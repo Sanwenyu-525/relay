@@ -50,20 +50,16 @@ async function connect(page: Page): Promise<void> {
 }
 
 /** 空壳路由：只保证「没有多余请求失败」，其余端点一律空清单。
- *  `imageInput` 用来验证「模型不接受图片」时的提前说明。 */
-async function installShellRoutes(page: Page, imageInput?: string): Promise<void> {
+/** 空壳路由：只保证「没有多余请求失败」，其余端点一律空清单。 */
+async function installShellRoutes(page: Page): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
     if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
     if (path === `${prefix}/model-port`) {
-      return fulfillJson(route, imageInput === undefined
-        ? { provider: "fake", configured: false, model: null, base_url: null,
-          max_call_tokens: null }
-        : { provider: "openai-compatible", configured: true, model: "agnes-3.0-flash",
-          base_url: "https://api.example.com/v1", max_call_tokens: 65_536,
-          image_input: imageInput });
+      return fulfillJson(route, { provider: "fake", configured: false, model: null, base_url: null,
+        max_call_tokens: null });
     }
     if (path === `${prefix}/projects/${projectId}`) {
       return fulfillJson(route, { id: projectId, title: "悬停预览验证", project_type: "GENERAL",
@@ -73,15 +69,15 @@ async function installShellRoutes(page: Page, imageInput?: string): Promise<void
   });
 }
 
-/** 在页面里画一张 PNG 并当作剪贴板图片粘贴进去。 */
-async function pasteImage(page: Page, target: string): Promise<void> {
-  await page.evaluate(async (selector) => {
+/** 在页面里画一张 PNG 并当作剪贴板图片粘贴进去；尺寸可指定（默认 320×200）。 */
+async function pasteImage(page: Page, target: string, width = 320, height = 200): Promise<void> {
+  await page.evaluate(async ({ selector, width, height }) => {
     const canvas = document.createElement("canvas");
-    canvas.width = 320; canvas.height = 200;
+    canvas.width = width; canvas.height = height;
     const context = canvas.getContext("2d")!;
-    context.fillStyle = "#0f766e"; context.fillRect(0, 0, 320, 200);
+    context.fillStyle = "#0f766e"; context.fillRect(0, 0, width, height);
     context.fillStyle = "#ffffff"; context.font = "28px sans-serif";
-    context.fillText("PREVIEW", 24, 112);
+    context.fillText("PREVIEW", 24, Math.round(height / 2) + 12);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     const file = new File([blob!], "截图.png", { type: "image/png" });
     const data = new DataTransfer();
@@ -89,7 +85,7 @@ async function pasteImage(page: Page, target: string): Promise<void> {
     const textarea = document.querySelector(selector)!;
     textarea.dispatchEvent(new ClipboardEvent("paste",
       { clipboardData: data, bubbles: true, cancelable: true }));
-  }, target);
+  }, { selector: target, width, height });
 }
 
 /** 浮层「没被裁、真的是放大、不压住锚点」这三条几何事实。 */
@@ -206,28 +202,50 @@ test.describe("图片悬停预览", () => {
     await expect(preview).toHaveCount(0);
   });
 
-  test("模型不接受图片时，粘进图片立刻给出说明，且不禁用发送键", async ({ page }) => {
-    await installShellRoutes(page, "MODEL_NOT_IN_CATALOG");
+  test("点击芯片打开原图查看层；悬停预览上限是视口六成（2026-10-24 方案 1+2）", async ({ page }) => {
+    await installShellRoutes(page);
     await page.goto("/agent?new=browser");
     await connect(page);
 
     const draft = page.getByTestId("assist-first-draft");
     await draft.click();
-    const notice = page.getByTestId("composer-attachment-notice");
-    // 还没粘图：不提前吓人。
-    await expect(notice).toHaveCount(0);
+    // 1000×400 的宽图：旧上限 480px 会压到读不清，新上限 60%×1280=768px 才放得下。
+    await pasteImage(page, '[data-testid="assist-first-draft"]', 1000, 400);
 
-    await pasteImage(page, '[data-testid="assist-first-draft"]');
-    await expect(page.locator(".composer-attachment").first()).toBeVisible();
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("agnes-3.0-flash");
-    await expect(notice).toContainText("会被拒绝");
-    // 只说明、不拦：服务端闸门才是准绳，禁用发送键会把「只发这段文字」也卡住。
-    await expect(page.getByTestId("assist-first-send")).toBeEnabled();
-    // 说明行与芯片同在输入卡内，不把卡片撑出视口。
-    const box = (await notice.boundingBox())!;
-    expect(box.width).toBeGreaterThan(0);
-    expect(box.height).toBeGreaterThan(0);
-    await page.screenshot({ path: "results/composer-image-capability-notice.png" });
+    const chip = page.locator(".composer-attachment").first();
+    await expect(chip).toBeVisible();
+    await chip.hover();
+    const preview = page.getByTestId("attachment-preview");
+    await expect(preview).toBeVisible();
+    await expectPreviewGeometry(page, chip, chip.locator(".composer-attachment-thumb"));
+    const previewBox = (await preview.boundingBox())!;
+    // 方案 2 的断言：宽图浮出后明显越过旧 480px 上限（768 + 浮层内边距）。
+    expect(previewBox.width).toBeGreaterThan(700);
+    await page.mouse.move(4, 4);
+    await expect(preview).toHaveCount(0);
+
+    // 方案 1：点击打开整层，原图（1000×400）可解码；Esc 收回。
+    await chip.click();
+    const lightbox = page.getByTestId("attachment-lightbox");
+    await expect(lightbox).toBeVisible();
+    await expect.poll(async () => page.getByTestId("attachment-lightbox-image")
+      .evaluate((node) => (node as HTMLImageElement).naturalWidth), { timeout: 15_000 })
+      .toBe(1000);
+    // 分步放大：100%→200%→4×→100%；2× 时图片实际渲染宽度翻倍（1000→2000），
+    // 且 max 约束解除——否则 zoom 坐标系里的百分比会把倍数吃掉，看起来「没变化」。
+    await page.getByTestId("attachment-lightbox-zoom").click();
+    await expect(lightbox).toHaveAttribute("data-zoom", "2");
+    const zoomedBox = (await page.getByTestId("attachment-lightbox-image").boundingBox())!;
+    expect(zoomedBox.width).toBeGreaterThan(1500);
+    await page.screenshot({ path: "results/composer-attachment-lightbox.png" });
+    await page.getByTestId("attachment-lightbox-zoom").click();
+    await expect(lightbox).toHaveAttribute("data-zoom", "4");
+    await page.getByTestId("attachment-lightbox-zoom").click();
+    await expect(lightbox).toHaveAttribute("data-zoom", "1");
+    await page.keyboard.press("Escape");
+    await expect(lightbox).toHaveCount(0);
+    // 查看层关掉后悬停预览照常工作：两条入口互不挤占。
+    await chip.hover();
+    await expect(preview).toBeVisible();
   });
 });

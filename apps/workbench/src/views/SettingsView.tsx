@@ -123,7 +123,7 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
         ? "本页最近一次与本机 API 的通信没有成功，可重新读取。"
         : loading || status === null
           ? "正在向本机 API 读取状态。"
-          : "本页已从本机 API 读到服务实例状态。" },
+          : "" },
     { key: "configured", label: "模型已配置",
       tone: status === null || loading ? "neutral"
         : status.configured ? "success" : status.provider === "invalid" ? "danger" : "neutral",
@@ -151,8 +151,8 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
   ];
   return <section id="settings-model" className="surface-panel settings-card" data-testid="service-state">
     <h2>连接与模型状态</h2>
-    <p className="helper-text">四个状态分别回答四个问题：连上了吗、配置了吗、验证过了吗、Worker 能执行吗。
-      「连接验证通过」只表示固定短文本调用成功，不等于真实任务执行成功。</p>
+    {/* 2026-10-24 用户指令：导语不再复述下方四行标签，只留连接验证的边界说明。 */}
+    <p className="helper-text">「连接验证通过」只表示固定短文本调用成功，不等于真实任务执行成功。</p>
     <dl className="settings-definition-list">
       {rows.map((row) => <div key={row.key} data-testid={`service-state-${row.key}`}>
         <dt>{row.label}</dt>

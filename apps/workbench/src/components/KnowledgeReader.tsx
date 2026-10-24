@@ -116,8 +116,10 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         className="text-button" onClick={() => setRetry((value) => value + 1)}>重试读取</button></p>}
       {content && <>
         {content.contentStatus === "FULL" && <>
+          {/* 2026-10-24 用户指令：正文芯片已显示「全文」，状态行不再复述；网页快照的
+              「当前网页可能已经变化」是无从预知的事实，保留。 */}
           <p className="knowledge-reader__status">{content.sourceKind === "WEB_PAGE"
-            ? "已保存网页快照全文；当前网页可能已经变化。" : "已保存的完整正文"} · v{content.version}</p>
+            ? <>已保存网页快照全文；当前网页可能已经变化。 · </> : null}v{content.version}</p>
           <div ref={bodyRef} className="knowledge-reader__body" data-testid="knowledge-reader-body">
             {content.mediaType === "text/markdown" ? <SafeMarkdown source={content.content ?? ""} />
               : <pre className="knowledge-reader__plain">{content.content}</pre>}

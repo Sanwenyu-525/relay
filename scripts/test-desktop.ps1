@@ -38,7 +38,7 @@ if ($interactive) {
 do {
 # 交互模式每轮都重新显示菜单：不能用 $Action 判断，它仍是上一次选中的动作。
 if ($interactive) {
-  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新，改了 API 会自动刷新暂存）`n0. 退出"
+  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新；已初始化后无需打包，API 自动刷新暂存）`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
     '2' { $Action = 'Build' }
@@ -127,7 +127,8 @@ function Get-MigrationSetHash {
 }
 # DesktopDev 时优先取暂存产物作为 migrate/install-graph/init-workspace 的来源；暂存产物缺失时
 # 退回测试包（dev-desktop.ps1 在真正开窗前会另行拒绝缺少暂存资源的开发启动）。
-$stagedApi = Join-Path $root 'apps\desktop\src-tauri\resources\api'
+$resourceRoot = Join-Path $root 'apps\desktop\src-tauri\resources'
+$stagedApi = Join-Path $resourceRoot 'api'
 try {
   if ($Action -eq 'Build') {
     if (@(Get-TrialProcesses).Count) { throw 'Close the desktop window before rebuilding.' }
@@ -167,15 +168,32 @@ try {
     if ($interactive) { continue }
     return
   }
-  foreach ($file in @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))) {
-    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing input: $file. Run dev-stack.bat Build first." }
-  }
-  if ($Action -eq 'DesktopDev') { Write-Host '正在连接开发数据库…' }
-  $manifestHash = (Get-FileHash -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Algorithm SHA256).Hash
   $state = $null
   if (Test-Path -LiteralPath $statePath) {
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     if ($state.cluster_path -ne $cluster -or $state.schema_version -ne 1) { throw 'Trial marker does not match this directory.' }
+  }
+  # 已初始化的开发环境不需要测试包：窗口执行暂存 API，CLI 用 resources 里的 node.exe，
+  # test-release 只服务首次初始化与打包启动。包被清理后菜单 6 仍应能打开开发窗口。
+  $stagedDevReady = $Action -eq 'DesktopDev' -and $null -ne $state -and $state.ready -and
+    (Test-Path -LiteralPath (Join-Path $stagedApi 'dist\src\main.js') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $stagedApi 'dist\src\cli\migrate.js') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $stagedApi 'dist\src\cli\install-graph.js') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $stagedApi 'dist\src\cli\init-workspace.js') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $resourceRoot 'node.exe') -PathType Leaf)
+  if ($stagedDevReady) { $node = Join-Path $resourceRoot 'node.exe' }
+  $requiredFiles = if ($stagedDevReady) {
+    @($pgCtl, $psql)
+  } else {
+    @($exe, $node, $pgCtl, $psql, (Join-Path $package 'desktop-build-manifest.json'))
+  }
+  foreach ($file in $requiredFiles) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing input: $file. Run dev-stack.bat Build first." }
+  }
+  if ($Action -eq 'DesktopDev') { Write-Host '正在连接开发数据库…' }
+  # 无包可校验时沿用标记里的基线，只按开发迁移集判断升级，不冒充包完整性校验。
+  $manifestHash = if ($stagedDevReady) { $state.manifest_hash } else {
+    (Get-FileHash -LiteralPath (Join-Path $package 'desktop-build-manifest.json') -Algorithm SHA256).Hash
   }
   # Daily development reuses the initialized database; package launches retain full verification.
   if ($Action -ne 'DesktopDev' -or $null -eq $state -or -not $state.ready -or $state.manifest_hash -ne $manifestHash) {

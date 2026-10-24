@@ -18,6 +18,10 @@ import { listAssistMessages, listAssistProposals, listAssistSessions, readAssist
   listAssistMessageAttachmentMeta, readAssistMessageAttachment,
   type AssistMessageAttachmentMeta }
   from '../application/assist-queries.js';
+import { listAssistMessageRecallSummaries, readAssistMessageRecall, recallAssistMessage,
+  readAssistMessageRecallUndo, readMessageRecallSettings, undoAssistMessageRecall,
+  type AssistMessageRecallSummary } from '../application/assist-message-recall.js';
+import { resourceNotFound } from '../application/domain-error.js';
 import { readSessionToolCalls } from '../application/session-tool-call-projection.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
@@ -58,6 +62,8 @@ const AssistSessionDto = Type.Object({
   title: Type.String(), status: Type.String(), revision: rev,
   /** 0090：置顶时刻（导航排序键，不是业务事实）。未置顶为 null。 */
   pinned_at: Type.Union([Type.String(), Type.Null()]),
+  /** 0104：未读标记时刻（导航标记，不是业务事实）。已读为 null。 */
+  unread_at: Type.Union([Type.String(), Type.Null()]),
   /** 0111：最后一条消息落库或生成结算的时刻（活动排序键）。还没有消息为 null。 */
   last_message_at: Type.Union([Type.String(), Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
@@ -99,6 +105,44 @@ const AssistSessionResult = Type.Object({
   remember: Type.Boolean(),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
+const assistRecallStatus = Type.Union([Type.Literal('RUNNING'), Type.Literal('COMPLETED'),
+  Type.Literal('PARTIAL'), Type.Literal('FAILED')]);
+/** 0132：消息列表用的撤回摘要；逐文件结果只在回执端点读取。 */
+const AssistMessageRecallSummaryDto = Type.Object({
+  id: uuid, message_id: uuid, assistant_message_id: uuid, status: assistRecallStatus,
+  planned_files: Type.Integer({ minimum: 0 }),
+  restored_files: Type.Integer({ minimum: 0 }),
+  skipped_files: Type.Integer({ minimum: 0 }),
+  completed_at: Type.Union([Type.String(), Type.Null()]),
+}, strict);
+/** 0132：一次消息撤回的逐文件结果。detail 只是摘要，事实以 files 为准。 */
+const AssistMessageRecallDto = Type.Object({
+  id: uuid, message_id: uuid, assistant_message_id: uuid,
+  status: assistRecallStatus,
+  root_path: Type.Union([Type.String(), Type.Null()]),
+  planned_files: Type.Integer({ minimum: 0 }),
+  restored_files: Type.Integer({ minimum: 0 }),
+  skipped_files: Type.Integer({ minimum: 0 }),
+  detail: Type.Object({}, { additionalProperties: true }),
+  requested_at: Type.String(), completed_at: Type.Union([Type.String(), Type.Null()]),
+  files: Type.Array(Type.Object({
+    path: Type.String(), status: Type.String(),
+    reason: Type.Union([Type.String(), Type.Null()]),
+    baseline: Type.Union([Type.Literal('PRESENT'), Type.Literal('ABSENT')]),
+    baseline_sha256: Type.Union([Type.String(), Type.Null()]),
+  }, strict)),
+}, strict);
+/** 0132（§27.3.3）：一次「撤销这次回退」的回执；files 为逐文件预检与恢复结果。 */
+const AssistMessageRecallUndoDto = Type.Object({
+  id: uuid, source_recall_id: uuid, status: assistRecallStatus,
+  root_path: Type.String(),
+  detail: Type.Object({}, { additionalProperties: true }),
+  requested_at: Type.String(), completed_at: Type.Union([Type.String(), Type.Null()]),
+  files: Type.Array(Type.Object({
+    path: Type.String(), status: Type.String(),
+    reason: Type.Union([Type.String(), Type.Null()]),
+  }, strict)),
+}, strict);
 const AssistMessageDto = Type.Object({
   id: uuid, session_id: uuid, seq: rev, role: Type.String(), status: Type.String(),
   intent: Type.String(), content: Type.Union([Type.String(), Type.Null()]),
@@ -127,6 +171,11 @@ const AssistMessageDto = Type.Object({
     id: uuid, name: Type.String(), media_type: Type.String(),
     byte_length: Type.Integer({ minimum: 1 }),
   }, strict)),
+  /** 0132：撤回标记。原文与工具记录仍返回；客户端按 withdrawn_at 显示占位。 */
+  withdrawn_at: Type.Union([Type.String(), Type.Null()]),
+  withdrawn_by_recall_id: Type.Union([uuid, Type.Null()]),
+  /** 0132：这条消息（或其直接回复）触发的撤回摘要；没有撤回为 null。 */
+  recall: Type.Union([AssistMessageRecallSummaryDto, Type.Null()]),
   created_at: Type.String(), updated_at: Type.String(),
 }, strict);
 const AssistLivePreviewDto = Type.Object({
@@ -371,11 +420,13 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   usage_output_tokens: number | null; usage_cache_read_tokens: number | null;
   usage_cache_creation_tokens: number | null; cancel_requested: boolean;
   steer_requested: boolean;
+  withdrawn_at: Date | null; withdrawn_by_recall_id: string | null;
   created_at: Date; updated_at: Date },
   projection: { skill: JsonObject | null; skill_input: JsonObject | null;
     skill_output: JsonObject | null; content: string | null; sources: unknown;
     method: JsonObject | null; method_argument: string | null },
-  attachments: readonly AssistMessageAttachmentMeta[] = []) {
+  attachments: readonly AssistMessageAttachmentMeta[] = [],
+  recall: AssistMessageRecallSummary | null = null) {
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
@@ -392,8 +443,18 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
     steer_requested: row.steer_requested,
     attachments: attachments.map((item) => ({ id: item.id, name: item.name,
       media_type: item.mediaType, byte_length: item.byteLength })),
+    withdrawn_at: row.withdrawn_at === null ? null : row.withdrawn_at.toISOString(),
+    withdrawn_by_recall_id: row.withdrawn_by_recall_id,
+    recall: recall === null ? null : recallSummaryDto(recall),
     created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
+}
+
+function recallSummaryDto(recall: AssistMessageRecallSummary) {
+  return { id: recall.id, message_id: recall.message_id,
+    assistant_message_id: recall.assistant_message_id, status: recall.status,
+    planned_files: recall.planned_files, restored_files: recall.restored_files,
+    skipped_files: recall.skipped_files, completed_at: recall.completed_at };
 }
 
 function proposalDto(row: { id: string; workspace_id: string; session_id: string;
@@ -678,10 +739,18 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       const attachments = await listAssistMessageAttachmentMeta(
         dependencies.database.executor, { workspaceId: p.workspace_id,
           sessionId: p.id ?? '', messageIds: rows.map((row) => row.id) });
+      // 0132：撤回摘要按消息一次性取齐，目标用户消息与其直接回复共用同一条回执。
+      const recalls = await listAssistMessageRecallSummaries(
+        dependencies.database.executor, p.id ?? '');
+      const recallByMessage = new Map<string, AssistMessageRecallSummary>();
+      for (const recall of recalls) {
+        recallByMessage.set(recall.message_id, recall);
+        recallByMessage.set(recall.assistant_message_id, recall);
+      }
       return { items: await Promise.all(rows.map(async (row) => messageDto(row,
         await projectAssistSkillMessage(dependencies.database.executor,
           dependencies.storage, session, row),
-        attachments.get(row.id) ?? []))) };
+        attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null))) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
@@ -749,6 +818,75 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         commandId: body.command_id });
       return { outcome, result: outcome.result };
     } }));
+
+  /* 0132：撤回一条用户消息，并回退这条消息之后本会话关联的文件写入。
+     范围、前像与逐路径结果由用例裁决；这里只负责 HTTP 表达与回执读取。 */
+  app.post('/assist-messages/:id/recall', { schema: { params: messageItem, body: cancelBody,
+    response: { 200: commandEnvelopeSchema(AssistMessageRecallDto) } } },
+  createCommandHandler(dependencies, { commandType: 'RecallAssistMessage',
+    bodySchema: cancelBody,
+    execute: async ({ executor, params, body }) => {
+      const { recall, replayed } = await recallAssistMessage(executor, {
+        workspaceId: params.workspace_id ?? '', messageId: params.id ?? '',
+        commandId: body.command_id });
+      const result = recall as unknown as JsonObject;
+      return { outcome: { result, replayed,
+        committedAt: new Date(recall.requested_at) }, result };
+    } }));
+
+  app.get('/assist-messages/:id/recall', { schema: { params: messageItem,
+    response: { 200: AssistMessageRecallDto } } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string };
+      const recall = await readAssistMessageRecall(
+        dependencies.database.executor, p.workspace_id, p.id ?? '');
+      if (recall === undefined) throw resourceNotFound('Assist message recall');
+      return recall;
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  /* 0132（§27.3.3）：撤销最近一次完整成功的撤回——把其实际触及的文件恢复到该次
+     撤回开始写入前的内容（保护副本）。单层：同一撤回至多一条撤销，撤销本身不可再反向。 */
+  app.post('/assist-message-recalls/:id/undo', { schema: {
+    params: messageItem, body: cancelBody,
+    response: { 200: commandEnvelopeSchema(AssistMessageRecallUndoDto) } } },
+  createCommandHandler(dependencies, { commandType: 'UndoAssistMessageRecall',
+    bodySchema: cancelBody,
+    execute: async ({ executor, params, body }) => {
+      const { undo, replayed } = await undoAssistMessageRecall(executor, {
+        workspaceId: params.workspace_id ?? '', recallId: params.id ?? '',
+        commandId: body.command_id });
+      const result = undo as unknown as JsonObject;
+      return { outcome: { result, replayed,
+        committedAt: new Date(undo.requested_at) }, result };
+    } }));
+
+  /* 0132（§27.3.4）：快照容量与保留的生效配置、实际占用与最旧快照（可恢复时段）。 */
+  app.get('/message-recall/settings', { schema: { params: base, response: { 200:
+    Type.Object({
+      retention_days: Type.Integer({ minimum: 0 }),
+      capacity_bytes: Type.Integer({ minimum: 1 }),
+      per_file_cap_bytes: Type.Integer({ minimum: 1 }),
+      usage_bytes: Type.String(),
+      snapshot_count: Type.Integer({ minimum: 0 }),
+      oldest_snapshot_at: Type.Union([Type.String(), Type.Null()]),
+    }, strict) } } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string };
+      return await readMessageRecallSettings(dependencies.database.executor, p.workspace_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.get('/assist-message-recalls/:id/undo', { schema: { params: messageItem,
+    response: { 200: AssistMessageRecallUndoDto } } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string };
+      const undo = await readAssistMessageRecallUndo(
+        dependencies.database.executor, p.workspace_id, p.id ?? '');
+      if (undo === undefined) throw resourceNotFound('Assist message recall undo');
+      return undo;
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
 
   app.get('/assist-proposals', { schema: { params: base, querystring: proposalsQuery } },
   async (request, reply) => {

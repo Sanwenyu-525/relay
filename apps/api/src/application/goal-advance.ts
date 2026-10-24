@@ -83,11 +83,12 @@ async function settleControls(db: DbExecutor, now: Date,
     }
     if (inflight !== undefined) continue;
     if (goal.status === 'CANCELLING') {
-      // 终态会让 settleRounds 不再扫描这条目标。先让它把已结算轮次记账，再在同一
-      // tick 里由 settleRounds 归一为 CANCELLED，避免取消丢掉最后一条轮次事实。
-      const latest = await repositories.planGoals.readLatestSettledRoundMessage(goal.id);
-      if (latest !== undefined
-        && await repositories.planGoals.readRoundByMessage(latest.id) === undefined) continue;
+      // 终态会让 settleRounds 不再扫描这条目标。先让它把名下**所有**已结算轮次记账
+      // （#143：不只最新一条），再由 settleRounds 在最后一条缺账消息的结算事务里归一为
+      // CANCELLED，避免取消丢掉任何轮次事实。
+      if ((await repositories.planGoals.listUnsettledRoundMessages(goal.id, 1)).length > 0) {
+        continue;
+      }
     }
     const next = goal.status === 'PAUSING' ? 'PAUSED' : 'CANCELLED';
     const updated = await repositories.planGoals.updateGoal(goal.id, goal.revision,
@@ -307,36 +308,54 @@ function controlFactPatch(patch: RoundDecision['patch']): RoundDecision['patch']
 
 async function settleRounds(db: DbExecutor, now: Date, result: GoalTickResult): Promise<void> {
   const repositories = createRepositories(db);
-  // 按「最新已结算消息还没记账」筛选，而不是按状态截一页：否则静止目标会饿死轮次结算。
+  // 按「名下还有已终结消息没记账」筛选，而不是按状态截一页：否则静止目标会饿死轮次结算。
+  // #143：候选判定是「任一条缺账」——最新消息先记账不能把更早的缺账消息挤出候选集。
   const goals = await repositories.planGoals.listGoalsWithUnsettledRounds(50);
   for (const goal of goals) {
     if (TERMINAL.includes(goal.status)) continue;
-    const latest = await repositories.planGoals.readLatestSettledRoundMessage(goal.id);
-    if (latest === undefined) continue;
-    if (await repositories.planGoals.readRoundByMessage(latest.id) !== undefined) continue;
-    const controlIntent = goal.status === 'PAUSING' || goal.status === 'PAUSED'
-      || goal.status === 'CANCELLING';
-    const decision = decideFromMessage(goal, latest, now);
-    const roundIndex = goal.round_count + 1;
-    const applied = await withTransaction(db, async (tx) => {
-      let patch = controlIntent ? controlFactPatch(decision.patch) : decision.patch;
-      let status = controlIntent ? goal.status : (decision.patch.status ?? goal.status);
-      if (goal.status === 'CANCELLING'
-        && await tx.planGoals.readInflightRoundMessage(goal.id) === undefined) {
-        patch = { ...patch, status: 'CANCELLED' };
-        status = 'CANCELLED';
-      }
-      const updated = await tx.planGoals.updateGoal(goal.id, goal.revision, {
-        ...patch, roundCount: roundIndex, lastRoundMessageId: latest.id });
-      if (!updated) return undefined;
-      await tx.planGoals.insertRound({ id: randomUUID(), goalId: goal.id,
-        messageId: latest.id, roundIndex, outcome: decision.outcome, note: decision.note,
-        criteriaSnapshot: (decision.patch.criteria ?? criterionList(goal)) as readonly JsonObject[] });
-      return { status };
-    });
-    if (applied !== undefined) {
-      result.settled.push({ goalId: goal.id, messageId: latest.id, outcome: decision.outcome,
-        status: applied.status });
+    // #143：按目标消息**原始顺序**有界结算所有未记账的终结消息。早到的回复先记自己的
+    // 轮次与条件冻结，晚到的补充再在已冻结条件上重放；一轮结算不完的余量（每目标 50 条）
+    // 留给下一个 tick，候选查询仍按「缺账」捞到它们，不饥饿也不双记。
+    const backlog = await repositories.planGoals.listUnsettledRoundMessages(goal.id, 50);
+    for (const message of backlog) {
+      // 判定与落库放进**锁定目标行**的同一短事务：并发 tick/恢复先在这里排队，读到的一定
+      // 是前一次结算提交后的状态——round_count、条件冻结与取消归一都不会基于旧快照重放；
+      // 消息已被他方记账时跳过这条继续下一条，重复记账与漏账都进不了账本。
+      const applied = await withTransaction(db, async (tx): Promise<
+        'STOP' | 'SKIP' | { readonly status: AssistGoalRow['status']; readonly outcome: string }
+      > => {
+        const fresh = await tx.planGoals.readGoal(goal.id, true);
+        if (fresh === undefined || TERMINAL.includes(fresh.status)) return 'STOP';
+        if (await tx.planGoals.readRoundByMessage(message.id) !== undefined) return 'SKIP';
+        const controlIntent = fresh.status === 'PAUSING' || fresh.status === 'PAUSED'
+          || fresh.status === 'CANCELLING';
+        const decision = decideFromMessage(fresh, message, now);
+        const roundIndex = fresh.round_count + 1;
+        let patch = controlIntent ? controlFactPatch(decision.patch) : decision.patch;
+        let status = controlIntent ? fresh.status : (decision.patch.status ?? fresh.status);
+        if (fresh.status === 'CANCELLING'
+          && await tx.planGoals.readInflightRoundMessage(fresh.id) === undefined) {
+          // 取消归一只放在**最后一条**缺账消息的结算事务里：同事务内重查缺账集合，
+          // 还有更早积压未记账时保持 CANCELLING，不让控制落定先于事实终结（#143）。
+          const remaining = await tx.planGoals.listUnsettledRoundMessages(fresh.id, 2);
+          if (remaining.length === 1 && remaining[0]!.id === message.id) {
+            patch = { ...patch, status: 'CANCELLED' };
+            status = 'CANCELLED';
+          }
+        }
+        const updated = await tx.planGoals.updateGoal(fresh.id, fresh.revision, {
+          ...patch, roundCount: roundIndex, lastRoundMessageId: message.id });
+        if (!updated) return 'STOP';
+        await tx.planGoals.insertRound({ id: randomUUID(), goalId: fresh.id,
+          messageId: message.id, roundIndex, outcome: decision.outcome, note: decision.note,
+          criteriaSnapshot: (decision.patch.criteria ?? criterionList(fresh)) as readonly JsonObject[] });
+        return { status, outcome: decision.outcome };
+      });
+      // CAS 竞争（并发已推进/目标已终结）：停止本目标这一批，下一个 tick 重扫补齐。
+      if (applied === 'STOP') break;
+      if (applied === 'SKIP') continue;
+      result.settled.push({ goalId: goal.id, messageId: message.id,
+        outcome: applied.outcome, status: applied.status });
     }
   }
 }
@@ -380,6 +399,12 @@ async function advanceGoals(db: DbExecutor, options: {
     if (goal.status !== 'ACTIVE') continue;
     if (await repositories.planGoals.readInflightRoundMessage(goal.id) !== undefined) {
       result.skipped.push({ goalId: goal.id, reason: 'INFLIGHT_ROUND' });
+      continue;
+    }
+    // #143：名下还有已终结但未记账的消息（本 tick 结算窗口外或 CAS 竞争遗留）时，
+    // 下一轮不能基于不完整的目标状态投递——先把积压按原始顺序记完账再推进。
+    if ((await repositories.planGoals.listUnsettledRoundMessages(goal.id, 1)).length > 0) {
+      result.skipped.push({ goalId: goal.id, reason: 'UNSETTLED_BACKLOG' });
       continue;
     }
     // 先拿租约：同一目标同一时刻只有一个 tick 能组织下一轮。

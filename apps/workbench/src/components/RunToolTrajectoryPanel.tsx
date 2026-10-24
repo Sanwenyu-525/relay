@@ -277,6 +277,13 @@ export default function RunToolTrajectoryPanel({ client, run }: {
         本次 Run 没有工具请求。这是事实，不代表模型已经完成工作。
       </p>}
 
+      {/* 2026-10-24 用户指令：证据绑定字段后端尚未下发，逐行宣告收成面板级一条开发注记；
+          字段落地后整条删除。不变量不变：未提供就是未提供，绝不补出 PASS。 */}
+      {projection.rounds.length > 0 && <p className="helper-text" data-testid="trajectory-evidence-note">
+        开发注记：验证证据绑定字段服务端尚未下发，以下每次调用都无法确认是否被验收检查覆盖，
+        也不能据此认为已通过验证。
+      </p>}
+
       {projection.rounds.map((round) => {
         const deduped = dedupeCalls(round.calls);
         return <section key={round.round} className="trajectory-round"
@@ -336,11 +343,6 @@ export default function RunToolTrajectoryPanel({ client, run }: {
                 ? ` 原样原因：${String(call.resultRef.reason)}${typeof call.resultRef.detail === "string" && call.resultRef.detail !== "" ? `：${String(call.resultRef.detail)}` : ""}`
                 : ""}
             </p>}
-            {/* 证据绑定字段后端尚未下发：这里必须写明未提供/无法确认，绝不补出当前 PASS。 */}
-            <p className="helper-text" data-testid={`trajectory-evidence-${call.id}`}>
-              验证证据绑定：未提供（服务端尚未下发该字段），无法确认这次调用是否被任何验收检查覆盖，
-              也不能据此认为它已通过验证。
-            </p>
             {approval !== null && <p
               className="trajectory-approval"
               data-testid={`trajectory-approval-${call.id}`}>

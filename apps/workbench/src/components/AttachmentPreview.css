@@ -25,3 +25,83 @@
   object-fit: contain;
   background: var(--relay-color-bg-subtle);
 }
+
+/* 原图查看层（2026-10-24）：整层模态。遮罩沿用 dialog-backdrop 的同一条 color-mix，
+   层级用 dialog 档——它就是模态，不是浮标。图片用 margin:auto 居中：
+   flex 的 justify-content:center 在内容溢出时会裁掉上缘，auto margin 溢出时可滚到边。 */
+.attachment-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--relay-zIndex-dialog);
+  display: flex;
+  padding: var(--relay-space-6);
+  overflow: auto;
+  background: color-mix(in srgb, var(--relay-color-text-primary) 32%, transparent);
+}
+/* 适应窗口：整图可见；实际大小：原像素铺开，超出靠查看层滚动平移。 */
+.attachment-lightbox-image {
+  margin: auto;
+  flex: none;
+  max-width: 100%;
+  max-height: calc(100vh - 2 * var(--relay-space-6));
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  cursor: zoom-in;
+}
+/* 分步缩放（2026-10-24 用户指认「放大之后没变化」）：图片原始尺寸接近视口时，
+   「适应窗口」与「实际大小」两态渲染相同，等值切换没有意义——改按适应尺寸的
+   1×→2×→4× 循环。CSS `zoom` 按布局放大（不是 transform），超出部分由查看层滚动
+   平移；WebView2/Chromium 与 Firefox 126+ 支持。放大档必须同时解除 max 约束：
+   百分比在 zoom 坐标系里按父宽/zoom 解析，留着 max-width 会把倍数吃掉。 */
+.attachment-lightbox[data-zoom="2"] .attachment-lightbox-image { zoom: 2; max-width: none; max-height: none; }
+.attachment-lightbox[data-zoom="4"] .attachment-lightbox-image { zoom: 4; max-width: none; max-height: none; }
+/* 工具条钉在右上：实际大小模式下图片超出视口，条随层固定才始终可点。
+   文件名弱化为辅助信息，动作是图标键（语义在 aria-label/title 上）。 */
+.attachment-lightbox-bar {
+  position: fixed;
+  top: var(--relay-space-2);
+  right: var(--relay-space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  max-width: calc(100vw - 2 * var(--relay-space-2));
+  padding: var(--relay-space-0-5);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+}
+.attachment-lightbox-name {
+  overflow: hidden;
+  max-width: 24ch;
+  padding: 0 var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-lightbox-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--relay-radius-round);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.attachment-lightbox-button:hover {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+.attachment-lightbox-button svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+/* 放大键带百分比文字（state-clarity：当前倍数常驻可见），宽度随文字自适应。 */
+.attachment-lightbox-zoom {
+  width: auto;
+  gap: var(--relay-space-0-5);
+  padding: 0 var(--relay-space-1);
+  font-size: var(--relay-font-size-meta);
+}

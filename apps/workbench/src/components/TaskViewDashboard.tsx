@@ -170,7 +170,6 @@ export default function TaskViewDashboard({
               <div className="task-agent-avatar">{executorLabels[task.executor]}</div>
               <span className="task-agent-status-text">
                 {task.executor === "AI" ? "Relay Agent" : executorLabels[task.executor]} · {run ? (runLabels[run.status] ?? run.status) : (taskStatusLabels[task.status] ?? task.status)}
-                {isPaused && " (已暂停)"}
               </span>
               <span style={{ flex: 1 }} />
               {isRunning && (

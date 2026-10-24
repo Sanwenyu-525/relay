@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Info, Link2 } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient,
   type RelayProjectGoalLink, type RelayProjectListItem } from "../api/relayClient";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 
 /**
@@ -27,6 +28,32 @@ type PendingLink = {
   readonly goalId: string;
 };
 
+/** 待核对关联按 API/Workspace/Goal 作用域暂存：整页重开后仍能继续核对原 ID（#20）。 */
+function linkPendingKey(client: RelayApiClient, goalId: string): string {
+  return `relay:link-goal:${client.baseUrl}:${client.workspaceId}:${goalId}`;
+}
+
+function readLinkPending(key: string): PendingLink | null {
+  try {
+    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const row = value as Record<string, unknown>;
+    if (typeof row.commandId !== "string" || row.commandId === "" ||
+      typeof row.projectId !== "string" || row.projectId === "" ||
+      typeof row.expectedRevision !== "string" || row.expectedRevision === "" ||
+      typeof row.goalId !== "string" || row.goalId === "") return null;
+    return { commandId: row.commandId, projectId: row.projectId,
+      expectedRevision: row.expectedRevision, goalId: row.goalId };
+  } catch { return null; }
+}
+
+function saveLinkPending(key: string, pending: PendingLink | null): void {
+  try {
+    if (pending) sessionStorage.setItem(key, JSON.stringify(pending));
+    else sessionStorage.removeItem(key);
+  } catch { /* 会话存储不可用只影响整页重开后的恢复；页内待核对状态不受影响。 */ }
+}
+
 export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLinked }: {
   client: RelayApiClient; goalId: string; goalTitle: string;
   /** 关联成功后把新的 Project 修订与 Goal 集合交回调用方。 */
@@ -35,6 +62,11 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   const [selectedId, setSelectedId] = useState("");
   const [link, setLink] = useState<RelayProjectGoalLink | null>(null);
   const [pending, setPending] = useState<PendingLink | null>(null);
+  const pendingRef = useRef<PendingLink | null>(null);
+  const holdPending = useCallback((next: PendingLink | null) => {
+    pendingRef.current = next; setPending(next);
+    saveLinkPending(linkPendingKey(client, goalId), next);
+  }, [client, goalId]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mayRetry, setMayRetry] = useState(false);
@@ -43,6 +75,28 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   const scope = useRef(0);
 
   useEffect(() => () => { disposed.current = true; scope.current++; }, []);
+
+  // 待核对关联不能靠离页丢弃收口：离页保护只拦不放（#20）。
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.commandId ?? null
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
+
+  // 整页重开或父页重新挂载后，按当前作用域恢复原待核对关联命令。
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const stored = readLinkPending(linkPendingKey(client, goalId));
+    if (stored !== null && pendingRef.current === null) {
+      pendingRef.current = stored; setPending(stored);
+    }
+  }, [client, goalId]);
 
   /**
    * 重新读取项目列表。默认会清空既有错误；冲突路径要在读取后继续显示
@@ -79,7 +133,7 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       }
       const next: RelayProjectGoalLink = { projectId: receipt.result.project_id,
         revision: receipt.result.revision, goalIds: raw as string[] };
-      setPending(null); setMayRetry(false); setBusy(false); setError(null);
+      holdPending(null); setMayRetry(false); setBusy(false); setError(null);
       setLink(next); onLinked?.(next);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
@@ -90,7 +144,7 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     } finally {
       if (!disposed.current && request === scope.current) setBusy(false);
     }
-  }, [client, onLinked]);
+  }, [client, holdPending, onLinked]);
 
   const send = useCallback(async (record: PendingLink, request: number) => {
     if (disposed.current || request !== scope.current) return;
@@ -98,12 +152,12 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     try {
       const result = await client.linkProjectGoal({ projectId: record.projectId,
         commandId: record.commandId, expectedRevision: record.expectedRevision, goalId: record.goalId });
-      setPending(null); setBusy(false); setLink(result); onLinked?.(result);
+      holdPending(null); setBusy(false); setLink(result); onLinked?.(result);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
       if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
         // Project 修订变了：重新读取，让用户按新事实重新确认，不覆盖他人变更。
-        setPending(null); setBusy(false);
+        holdPending(null); setBusy(false);
         setError(`Project 修订已变化${caught.problem.actualRevision ? `（当前 v${caught.problem.actualRevision}）` : ""}；已重新读取项目，请再次确认关联。`);
         await load(true);
         return;
@@ -111,22 +165,28 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       // 明确的业务拒绝可以直接再发起：INVALID_TRANSITION 与 REVISION_CONFLICT 都是 409，
       // 不能一并当成「结果不明」——那会让用户以为关联命令待核对，而实际上什么都没关联。
       if (caught instanceof RelayApiError && caught.problem.code === "INVALID_TRANSITION") {
-        setPending(null); setBusy(false);
+        holdPending(null); setBusy(false);
         setError(describeLiveError(caught).message);
         return;
       }
       if (caught instanceof RelayApiError && caught.problem.status < 500 &&
           caught.problem.code !== "COMMAND_ID_REUSED") {
-        setPending(null); setBusy(false);
+        holdPending(null); setBusy(false);
         setError(describeLiveError(caught).message);
       } else {
         setError("关联提交结果不明；正在查询原 command_id 回执，不能重复关联。");
         await checkReceipt(record, request);
       }
     }
-  }, [checkReceipt, client, load, onLinked]);
+  }, [checkReceipt, client, holdPending, load, onLinked]);
 
   async function submit() {
+    // 原关联命令未收口前，普通确认不得开始新命令（#20）：拒绝发生在 handler，
+    // 按钮保持可用（不置灰），冻结的原 ID/原 Project/原修订不受改选影响。
+    if (pendingRef.current !== null) {
+      setError("已有待核对的关联命令（见下方原 command ID）；核对回执或原样重试收口前，不会发出第二条关联命令。");
+      return;
+    }
     // 同步闸：busy 状态在同一 tick 内尚未生效，靠它防不住双击提交出两条命令。
     if (busyRef.current || selectedId === "" || projects === null) return;
     const project = projects.find((item) => item.id === selectedId);
@@ -135,7 +195,7 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     const request = ++scope.current;
     const record: PendingLink = { commandId: createCommandId(), projectId: project.id,
       expectedRevision: project.revision, goalId };
-    setPending(record); setBusy(true); setLink(null);
+    holdPending(record); setBusy(true); setLink(null);
     try { await send(record, request); } finally { busyRef.current = false; }
   }
 

@@ -6,6 +6,8 @@
 #     后台启动：立即返回，runner 进程与日志记录在 .relay-dev\dev-desktop\。
 #   ... -Action status   查看后台实例状态（runner / 窗口 / Vite / 日志路径）。
 #   ... -Action stop     停止后台实例：结束 runner 进程树并兜底清理 dev 版窗口与 Vite 残留。
+#   ... -Action restart  先关闭旧的 dev 窗口（后台或前台实例），再以前台方式重新启动。
+#                        仓库根的 dev-desktop.bat 双击即执行这一动作。
 # 可选参数：
 #   -ConfigPath <绝对路径>   桌面 desktop.env（默认优先 .relay-test\desktop.env，其次 %APPDATA%\dev.relay.agent\desktop.env）
 #   -FrontendPort 5173       Vite 端口（需与 src-tauri DEV_ORIGIN/tauri.conf devUrl 一致，改动需同步 Rust 常量）
@@ -19,7 +21,7 @@
 # 限制：与打包版共用单实例互斥；运行打包版时请先关闭，反之亦然。
 # Rust 源码变更由 tauri dev 自动重编译并重启应用；前端由 Vite HMR 热更新。
 param(
-  [ValidateSet('', 'start', 'stop', 'status')]
+  [ValidateSet('', 'start', 'stop', 'status', 'restart')]
   [string]$Action = '',
   [string]$ConfigPath,
   [int]$FrontendPort = 5173,
@@ -60,7 +62,71 @@ function Assert-DesktopAvailable {
   }
 }
 
+function Stop-DevDesktop {
+  param([switch]$IncludeWindow)
+  if (Test-Path $pidFile) {
+    $runnerPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+    $runnerProc = if ($runnerPid) { Get-Process -Id $runnerPid -ErrorAction SilentlyContinue } else { $null }
+    if ($runnerProc) {
+      cmd.exe /d /c "taskkill /PID $runnerPid /T /F >nul 2>&1"
+      Write-Host "已结束 runner 进程树（PID $runnerPid）。"
+    } else {
+      Write-Host 'runner 进程已不在（可能异常退出），仅清理残留。'
+    }
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    # 兜底清理只针对 dev 构建、且启动时间晚于 runner 的残留，不触碰打包版或用户自行启动的服务。
+    $cleanupAfter = if ($runnerProc) { $runnerProc.StartTime } else { $null }
+    if ($cleanupAfter) {
+      Get-Process relay-desktop -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($tauriRoot, [System.StringComparison]::OrdinalIgnoreCase) -and $_.StartTime -gt $cleanupAfter } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+      $viteOwners = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+      foreach ($ownerPid in $viteOwners) {
+        $owner = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+        if ($owner -and $owner.StartTime -gt $cleanupAfter) {
+          Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+        }
+      }
+    }
+  } elseif (-not $IncludeWindow) {
+    Write-Host '没有后台运行记录（.relay-dev\dev-desktop\runner.pid 不存在）；前台运行的实例请在其终端 Ctrl+C 停止。'
+  }
+  if ($IncludeWindow) {
+    # 重启要覆盖前台实例；只认 dev 构建路径，打包版与测试包窗口不在这里处理。
+    $windows = @(Get-Process relay-desktop -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and $_.Path.StartsWith($tauriRoot, [System.StringComparison]::OrdinalIgnoreCase) })
+    foreach ($window in $windows) {
+      Write-Host "正在关闭旧的开发窗口（PID $($window.Id)）…"
+      if (-not $window.CloseMainWindow() -or -not $window.WaitForExit(5000)) {
+        Stop-Process -Id $window.Id -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+}
+
 # 后台管理模式：PID 记录 + 日志集中在 .relay-dev\dev-desktop\；前台流程保持原样。
+if ($Action -eq 'restart') {
+  Stop-DevDesktop -IncludeWindow
+  # 等窗口和单实例锁真正退出，避免紧接着的前台启动被旧实例挡住。
+  $deadline = (Get-Date).AddSeconds(15)
+  do {
+    Start-Sleep -Milliseconds 300
+    $guard = $null
+    $busy = $false
+    try {
+      if ([Threading.Mutex]::TryOpenExisting('Local\RelayAgentDesktopSingleInstance', [ref]$guard)) { $busy = $true }
+    } catch {
+      $busy = $false
+    } finally {
+      if ($guard) { $guard.Dispose() }
+    }
+  } while ($busy -and (Get-Date) -lt $deadline)
+  if ($busy) { throw '旧桌面窗口未在 15 秒内退出，未启动第二个实例。请手动关闭后重试。' }
+  Write-Host '旧开发窗口已清理，正在重新启动…'
+}
+
 if ($Action -eq 'start') {
   if (Test-Path $pidFile) {
     $old = Get-Content $pidFile -ErrorAction SilentlyContinue
@@ -92,35 +158,8 @@ if ($Action -eq 'start') {
 }
 
 if ($Action -eq 'stop') {
-  if (-not (Test-Path $pidFile)) {
-    Write-Host '没有后台运行记录（.relay-dev\dev-desktop\runner.pid 不存在）；前台运行的实例请在其终端 Ctrl+C 停止。'
-    return
-  }
-  $runnerPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-  $runnerProc = if ($runnerPid) { Get-Process -Id $runnerPid -ErrorAction SilentlyContinue } else { $null }
-  if ($runnerProc) {
-    cmd.exe /d /c "taskkill /PID $runnerPid /T /F >nul 2>&1"
-    Write-Host "已结束 runner 进程树（PID $runnerPid）。"
-  } else {
-    Write-Host 'runner 进程已不在（可能异常退出），仅清理残留。'
-  }
-  Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2
-  # 兜底清理只针对 dev 构建、且启动时间晚于 runner 的残留，不触碰打包版或用户自行启动的服务。
-  $cleanupAfter = if ($runnerProc) { $runnerProc.StartTime } else { $null }
-  if ($cleanupAfter) {
-    Get-Process relay-desktop -ErrorAction SilentlyContinue |
-      Where-Object { $_.Path -and $_.Path.StartsWith($tauriRoot, [System.StringComparison]::OrdinalIgnoreCase) -and $_.StartTime -gt $cleanupAfter } |
-      Stop-Process -Force -ErrorAction SilentlyContinue
-    $viteOwners = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue |
-      Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($ownerPid in $viteOwners) {
-      $owner = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
-      if ($owner -and $owner.StartTime -gt $cleanupAfter) {
-        Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
-      }
-    }
-  }
+  Stop-DevDesktop
+  if (Test-Path $pidFile) { return }
   Write-Host 'dev 桌面已停止。'
   return
 }
@@ -228,6 +267,14 @@ if (-not $ConfigPath) {
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "desktop.env 不存在：$ConfigPath" }
 $env:RELAY_DESKTOP_CONFIG_PATH = (Resolve-Path -LiteralPath $ConfigPath).Path
 Write-Host "dev 桌面使用配置：$env:RELAY_DESKTOP_CONFIG_PATH"
+# 与 test-desktop.ps1 的 DesktopDev 对齐：使用测试库配置时默认沿用同一份数据目录，
+# 否则直接运行本脚本会落到 %APPDATA%，看不到试用环境里的产物。
+$trialConfig = Join-Path $repoRoot '.relay-test\desktop.env'
+if (-not $env:RELAY_DESKTOP_DATA_ROOT -and
+    [IO.Path]::GetFullPath($ConfigPath) -eq [IO.Path]::GetFullPath($trialConfig)) {
+  $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $repoRoot '.relay-test\data'
+  Write-Host "dev 桌面数据目录：$env:RELAY_DESKTOP_DATA_ROOT"
+}
 
 # 3) 前端 Vite：tauri dev 依赖 devUrl 可达；已监听则复用。
 $portBusy = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue

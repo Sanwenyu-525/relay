@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
+import { clickPortal, DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, openUnresolvedDialog, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
 import { COLLABORATION_LAYOUT_STORAGE_KEY } from "../src/lib/collaborationLayoutPreferences";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -335,9 +335,13 @@ describe("协作工作区主路径", () => {
         await view.wrapper.get(`[data-testid="collab-layout-${mode}"]`).trigger("click");
         expect(view.wrapper.get(selector).element).toBe(original);
       }
-      const check = owner === "assist" ? view.wrapper.get(".assist-pending").findAll("button")[0]!
-        : view.wrapper.get(`[data-testid="${owner === "review" ? "review-check-receipt" : "run-check-receipt"}"]`);
-      await check.trigger("click"); await flush();
+      if (owner === "assist") {
+        await openUnresolvedDialog("assist-pending");
+        await clickPortal("assist-pending-receipt"); await flush();
+      } else {
+        await view.wrapper.get(`[data-testid="${owner === "review" ? "review-check-receipt" : "run-check-receipt"}"]`).trigger("click");
+        await flush();
+      }
       expect(receipts).toEqual([`${prefix}/commands/${commandId}`]);
       expect(posts).toBe(1);
     } finally { view.unmount(); }
@@ -506,8 +510,12 @@ describe("协作工作区主路径", () => {
         expect(toolbarSessionTitle()).toBe("讨论1");
         expect(dialogText()).toContain(currentCommandId);
         expect(document.querySelector('[data-testid="collab-discard-draft"]')).toBeNull();
-        await new DomWrapper(document.querySelector('[role="dialog"] button')).trigger("click");
-        await view.wrapper.get(".assist-pending").findAll("button")[0]!.trigger("click"); await flush();
+        const stay = Array.from(document.querySelectorAll("button"))
+          .find((button) => button.textContent?.trim() === "留在当前工作区");
+        if (stay === undefined) throw new Error("missing stay-current-workspace action");
+        stay.dispatchEvent(new MouseEvent("click", { bubbles: true })); await flush();
+        await openUnresolvedDialog("assist-pending");
+        await clickPortal("assist-pending-receipt"); await flush();
         expect(receiptPaths).toEqual([`${prefix}/commands/${oldCommandId}`, `${prefix}/commands/${currentCommandId}`]);
         expect(posts).toHaveLength(1);
       } else {
@@ -635,7 +643,8 @@ describe("协作工作区主路径", () => {
           .attributes("aria-label")).toBe(label);
         // 在途发送期间顶栏的切换键一起禁用：同一条「不许中途换讨论」的承诺，不再由下拉承载。
         expect(view.wrapper.get('[data-testid="collab-session-switcher"]').attributes("disabled")).toBeDefined();
-        await view.wrapper.get(".assist-pending").findAll("button")[1]!.trigger("click"); await flush();
+        await openUnresolvedDialog("assist-pending");
+        await clickPortal("assist-pending-retry"); await flush();
         expect(posts).toHaveLength(2); expect(posts[1]).toEqual(posts[0]);
       } finally { view.unmount(); }
     });
@@ -1524,7 +1533,8 @@ describe("协作工作区主路径", () => {
     await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
     expect(view.wrapper.get('[data-testid="git-read-idle"]').text()).toContain("尚未读取所选目录");
     expect(view.wrapper.get('[data-testid="git-read-status"]').attributes("disabled")).toBeDefined();
-    expect(view.wrapper.get('[data-testid="devtools-git"]').text()).toContain("非 Git 目录与读取失败都不得显示为“干净”");
+    // 2026-10-24 用户指令：面板规范语言（「不得显示为干净」）撤出上屏，能力边界收成开发注记。
+    expect(view.wrapper.get('[data-testid="devtools-git"]').text()).toContain("开发注记：本轮只放行受管资源上的状态与差异读取");
     expect(view.wrapper.find('[data-testid="devtools-terminal-gap"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="devtools-tab-TERMINAL"]').trigger("click");
     expect(view.wrapper.get('[data-testid="devtools-terminal-gap"]').text()).toContain("不提供可执行提示符");

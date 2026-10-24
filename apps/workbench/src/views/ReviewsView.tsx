@@ -4,7 +4,7 @@ import { Info, RotateCcw } from "lucide-react";
 import ReviewDecisionPanel, { isReviewExpired, reviewReasonText } from "../components/ReviewDecisionPanel";
 import ArtifactReaderPanel from "../components/ArtifactReaderPanel";
 import PageHeader from "../components/PageHeader";
-import { RelayTransportError, type RelayReview } from "../api/relayClient";
+import { RelayApiError, RelayTransportError, type RelayReview } from "../api/relayClient";
 import { reviewKindLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -76,7 +76,20 @@ export default function ReviewsView() {
       if (version !== requestVersion.current) return;
       setReviews(items); setSelected(detail); selectedRef.current = detail; setProjectArchivedAt(archivedAt); setProjectReadError(projectFailure);
       setLabels(detail ? { reviewId: detail.id, projectTitle, targetTitle } : null);
-    } catch (caught) { if (version === requestVersion.current) setError(describeLiveError(caught).message); }
+    } catch (caught) {
+      if (version !== requestVersion.current) return;
+      setError(describeLiveError(caught).message);
+      if (caught instanceof RelayApiError && (caught.problem.status === 401 || caught.problem.status === 403)) {
+        // 读取权限已明确失效（#25）：旧列表与判断依据立即撤下。保留不含原正文的恢复壳——
+        // 请求身份与决定面板仍在，ReviewDecisionPanel 里未核对的 command_id 与回执入口不能无提示丢失。
+        setReviews([]); setLabels(null); setProjectArchivedAt(undefined); setProjectReadError(null);
+        const previous = selectedRef.current;
+        if (previous !== null) {
+          const shell: RelayReview = { ...previous, reason: "", targetHash: "", target: {}, evidence: {}, effect: {} };
+          setSelected(shell); selectedRef.current = shell;
+        }
+      }
+    }
     finally { if (version === requestVersion.current) { setLoading(false); setRefreshing(false); } }
   }
   useEffect(() => { setSelected(null); selectedRef.current = null; setProjectArchivedAt(undefined); setProjectReadError(null); void load(); return () => { requestVersion.current++; }; }, [live, selectedId, connection.client]);

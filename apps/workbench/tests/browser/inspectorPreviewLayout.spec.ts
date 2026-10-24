@@ -398,4 +398,57 @@ test.describe("CT-01 详情与预览的容器布局", () => {
     // 再按一次才收起整个抽屉。分栏没有遮罩，Esc 仍不关它——先在抽屉态验证一次。
     await expect(page.getByTestId("collab-inspector")).toBeVisible();
   });
+
+  test("1162×782 真分栏：工作详情左边界可拖拽调宽，双击复位，预览时不提供手柄", async ({ page }) => {
+    await openTaskWorkspace(page, { width: 1162, height: 782 });
+    await openWorkDetails(page);
+    const panel = page.getByTestId("collab-inspector");
+    const handle = page.getByTestId("inspector-resize-handle");
+    await expect(handle).toBeVisible();
+    const before = await panel.boundingBox();
+    const grip = await handle.boundingBox();
+    if (before === null || grip === null) throw new Error("工作详情或拖拽手柄没有可测几何");
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + grip.width / 2 - 64, grip.y + grip.height / 2, { steps: 4 });
+    await page.mouse.up();
+    const widened = await panel.boundingBox();
+    if (widened === null) throw new Error("拖拽后面板消失");
+    // 面板贴右缘：手柄左移 64px，面板就该宽 64px；数值同时写进本设备偏好。
+    expect(widened.width - before.width).toBeCloseTo(64, 0);
+    expect(await page.evaluate(() => window.localStorage.getItem("relay.workbench.inspectorWidthPx")))
+      .toBe(String(Math.round(widened.width)));
+    await handle.dblclick();
+    const reset = await panel.boundingBox();
+    if (reset === null) throw new Error("复位后面板消失");
+    expect(reset.width).toBeCloseTo(before.width, 0);
+    expect(await page.evaluate(() => window.localStorage.getItem("relay.workbench.inspectorWidthPx"))).toBeNull();
+    // 深预览按 wideWidth 排版，不参与拖拽。
+    await openFilePreview(page);
+    await expect(page.getByTestId("inspector-resize-handle")).toHaveCount(0);
+  });
+
+  test("860×800 抽屉：左边界拖拽同样生效，手柄仍可达", async ({ page }) => {
+    await openTaskWorkspace(page, { width: 860, height: 800 });
+    await openWorkDetails(page);
+    await expect(page.getByTestId("collab-inspector-scrim")).toBeVisible();
+    const panel = page.getByTestId("collab-inspector");
+    const before = await panel.boundingBox();
+    const grip = await page.getByTestId("inspector-resize-handle").boundingBox();
+    if (before === null || grip === null) throw new Error("抽屉或拖拽手柄没有可测几何");
+    // 抽屉的宽度上限是容器减一档留白：把手柄落在面板左缘外侧的命中区里。
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + grip.width / 2 - 64, grip.y + grip.height / 2, { steps: 4 });
+    await page.mouse.up();
+    const widened = await panel.boundingBox();
+    if (widened === null) throw new Error("拖拽后抽屉消失");
+    expect(widened.width - before.width).toBeCloseTo(64, 0);
+    expect(widened.x).toBeLessThan(before.x);
+    expect(widened.x + widened.width).toBeLessThanOrEqual(860);
+    // 遮罩仍在，关闭键仍可命中：改宽没有改变抽屉的模态语义。
+    await expect(page.getByTestId("collab-inspector-scrim")).toBeVisible();
+    await page.getByTestId("collab-inspector-scrim").click({ position: { x: 12, y: 12 } });
+    await expect(panel).toHaveCount(0);
+  });
 });

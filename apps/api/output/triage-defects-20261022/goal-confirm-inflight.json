@@ -6,12 +6,12 @@
     "inflight": null,
     "confirmHttp": 200,
     "confirmBody": {
-      "command_id": "27bbede4-4ebb-4197-a372-9b39dfe7161a",
-      "committed_at": "2026-10-23T11:05:56.096Z",
+      "command_id": "901a7a08-19aa-48b4-aa5e-95fae40ec1bb",
+      "committed_at": "2026-10-24T04:49:28.771Z",
       "result": {
         "goal": {
-          "goal_id": "895eb74d-b62f-45f7-8098-ad5c876579d4",
-          "session_id": "1dac0b84-6523-4dd3-9adb-df520025a7e5",
+          "goal_id": "cc8d03ce-12ac-40b5-bc82-9ace78752e04",
+          "session_id": "9fbb91d5-ac9b-4ac9-b465-5ecaa4c23d8d",
           "objective": "完成检查",
           "status": "COMPLETED",
           "current_step": null,
@@ -36,7 +36,7 @@
           "no_progress_rounds": 0,
           "plan_version_id": null,
           "plan_version": null,
-          "last_round_at": "2026-10-23T11:05:56.046Z",
+          "last_round_at": "2026-10-24T04:49:28.625Z",
           "actions": {
             "pause": false,
             "cancel": false,
@@ -44,12 +44,12 @@
             "confirm_completion": false
           },
           "revision": "3",
-          "created_at": "2026-10-23T11:05:55.989Z",
-          "updated_at": "2026-10-23T11:05:56.096Z"
+          "created_at": "2026-10-24T04:49:27.872Z",
+          "updated_at": "2026-10-24T04:49:28.771Z"
         }
       },
       "links": {
-        "resource": "/api/v1/workspaces/1ac0a91e-cb33-4ea6-a565-65c80b5df017/"
+        "resource": "/api/v1/workspaces/62b408a1-b71e-4cb7-9334-91f9aabaad06/"
       }
     },
     "goalAfterConfirm": "COMPLETED",
@@ -69,71 +69,46 @@
     "beforeGoalStatus": "AWAITING_ACCEPTANCE",
     "confirmAction": true,
     "inflight": {
-      "id": "f403ca65-620a-47b4-aa69-db102f46bda6",
+      "id": "53e1b7d4-889c-4ef0-9fbe-b3e8800468cb",
       "status": "PENDING"
     },
-    "confirmHttp": 200,
+    "confirmHttp": 409,
     "confirmBody": {
-      "command_id": "3ee5dbba-9f36-4457-87d9-0c6d91fdd0b7",
-      "committed_at": "2026-10-23T11:05:56.149Z",
-      "result": {
-        "goal": {
-          "goal_id": "e2735ef1-d7e1-45ef-9aa9-a5be7a32166b",
-          "session_id": "9f988e07-4c9f-4d4a-986c-cb9f068176e9",
-          "objective": "完成检查",
-          "status": "COMPLETED",
-          "current_step": null,
-          "progress": "检查完成",
-          "stop_reason": {
-            "code": "AWAITING_ACCEPTANCE",
-            "detail": "目标已按成功条件完成自检，需要你确认后才会记作完成。",
-            "questions": [],
-            "resumable": false
-          },
-          "criteria": [
-            {
-              "key": "c1",
-              "statement": "检查通过",
-              "status": "MET",
-              "evidence": "受控检查返回通过",
-              "required": true
-            }
-          ],
-          "steps": [],
-          "round_count": 1,
-          "no_progress_rounds": 0,
-          "plan_version_id": null,
-          "plan_version": null,
-          "last_round_at": "2026-10-23T11:05:56.138Z",
-          "actions": {
-            "pause": false,
-            "cancel": false,
-            "resume": false,
-            "confirm_completion": false
-          },
-          "revision": "3",
-          "created_at": "2026-10-23T11:05:56.113Z",
-          "updated_at": "2026-10-23T11:05:56.149Z"
-        }
-      },
-      "links": {
-        "resource": "/api/v1/workspaces/1ac0a91e-cb33-4ea6-a565-65c80b5df017/"
+      "type": "/problems/goal-rounds-unsettled",
+      "title": "目标还有未结算的轮次消息",
+      "status": 409,
+      "detail": "这条目标名下还有排队生成或已结束但未记账的轮次消息；请等推进器把它们安全结算后再确认完成，否则这些工作会游离在目标终态之外。",
+      "instance": "/requests/req-a80b2a70-3bf2-4675-aa5f-b274c5d447bb",
+      "code": "GOAL_ROUNDS_UNSETTLED",
+      "request_id": "req-a80b2a70-3bf2-4675-aa5f-b274c5d447bb",
+      "retryable": true,
+      "retry_action": "REFRESH_AND_REDECIDE",
+      "command_id": "67cd2a14-cc82-4c59-8dcd-97950804f875",
+      "conflict": {
+        "goal_id": "047ebd3f-265a-4ea3-a06e-3856ffc741e8"
       }
     },
-    "goalAfterConfirm": "COMPLETED",
+    "goalAfterConfirm": "AWAITING_ACCEPTANCE",
     "callsAfterConfirm": 1,
     "laterGeneration": {
-      "messageId": "f403ca65-620a-47b4-aa69-db102f46bda6",
-      "sessionId": "9f988e07-4c9f-4d4a-986c-cb9f068176e9",
+      "messageId": "53e1b7d4-889c-4ef0-9fbe-b3e8800468cb",
+      "sessionId": "df9a1e26-2ae8-47e3-b226-8f864fa7efeb",
       "status": "COMPLETED",
       "errorCode": null,
       "proposalIds": []
     },
-    "finalGoalStatus": "COMPLETED",
-    "laterRoundRecorded": false,
+    "finalGoalStatus": "AWAITING_ACCEPTANCE",
+    "laterRoundRecorded": true,
     "finalTick": {
       "advanced": [],
-      "settled": [],
+      "settled": [
+        {
+          "goalId": "047ebd3f-265a-4ea3-a06e-3856ffc741e8",
+          "messageId": "53e1b7d4-889c-4ef0-9fbe-b3e8800468cb",
+          "outcome": "AWAITING_ACCEPTANCE",
+          "status": "AWAITING_ACCEPTANCE"
+        }
+      ],
       "controls": [],
       "skipped": []
     }

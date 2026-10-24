@@ -262,11 +262,15 @@ export class PlanGoalRepository {
   }
 
   /**
-   * 轮次结算阶段只看「最新一条已结算消息还没有轮次账」的目标。
+   * 轮次结算阶段只看「名下还有已终结消息没有轮次账」的目标。
    *
    * 不能简单排除 PAUSED：暂停/取消先于轮次结算落定时，暂停目标上仍可能压着已结算
    * 但未记账的轮次，排除它会永久丢掉这条事实。这里按消息事实筛选、不按目标状态筛选
    * （终态除外）；每结算一条就离开候选集，静止目标不会饿死后来者。
+   *
+   * 候选判定必须是「任一条缺账」而不是「最新一条缺账」（#143）：最新消息先记上账之后，
+   * 只看 MAX(seq) 会让更早的缺账消息永远退出候选——早期轮次从此无账可查，成功条件
+   * 也只能从最后一条冻结。
    */
   async listGoalsWithUnsettledRounds(limit = 50): Promise<readonly AssistGoalRow[]> {
     return (await sql<AssistGoalRow>`select g.* from assist_goals g
@@ -275,15 +279,26 @@ export class PlanGoalRepository {
           select 1 from assist_messages m
           where m.goal_id = g.id
             and m.status in ('COMPLETED', 'FAILED', 'CANCELLED')
-            and m.seq = (
-              select max(m2.seq) from assist_messages m2
-              where m2.goal_id = g.id and m2.status in ('COMPLETED', 'FAILED', 'CANCELLED')
-            )
             and not exists (
               select 1 from assist_goal_rounds r where r.message_id = m.id
             )
         )
       order by g.updated_at, g.id
+      limit ${Math.max(1, Math.min(200, limit))}`.execute(this.db)).rows;
+  }
+
+  /**
+   * 目标名下已终结（COMPLETED/FAILED/CANCELLED）但还没有轮次账的消息，按**原始 seq
+   * 升序**有界返回（#143）。顺序结算、候选判定与「确认完成前的在途/缺账核对」都
+   * 以它为准；一轮结算不完的余量留给下一个 tick，不扩大单 tick 窗口。
+   */
+  async listUnsettledRoundMessages(goalId: string, limit = 50): Promise<readonly AssistMessageRow[]> {
+    return (await sql<AssistMessageRow>`select * from assist_messages
+      where goal_id = ${goalId} and status in ('COMPLETED', 'FAILED', 'CANCELLED')
+        and not exists (
+          select 1 from assist_goal_rounds r where r.message_id = assist_messages.id
+        )
+      order by seq
       limit ${Math.max(1, Math.min(200, limit))}`.execute(this.db)).rows;
   }
 

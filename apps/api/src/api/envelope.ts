@@ -222,6 +222,9 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
         : undefined;
     case 'RequestAssistMessage':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}` : undefined;
+    case 'RecallAssistMessage':
+      return typeof result.message_id === 'string'
+        ? `assist-messages/${result.message_id}/recall` : undefined;
     case 'AcceptAssistProposal':
     case 'RejectAssistProposal':
       return typeof result.proposal_id === 'string' ? `assist-proposals/${result.proposal_id}` : undefined;

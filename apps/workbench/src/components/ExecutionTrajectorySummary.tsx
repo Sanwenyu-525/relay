@@ -31,6 +31,11 @@ const CHECK_TOOLS = new Set(["run_check"]);
 const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 /** 折叠区最多逐字展示的正文行数；超出只算「还有更多」，不截断后冒充完整内容。 */
 const INLINE_MAX_LINES = 40;
+/** 读取结果超过这个项数后，平铺列表改按工具名聚成组行（页面原型 V5.26「轻量分组行」）：
+    组行默认收起，展开才逐项回执；阈值内维持既有平铺，常见短轮次不受影响。 */
+const READ_GROUP_THRESHOLD = 8;
+/** 读取结果超过这个项数后，折叠区整体限高、框内滚动（V5.26「文件列表限高滚动」）。 */
+const READ_CAP_THRESHOLD = 12;
 /** 找不到精确 Review 或读取失败时的审批入口：仍是原审批页，由面板自己列出待决项。 */
 const APPROVAL_FALLBACK_HREF = "/reviews?kind=ACTION_APPROVAL";
 
@@ -108,6 +113,19 @@ function waitingOperationIds(projection: RelayRunToolCalls): string {
     }
   }
   return [...ids].sort().join(",");
+}
+
+/** 超过阈值后按工具名聚组（保持首次出现顺序）：同类的多次读取压成一行组行，
+    组内仍是原来的逐项回执；这是呈现层聚合，不改变计数与「逐字来自 result_ref」的取值。 */
+function groupReadsByTool(reads: readonly RelayRunToolCall[]):
+readonly (readonly [toolName: string, calls: readonly RelayRunToolCall[]])[] {
+  const groups = new Map<string, RelayRunToolCall[]>();
+  for (const call of reads) {
+    const bucket = groups.get(call.toolName);
+    if (bucket === undefined) groups.set(call.toolName, [call]);
+    else bucket.push(call);
+  }
+  return [...groups.entries()].map(([toolName, calls]) => [toolName, calls] as const);
 }
 
 export default function ExecutionTrajectorySummary({ client, runId, revision = null, onOpenTrajectory }: {
@@ -193,8 +211,9 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
         aria-expanded={open} onClick={() => setOpen((previous) => !previous)}>
         {open ? "收起本次读取结果" : `展开本次读取结果（${reads.length} 项，来自实际工具回执）`}
       </button>
-      {open && <ul className="execution-read-results" data-testid="execution-read-results">
-        {reads.map((call) => {
+      {open && (() => {
+        // 单项回执的呈现平铺与分组共用：组内每一项仍是完整可复制块，聚合只发生在组行这一层。
+        const readItem = (call: RelayRunToolCall) => {
           const lines = resultText(call).split("\n");
           const shown = lines.slice(0, INLINE_MAX_LINES);
           return <li key={call.id} data-testid={`execution-read-${call.id}`}>
@@ -205,8 +224,24 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
             {lines.length > shown.length &&
               <p className="helper-text">还有 {lines.length - shown.length} 行未在此展开；完整内容见工具轨迹。</p>}
           </li>;
-        })}
-      </ul>}
+        };
+        const groups = reads.length > READ_GROUP_THRESHOLD ? groupReadsByTool(reads) : null;
+        const capped = reads.length > READ_CAP_THRESHOLD;
+        return <ul className="execution-read-results" data-testid="execution-read-results"
+          data-grouped={groups !== null ? "true" : undefined}
+          data-capped={capped ? "true" : undefined}
+          tabIndex={capped ? 0 : undefined}>
+          {groups !== null
+            ? groups.map(([toolName, calls]) => <li key={toolName} className="execution-read-group">
+              {/* 组行是「工具 · N 项」的一行概览，默认收起；计数与上方统计标签同源。 */}
+              <details data-testid={`execution-read-group-${toolName}`}>
+                <summary>{toolName} · {calls.length} 项</summary>
+                <ul className="execution-read-group-items">{calls.map(readItem)}</ul>
+              </details>
+            </li>)
+            : reads.map(readItem)}
+        </ul>;
+      })()}
     </>}
     {onOpenTrajectory !== undefined && <button className="text-link" type="button"
       data-testid="execution-summary-open" onClick={onOpenTrajectory}>查看逐步轨迹</button>}

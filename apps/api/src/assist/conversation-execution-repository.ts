@@ -75,15 +75,18 @@ export class ConversationExecutionRepository {
    * 否则 Run 收口语义会悄悄漂移。请求自己排除在外——本请求接续自己的 Run 不是并行推进。
    */
   async findLiveRunForSession(workspaceId: string, sessionId: string,
-    excludeRequestId: string): Promise<{ readonly requestId: string;
+    excludeRequestId: string | null): Promise<{ readonly requestId: string;
       readonly runId: string } | undefined> {
+    // 不排除任何请求时不能传空串：先按 uuid 比较会在参数解析阶段直接报 22P02。
+    const exclude = excludeRequestId === null ? sql``
+      : sql`and request.id <> ${excludeRequestId}`;
     const rows = await sql<{ request_id: string; run_id: string }>`
       select request.id as request_id, request.run_id
       from conversation_execution_requests request
       join runs on runs.id = request.run_id
       where request.workspace_id = ${workspaceId}
         and request.session_id = ${sessionId}
-        and request.id <> ${excludeRequestId}
+        ${exclude}
         and request.status = 'DELEGATED'
         and request.run_id is not null
         and runs.status in (

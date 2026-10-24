@@ -294,4 +294,127 @@ describe("结果未知", () => {
     expect(document.querySelector('[data-testid="save-memory-error"]')?.textContent)
       .toContain("不是保存记忆");
   });
+
+  it("创建 201 后读详情失败：持有已创建身份只重读该身份，不开放第二次创建", async () => {
+    const posts: Record<string, unknown>[] = [];
+    const memoryGets: string[] = [];
+    let detailStatus = 503;
+    stub((url, init) => {
+      if (url.endsWith("/messages?limit=200")) return json({ items: [message()] });
+      if (init.method === "POST" && url.includes("/memories")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        return json({ command_id: body.command_id, committed_at: "2026-10-20T00:00:00.000Z",
+          result: { memory_id: memoryId, revision: "0", version: "1", status: "ACTIVE" } }, 201);
+      }
+      if (url.includes(`/memories/${memoryId}/provenance`)) return json({ memory_id: memoryId, sources: [] });
+      if (url.endsWith(`/memories/${memoryId}`)) {
+        memoryGets.push(url);
+        if (detailStatus >= 400) return json({ code: "DATABASE_UNAVAILABLE", detail: "read unavailable" }, detailStatus);
+        return json(memoryBody({ title: "服务端标题" }));
+      }
+      throw new Error(`unexpected ${init.method ?? "GET"} ${url}`);
+    });
+    await mount();
+    await click("save-memory-confirm");
+    await flush();
+    // 创建成功与读回失败是两个事实：不是「保存失败」，也不能再点出第二条创建命令。
+    expect(posts).toHaveLength(1);
+    expect(document.querySelector('[data-testid="save-memory-error"]')?.textContent)
+      .toContain("数据库不可达");
+    expect(document.querySelector('[data-testid="save-memory-error"]')?.textContent)
+      .not.toContain("保存失败");
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="save-memory-confirm"]')?.disabled)
+      .toBe(true);
+    await click("save-memory-confirm");
+    await flush();
+    expect(posts).toHaveLength(1);
+    // 重读只按已创建身份进行，成功后展示确切服务端内容。
+    detailStatus = 200;
+    await click("save-memory-reread");
+    await flush();
+    expect(memoryGets.length).toBeGreaterThan(0);
+    expect(memoryGets.every((url) => url.endsWith(`/memories/${memoryId}`))).toBe(true);
+    expect(document.querySelector('[data-testid="save-memory-saved-title"]')?.textContent)
+      .toBe("服务端标题");
+  });
+
+  it("创建 201 后读来源失败同样只重读，不能触发第二次创建", async () => {
+    const posts: Record<string, unknown>[] = [];
+    let provenanceStatus = 503;
+    stub((url, init) => {
+      if (url.endsWith("/messages?limit=200")) return json({ items: [message()] });
+      if (init.method === "POST" && url.includes("/memories")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        return json({ command_id: body.command_id, committed_at: "2026-10-20T00:00:00.000Z",
+          result: { memory_id: memoryId, revision: "0", version: "1", status: "ACTIVE" } }, 201);
+      }
+      if (url.includes(`/memories/${memoryId}/provenance`)) {
+        if (provenanceStatus >= 400) return json({ code: "DATABASE_UNAVAILABLE", detail: "read unavailable" }, provenanceStatus);
+        return json({ memory_id: memoryId, sources: [{ memory_version: "1", session_id: sessionId,
+          message_id: messageId, content_sha256: sha256Hex(original) }] });
+      }
+      if (url.endsWith(`/memories/${memoryId}`)) return json(memoryBody());
+      throw new Error(`unexpected ${init.method ?? "GET"} ${url}`);
+    });
+    await mount();
+    await click("save-memory-confirm");
+    await flush();
+    expect(posts).toHaveLength(1);
+    expect(document.querySelector('[data-testid="save-memory-saved"]')).toBeNull();
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="save-memory-confirm"]')?.disabled)
+      .toBe(true);
+    provenanceStatus = 200;
+    await click("save-memory-reread");
+    await flush();
+    expect(posts).toHaveLength(1);
+    const sources = document.querySelector('[data-testid="save-memory-saved-sources"]')?.textContent ?? "";
+    expect(sources).toContain(messageId);
+  });
+
+  it("回执确认保存已生效后读回失败：停留在已创建待重读，不回到可再次创建的状态", async () => {
+    const posts: Record<string, unknown>[] = [];
+    let detailStatus = 503;
+    stub((url, init) => {
+      if (url.endsWith("/messages?limit=200")) return json({ items: [message()] });
+      if (init.method === "POST" && url.includes("/memories")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        throw new TypeError("Failed to fetch");
+      }
+      if (/\/commands\/[^/]+$/u.test(url)) {
+        const commandId = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+        return json({ command_id: commandId, committed_at: "2026-10-20T00:00:00.000Z",
+          command_type: "CreateMemoryFromMessage",
+          result: { memory_id: memoryId, revision: "0", version: "1", status: "ACTIVE" } });
+      }
+      if (url.includes(`/memories/${memoryId}/provenance`)) return json({ memory_id: memoryId, sources: [] });
+      if (url.endsWith(`/memories/${memoryId}`)) {
+        if (detailStatus >= 400) return json({ code: "DATABASE_UNAVAILABLE", detail: "read unavailable" }, detailStatus);
+        return json(memoryBody());
+      }
+      throw new Error(`unexpected ${init.method ?? "GET"} ${url}`);
+    });
+    await mount();
+    await click("save-memory-confirm");
+    await flush();
+    await click("save-memory-receipt");
+    await flush();
+    // 回执确认创建已生效：之后读详情 503 只保留身份重读，pending 收口且不能再次创建。
+    expect(posts).toHaveLength(1);
+    expect(document.querySelector('[data-testid="save-memory-pending"]')).toBeNull();
+    expect(document.querySelector('[data-testid="save-memory-error"]')?.textContent)
+      .toContain("数据库不可达");
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="save-memory-confirm"]')?.disabled)
+      .toBe(true);
+    await click("save-memory-confirm");
+    await flush();
+    expect(posts).toHaveLength(1);
+    detailStatus = 200;
+    await click("save-memory-reread");
+    await flush();
+    expect(document.querySelector('[data-testid="save-memory-saved"]')).not.toBeNull();
+    expect(posts).toHaveLength(1);
+  });
 });

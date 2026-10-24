@@ -61,7 +61,8 @@ function user(id: string, content: string | null): RelayAssistMessage {
     intent: "DISCUSS", content, errorCode: null,
     providerErrorKind: null, sources: [], skill: null, skillInput: null, skillOutput: null,
     usage: { inputTokens: null, outputTokens: null, cacheReadTokens: null,
-      cacheCreationTokens: null }, cancelRequested: false, steerRequested: false, attachments: [] };
+      cacheCreationTokens: null }, cancelRequested: false, steerRequested: false, attachments: [],
+    withdrawnAt: null, withdrawnByRecallId: null, recall: null };
 }
 function assistant(id: string, content: string | null, status: RelayAssistMessage["status"] = "COMPLETED"): RelayAssistMessage {
   return { ...user(id, content), role: "ASSISTANT", status };

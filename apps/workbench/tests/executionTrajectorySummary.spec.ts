@@ -119,3 +119,52 @@ describe("本次读取结果的呈现", () => {
     } finally { view.unmount(); }
   });
 });
+
+describe("长任务读取结果的分组与限高", () => {
+  const manyReads = (countOf: number, tool = "read_file") =>
+    Array.from({ length: countOf }, (_, index) =>
+      // id 带工具名：读取链路按 call.id 去重，不同工具复用同 ID 会被当成重放丢掉。
+      call(`${tool}-${index}`, tool, { content: `内容 ${index}` }));
+
+  it("超过 8 项时按工具聚成组行，组行默认收起、展开后逐项回执仍逐字来自 result_ref", async () => {
+    const view = await mount([...manyReads(5), ...manyReads(4, "search_text")]);
+    try {
+      await view.wrapper.get('[data-testid="execution-read-results-toggle"]').trigger("click");
+      const list = view.wrapper.get('[data-testid="execution-read-results"]');
+      expect(list.attributes("data-grouped")).toBe("true");
+      const readGroup = view.wrapper.get('[data-testid="execution-read-group-read_file"]');
+      expect(readGroup.find("summary").text()).toBe("read_file · 5 项");
+      expect(view.wrapper.get('[data-testid="execution-read-group-search_text"]').find("summary").text())
+        .toBe("search_text · 4 项");
+      // 组行默认收起（jsdom 里收起的 details 内容仍在 DOM，按 open 属性断言）：
+      // 先给「工具 · N 项」的分组概览，展开后才逐项回执。
+      expect((readGroup.element as HTMLDetailsElement).open).toBe(false);
+      await readGroup.find("summary").trigger("click");
+      expect((readGroup.element as HTMLDetailsElement).open).toBe(true);
+      const block = view.wrapper.get('[data-testid="execution-read-read_file-0"] .msg-code');
+      expect(block.find(".msg-code-label").text()).toBe("read_file · read_file");
+      expect((block.get("pre code").element as HTMLElement).textContent).toBe("内容 0");
+    } finally { view.unmount(); }
+  });
+
+  it("8 项以内保持既有平铺，不加分组与限高标记", async () => {
+    const view = await mount(manyReads(8));
+    try {
+      await view.wrapper.get('[data-testid="execution-read-results-toggle"]').trigger("click");
+      const list = view.wrapper.get('[data-testid="execution-read-results"]');
+      expect(list.attributes("data-grouped")).toBeUndefined();
+      expect(list.attributes("data-capped")).toBeUndefined();
+      expect(view.wrapper.findAll('[data-testid^="execution-read-read_file-"]').length).toBe(8);
+    } finally { view.unmount(); }
+  });
+
+  it("超过 12 项折叠区限高、框内滚动，滚动区可被键盘聚焦", async () => {
+    const view = await mount(manyReads(13));
+    try {
+      await view.wrapper.get('[data-testid="execution-read-results-toggle"]').trigger("click");
+      const list = view.wrapper.get('[data-testid="execution-read-results"]');
+      expect(list.attributes("data-capped")).toBe("true");
+      expect(list.attributes("tabindex")).toBe("0");
+    } finally { view.unmount(); }
+  });
+});

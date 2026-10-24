@@ -15,6 +15,11 @@ export interface RelayProblem {
   readonly expectedRevision: string | null;
   readonly actualRevision: string | null;
   readonly blockingReasons?: readonly string[];
+  /**
+   * 0132：撤回预检的逐路径阻断项（`路径｜状态｜原因`）。只在
+   * `RECALL_PREFLIGHT_BLOCKED` 等 409 里出现；界面原样列出，不重新解释。
+   */
+  readonly recallPaths?: readonly string[];
 }
 
 export class RelayApiError extends Error {

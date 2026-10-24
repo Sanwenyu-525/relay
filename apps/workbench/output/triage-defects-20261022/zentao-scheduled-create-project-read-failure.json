@@ -1,0 +1,10 @@
+{
+  "title": "[Relay] 定时创建页项目首读失败被吞掉，空下拉无错误与重试导致无法继续",
+  "type": "codeerror",
+  "steps": "<pre>【现象】新建定时任务页初次读取项目失败后，catch完全吞错，页面展示空项目下拉且没有重新读取入口。提交时只提示“定时任务必须归属一个进行中的项目”，无法分辨读取失败与无项目。服务恢复不触发重读，用户必须重开页面并面临草稿恢复成本。\n\n【受控真实组件证据】apps/workbench/output/triage-defects-20261022/scheduledCreateProjectReadFailure.spec.tsx，日志scheduled-create-project-read-failure.log。真实CreateScheduledTaskView+MemoryRouter+RelayApiClient+fetch Response+jsdom；首次GET projects503 DATABASE_UNAVAILABLE，随后同fetch可返回合法项目。\n结果：初次项目读取1次；errorShownBeforeSubmit=false；projectOptionCount=1（只有请选择）；selectedProject为空；retryButtons=0；填写名称/目标/验收条件后提交仍只报缺项目；postCount=0；原草稿标题仍在页内。正常unmount/remount后再次读取成功，项目ID被选中，排除模拟响应或DTO错误。没有虚构不存在的重试按钮来触发恢复。\nVitest明确1 failed：期望读取失败可见，实际false。shell因后续GetContent返回0不等于测试绿。没有真实API写入、真实网络故障注入、浏览器/Windows或Provider验收，本单仅证明组件在受控HTTP503路径的行为。\n\n【根因】CreateScheduledTaskView的项目useEffect只依赖connection.epoch，getProjectsPage首读catch空处理，未维护项目loading/error/retry状态。注释称“项目列表不可用时仍可手动输入”，但实际project字段是select，仅有page.items选项，没有手工ID输入或其它恢复入口。该页也只加载项目首批，分页问题本单未动态验证，不作为既证范围。#103是ComposerTargetPicker另一个入口，不是该表单的共享修复。\n\n【可直接执行修复提示词】\n先读CODEX_NEXT_STEP、定时创建交互、当前CreateScheduledTaskView、RelayClient项目分页与已有创建回执/草稿测试，保护共享改动。先复现再最小修复：项目首读有Loading/明确错误与页内重试，区分无项目与读取失败；重试只读取项目，不重建定时任务、不丢其它草稿、不破坏“默认项目异步落位不算未保存”的既有守卫。读取失败后不让用户猜必须去建项目，也不要新增任意ID输入绕过正常范围检查。连接切换时清理旧scope项目选项并丢弃迟到回包，默认选中只在用户未选择时发生。\n验收：503/网络首读失败→健康重试恢复；真正空项目给下一步；已有草稿重试前后完整保留；异步默认选择与dirty基线；跨连接/迟到响应/已归档项目；创建正常路径与未知回执原身份冻结全部回归。组件受控测试红到绿，真实浏览器/Windows未跑明确说明。\n仅同步受影响已有表单错误恢复交互与统一验收表，文档修改跑node scripts/check-docs.mjs。不commit/push、不改业务准入或生产数据、不扩展无关调度功能。</pre>",
+  "pri": 2,
+  "severity": 3,
+  "openedBuild": [
+    "trunk"
+  ]
+}

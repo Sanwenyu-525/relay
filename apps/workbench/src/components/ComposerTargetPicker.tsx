@@ -126,7 +126,7 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
           : tasks.length === 0 ? <p className="composer-target-line">这个项目还没有任务。</p>
           : taskRows}
       </>}
-      <p className="composer-target-footnote">Skill 需要{needLabel}上下文；选定后这条讨论会在该{needLabel}下进行。</p>
+      {/* 2026-10-24 用户指令：菜单底部脚注与头句重复（头句已说明先指定目标），删除。 */}
     </div>
   </details>;
 }

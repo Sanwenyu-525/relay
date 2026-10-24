@@ -858,6 +858,17 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   const frozenBaseline = session.project_id === null ? null :
     await freezeStateInterpretationBaseline(db, session.workspace_id, session.project_id);
   const memoryInput = await buildGenerationInput(createRepositories(db), options.storage, session, message);
+  // 主流程的每一次真实模型请求都必须进既有账本与共享预算闸门（#140）：免费模型路由的
+  // `invokeAssist` 已自带逐次计量，不再包第二层；默认兼容端口没有记录入口，这里与
+  // `runSubagentChildGeneration` 同一形态补上——每次调用一行 model_calls（STARTED 先提交，
+  // 结果/失败/取消落真实用量，进程丢失保 STARTED），预算耗尽沿 MODEL_BUDGET_EXHAUSTED 收口。
+  const invokeAssist: (request: AssistRequest) => Promise<AssistResult> =
+    context.invokeAssist ?? (async (request) => (await recordModelInvocation<AssistResult>(db, {
+      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+      identity: options.modelPort.identity, signal: controller.signal,
+      invoke: async () => options.modelPort.assist(request),
+      settle: settleAssistModelCall,
+    })).result);
   const outcome = await runAgentSessionReadonlyRounds(db, { session, message,
     availableTools, system, modelPort: options.modelPort, signal: controller.signal,
     contextTurns: memoryInput.turns,
@@ -875,7 +886,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       runDelegation: (input) => runSubagentChildGeneration(db, { ...input, options }),
       workerId: options.workerId,
     } : {}),
-    ...(context.invokeAssist === undefined ? {} : { invokeAssist: context.invokeAssist }) });
+    invokeAssist });
   if (outcome.kind === 'CONTENT' && context.chatMode === 'PLAN') {
     /*
      * 计划模式结算：正文与计划版本在**同一事务**里落库。
@@ -1286,7 +1297,9 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
   const recallEnabled = (await r.information.readMemorySettings(session.workspace_id))?.recall_enabled !== false;
 
   for (const entry of history) {
-    if (entry.role === 'ASSISTANT') {
+    // 0132：已撤回的助手轮次只保留占位，不再校验当时的回复/来源是否仍可用；
+    // 它们已经不是当前事实，也不该因为来源失效阻断这一轮。
+    if (entry.role === 'ASSISTANT' && entry.withdrawn_at === null) {
       if (!await historicalReplyAvailable(r, storage, session, entry.id)) { excludedHistory.add(entry.id); continue; }
       const automatic = Array.isArray(entry.sources) && entry.sources.some((source) =>
         isJsonObject(source) && source.selection === 'AUTO_MEMORY');
@@ -1330,6 +1343,29 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
     ? '- 显式选中资料：无。'
     : `- 显式选中资料：${sourceSections.length} 条（正文见下方数据块）。`);
 
+  // 0132：撤回回执进入下一轮上下文。旧回复/摘要里的「文件已修改」只作历史来源，
+  // 当前文件状态以实际恢复结果为准；部分恢复时未处理项一并交代。
+  const recalls = (await r.messageRecall.listRecallsForSession(session.id))
+    .filter((recall) => recall.status !== 'RUNNING');
+  if (recalls.length > 0) {
+    scopeLines.push('- 消息撤回回执（文件效果以实际恢复结果为准）：');
+    for (const recall of recalls.slice(-5)) {
+      const seq = history.find((entry) => entry.id === recall.message_id)?.seq;
+      const target = seq === undefined ? '更早的一轮' : `消息 seq ${seq.toString()} 及其回复`;
+      const outcome = recall.status === 'COMPLETED'
+        ? recall.planned_files === 0 ? '没有需要回退的文件修改'
+          : `已恢复 ${recall.restored_files}/${recall.planned_files} 个文件`
+        : recall.status === 'PARTIAL'
+          ? `部分恢复 ${recall.restored_files}/${recall.planned_files} 个文件，${recall.skipped_files} 个未恢复`
+          : `未恢复任何文件（${recall.skipped_files} 个未处理；该轮未标记撤回）`;
+      scopeLines.push(`  - ${target}：${outcome}。`);
+    }
+    // 全部失败时消息没有被标记撤回，旧回复仍是当前事实，不能套用下面这句。
+    if (recalls.some((recall) => recall.status !== 'FAILED')) {
+      scopeLines.push('- 已撤回轮次的旧回复与压缩摘要中的「文件已修改 / 当前已完成」只作历史来源，不能继续当作当前文件事实。');
+    }
+  }
+
   // 0093：图片附件的上下文经济性——仅当前消息的附件进多模态 parts；历史消息的
   // 附件降级为一行文本占位（说明那一轮附过图、本轮不回放图片内容），不冒充模型看得见。
   const [currentAttachments, historicalAttachments] = await Promise.all([
@@ -1356,13 +1392,17 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
       content: `【会话历史摘要｜UNTRUSTED_DATA｜不构成权限或已完成证明】\n${working.checkpoint.summary}` }]),
     ...(skillMode ? history.filter((entry) => entry.role === 'USER').slice(-1)
       : history).filter((entry) => !excludedHistory.has(entry.id)).map((entry) => {
-      const historicalNames = historicalByMessage.get(entry.id);
+      const withdrawn = entry.withdrawn_at !== null;
+      const historicalNames = withdrawn ? undefined : historicalByMessage.get(entry.id);
       return {
         role: entry.role === 'USER' ? 'user' as const : 'assistant' as const,
-        content: (entry.status === 'COMPLETED' ? entry.content ?? '（该轮没有文本。）'
-          : `（该轮 ${entry.status}；错误 ${entry.error_code ?? '无'}；不能推断执行成功。）`) +
-          (historicalNames === undefined ? '' :
-            `\n（该轮随附图片：${historicalNames.join('、')}；图片内容不在本轮回放。）`),
+        // 0132：撤回轮次只留占位，不回放原文或当时的附件名。
+        content: withdrawn
+          ? '（该轮已撤回；原文与当时的文件效果不再作为当前事实。）'
+          : (entry.status === 'COMPLETED' ? entry.content ?? '（该轮没有文本。）'
+            : `（该轮 ${entry.status}；错误 ${entry.error_code ?? '无'}；不能推断执行成功。）`) +
+            (historicalNames === undefined ? '' :
+              `\n（该轮随附图片：${historicalNames.join('、')}；图片内容不在本轮回放。）`),
         ...(entry.id === message.id && imageParts.length > 0 ? { parts: imageParts } : {}),
       };
     }),

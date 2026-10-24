@@ -78,6 +78,11 @@ async function installRoutes(page: Page, ctx: Ctx): Promise<void> {
             created_at: "2026-10-03T00:00:00Z", updated_at: "2026-10-03T00:00:00Z" },
           links: { resource: "" } }, 201);
       }
+      if (path === `${prefix}/assist-sessions/${sessionId}/working-directory`) {
+        return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-03T00:00:00Z",
+          result: { session_id: sessionId, working_resource_id: body.resource_id, revision: "2" },
+          links: { resource: "" } });
+      }
       if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
         // 受控故障：服务端已接受，这里直接中断响应，前端拿不到 user_message_id。
         if (ctx.loseMessageResponse > 0) {
@@ -471,20 +476,28 @@ test.describe("方案 2 独立验收四项整改（真实 Chromium）", () => {
     const messagePost = ctx.posts.find((post) => post.path.endsWith("/messages"));
     const commandId = messagePost?.body.command_id as string;
     expect(commandId).toMatch(/^[0-9a-f-]{36}$/u);
-    await expect(pending).toContainText(commandId);
     await expect(pending).toContainText("会话已创建");
     await expect(pending).toContainText("消息结果待核对");
-    // 传输失败不能被说成业务失败，也不能宣称已完成：真实传输原因与部分成功事实分别可见。
-    await expect(page.locator('[data-testid="assist-first-error"]')).toBeVisible();
-    await expect(page.locator('[data-testid="assist-first-pending"]')).toContainText("核对前这条消息不算已送达");
+    // 状态行只留结论；完整原因、原 command_id 与恢复出口在核对弹窗里，点开才出现。
+    await expect(pending).not.toContainText("核对前这条消息不算已送达");
+    await pending.getByRole("button", { name: "查看核对" }).click();
+    const receiptDialog = page.locator('[role="dialog"][aria-label="首条消息结果待核对"]');
+    await expect(receiptDialog).toBeVisible();
+    await expect(receiptDialog).toContainText(commandId);
+    await expect(receiptDialog).toContainText("核对前这条消息不算已送达");
+    await expect(receiptDialog.locator('[data-testid="assist-first-reason"]')).toBeVisible();
     await expect(page.locator("main")).not.toContainText("已完成本轮");
 
     // 服务端确实已经接受这条消息，回执按原 command_id 可查。
     ctx.receipts.set(commandId, { command_id: commandId, command_type: "RequestAssistMessage",
       committed_at: "2026-10-03T00:00:05Z",
       result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" } });
-    // 用户在正常会话里继续改写输入；同 ID 重试仍按首条消息的原载荷与原 ID 走。
+    // 收起弹窗不丢未决身份：改写输入后从同一行状态重新打开，同 ID 重试仍按原载荷走。
+    await receiptDialog.getByRole("button", { name: "稍后处理" }).click();
+    await expect(receiptDialog).toHaveCount(0);
+    await expect(pending).toBeVisible();
     await page.locator('[data-testid="assist-draft"]').fill("后来改写的别的内容");
+    await pending.getByRole("button", { name: "查看核对" }).click();
     await page.locator('[data-testid="assist-first-retry"]').click();
     await expect(page.locator('[data-testid="assist-first-pending"]')).toHaveCount(0, { timeout: 20_000 });
 

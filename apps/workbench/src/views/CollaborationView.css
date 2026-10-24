@@ -376,6 +376,9 @@
 
 .collab-columns:has(.task-inspector) {
   display: flex;
+  /* 用户拖过左边界后由 --relay-inspector-user-width 覆写；未拖过则仍是 layout.inspector.width。
+     网格轨道与抽屉宽度都读这一个派生值，避免面板与拖拽手柄位置不同源。 */
+  --relay-inspector-panel-width: var(--relay-inspector-user-width, var(--relay-layout-inspector-width));
 }
 
 .collab-columns:has(.task-inspector) > .collab-center {
@@ -394,13 +397,13 @@
       minmax(0, var(--relay-collab-chat-column))
       var(--relay-space-2)
       minmax(0, var(--relay-collab-result-column))
-      var(--relay-layout-inspector-width);
+      var(--relay-inspector-panel-width);
   }
 
   /* 单区模式（对话 / 成果）只剩两栏：被隐藏的兄弟不占格，因此只声明两列。 */
   .collab-columns:has(.task-inspector)[data-layout-mode="chat"],
   .collab-columns:has(.task-inspector)[data-layout-mode="result"] {
-    grid-template-columns: minmax(0, 1fr) var(--relay-layout-inspector-width);
+    grid-template-columns: minmax(0, 1fr) var(--relay-inspector-panel-width);
   }
 
   /* 深预览要宽得多的第四栏：按预览态换 track，否则正文轨道被固定宽度压成一列窄条。 */
@@ -461,10 +464,13 @@
 }
 
 @container collaboration (max-width: calc(26rem + 20rem + 6rem)) {
-  /* 面板改成 position:absolute 之后不再占格——但上面的网格仍为它留着第四条 track
+  /* 抽屉形态的可用宽度上限必须一起进派生值：拖到 640px 但容器只有 533px 时，
+     面板会按容器收窄，手柄若仍按用户值定位就会跑到可视区外。
+     面板改成 position:absolute 之后不再占格——但上面的网格仍为它留着第四条 track
      （实测白吃掉 288px，中栏只剩 281px）。这里把那一列撤掉。
      单区模式（对话 / 成果）只剩一栏，同样要收回 1fr，否则可见的那栏只拿到 52%。 */
   .collab-columns:has(.task-inspector) {
+    --relay-inspector-panel-width: min(var(--relay-inspector-user-width, var(--relay-layout-inspector-width)), calc(100% - var(--relay-space-6)));
     grid-template-columns:
       minmax(0, var(--relay-collab-chat-column))
       var(--relay-space-2)
@@ -481,7 +487,7 @@
     inset-block: 0;
     inset-inline-end: 0;
     z-index: var(--relay-zIndex-sticky);
-    width: min(var(--relay-layout-inspector-width), calc(100% - var(--relay-space-6)));
+    width: var(--relay-inspector-panel-width);
     box-shadow: var(--relay-shadow-floating);
   }
 
@@ -517,6 +523,23 @@
   .collab-columns:has(> .task-inspector--preview) .collab-inspector-scrim { display: block; }
 }
 
+/* 工作详情左边界拖拽：命中区跨在面板左缘，可见线复用 .drag-separator。
+   right 由 --relay-inspector-panel-width 推算，分栏（网格轨道）与抽屉（absolute 面板）
+   两种形态共用同一处定位；深预览不渲染手柄（宽度由 wideWidth 决定）。 */
+.drag-separator.inspector-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--relay-inspector-panel-width) - var(--relay-control-target-minimum) / 2);
+  width: var(--relay-control-target-minimum);
+  z-index: var(--relay-zIndex-sticky);
+}
+
+/* 拖动期间关掉面板的宽度过渡：否则数值要晚一拍才跟上指针，手柄会与边界脱开。 */
+.collab-columns:has(.inspector-resize-handle.drag-separator--dragging) > .task-inspector {
+  transition: none;
+}
+
 /* 会话顶栏：一行 chrome（2026-10-16 分成左右两翼；2026-10-17 用户指令「顶栏高度太宽」＋
    「左侧显示会话名字就好，不需要下拉框」→ 收成一行，左侧只剩文字）。
    同日接续（用户指令「你好这一行往上移…会话目录那个字样移动到你好下面，这三个协调一下」＋
@@ -528,7 +551,8 @@
    2026-10-16 taste 审计（§4.4「卡片只在需要层级时用」）：顶栏此前是纸面卡里再套一张带描边圆角的卡，
    两层边框互相抵消层级。改回 chrome：无描边、无圆角。
    2026-10-17 两翼贴聊天列边：不按 --chat-measure 居中收窄，整条铺满聊天列（1fr/auto 两轨把右翼推到末端）。
-   高度：min-height 走 control.height.compact（32px），两行档由内容决定，见 conversationToolbarDensity 的几何断言。 */
+   高度：min-height 按内容盒预留右侧 compact 控件加上下内边距（44px），两行档由内容决定，
+   见 conversationToolbarDensity 的几何断言。 */
 .collab-conversation-toolbar {
   flex: none;
   width: 100%;
@@ -544,7 +568,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--relay-space-2);
-  min-height: var(--relay-control-height-compact);
+  /* 下限按内容盒算：border-box 下把上下内边距加回来，等于右侧键的 compact 高度。
+     右侧「工作详情」键在面板弹出后整颗不渲染，「新对话」又没有会话名那一行，
+     只写 compact 会让顶栏在展开瞬间从 44px 塌到 32px（2026-10-24 用户截图）。 */
+  min-height: calc(var(--relay-control-height-compact) + var(--relay-space-1) + var(--relay-space-2));
   padding: var(--relay-space-1) var(--relay-space-3) var(--relay-space-2);
   /* 底色就是这一列自己的纸面（外壳卡片 .app-content 铺的同一档 bg.surface）：静止时渐变不改变画面，
      它保证的是顶栏与正文之间没有一条线、只有一段淡出。两翼文字停在 40% 以上的实底段里。 */

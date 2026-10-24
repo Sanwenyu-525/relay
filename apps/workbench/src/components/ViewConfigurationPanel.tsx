@@ -190,7 +190,8 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
           .map((page) => <li key={page.pageId}>{pageLabels[page.pageId] ?? page.pageId}
             <small> {page.pageId} · {page.visible ? "显示" : "隐藏"} · position {page.position}</small></li>)}</ol>
         {browseKind ? <p className="helper-text">正在浏览：{kindLabel(browseKind)}。
-          {browseKind === current.kind ? "这是当前默认视图。" : "这只是临时浏览，尚未保存为默认视图；上方页面顺序属于当前默认模板。"}</p> :
+          {/* 2026-10-24 用户指令：浏览的就是当前默认时不再复述；只有临时浏览另一档才说明后果。 */}
+          {browseKind === current.kind ? "" : "这只是临时浏览，尚未保存为默认视图；上方页面顺序属于当前默认模板。"}</p> :
           <label className="field"><span className="field-label">选择新的默认视图</span>
             <select data-testid="view-kind-select" value={chosen} disabled={pending !== null || busy}
               onChange={(event) => setSelectedKind(event.target.value as RelayViewKind)}>

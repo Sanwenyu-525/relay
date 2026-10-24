@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench, pageText } from "./mountApp";
+import { clickPortal, flush, mountWorkbench, openUnresolvedDialog, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -321,7 +321,8 @@ describe("M04 Assist 真实路由与命令", () => {
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
     await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
-    await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click");
+    await openUnresolvedDialog("assist-pending");
+    await clickPortal("assist-pending-retry");
     await flush();
     expect(attempts).toHaveLength(2);
     expect(attempts[1]).toEqual(attempts[0]);

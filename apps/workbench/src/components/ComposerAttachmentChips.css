@@ -1,5 +1,6 @@
 /* 输入卡内的附件芯片行（工作台 §33.2）。
-   位置：正文下方、工具行上方；宽度跟随输入卡，行内换行，不横向滚动。
+   位置：卡片顶部、正文上方（2026-10-24 用户指令，悬停预览向上浮出不盖正文）；
+   宽度跟随输入卡，行内换行，不横向滚动。
    只引用既有 token：缩略图圆角用 radius.control、边框用 border.control、
    尺寸取 compact 控件高度，不新增色值或字号。 */
 .composer-attachments { display: grid; gap: var(--relay-space-1); min-width: 0; }
@@ -33,7 +34,9 @@
   object-fit: cover;
   background: var(--relay-color-bg-surface);
 }
-/* 缩略图小到读不出内容，悬停即放大：光标是这里唯一能提前说明「可看」的线索。 */
+/* 缩略图小到读不出内容，悬停即放大：光标是这里唯一能提前说明「可看」的线索。
+   2026-10-24 起点击整枚芯片还能打开原图查看层，光标跟到芯片整体上。 */
+.composer-attachment[data-previewable="true"] { cursor: zoom-in; }
 .composer-attachment[data-previewable="true"] .composer-attachment-thumb { cursor: zoom-in; }
 /* 名称可截断，大小不截断：读得出「这是哪张图」比读全文件名更重要。 */
 .composer-attachment-copy { display: grid; min-width: 0; line-height: var(--relay-font-lineHeight-snug); }
@@ -65,35 +68,6 @@
 .composer-attachment-remove:disabled { color: var(--relay-color-text-muted); cursor: not-allowed; }
 .composer-attachment-status,
 .composer-attachment-error { margin: 0; }
-
-/* 能力预检（2026-10-19）：这条消息会被服务端拒绝，但还没到发送那一刻。
-   用警示色而不是错误红——它说的是「接下来会发生什么」，不是「刚刚失败了」。 */
-.composer-attachment-notice {
-  margin: 0;
-  padding: var(--relay-space-1) var(--relay-space-2);
-  border-radius: var(--relay-radius-control);
-  background: var(--relay-color-status-warning-bg);
-  color: var(--relay-color-status-warning-text);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-snug);
-}
-
-/* 原地声明（2026-10-20，P1-5）：说明与两个动作同排，窄窗口换行；
-   它不是错误态，所以不铺警示底色——底色留给上面那条「这条消息会被拒绝」。 */
-.composer-attachment-declare {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--relay-space-2);
-  padding: var(--relay-space-1) 0;
-}
-.composer-attachment-declare-copy {
-  flex: 1 1 12rem;
-  min-width: 0;
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-snug);
-}
 
 /* 拖拽悬停：只在真的有文件拖过来时点亮（data-drop="true" 由输入器在 dragenter 时置位），
    用虚线内描边而不是给整卡换底色——卡片底色属于状态语言，不借给拖拽。 */

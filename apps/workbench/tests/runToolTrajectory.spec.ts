@@ -110,8 +110,8 @@ describe("工具轨迹面板：只呈现已落库事实", () => {
       await flush(80);
       expect(view.wrapper.findAll('[data-testid^="trajectory-call-dup"]')).toHaveLength(1);
       expect(view.wrapper.get('[data-testid="trajectory-replay-conflict-dup"]').text()).toContain("无法确认哪一条是最新状态");
-      const evidence = view.wrapper.get('[data-testid="trajectory-evidence-dup"]').text();
-      expect(evidence).toContain("未提供");
+      const evidence = view.wrapper.get('[data-testid="trajectory-evidence-note"]').text();
+      expect(evidence).toContain("未下发");
       expect(evidence).toContain("无法确认");
       expect(evidence).not.toContain("PASS");
     } finally { view.unmount(); }

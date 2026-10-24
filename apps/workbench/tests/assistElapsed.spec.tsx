@@ -19,7 +19,8 @@ function message(overrides: Partial<RelayAssistMessage>): RelayAssistMessage {
     content: null, errorCode: null, providerErrorKind: null, sources: [], skill: null,
     skillInput: null, skillOutput: null,
     usage: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null },
-    cancelRequested: false, steerRequested: false, attachments: [], ...overrides };
+    cancelRequested: false, steerRequested: false, attachments: [],
+    withdrawnAt: null, withdrawnByRecallId: null, recall: null, ...overrides };
 }
 
 const rawMessage = { id: "m-1", session_id: "s-1", seq: "1", role: "ASSISTANT", status: "COMPLETED",

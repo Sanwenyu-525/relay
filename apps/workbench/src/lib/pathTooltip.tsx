@@ -65,7 +65,8 @@ export function usePathTooltip(getPath: () => string | null, testId = "path-tool
 const GAP_PX = 6;
 const MARGIN_PX = 8;
 
-/** 浮层本体：优先放在锚点上方，上方放不下就翻到下方；水平夹在视口内。纯展示，不接收指针。 */
+/** 浮层本体：优先放在锚点上方，上方放不下就翻到下方；水平居中于锚点并夹在视口内。
+ *  纯展示，不接收指针。 */
 function PathTooltipCard({ anchor, text, testId }: {
   readonly anchor: HTMLElement; readonly text: string; readonly testId: string;
 }) {
@@ -77,8 +78,12 @@ function PathTooltipCard({ anchor, text, testId }: {
     const box = anchor.getBoundingClientRect();
     const width = card.offsetWidth;
     const height = card.offsetHeight;
+    // 水平居中于锚点（2026-10-24 用户截图指令「tooltip 要居中」）：此前左缘贴锚点左缘，
+    // 锚点是窄元素（目录名按钮、24px 圆环）时提示整块偏到右侧，读起来不指着谁。
+    // 居中之后仍夹在视口内：路径比视口宽时限位规则优先，不会溢出左右边缘。
     const left = Math.max(MARGIN_PX,
-      Math.min(box.left, window.innerWidth - MARGIN_PX - width));
+      Math.min(box.left + box.width / 2 - width / 2,
+        window.innerWidth - MARGIN_PX - width));
     const above = box.top - GAP_PX - height;
     setPlaced({ left, top: above >= MARGIN_PX ? above : box.bottom + GAP_PX });
   }, [anchor, text]);

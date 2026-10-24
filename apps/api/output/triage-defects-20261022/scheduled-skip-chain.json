@@ -1,16 +1,16 @@
 {
   "originalTask": {
-    "id": "5d099808-8611-4491-a9c1-b4c2c07b33c5",
+    "id": "cce4c8ac-e8c1-4041-b429-253c61c64d02",
     "before": "IN_PROGRESS",
     "after": "IN_PROGRESS"
   },
   "occurrences": [
     {
       "sequence": "3",
-      "status": "DISPATCHED",
-      "reason": null,
-      "taskId": "c2bf34e6-b951-42b8-b447-58b559fbb3c9",
-      "runId": "64f73824-56c3-4d4f-87ea-95d1f2699509"
+      "status": "SKIPPED",
+      "reason": "PREVIOUS_TASK_NOT_ACCEPTED",
+      "taskId": null,
+      "runId": null
     },
     {
       "sequence": "2",
@@ -23,36 +23,32 @@
       "sequence": "1",
       "status": "DISPATCHED",
       "reason": null,
-      "taskId": "5d099808-8611-4491-a9c1-b4c2c07b33c5",
-      "runId": "8fbf04c2-3be2-428f-b1c4-e90c8c54ecea"
+      "taskId": "cce4c8ac-e8c1-4041-b429-253c61c64d02",
+      "runId": "cbe72900-2829-4271-8c35-e70e2883ad1d"
     }
   ],
-  "taskCount": 2,
+  "taskCount": 1,
   "tasks": [
     {
-      "id": "c2bf34e6-b951-42b8-b447-58b559fbb3c9",
-      "status": "IN_PROGRESS"
-    },
-    {
-      "id": "5d099808-8611-4491-a9c1-b4c2c07b33c5",
+      "id": "cce4c8ac-e8c1-4041-b429-253c61c64d02",
       "status": "IN_PROGRESS"
     }
   ],
-  "runsStarted": 2,
+  "runsStarted": 1,
   "thirdHttpProjection": {
-    "occurrence_id": "06d79027-70c5-499f-ae9d-335a76b24034",
-    "scheduled_task_id": "c7df42fd-434f-478a-85aa-97941845607b",
-    "project_id": "124ceffb-cd31-4b5d-9ca5-305ec1b496a9",
+    "occurrence_id": "8054cf09-d34f-4fbd-85b8-235fb3906e0a",
+    "scheduled_task_id": "f8dd87c6-98d2-4ec7-80e9-eb2976aea6d6",
+    "project_id": "b0e6e4f1-c177-4752-9da5-2293ed306f0b",
     "schedule_generation": "1",
     "sequence": "3",
-    "due_at": "2026-10-23T11:28:46.282Z",
+    "due_at": "2026-10-24T03:25:21.015Z",
     "timezone": "Asia/Shanghai",
     "missed": false,
-    "status": "DISPATCHED",
-    "task_id": "c2bf34e6-b951-42b8-b447-58b559fbb3c9",
-    "run_id": "64f73824-56c3-4d4f-87ea-95d1f2699509",
-    "reason": null,
-    "revision": "4",
-    "created_at": "2026-10-23T11:28:46.283Z"
+    "status": "SKIPPED",
+    "task_id": null,
+    "run_id": null,
+    "reason": "PREVIOUS_TASK_NOT_ACCEPTED",
+    "revision": "1",
+    "created_at": "2026-10-24T03:25:21.016Z"
   }
 }

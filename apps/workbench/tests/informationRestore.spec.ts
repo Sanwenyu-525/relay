@@ -308,6 +308,49 @@ describe("资料生命周期恢复", () => {
     expect(mounted.wrapper.text()).toContain("到期 2026-12-31");
   });
 
+  it("恢复命令响应丢失后按原回执补查成功，与直接成功同一套收尾：保留无关新建草稿", async () => {
+    connect();
+    let status = "RETIRED"; let revision = "1";
+    const reactivateBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (path === "/memories") return response(200, [memory(status, revision)]);
+      if (path === `/memories/${memoryId}`) return response(200, memory(status, revision));
+      if (path === `/memories/${memoryId}/revisions`) return response(200, []);
+      if (path === `/memories/${memoryId}/reactivate` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        reactivateBodies.push(body);
+        // 服务端已提交，但回包丢失：页面只能靠原回执核对。
+        status = "ACTIVE"; revision = "2";
+        throw new TypeError("response lost after commit");
+      }
+      if (/^\/commands\//u.test(path)) {
+        return response(200, { command_id: decodeURIComponent(path.slice("/commands/".length)),
+          command_type: "ReactivateMemory", committed_at: created,
+          result: { memory_id: memoryId, revision: "2", status: "ACTIVE" } });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
+    // 草稿未参与本次恢复命令：恢复成功不得清掉它。
+    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("未提交的新记忆标题");
+    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("恢复旧记忆不能删除这份草稿");
+    await mounted.wrapper.get('[data-testid="knowledge-restore"]').trigger("click"); await flush();
+    expect(reactivateBodies).toHaveLength(1);
+    const pending = mounted.wrapper.get('[data-testid="knowledge-pending-receipt"]');
+    expect(pending.text()).toContain(String(reactivateBodies[0]!.command_id));
+    await mounted.wrapper.get('[data-testid="knowledge-check-receipt"]').trigger("click"); await flush();
+    expect(mounted.wrapper.find('[data-testid="knowledge-pending-receipt"]').exists()).toBe(false);
+    // 与直接成功路径一致：恢复命令只收口 pending 与对象状态，草稿完整保留。
+    expect((mounted.wrapper.get('[data-testid="knowledge-title"]').element as HTMLInputElement).value)
+      .toBe("未提交的新记忆标题");
+    expect((mounted.wrapper.get('[data-testid="memory-text"]').element as HTMLTextAreaElement).value)
+      .toBe("恢复旧记忆不能删除这份草稿");
+    expect(mounted.wrapper.get(".receipt-message").text()).toContain("已核对原命令回执");
+    expect(mounted.wrapper.find('[data-testid="knowledge-restore-entry"]').exists()).toBe(false);
+  });
+
   it("切换 Workspace 后按撤销仍打到原范围，不落到新连接", async () => {
     connect(workspaceId);
     let status = "ACTIVE";

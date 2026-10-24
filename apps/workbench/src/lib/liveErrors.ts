@@ -111,6 +111,22 @@ export function describeLiveError(caught: unknown): LiveActionError {
           kind: "reused",
           message: "同一个 command ID 被用于不同内容：请先查询原回执，不要复用 ID 提交新内容。"
         };
+      case "RECALL_PREFLIGHT_BLOCKED": {
+        // 0132：预检阻断时一个文件都没写；逐路径原因必须原样露出，否则用户只看到
+        // 「预检未通过」却不知道该先处理哪一项。
+        const paths = (problem.recallPaths ?? []).filter((path) => path.trim() !== "");
+        return { ...base, kind: "conflict",
+          message: `${problem.detail}${paths.length === 0 ? ""
+            : ` 阻断项：${paths.join("；")}`}` };
+      }
+      case "RECALL_IN_PROGRESS":
+        return { ...base, kind: "transition",
+          message: `${problem.detail} 请按原回执读取实际进展，不要重复发起。` };
+      case "RECALL_EFFECT_UNCERTAIN":
+      case "RECALL_MULTIPLE_ROOTS":
+      case "RECALL_ROOT_UNAVAILABLE":
+      case "RECALL_ROOT_CHANGED":
+        return { ...base, kind: "conflict", message: problem.detail };
       case "VALIDATION_FAILED": {
         // 服务端每条字段错误都带一句可执行说明（例如「当前聊天模型不支持图片输入」或
         // 「目录中没有当前聊天模型的条目…请声明 RELAY_MODEL_IMAGE_INPUT=true」）。

@@ -136,3 +136,51 @@ export function useMenuExclusive(open: boolean, onClose: () => void): void {
     return () => { registered.delete(token); };
   }, [open]);
 }
+
+/**
+ * 浮层翻面（2026-10-24，贴芯片锚定同轮）：浮层改锚在芯片上后，芯片靠近输入卡右缘时
+ * 从左缘起排的面板会越出卡片，被中栏 `.collab-center` 的 `overflow:hidden` 裁掉
+ * （1000px 视口实测：芯片左缘 715 + 320 = 1035，卡片右缘 971）。模型选择器在右端
+ * 一组里常驻翻面（CSS 静态规则），但资料芯片在窄窗会随工具行换行跑到左边，静态规则
+ * 那时又会把面板裁出卡片左缘——所以这一枚的量必须现算：打开时、窗口尺寸变化时、
+ * 面板自身宽度变化时（选 Skill 会改变发送选项面板宽度）各量一次。
+ *
+ * 规则：芯片左缘 + 面板宽越过卡片右缘、且翻面后面板左缘仍在卡片内时，写
+ * `data-flip="inline"`（CSS 改为右缘贴芯片）；其余情况不写（左缘贴芯片是默认）。
+ * 只写数据属性，定位本身仍在 CSS；量不到卡片或面板宽为 0（关闭态）时保持不翻。
+ */
+export function usePopupFlip(details: RefObject<HTMLDetailsElement | null>): void {
+  const node = details.current;
+  useEffect(() => {
+    if (node === null) return;
+    const place = () => {
+      if (!node.open) { node.removeAttribute("data-flip"); return; }
+      const summary = node.querySelector("summary");
+      const panel = node.lastElementChild;
+      const card = node.closest(".agent-chat-composer, .create-form");
+      if (summary === null || panel === null || card === null) return;
+      const chip = summary.getBoundingClientRect();
+      const bounds = card.getBoundingClientRect();
+      const width = (panel as HTMLElement).getBoundingClientRect().width;
+      if (width === 0) return;
+      const flip = chip.left + width > bounds.right - 1 && chip.right - width >= bounds.left + 1;
+      // 只在状态真的变化时写：同值 setAttribute 也会进 MutationObserver，不自激循环。
+      const flipped = node.getAttribute("data-flip") === "inline";
+      if (flip && !flipped) node.setAttribute("data-flip", "inline");
+      else if (!flip && flipped) node.removeAttribute("data-flip");
+    };
+    place();
+    // 开合可能来自原生 toggle、React 受控 open 或用户点 summary：监听属性覆盖全部来源。
+    const attributes = new MutationObserver(place);
+    attributes.observe(node, { attributes: true, attributeFilter: ["open"] });
+    const panel = node.lastElementChild;
+    const size = panel === null ? null : new ResizeObserver(place);
+    if (panel !== null && size !== null) size.observe(panel);
+    window.addEventListener("resize", place);
+    return () => {
+      attributes.disconnect();
+      size?.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [node]);
+}

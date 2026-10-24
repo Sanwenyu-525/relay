@@ -77,7 +77,9 @@ export class RelayHttp {
         expectedRevision: optionalString(conflict, "expected_revision"),
         actualRevision: optionalString(conflict, "actual_revision"),
         blockingReasons: Array.isArray(conflict.blocking_reasons)
-          ? conflict.blocking_reasons.filter((reason): reason is string => typeof reason === "string") : []
+          ? conflict.blocking_reasons.filter((reason): reason is string => typeof reason === "string") : [],
+        recallPaths: Array.isArray(conflict.recall_paths)
+          ? conflict.recall_paths.filter((path): path is string => typeof path === "string") : []
       });
     }
     if (expectedStatus !== undefined && response.status !== expectedStatus) {

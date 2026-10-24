@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AttentionQueue from "../src/components/AttentionQueue";
 import type { RelayApiClient } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
@@ -114,5 +114,57 @@ describe("人工待处理卡片先说人能读懂的对象", () => {
     expect(body).not.toContain("task-b");
     expect(card.find("details").text()).toContain("task-b");
     expect(card.find("details").text()).toContain("v2");
+  });
+});
+
+describe("稍后处理分组", () => {
+  beforeEach(() => { localStorage.removeItem("relay.attention.postponed.v1"); });
+
+  it("点「稍后处理」把条目移出原分组、进入底部稍后分组，服务端读取口径不变", async () => {
+    await read();
+    await mounted!.wrapper.get('[data-testid="attention-postpone-review-1"]').trigger("click");
+    // 原分组：条目与计数都按可见条目走；被隐藏的条目不再自称列在下方。
+    expect(mounted!.wrapper.find('[data-testid="attention-review-review-1"]').exists()).toBe(false);
+    expect(mounted!.wrapper.text()).toContain("待判断 Review · 0");
+    const entry = mounted!.wrapper.get('[data-testid="attention-postponed-review-1"]');
+    expect(entry.text()).toContain("待判断 Review");
+    expect(entry.find("a").attributes("href")).toBe("/reviews?id=review-1");
+    expect(entry.text()).toContain("移回原分组");
+    // 稍后键已落本机存储；这是查看安排，不是服务端状态。
+    expect(localStorage.getItem("relay.attention.postponed.v1")).toContain("review:review-1");
+  });
+
+  it("移回原分组后条目与计数恢复", async () => {
+    await read();
+    await mounted!.wrapper.get('[data-testid="attention-postpone-review-1"]').trigger("click");
+    await mounted!.wrapper.get('[data-testid="attention-restore-review-1"]').trigger("click");
+    expect(mounted!.wrapper.find('[data-testid="attention-review-review-1"]').exists()).toBe(true);
+    expect(mounted!.wrapper.text()).toContain("待判断 Review · 1");
+    expect(mounted!.wrapper.find('[data-testid="attention-postponed"]').exists()).toBe(false);
+  });
+
+  it("稍后键跨刷新生效：挂载前写入存储，条目直接落在稍后分组", async () => {
+    localStorage.setItem("relay.attention.postponed.v1", JSON.stringify(["task:task-b"]));
+    await read({ getWorkspaceTasksPage: vi.fn(async () => ({ items: [taskA, humanTask], nextCursor: null })) });
+    expect(mounted!.wrapper.find('[data-testid="attention-task-task-b"]').exists()).toBe(false);
+    const entry = mounted!.wrapper.get('[data-testid="attention-postponed-task-b"]');
+    expect(entry.text()).toContain("人工任务与受阻 Task");
+  });
+
+  it("完整读取后清理不在当前快照里的失效稍后键；全部稍后时空态指向稍后分组", async () => {
+    localStorage.setItem("relay.attention.postponed.v1", JSON.stringify(["review:gone-review"]));
+    await read();
+    await flush(60);
+    // gone-review 不在当前快照：读取完整后被清理，存储回到空集。
+    expect(JSON.parse(localStorage.getItem("relay.attention.postponed.v1") ?? "[]")).toEqual([]);
+    // 三类可见条目（必须介入、Review、Run）全部稍后：分组空态说明还有稍后项，
+    // 不把「都稍后了」说成「没有待处理项」。
+    await mounted!.wrapper.get('[data-testid="attention-postpone-review:review-1-1"]').trigger("click");
+    await mounted!.wrapper.get('[data-testid="attention-postpone-review-1"]').trigger("click");
+    await mounted!.wrapper.get('[data-testid="attention-postpone-run-a"]').trigger("click");
+    expect(mounted!.wrapper.get('[data-testid="attention-empty-but-postponed"]').text())
+      .toContain("稍后处理");
+    expect(mounted!.wrapper.get('[data-testid="attention-postponed"]').text())
+      .toContain("稍后处理 · 3");
   });
 });

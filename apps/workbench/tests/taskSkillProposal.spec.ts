@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench, pageText } from "./mountApp";
+import { clickPortal, dialogText, flush, mountWorkbench, openUnresolvedDialog, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -124,20 +124,22 @@ describe("P12 Task Skill 合并提案", () => {
       expect(acceptedReads).toBeGreaterThanOrEqual(2);
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("继续补充要求");
       await view.wrapper.get("form.agent-chat-message-form").trigger("submit"); await flush();
-      expect(view.wrapper.get(".assist-pending").text()).toContain(String(sends[0].command_id));
+      expect(view.wrapper.get(".assist-pending").text()).toContain("命令结果待核对");
+      await openUnresolvedDialog("assist-pending");
+      expect(dialogText()).toContain(String(sends[0].command_id));
       finishFacts(response({ code: status === 403 ? "FORBIDDEN" : "SERVICE_UNAVAILABLE", detail: "Task read failed" }, status));
       await flush();
       expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(true);
-      expect(view.wrapper.get(".assist-pending").text()).toContain(String(sends[0].command_id));
+      expect(dialogText()).toContain(String(sends[0].command_id));
       expect(view.wrapper.find('[data-testid="live-task-accepted-facts"]').exists()).toBe(false);
       expect(view.wrapper.find('[data-testid="task-skill-proposal"]').exists()).toBe(false);
       expect(view.wrapper.find(".embedded-assist-history").exists()).toBe(false);
       expect(view.wrapper.find(".embedded-assist-sources").exists()).toBe(false);
       expect(view.wrapper.text()).not.toContain("合并后的目标");
       expect(view.wrapper.get('[data-testid="assist-send"]').attributes("disabled")).toBe("");
-      await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
+      await clickPortal("assist-pending-receipt"); await flush();
       expect(view.wrapper.find(".assist-pending").exists()).toBe(true);
-      await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click"); await flush();
+      await clickPortal("assist-pending-retry"); await flush();
       expect(sends).toHaveLength(2);
       expect(sends[1]).toEqual(sends[0]);
       expect(view.wrapper.find(".assist-pending").exists()).toBe(false);
@@ -253,13 +255,15 @@ describe("P12 Task Skill 合并提案", () => {
       const keep = [...document.querySelectorAll("button")].find((button) => button.textContent === "保留并继续编辑");
       if (!keep) throw new Error("missing keep-current-session action");
       keep.dispatchEvent(new MouseEvent("click", { bubbles: true })); await flush();
-      expect(view.wrapper.get('.assist-pending').text()).toContain(String(bodies[0].command_id));
+      await openUnresolvedDialog("assist-pending");
+      expect(dialogText()).toContain(String(bodies[0].command_id));
     }
     expect(bodies[0]).toMatchObject({ expected_task_revision: "2", expected_acceptance_revision: "1",
       payload_hash: hash });
-    await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
+    if (pageKind === "assist") await openUnresolvedDialog("assist-pending");
+    await clickPortal("assist-pending-receipt"); await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
-    await view.wrapper.get(".assist-pending .secondary-button:last-child").trigger("click"); await flush();
+    await clickPortal("assist-pending-retry"); await flush();
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(bodies[0]);
     expect(pageText(view.wrapper)).toContain("提案已接受；Task v3 / 验收 v2");
@@ -329,7 +333,8 @@ describe("P12 Task Skill 合并提案", () => {
     await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
     await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
-    await view.wrapper.get(".assist-pending .secondary-button:first-of-type").trigger("click"); await flush();
+    await openUnresolvedDialog("assist-pending");
+    await clickPortal("assist-pending-receipt"); await flush();
     expect(postCount).toBe(1);
     expect(pageText(view.wrapper)).toContain("原命令回执已核对");
     expect(view.wrapper.find(".assist-pending").exists()).toBe(false);

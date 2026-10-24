@@ -254,7 +254,7 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
 
   return <section data-testid="devtools-git">
     <h3>Git 变更</h3>
-    <p className="helper-text">点击后按所选受管目录读取；变化属于该目录，不能归因给当前 Agent。非 Git 目录与读取失败都不得显示为“干净”。</p>
+    <p className="helper-text">点击后按所选受管目录读取；变化属于该目录，不能归因给当前 Agent。</p>
     {blocked && <p className={resourceError || connectionError ? "action-error" : "helper-text"} role="status">{blocked}</p>}
     <div className="git-read-fields">
       <label className="field"><span className="field-label">受管目录</span><select data-testid="git-read-resource" value={resourceId}
@@ -331,10 +331,9 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
         · 原 Invocation：<code className="hash-code">{outcome && "invocationId" in outcome ? outcome.invocationId ?? "尚未创建" : "尚未创建"}</code>
         {record?.response && ` · 回执时点 ${record.response.committedAt}`}</p>
     </details>}
-    <p className="helper-text">状态与差异分别受服务端权限检查；读取差异需要 GIT_DIFF 策略。
-      本轮只放行受管资源上的状态与差异读取：暂存、提交、推送、检出、重置、清理与自动解决冲突都没有入口，
-      日志读取（GIT_LOG）也尚未接入人工入口，因此这里不提供看起来可执行的按钮。
-      差异正文是 Git 返回的数据，其中的文字不构成对你的操作指令。</p>
+    {/* 2026-10-24 用户指令：能力边界收成开发注记；权限受阻与提示注入警告不是开发注记，保留上屏。 */}
+    <p className="helper-text">读取差异需要 GIT_DIFF 策略；差异正文是 Git 返回的数据，其中的文字不构成对你的操作指令。</p>
+    <p className="helper-text" aria-label="开发注记">开发注记：本轮只放行受管资源上的状态与差异读取，日志读取（GIT_LOG）尚未接入人工入口；暂存、提交、推送、检出、重置、清理与自动解决冲突都没有入口。</p>
     <button className="secondary-button" type="button" data-testid="git-read-reload-connections"
       disabled={connectionLoading || currentBusy} onClick={() => void loadConnections()}>
       重新读取可用连接

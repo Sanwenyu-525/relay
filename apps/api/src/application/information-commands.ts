@@ -274,6 +274,12 @@ export async function createMemory(db: DbExecutor, input: ScopeInput & {
     body: { title, text: body, confirmed: true, expires_at: expiresAt?.toISOString() ?? null },
     execute: async (r) => {
       await ruleAuthority(r, input.workspaceId);
+      // A concurrent first request can commit while authority is locked; returning its
+      // result keeps replay ahead of the time-dependent admission check below.
+      const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId });
+      if (prior !== undefined) return prior.result_ref as Result;
+      requireFutureExpiry(expiresAt);
       await projectScope(r, input.workspaceId, input.projectId);
       const id = randomUUID();
       await r.information.insertMemoryRoot(id, input.workspaceId, input.projectId, title);
@@ -305,6 +311,7 @@ export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput 
       await ruleAuthority(r, input.workspaceId);
       const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId });
       if (prior !== undefined) return prior.result_ref as Result;
+      requireFutureExpiry(expiresAt);
       const session = await r.assist.readSession(input.sessionId, true);
       if (session?.workspace_id !== input.workspaceId) throw resourceNotFound('Assist session');
       sameRevision('assist_session', session.revision, expected);
@@ -352,6 +359,12 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
     body: { expected_revision: input.expectedRevision, title, text: body, confirmed: true,
       expires_at: expiresAt?.toISOString() ?? null }, execute: async (r) => {
       await ruleAuthority(r, input.workspaceId);
+      // A concurrent first request can commit while authority is locked; returning its
+      // result keeps replay ahead of the time-dependent admission check below.
+      const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId });
+      if (prior !== undefined) return prior.result_ref as Result;
+      requireFutureExpiry(expiresAt);
       const item = await root<InformationRootRow>(r, 'memory', input.workspaceId, input.memoryId);
       sameRevision('memory', item.revision, expected);
       if (item.status !== 'ACTIVE') throw invalidTransition('Memory 已退役。');
@@ -365,13 +378,30 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
     } });
 }
 
+/**
+ * Payload normalization only: turn the submitted value into a deterministic instant.
+ * This must never read the clock — the receipt payload hash is computed from the
+ * normalized value, so the same input has to normalize the same way at any time.
+ */
 function parseExpiry(value?: string | null): Date | null {
   if (value === undefined || value === null) return null;
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) {
-    throw validationFailed([{ field: 'expires_at', message: 'must be a future ISO timestamp' }]);
+  if (!Number.isFinite(date.getTime())) {
+    throw validationFailed([{ field: 'expires_at', message: 'must be a valid ISO timestamp' }]);
   }
   return date;
+}
+
+/**
+ * First-execution business admission: an expires_at in the past is rejected only when the
+ * command actually executes for the first time. Replaying an already committed command
+ * (same command_id, same payload) resolves from its original receipt and must not fail
+ * just because wall-clock time has since moved past its expiry.
+ */
+function requireFutureExpiry(expiresAt: Date | null): void {
+  if (expiresAt !== null && expiresAt.getTime() <= Date.now()) {
+    throw validationFailed([{ field: 'expires_at', message: 'must be a future ISO timestamp' }]);
+  }
 }
 
 export async function createDecision(db: DbExecutor, input: ScopeInput & {

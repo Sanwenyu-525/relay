@@ -2,7 +2,7 @@
 
 项目级长期 Agent 团队（2026-10-23，已确认、待实现）：[总纲 §0.18](../Personal_Workflow_OS_Master_Spec.md#018-项目级长期-agent-团队与跨会话协作)拥有产品规则，[路线 §16](requirements/post-v1-roadmap.md#16-项目级长期-agent-团队与跨会话协作)拥有范围与工程待核定项，[领域模型 §23](architecture/domain-model.md#23-长期-agent-成员与跨会话协作的应用边界)拥有责任，[ADR-034](decisions/ADR-034-persistent-project-agent-team.md)记录取舍，[工作台 §47](frontend/workbench-design.md#47-长期-agent-团队私聊群聊与工作概览)拥有交互，[测试计划 §44](testing/verification-plan.md#44-长期-agent-团队与跨会话协作的目标验收)为未运行规格。成员身份、会话与运行分离，项目不额外设置额度上限；本轮仅文档，不改变阶段或验收成绩。
 
-差异化体验规划（2026-10-22）：[产品总纲 §0.17](../Personal_Workflow_OS_Master_Spec.md#017-长期项目协作的差异化体验)记录六项方向的产品规则，[后续路线 §14](requirements/post-v1-roadmap.md#14-差异化体验的范围与推荐顺序)记录复用关系、推荐顺序与实施前置，[工作台 §45](frontend/workbench-design.md#45-长期项目协作的差异化体验)拥有推荐交互，[测试计划 §42](testing/verification-plan.md#42-长期项目协作差异化体验的目标验收)拥有未运行场景。仅纳入规划，不改变已有实现成绩、当前开发顺序或执行授权。
+差异化体验规划（2026-10-24 接续）：[产品总纲 §0.17](../Personal_Workflow_OS_Master_Spec.md#017-长期项目协作的差异化体验)记录原六项方向与本轮五个推荐方向的确认和映射，新增围绕成果工作的专用工作台；[后续路线 §14](requirements/post-v1-roadmap.md#14-差异化体验的范围与推荐顺序)记录复用关系、推荐顺序与实施前置，[工作台 §45](frontend/workbench-design.md#45-长期项目协作的差异化体验)拥有推荐交互，[测试计划 §42](testing/verification-plan.md#42-长期项目协作差异化体验的目标验收)拥有未运行场景。仅纳入规划，不改变已有实现成绩、当前开发顺序或执行授权。
 
 Agent 执行模式导航：[产品总纲 §0.16](../Personal_Workflow_OS_Master_Spec.md#016-七种-agent-执行模式与产品能力边界)说明 ReAct、Plan and Execute、Reflexion、Workflow、Multi Agent、Agent and Tool、Code as Action 的产品用途与能力边界；[运行架构 §10](architecture/runtime-context.md#10-七种-agent-模式的实现映射)维护源码入口与责任，[§10.1](architecture/runtime-context.md#101-现状分级与证据缺口2026-10-21-差距核对)维护 A/B/C/D 现状分级、缺的证据类与待产品决定项。七种模式可组合，不代表七套引擎或七个 UI 入口；实际成绩只归统一功能验收表。
 

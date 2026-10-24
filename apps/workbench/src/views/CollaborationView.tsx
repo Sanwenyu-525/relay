@@ -15,6 +15,7 @@ import WorkDetailsFrame, { type WorkDetailsTab, type WorkDetailsTabItem } from "
 import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import TaskInspectorPanel from "../components/TaskInspectorPanel";
 import CollaborationSplitter from "../components/CollaborationSplitter";
+import InspectorResizeHandle from "../components/InspectorResizeHandle";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayControlRequest, type RelayReview,
   type RelayArtifact, type RelayArtifactVersionSummary, type RelayAssistSession, type RelayConversationMode, type RelayRun, type RelayTaskDetail,
   type RelayWorkingDirectory, type RelayWorkingDirectorySource } from "../api/relayClient";
@@ -32,6 +33,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import { useRunDraftPreview } from "../lib/useRunDraftPreview";
 import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
   type CollaborationLayoutMode } from "../lib/collaborationLayoutPreferences";
+import { readStoredInspectorWidth, saveInspectorWidth } from "../lib/inspectorWidthPreferences";
 import "./CollaborationView.css";
 
 const cleanNavigation: AssistNavigationState = { dirty: false, pending: null };
@@ -235,6 +237,12 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const inspectorToggleRef = useRef<HTMLButtonElement | null>(null);
   const [sidePanelRevealed, setSidePanelRevealed] = useState(false);
   const [layout, setLayout] = useState(readCollaborationLayoutPreferences);
+  // 工作详情宽度与 chatRatio 同属本设备布局偏好；null＝跟随 token 默认宽度。
+  const [inspectorWidth, setInspectorWidth] = useState<number | null>(readStoredInspectorWidth);
+  const changeInspectorWidth = useCallback((next: number | null, commit: boolean) => {
+    setInspectorWidth(next);
+    if (commit) saveInspectorWidth(next);
+  }, []);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [narrowSideOpen, setNarrowSideOpen] = useState(false);
   /**
@@ -1283,7 +1291,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       <div className={`collab-columns${task === null && !awaitingWork ? " collab-columns--empty" : ""}`} data-pane={sideTab}
         data-layout-mode={task === null && !awaitingWork ? "chat" : renderedLayoutMode} data-narrow-side={narrowSideOpen ? "open" : "closed"}
         data-loading={awaitingWork ? "work" : undefined}
-        style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr` } as CSSProperties}>
+        style={{ "--relay-collab-chat-column": `${layout.chatRatio}fr`, "--relay-collab-result-column": `${1 - layout.chatRatio}fr`,
+          ...(inspectorWidth === null ? {} : { "--relay-inspector-user-width": `${inspectorWidth}px` }) } as CSSProperties}>
 {/* 首帧骨架与任务视图同构（左对话列＋右成果列）：先给稳定列宽再填内容，
     避免「单列会话视图 → 双列任务视图」的整块替换被读成闪一下。 */}
 {awaitingWork
@@ -1459,6 +1468,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               />
             </>}
           </>}
+        {/* 左边界拖拽：与近期工作栏同一套手柄交互；成果深预览按 wideWidth 排版，不参与拖拽。 */}
+        {conversationInspectorVisible && !(task !== null && selectedPreviewArtifact !== null)
+          && <InspectorResizeHandle width={inspectorWidth} onWidthChange={changeInspectorWidth} />}
       </div>
     </div>
 

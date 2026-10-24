@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Info, Target } from "lucide-react";
 import { createCommandId, goalCreationFrom, RelayApiError, type RelayApiClient,
   type RelayGoalCreation } from "../api/relayClient";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 import GoalProjectLinkPanel from "./GoalProjectLinkPanel";
 
@@ -25,6 +26,29 @@ type PendingGoalCommand = {
   readonly description: string;
 };
 
+/** 待核对命令按 API/Workspace 作用域暂存：整页重开后仍能继续核对原 ID（#20）。 */
+function goalPendingKey(client: RelayApiClient): string {
+  return `relay:create-goal:${client.baseUrl}:${client.workspaceId}`;
+}
+
+function readGoalPending(key: string): PendingGoalCommand | null {
+  try {
+    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const row = value as Record<string, unknown>;
+    if (typeof row.commandId !== "string" || row.commandId === "" ||
+      typeof row.title !== "string" || typeof row.description !== "string") return null;
+    return { commandId: row.commandId, title: row.title, description: row.description };
+  } catch { return null; }
+}
+
+function saveGoalPending(key: string, pending: PendingGoalCommand | null): void {
+  try {
+    if (pending) sessionStorage.setItem(key, JSON.stringify(pending));
+    else sessionStorage.removeItem(key);
+  } catch { /* 会话存储不可用只影响整页重开后的恢复；页内待核对状态不受影响。 */ }
+}
+
 /** 标题只是摘要：取首个非空行，限制在服务端允许的长度内，其余原话进 description。 */
 function deriveTitle(input: string): string {
   const firstLine = input.split(/\r?\n/u).map((line) => line.trim()).find((line) => line !== "") ?? "";
@@ -43,6 +67,11 @@ export default function CreateGoalView({ client, onCancel }: {
   const [titleTouched, setTitleTouched] = useState(false);
   const [created, setCreated] = useState<RelayGoalCreation | null>(null);
   const [pending, setPending] = useState<PendingGoalCommand | null>(null);
+  const pendingRef = useRef<PendingGoalCommand | null>(null);
+  const holdPending = useCallback((next: PendingGoalCommand | null) => {
+    pendingRef.current = next; setPending(next);
+    saveGoalPending(goalPendingKey(client), next);
+  }, [client]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mayRetry, setMayRetry] = useState(false);
@@ -52,6 +81,28 @@ export default function CreateGoalView({ client, onCancel }: {
 
   useEffect(() => () => { disposed.current = true; scope.current++; }, []);
 
+  // 待核对命令无法靠「丢弃」收口：只能核对回执或明确拒绝后解除，所以离页保护只拦不放（#20）。
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.commandId ?? null
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
+
+  // 整页重开或父页重新挂载后，按当前 API/Workspace 作用域恢复原待核对命令。
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const stored = readGoalPending(goalPendingKey(client));
+    if (stored !== null && pendingRef.current === null) {
+      pendingRef.current = stored; setPending(stored);
+    }
+  }, [client]);
+
   // 标题未被人改过时跟随输入派生；一旦改写就不再被输入覆盖。
   const effectiveTitle = titleTouched ? title.trim() : deriveTitle(input);
   const description = deriveDescription(input);
@@ -59,10 +110,10 @@ export default function CreateGoalView({ client, onCancel }: {
 
   const finish = useCallback(async (creation: RelayGoalCreation, request: number, title: string) => {
     if (disposed.current || request !== scope.current) return;
-    setPending(null); setMayRetry(false); setError(null); setBusy(false);
+    holdPending(null); setMayRetry(false); setError(null); setBusy(false);
     // 标题取本次命令的原载荷，不回读 Goal：回执本身不带标题，凭空补值会变成编造事实。
     setCreated({ ...creation, title });
-  }, []);
+  }, [holdPending]);
 
   /** 回执核对：只按原 command_id 读，不猜结果、不换 ID 重建。 */
   const checkReceipt = useCallback(async (command: PendingGoalCommand, request: number) => {
@@ -96,7 +147,7 @@ export default function CreateGoalView({ client, onCancel }: {
       // 明确的业务拒绝可以改载荷重试；传输/5xx/冲突一律先核对，不换 ID 重建。
       if (caught instanceof RelayApiError && caught.problem.status < 500 &&
           caught.problem.status !== 409 && caught.problem.code !== "COMMAND_ID_REUSED") {
-        setPending(null); setBusy(false); setError(describeLiveError(caught).message);
+        holdPending(null); setBusy(false); setError(describeLiveError(caught).message);
       } else {
         setError("Goal 提交结果不明；正在查询原 command_id 回执，不能换 ID 创建第二个 Goal。");
         await checkReceipt(command, request);
@@ -106,13 +157,19 @@ export default function CreateGoalView({ client, onCancel }: {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 原命令未收口前，普通提交不得开始新命令（#20）：先按原 pending 拒绝，
+    // 按钮保持可用是为了让「保存」的拒绝发生在 handler，而不是只靠置灰外观。
+    if (pendingRef.current !== null) {
+      setError("已有待核对的 Goal 命令（见下方原 command ID）；核对回执或原样重试收口前，不会创建第二个 Goal。");
+      return;
+    }
     // 同步闸：busy 状态在同一 tick 内尚未生效，靠它防不住双击提交出两条命令。
     if (busyRef.current || !canSubmit) return;
     busyRef.current = true;
     const request = ++scope.current;
     const command: PendingGoalCommand = { commandId: createCommandId(),
       title: effectiveTitle, description };
-    setPending(command); setBusy(true);
+    holdPending(command); setBusy(true);
     void send(command, request).finally(() => { busyRef.current = false; });
   }
 

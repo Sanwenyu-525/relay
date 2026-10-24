@@ -54,6 +54,7 @@ import { ModelCapabilityRepository } from '../model/model-capability-repository.
 import { ComputerControlStateRepository } from '../computer/control-state.js';
 import { ComputerDesktopLeaseRepository } from '../computer/desktop-lease-repository.js';
 import { SessionModelSelectionRepository } from '../model/session-model-selection-repository.js';
+import { MessageRecallRepository } from '../assist/message-recall-repository.js';
 import { KyselyConversationDiffRepository, type ConversationDiffRepository }
   from '../conversation-diff/conversation-diff-repository.js';
 import { KyselyToolCallPreviewRepository, type ToolCallPreviewRepository }
@@ -138,6 +139,8 @@ export interface Repositories {
   readonly conversationDiff: ConversationDiffRepository;
   /** 工具调用生成中预览（迁移 0102）：可丢弃的展示证据，不进总数、不授予权限。 */
   readonly toolCallPreview: ToolCallPreviewRepository;
+  /** 消息撤回（迁移 0132）：逐消息文件前像、撤回回执与逐文件结果。 */
+  readonly messageRecall: MessageRecallRepository;
 }
 
 export function createRepositories(db: DbExecutor): Repositories {
@@ -199,6 +202,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     computerDesktopLease: new ComputerDesktopLeaseRepository(db),
     conversationDiff: new KyselyConversationDiffRepository(db),
     toolCallPreview: new KyselyToolCallPreviewRepository(db),
+    messageRecall: new MessageRecallRepository(db),
   };
 }
 

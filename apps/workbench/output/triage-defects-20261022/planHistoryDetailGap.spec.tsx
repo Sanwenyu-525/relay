@@ -1,0 +1,21 @@
+import {createElement} from 'react';
+import {afterEach,expect,it,vi} from 'vitest';
+import PlanCard from '../../src/components/PlanCard';
+import {mountReact} from '../../tests/mountApp';
+let unmount:(()=>void)|null=null;
+afterEach(()=>{unmount?.();unmount=null;vi.restoreAllMocks();});
+it('history should expose the old immutable plan content when it promises viewing old versions',async()=>{
+ const plan=(version:number)=>({planId:`plan-${version}`,sessionId:'session',version,status:version===2?'CURRENT' as const:'SUPERSEDED' as const,goal:`第${version}版目标`,scope:[`SCOPE_V${version}_MARKER`],steps:[{title:`STEP_V${version}_MARKER`,detail:`DETAIL_V${version}_MARKER`}],verification:[{statement:`CHECK_V${version}_MARKER`,method:'HUMAN'}],openQuestions:[`QUESTION_V${version}_MARKER`],sourceMessageId:`message-${version}`,createdAt:'2026-10-23T00:00:00Z'});
+ const latest=plan(2),old=plan(1),execute=vi.fn(),exportPlan=vi.fn();
+ const mounted=await mountReact(createElement(PlanCard,{view:{latest,versions:[latest,old]},busy:false,error:null,onExecute:execute,onExport:exportPlan,onDismiss:vi.fn()}));unmount=mounted.unmount;
+ expect(mounted.wrapper.text()).toContain('SCOPE_V2_MARKER');
+ const history=mounted.wrapper.get('[data-testid="plan-card-history"]');
+ expect(history.text()).toContain('查看旧版本');
+ const oldRow=mounted.wrapper.get('[data-testid="plan-version-1"]');await oldRow.trigger('click');
+ const oldControls=oldRow.element.querySelectorAll('a,button,[role="button"]').length;
+ const oldScopeVisible=mounted.wrapper.text().includes('SCOPE_V1_MARKER');
+ await mounted.wrapper.get('[data-testid="plan-card-execute"]').trigger('click');
+ expect(execute).toHaveBeenCalledWith('plan-2',2);
+ console.log('TRIAGE_PLAN_HISTORY_DETAIL_GAP',JSON.stringify({historyLabel:history.text(),oldRowText:oldRow.text(),oldRowInteractiveControls:oldControls,oldScopeVisible,latestScopeVisible:mounted.wrapper.text().includes('SCOPE_V2_MARKER'),executedPlanId:execute.mock.calls[0]?.[0]}));
+ expect(oldScopeVisible,'feature gap: history only renders the old goal summary, not its scope, detail, verification or questions').toBe(true);
+});

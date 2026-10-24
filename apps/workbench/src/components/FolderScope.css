@@ -26,7 +26,8 @@
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
-  /* 2026-10-20：带完整路径的行要把路径折到第二行，因此允许换行；动作行没有 hint，不受影响。 */
+  /* hint 行把次要事实折到第二行，因此允许换行；2026-10-24 起最近使用行不再带路径 hint
+     （路径退回整行悬停 tooltip），仍带 hint 的只剩候选行；动作行没有 hint，不受影响。 */
   flex-wrap: wrap;
   width: 100%;
   min-height: var(--relay-control-height-compact);
@@ -65,12 +66,12 @@
   font-weight: var(--relay-font-weight-medium);
 }
 
-/* 次要事实（完整路径、项目与目录状态）：靠右、比主标签低一档，超出按本档省略，
-   完整值挂在 title 或本行按钮上。收缩系数 3：面板放不下时先挤掉这一段，
-   主标签（目录名／项目名）要到最后才省略——用户认的是名字，路径只是佐证。 */
+/* 次要事实（候选行的项目与目录状态；最近使用行的路径 hint 已于 2026-10-24 退回悬停
+   tooltip，见 usePathTooltip）：比主标签低一档。收缩系数 3：面板放不下时先挤掉这一段，
+   主标签（目录名／项目名）要到最后才省略——用户认的是名字，佐证只是补充。 */
 .folder-scope-row-hint {
-  /* 2026-10-20 用户指认桌面端浮层里的路径被省略号截断：完整路径独占第二行、允许任意断行，
-     左边距对齐目录名（图标宽 + 行内间距）。它仍是次要事实，字号取 caption 档。 */
+  /* 状态说明独占第二行、允许任意断行，左边距对齐主标签（图标宽 + 行内间距），
+     字号取 caption 档；原 2026-10-20「完整路径独占第二行」已随路径退回 tooltip 失效。 */
   flex: 1 1 100%;
   min-width: 0;
   margin-inline-start: calc(var(--relay-control-icon-size) + var(--relay-space-2));
@@ -136,7 +137,7 @@
 }
 
 /* 状态与错误说明按浮层密度排：全局 .action-error 的 space-3 外边距与 space-3/4 内边距
-   是给整宽表单用的，放在 18rem 面板里会把高度顶起来。 */
+   是给整宽表单用的，放在 15rem 面板里会把高度顶起来。 */
 .folder-scope .action-error {
   margin: 0;
   padding: var(--relay-space-1) var(--relay-space-2);
@@ -150,17 +151,8 @@
 /* 底部权限脚注已按 2026-10-23 用户截图指令删除（「新目录打开后可读取本目录文件…」）：
    读取授权的事实由各目录行自身的就绪状态与写档位说明，面板底部不再常驻一段告知。 */
 
-/* 当前目录的完整路径（2026-10-20 用户要求）：细条只显示目录名，同名目录无法区分，
-   完整路径在这里可核对。Windows 反斜杠没有天然断点，用 anywhere 保证长路径换行而不是溢出；
-   它是可核对的事实，不是第二颗按钮，因此不上色、不描边、不加图标。 */
-.folder-scope-path {
-  margin: 0;
-  padding: var(--relay-space-1) var(--relay-space-2) 0;
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-heading);
-  overflow-wrap: anywhere;
-}
+/* 浮层顶部的完整路径行已按 2026-10-24 用户指令删除：悬停目录名浮出绝对路径
+   （usePathTooltip）已可核对，不再两处重复；原 .folder-scope-path 样式一并移除。 */
 
 /* 原 .folder-scope-bar（消息区上方的可折叠大块）已由 FolderScopeBar 的常驻细条取代，
    这里不再保留它的样式；本文件只管浮层内的目录控件本身。 */
@@ -262,4 +254,24 @@
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-1);
+}
+
+/* 长任务的读取结果（页面原型 V5.26）：超过阈值改按工具分组——组行默认收起、展开才逐项回执；
+   折叠区整体限高、框内滚动，列表不再把消息列撑成几屏长。可滚动区可被键盘聚焦。 */
+.execution-read-results[data-capped="true"] {
+  max-height: min(26rem, 55dvh);
+  overflow-y: auto;
+}
+.execution-read-group > details > summary {
+  cursor: pointer;
+  color: var(--relay-color-action-primary);
+  font-size: var(--relay-font-size-meta);
+}
+.execution-read-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-1) 0 var(--relay-space-2);
+  padding: 0;
+  list-style: none;
 }

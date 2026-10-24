@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { readLastModel, writeLastModel } from "../src/lib/modelPreferences";
-import { DomWrapper, flush, folderStripName, mountWorkbench } from "./mountApp";
+import { clickPortal, DomWrapper, flush, folderStripName, mountWorkbench, openUnresolvedDialog } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
@@ -111,7 +111,9 @@ describe("新对话直接起步", () => {
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("首条使用我选择的免费模型");
     await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
     expect(view.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
-    await view.wrapper.get(`[data-testid="assist-first-${recovery}"]`).trigger("click"); await flush();
+    // 模型选择响应丢失后命令未决：核对与重试出口在正文状态行点开的弹窗里。
+    await openUnresolvedDialog("assist-first-pending");
+    await clickPortal(`assist-first-${recovery}`); await flush();
     const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
     expect(selections).toHaveLength(2);
     expect(selections[1]?.body).toEqual(selections[0]?.body);
@@ -322,7 +324,9 @@ describe("新对话直接起步", () => {
       expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
       const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "保留并继续编辑");
       keep!.click(); await flush();
-      const check = Array.from(view.wrapper.element!.querySelectorAll("button")).find(b =>
+      // 未决命令在正文只留一行状态；核对弹窗从那一行点开（不再自动弹出，也不再把细节铺在正文）。
+      await openUnresolvedDialog(failure === "CREATE_RESPONSE_LOST" ? "assist-first-create-pending" : "assist-first-pending");
+      const check = Array.from(document.querySelectorAll("button")).find(b =>
         b.textContent === (failure === "CREATE_RESPONSE_LOST" ? "查询创建回执" : "查询首条回执"));
       expect(check).toBeDefined(); await new DomWrapper(check!).trigger("click"); await flush(); await flush();
       expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);

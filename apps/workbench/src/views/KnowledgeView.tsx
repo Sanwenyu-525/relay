@@ -32,6 +32,11 @@ interface PendingCommand {
   readonly resultKey: string;
   readonly targetId: string | null;
   readonly replacementId: string | null;
+  /**
+   * 本次成功后的收尾语义（#109）：与直接成功完全一致，回执补查成功时不能另算一套。
+   * 生命周期恢复命令为 false——只收口 pending 与对象状态，不碰未参与命令的新建草稿。
+   */
+  readonly resetComposer: boolean;
 }
 
 /**
@@ -179,6 +184,24 @@ function splitLines(value: string): string[] {
   return value.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
 }
 
+/**
+ * 原到期时刻的 datetime-local 表示（本机墙钟；非零秒/毫秒按控件精度保留）。
+ *
+ * datetime-local 承载不了 UTC 偏移与完整精度，所以提交端约定：字段未被编辑时按原 ISO
+ * 原样回传，编辑过才按本机时区重新换算（见 save 的 MEMORY 分支）。这里的格式与控件
+ * 的规范化值一致（秒/毫秒仅在非零时出现），保证「未编辑」的判断不被控件静默改写。
+ */
+function memoryExpiryInputValue(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number, width = 2): string => String(value).padStart(width, "0");
+  const base = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (date.getSeconds() === 0 && date.getMilliseconds() === 0) return base;
+  const withSeconds = `${base}:${pad(date.getSeconds())}`;
+  return date.getMilliseconds() === 0 ? withSeconds : `${withSeconds}.${pad(date.getMilliseconds(), 3)}`;
+}
+
 function confirmedResult(result: Readonly<Record<string, unknown>>, pending: PendingCommand): { readonly id: string; readonly revision: string } | null {
   const id = result[pending.resultKey];
   if (typeof id !== "string" || id.length === 0 ||
@@ -319,6 +342,12 @@ export default function KnowledgeView() {
   const [mediaType, setMediaType] = useState("text/plain");
   const [confirmed, setConfirmed] = useState(false);
   const [expiresAt, setExpiresAt] = useState("");
+  /**
+   * 修订草稿打开时的原到期时刻（确切 ISO）；新建表单与无期限记忆为 null（#33）。
+   * 提交时若到期输入仍是打开表单时的回填值，就按这个原 ISO 原样提交，
+   * 只改正文不会顺带撤销或取整有效期；显式编辑或清空才改变。
+   */
+  const [memoryExpiryOriginal, setMemoryExpiryOriginal] = useState<string | null>(null);
   const [choice, setChoice] = useState("");
   const [rationale, setRationale] = useState("");
   const [alternatives, setAlternatives] = useState("");
@@ -432,7 +461,7 @@ export default function KnowledgeView() {
     setTitle(""); setText(""); setSourceKind("NOTE"); setArtifactVersionId("");
     setArtifactPreview(null); setArtifactPreviewError(null); setCaptureConfirmed(false);
     setArtifactCandidates({ status: "IDLE", items: [], error: null });
-    setMediaType("text/plain"); setConfirmed(false); setExpiresAt("");
+    setMediaType("text/plain"); setConfirmed(false); setExpiresAt(""); setMemoryExpiryOriginal(null);
     setChoice(""); setRationale(""); setAlternatives(""); setCosts("");
     setReplacementId(""); setScope(projectId === null ? "WORKSPACE" : "PROJECT");
     setScopeId(""); setRuleKey(""); setStatement(""); setStrength("PREFERENCE");
@@ -642,7 +671,12 @@ export default function KnowledgeView() {
       if (asRevision && kind === "KNOWLEDGE" && selectedKnowledge !== null)
         setKnowledgeDraftBase({ id: selectedKnowledge.id, revision: selectedKnowledge.revision,
           projectId: selectedKnowledge.projectId });
-      if (asRevision && selectedMemory !== null) { setTitle(selectedMemory.title); setText(selectedMemory.text); }
+      if (asRevision && selectedMemory !== null) {
+        setTitle(selectedMemory.title); setText(selectedMemory.text);
+        // 原期限随修订回填（#33）：正文修订不得顺手撤销有效期；清空/续期必须是显式编辑。
+        setMemoryExpiryOriginal(selectedMemory.expiresAt);
+        setExpiresAt(selectedMemory.expiresAt === null ? "" : memoryExpiryInputValue(selectedMemory.expiresAt));
+      }
       if (asRevision && selectedRule !== null) {
         setRuleKey(selectedRule.ruleKey); setStatement(selectedRule.statement);
         setStrength(selectedRule.strength); setEnforcement(selectedRule.enforcement);
@@ -754,7 +788,8 @@ export default function KnowledgeView() {
       ? selected?.id === targetId ? rowTarget(selected) : undefined
       : commandType === "CreateRule" ? newTarget() : projectId ? { kind: "PROJECT" as const, id: projectId } : null;
     if (target === undefined) { setActionError("资料目标已变化，请重新读取后再提交。"); return null; }
-    const command: PendingCommand = { id: createCommandId(), commandType, resultKey, targetId, replacementId: replacement };
+    const command: PendingCommand = { id: createCommandId(), commandType, resultKey, targetId,
+      replacementId: replacement, resetComposer };
     const context = contextVersion.current;
     pendingRef.current = command; setPendingCommand(command); setSubmitting(true);
     setActionError(null); setActionMessage(null);
@@ -773,7 +808,7 @@ export default function KnowledgeView() {
         return { kind: "CONFIRMED", ...confirmed };
       }
       setPendingCommand(null); setSelectedId(confirmed.id);
-      if (resetComposer) {
+      if (command.resetComposer) {
         setActionMessage("命令已提交；正在读取服务端最新资料。"); setFormOpen(false); clearDraft();
       }
       await load(kind, confirmed.id, client, projectId, memoryFilter, true);
@@ -830,9 +865,15 @@ export default function KnowledgeView() {
     } else if (kind === "MEMORY") {
       if (!titleValue || !textValue) { setActionError("请填写记忆标题与内容。"); return; }
       if (!confirmed) { setActionError("只有明确确认后才能保存 Memory。"); return; }
-      const expiry = expiresAt.trim() || null;
-      if (expiry !== null && Number.isNaN(Date.parse(expiry))) { setActionError("到期时间须为有效日期时间。"); return; }
-      const expires = expiry === null ? null : new Date(expiry).toISOString();
+      // 未编辑的期限按原 ISO 原样提交（#33）：datetime-local 只有本机墙钟精度，
+      // 重新换算会无声截秒或换时刻；清空与改值都是显式编辑，才允许改变有效期。
+      const expiryPrefill = memoryExpiryOriginal === null ? "" : memoryExpiryInputValue(memoryExpiryOriginal);
+      const expiryInput = expiresAt.trim();
+      if (expiryInput !== expiryPrefill && expiryInput !== "" && Number.isNaN(Date.parse(expiryInput))) {
+        setActionError("到期时间须为有效日期时间。"); return;
+      }
+      const expires = expiryInput === expiryPrefill ? memoryExpiryOriginal
+        : expiryInput === "" ? null : new Date(expiryInput).toISOString();
       if (revisionMode && itemId !== null && revision !== undefined) {
         await submit("AddMemoryRevision", "memory_id", itemId, (api, commandId) =>
           api.addMemoryRevision({ id: itemId, commandId, expectedRevision: revision, title: titleValue,
@@ -1010,7 +1051,10 @@ export default function KnowledgeView() {
         setActionError("原命令回执类型或目标不匹配，结果仍未确定。请保留 command_id 核对。"); return;
       }
       pendingRef.current = null; setPendingCommand(null); setSelectedId(confirmed.id); setActionError(null);
-      setActionMessage("已核对原命令回执；正在读取最新资料。"); setFormOpen(false); clearDraft();
+      setActionMessage("已核对原命令回执；正在读取最新资料。");
+      // 收尾语义与直接成功一致（#109）：生命周期恢复只收口 pending 与对象状态，
+      // 不清未参与本次命令的新建草稿；表单类命令的确认成功仍按原语义收起草稿。
+      if (pending.resetComposer) { setFormOpen(false); clearDraft(); }
       await load(kind, confirmed.id, client, projectId, memoryFilter, true);
     } catch (caught) {
       if (context !== contextVersion.current) return;

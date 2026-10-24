@@ -141,3 +141,86 @@ test('memory settings are persisted, revision guarded and HTTP replayable', asyn
   assert.equal((read.body as { recall_enabled: boolean }).recall_enabled, false);
   assert.equal((await api.post(endpoint, { ...body, command_id: randomUUID() })).status, 409);
 });
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+async function waitPast(iso: string): Promise<void> {
+  await waitMs(Math.max(0, Date.parse(iso) - Date.now()) + 250);
+}
+
+test('replaying an expired memory create returns the original receipt; only first execution checks expiry admission', async () => {
+  const f = await fixture();
+  const path = f.path('/memories');
+  const commandId = randomUUID();
+  const body = { command_id: commandId, project_id: null, title: 'short-lived declared memory',
+    text: 'expiry replay', confirmed: true, expires_at: new Date(Date.now() + 1200).toISOString() };
+  const first = await api.post(path, body);
+  assert.equal(first.status, 201, first.text);
+  const memoryId = (first.body as { result: { memory_id: string } }).result.memory_id;
+  const beforeExpiry = await api.post(path, body);
+  assert.equal(beforeExpiry.status, 201, beforeExpiry.text);
+  assert.equal(beforeExpiry.headers['command-replayed'], 'true');
+  assert.deepEqual(beforeExpiry.body, first.body);
+  await waitPast(body.expires_at);
+  // Time has moved past expires_at: the already committed command still resolves from its
+  // original receipt - same memory, no extension, no new version, no time-based rejection.
+  const afterExpiry = await api.post(path, body);
+  assert.equal(afterExpiry.status, 201, afterExpiry.text);
+  assert.deepEqual(afterExpiry.body, first.body);
+  const receipt = await api.get(f.path(`/commands/${commandId}`));
+  assert.equal(receipt.status, 200, receipt.text);
+  const memory = await api.get(f.path(`/memories/${memoryId}`));
+  assert.equal(memory.status, 200, memory.text);
+  assert.equal((memory.body as { effective_status: string }).effective_status, 'EXPIRED');
+  assert.equal((memory.body as { current_version: string }).current_version, '1');
+  // First-execution admission still applies: a new command with a past expires_at is rejected,
+  // and reusing the original command_id with a different payload is a command-id conflict.
+  const pastBody = { ...body, command_id: randomUUID(), expires_at: new Date(Date.now() - 1000).toISOString() };
+  const past = await api.post(path, pastBody);
+  assert.equal(past.status, 422, past.text);
+  assert.equal((past.body as { code: string }).code, 'VALIDATION_FAILED');
+  assert.equal((await api.post(path, { ...body, title: 'changed payload' })).status, 409);
+});
+
+test('memory revision replay keeps the original result after its own expires_at has passed', async () => {
+  const f = await fixture();
+  const created = await api.post(f.path('/memories'), { command_id: randomUUID(), project_id: null,
+    title: 'renewable fact', text: 'revision replay base', confirmed: true });
+  assert.equal(created.status, 201, created.text);
+  const memoryId = (created.body as { result: { memory_id: string } }).result.memory_id;
+  const revisionPath = f.path(`/memories/${memoryId}/revisions`);
+  const revision = { command_id: randomUUID(), expected_revision: '0', title: 'renewable fact',
+    text: 'revision replay v2', confirmed: true, expires_at: new Date(Date.now() + 1200).toISOString() };
+  const first = await api.post(revisionPath, revision);
+  assert.equal(first.status, 200, first.text);
+  await waitPast(revision.expires_at);
+  const replayed = await api.post(revisionPath, revision);
+  assert.equal(replayed.status, 200, replayed.text);
+  assert.deepEqual(replayed.body, first.body);
+  const detail = await api.get(f.path(`/memories/${memoryId}`));
+  assert.equal((detail.body as { current_version: string }).current_version, '2');
+  assert.equal((detail.body as { effective_status: string }).effective_status, 'EXPIRED');
+});
+
+test('save-from-message replay returns the original memory after its expires_at has passed', async () => {
+  const f = await fixture();
+  const content = `expiry-replay-source-${randomUUID()}`;
+  const sent = await ask(f, content);
+  const path = f.path(`/assist-sessions/${f.sessionId}/messages/${sent.user_message_id}/memories`);
+  const body = { command_id: randomUUID(), expected_session_revision: '0',
+    content_sha256: createHash('sha256').update(content).digest('hex'), project_id: f.projectId,
+    title: 'saved source', text: content, confirmed: true,
+    expires_at: new Date(Date.now() + 1200).toISOString() };
+  const first = await api.post(path, body);
+  assert.equal(first.status, 201, first.text);
+  const memoryId = (first.body as { result: { memory_id: string } }).result.memory_id;
+  await waitPast(body.expires_at);
+  const replayed = await api.post(path, body);
+  assert.equal(replayed.status, 201, replayed.text);
+  assert.deepEqual(replayed.body, first.body);
+  const detail = await api.get(f.path(`/memories/${memoryId}`));
+  assert.equal((detail.body as { effective_status: string }).effective_status, 'EXPIRED');
+  assert.equal((detail.body as { current_version: string }).current_version, '1');
+});

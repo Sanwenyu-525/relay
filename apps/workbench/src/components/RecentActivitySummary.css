@@ -10,6 +10,11 @@
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
+  /* 列数按卡片自己的宽度决定，不看视口（2026-10-24 用户截图指认红框右侧空着、
+     小屏又会挤到一起）：协作页分栏或侧栏展开时卡片会先于窗口变窄，用视口宽度
+     判断会在「窗口还很宽、卡片已经窄」时仍排两列，把摘要与时间挤进同一条窄道。 */
+  container-name: recent-activity;
+  container-type: inline-size;
 }
 
 .recent-activity-head {
@@ -56,10 +61,11 @@
   cursor: pointer;
 }
 
-/* 紧凑单列时间线（2026-10-20 第五轮：原为两列 2×2）。首页只取 4 条、每条就一两句，
-   两列把 700px 宽切成两条 340px 的窄道，标签被省略号切碎、时间挤到折行——两列在这里换来的是
-   更差的可读性，不是空间利用率。单列后标签按内容宽度铺开，不再截断。
-   列间距变行间距仍取同一档 space.2，条目行距与左栏列表同一缩放档。 */
+/* 紧凑时间线（2026-10-24 响应式两列）：宽卡片排 2×2，把此前空着的右半边用起来；
+   卡片窄于 40rem 时回落单列（2026-10-20 第五轮单列结论在窄道里仍成立——那种宽度下
+   两列会把摘要与时间挤到互相压字）。列数由 card 的容器查询决定，骨架、真实数据与
+   等格占位共用同一个网格，因此三种状态的行数与高度仍随同一档切换。
+   列间距取 space.4 让两列之间留出可读的缝；行距沿用 space.1，与单列时同一档。 */
 .recent-activity-list {
   list-style: none;
   margin: 0;
@@ -69,10 +75,24 @@
   gap: var(--relay-space-1);
 }
 
-/* 骨架与占位（2026-10-20）：加载中/行数不足/空态错误态共用同一单列几何，
+@container recent-activity (min-width: 40rem) {
+  .recent-activity-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--relay-space-4);
+  }
+}
+
+/* 行高下限让 filler（无内容的等格占位）与真实行同高：骨架 → 就绪 → 行数不足补位
+   三种状态因此不因内容多少改变卡片高度，输入卡不跟着移动（2026-10-20 口径）。
+   数值取 control.height.comfort(2.75rem)，与真实行的徽牌 + 上下内边距实测同高。 */
+.recent-activity-row {
+  min-height: var(--relay-control-height-comfort);
+}
+
+/* 骨架与占位（2026-10-20）：加载中/行数不足/空态错误态共用同一网格几何，
    行与真实行同构同高——数据到达时原位替换，输入卡不移动。不写死行高：
    骨架行复用真实行的字号与行盒，跨 DPI 自然相等。
-   2026-10-20 第五轮：由 2×2 网格改单列后这条只改列数，行数仍是 4——三种状态
+   2026-10-24：列数随卡片宽度在 1/2 之间切换，行数仍是 4——三种状态
    （骨架 4 行 / 真实 N 行 + 占位补到 4 行 / 空态覆层盖住 4 行）同高不变。 */
 .recent-activity-body { position: relative; }
 
@@ -139,7 +159,7 @@
 
 .recent-activity-copy {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   display: flex;
   align-items: baseline;
   gap: var(--relay-space-2);
@@ -148,15 +168,22 @@
 
 .recent-activity-label {
   min-width: 0;
+  flex: 0 1 auto;
   /* 单列之后有足够宽度：按内容铺开、允许折行，不再用省略号把一句话切成碎片
-     （2026-10-20 用户截图指认「两列布局文本被不必要地截断」）。 */
+     （2026-10-20 用户截图指认「两列布局文本被不必要地截断」）。
+     2026-10-24：长目录名、文件名这类不含空格的长 token 也要在卡片内断行，
+     否则窄卡里它会横穿到时间那一侧，读成内容重叠。 */
+  overflow-wrap: anywhere;
   font-size: var(--relay-font-size-meta);
   color: var(--relay-color-text-secondary);
   line-height: var(--relay-font-lineHeight-ui);
 }
 
+/* 时间贴行右缘：两列时每列的时间成一条对齐的右缘，单列时也把右侧的空白收进这一行，
+   不再让整行的内容全挤在左半边。 */
 .recent-activity-time {
   flex: none;
+  margin-left: auto;
   font-size: var(--relay-font-size-caption);
   color: var(--relay-color-text-muted);
   white-space: nowrap;

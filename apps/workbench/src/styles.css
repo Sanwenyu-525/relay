@@ -749,13 +749,17 @@ svg {
    2026-10-16 第七轮按用户「item 的间距再减小，而且要统一」撤掉分组覆盖里的 space.1——
    此前分组内 4px、已归档区 2px，同一列出现两档行距。 */
 .recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-0-5); position: relative; }
-/* 分组相对段标题的上下留白：上 4px 段标题→分组、下 2px 只为「末组→下一根区」让出塌穿源。
+/* 分组相对段标题的上下留白：段标题→分组与分组↔分组同档，下边距同时是「末组→下一根区」的塌穿源。
    2026-10-16 第八轮按用户「间距还是太大」由 space.3(12) 收到 space.2(8)——
    分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。
    2026-10-20 第九轮随根区 margin 收到 space.1(4)；同日第十轮按用户「减小到2px」再收到
    space.0.5(2)——分组下外边距只服务「末组→下一根区」，分组↔分组间距由上外边距 4px 主导，
-   不随之下探。 */
-.recent-work-group { position: relative; margin-block: var(--relay-space-1) var(--relay-space-0-5); margin-inline-start: var(--relay-space-2); }
+   不随之下探。
+   2026-10-24 第十一轮（用户截图圈出「任务入口」下两条分组行，指「上下间距有点大，缩小一点」）：
+   上外边距由 space.1(4) 收到 space.0.5(2)——段标题→分组与分组↔分组随同降到 2px。第十轮
+   有意留在 4px 的两档自此与条目行距、根区↔根区同档，整列竖向节奏统一为 2px；下外边距本就是
+   space.0.5，无需再动，塌穿机制不变（末组下外边距仍穿 <details> 与相邻根区 margin 合并取大）。 */
+.recent-work-group { position: relative; margin-block: var(--relay-space-0-5); margin-inline-start: var(--relay-space-2); }
 /* 2026-10-16 第三轮截图反馈：根区之间不再画分隔线。目标／工作区（目录）／任务入口连排时，
    这三条横线把一列切成几段，层级改由字号档、字重、缩进与留白表达（见设计系统 §9.11）。
    同日第五轮按用户截图再收：margin 与 padding 原本各留一档（12 + 8 = 20px），分隔线撤掉后
@@ -777,18 +781,24 @@ svg {
    水平居中：这一段没有可点对象，左对齐会读成「还有一列没显示出来的内容」。 */
 .recent-work .helper-text.recent-work-scope-note { margin: var(--relay-space-2); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-ui); color: var(--relay-color-text-muted); text-align: center; }
 /* 根区标题静止时不铺底：淡底在这一列里读成一块抬起的卡片，三个根区连排会把左栏切成灰白条纹。
-   底色只在悬停/按下时出现，与内层组标题同一套交互，层级靠字号档、字重、缩进与留白表达。 */
-.recent-work-section > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-height-compact); cursor: pointer; list-style: none; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-badge); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); padding: 0 var(--relay-space-2); transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
+   底色只在悬停/按下时出现，与内层组标题同一套交互，层级靠字号档、字重、缩进与留白表达。
+   2026-10-24 第十二轮（用户「减小行内留白」）：行高由 control.height.compact(32px) 收到
+   control.target.minimum(24px)——本列三类行（根区标题／组标题／条目）与仓内先例同档
+   （Today 视图的 today-rail__link、today-task 折叠摘要、设置导航按钮都是 target.minimum），
+   此前 32px 是全栏异类。命中区仍是整行宽，24px 即交互目标下限，指针与键盘目标不缩水；
+   搜索框与「新对话」键不动（前者行高绑光标高度，后者是栏头主按钮，各有自己的用例钉着）。 */
+.recent-work-section > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-target-minimum); cursor: pointer; list-style: none; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-badge); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); padding: 0 var(--relay-space-2); transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
 .recent-work-section > summary:hover { background: var(--relay-color-bg-subtle); }
 .recent-work-section > summary:active { background: var(--relay-color-selection-hover); }
 .recent-work-section > summary > svg { order: 1; width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); flex: none; color: var(--relay-color-text-muted); }
 .recent-work-section > summary::-webkit-details-marker { display: none; }
 .recent-work-section:not([open]) > summary > svg { transform: rotate(-90deg); }
-/* 区块 meta/semibold，内层组 caption/medium，条目 meta/regular；用一档缩进和树线补足层级。 */
+/* 区块 meta/semibold，内层组 caption/medium，条目 meta/regular；用一档缩进和树线补足层级。
+   2026-10-24 第十二轮：组标题行高随三类行一起收到 control.target.minimum(24px)（用户「减小行内留白」）。 */
 .recent-work-group > summary {
   display: flex; align-items: center; gap: var(--relay-space-1);
   list-style: none; cursor: pointer;
-  min-height: var(--relay-control-height-compact);
+  min-height: var(--relay-control-target-minimum);
   padding: 0 var(--relay-space-1);
   border-radius: var(--relay-radius-control);
   font-size: var(--relay-font-size-caption); font-weight: var(--relay-font-weight-medium);
@@ -821,7 +831,9 @@ svg {
    悬停或键盘聚焦才出现，静止时行盒逐像素不变。它压在数字徽标那一格上，显形时徽标
    用 visibility 让位（仍占宽，标题可用宽度不动），两者不会同时出现。
    位置相对 details 而不是 summary：summary 的后代不许是可交互内容，按钮只能当它的兄弟；
-   指针移上「＋」时它自己仍是悬停目标，不会闪断。 */
+   指针移上「＋」时它自己仍是悬停目标，不会闪断。
+   2026-10-24 第十二轮：行高收到 control.target.minimum(24px)，这枚键随行从 compact(32px)
+   收到同档，仍铺满所在行、不越出分组行盒。 */
 .recent-work-group-new {
   position: absolute;
   inset-block-start: 0;
@@ -829,8 +841,8 @@ svg {
   display: none;
   align-items: center;
   justify-content: center;
-  width: var(--relay-control-height-compact);
-  height: var(--relay-control-height-compact);
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
   padding: 0;
   background: transparent;
   border: var(--relay-border-width) solid transparent;
@@ -856,12 +868,15 @@ svg {
 /* 单行列表：标题 meta/regular，行内不再有第二行。2026-10-16 第五轮按用户「item 的间距太大」
    把行高压到紧凑档（control.height.comfort 44 → control.height.compact 32）、竖直内边距同步由
    space.2 收到 space.1；同日接续「再减小一点」把行内竖直留白与行间距再收半档（space.1 → space.0-5），
-   行距 48px → 34px。命中区仍是整行宽，不缩窄指针目标，行高下限仍是紧凑档。
+   行距 48px → 34px。命中区仍是整行宽，不缩窄指针目标，行高下限曾是紧凑档。
+   2026-10-24 第十二轮按用户「减小行内留白」：行高由 compact(32px) 收到 control.target.minimum
+   (24px)——文字上下各行内留白约 9px → 5px，两行文字之间的白约 20px → 12px；24px 即交互目标
+   下限，命中区仍整行宽。竖直内边距保持 space.0-5 不动（已是令牌最小档）。
    定位基准只为行内激活标记，标记本身不占 border。 */
 .recent-work-item {
   position: relative;
   width: 100%;
-  min-height: var(--relay-control-height-compact);
+  min-height: var(--relay-control-target-minimum);
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
@@ -1614,6 +1629,10 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text);
   font-size: var(--relay-font-size-meta); line-height: var(--relay-font-lineHeight-ui);
 }
+/* 2026-10-24 外壳对齐仓内浮层语言：近期工作面板、会话切换与模式浮层同为
+   separator 细边 + panel 圆角 + floating 投影；此前是 control 边 + control 圆角 +
+   无投影，贴在该标题带上读作一张平纸，与下方内容分不开（真实 Chromium 前后实测：
+   圆角 8px→12px、投影 none→floating、边框 #849185→#E8EEE8）。 */
 .intervention-notifications-panel {
   position: absolute; top: calc(100% + var(--relay-space-2)); right: 0;
   z-index: var(--relay-zIndex-popover);
@@ -1621,19 +1640,37 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   width: min(var(--relay-layout-rail-width), calc(100vw - 2 * var(--relay-layout-main-smallPadding)));
   max-height: calc(100dvh - var(--relay-layout-header-height) - 2 * var(--relay-space-4));
   overflow: auto; padding: var(--relay-space-4);
-  border: var(--relay-border-width) solid var(--relay-color-border-control);
-  border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+  background: var(--relay-color-bg-surface);
   font-size: var(--relay-font-size-meta); overflow-wrap: anywhere;
 }
 .intervention-notifications-panel p { margin: 0; }
+/* 聚合入口是面板唯一主操作：与条目内「打开原处理入口」同式样时两级链接分不出
+   层级，只把这一枚升到 semibold。双类选择器压过 .text-link 基座（同特异度靠
+   声明顺序，基座在 2432 行，晚于本块）。 */
+.text-link.intervention-notifications-entry { font-weight: var(--relay-font-weight-semibold); }
+/* 2026-10-24 用户截图指认：面板两枚链接的下划线来自 .text-link 继承的 UA 默认值，
+   在这处密集列表里过重。对齐仓内密集行先例（Today 任务行与项目名、收件箱行、
+   FolderScopeBar 同源处理）：action 色保留，静止无下划线，hover 才补一道
+   0.2em 偏移的线说出「可点」；键盘 focus 走全局 focus ring，不另加下划线。
+   只收在本面板，全局 87 处 text-link 与 inline-link 的静止下划线不变。 */
+.intervention-notifications-panel a { text-decoration: none; }
+.intervention-notifications-panel a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 /* 逐条事项（2026-10-21 第三轮 R3-03）：面板原本只有一句聚合计数，打开后仍不知道哪件事在等什么。
-   条目按「标题 / 原因 / 直达入口」三行成组，细边分行；面板自身的滚动与宽度不变。 */
+   条目按「标题 / 原因 / 直达入口」三行成组，细边分行；面板自身的滚动与宽度不变。
+   2026-10-24 原因句降为 secondary + relaxed 行高（tokens 里「面板内的说明段落」档），
+   与标题的墨绿原色分开，不再同字同色。 */
 .intervention-notifications-list { display: grid; gap: var(--relay-space-2); margin: 0; padding: 0; list-style: none; }
 .intervention-notifications-list > li { display: grid; gap: var(--relay-space-1); padding-top: var(--relay-space-2);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .intervention-notifications-list strong { font-weight: var(--relay-font-weight-medium); }
+.intervention-notifications-list p { color: var(--relay-color-text-secondary); line-height: var(--relay-font-lineHeight-relaxed); }
+/* 权限状态是受阻/可行动事实（2026-10-24 起「已允许」不再宣告）：句子保留，样式降为 muted 副文案，
+   与 BellRing 行动按钮同一行。 */
 .intervention-notifications-permission { display: flex; align-items: center; gap: var(--relay-space-2); }
-.intervention-notifications-permission p { flex: 1; min-width: 0; }
+.intervention-notifications-permission p { flex: 1; min-width: 0; color: var(--relay-color-text-muted); }
 .intervention-notifications-permission .icon-button { flex: none; }
 /* 2026-10-04：通知与连接入口已移入共享标题带，顶栏不再有它们；
    面包屑改为独占整行并自行截断，避免空出右侧大片空白。 */

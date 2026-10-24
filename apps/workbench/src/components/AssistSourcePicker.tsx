@@ -98,7 +98,7 @@ export default function AssistSourcePicker({ projectId, selectedRefs, onChange, 
         <ul className="assist-source-list assist-source-selected">{selectedRefs.map((ref) => <li key={key(ref)}>{ref.kind} · v{ref.version} · {ref.rootId} <button type="button" className="text-link" disabled={disabled} onClick={() => onChange(selectedRefs.filter((item) => key(item) !== key(ref)))}>移除</button></li>)}</ul>
       </section>}
       {!loading && !error && !searched && <p className="helper-text" data-testid="assist-source-empty">还没有检索资料；输入检索词后只显示当前获准范围内的可选项。</p>}
-      {!loading && !error && searched && !results.length && <p className="helper-text" data-testid="assist-source-none">没有可见的匹配资料；不据此推断其他范围的资料数量。</p>}
+      {!loading && !error && searched && !results.length && <p className="helper-text" data-testid="assist-source-none">没有可见的匹配资料。</p>}
       {!!results.length && <section className="assist-source-block" data-region="results">
         <h3 className="assist-source-block-title">检索结果</h3>
         <ul className="assist-source-list">{results.map((item) => <li key={item.sourceRef}><label className="assist-source-option"><input type="checkbox" checked={selectedRefs.some((selected) => key(selected) === key({ kind: item.type as RelayAssistSourceRef["kind"], rootId: item.id, version: item.version }))} onChange={() => toggle(item)} disabled={disabled} /><span><strong>{item.title}</strong><small>{item.type} · v{item.version} · {item.sourceRef}</small><small>{item.snippet}</small></span></label></li>)}</ul>

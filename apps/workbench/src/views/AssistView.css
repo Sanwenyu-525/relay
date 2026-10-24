@@ -530,6 +530,11 @@
   min-height: var(--relay-control-height-compact);
   color: var(--relay-color-text-muted);
 }
+/* 用户消息的复制键沿用助手页脚同一构件，但没有用量行与它常驻同排：平时收起、
+   悬停或聚焦才出现（页面原型 V5.0 的悬停操作）。占位恒在，出现时不推走正文。 */
+.agent-message[data-role="USER"] .agent-message-footer { opacity: 0; }
+.agent-message[data-role="USER"]:hover .agent-message-footer,
+.agent-message[data-role="USER"] .agent-message-footer:focus-within { opacity: 1; }
 
 .agent-message-body details { font-size: var(--relay-font-size-meta); }
 .assist-skill-summary h4 { margin: 0; font-size: var(--relay-font-size-body); }
@@ -597,8 +602,16 @@
    两种输入器形态都承载：独立对话卡的 .agent-chat-composer 与嵌入式子页的
    .create-form。后者原本不是定位上下文，绝对定位的光点会跑到更外层，这里补上。 */
 .create-form[data-inflight] { position: relative; }
-.agent-chat-composer[data-inflight="true"],
-.create-form[data-inflight="true"] { overflow: hidden; }
+/* 光点的裁剪壳（2026-10-24）：按卡圆角收边的权收在这颗壳上，输入卡本身**不**在在途态
+   overflow:hidden——那会把资料/发送选项浮层、「+」菜单与附件悬停预览一起裁掉：实测在途态
+   浮层只剩贴着工具行的一条、检索行不可达（浮层改锚芯片之前整片不可见，同属这一条）。
+   卡片任何状态都不建裁剪上下文，在途照旧只禁控件不关浮层。 */
+.agent-chat-composer-spark-clip { display: none; }
+.agent-chat-composer[data-inflight="true"] .agent-chat-composer-spark-clip,
+.create-form[data-inflight="true"] .agent-chat-composer-spark-clip {
+  position: absolute; inset: 0; display: block; overflow: hidden;
+  border-radius: inherit; pointer-events: none;
+}
 .agent-chat-composer-spark {
   position: absolute; top: 0; left: 0; height: var(--relay-border-width) * 2; width: 18%;
   border-radius: 0 var(--relay-border-width) var(--relay-border-width) 0;
@@ -670,6 +683,21 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    不再绝对钉在右下角，因此这里不需要负外边距、也不需要为它预留右侧空间；
    窄中栏时工具行自然换行，不会再被发送键压住或被裁掉。 */
 .agent-chat-composer-actions { display: flex; align-items: center; gap: var(--relay-space-2); flex-wrap: wrap; padding-top: var(--relay-space-1); border-top: 0; }
+/* 未决命令在正文只留一行状态（2026-10-24 用户指令：按类型走 toast/弹窗，不铺大块文字）。
+   状态行本身是持久证据与重开入口：关掉核对弹窗它仍在这里；原因、command_id 与恢复出口在弹窗。 */
+.unresolved-command-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
+.unresolved-command-strip .helper-text { margin: 0; }
+.unresolved-command-details summary {
+  cursor: pointer;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+.unresolved-command-details p {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
 /* 底栏左侧那一行与发送键同高：键边长是 2×radius.composer，这一行就取同一个值，
    两边高度由同一个 token 推导，不再各写一个数字。 */
 .agent-chat-composer-tools,
@@ -1470,10 +1498,38 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
    details 面板同层），不再用裸数值。 */
 /* 展开的是**内容**，入口芯片留在工具行里（2026-10-19 用户指认「点击之后 ui 还会消失，关闭菜单之后 ui 又出来了」）：
    此前这条规则挂在 `.agent-chat-options[open]` 上，整个 details 连 summary 一起离开文档流浮到卡外，
-   工具行当场少一枚芯片、其余芯片左移，收起才回来。定位仍相对输入卡（details 自身不建立包含块），
-   所以面板的位置、宽度与限高和改前逐像素一致。 */
-.agent-chat-options[open] > .agent-chat-options-panel { position: absolute; bottom: calc(100% + var(--relay-space-2)); inset-inline: 0; z-index: var(--relay-zIndex-popover); max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; padding: var(--relay-space-4); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
+   工具行当场少一枚芯片、其余芯片左移，收起才回来。 */
+/* 2026-10-24（用户截图「宽度跟输入框一样而且样式不好看」）：details 自己建立包含块，
+   浮层改锚在芯片上——左缘贴芯片左缘、宽度 max(内容, 芯片) 且上限 20rem，与同排
+   「普通 Agent」档位菜单（.agent-chat-mode-options）、写入档位菜单同一套锚定与封顶。
+   改前 details 不建立包含块，面板按输入卡定位并被 `inset-inline: 0` 拉满整卡宽
+   （1162px 视口实测 742px，是芯片宽 91px 的 8 倍）：检索行被拉散、两段长说明铺成
+   一整片。内边距同步降一档（space.4 → space.3），长 token（sha256、UUID）在封顶
+   宽度内断行，不产生横向滚动。 */
+.agent-chat-options { position: relative; }
+.agent-chat-options[open] > .agent-chat-options-panel { position: absolute; bottom: calc(100% + var(--relay-space-2)); left: 0; z-index: var(--relay-zIndex-popover); width: max-content; min-width: 100%; max-width: min(20rem, calc(100vw - var(--relay-space-6))); max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; overflow-wrap: anywhere; padding: var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
+/* 浮层里的资料面板不再自带卡片外壳（2026-10-24 收窄同轮）：popup 自己就是浮层，
+   AssistSourcePicker 根上的 .surface-panel 会画出卡片套卡片——双层描边、双层阴影、
+   水平内边距 16+24px，在 20rem 的浮层里尤其挤。嵌入态与 TaskDelegatePanel 里的
+   同一份组件不受影响：这条只命中 .agent-chat-options-panel 内部。 */
+.agent-chat-options-panel .assist-source-panel { margin-top: 0; padding: 0; border: 0; background: transparent; border-radius: 0; box-shadow: none; }
+/* 检索行：输入框可伸缩、按钮不缩；全局 .form-actions 不换行，窄到一行放不下时
+   整组降级成两行（按钮跟到第二行），不允许把按钮压扁。 */
+.agent-chat-options-panel .assist-source-panel > form.form-actions { flex-wrap: wrap; gap: var(--relay-space-2); }
+.agent-chat-options-panel .assist-source-panel > form.form-actions > .field { flex: 1 1 12rem; min-width: 0; margin-top: 0; }
+/* 资料芯片是工具行最右一枚（发送选项右侧、右端一组左侧）：浮层若同样从左缘起排，
+   1000px 视口下右缘越出视口 35px（实测芯片左缘 715 + 320 = 1035），1162px 下右缘
+   1107 也会压到发送键所在列。因此芯片靠近卡片右缘时翻面——右缘贴芯片右缘、向左展开，
+   与左缘锚定同属「贴芯片」，只是芯片太靠右时的标准翻面；宽度封顶不变，任何视口都放得下。
+   翻面由 usePopupFlip 现算后写 data-flip（不用静态规则：资料芯片在窄窗会随工具行
+   换行跑到卡片左缘，静态翻面那时会把面板裁出卡片左缘——860px 视口实测即此）。
+   发送选项芯片在行中线附近，多数视口左缘锚定即可放下，量到越界才同样翻面。 */
+.agent-chat-options[data-flip="inline"][open] > .agent-chat-options-panel { left: auto; right: 0; }
 .agent-chat-options .field { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-3); }
+/* 合体浮层内的两节（2026-10-24 合并「普通讨论」与「资料」）：上节发送选项、下节资料，
+   用一条分隔线分开，不再套第二层卡片——CT-02 反「一大片全铺开」的结论仍在：两节各自
+   限高，资料结果区在自己的 30dvh 里内部滚动，检索行不随长结果被推走。 */
+.agent-chat-options-panel > .agent-chat-options-section { margin-top: var(--relay-space-3); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .agent-chat-proposals { margin-top: var(--relay-space-4); }
 .agent-chat-proposals .assist-proposal-payload { max-height: none; overflow: visible; }
 .agent-chat-proposal-card { margin-top: var(--relay-space-3); font-size: var(--relay-font-size-body); }
@@ -1603,6 +1659,71 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
   overflow-wrap: anywhere;
 }
 
+/* ── 0132：消息撤回回执与已撤回占位 ───────────────────────────
+   回执固定挂在被撤回的用户消息下：摘要行常驻，逐文件结果进 details；
+   部分恢复、失败与冲突用琥珀边框标出，不把「没恢复完」混进成功态。 */
+.assist-recall-note {
+  margin: var(--relay-space-2) 0 0;
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+
+.assist-recall-note[data-status="PARTIAL"],
+.assist-recall-note[data-status="FAILED"] {
+  border-color: var(--relay-color-palette-amber);
+}
+
+.assist-recall-headline {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
+}
+
+.assist-recall-headline svg {
+  flex: none;
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.assist-recall-note .tech-details { margin-top: var(--relay-space-2); }
+
+.assist-recall-files {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: var(--relay-space-2) 0 0;
+  padding-left: var(--relay-space-4);
+  font-size: var(--relay-font-size-meta);
+}
+
+.assist-recall-files code { overflow-wrap: anywhere; }
+
+.assist-recall-files li[data-status="CONFLICT"],
+.assist-recall-files li[data-status="FAILED"],
+.assist-recall-files li[data-status="UNAVAILABLE"] {
+  color: var(--relay-color-palette-red);
+}
+
+.assist-recall-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-1) 0 0;
+}
+
+.assist-recall-action .helper-text { margin: 0; }
+
+.assist-withdrawn-note {
+  margin: var(--relay-space-1) 0 0;
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-muted);
+}
+
 /* ==== 会话局部与总 diff（工作台 §34 / 设计系统 §9.15） ====
    token 零新增：位置、层级、颜色与字号全部取现有 --relay-* 档位。
    数字直接切换，不做补间或滚轮；这里也不写动画，因此 reduced-motion 与
@@ -1618,6 +1739,13 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
   margin: var(--relay-space-1) 0 0;
   padding: 0;
   list-style: none;
+}
+
+/* 长任务的逐文件行超过阈值后限高、框内滚动（页面原型 V5.26）：一屏内先看全貌，
+   滚动查看其余行；可滚动区可被键盘聚焦。 */
+.local-file-diff-list[data-capped="true"] {
+  max-height: min(22rem, 50dvh);
+  overflow-y: auto;
 }
 
 .local-file-diff {

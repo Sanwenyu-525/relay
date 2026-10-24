@@ -251,6 +251,37 @@ test.describe("会话顶栏单行密度", () => {
     await toolbar.screenshot({ path: "results/conversation-toolbar-density.png" });
   });
 
+  // 2026-10-24 用户截图：新对话顶栏（只有作用域一行）在展开工作详情时高度从 44px 塌到 32px。
+  // 根因是面板弹出后右侧「工作详情」键整颗不渲染（2026-10-23 指令），首条输入区又没有会话名那一行，
+  // 顶栏高度只剩 min-height，而 border-box 下 compact 的 32px 不含上下内边距。
+  // 锁的是「两种状态同高」：下限至少等于右侧控件高度 + 顶栏上下内边距。
+  test("新对话顶栏：展开工作详情前后同高，不因右侧键消失而塌陷", async ({ page }) => {
+    await installRoutes(page);
+    await page.goto("/agent?new=toolbar-height");
+    await connect(page);
+    const toolbar = page.getByTestId("collab-conversation-toolbar");
+    await expect(toolbar).toBeVisible({ timeout: 20_000 });
+    const read = () => page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      const rem = (name: string) => Number.parseFloat(root.getPropertyValue(name)) * Number.parseFloat(root.fontSize);
+      const bar = document.querySelector<HTMLElement>('[data-testid="collab-conversation-toolbar"]')!;
+      return { height: bar.getBoundingClientRect().height,
+        floor: rem("--relay-control-height-compact") + rem("--relay-space-1") + rem("--relay-space-2"),
+        titleCount: document.querySelectorAll('[data-testid="collab-session-title"]').length,
+        toggle: document.querySelectorAll('[data-testid="collab-conversation-inspector-toggle"]').length };
+    });
+    const closed = await read();
+    // 首条输入区没有会话身份：左侧只剩作用域一行，这正是塌陷的前提。
+    expect(closed.titleCount).toBe(0);
+    expect(closed.toggle).toBe(1);
+    expect(closed.height).toBeCloseTo(closed.floor, 0);
+    await page.getByTestId("collab-conversation-inspector-toggle").click();
+    await expect(page.getByTestId("collab-conversation-inspector")).toBeVisible();
+    const open = await read();
+    expect(open.toggle).toBe(0);
+    expect(open.height).toBeCloseTo(closed.height, 0);
+  });
+
   // taste 审计（§4.4 卡片只在需要层级时用）：顶栏是 chrome 不是卡片，右翼键也不再各自描边。
   // 2026-10-17 接续指令「删除顶栏下面的分隔线…（顶栏的颜色改变）」：收边从 1px 线换成顶栏自己的底色渐变。
   test("顶栏无描边、由底色渐变收边；右翼键静止透明、展开走选中色族", async ({ page }) => {
@@ -639,6 +670,9 @@ test.describe("会话顶栏单行密度", () => {
     await connect(page);
     const toolbar = page.getByTestId("collab-conversation-toolbar");
     await expect(toolbar).toBeVisible({ timeout: 20_000 });
+    // 顶栏先于消息区挂载：下面要读输入卡与转录外壳的盒子，先等它们真的在。
+    await expect(page.locator(".agent-chat-composer")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".agent-chat-transcript-shell")).toBeVisible({ timeout: 20_000 });
     const geo = await page.evaluate(() => {
       const rect = (el: Element) => el.getBoundingClientRect();
       const composer = rect(document.querySelector<HTMLElement>(".agent-chat-composer")!);

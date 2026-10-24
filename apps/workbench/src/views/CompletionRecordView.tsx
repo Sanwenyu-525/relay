@@ -103,7 +103,7 @@ export default function CompletionRecordView() {
     </>}
     </div>
     <ResponsiveRail label="查看完成凭据与操作" title={evidence?.isCurrent ? "结果已保存" : "历史记录"}><div className="rail-content">
-        {evidence && <section className="completion-section completion-actions"><h2>{evidence.isCurrent ? "结果已保存" : "历史记录"}</h2><p className="helper-text">{evidence.isCurrent ? "完成提交已记录。新的修改需从任务入口重开，历史依据继续保留。" : "这是先前完成周期的依据，不代表当前任务已经完成。"}</p>
+        {evidence && <section className="completion-section completion-actions"><h2>{evidence.isCurrent ? "结果已保存" : "历史记录"}</h2><p className="helper-text">{evidence.isCurrent ? "新的修改需从任务入口重开，历史依据继续保留。" : "这是先前完成周期的依据，不代表当前任务已经完成。"}</p>
           {evidence.artifactVersions.filter((version) => version.availability === "AVAILABLE" && version.artifactVersionId).map((version) => <Link key={version.artifactVersionId}
             className="primary-button" to={`/artifact-versions/${version.artifactVersionId}/lineage`}>查看已接受版本 v{version.versionNumber ?? "?"}</Link>)}
           <Link className="secondary-button" to={`/tasks/${evidence.taskId}?tab=artifacts`}>{evidence.isCurrent ? "前往任务重开" : "查看当前任务"}</Link>

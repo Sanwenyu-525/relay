@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   createCommandId, RelayApiError, selectionRevisionFrom, taskMutationFrom,
   type RelayApiClient, type RelayCommandEnvelope, type RelayReview, type RelayToday, type RelayTodayItem,
   type RelayTodayPriority
 } from "../api/relayClient";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
 import { reviewKindLabels, taskStatusLabels } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -56,6 +57,54 @@ function commandSummary(command: TodayCommand): string {
   if (command.kind === "selection") return `Task ${command.taskId}；Pin ${command.pin ? "开" : "关"}；Later ${command.laterLocalDate ? `${command.laterLocalDate}（${command.timezone}）` : "清除"}`;
   if (command.kind === "focus") return `日期 ${command.date}（${command.timezone}）；Focus ${command.targetKind ? `${command.targetKind} ${command.targetId}` : "清除"}`;
   return `Task ${command.taskId}；优先级 ${command.priority ?? "未设"}；截止 ${command.dueLocalDate ? `${command.dueLocalDate}（${command.timezone}）` : "清除"}`;
+}
+
+/**
+ * 未决 Today 命令按 API/Workspace 作用域暂存（#22）：请求发出前登记原 ID、类型、
+ * 精确载荷与原查询日期/时区，切页或整页重开后仍能继续核对，不在新连接下复用。
+ */
+function todayCommandKey(client: RelayApiClient): string {
+  return `relay:today-command:${client.baseUrl}:${client.workspaceId}`;
+}
+
+function isTodayCommand(value: unknown): value is TodayCommand {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || row.id === "" ||
+    typeof row.expectedRevision !== "string" || row.expectedRevision === "" ||
+    typeof row.queryDate !== "string" || typeof row.queryTimezone !== "string") return false;
+  if (row.kind === "selection") {
+    return typeof row.taskId === "string" && typeof row.pin === "boolean" &&
+      (row.laterLocalDate === null || typeof row.laterLocalDate === "string") &&
+      (row.timezone === null || typeof row.timezone === "string") &&
+      (row.projectId === undefined || row.projectId === null || typeof row.projectId === "string");
+  }
+  if (row.kind === "focus") {
+    return typeof row.date === "string" && typeof row.timezone === "string" &&
+      (row.targetKind === "TASK" || row.targetKind === null) &&
+      (row.targetId === null || typeof row.targetId === "string");
+  }
+  if (row.kind === "planning") {
+    return typeof row.taskId === "string" &&
+      (row.priority === "LOW" || row.priority === "NORMAL" || row.priority === "HIGH" || row.priority === null) &&
+      (row.dueLocalDate === null || typeof row.dueLocalDate === "string") &&
+      (row.timezone === null || typeof row.timezone === "string");
+  }
+  return false;
+}
+
+function readTodayCommand(key: string): TodayCommand | null {
+  try {
+    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    return isTodayCommand(value) ? value : null;
+  } catch { return null; }
+}
+
+function saveTodayCommand(key: string, command: TodayCommand | null): void {
+  try {
+    if (command) sessionStorage.setItem(key, JSON.stringify(command));
+    else sessionStorage.removeItem(key);
+  } catch { /* 会话存储不可用只影响整页重开后的恢复；页内待核对状态不受影响。 */ }
 }
 
 function confirmResult(envelope: RelayCommandEnvelope, command: TodayCommand): void {
@@ -110,9 +159,37 @@ const ianaTimezoneOptions: readonly [string, string][] = (() => {
     ...supported.filter((zone) => !commonTimezones.some(([value]) => value === zone)).map((zone) => [zone, zone] as [string, string])];
 })();
 
-function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitle, onSelection, onFocus, onPlanning }: {
+/** 表单跟随的基线字段：来自一个 Today 事实快照，用于判断草稿是否被编辑过、差异是什么。 */
+function formFieldsOf(item: RelayTodayItem, queryTimezone: string) {
+  return {
+    laterDate: item.laterLocalDate ?? "",
+    laterZone: item.laterTimezone ?? queryTimezone,
+    priority: item.priority ?? "",
+    dueDate: item.dueLocalDate ?? "",
+    dueZone: item.timezone ?? queryTimezone
+  };
+}
+
+function fieldsDiffer(left: ReturnType<typeof formFieldsOf>, right: ReturnType<typeof formFieldsOf>): boolean {
+  return left.laterDate !== right.laterDate || left.laterZone !== right.laterZone ||
+    left.priority !== right.priority || left.dueDate !== right.dueDate || left.dueZone !== right.dueZone;
+}
+
+/** 冲突提示里的差异摘要：只列计划相关字段，不把无关变化（如 pin）算进表单基线。 */
+function staleDiffSummary(base: RelayTodayItem, next: RelayTodayItem): string {
+  const parts: string[] = [];
+  if (base.priority !== next.priority) parts.push(`优先级 ${base.priority ? priorityLabels[base.priority] ?? base.priority : "未设"} → ${next.priority ? priorityLabels[next.priority] ?? next.priority : "未设"}`);
+  if (base.dueLocalDate !== next.dueLocalDate) parts.push(`截止 ${base.dueLocalDate ?? "无"} → ${next.dueLocalDate ?? "无"}`);
+  if (base.laterLocalDate !== next.laterLocalDate) parts.push(`延后 ${base.laterLocalDate ?? "无"} → ${next.laterLocalDate ?? "无"}`);
+  if (base.taskRevision !== next.taskRevision) parts.push(`任务修订 v${base.taskRevision} → v${next.taskRevision}`);
+  return parts.join("；") || "任务事实已更新。";
+}
+
+function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitle, conflictFromRevision, onSelection, onFocus, onPlanning }: {
   item: RelayTodayItem; eligible: boolean; busy: boolean; queryTimezone: string; queryDate: string;
   projectTitle: string | null;
+  /** 本任务最近一次计划命令 REVISION_CONFLICT 所依据的修订；存在且匹配时，冲突刷新按换基线处理（#21）。 */
+  conflictFromRevision?: string;
   onSelection: (item: RelayTodayItem, pin: boolean, laterLocalDate: string | null, timezone: string | null) => void;
   onFocus: (item: RelayTodayItem) => void;
   onPlanning: (item: RelayTodayItem, priority: RelayTodayPriority | null, dueLocalDate: string | null, timezone: string | null) => void;
@@ -123,10 +200,53 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
   const [dueDate, setDueDate] = useState(item.dueLocalDate ?? "");
   const [dueZone, setDueZone] = useState(item.timezone ?? queryTimezone);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  // 表单基线（#21）：草稿基于哪份任务事实。刷新拿到新事实时，未编辑的表单整体跟随；
+  // 已编辑的草稿保留并冻结原基线，展示差异等待明确选择，不用新修订静默包装旧值。
+  const [formBase, setFormBase] = useState(item);
+  const [stale, setStale] = useState<RelayTodayItem | null>(null);
   const actions = new Set(item.allowedActions);
+
+  const currentFields = { laterDate, laterZone, priority, dueDate, dueZone };
+  const baseFields = formFieldsOf(formBase, queryTimezone);
+  const edited = fieldsDiffer(currentFields, baseFields);
+
+  useEffect(() => {
+    if (item === formBase) return;
+    if (item.taskRevision === formBase.taskRevision &&
+      !fieldsDiffer(formFieldsOf(item, queryTimezone), baseFields)) {
+      // 内容相同的新快照：只换基线对象，草稿与差异状态不动。
+      setFormBase(item); setStale(null);
+      return;
+    }
+    const nextFields = formFieldsOf(item, queryTimezone);
+    if (!edited || !fieldsDiffer(currentFields, nextFields)) {
+      // 未编辑（或草稿恰好等于新事实）：整体跟随新事实。
+      setLaterDate(nextFields.laterDate); setLaterZone(nextFields.laterZone);
+      setPriority(nextFields.priority as RelayTodayPriority | ""); setDueDate(nextFields.dueDate);
+      setDueZone(nextFields.dueZone);
+      setFormBase(item); setStale(null); setFieldError(null);
+      return;
+    }
+    if (conflictFromRevision !== undefined && conflictFromRevision === formBase.taskRevision) {
+      // 服务端明确 REVISION_CONFLICT 后的重读：保留草稿、基线换到新事实，
+      // 下一次显式提交按新修订走（既有冲突重提语义）。
+      setFormBase(item); setStale(null);
+      return;
+    }
+    setStale(item);
+  }, [item, formBase, conflictFromRevision, queryTimezone, laterDate, laterZone, priority, dueDate, dueZone]);
+
+  function adoptFacts(source: RelayTodayItem) {
+    const nextFields = formFieldsOf(source, queryTimezone);
+    setLaterDate(nextFields.laterDate); setLaterZone(nextFields.laterZone);
+    setPriority(nextFields.priority as RelayTodayPriority | ""); setDueDate(nextFields.dueDate);
+    setDueZone(nextFields.dueZone);
+    setFormBase(source); setStale(null); setFieldError(null);
+  }
 
   function submitLater(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (stale !== null) { setFieldError("任务最新事实已变化：先在下方提示里选择按最新事实重填或保留修改。"); return; }
     if (!laterDate || !validTimezone(laterZone)) { setFieldError("延后需要有效日期和 IANA 时区。"); return; }
     setFieldError(null);
     onSelection(item, item.pin, laterDate, laterZone);
@@ -134,6 +254,7 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
 
   function submitPlanning(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (stale !== null) { setFieldError("任务最新事实已变化：先在下方提示里选择按最新事实重填或保留修改。"); return; }
     if (dueDate && !validTimezone(dueZone)) { setFieldError("截止日期需要有效 IANA 时区。"); return; }
     setFieldError(null);
     onPlanning(item, priority || null, dueDate || null, dueDate ? dueZone : null);
@@ -176,16 +297,25 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
       {actions.has("SET_LATER") && <form onSubmit={submitLater}>
         <strong>延后</strong><label>日期<input type="date" value={laterDate} onChange={(event) => setLaterDate(event.target.value)} min={queryDate} disabled={busy} required /></label>
         <label>时区<input value={laterZone} onChange={(event) => setLaterZone(event.target.value)} disabled={busy} required /></label>
-        <button className="secondary-button" type="submit" disabled={busy}>保存延后</button>
+        <button className="secondary-button" type="submit" disabled={busy || stale !== null}>保存延后</button>
       </form>}
       <form onSubmit={submitPlanning}>
         <strong>任务计划</strong><label>优先级<select value={priority} onChange={(event) => setPriority(event.target.value as RelayTodayPriority | "") } disabled={busy}>
           <option value="">未设</option><option value="LOW">低</option><option value="NORMAL">中</option><option value="HIGH">高</option></select></label>
         <label>截止日期<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={busy} /></label>
         <label>截止时区<input value={dueZone} onChange={(event) => setDueZone(event.target.value)} disabled={busy || !dueDate} /></label>
-        <button className="secondary-button" type="submit" disabled={busy}>保存计划</button>
+        <button className="secondary-button" type="submit" disabled={busy || stale !== null}>保存计划</button>
       </form>
       </div>
+      {/* 草稿基线冻结（#21）：已编辑的表单遇到新事实时保草稿、展示差异，由用户明确选择后才能继续。 */}
+      {stale !== null && <div className="warning-callout" data-testid="today-task-stale">
+        <strong>任务最新事实已变化，保存已暂停</strong>
+        <p>{staleDiffSummary(formBase, stale)}。你的未保存修改仍基于 v{formBase.taskRevision}，不会静默按新修订提交。</p>
+        <button className="secondary-button" type="button" data-testid="today-task-stale-adopt"
+          onClick={() => adoptFacts(stale)}>放弃修改，按最新事实重填</button>
+        <button className="secondary-button" type="button" data-testid="today-task-stale-keep"
+          onClick={() => { setFormBase(stale); setStale(null); }}>保留我的修改（按新基线提交）</button>
+      </div>}
     </details>
     {fieldError && <p className="action-error" role="alert">{fieldError}</p>}
     <details className="today-task__trace"><summary>排序依据与允许操作</summary>
@@ -219,6 +349,8 @@ export default function TodayView() {
   const [projectTitles, setProjectTitles] = useState<Record<string, string | null>>({});
   const [openReviews, setOpenReviews] = useState<readonly RelayReview[]>([]);
   const [reviewsState, setReviewsState] = useState<"loading" | "ready" | "error">("loading");
+  /** 计划命令 REVISION_CONFLICT 时依据的修订（taskId → expectedRevision）：让冲突后的显式重提换到新基线（#21）。 */
+  const [conflictRevisions, setConflictRevisions] = useState<Record<string, string>>({});
   const requestedProjectIds = useRef<Set<string>>(new Set());
   const requestVersion = useRef(0);
   const reviewsScope = useRef(0);
@@ -226,6 +358,26 @@ export default function TodayView() {
   const pendingRef = useRef<TodayCommand | null>(null);
   const queryRef = useRef(`${date}|${timezone}`);
   queryRef.current = `${date}|${timezone}`;
+
+  /**
+   * 未决命令的唯一写入口：ref 与状态一起改，并同步到当前连接作用域的会话存储（#22）。
+   * 作用域重置效果不经过这里——它只清内存，不清存储，否则整页重开就没有可恢复的原命令。
+   */
+  const holdPending = useCallback((next: TodayCommand | null) => {
+    pendingRef.current = next; setPending(next);
+    if (client !== null) saveTodayCommand(todayCommandKey(client), next);
+  }, [client]);
+
+  // 未决命令不能靠离页丢弃收口：切页保护只拦不放，核对回执或明确拒绝后才解除（#22）。
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.id ?? null
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
 
   async function loadToday(activeClient: RelayApiClient, targetDate: string, targetTimezone: string) {
     const request = ++requestVersion.current;
@@ -250,6 +402,12 @@ export default function TodayView() {
     viewScope.current++;
     pendingRef.current = null; setPending(null); setMayRetry(false); setSnapshot(null);
     requestedProjectIds.current = new Set(); setProjectTitles({});
+    // 作用域（API/Workspace）匹配时恢复原未决命令；不同连接的命令存放在各自的作用域键下，
+    // 不会互相串扰（#22）。epoch 变化是同一 API 的重连，原命令仍然有效，一并恢复。
+    if (client !== null) {
+      const stored = readTodayCommand(todayCommandKey(client));
+      if (stored !== null) { pendingRef.current = stored; setPending(stored); }
+    }
     return () => { viewScope.current++; requestVersion.current++; pendingRef.current = null; };
   }, [client, connection.epoch]);
   useEffect(() => {
@@ -313,7 +471,7 @@ export default function TodayView() {
   async function sendFrozen(command: TodayCommand, retry = false) {
     if (client === null || submitting || (pendingRef.current !== null && (!retry || pendingRef.current !== command))) return;
     const scope = viewScope.current;
-    pendingRef.current = command; setPending(command); setMayRetry(false); setSubmitting(true);
+    holdPending(command); setMayRetry(false); setSubmitting(true);
     setActionError(null); setMessage(null); setFailedCommandId(null);
     let sent = false;
     try {
@@ -321,7 +479,7 @@ export default function TodayView() {
         await confirmTodayTarget(client, command);
         if (scope !== viewScope.current) return;
         if (queryRef.current !== `${command.queryDate}|${command.queryTimezone}`) {
-          pendingRef.current = null; setPending(null);
+          holdPending(null);
           setActionError("Today 查询范围已变化，原选择尚未发送；请在新范围重新确认。");
           return;
         }
@@ -339,21 +497,28 @@ export default function TodayView() {
             dueLocalDate: command.dueLocalDate, timezone: command.timezone });
       if (scope !== viewScope.current) return;
       confirmResult(envelope, command);
-      pendingRef.current = null; setPending(null);
+      holdPending(null);
       setMessage("操作已由服务端确认，今日安排已更新。"); setLastReceiptId(command.id);
+      if (command.kind === "planning") {
+        setConflictRevisions((current) => { if (!(command.taskId in current)) return current;
+          const next = { ...current }; delete next[command.taskId]; return next; });
+      }
       const [currentDate, currentTimezone] = queryRef.current.split("|");
       await loadToday(client, currentDate!, currentTimezone!);
     } catch (caught) {
       if (scope !== viewScope.current) return;
       if (!sent) {
-        pendingRef.current = null; setPending(null);
+        holdPending(null);
         setActionError(`关联任务或 Project 状态未确认，Today 命令尚未提交：${describeLiveError(caught).message}`);
         const [currentDate, currentTimezone] = queryRef.current.split("|");
         await loadToday(client, currentDate!, currentTimezone!);
       } else if (caught instanceof RelayApiError && caught.problem.status < 500 && caught.problem.code !== "COMMAND_ID_REUSED") {
-        pendingRef.current = null; setPending(null); setFailedCommandId(command.id);
+        holdPending(null); setFailedCommandId(command.id);
         setActionError(`${describeLiveError(caught).message} 原 command_id：${command.id}。保留表单；请核对最新修订后明确重新提交。`);
         if (caught.problem.code === "REVISION_CONFLICT") {
+          if (command.kind === "planning") {
+            setConflictRevisions((current) => ({ ...current, [command.taskId]: command.expectedRevision }));
+          }
           const [currentDate, currentTimezone] = queryRef.current.split("|");
           await loadToday(client, currentDate!, currentTimezone!);
         }
@@ -375,7 +540,7 @@ export default function TodayView() {
         throw new Error("原命令回执的 ID 或类型不匹配，仍需核对。");
       }
       confirmResult(receipt, command);
-      pendingRef.current = null; setPending(null); setMayRetry(false);
+      holdPending(null); setMayRetry(false);
       setMessage("提交回执已核对，今日安排已更新。"); setLastReceiptId(command.id);
       const [currentDate, currentTimezone] = queryRef.current.split("|");
       await loadToday(client, currentDate!, currentTimezone!);
@@ -446,6 +611,7 @@ export default function TodayView() {
     return <ul className="today-list">{items.map((item) => <TodayTask key={`${date}|${timezone}|${item.taskId}`} item={item}
       eligible={eligible} busy={busy} queryTimezone={timezone} queryDate={date}
       projectTitle={item.projectId ? projectTitles[item.projectId] ?? null : null}
+      conflictFromRevision={conflictRevisions[item.taskId]}
       onSelection={select} onFocus={focus} onPlanning={plan} />)}</ul>;
   }
   function renderGroup(title: string, count: number, list: readonly RelayTodayItem[], eligible: boolean) {

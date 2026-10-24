@@ -1526,8 +1526,98 @@ export interface AssistMessageRow {
   readonly goal_id: string | null;
   /** 0127：目标轮次的结构化结论；非目标轮次为 null。 */
   readonly goal_outcome: JsonObject | null;
+  /**
+   * 0132：这条消息已被撤回。原文、工具记录与来源仍保留；UI 与后续上下文按占位处理，
+   * 不得再把这一轮的回复或文件效果当作当前事实。
+   */
+  readonly withdrawn_at: Date | null;
+  /** 0132：触发撤回的回执；同一消息至多一条撤回回执。 */
+  readonly withdrawn_by_recall_id: string | null;
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+/** 0132：一次写入落盘前按消息记录的路径前像。首写优先，不可改写。 */
+export interface AssistMessageFilePreimageRow {
+  readonly message_id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly relative_path: string;
+  readonly existed: boolean;
+  readonly content: Buffer | null;
+  readonly sha256: string | null;
+  readonly size_bytes: bigint | null;
+  readonly unavailable_reason: string | null;
+  readonly source: 'SESSION_WRITE' | 'RUN_WRITE';
+  readonly created_at: Date;
+}
+
+export type AssistMessageRecallStatus = 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
+
+/** 0132：一次消息撤回请求的持久身份与结果摘要。 */
+export interface AssistMessageRecallRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly assistant_message_id: string;
+  readonly command_id: string;
+  readonly status: AssistMessageRecallStatus;
+  readonly root_path: string | null;
+  readonly planned_files: number;
+  readonly restored_files: number;
+  readonly skipped_files: number;
+  readonly detail: JsonObject;
+  readonly requested_at: Date;
+  readonly completed_at: Date | null;
+  readonly last_resumed_at: Date | null;
+}
+
+export type AssistMessageRecallFileStatus = 'PLANNED' | 'RESTORED' | 'ALREADY_RESTORED'
+  | 'CONFLICT' | 'UNAVAILABLE' | 'FAILED' | 'SKIPPED' | 'UNCERTAIN';
+
+/** 0132：撤回的逐文件预检与恢复结果。 */
+export interface AssistMessageRecallFileRow {
+  readonly recall_id: string;
+  readonly relative_path: string;
+  readonly baseline_existed: boolean;
+  readonly baseline_sha256: string | null;
+  /** 前像所属消息；CREATE 且首次写入前路径不存在时为 null。 */
+  readonly baseline_message_id: string | null;
+  readonly expected_current_sha256: string | null;
+  readonly observed_sha256: string | null;
+  readonly status: AssistMessageRecallFileStatus;
+  readonly reason: string | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
+
+/** 0132（§27.3.3）：撤回首个恢复写入前保存的当前内容（保护副本，单层撤销依据）。 */
+export interface AssistMessageRecallProtectionRow {
+  readonly recall_id: string;
+  readonly relative_path: string;
+  readonly existed: boolean;
+  readonly content: Buffer | null;
+  readonly sha256: string | null;
+  readonly size_bytes: bigint | null;
+  readonly unavailable_reason: string | null;
+  readonly created_at: Date;
+}
+
+/** 0132（§27.3.3）：一次「撤销这次回退」的持久回执；单层，至多对应一条撤回。 */
+export interface AssistMessageRecallUndoRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly source_recall_id: string;
+  readonly command_id: string;
+  readonly status: AssistMessageRecallStatus;
+  readonly root_path: string;
+  readonly files: JsonObject;
+  readonly detail: JsonObject;
+  readonly requested_at: Date;
+  readonly last_resumed_at: Date | null;
+  readonly completed_at: Date | null;
 }
 
 /** Disposable, bounded DISCUSS prefix. Removed in the same transaction as settlement. */
@@ -1748,6 +1838,11 @@ export interface RelayDatabaseSchema {
   assist_delegation_attempts: AssistDelegationAttemptRow;
   assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
+  assist_message_file_preimages: AssistMessageFilePreimageRow;
+  assist_message_recalls: AssistMessageRecallRow;
+  assist_message_recall_files: AssistMessageRecallFileRow;
+  assist_message_recall_protections: AssistMessageRecallProtectionRow;
+  assist_message_recall_undos: AssistMessageRecallUndoRow;
   run_draft_previews: RunDraftPreviewRow;
   assist_proposals: AssistProposalRow;
   conversation_execution_requests: ConversationExecutionRequestRow;

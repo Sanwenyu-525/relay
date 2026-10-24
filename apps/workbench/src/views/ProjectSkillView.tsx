@@ -167,7 +167,8 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
           : `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。`}</dd></div>
         {archived && <div><dt>归档时间</dt><dd>{new Date(project.archivedAt!).toLocaleString("zh-CN")}</dd></div>}
       </dl>
-      <p className="disabled-reason"><CircleDashed aria-hidden="true" />State 的确认人与确认时间、以及「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、任务、选用产物与 Decision 等真实事实，不推断状态由任务数量决定。</p>
+      {/* 2026-10-24 用户指令：服务端待接入字段收成开发注记；页面呈现原则归代码与文档，不再上屏。 */}
+      <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：State 的确认人与确认时间、「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、任务、选用产物与 Decision。</p>
     </section>
     <section className="resume-section" data-testid="project-overview-tasks"><h2>任务</h2>
       {tasksReadFailed ? <p className="warning-callout">任务列表本次读取失败，无法列出项目任务；State 下一步仍单独核对。</p>
@@ -257,7 +258,7 @@ function FixtureProjectOverview() {
     </div>
     <section className="resume-section"><h2>项目当前状态</h2>
       <p className="metadata-row">状态 v{summary.stateRevision}<span aria-hidden="true"> · </span>{typeLabel}<span aria-hidden="true"> · </span>阶段：{phaseText}</p>
-      <p className="disabled-reason"><CircleDashed aria-hidden="true" />示例视图：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>
+      <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>
       <dl className="rail-definition-list"><div><dt>当前阶段</dt><dd>{phaseText}</dd></div>
         <div><dt>当前目标</dt><dd>{summary.goal}</dd></div></dl>
     </section>

@@ -188,3 +188,43 @@ describe("聊天局部 diff 行", () => {
     } finally { previewView.unmount(); }
   });
 });
+
+describe("长任务的逐文件行限高滚动", () => {
+  /** n 个文件的已落账行：一次 apply_changeset 带多个 fileChanges，行数＝文件数。 */
+  function rowsWithFiles(countOf: number) {
+    const paths = Array.from({ length: countOf }, (_, index) => `src/a/file-${index}.ts`);
+    return localFileDiffRows({ runId: "run-1", runStatus: "COMPLETED", waitReason: null,
+      rounds: [{ round: 0, modelCallId: "m-0", calls: [{
+        id: "c-1", round: 0, ordinal: 0, toolName: "apply_changeset", status: "SETTLED",
+        args: { changes: paths.map((path) => ({ path, action: "MODIFY" })) },
+        argsSha256: "a".repeat(64), providerToolCallId: "p-1", operationId: "op-1",
+        adaptationOf: null, adaptedPath: null, resultRef: { outcome: "COMPLETED" },
+        createdAt: "2026-10-16T00:00:00Z", updatedAt: "2026-10-16T00:00:01Z",
+        fileChanges: paths.map((path) => ({ path, action: "MODIFY" as const, status: "APPLIED" as const,
+          added: 3, removed: 1, unavailableReason: null })) }] }],
+    }, []);
+  }
+
+  it("超过 10 行时限高、框内滚动并说明总数，滚动区可被键盘聚焦", async () => {
+    const view = await mountReact(createElement(ChatLocalFileDiff,
+      { client: asClient({}), rows: rowsWithFiles(11) }));
+    try {
+      const list = view.wrapper.get('[data-testid="local-file-diff-list"]');
+      expect(list.attributes("data-capped")).toBe("true");
+      expect(list.attributes("tabindex")).toBe("0");
+      expect(view.wrapper.get('[data-testid="local-file-diff-capped-note"]').text())
+        .toContain("共 11 条编辑记录");
+      expect(view.wrapper.findAll(".local-file-diff").length).toBe(11);
+    } finally { view.unmount(); }
+  });
+
+  it("10 行以内不加限高标记与说明", async () => {
+    const view = await mountReact(createElement(ChatLocalFileDiff,
+      { client: asClient({}), rows: rowsWithFiles(3) }));
+    try {
+      const list = view.wrapper.get('[data-testid="local-file-diff-list"]');
+      expect(list.attributes("data-capped")).toBeUndefined();
+      expect(view.wrapper.find('[data-testid="local-file-diff-capped-note"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+});

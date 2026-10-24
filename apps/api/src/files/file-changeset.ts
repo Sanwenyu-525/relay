@@ -9,6 +9,8 @@ export interface FileChange {
   readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
   readonly baselineSha256?: string | null | undefined;
   readonly content?: string | undefined;
+  /** 受控恢复的字节内容（可含二进制）；与 content 互斥。 */
+  readonly contentBytes?: Buffer | undefined;
   readonly targetSha256?: string | undefined;
 }
 
@@ -185,14 +187,24 @@ export function requireFrozenBaseline(change: Pick<FileChange, 'action' | 'basel
 }
 
 /** 声明目标摘要只能描述本次真正要写的 UTF-8 内容。 */
-export function requireMatchingTarget(change: Pick<FileChange, 'action' | 'content' | 'targetSha256'>): void {
+export function requireMatchingTarget(change: Pick<FileChange,
+  'action' | 'content' | 'contentBytes' | 'targetSha256'>): void {
   if (change.action === 'DELETE') return;
-  if (typeof change.content !== 'string') throw new Error(`${change.action} requires explicit string content`);
+  if (change.content !== undefined && change.contentBytes !== undefined) {
+    throw new Error('content and contentBytes are mutually exclusive');
+  }
+  const payload = change.contentBytes ?? change.content;
+  if (payload === undefined) throw new Error(`${change.action} requires explicit content`);
   if (change.targetSha256 === undefined) return;
   if (!isFrozenBaseline(change.targetSha256) ||
-      change.targetSha256.toLowerCase() !== computeSha256(change.content)) {
+      change.targetSha256.toLowerCase() !== computeSha256(payload)) {
     throw new Error('targetSha256 must match SHA-256 of content');
   }
+}
+
+function changePayload(change: Pick<FileChange, 'content' | 'contentBytes'>):
+string | Buffer | undefined {
+  return change.contentBytes ?? change.content;
 }
 
 function sameFrozenPath(expected: string, actual: string): boolean {
@@ -414,7 +426,8 @@ export async function executeFileChangeset(
           actualBaselineSha256: currentSha,
         });
       } else {
-        const bytes = Buffer.from(change.content!, 'utf8');
+        const payload = changePayload(change)!;
+        const bytes = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
         const targetSha = computeSha256(bytes);
         await writeFile(resolvedPath, bytes);
         outcomes.push({
@@ -468,11 +481,14 @@ async function boundedFileHash(path: string, maxBytes: number, signal?: AbortSig
 function unconfirmedRoot(changes: readonly FileChange[], reason: string): {
   outcome: 'FAILED'; checks: readonly FileReconciliationCheck[]; details: JsonObject;
 } {
-  const checks = changes.map((change) => ({ path: change.path,
-    expectedSha: change.action === 'DELETE' ? null :
-      (change.targetSha256?.toLowerCase() ??
-        (change.content !== undefined ? computeSha256(change.content) : null)),
-    actualSha: null, matches: false, readError: reason }));
+  const checks = changes.map((change) => {
+    const payload = changePayload(change);
+    return { path: change.path,
+      expectedSha: change.action === 'DELETE' ? null :
+        (change.targetSha256?.toLowerCase() ??
+          (payload !== undefined ? computeSha256(payload) : null)),
+      actualSha: null, matches: false, readError: reason };
+  });
   return { outcome: 'FAILED', checks, details: { reconciliation: 'MISMATCH_OR_PARTIAL', reason,
     checks: checks as unknown as JsonObject[] } };
 }
@@ -511,7 +527,8 @@ export async function reconcileFileChangeset(
     }
 
     const expectedSha = change.action === 'DELETE' ? null :
-      (change.targetSha256?.toLowerCase() ?? (change.content !== undefined ? computeSha256(change.content) : null));
+      (change.targetSha256?.toLowerCase() ??
+        (changePayload(change) !== undefined ? computeSha256(changePayload(change)!) : null));
     try {
       const actualParent = await realpath(dirname(resolvedPath));
       if (!sameFrozenPath(dirname(resolvedPath), actualParent)) throw new Error('PARENT_CHANGED');
@@ -544,7 +561,7 @@ export async function reconcileFileChangeset(
     }
 
     const matches = readError === undefined &&
-      (change.action === 'DELETE' || typeof change.content === 'string') && actualSha === expectedSha;
+      (change.action === 'DELETE' || changePayload(change) !== undefined) && actualSha === expectedSha;
     if (!matches) {
       allMatch = false;
     }

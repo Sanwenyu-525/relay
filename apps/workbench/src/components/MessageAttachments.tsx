@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { RelayApiClient, RelayAssistMessageAttachment } from "../api/relayClient";
 import { formatAttachmentBytes } from "./composerAttachments";
 import {
-  AttachmentPreviewLayer, attachmentPreviewHandlers, useAttachmentPreview,
+  AttachmentLightbox, AttachmentPreviewLayer, attachmentPreviewHandlers, useAttachmentPreview,
 } from "./attachmentPreview";
 import "./MessageAttachments.css";
 
@@ -17,7 +17,9 @@ import "./MessageAttachments.css";
  * 不假装模型回放了历史图片（回放规则在服务端组装里，见 HTTP §10.85）。
  *
  * 悬停预览（2026-10-19，与输入框芯片同一份 `attachmentPreview`）：气泡里的图被
- * `20rem × 12rem` 压着，竖屏截图读不出内容，悬停/聚焦时浮出原图。
+ * `20rem × 12rem` 压着，竖屏截图读不出内容，悬停/聚焦时浮出原图；点击/回车再打开
+ * **原图查看层**（2026-10-24 用户确认，与芯片同一份实现），整层里按实际大小细看。
+ * 「重新读取」键 stopPropagation：重试是动作，不是「想看原图」。
  *
  * 尺寸预留（2026-10-23，禅道 #154）：占位符换成 `<img>` 之前先解码拿固有宽高，插入时就带
  * `width`/`height`，加载期间不再从 32px 占位撑到 192px 推挤后面的消息。解码失败或宿主
@@ -62,7 +64,7 @@ export default function MessageAttachments({ client, sessionId, attachments }: {
   const [loaded, setLoaded] = useState<Readonly<Record<string, CachedAttachmentImage>>>({});
   const [failed, setFailed] = useState<Readonly<Record<string, boolean>>>({});
   const [retry, setRetry] = useState(0);
-  const { preview, show, hide } = useAttachmentPreview();
+  const { preview, show, hide, viewer, openViewer, closeViewer } = useAttachmentPreview();
   useEffect(() => {
     let live = true;
     for (const item of attachments) {
@@ -91,8 +93,10 @@ export default function MessageAttachments({ client, sessionId, attachments }: {
       const broken = missing && failed[item.id] === true;
       return <figure key={item.id} className="message-attachment"
         data-previewable={!missing}
+        tabIndex={missing ? undefined : 0} aria-label={missing ? undefined : `查看原图 ${item.name}`}
         // 图还没读到（或读失败）时不挂预览：没有内容可放大，浮空框只会挡住重试入口。
-        {...(missing ? {} : attachmentPreviewHandlers(item.id, cached.url, item.name, { preview, show, hide }))}>
+        {...(missing ? {} : attachmentPreviewHandlers(item.id, cached.url, item.name,
+          { preview, show, hide, viewer, openViewer, closeViewer }))}>
         {missing
           ? <span className="message-attachment-placeholder" role="status">
             {broken ? "图片读取失败" : "正在读取图片…"}</span>
@@ -101,13 +105,15 @@ export default function MessageAttachments({ client, sessionId, attachments }: {
               ? {} : { width: cached.width, height: cached.height })} />}
         <figcaption>{item.name} · {formatAttachmentBytes(item.byteLength)}</figcaption>
         {broken && <button className="text-link" type="button"
-          onClick={() => {
+          onClick={(event) => {
+            event.stopPropagation();
             setFailed((current) => { const copy = { ...current }; delete copy[item.id]; return copy; });
             setRetry((value) => value + 1);
           }}>重新读取</button>}
       </figure>;
     })}
     <AttachmentPreviewLayer preview={preview} />
+    <AttachmentLightbox item={viewer} onClose={closeViewer} />
   </div>;
 }
 

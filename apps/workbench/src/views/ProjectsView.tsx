@@ -465,8 +465,7 @@ function FixtureDetail({ project, submitting, onArchive }: {
     <h3 className="projects-detail__heading">项目概况</h3>
     <DetailRows rows={[
       { label: "项目类型", value: projectTypeLabels[project.projectType] },
-      { label: "当前阶段", value: phaseLabel(project.phase) },
-      { label: "项目状态", value: project.archived ? "已归档" : "进行中" }
+      { label: "当前阶段", value: phaseLabel(project.phase) }
     ]} />
     <p className="helper-text">状态修订 v{project.stateRevision} · 待审 {project.pendingReviewCount} 项</p>
     <div className="projects-detail__divider" />
@@ -850,10 +849,10 @@ function LiveProjectsListView({ client, scope, onCreate }: {
         </div>
         <div className="projects-detail__divider" />
         <h3 className="projects-detail__heading">项目概况</h3>
+        {/* 2026-10-24 用户指令：归档状态由抽屉状态行（844 行）承载，概况里不再重复一行。 */}
         <DetailRows rows={[
           { label: "项目类型", value: projectTypeLabels[selected.projectType as ProjectType] ?? selected.projectType },
           { label: "项目阶段", value: phaseLabel(selected.phaseKey) },
-          { label: "项目状态", value: selected.archiveStatus === "ARCHIVED" ? "已归档" : "进行中" },
           { label: "修订", value: `Project v${selected.revision} · State v${selected.stateRevision}` }
         ]} />
         <div className="projects-detail__divider" />

@@ -90,6 +90,9 @@ async function createGoalAndWait(view: Awaited<ReturnType<typeof mountWorkbench>
 let unmount: (() => void) | null = null;
 afterEach(() => {
   unmount?.(); unmount = null;
+  // 待核对关联现在按作用域暂存会话存储（#20 整页重开恢复）：用例之间清掉，
+  // 避免上一条未收口的命令被下一用例的恢复逻辑读到。
+  sessionStorage.clear();
   resetRelayConnectionForTest(); vi.unstubAllGlobals();
 });
 

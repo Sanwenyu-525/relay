@@ -397,7 +397,9 @@ export default function ProjectWorkbenchView() {
           {development.runCount > development.runs.length && <p className="helper-text">这里只展开前 {development.runs.length} 个 Run；其他任务请继续加载或到任务页查看。</p>}
         </> : <p>{extraError ?? "Run 与待审尚未就绪。"}</p>}
       </section>}
-      {kind === "development" && <section className="workbench-section workbench-unavailable" aria-labelledby="workbench-tools"><h2 id="workbench-tools">变化集与检查</h2><p>真实 Git diff、受控测试和 Coding CLI 尚未接入此工作台，当前不可用。这里不生成变化集或检查结果。</p></section>}
+      {/* 2026-10-24 用户指令：未接入功能的整节宣告收成一句开发注记，不再占一个 section。 */}
+      {kind === "development" && <p className="helper-text" data-testid="workbench-dev-note"
+        aria-label="开发注记">开发注记：真实 Git diff、受控测试与 Coding CLI 尚未接入此工作台；这里不生成变化集或检查结果。</p>}
       <details className="workbench-detail-section"><summary>项目任务与读取范围</summary>{taskDirectory}</details>
     </>}
     <details className="workbench-view-configuration" data-testid="workbench-view-configuration"><summary>默认视图与页面配置</summary>

@@ -41,6 +41,33 @@ function targetKey(url: string): string {
   return id === null ? path : `${path}?id=${id}`;
 }
 
+/** 稍后处理只影响本机呈现，不是业务状态（页面原型 V5.15/V5.18 的「稍后处理」）：
+ *  不发命令、不改服务端事实，存 localStorage；读写失败只影响跨刷新保留。 */
+const POSTPONE_STORAGE_KEY = "relay.attention.postponed.v1";
+
+/** 各分组条目的稍后键：与各自行键同源，分组前缀避免不同分组的同类 ID 相互干扰。
+ *  必须介入条目带 changeKey：事项变化（新 changeKey）即新键，旧稍后记录按当前快照清理。 */
+const postponeKey = {
+  intervention: (item: RelayInterventionItem) => `intervention:${item.itemKey}:${item.changeKey}`,
+  review: (review: RelayReview) => `review:${review.id}`,
+  run: (run: RelayRun) => `run:${run.id}`,
+  task: (task: RelayTaskSummary) => `task:${task.id}`
+} as const;
+
+function loadPostponed(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem(POSTPONE_STORAGE_KEY);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function savePostponed(values: ReadonlySet<string>): void {
+  try { localStorage.setItem(POSTPONE_STORAGE_KEY, JSON.stringify([...values])); } catch { /* 写不进只影响跨刷新保留 */ }
+}
+
 /**
  * 续页失败的说法要分清两种情形：「暂时不可用」按原游标重试这一页即可，
  * 「已失权／不可见」重试同一页不会自己变好，得先核对作用域与权限。
@@ -129,6 +156,7 @@ async function readAttention(client: RelayApiClient, active: () => boolean,
 export default function AttentionQueue({ client }: { readonly client: RelayApiClient }) {
   const [snapshot, setSnapshot] = useState<AttentionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [postponed, setPostponed] = useState<ReadonlySet<string>>(loadPostponed);
   const version = useRef(0);
   async function load(continuePages = false) {
     const request = ++version.current;
@@ -142,6 +170,63 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
   const taskItems = snapshot?.tasks.filter((task) => needsTaskAttention(task, reviewTaskIds)) ?? [];
   const runItems = snapshot?.runs.filter(({ run }) => run.unresolvedOperationIds.length > 0 ||
     run.pendingControlRequest !== null) ?? [];
+  // 可见列表＝服务端事实 −本机稍后键。稍后不改任何服务端状态：分组计数跟着可见条目走。
+  const visibleInterventions = (snapshot?.interventions ?? [])
+    .filter((item) => !postponed.has(postponeKey.intervention(item)));
+  const visibleReviews = (snapshot?.reviews ?? [])
+    .filter((review) => !postponed.has(postponeKey.review(review)));
+  const visibleRunItems = runItems.filter(({ run }) => !postponed.has(postponeKey.run(run)));
+  const visibleTaskItems = taskItems.filter((task) => !postponed.has(postponeKey.task(task)));
+  /** 稍后条目在当前快照里的呈现信息；不在快照里的键不在这里出现（读取完整后会被清理）。 */
+  const postponedEntries = snapshot === null ? [] : [...postponed].flatMap((id) => {
+    if (id.startsWith("intervention:")) {
+      const item = snapshot.interventions.find((candidate) => postponeKey.intervention(candidate) === id);
+      return item === undefined ? [] : [{ id, group: "必须介入", title: item.title, href: item.targetUrl,
+        suffix: `${item.itemKey}-${item.changeKey}` }];
+    }
+    if (id.startsWith("review:")) {
+      const review = snapshot.reviews.find((candidate) => postponeKey.review(candidate) === id);
+      return review === undefined ? [] : [{ id, group: "待判断 Review",
+        title: `${reviewKindLabels[review.kind]} · ${reviewReasonText(review.reason)}`,
+        href: `/reviews?id=${encodeURIComponent(review.id)}`, suffix: review.id }];
+    }
+    if (id.startsWith("run:")) {
+      const entry = snapshot.runs.find(({ run }) => postponeKey.run(run) === id);
+      return entry === undefined ? [] : [{ id, group: "当前 Run 待核对",
+        title: `${entry.task.title} · ${runLabels[entry.run.status] ?? entry.run.status}`,
+        href: `/runs/${entry.run.id}`, suffix: entry.run.id }];
+    }
+    if (id.startsWith("task:")) {
+      const task = snapshot.tasks.find((candidate) => postponeKey.task(candidate) === id);
+      return task === undefined ? [] : [{ id, group: "人工任务与受阻 Task",
+        title: `${task.title} · ${taskStatusLabels[task.status]}`,
+        href: `/tasks/${task.id}`, suffix: task.id }];
+    }
+    return [];
+  });
+  // 完整读取后按当前快照清理失效的稍后键：条目已处理/消失或身份变化时不残留；
+  // 读取不完整时刻意不清理，宁可稍后分组里多留一拍，也不凭半份快照断定条目不存在。
+  useEffect(() => {
+    if (snapshot === null || snapshot.failures.length > 0 || !snapshot.taskPagesComplete) return;
+    const current = new Set<string>([
+      ...snapshot.interventions.map(postponeKey.intervention),
+      ...snapshot.reviews.map(postponeKey.review),
+      ...runItems.map(({ run }) => postponeKey.run(run)),
+      ...taskItems.map(postponeKey.task)
+    ]);
+    const next = new Set([...postponed].filter((id) => current.has(id)));
+    if (next.size === postponed.size) return;
+    savePostponed(next);
+    setPostponed(next);
+  }, [snapshot, postponed, runItems, taskItems]);
+  function postpone(id: string) {
+    const next = new Set(postponed); next.add(id);
+    savePostponed(next); setPostponed(next);
+  }
+  function restorePostponed(id: string) {
+    const next = new Set(postponed); next.delete(id);
+    savePostponed(next); setPostponed(next);
+  }
   const complete = snapshot !== null && snapshot.failures.length === 0 && snapshot.taskPagesComplete;
   const titles = snapshot?.projectTitles ?? new Map<string, string>();
   // 名称只说服务端给过的事实：读不到就写「暂不可读取」，不拿 UUID 冒充名字。
@@ -149,17 +234,18 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
     : titles.get(projectId) ?? "项目名称暂不可读取";
   const taskName = (taskId: string | null) => taskId === null ? "未关联任务"
     : snapshot?.tasks.find((item) => item.id === taskId)?.title ?? "任务标题暂不可读取";
+  // 「与下方分组是同一条」的提示只对照可见条目：被稍后隐藏的条目不再自称列在下方。
   const listed = new Map<string, string>();
-  for (const review of snapshot?.reviews ?? []) {
+  for (const review of visibleReviews) {
     listed.set(targetKey(`/reviews?id=${review.id}`), "与下方「待判断 Review」列出的是同一条请求");
   }
-  for (const { run } of runItems) {
+  for (const { run } of visibleRunItems) {
     listed.set(targetKey(`/runs/${run.id}`), "与下方「当前 Run 待核对」列出的是同一次执行");
   }
-  for (const task of taskItems) {
+  for (const task of visibleTaskItems) {
     listed.set(targetKey(`/tasks/${task.id}`), "与下方「人工任务与受阻 Task」列出的是同一个任务");
   }
-  const attentionKeys = new Set(snapshot?.interventions.map((item) => targetKey(item.targetUrl)) ?? []);
+  const attentionKeys = new Set(visibleInterventions.map((item) => targetKey(item.targetUrl)));
   return <section className="skill-page page-primary" data-testid="attention-queue">
     <PageHeader testId="attention-page-head" title="需要你查看的事项" meta="跨项目人工待处理"
       lede="按 Review、当前 Run 与 Task 的服务端事实分组。每组保留原读取顺序，分组不表示紧急程度或截止时间。"
@@ -177,60 +263,81 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
         {snapshot.failures.length > 0 && <ul>{snapshot.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>}
         {snapshot.taskPageFailure && <p className="action-error" data-testid="attention-continuation-error">续页失败：{snapshot.taskPageFailure.message}；已保留前面加载的结果，可按同一游标重试这一页。</p>}
         {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" data-testid="attention-continue-pages" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
-      <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {snapshot.interventions.length}</h2>
+      <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {visibleInterventions.length}</h2>
         <p className="helper-text">来自当前服务端事实；普通收件箱与 READY 任务不会因此主动通知。进入原入口后重新核对是否仍待处理。</p>
-        {snapshot.interventions.length ? <ul>{snapshot.interventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
+        {visibleInterventions.length ? <ul>{visibleInterventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
           data-testid={`attention-intervention-${item.itemKey}`}>
           <strong>{item.title}</strong><p>{interventionReasonText(item)}</p>
           {listed.has(targetKey(item.targetUrl)) && <p>这条提醒{listed.get(targetKey(item.targetUrl))}；处理仍在那一条的入口里做。</p>}
-          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={item.targetUrl}>打开原处理入口</Link>。进入后按那条请求的当前事实再核对一次。</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={item.targetUrl}>打开原处理入口</Link>。进入后按那条请求的当前事实再核对一次。
+            <button className="text-link" type="button"
+              data-testid={`attention-postpone-${item.itemKey}-${item.changeKey}`}
+              onClick={() => postpone(postponeKey.intervention(item))}>稍后处理</button></p>
           <details className="attention-identity"><summary>技术细节</summary>
             <p>事项类型 {item.kind} · 事项键 {item.itemKey} · 变化键 {item.changeKey}</p>
             <p>入口地址 {item.targetUrl}</p></details>
         </li>)}</ul> : <p className="helper-text">当前读取范围未发现必须介入事项。</p>}</section>
-      {complete && snapshot.interventions.length === 0 && snapshot.reviews.length === 0 &&
-        runItems.length === 0 && taskItems.length === 0 &&
-        <p className="helper-text">当前读取范围内没有待处理项。历史 Run 与其他外部执行回执仍需从原入口核对。</p>}
-      <section className="surface-panel"><h2>待判断 Review · {snapshot.reviews.length}</h2>
+      {complete && visibleInterventions.length === 0 && visibleReviews.length === 0 &&
+        visibleRunItems.length === 0 && visibleTaskItems.length === 0 &&
+        (postponedEntries.length > 0
+          ? <p className="helper-text" data-testid="attention-empty-but-postponed">上方分组当前没有待处理项；你有 {postponedEntries.length} 项在「稍后处理」里，随时可移回。</p>
+          : <p className="helper-text">当前读取范围内没有待处理项。历史 Run 与其他外部执行回执仍需从原入口核对。</p>)}
+      <section className="surface-panel"><h2>待判断 Review · {visibleReviews.length}</h2>
         <p className="helper-text">每条决定绑定独立目标与版本；进入 Review 后重新读取，不批量批准。</p>
-        <ul>{snapshot.reviews.map((review) => <li key={review.id} data-testid={`attention-review-${review.id}`}>
+        <ul>{visibleReviews.map((review) => <li key={review.id} data-testid={`attention-review-${review.id}`}>
           <strong>{reviewKindLabels[review.kind]} · {reviewReasonText(review.reason)}</strong>
           <p>{projectName(review.projectId)} · 任务「{taskName(review.taskId)}」</p>
           <p>你要做什么：{review.allowedDecisions.length
             ? `核对判断依据后，在${review.allowedDecisions.map((decision) => reviewDecisionLabels[decision]).join("、")}里选一个作决定。`
             : "打开这条请求核对当前状态；这次读取没有给出可用决定。"}</p>
-          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/reviews?id=${encodeURIComponent(review.id)}`}>打开原 Review 决定入口</Link>。延后影响以该请求当前事实为准，尚未由此队列确定。</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/reviews?id=${encodeURIComponent(review.id)}`}>打开原 Review 决定入口</Link>。延后影响以该请求当前事实为准，尚未由此队列确定。
+            <button className="text-link" type="button" data-testid={`attention-postpone-${review.id}`}
+              onClick={() => postpone(postponeKey.review(review))}>稍后处理</button></p>
           <details className="attention-identity"><summary>技术细节</summary>
             <p>Review {review.id} · Project {review.projectId ?? "未关联"} · Task {review.taskId ?? "未关联"} · Run {review.runId ?? "未关联"} · Review v{review.revision}</p>
             {attentionKeys.has(targetKey(`/reviews?id=${review.id}`)) &&
               <p>这条请求也出现在「必须介入」事项里，那里只是提醒，不改变它的版本，也不代替这里的判断。</p>}</details></li>)}</ul></section>
-      <section className="surface-panel"><h2>当前 Run 待核对 · {runItems.length}</h2>
-        <ul>{runItems.map(({ task, run }) => <li key={run.id} data-testid={`attention-run-${run.id}`}>
+      <section className="surface-panel"><h2>当前 Run 待核对 · {visibleRunItems.length}</h2>
+        <ul>{visibleRunItems.map(({ task, run }) => <li key={run.id} data-testid={`attention-run-${run.id}`}>
           <strong>{task.title} · {runLabels[run.status] ?? run.status}</strong>
           <p>{projectName(task.projectId)}</p>
           <p>你要做什么：{[
             run.unresolvedOperationIds.length ? `有 ${run.unresolvedOperationIds.length} 个动作的结果还没确定，要按原身份核对它是否已经生效。` : "",
             run.pendingControlRequest ? `有一个「${controlLabels[run.pendingControlRequest.type] ?? run.pendingControlRequest.type}」在等待处理。` : ""]
             .filter((line) => line !== "").join(" ")}</p>
-          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/runs/${run.id}`}>打开原 Run 核对入口</Link>。切换视图不会完成控制或重试动作。</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/runs/${run.id}`}>打开原 Run 核对入口</Link>。切换视图不会完成控制或重试动作。
+            <button className="text-link" type="button" data-testid={`attention-postpone-${run.id}`}
+              onClick={() => postpone(postponeKey.run(run))}>稍后处理</button></p>
           <details className="attention-identity"><summary>技术细节</summary>
             <p>Run {run.id} · 状态 {run.status} · Task {task.id} · 任务 v{task.revision}</p>
             {run.unresolvedOperationIds.length > 0 && <p>未决 Operation：{run.unresolvedOperationIds.join("、")}。状态或外部效果须按原身份核对。</p>}
             {run.pendingControlRequest !== null && <p>控制请求 {run.pendingControlRequest.id}：{run.pendingControlRequest.status}。</p>}
             {attentionKeys.has(targetKey(`/runs/${run.id}`)) &&
               <p>这次执行也出现在「必须介入」事项里，那里只是提醒，不代替这里的核对。</p>}</details></li>)}</ul></section>
-      <section className="surface-panel"><h2>人工任务与受阻 Task · {taskItems.length}</h2>
-        <ul>{taskItems.map((task) => <li key={task.id} data-testid={`attention-task-${task.id}`}>
+      <section className="surface-panel"><h2>人工任务与受阻 Task · {visibleTaskItems.length}</h2>
+        <ul>{visibleTaskItems.map((task) => <li key={task.id} data-testid={`attention-task-${task.id}`}>
           <strong>{task.title} · {taskStatusLabels[task.status]}</strong>
           <p>{projectName(task.projectId)}</p>
           <p>等待原因：{task.waitingReason ?? (task.unresolvedBlockerIds.length
             ? `有 ${task.unresolvedBlockerIds.length} 项未决阻塞（清单在技术细节里）` : "服务端未给出具体原因")}。未提供可证实的延后影响。</p>
-          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/tasks/${task.id}`}>打开任务核对当前状态</Link>{task.executorRunId && <>；<Link to={`/runs/${task.executorRunId}`}>查看当前 Run</Link></>}。</p>
+          <p>下一步：<Link className="inline-link" data-testid="attention-main-entry" to={`/tasks/${task.id}`}>打开任务核对当前状态</Link>{task.executorRunId && <>；<Link to={`/runs/${task.executorRunId}`}>查看当前 Run</Link></>}。
+            <button className="text-link" type="button" data-testid={`attention-postpone-${task.id}`}
+              onClick={() => postpone(postponeKey.task(task))}>稍后处理</button></p>
           <details className="attention-identity"><summary>技术细节</summary>
             <p>Task {task.id} · 任务 v{task.revision}{task.executorRunId ? ` · Run ${task.executorRunId}` : ""}</p>
             {task.unresolvedBlockerIds.length > 0 && <p>未决阻塞：{task.unresolvedBlockerIds.join("、")}</p>}
             {attentionKeys.has(targetKey(`/tasks/${task.id}`)) &&
               <p>这个任务也出现在「必须介入」事项里，那里只是提醒，不等于任务已经交给别人。</p>}</details></li>)}</ul></section>
+      {postponedEntries.length > 0 && <section className="surface-panel" data-testid="attention-postponed">
+        <h2>稍后处理 · {postponedEntries.length}</h2>
+        <p className="helper-text">稍后只在本机隐藏条目，不改变任何服务端状态，也不表示已经处理；条目从待处理范围消失或身份变化后，稍后记录会自动清理。</p>
+        <ul>{postponedEntries.map((entry) => <li key={entry.id} data-testid={`attention-postponed-${entry.suffix}`}>
+          <strong>{entry.group} · {entry.title}</strong>
+          <p>下一步：<Link className="inline-link" to={entry.href}>打开原入口</Link>；
+            <button className="text-link" type="button" data-testid={`attention-restore-${entry.suffix}`}
+              onClick={() => restorePostponed(entry.id)}>移回原分组</button>。</p>
+        </li>)}</ul>
+      </section>}
     </>}
   </section>;
 }

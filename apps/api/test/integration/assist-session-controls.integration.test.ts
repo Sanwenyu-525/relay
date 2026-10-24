@@ -448,6 +448,11 @@ test('迁移 0104 只是可空列，列表把 unread_at 逐字返回', async () 
   assert.equal(listed.items[0]?.id, sessionId);
   assert.equal(listed.items[0]?.unread_at, at.toISOString(),
     '列表必须带上未读时刻，客户端不再自己猜');
+  // 单条读取是标记未读之后的重读路径（左栏不本地拼结果）。它也带严格响应
+  // schema，只把字段加进列表映射不够——2026-10-24 用户报告行上的圆点不出现。
+  const single = (await api.get(workspacePath(workspaceId, `/assist-sessions/${sessionId}`)))
+    .body as { unread_at: string | null };
+  assert.equal(single.unread_at, at.toISOString(), '单条读取必须带上未读时刻');
 
   // 未读不是排序键：列表顺序只由置顶与「最后消息时间（无消息时回落创建时间）」决定，
   // 标记前后顺序不变。

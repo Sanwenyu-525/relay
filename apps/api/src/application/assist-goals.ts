@@ -326,6 +326,12 @@ export async function resumeGoal(db: DbExecutor, input: {
  *
  * 模型声明完成只会把目标带到 `AWAITING_ACCEPTANCE`；把状态写成 `COMPLETED` 的只有这一条
  * 由用户显式触发的命令。这是「模型声称完成不算完成」在代码里的落点。
+ *
+ * #142：确认之前必须核对目标名下没有尚未安全结算的轮次消息——ACTIVE 期间受理的补充
+ * 消息（PENDING/RUNNING）与已终结但推进器还没记账的消息，都是本轮验收结果之外的事实。
+ * 放行确认会把它们留在终态之外（生成队列仍会执行，轮次账却不再收），因此这里按既有
+ * 冲突语义拒绝：等推进器把这些消息结算完（或用户显式处置）后再确认。检查在锁定目标行
+ * 的同一事务里进行，与受理、领取和推进竞争时读到的是一致状态。
  */
 export async function confirmGoalCompletion(db: DbExecutor, input: {
   workspaceId: string; goalId: string; commandId: string;
@@ -337,6 +343,17 @@ export async function confirmGoalCompletion(db: DbExecutor, input: {
       if (goal.status !== 'AWAITING_ACCEPTANCE') {
         throw invalidTransition('目标还没有走到「等待验收」，不能直接确认完成。',
           { goalId: goal.id, sessionId: goal.session_id });
+      }
+      const inflight = await repositories.planGoals.readInflightRoundMessage(goal.id);
+      const unsettled = inflight === undefined
+        ? await repositories.planGoals.listUnsettledRoundMessages(goal.id, 1) : [];
+      if (inflight !== undefined || unsettled.length > 0) {
+        throw new DomainError({ code: 'GOAL_ROUNDS_UNSETTLED', status: 409,
+          type: '/problems/goal-rounds-unsettled', title: '目标还有未结算的轮次消息',
+          detail: '这条目标名下还有排队生成或已结束但未记账的轮次消息；'
+            + '请等推进器把它们安全结算后再确认完成，否则这些工作会游离在目标终态之外。',
+          retryable: true, retryAction: 'REFRESH_AND_REDECIDE',
+          conflict: { goalId: goal.id, sessionId: goal.session_id } });
       }
       await advance(repositories, goal, { status: 'COMPLETED', nextRoundAt: null });
     } });

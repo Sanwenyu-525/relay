@@ -51,6 +51,11 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
   /** 响应丢失时保留的原命令与载荷：只允许按原 ID 查回执或原样重试。 */
   const [pending, setPending] = useState<{ readonly commandId: string; readonly title: string;
     readonly text: string; readonly projectId: string | null } | null>(null);
+  /**
+   * 创建命令已确认后持有的记忆身份（工作台 §40）：创建成功是服务端事实，详情/来源读不出来
+   * 只是读取失败。持有身份期间只提供重读，绝不从同一对话框再发一次创建命令。
+   */
+  const [createdMemoryId, setCreatedMemoryId] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedState | null>(null);
   const requestVersion = useRef(0);
   const disposed = useRef(false);
@@ -101,10 +106,14 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
   async function submit(frozen?: { commandId: string; title: string; text: string;
     projectId: string | null }) {
     if (source.kind !== "READY" || saving) return;
+    // 已持有创建身份时这里只可能误触创建入口：身份重读走 rereadCreated，不能再次创建。
+    if (createdMemoryId !== null) return;
     const payload = frozen ?? { commandId: createCommandId(), title: title.trim(),
       text: text.trim(), projectId: scope === "PROJECT" ? sessionProjectId : null };
     if (payload.title === "" || payload.text === "") { setError("标题与内容都不能为空。"); return; }
     setSaving(true); setError(null); setConflict(null); setPending(null);
+    // 创建与读回是两个事实：进入这个变量说明创建命令本身已经成功（201）。
+    let createdId: string | null = null;
     try {
       const created = await client.createMemoryFromMessage({ sessionId, messageId,
         commandId: payload.commandId, expectedSessionRevision: sessionRevision,
@@ -112,10 +121,17 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
         contentSha256: source.sha256, projectId: payload.projectId,
         title: payload.title, text: payload.text });
       if (disposed.current) return;
+      createdId = created.memoryId;
+      setCreatedMemoryId(created.memoryId);
       await showSaved(created.memoryId);
     } catch (caught) {
       if (disposed.current) return;
       const described = describeLiveError(caught);
+      if (createdId !== null) {
+        // 创建已确认，失败的是详情/来源读取：保留已创建身份只重读，不当作保存失败、不开放再创建。
+        setError(described.message);
+        return;
+      }
       if (caught instanceof RelayApiError && caught.problem.status === 409) {
         // 会话或来源在确认期间变化：不覆盖、不换命令 ID 重发，让用户重新读取后再决定。
         setConflict(described.message);
@@ -125,6 +141,17 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
       } else {
         setError(described.message);
       }
+    } finally { if (!disposed.current) setSaving(false); }
+  }
+
+  /** 只重读已创建的记忆身份：读回失败不改变「已保存」这一事实，也不重新创建。 */
+  async function rereadCreated() {
+    if (createdMemoryId === null || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await showSaved(createdMemoryId);
+    } catch (caught) {
+      if (!disposed.current) setError(describeLiveError(caught).message);
     } finally { if (!disposed.current) setSaving(false); }
   }
 
@@ -150,15 +177,22 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
       }
       const memoryId = receipt.result.memory_id;
       if (typeof memoryId !== "string") { setError("原命令回执没有记忆身份，无法核对。"); return; }
+      // 回执确认创建已生效：先持有身份再读详情，读失败也停留在「已创建待重读」，不回到可创建状态。
+      setCreatedMemoryId(memoryId);
       setPending(null);
-      await showSaved(memoryId);
+      try {
+        await showSaved(memoryId);
+      } catch (caught) {
+        if (!disposed.current) setError(describeLiveError(caught).message);
+        return;
+      }
     } catch (caught) {
       if (!disposed.current) setError(`回执尚未核对到：${describeLiveError(caught).message}`);
     } finally { if (!disposed.current) setSaving(false); }
   }
 
   const ready = source.kind === "READY" ? source : null;
-  const canSubmit = ready !== null && !saving && title.trim() !== "" && text.trim() !== "";
+  const canSubmit = ready !== null && !saving && createdMemoryId === null && title.trim() !== "" && text.trim() !== "";
 
   return <AppDialog open title="保存为长期记忆" size="lg" onClose={onClose}
     subtitle="只保存你确认的这条来源；不会自动提取或后台保存其他内容">
@@ -209,7 +243,12 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
             <button className="secondary-button" type="button" data-testid="save-memory-reload"
               disabled={saving} onClick={() => void readSource()}>重新读取来源</button>
           </div>}
-          {error !== null && <p className="action-error" role="alert" data-testid="save-memory-error">保存失败：{error}</p>}
+          {error !== null && <p className="action-error" role="alert" data-testid="save-memory-error">
+            {createdMemoryId === null ? "保存失败：" : "记忆已创建（命令已确认），读取已保存内容失败："}{error}</p>}
+          {createdMemoryId !== null && saved === null && <div className="save-memory-actions">
+            <button className="secondary-button" type="button" data-testid="save-memory-reread"
+              disabled={saving} onClick={() => void rereadCreated()}>重新读取已保存的记忆</button>
+          </div>}
           {pending !== null && <div className="action-error" role="alert" data-testid="save-memory-pending">
             <p>保存结果未核对：请求响应丢失，这条命令是否已生效尚未确定。草稿与载荷都保留在这里。</p>
             <p className="helper-text">原 command_id：{pending.commandId}。先查回执；查不到时只能按同一命令与同一载荷重试，不换新 ID。</p>

@@ -38,6 +38,8 @@ export interface DomainConflict {
   readonly sessionId?: string;
   readonly messageId?: string;
   readonly proposalId?: string;
+  /** 消息撤回预检的逐路径结果（0132）；只用于说明为何尚未写入。 */
+  readonly recallPaths?: readonly string[];
   readonly blockingReasons?: readonly ProjectArchiveBlockerReason[] | readonly SessionDeleteBlockerReason[];
 }
 

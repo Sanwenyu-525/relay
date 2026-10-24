@@ -109,11 +109,13 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
       preferredSkillId={kind === "definition" ? "task-to-execution-contract" : "verification-plan"}
       onTargetChanged={() => void refreshAcceptedFacts()} />}
     {task && factsReadable && <>
-      {task.projectId && <p className="helper-text" data-testid="task-skill-project-status">{projectReadError
+      {/* 2026-10-24 用户指令：归档状态正常时保持沉默；核对中、失败与已归档是用户无从
+          预知的受阻事实，仍如实显示。 */}
+      {task.projectId && (!!projectReadError || projectArchivedAt !== null) &&
+        <p className="helper-text" data-testid="task-skill-project-status">{projectReadError
         ? `Project 状态无法核对：${projectReadError}；本页仍可阅读已取得的 Task 事实。`
         : projectArchivedAt === undefined ? "正在核对所属 Project 的归档状态…"
-          : projectArchivedAt !== null ? "项目已归档；这里只保留已接受事实和历史证据的阅读入口。"
-            : "所属 Project 正在进行中。"}</p>}
+          : "项目已归档；这里只保留已接受事实和历史证据的阅读入口。"}</p>}
       <details className="surface-panel" data-testid="live-task-accepted-facts"><summary>已接受的当前事实 · {task.title} · 任务 v{task.revision} / 验收 v{task.acceptance.acceptanceRevision}</summary>
         <p className="metadata-row"><strong>{task.title}</strong>
           <span aria-hidden="true"> · </span>任务 v{task.revision}

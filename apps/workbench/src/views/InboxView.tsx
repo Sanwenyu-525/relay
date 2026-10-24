@@ -199,7 +199,7 @@ function FixtureInboxBoard() {
         ? <InboxEmptyState hasFilters={hasFilters} onClearFilters={clearFilters} onCreate={openCreate} />
         : rows.map((task) => <InboxTaskRow key={task.id} task={task} />)}
     </InboxTaskCard>
-    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交；工作状态、执行模式与当前执行者是三个独立事实，不能用一枚标签合并。</p>
+    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
     <InboxScopeNote />
   </div></section>;
 }
@@ -282,7 +282,7 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
           {nextCursor && <button className="secondary-button" type="button" data-testid="inbox-load-more" disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
         </div>
       </>}
-    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交；工作状态、执行模式与当前执行者是三个独立事实，不能用一枚标签合并。</p>
+    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
     <InboxScopeNote />
   </div></section>;
 }

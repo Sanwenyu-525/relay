@@ -51,11 +51,17 @@ describe("人工介入提醒聚合", () => {
 
       await trigger.trigger("click");
       expect(disclosure.open).toBe(true);
+      // 2026-10-24：首读成功且确无事项时给空态结论；此前打开只有一条链接，读作面板坏了。
+      expect(mounted.wrapper.get('[data-testid="intervention-notifications-panel"]').text())
+        .toContain("当前没有需要你处理的事项。");
       const enable = mounted.wrapper.get('button[aria-label="开启 Windows 通知"]');
       expect(enable.attributes("title")).toBe("开启 Windows 通知");
       await enable.trigger("click");
       expect(FakeNotification.requestPermission).toHaveBeenCalledTimes(1);
-      expect(mounted.wrapper.text()).toContain("已允许 Windows 通知");
+      // 2026-10-24 用户指令：已允许这一正常态不再在浮层里宣告（组件侧同日期改动）；
+      // denied/unsupported/default 是受阻或可行动状态，仍如实显示。
+      expect(mounted.wrapper.text()).not.toContain("已允许 Windows 通知");
+      expect(mounted.wrapper.text()).not.toContain("Windows 通知尚未开启");
       expect(mounted.wrapper.find('button[aria-label="开启 Windows 通知"]').exists()).toBe(false);
 
       const summary = trigger.element as HTMLElement;
@@ -121,6 +127,10 @@ describe("人工介入提醒聚合", () => {
       await mounted.wrapper.get('[data-testid="intervention-notifications-open"]').trigger("click");
       const panel = mounted.wrapper.get('[data-testid="intervention-notifications-panel"]');
       expect(panel.findAll('[data-testid="intervention-item"]')).toHaveLength(2);
+      // 聚合入口是面板唯一主操作，与条目内链接分字重（2026-10-24 层级收口）。
+      expect(panel.get('a[href="/tasks?tab=attention"]').attributes("class"))
+        .toContain("intervention-notifications-entry");
+      expect(panel.get('ul[aria-label="需人工介入事项"]').exists()).toBe(true);
       expect(panel.text()).toContain("执行失败，需要人工核对");
       expect(panel.text()).toContain("这次执行停下来等你核对结果。");
       // 服务端的 REVIEW 事项把「为什么」投影成枚举对，面板要翻成人话；翻不出来的原文照留。

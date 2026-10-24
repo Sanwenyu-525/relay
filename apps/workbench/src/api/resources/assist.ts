@@ -3,9 +3,9 @@ import type { RelayWriteTier } from "../dtos/gateway";
 import { RelayContractError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
-import { assistMessageFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
+import { assistMessageFrom, assistMessageRecallFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
+import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
@@ -297,6 +297,34 @@ export async function steerAssistMessage(http: RelayHttp, messageId: string, com
     if (envelope.commandId !== commandId || envelope.result.message_id !== messageId) throw new Error("command mismatch");
     return string(envelope.result, "status", "assist steer result");
   } catch { throw new RelayTransportError("Assist 插话回执无法核对，请查询原 command_id。"); }
+}
+
+/**
+ * 0132：把一条已完成用户消息及其后续本会话文件写入回退到发送前。
+ *
+ * 预检不通过时服务端不写任何文件并返回 409（逐路径原因在 problem 里）；
+ * 成功回执可能是 COMPLETED / PARTIAL / FAILED，必须按 files 逐项读，不能只看 200。
+ */
+export async function recallAssistMessage(http: RelayHttp, messageId: string, commandId: string): Promise<RelayAssistMessageRecall> {
+  const body = await http.request(http.workspacePath(`/assist-messages/${encodeURIComponent(messageId)}/recall`), {
+    method: "POST", body: JSON.stringify({ command_id: commandId }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== commandId) throw new Error("command mismatch");
+    const recall = assistMessageRecallFrom(envelope.result);
+    if (recall.messageId !== messageId) throw new Error("message mismatch");
+    return recall;
+  } catch { throw new RelayTransportError("Assist 文件回退回执无法核对，请查询原 command_id。"); }
+}
+
+/** 读取某条消息的撤回回执；没有回执由服务端返回 404。 */
+export async function getAssistMessageRecall(http: RelayHttp, messageId: string): Promise<RelayAssistMessageRecall> {
+  const recall = assistMessageRecallFrom(await http.request(
+    http.workspacePath(`/assist-messages/${encodeURIComponent(messageId)}/recall`)));
+  if (recall.messageId !== messageId) {
+    throw new RelayContractError("撤回回执属于另一条消息：请刷新消息列表后重试。");
+  }
+  return recall;
 }
 
 export async function getAssistProposals(http: RelayHttp, sessionId: string): Promise<readonly RelayAssistProposal[]> {

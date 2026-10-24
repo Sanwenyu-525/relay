@@ -12,7 +12,7 @@ import { prepareTaskCreation, createTask, type CreateTaskCriterionInput, type Cr
 import { delegateTask } from './delegate-task.js';
 import { requireRevision } from './revisions.js';
 import { markTaskReady } from './task-commands.js';
-import { freezeTaskChainExecution, taskChainDelegateExecution, type TaskChainExecutionInput, type TaskChainExecutionSpec } from './task-chain-execution.js';
+import { freezeTaskChainExecution, requireTaskChainExecutionCurrent, taskChainDelegateExecution, type TaskChainExecutionInput, type TaskChainExecutionSpec } from './task-chain-execution.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { advanceDueAt, isValidTimezone, localDateAt, parseLocalDate, parseLocalTime, resolveLocalDateTime, type RepeatRule } from './zoned-time.js';
 
@@ -472,13 +472,12 @@ export async function scanScheduledTasks(db: DbExecutor, openedAt: Date): Promis
           continue;
         }
 
-        const previous = await r.scheduledTasks.latestOccurrence(row.id);
-        if (previous?.task_id != null) {
-          const task = await r.tasks.readTask(previous.task_id);
-          if (task !== undefined && !['DONE', 'CANCELLED'].includes(task.status)) {
-            await r.scheduledTasks.insertOccurrence(occurrenceBase, 'SKIPPED', 'PREVIOUS_TASK_NOT_ACCEPTED');
-            continue;
-          }
+        // 串行准入看真实存在的 Task（#147）：无 task_id 的 SKIPPED/BLOCKED/RESOLVED 发生
+        // 不产生任务，不能遮住仍未验收的上一轮——上一条 occurrence 是什么状态无关紧要，
+        // 只要本计划还有未终态（DONE/CANCELLED）的 Task，本轮就继续跳过，不堆出第二个任务。
+        if ((await r.scheduledTasks.unfinishedBoundTaskIds(row.id)).length > 0) {
+          await r.scheduledTasks.insertOccurrence(occurrenceBase, 'SKIPPED', 'PREVIOUS_TASK_NOT_ACCEPTED');
+          continue;
         }
 
         const inserted = await r.scheduledTasks.insertOccurrence(occurrenceBase, 'DISPATCHING');
@@ -506,7 +505,10 @@ function reasonOf(error: unknown): string {
  * 重跑的载荷一律来自已持久化的原事实，不从当前可变配置重算（#150）：
  *   * CreateTask 已提交过就取原回执结果——分发中断后用户编辑模板，重跑不得把
  *     当前模板与原 create_command_id 拼在一起（那会被判 ID 复用并反复阻塞）；
- *   * 执行范围复用 occurrence 上已冻结的 frozen_execution，只有首次才按当时状态冻结。
+ *   * 执行范围复用 occurrence 上已冻结的 frozen_execution，只有首次才按当时状态冻结；
+ *     恢复时旧冻结依据必须仍与当前事实一致（requireTaskChainExecutionCurrent），
+ *     资料/资源/连接漂移就让这次 BLOCKED，不重算覆盖（#151）。
+ * 上一轮 Task 终态由 Delegate 原事务内的准入复核（ADR-026），扫描只负责给跳过原因。
  */
 export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: string): Promise<void> {
   const occurrence = await withTransaction(db, async (r) => r.scheduledTasks.readOccurrence(occurrenceId));
@@ -549,7 +551,13 @@ export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: 
           await r.scheduledTasks.freezeExecution(occurrenceId, spec);
           return spec;
         })
-      : occurrence.frozen_execution as unknown as TaskChainExecutionSpec;
+      : await withTransaction(db, async (r) => {
+          // 恢复分发（#151）：已有冻结依据必须先核对是否仍然 CURRENT，漂移就让这次
+          // BLOCKED——不重算、不覆盖原快照，重写会抹掉漂移证据并绕过契约要求的漂移阻断。
+          const spec = occurrence.frozen_execution as unknown as TaskChainExecutionSpec;
+          await requireTaskChainExecutionCurrent(r, occurrence.workspace_id, occurrence.project_id, spec, taskId);
+          return spec;
+        });
 
     const ready = await markTaskReady(db, {
       workspaceId: occurrence.workspace_id, taskId,

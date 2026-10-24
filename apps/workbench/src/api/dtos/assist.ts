@@ -520,6 +520,46 @@ export interface RelayAssistMessage {
    * 没有附件与「服务端不报附件」在展示上是同一件事，不能因此判整条响应非法。
    */
   readonly attachments: readonly RelayAssistMessageAttachment[];
+  /**
+   * 0132：这条消息已撤回。原文、工具记录与来源仍在服务端保留；界面按占位显示，
+   * 不再把这一轮的文件效果当作当前事实。缺字段（旧服务端）读成未撤回。
+   */
+  readonly withdrawnAt: string | null;
+  readonly withdrawnByRecallId: string | null;
+  /** 0132：这条消息（或其直接回复）触发的撤回摘要；未撤回为 null。 */
+  readonly recall: RelayAssistMessageRecallSummary | null;
+}
+
+/** 0132：撤回状态。RUNNING 只出现在执行中的回执里。 */
+export type RelayAssistMessageRecallStatus = "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
+
+/** 消息列表用的撤回摘要：逐文件结果只在回执端点读取。 */
+export interface RelayAssistMessageRecallSummary {
+  readonly id: string;
+  /** 被撤回的用户消息；直接回复行上的摘要也指向同一条用户消息。 */
+  readonly messageId: string;
+  readonly assistantMessageId: string;
+  readonly status: RelayAssistMessageRecallStatus;
+  readonly plannedFiles: number;
+  readonly restoredFiles: number;
+  readonly skippedFiles: number;
+  readonly completedAt: string | null;
+}
+
+/** 一次撤回的逐文件结果；`baseline` 说明目标文件在发送前是否存在。 */
+export interface RelayAssistMessageRecallFile {
+  readonly path: string;
+  readonly status: string;
+  readonly reason: string | null;
+  readonly baseline: "PRESENT" | "ABSENT";
+  readonly baselineSha256: string | null;
+}
+
+export interface RelayAssistMessageRecall extends RelayAssistMessageRecallSummary {
+  readonly rootPath: string | null;
+  readonly detail: Readonly<Record<string, unknown>>;
+  readonly requestedAt: string;
+  readonly files: readonly RelayAssistMessageRecallFile[];
 }
 
 /**

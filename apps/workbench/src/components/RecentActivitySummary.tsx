@@ -40,10 +40,15 @@ export function RecentActivitySummary({ client }: { client: RelayApiClient }) {
    * 数据到达原位替换、行数不足补等格占位，空态与错误态用居中覆层盖住骨架只换文案：
    * 三种状态同高，输入卡不再移动。
    *
-   * 2026-10-20 第五轮：改单列（见 CSS）后 filler 从「补齐 2×2 网格」变成「补齐到同一行数」，
-   * 语义不变——仍是等格占位，不是动态内容。它没有文字、没有事件类型、aria-hidden，
+   * 2026-10-20 第五轮曾把网格改成单列：filler 的语义不变——补齐到同一行数，
+   * 不是动态内容。它没有文字、没有事件类型、aria-hidden，
    * 读屏与视觉都读不出「又一条动态」；真实动态重复的问题在数据与标签两侧修
    * （activity 标签映射补满 + 列表按 id 去重），不靠藏 filler 掩盖。
+   *
+   * 2026-10-24：网格改为按卡片宽度的响应式两列（≥40rem 排 2×2，更窄回落单列，
+   * 2026-10-20 的单列结论因此在窄卡里继续成立）。骨架、真实行与 filler 始终共用
+   * 同一个网格，所以列数切换只发生在布局容器变化时，数据到达不会改变行数；
+   * filler 的行高下限由 CSS 的 .recent-activity-row 承担。
    */
   const { items, loading, error, stale, refresh } = useActivities(client, {}, 4);
   const hasItems = items.length > 0;
@@ -86,7 +91,7 @@ export function RecentActivitySummary({ client }: { client: RelayApiClient }) {
               );
             })}
             {/* 行数不足 4 时补等格占位：见组件头部注释——这个区块在输入卡正上方，
-                加载中（2×2 骨架）→ 就绪之间的高度变化会把细条与输入卡推着走。 */}
+                加载中（骨架）→ 就绪之间的高度变化会把细条与输入卡推着走。 */}
             {Array.from({ length: Math.max(0, 4 - items.length) }, (_, index) => (
               <li key={`filler-${index}`} className="recent-activity-row" data-testid="recent-activity-filler" aria-hidden="true" />
             ))}

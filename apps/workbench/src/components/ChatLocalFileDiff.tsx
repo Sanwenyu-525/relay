@@ -109,13 +109,22 @@ function LocalDiffBody({ client, row }: { client: RelayApiClient; row: LocalFile
   </>;
 }
 
+/** 超过这个行数后列表限高、框内滚动（页面原型 V5.26「文件列表限高滚动」）：
+    逐文件行是一条条一行的紧凑记录，长任务几十条时不再把消息列撑成几屏长。 */
+const CAP_ROWS = 10;
+
 export default function ChatLocalFileDiff({ client, rows }: {
   client: RelayApiClient;
   rows: readonly LocalFileDiffRow[];
 }) {
   if (rows.length === 0) return null;
-  return <ul className="local-file-diff-list" data-testid="local-file-diff-list"
-    aria-label="本次编辑的逐文件增删行">
+  const capped = rows.length > CAP_ROWS;
+  return <>
+    {capped && <p className="helper-text" data-testid="local-file-diff-capped-note">
+      共 {rows.length} 条编辑记录；列表在框内滚动查看。</p>}
+    <ul className="local-file-diff-list" data-testid="local-file-diff-list"
+      aria-label="本次编辑的逐文件增删行" data-capped={capped ? "true" : undefined}
+      tabIndex={capped ? 0 : undefined}>
     {rows.map((row) => <li key={row.key} className="local-file-diff" data-phase={row.phase}
       data-preview={row.preview} data-testid={`local-file-diff-${row.key}`}>
       {/* 图标与状态词都不靠颜色单独表意：形状（笔）+ 文字（已修改/正在生成/…）同时在场，
@@ -139,5 +148,6 @@ export default function ChatLocalFileDiff({ client, rows }: {
           {localDiffReasonText(row.unavailableReason)}</span>}
       <LocalDiffBody client={client} row={row} />
     </li>)}
-  </ul>;
+    </ul>
+  </>;
 }

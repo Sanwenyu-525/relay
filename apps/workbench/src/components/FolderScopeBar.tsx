@@ -27,7 +27,8 @@ import "./FolderScopeBar.css";
  * 2026-10-18 第二轮：选择面从 `AppDialog`（40rem 居中大弹窗）换成锚在目录名上方的
  * 紧凑浮层。目录选择是「看一眼、点一行」的动作，不是需要占满注意力的一屏；弹窗把
  * 三行目录撑成半屏，用户每次换目录都要先扫一遍空白。浮层沿用「+」菜单那一套外壳
- * 语言（panel 圆角 + separator 细边 + floating 阴影 + popover 层级），宽度收到 18rem，
+ * 语言（panel 圆角 + separator 细边 + floating 阴影 + popover 层级），宽度首版 18rem，
+ * 2026-10-24 用户截图指令再收到 15rem（条目只有目录名与短动作行，18rem 右侧空底），
  * 内容与命令一概未动。
  */
 export default function FolderScopeBar({ directory, recents, busy, error,
@@ -108,16 +109,13 @@ export default function FolderScopeBar({ directory, recents, busy, error,
       {directory !== null && directory.gitRead?.state === "REPO_ROOT_REQUIRED" &&
         <span className="folder-strip-git" data-testid="folder-strip-git"
           title={directory.gitRead.detail}>Git 只在仓库根授权</span>}
-      {/* 完整告警给读屏与 title；可见区只留「这件事的后果」，不复述归属那一句，
-          避免同一事实在一行里说两遍。
-          2026-10-20 第五轮：未归入项目这一档降为 advisory——它是常态而非紧急故障，
-          整条铺琥珀色、目录名跟着换色，会把普通状态长期读成高优先级告警（用户截图指认
-          「信息拥挤、语义混杂」）。现在只有「目录未就绪」这一档（写操作真的被挡住）保留
-          警示色；advisory 用中性前景，完整原因与去向仍在 visually-hidden 与 title 里。 */}
+      {/* 完整告警给读屏与 title。2026-10-24 用户指令：同一行同一事实只说一次——未归入项目
+          时归属格已显示「未归入项目」，可见区不再重复后果句，完整后果留在 title 与读屏文本；
+          目录未就绪是真正的受阻告警（写操作被挡），可见句保留。 */}
       {warning !== null && <span className="folder-strip-warning" role="status" title={warning}
         data-testid={notReady ? "folder-scope-not-ready" : "collab-unassigned-execution-hint"}>
         <span className="visually-hidden">{warning}</span>
-        <span aria-hidden="true">{notReady ? "目录未就绪，暂不能执行写操作" : "执行前需归入项目"}</span>
+        {notReady && <span aria-hidden="true">目录未就绪，暂不能执行写操作</span>}
       </span>}
     </p>
     {error !== null && <p className="action-error" role="alert" data-testid="folder-error">{error}</p>}
@@ -127,8 +125,8 @@ export default function FolderScopeBar({ directory, recents, busy, error,
         「这是换目录」。可见标题省掉，身份挂在 aria-label 上，与触发键的 aria-haspopup 对上。 */}
     {changing && <div className="folder-scope-pop" ref={panelRef} role="dialog" tabIndex={-1}
       aria-label="更换工作目录">
-      <FolderScope state={{ directory, recents, busy,
-        currentPath: directory?.canonicalRoot ?? boundDirectoryPath }} onOpen={submit}
+      {/* 2026-10-24 用户指令：浮层顶部不再重复完整路径（悬停目录名已有 tooltip）。 */}
+      <FolderScope state={{ directory, recents, busy }} onOpen={submit}
         onNewConversation={() => { setChanging(false); onNewConversation(); }} />
     </div>}
   </section>;

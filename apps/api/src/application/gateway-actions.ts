@@ -27,6 +27,9 @@ import {
   type FileChange, type FileChangeOutcome, type FileReconciliationCheck,
 } from '../files/file-changeset.js';
 import type { ChangeSetLedgerFile, ChangeSetLedgerHeader } from '../files/change-set-repository.js';
+import { captureMessageFilePreimages, readMessageSnapshotLimits,
+  type CapturedMessagePreimage }
+  from '../files/message-file-preimage.js';
 import { executeFileQuery, reconcileFileQuery } from '../files/file-query.js';
 import type { ChangeSetFileStatus, ChangeSetStatus } from '../infrastructure/database-schema.js';
 import {
@@ -2290,9 +2293,89 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   return settleGatewayInvocation(db, admitted, 'SUCCEEDED', result, input.origin);
 }
 
+interface FileWritePreimageAttribution {
+  readonly messageId: string; readonly workspaceId: string; readonly sessionId: string;
+  readonly source: 'SESSION_WRITE' | 'RUN_WRITE';
+}
+
+/** 会话直写按 tool call 归因；委派执行按 source_message 归因；其他 Run 不参与消息撤回。 */
+async function resolvePreimageAttribution(db: DbExecutor,
+  op: LogicalOperationRow): Promise<FileWritePreimageAttribution | null> {
+  try {
+    const repositories = createRepositories(db);
+    if (op.origin === 'AGENT_SESSION_WRITE') {
+      const call = await repositories.messageRecall.findSessionToolCallByOperation(op.id);
+      return call === undefined ? null : {
+        messageId: call.message_id, workspaceId: call.workspace_id,
+        sessionId: call.session_id, source: 'SESSION_WRITE',
+      };
+    }
+    if (op.origin === 'RUN' && op.run_id !== null) {
+      const request = await repositories.messageRecall.findConversationRequestByRun(
+        op.workspace_id, op.run_id);
+      return request === undefined ? null : {
+        messageId: request.source_message_id, workspaceId: op.workspace_id,
+        sessionId: request.session_id, source: 'RUN_WRITE',
+      };
+    }
+  } catch {
+    // 归因是尽力而为的撤回证据，不能让原本合法的写入依赖它。
+  }
+  return null;
+}
+
+async function recordFileWritePreimages(db: DbExecutor,
+  attribution: FileWritePreimageAttribution | null, rootPath: string,
+  changes: readonly FileChange[]): Promise<void> {
+  if (attribution === null || changes.length === 0) return;
+  let captured: readonly (CapturedMessagePreimage | null)[];
+  try {
+    captured = await captureMessageFilePreimages(rootPath, changes);
+  } catch {
+    return;
+  }
+  const repositories = createRepositories(db);
+  // §27.3.4 容量预算：占满时停止新增快照并如实降级（该路径此后不可恢复），
+  // 不删既有数据腾空间、不悄悄绕过预算。同批内多个前像按顺序共享同一份余量。
+  const limits = readMessageSnapshotLimits();
+  let remaining = limits.budgetBytes;
+  try {
+    remaining -= Number((await repositories.messageRecall.snapshotUsage(
+      attribution.workspaceId)).bytes);
+  } catch {
+    remaining = 0;
+  }
+  for (const preimage of captured) {
+    if (preimage === null) continue;
+    let entry: CapturedMessagePreimage = preimage;
+    if (preimage.content !== null && preimage.sizeBytes !== null &&
+        Number(preimage.sizeBytes) > remaining) {
+      entry = { ...preimage, content: null, sha256: null, unavailableReason: 'CAPACITY_FULL' };
+    } else if (preimage.content !== null && preimage.sizeBytes !== null) {
+      remaining -= Number(preimage.sizeBytes);
+    }
+    try {
+      await repositories.messageRecall.insertPreimage({
+        messageId: attribution.messageId, workspaceId: attribution.workspaceId,
+        sessionId: attribution.sessionId, relativePath: entry.relativePath,
+        existed: entry.existed, content: entry.content, sha256: entry.sha256,
+        sizeBytes: entry.sizeBytes, unavailableReason: entry.unavailableReason,
+        source: attribution.source,
+      });
+    } catch {
+      // 单条前像写不进去时，撤回会按「缺少基线」如实报告，而不是阻断写文件。
+    }
+  }
+}
+
 async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
+  /**
+   * 0132：消息撤回的发送前文件前像。只在真正落盘前读取当前字节，首写优先；
+   * 采集失败不阻断原写入——那条路径之后会如实显示为「缺少基线、不可恢复」。
+   */
+  const preimageAttribution = await resolvePreimageAttribution(db, op);
   // 0126：会话写不走 Windows 原生路径身份冻结。`file_write_path_identity` 的复合外键
   // 强制绑定 (operation, run, resource, action_type)，会话写没有 run_id，插不进去；
   // 强行放开要改那张表的主键语义，代价远大于收益。
@@ -2308,6 +2391,7 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
       ...change, path: canonicalRelativePath(pathRow.root_path, change.path),
     }));
     const capturedRows = pathRow.captures as unknown as WindowsFilePathEvidence['captures'];
+    await recordFileWritePreimages(db, preimageAttribution, pathRow.root_path, nativeChanges);
     let result: Awaited<ReturnType<typeof executeWindowsFileChangeset>>;
     try {
       result = await executeWindowsFileChangeset({ root_path: pathRow.root_path,
@@ -2347,6 +2431,7 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
   }
   if (op.action_type === 'APPLY_CHANGESET') {
     const changes = (op.params.changes as any[]) as FileChange[];
+    await recordFileWritePreimages(db, preimageAttribution, op.normalized_target, changes);
     const res = await executeFileChangeset(op.normalized_target, changes, signal);
     return {
       outcome: res.outcome,
@@ -2369,6 +2454,7 @@ async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocat
     targetSha256: createHash('sha256').update(content).digest('hex'),
   }];
   const parent = dirname(op.normalized_target);
+  await recordFileWritePreimages(db, preimageAttribution, parent, changes);
   const res = await executeFileChangeset(parent, changes, signal);
   return {
     outcome: res.outcome,

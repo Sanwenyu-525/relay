@@ -6,6 +6,11 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 // 本轮改的是资料面板自己（components/AssistSourcePicker.tsx + migrated-scoped.css）：
 // 标题降到面板字号档，内容区限高并在内部滚动，检索行／引用范围／关闭入口留在滚动区之外；
 // 生成方式与意图仍属发送选项设置区，不进了资料面板的 DOM。
+// 2026-10-24（用户截图「浮层宽度跟输入框一样而且样式不好看」）：两枚浮层从「按输入卡
+// 拉满整卡宽」改为锚定芯片（AssistView.css 的 .agent-chat-options：details 建立包含块，
+// 面板 left:0 / width:max-content / 封顶 20rem）；资料芯片是工具行最右一枚，翻面为
+// 右缘贴芯片右缘；翻面由 usePopupFlip 现算（窄窗资料芯片换行到左缘时不翻）。本节 3b 与
+// 第 4 条的断言按新几何更新（草稿被浮层短暂盖住属芯片菜单既有模式，见该处注释）。
 // 只连页面内夹具：不连数据库、不调 Provider、不写任何真实业务事实；全程核对零 POST。
 
 const apiBase = "http://127.0.0.1:8787";
@@ -129,6 +134,9 @@ async function measure(page: Page) {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       rootFontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
       panelBox: box(panel),
+      // 输入卡自身（root 就是 [data-testid="assist-composer"]）：浮层必须待在它里面，
+      // 中栏 .collab-center 是 overflow:hidden，越出即被裁。
+      cardBox: box(root),
       toolsBox: box(node(".agent-chat-composer-tools")),
       // 工具行的文档序（类名）：位置换档只有量出来才锁得住，CSS 换行不改文档序。
       toolOrder: Array.from(document.querySelector(".agent-chat-composer-tools")?.children ?? [])
@@ -245,6 +253,10 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       // 3b. 展开只浮出内容，入口芯片不离开工具行（2026-10-19 用户指认「点击之后 ui 还会消失，
       //     关闭菜单之后 ui 又出来了」：原先整个 details 连 summary 一起绝对定位，点开时芯片
       //     从行里跳走、其余芯片左移）。面板必须仍在行的上方，且明显宽于芯片。
+      //     2026-10-24（用户截图「宽度跟输入框一样而且样式不好看」）：浮层改锚在芯片上，
+      //     宽度 max(内容, 芯片) 且封顶 20rem（模式菜单同款）。左缘起排在芯片靠近卡片右缘
+      //     时会越界（1000px 视口实测右缘 1035，卡片右缘 971，中栏 overflow:hidden 会裁掉它），
+      //     因此由 usePopupFlip 现算翻面：越界就右缘贴芯片，窄窗芯片随工具行换行到左缘时不翻。
       const tools = require(where, "工具行", snapshot.toolsBox);
       const chip = require(where, "展开中的入口芯片", snapshot.openSummaryBox);
       const floating = require(where, "展开中的面板", snapshot.openPanelBox);
@@ -252,6 +264,18 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(chip.bottom, `${where} · 入口芯片下沿跳出工具行`).toBeLessThanOrEqual(tools.bottom + 0.5);
       expect(floating.bottom, `${where} · 面板没有浮在工具行之上`).toBeLessThanOrEqual(tools.top + 0.5);
       expect(floating.width, `${where} · 面板宽度没有铺过输入卡`).toBeGreaterThan(chip.width);
+      expect(floating.width, `${where} · 面板宽度超过 20rem 封顶`).toBeLessThanOrEqual(snapshot.rootFontSize * 20 + 0.5);
+      // 贴芯片与不越界二选一断言：芯片靠近卡片右缘时翻面（右缘贴芯片），否则左缘贴芯片；
+      // 翻面由 usePopupFlip 现算——资料芯片在窄窗会随工具行换行跑到卡片左缘，静态翻面
+      // 那时会把面板裁出卡片左缘（860px 视口实测）。两种形态都必须待在输入卡内。
+      const leftAligned = Math.abs(floating.left - chip.left) <= 1;
+      const rightAligned = Math.abs(floating.right - chip.right) <= 1;
+      expect(leftAligned || rightAligned, `${where} · 浮层两缘都不贴芯片`).toBe(true);
+      const card = require(where, "输入卡", snapshot.cardBox);
+      expect(floating.left, `${where} · 资料浮层左缘越出输入卡（会被中栏裁掉）`).toBeGreaterThanOrEqual(card.left - 0.5);
+      expect(floating.right, `${where} · 资料浮层右缘越出输入卡（会被中栏裁掉）`).toBeLessThanOrEqual(card.right + 0.5);
+      expect(floating.left, `${where} · 资料浮层左缘越出视口`).toBeGreaterThanOrEqual(-0.5);
+      expect(floating.right, `${where} · 资料浮层右缘越出视口`).toBeLessThanOrEqual(snapshot.viewport.width + 0.5);
       // 3c. 行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
       //     计量环与模型下拉收在发送键左边，工具行左端改由「+」起头；「普通讨论」与「资料」的
       //     相对顺序保持 2026-10-18 那一半。
@@ -273,9 +297,11 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(Math.abs(chipCenter - valueCenter), `${where} · 模式芯片文字竖直重心偏了`)
         .toBeLessThanOrEqual(1);
       // 检索行本来就在弹层内，这里只核对它没被挤出滚动区（可命中即说明留在视野里）。
-      // 4. 输入器不被面板压住：草稿与发送键仍然可命中，页面不横向溢出。
+      // 4. 输入器不被面板压走：面板是浮层不进文档流，草稿与发送键的几何不随开合变化；
+      //    发送键不被压住。草稿在浮层开着时被短暂盖住属芯片菜单既有模式——DEV-0116 的
+      //    档位菜单（普通 Agent）同样盖草稿，2026-10-24 资料/发送选项两枚浮层锚定芯片后
+      //    与它一致；页面不横向溢出。
       insideViewport(snapshot, where, "发送键", require(where, "发送键", snapshot.sendBox));
-      expect(snapshot.overlaps.panelDraft, `${where} · 弹层压住输入器`).toBeLessThanOrEqual(0.5);
       expect(snapshot.overlaps.panelSend, `${where} · 弹层压住发送键`).toBeLessThanOrEqual(0.5);
       expect(snapshot.hitTests.send, `${where} · 发送键被面板遮挡`).toBe("self");
       expect(snapshot.horizontalOverflow, `${where} · 页面横向溢出`).toBe(0);

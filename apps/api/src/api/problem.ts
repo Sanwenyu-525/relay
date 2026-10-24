@@ -28,6 +28,8 @@ export interface ConflictDetails {
   readonly artifactVersionIds?: readonly string[];
   readonly artifactKinds?: readonly string[];
   readonly blockingReasons?: readonly string[];
+  /** 消息撤回预检的逐路径结果（0132）。 */
+  readonly recallPaths?: readonly string[];
 }
 
 export interface ProblemDetails {
@@ -157,6 +159,10 @@ function conflictBody(conflict: ConflictDetails): Record<string, unknown> {
 
   if (conflict.artifactKinds !== undefined) {
     body.artifact_kinds = conflict.artifactKinds;
+  }
+
+  if (conflict.recallPaths !== undefined) {
+    body.recall_paths = conflict.recallPaths;
   }
 
   return body;

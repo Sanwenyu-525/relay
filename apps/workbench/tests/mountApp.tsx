@@ -149,6 +149,19 @@ export async function clickPortal(testId: string): Promise<void> {
   await act(async () => { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
 }
 
+/**
+ * 从正文的未决状态行打开核对弹窗。
+ *
+ * 弹窗不自动弹出：状态行是唯一入口，关掉弹窗后它仍在原处，可以再次打开。
+ * 原因、command_id 与两个恢复出口都在弹窗里，因此核对类操作前要先走这一步。
+ */
+export async function openUnresolvedDialog(testId: string): Promise<void> {
+  const trigger = document.querySelector<HTMLElement>(`[data-testid="${testId}"] button`);
+  if (trigger === null) throw new Error(`DOM test selector not found: [data-testid="${testId}"] button`);
+  await act(async () => { trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  await flush();
+}
+
 /** 打开细条上的「更换目录」浮层（非模态，挂在细条子树里）。 */
 export async function openFolderDialog(): Promise<void> {
   const trigger = document.querySelector<HTMLElement>('[data-testid="folder-scope-change"]');

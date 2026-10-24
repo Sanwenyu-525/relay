@@ -6,14 +6,14 @@
       "context_sources": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "root_id": "9458ce66-3c25-4110-9962-792ac74593bb",
           "version": "1"
         }
       ],
       "source_refs": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "root_id": "9458ce66-3c25-4110-9962-792ac74593bb",
           "revision": "0",
           "current_version": "1"
         }
@@ -23,7 +23,7 @@
       "source_refs": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "root_id": "9458ce66-3c25-4110-9962-792ac74593bb",
           "revision": "0",
           "current_version": "1"
         }
@@ -31,14 +31,14 @@
       "context_sources": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "a9537d8a-2f90-4c09-9152-840294091bc7",
+          "root_id": "9458ce66-3c25-4110-9962-792ac74593bb",
           "version": "1"
         }
       ]
     },
     "occurrenceStatus": "DISPATCHED",
     "reason": null,
-    "runId": "4df132b2-8639-411f-8769-8bf945c825ba",
+    "runId": "8bc30802-2018-4662-99d8-bdd3f17a59c8",
     "taskStatus": "IN_PROGRESS",
     "pinnedContextVersionBefore": "1",
     "pinnedContextVersionAfter": "1"
@@ -50,14 +50,14 @@
       "context_sources": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "root_id": "8e565d40-03ae-47c6-aac3-7a8c0146352f",
           "version": "1"
         }
       ],
       "source_refs": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "root_id": "8e565d40-03ae-47c6-aac3-7a8c0146352f",
           "revision": "0",
           "current_version": "1"
         }
@@ -67,23 +67,23 @@
       "source_refs": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
-          "revision": "1",
-          "current_version": "2"
+          "root_id": "8e565d40-03ae-47c6-aac3-7a8c0146352f",
+          "revision": "0",
+          "current_version": "1"
         }
       ],
       "context_sources": [
         {
           "kind": "KNOWLEDGE",
-          "root_id": "d0272d68-7851-4f81-becb-ac7ad302d3ae",
+          "root_id": "8e565d40-03ae-47c6-aac3-7a8c0146352f",
           "version": "1"
         }
       ]
     },
-    "occurrenceStatus": "DISPATCHED",
-    "reason": null,
-    "runId": "2a8529de-aac7-4b06-bd34-b8250225e13c",
-    "taskStatus": "IN_PROGRESS",
+    "occurrenceStatus": "BLOCKED",
+    "reason": "INVALID_TRANSITION: 任务链资料依据已变化，原版本保留，请重新圈定。",
+    "runId": null,
+    "taskStatus": "INBOX",
     "pinnedContextVersionBefore": "1",
     "pinnedContextVersionAfter": "1"
   }

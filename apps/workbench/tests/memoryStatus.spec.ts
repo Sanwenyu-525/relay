@@ -238,6 +238,57 @@ describe("长期记忆有效状态与筛选", () => {
     expect(mounted.wrapper.find('[data-testid="memory-expired-hint"]').exists()).toBe(false);
   });
 
+  it("只改正文的修订回填并按原样保留到期时刻，清空或续期才是显式改变", async () => {
+    activate();
+    // 原时刻带非零秒与毫秒：未被编辑的期限必须逐时刻原样回传，不能被分钟精度控件取整。
+    const originalExpiry = "2026-12-31T00:00:37.250Z";
+    let state = memory({ expires_at: originalExpiry });
+    const posted: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if (path === "/memories") return response(200, [state]);
+      if (path === `/memories/${activeId}`) return response(200, state);
+      if (path === `/memories/${activeId}/revisions` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posted.push(body);
+        state = memory({ revision: String(Number(state.revision) + 1),
+          current_version: String(Number(state.current_version) + 1),
+          expires_at: body.expires_at as string | null });
+        return response(200, envelope(String(body.command_id),
+          { memory_id: activeId, revision: state.revision, version: state.current_version, status: "ACTIVE" }));
+      }
+      if (path === `/memories/${activeId}/revisions`) return response(200, []);
+      throw new Error(`Unexpected request ${path}`);
+    }));
+    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
+    // 打开修订表单：原到期时间必须回填（不是空白），只改正文不碰它。
+    await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click"); await flush();
+    const expiry = mounted.wrapper.get('[data-testid="memory-expires-at"]').element as HTMLInputElement;
+    expect(expiry.value).not.toBe("");
+    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("只改正文的版本");
+    await mounted.wrapper.get('[data-testid="memory-confirmed"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="knowledge-form"]').trigger("submit"); await flush(60);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ expected_revision: "1", expires_at: originalExpiry, confirmed: true });
+
+    // 显式清空：新版本没有到期时间。
+    await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="memory-expires-at"]').setValue("");
+    await mounted.wrapper.get('[data-testid="memory-confirmed"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="knowledge-form"]').trigger("submit"); await flush(60);
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toMatchObject({ expected_revision: "2", expires_at: null });
+
+    // 显式续期：按本机时区把输入换算成确切时刻提交。
+    await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="memory-expires-at"]').setValue("2030-06-01T12:30");
+    await mounted.wrapper.get('[data-testid="memory-confirmed"]').setValue(true);
+    await mounted.wrapper.get('[data-testid="knowledge-form"]').trigger("submit"); await flush(60);
+    expect(posted).toHaveLength(3);
+    expect(posted[2]).toMatchObject({ expected_revision: "3",
+      expires_at: new Date("2030-06-01T12:30").toISOString() });
+  });
+
   it("恢复过期记忆后重读仍显示已过期，回执不宣称记忆现已有效", async () => {
     activate();
     let state = memory({ id: retiredId, title: "停用且过期", status: "RETIRED", revision: "1",

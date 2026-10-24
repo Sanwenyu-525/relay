@@ -42,6 +42,7 @@ import { readAdmission, requireNormalAdmission } from './maintenance-admission.j
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { createGoalForMessage } from './assist-goals.js';
 import { parseChatModePrefix } from './chat-mode.js';
+
 import { resolveSessionReadTools } from './assist-read-tools.js';
 import { inheritWorkspaceDefaultDirectory } from './workspace-default-directory.js';
 
@@ -519,6 +520,15 @@ export async function requestAssistMessage(
       }
       if (session.status !== 'ACTIVE') {
         throw invalidTransition('会话已归档，不能再发送消息。', { sessionId: session.id });
+      }
+      // 0132：撤回执行中不接受新消息，避免恢复写入与新一轮文件写入交错。
+      // 崩溃遗留的 RUNNING 同样挡住发送：新写入会扩大该次撤回应回退的文件集合，
+      // 接续恢复未必覆盖。恢复入口是对原消息再次发起撤回（按过期回执接续）。
+      // §27.3.3：在途「撤销这次回退」同样是恢复写入，共用同一道栅栏。
+      if (await repositories.messageRecall.hasRunningRecall(session.id) ||
+          await repositories.messageRecall.hasRunningUndo(session.id)) {
+        throw invalidTransition('这段会话正在执行消息撤回；继续回退完成后再发送。',
+          { sessionId: session.id });
       }
       // 0060: 助手会话的准入收紧。它是只读会话，因此三件事在这里被明确挡住：
       //   * 不排队——上一条还在回答时再发一条会被拒，而不是变成看不见的队列；

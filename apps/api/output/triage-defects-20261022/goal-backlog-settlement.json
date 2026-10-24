@@ -14,11 +14,11 @@
         "statement": "代码与安装都通过"
       }
     ],
-    "firstMessage": "9ad044c0-e3b6-4ef9-b492-0e5bba91c9de",
-    "secondMessage": "b69381f0-3f18-45b6-8626-7854e0343f4d",
+    "firstMessage": "f8f33dcb-f849-4966-ad2c-5a3dccea2927",
+    "secondMessage": "bc7a1080-ce85-4f05-8aad-44e8bbc69def",
     "recordedMessageIds": [
-      "b69381f0-3f18-45b6-8626-7854e0343f4d",
-      "9ad044c0-e3b6-4ef9-b492-0e5bba91c9de"
+      "bc7a1080-ce85-4f05-8aad-44e8bbc69def",
+      "f8f33dcb-f849-4966-ad2c-5a3dccea2927"
     ],
     "firstRecorded": true,
     "secondRecorded": true,
@@ -28,15 +28,15 @@
         "advanced": [],
         "settled": [
           {
-            "goalId": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
-            "messageId": "b69381f0-3f18-45b6-8626-7854e0343f4d",
+            "goalId": "8ae96584-8dc0-4e10-9fbd-44256ee109ff",
+            "messageId": "bc7a1080-ce85-4f05-8aad-44e8bbc69def",
             "outcome": "CONTINUE",
             "status": "PAUSED"
           }
         ],
         "controls": [
           {
-            "goalId": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
+            "goalId": "8ae96584-8dc0-4e10-9fbd-44256ee109ff",
             "status": "PAUSED"
           }
         ],
@@ -57,8 +57,8 @@
     ],
     "projected": {
       "goal": {
-        "goal_id": "23699b5b-3176-4b9e-b8e8-d789ac4ad3fc",
-        "session_id": "bdeb22fe-913c-4aed-8a9a-caeaf2fab640",
+        "goal_id": "8ae96584-8dc0-4e10-9fbd-44256ee109ff",
+        "session_id": "c2c9aa1b-ce69-4c8e-921f-1b2405242fd1",
         "objective": "完成代码检查及安装验证",
         "status": "PAUSED",
         "current_step": null,
@@ -83,7 +83,7 @@
         "no_progress_rounds": 1,
         "plan_version_id": null,
         "plan_version": null,
-        "last_round_at": "2026-10-23T11:08:11.347Z",
+        "last_round_at": "2026-10-24T04:51:32.317Z",
         "actions": {
           "pause": false,
           "cancel": true,
@@ -91,21 +91,21 @@
           "confirm_completion": false
         },
         "revision": "5",
-        "created_at": "2026-10-23T11:08:11.252Z",
-        "updated_at": "2026-10-23T11:08:11.373Z"
+        "created_at": "2026-10-24T04:51:32.023Z",
+        "updated_at": "2026-10-24T04:51:32.381Z"
       },
       "rounds": [
         {
           "round_index": 2,
           "outcome": "CONTINUE",
           "note": "本轮没有可核对的进展。",
-          "created_at": "2026-10-23T11:08:11.373Z"
+          "created_at": "2026-10-24T04:51:32.381Z"
         },
         {
           "round_index": 1,
           "outcome": "CONTINUE",
           "note": "本轮有进展。",
-          "created_at": "2026-10-23T11:08:11.326Z"
+          "created_at": "2026-10-24T04:51:32.247Z"
         }
       ]
     }
@@ -114,23 +114,24 @@
     "delayed": true,
     "calls": 2,
     "status": "PAUSED",
-    "roundCount": 1,
+    "roundCount": 2,
     "criteria": [
       {
-        "key": "replacement",
+        "key": "original",
         "method": "HUMAN",
         "status": "UNMET",
         "evidence": "仍需验证",
         "required": true,
-        "statement": "仅代码检查通过"
+        "statement": "代码与安装都通过"
       }
     ],
-    "firstMessage": "d0e6e528-f793-4d93-92a5-b81e4b3d2684",
-    "secondMessage": "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5",
+    "firstMessage": "06c68e0a-f021-49ce-8ea9-f6b0fe17f780",
+    "secondMessage": "6e9532cc-b341-40ee-bc20-e3f7ec731475",
     "recordedMessageIds": [
-      "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5"
+      "6e9532cc-b341-40ee-bc20-e3f7ec731475",
+      "06c68e0a-f021-49ce-8ea9-f6b0fe17f780"
     ],
-    "firstRecorded": false,
+    "firstRecorded": true,
     "secondRecorded": true,
     "remainingCandidates": false,
     "ticks": [
@@ -138,15 +139,21 @@
         "advanced": [],
         "settled": [
           {
-            "goalId": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
-            "messageId": "8b81a714-85d5-40d3-9cd6-6840c4b5c2d5",
+            "goalId": "198116d4-a8c0-4331-94d5-16f9081451c9",
+            "messageId": "06c68e0a-f021-49ce-8ea9-f6b0fe17f780",
+            "outcome": "CONTINUE",
+            "status": "PAUSED"
+          },
+          {
+            "goalId": "198116d4-a8c0-4331-94d5-16f9081451c9",
+            "messageId": "6e9532cc-b341-40ee-bc20-e3f7ec731475",
             "outcome": "CONTINUE",
             "status": "PAUSED"
           }
         ],
         "controls": [
           {
-            "goalId": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
+            "goalId": "198116d4-a8c0-4331-94d5-16f9081451c9",
             "status": "PAUSED"
           }
         ],
@@ -167,8 +174,8 @@
     ],
     "projected": {
       "goal": {
-        "goal_id": "331356a6-43b1-4839-aa93-ec81b71ffbf3",
-        "session_id": "7f793069-92f1-4f0e-a025-17445449a84f",
+        "goal_id": "198116d4-a8c0-4331-94d5-16f9081451c9",
+        "session_id": "1c17bb6d-3ffb-4d07-b2b5-02f7d388ce4a",
         "objective": "完成代码检查及安装验证",
         "status": "PAUSED",
         "current_step": null,
@@ -181,35 +188,41 @@
         },
         "criteria": [
           {
-            "key": "replacement",
-            "statement": "仅代码检查通过",
+            "key": "original",
+            "statement": "代码与安装都通过",
             "status": "UNMET",
             "evidence": "仍需验证",
             "required": true
           }
         ],
         "steps": [],
-        "round_count": 1,
-        "no_progress_rounds": 0,
+        "round_count": 2,
+        "no_progress_rounds": 1,
         "plan_version_id": null,
         "plan_version": null,
-        "last_round_at": "2026-10-23T11:08:11.452Z",
+        "last_round_at": "2026-10-24T04:51:32.629Z",
         "actions": {
           "pause": false,
           "cancel": true,
           "resume": true,
           "confirm_completion": false
         },
-        "revision": "4",
-        "created_at": "2026-10-23T11:08:11.412Z",
-        "updated_at": "2026-10-23T11:08:11.462Z"
+        "revision": "5",
+        "created_at": "2026-10-24T04:51:32.477Z",
+        "updated_at": "2026-10-24T04:51:32.658Z"
       },
       "rounds": [
+        {
+          "round_index": 2,
+          "outcome": "CONTINUE",
+          "note": "本轮没有可核对的进展。",
+          "created_at": "2026-10-24T04:51:32.658Z"
+        },
         {
           "round_index": 1,
           "outcome": "CONTINUE",
           "note": "本轮有进展。",
-          "created_at": "2026-10-23T11:08:11.462Z"
+          "created_at": "2026-10-24T04:51:32.654Z"
         }
       ]
     }

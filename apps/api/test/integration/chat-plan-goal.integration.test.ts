@@ -883,3 +883,114 @@ test('取消目标时 PENDING 轮次直接收敛为 CANCELLED，生成 Worker �
   assert.equal(await runGeneration(envelopePort([IDLE_REPLY])), undefined,
     '取消路径不得再让生成 tick 抛出 AssistPreviewOwnershipLostError');
 });
+
+test('确认完成时目标名下还有排队补充消息：按冲突拒绝，结算进轮次账本后才能完成', async () => {
+  /*
+   * #142：ACTIVE 目标受理的补充消息还排在队列里时，上一条回复的 COMPLETE 就能把目标
+   * 带到 AWAITING_ACCEPTANCE。此时放行人工确认，补充消息会在终态之后照常生成、轮次却
+   * 永远不再记账。新行为：确认按 409 冲突拒绝；等推进器把补充消息结算进轮次账本后，
+   * 确认才被接受——已发生的轮次事实不游离在目标终态之外。
+   */
+  await drainQueue();
+  const workspaceId = await newWorkspace('goal-confirm-inflight');
+  const sessionId = await newSession(workspaceId, '确认与排队补充');
+  const first = await send(workspaceId, sessionId, '/goal 完成安装检查', 'GOAL');
+  const goalId = first.result.goal_id;
+  assert.ok(goalId !== null);
+  const supplemental = await send(workspaceId, sessionId, '补充：还要核对回滚步骤', 'GOAL');
+  assert.equal(supplemental.result.goal_id, goalId, 'ACTIVE 目标受理的补充消息绑定同一目标');
+
+  const repositories = createRepositories(app.db);
+  await settleAssistant(first.result.assistant_message_id, [JSON.stringify({
+    reply: '检查完成。',
+    goal: { state: 'COMPLETE',
+      success_criteria: [{ key: 'c1', statement: '安装检查通过', required: true }],
+      criteria_status: [{ key: 'c1', status: 'MET', evidence: '自检通过' }],
+      steps: [], current_step: null, progress: '检查完成', questions: [],
+      blocked_reason: null, adjustment: null } })]);
+  await runAssistGoalTick(app.db, { workerId: `confirm-inflight-${randomUUID()}` });
+  assert.equal((await repositories.planGoals.readGoal(goalId))?.status, 'AWAITING_ACCEPTANCE');
+  assert.equal((await repositories.planGoals.readInflightRoundMessage(goalId))?.status, 'PENDING',
+    '前置：补充消息仍在队列，这正是被保护的状态');
+
+  await assert.rejects(
+    () => confirmGoalCompletion(app.db, { workspaceId, goalId, commandId: randomUUID() }),
+    (error: unknown) => error instanceof DomainError && error.status === 409
+      && error.code === 'GOAL_ROUNDS_UNSETTLED',
+    '还有排队补充消息时确认完成必须按冲突拒绝，不能 200 终结目标');
+  assert.equal((await repositories.planGoals.readGoal(goalId))?.status, 'AWAITING_ACCEPTANCE',
+    '被拒的确认不改变目标状态');
+
+  // 补充消息随后照常生成，并由推进器结算进轮次账本。
+  await settleAssistant(supplemental.result.assistant_message_id, [JSON.stringify({
+    reply: '回滚步骤也核对完毕。',
+    goal: { state: 'COMPLETE',
+      success_criteria: [{ key: 'c1', statement: '安装检查通过', required: true }],
+      criteria_status: [{ key: 'c1', status: 'MET', evidence: '回滚步骤核对通过' }],
+      steps: [], current_step: null, progress: '补充核对完成', questions: [],
+      blocked_reason: null, adjustment: null } })]);
+  await runAssistGoalTick(app.db, { workerId: `confirm-settle-${randomUUID()}` });
+  assert.ok(await repositories.planGoals.readRoundByMessage(
+    supplemental.result.assistant_message_id) !== undefined,
+    '补充消息的轮次事实必须可追溯，不能静默漏账');
+  await confirmGoalCompletion(app.db, { workspaceId, goalId, commandId: randomUUID() });
+  assert.equal((await repositories.planGoals.readGoal(goalId))?.status, 'COMPLETED',
+    '全部轮次安全结算后确认完成照常成立');
+});
+
+test('积压恢复按原始顺序结算：早期回复不缺账，成功条件从最早一轮冻结', async () => {
+  /*
+   * #143：两条目标轮次消息在推进器结算之前都已生成完成（崩溃/恢复窗口）时，恢复不能
+   * 只记最新一条——更早的回复必须先按原始顺序记账，成功条件也从它首次冻结；最新消息
+   * 先记账不得把早期缺账消息挤出候选集。积压记完后才组织下一轮。
+   */
+  await drainQueue();
+  const workspaceId = await newWorkspace('goal-backlog-order');
+  const sessionId = await newSession(workspaceId, '积压顺序结算');
+  const first = await send(workspaceId, sessionId, '/goal 代码与安装都要通过', 'GOAL');
+  const goalId = first.result.goal_id;
+  assert.ok(goalId !== null);
+  const second = await send(workspaceId, sessionId, '补充说明', 'GOAL');
+  assert.equal(second.result.goal_id, goalId);
+
+  const repositories = createRepositories(app.db);
+  // 两条消息先后生成完成，之间没有任何目标 tick。
+  await settleAssistant(first.result.assistant_message_id, [JSON.stringify({
+    reply: '第一轮：读完现状。',
+    goal: { state: 'CONTINUE',
+      success_criteria: [{ key: 'c1', statement: '代码与安装都通过', required: true }],
+      criteria_status: [{ key: 'c1', status: 'UNMET', evidence: '尚未验证' }],
+      steps: [], current_step: null, progress: '读完现状', questions: [],
+      blocked_reason: null, adjustment: null } })]);
+  await settleAssistant(second.result.assistant_message_id, [JSON.stringify({
+    reply: '第二轮：换了口径。',
+    goal: { state: 'CONTINUE',
+      success_criteria: [{ key: 'c2', statement: '仅代码检查通过', required: true }],
+      criteria_status: [{ key: 'c2', status: 'UNMET', evidence: '仍未安装验证' }],
+      steps: [], current_step: null, progress: '第二轮进展', questions: [],
+      blocked_reason: null, adjustment: null } })]);
+
+  const tick = await runAssistGoalTick(app.db, { workerId: `backlog-${randomUUID()}` });
+
+  const goal = await repositories.planGoals.readGoal(goalId);
+  assert.equal(goal?.status, 'ACTIVE');
+  assert.equal(goal?.round_count, 2, '两条已终结消息都必须有轮次账');
+  const firstRound = await repositories.planGoals
+    .readRoundByMessage(first.result.assistant_message_id);
+  const secondRound = await repositories.planGoals
+    .readRoundByMessage(second.result.assistant_message_id);
+  assert.ok(firstRound !== undefined && secondRound !== undefined);
+  assert.equal(firstRound.round_index, 1);
+  assert.equal(secondRound.round_index, 2);
+  const view = await readSessionGoal(app.db, { workspaceId, sessionId });
+  assert.deepEqual(view.goal?.criteria, [{ key: 'c1', statement: '代码与安装都通过',
+    status: 'UNMET', evidence: '尚未验证', required: true }],
+    '成功条件按原始顺序从第一轮冻结，不被较晚清单替换');
+  // 积压记完账后才投递下一轮：轮次身份按 round_count 连续派生。
+  assert.ok(tick.advanced.some((entry) => entry.goalId === goalId
+    && entry.roundIndex === 3), '积压清零后组织下一轮');
+  assert.equal(await repositories.planGoals.readRoundByMessage(
+    first.result.assistant_message_id) !== undefined
+    && await repositories.planGoals.readRoundByMessage(
+      second.result.assistant_message_id) !== undefined, true);
+});

@@ -77,10 +77,10 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
       {/* 失败原因是**事实**，不是提示：缺哪个连接、哪个目录、哪一步被挡住，原样呈现。 */}
       {failureReason !== null && <p className="action-error" role="alert"
         data-testid="execution-summary-failure">{failureReason}</p>}
-      {failureReason === null && !failed && <p className="helper-text">
-        {request.status === "DELEGATED"
-          ? "文件内容在读取真实内容后决定；需要你决定时会在这里停下。"
-          : "不需要再确认一次：准备完成后会直接继续。"}
+      {/* 2026-10-24 用户指令：正常态不再宣告「不需要再确认一次」；只有 DELEGATED 的
+          「何时会需要你决定」是用户无从预知的，保留。 */}
+      {failureReason === null && !failed && request.status === "DELEGATED" && <p className="helper-text">
+        文件内容在读取真实内容后决定；需要你决定时会在这里停下。
       </p>}
     </>}
     {request.decision === "CLARIFY" && <p className="execution-summary-question"

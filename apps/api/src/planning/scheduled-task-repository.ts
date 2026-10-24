@@ -182,10 +182,20 @@ export class ScheduledTaskRepository {
       where scheduled_task_id = ${scheduledTaskId} order by created_at desc, id desc limit ${limit}`.execute(this.db)).rows;
   }
 
-  /** 上一轮（最近创建）的 occurrence；用于判断「上一轮是否已验收」。 */
-  async latestOccurrence(scheduledTaskId: string): Promise<ScheduledTaskOccurrenceRow | undefined> {
-    return (await sql<ScheduledTaskOccurrenceRow>`select * from scheduled_task_occurrences
-      where scheduled_task_id = ${scheduledTaskId} order by created_at desc, id desc limit 1`.execute(this.db)).rows[0];
+  /**
+   * 本计划绑定过、且尚未到达终态（DONE/CANCELLED）的 Task（#147）。
+   *
+   * 串行准入以真实存在的 Task 为准：无 task_id 的 SKIPPED/BLOCKED/RESOLVED 发生不产生任务，
+   * 不能遮挡仍未验收的上一任务；有 task_id 的发生（含恢复后 BLOCKED）对应真实 Task。
+   * 不分规则代次——旧代次留下的未结 Task 同样阻止新一轮启动，与 ADR-026「准入看 Task 终态」一致。
+   * `excludeTaskId` 供 Delegate 准入排除本次委托的 Task 自身。
+   */
+  async unfinishedBoundTaskIds(scheduledTaskId: string, excludeTaskId?: string): Promise<string[]> {
+    return (await sql<{ task_id: string }>`select distinct o.task_id from scheduled_task_occurrences o
+      join tasks t on t.id = o.task_id
+      where o.scheduled_task_id = ${scheduledTaskId} and t.status not in ('DONE', 'CANCELLED')
+        ${excludeTaskId === undefined ? sql`` : sql`and o.task_id <> ${excludeTaskId}`}
+      order by o.task_id`.execute(this.db)).rows.map((row) => row.task_id);
   }
 
   async blocked(workspaceId: string, limit = 50): Promise<ScheduledTaskOccurrenceRow[]> {

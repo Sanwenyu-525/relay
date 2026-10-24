@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
@@ -210,6 +210,45 @@ function workingDirectorySourceOf(directory: Record<string, unknown>): RelayWork
   return value;
 }
 
+function assistRecallStatus(value: string): RelayAssistMessageRecallStatus {
+  if (value !== "RUNNING" && value !== "COMPLETED" && value !== "PARTIAL" && value !== "FAILED") {
+    throw new Error("Assist 消息撤回状态无法识别。");
+  }
+  return value;
+}
+
+export function assistMessageRecallSummaryFrom(value: unknown): RelayAssistMessageRecallSummary {
+  const row = object(value, "assist recall");
+  return { id: string(row, "id", "assist recall"),
+    messageId: string(row, "message_id", "assist recall"),
+    assistantMessageId: string(row, "assistant_message_id", "assist recall"),
+    status: assistRecallStatus(string(row, "status", "assist recall")),
+    plannedFiles: integer(row, "planned_files", "assist recall"),
+    restoredFiles: integer(row, "restored_files", "assist recall"),
+    skippedFiles: integer(row, "skipped_files", "assist recall"),
+    completedAt: nullableString(row, "completed_at", "assist recall") };
+}
+
+export function assistMessageRecallFrom(value: unknown): RelayAssistMessageRecall {
+  const row = object(value, "assist recall");
+  return { ...assistMessageRecallSummaryFrom(row),
+    rootPath: nullableString(row, "root_path", "assist recall"),
+    detail: object(row.detail, "assist recall.detail"),
+    requestedAt: string(row, "requested_at", "assist recall"),
+    files: array(row, "files", "assist recall").map((value) => {
+      const file = object(value, "assist recall file");
+      const baseline = string(file, "baseline", "assist recall file");
+      if (baseline !== "PRESENT" && baseline !== "ABSENT") {
+        throw new Error("Assist 消息撤回基线状态无法识别。");
+      }
+      return { path: string(file, "path", "assist recall file"),
+        status: string(file, "status", "assist recall file"),
+        reason: nullableString(file, "reason", "assist recall file"),
+        baseline,
+        baselineSha256: nullableString(file, "baseline_sha256", "assist recall file") };
+    }) };
+}
+
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
   const row = object(value, "assist message");
   const role = string(row, "role", "assist message");
@@ -288,7 +327,14 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
           name: string(item, "name", "assist attachment"),
           mediaType: string(item, "media_type", "assist attachment"),
           byteLength: integer(item, "byte_length", "assist attachment") };
-      }) };
+      }),
+    // 0132：旧服务端没有撤回字段，按「未撤回」读；新服务端每条消息都带这三项。
+    withdrawnAt: row.withdrawn_at === undefined ? null
+      : nullableString(row, "withdrawn_at", "assist message"),
+    withdrawnByRecallId: row.withdrawn_by_recall_id === undefined ? null
+      : nullableString(row, "withdrawn_by_recall_id", "assist message"),
+    recall: row.recall === undefined || row.recall === null ? null
+      : assistMessageRecallSummaryFrom(row.recall) };
 }
 
 export function assistProposalFrom(value: unknown): RelayAssistProposal {

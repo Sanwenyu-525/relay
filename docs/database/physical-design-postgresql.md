@@ -1420,3 +1420,16 @@ Migration：`0118_long_term_memory.sql`、`0119_short_term_memory.sql`、`0120_m
 - **修正一：`ck_memory_version_values` 放宽**。0009 的 CHECK 要求 `confirmed_by = 'user:local'`，而 §107 的自动捕获写的是 `'auto-capture'`：真实 PostgreSQL 上每一次自动捕获写入都被这条约束拒绝，又被写入路径的失败静默吞掉——「自动记住」从未真正落库（此前只有不碰库的单测，没有暴露）。本迁移把取值放宽为 `in ('user:local', 'auto-capture')`，不新增第三个来源。
 - **修正二：自动捕获显式写 `origin`**。写入路径此前没写这一列，落到了列默认值 `HUMAN_CONFIRMED`，自动记住的条目在召回排序与界面标注上冒充人工确认。改为显式写 `AUTO_CAPTURE`。
 - **授权**：`memory_items` 与 `memory_auto_captures` 的新列由既有表级授权覆盖，不需要额外 GRANT。
+
+## 111. 0132 消息文件撤回、前像、保护副本与单层撤销（2026-10-24）
+
+新增五张表并给 `assist_messages` 加两列；对既有消息/会话只追加可空字段。**Breaking Change: No**。
+
+- **`assist_message_file_preimages`**：逐消息、逐路径的**写入前像**。`PRIMARY KEY (message_id, relative_path)`＋写入端 `ON CONFLICT DO NOTHING` 实现首写优先，后续同消息同路径覆写不改写首份。`existed=false` 时内容全空；`existed=true` 时要么 `sha256/content/size_bytes` 齐备（`octet_length(content) = size_bytes`），要么只有 `unavailable_reason`（`CONTENT_TOO_LARGE / READ_FAILED / TARGET_NOT_REGULAR / PATH_UNSAFE / CAPACITY_FULL`）。`source` 只允许 `SESSION_WRITE / RUN_WRITE`。路径 CHECK 禁止绝对路径、盘符、反斜杠与 `..`。索引 `(session_id, message_id)` 供撤回按会话读取。
+- **`assist_message_recalls`**：一次撤回的持久身份与结果摘要。`uq_assist_message_recall_message (message_id)` 保证一条消息只撤回一次；`uq_assist_message_recall_command (workspace_id, command_id)` 保证命令幂等。状态 `RUNNING / COMPLETED / PARTIAL / FAILED`，`ck_assist_message_recall_terminal` 把非 RUNNING 与 `completed_at` 绑在一起；`last_resumed_at` 是崩溃遗留 RUNNING 的认领心跳。`root_path` 记录本次唯一受管根，`planned/restored/skipped_files` 是计数摘要，逐文件事实在下一张表。
+- **`assist_message_recall_files`**：逐文件预检/恢复结果。`PRIMARY KEY (recall_id, relative_path)`；`baseline_existed/baseline_sha256/baseline_message_id` 描述撤回目标基线，`expected_current_sha256` 是最近一次已确认写入应留下的内容（NULL＝应不存在），`observed_sha256` 是读取到的当前内容。状态 `PLANNED / RESTORED / ALREADY_RESTORED / CONFLICT / UNAVAILABLE / FAILED / SKIPPED / UNCERTAIN`；路径与哈希 CHECK 与前者同规。
+- **`assist_message_recall_protections`**：首个恢复写入前保存的当前字节（单层撤销的依据）。`PRIMARY KEY (recall_id, relative_path)`；形状与 preimages 相同，`unavailable_reason` 另允许 `CAPACITY_FULL`。副本不可用时应用层让整次撤回不执行。
+- **`assist_message_recall_undos`**：单层撤销回执。`uq_assist_recall_undo_source (source_recall_id)` 保证一次撤回至多一条撤销；`uq_assist_recall_undo_command (workspace_id, command_id)` 保证命令幂等。`files` 直接保存逐文件预检/恢复结果（jsonb），不再建第二张逐文件表；状态词表与终结约束同 recalls，`last_resumed_at` 支持过期 RUNNING 接续。
+- **`assist_messages.withdrawn_at / withdrawn_by_recall_id`**：可空标记，终态撤回时同时写目标用户消息与其直接助手回复；部分索引 `ix_assist_messages_withdrawn (session_id, seq) WHERE withdrawn_at IS NOT NULL` 供方向规则与上下文占位读取。原文、附件、工具记录不删除。
+- **保留与容量**：`created_at`＋`size_bytes` 支撑保留期清理与工作区占用投影；清理删除超过保留期且不被在途撤回/撤销引用的前像与保护副本（`sweepExpiredSnapshots`）。**授权必须含 DELETE**：前像与保护副本授 `SELECT, INSERT, DELETE`（内容本身不可改写，DELETE 仅供过期清理）；撤回/撤销回执授 `SELECT, INSERT, UPDATE`。缺 DELETE 会让清理被静默拒绝，RA-08 已锁住该形态。
+- **回滚**：仅本功能未投入使用时可直接删表并移除两列；已产生撤回记录后回滚会丢失回执与撤回标记，需先导出。前像/保护副本字节直存 PG，未做内容寻址去重，容量按实际字节计。

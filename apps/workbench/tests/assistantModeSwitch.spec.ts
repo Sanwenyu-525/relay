@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { DomWrapper, feedbackText, flush, mountWorkbench, openSessionSwitcher, openWorkingDirectory, pressEscape, switchToolbarSession, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
+import { clickPortal, DomWrapper, feedbackText, flush, mountWorkbench, openSessionSwitcher, openUnresolvedDialog, openWorkingDirectory, pressEscape, switchToolbarSession, switcherCurrentSession, toolbarSessionTitle } from "./mountApp";
 
 /**
  * 协作页聊天框的会话模式单选框与人设助手（工作台 §25、ADR-018、测试计划 §23.2）。
@@ -369,7 +369,8 @@ describe("会话模式单选框", () => {
       await flush(80);
       expect(view.wrapper.find(".assist-pending").exists()).toBe(true);
       expect((document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement).value).toBe("/clear");
-      await view.wrapper.findAll("button").find((item) => item.text() === "查询原命令回执")!.trigger("click");
+      await openUnresolvedDialog("assist-pending");
+      await clickPortal("assist-pending-receipt");
       await flush(100);
       // 回执接续之后停在按原 command_id 建出的那条讨论上（顶栏浮层的当前标记，取代旧下拉的 value）。
       await openSessionSwitcher();
@@ -447,8 +448,9 @@ describe("会话模式单选框", () => {
     await flush(120);
     const create = options.posts.find((p) => p.path.endsWith("/assist-sessions"));
     expect(create?.body).toMatchObject({ conversation_mode: "LEARNING", project_id: null, task_id: null });
-    expect(view.wrapper.find('[data-testid="assist-first-retry"]').exists()).toBe(true);
-    await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
+    await openUnresolvedDialog("assist-first-pending");
+    expect(document.querySelector('[data-testid="assist-first-retry"]')).not.toBeNull();
+    await clickPortal("assist-first-retry");
     await flush(100);
     const sends = options.posts.filter((p) => p.path.endsWith("/messages"));
     expect(sends).toHaveLength(2);
@@ -914,10 +916,13 @@ describe("会话模式单选框", () => {
       await flush(100);
       const firstCreate = options.posts.find((post) => post.path === `${prefix}/assist-sessions`);
       expect(firstCreate?.body.assistant_profile_id).toBe(assistantProfileId);
-      expect(view.wrapper.get('[data-testid="assist-first-create-retry"]').exists()).toBe(true);
-
+      await openUnresolvedDialog("assist-first-create-pending");
+      expect(document.querySelector('[data-testid="assist-first-create-retry"]')).not.toBeNull();
+      // 核对弹窗是模态的：先收起再改助手，随后从同一行状态重新打开并重试。
+      pressEscape(); await flush();
       await pickAssistant(view, createdProfileId);
-      await view.wrapper.get('[data-testid="assist-first-create-retry"]').trigger("click");
+      await openUnresolvedDialog("assist-first-create-pending");
+      await clickPortal("assist-first-create-retry");
       await flush(160);
       const createPosts = options.posts.filter((post) => post.path === `${prefix}/assist-sessions`);
       expect(createPosts).toHaveLength(2);
@@ -942,9 +947,12 @@ describe("会话模式单选框", () => {
       const firstSend = options.posts.find((post) => post.path.endsWith("/messages"));
       expect(firstSend?.body).toMatchObject({ content: "重试不新增 intent" });
       expect(firstSend?.body).not.toHaveProperty("intent");
-      expect(view.wrapper.get('[data-testid="assist-first-retry"]').exists()).toBe(true);
+      await openUnresolvedDialog("assist-first-pending");
+      expect(document.querySelector('[data-testid="assist-first-retry"]')).not.toBeNull();
+      pressEscape(); await flush();
       await pickAssistant(view, createdProfileId);
-      await view.wrapper.get('[data-testid="assist-first-retry"]').trigger("click");
+      await openUnresolvedDialog("assist-first-pending");
+      await clickPortal("assist-first-retry");
       await flush(120);
       const sends = options.posts.filter((post) => post.path.endsWith("/messages"));
       expect(sends).toHaveLength(2);
@@ -1019,7 +1027,9 @@ describe("会话模式单选框", () => {
     try {
       const card = view.wrapper.get('[data-testid="assist-composer"]');
       expect([...card.element!.children].map((element) => element.className.split(" ")[0]))
-        .toEqual(["agent-chat-composer-spark", "agent-chat-message-form", "agent-chat-composer-actions"]);
+        // 2026-10-24：在途光点套了裁剪壳（卡片不再 overflow:hidden，浮层在途才不会被裁），
+        // 卡内直接子项因此是「裁剪壳 → 表单 → 底栏」三项，顺序与数量不变。
+        .toEqual(["agent-chat-composer-spark-clip", "agent-chat-message-form", "agent-chat-composer-actions"]);
       const locked = view.wrapper.get('[data-testid="conversation-mode-locked"]');
       expect(locked.element?.closest(".agent-chat-composer")).toBeNull();
       expect(locked.element?.closest(".agent-chat-mode")).toBeNull();
@@ -1040,7 +1050,9 @@ describe("会话模式单选框", () => {
       await flush(60);
       const card = view.wrapper.get('[data-testid="assist-composer"]');
       expect([...card.element!.children].map((element) => element.className.split(" ")[0]))
-        .toEqual(["agent-chat-composer-spark", "agent-chat-message-form", "agent-chat-composer-actions"]);
+        // 2026-10-24：在途光点套了裁剪壳（卡片不再 overflow:hidden，浮层在途才不会被裁），
+        // 卡内直接子项因此是「裁剪壳 → 表单 → 底栏」三项，顺序与数量不变。
+        .toEqual(["agent-chat-composer-spark-clip", "agent-chat-message-form", "agent-chat-composer-actions"]);
       const receipt = document.querySelector('[data-testid="assist-receipt-notice"]');
       expect(receipt?.textContent ?? "").toContain("撤回本次调整");
       // 2026-10-17：回执从「卡外的一条正文」变成 body 上的浮层栈条目，

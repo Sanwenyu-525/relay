@@ -16,6 +16,9 @@ export default function InterventionNotifications({ client }:
   { readonly client: RelayApiClient }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<readonly RelayInterventionItem[]>([]);
+  // 首读成功前不下空态结论：与待处理页「读取中不显示空队列结论」同一口径，
+  // 避免轮询未回时把「还没读到」演成「没有事项」。
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -34,7 +37,7 @@ export default function InterventionNotifications({ client }:
       try {
         const latest = await client.getInterventions();
         if (!active) return;
-        setItems(latest); setError(null);
+        setItems(latest); setError(null); setLoaded(true);
         void syncTaskbarBadge(latest.length);
         if (latest.length === 0) {
           try { await deliverProjectReminderNotifications(client, navigate, () => active); }
@@ -107,14 +110,14 @@ export default function InterventionNotifications({ client }:
       {items.length > 0 && <span className="intervention-notifications-count" aria-hidden="true">{items.length}</span>}
     </summary>
     <div className="intervention-notifications-panel" data-testid="intervention-notifications-panel">
-      <a className="text-link" href="/tasks?tab=attention" onClick={(event) => {
+      <a className="text-link intervention-notifications-entry" href="/tasks?tab=attention" onClick={(event) => {
         event.preventDefault(); if (disclosure.current) disclosure.current.open = false;
         navigate("/tasks?tab=attention");
       }}>{items.length > 0 ? `需人工介入 ${items.length} 项` : "打开人工待处理列表"}</a>
       {/* 聚合入口之上先给逐条事实（2026-10-21 第三轮 R3-03）：原先这一层只有一句「N 项」，
           用户必须整队打开才知道到底哪一件事在等什么。逐条只列已读到的服务端事实并直达原请求，
           不在此处作任何决定；整体清单仍是另一条入口。 */}
-      {items.length > 0 && <ul className="intervention-notifications-list">{items.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
+      {items.length > 0 && <ul className="intervention-notifications-list" aria-label="需人工介入事项">{items.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
         data-testid="intervention-item">
         <strong>{item.title}</strong>
         <p>{interventionReasonText(item)}</p>
@@ -123,8 +126,13 @@ export default function InterventionNotifications({ client }:
           navigate(item.targetUrl);
         }}>打开原处理入口</a>
       </li>)}</ul>}
+      {/* 2026-10-24：空队列打开时原先只有一条链接（实测面板高 58px），读作面板坏了。
+          首读成功且确无事项才给这句结论；稍后处理只改待处理页的本机视图，不改这里的事实源。 */}
+      {items.length === 0 && loaded && <p className="helper-text">当前没有需要你处理的事项。</p>}
       {isTauri() && <div className="intervention-notifications-permission">
-        <p>{permissionLabel}</p>
+        {/* 2026-10-24 用户指令：已允许这一正常态不再宣告；denied/unsupported/default 是
+            受阻或可行动状态，仍如实显示。 */}
+        {permission !== "granted" && <p>{permissionLabel}</p>}
         {permission === "default" && <button type="button" className="icon-button"
           aria-label="开启 Windows 通知" title="开启 Windows 通知" onClick={() => void enableNotifications()}>
           <BellRing aria-hidden="true" />
