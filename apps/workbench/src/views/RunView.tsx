@@ -290,13 +290,13 @@ export default function RunView() {
     })();
     return () => { active = false; abort.abort(); window.clearInterval(interval); if (refreshTimer !== null) window.clearTimeout(refreshTimer); };
   }, [id, connection.client, run?.id]);
-  if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">Run</p><h1>正在读取执行记录</h1></section>;
-  if (!live) return <section className="page-state" data-testid="run-fixture-gap"><p className="eyebrow">Run</p><h1>示例模式没有真实 Run</h1><p>连接本机 API 后才能读取步骤、未决请求和控制状态。示例数据不生成执行记录。</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
-  if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">Run</p><h1>暂时无法读取执行记录</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Run</p><h1>正在读取执行记录</h1></section>;
+  if (!live) return <section className="page-state pv-page" data-testid="run-fixture-gap"><p className="eyebrow">Run</p><h1>示例模式没有真实 Run</h1><p>连接本机 API 后才能读取步骤、未决请求和控制状态。示例数据不生成执行记录。</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Run</p><h1>暂时无法读取执行记录</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   // 不静默返回 null：没有 run/task 时给明确的不可用说明与重读入口，而不是渲染空白文档。
-  if (!run || !task) return <section className="page-state" data-testid="run-record-unavailable"><p className="eyebrow">Run</p><h1>暂时没有可显示的执行记录</h1><p>这次没有读到完整的 Run 与任务事实，因此不展示步骤、控制与轨迹；这不代表执行成功或已停止。请重新读取核对。</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (!run || !task) return <section className="page-state pv-page" data-testid="run-record-unavailable"><p className="eyebrow">Run</p><h1>暂时没有可显示的执行记录</h1><p>这次没有读到完整的 Run 与任务事实，因此不展示步骤、控制与轨迹；这不代表执行成功或已停止。请重新读取核对。</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   // COMPLETED 是服务端提交完成的确定事实，用成功色调；CREATED/RUNNING 等在途状态保持中性，不靠颜色暗示进展。
-  return <section className="skill-page run-detail-page" data-testid="run-detail"><div className="page-layout"><div className="page-primary"><PageHeader testId="run-page-head" title={task.title} meta="执行记录"
+  return <section className="skill-page run-detail-page pv-page" data-testid="run-detail"><div className="page-layout"><div className="page-primary"><PageHeader testId="run-page-head" title={task.title} overline="Run" meta="执行记录"
     lede={`${runLabels[run.status] ?? run.status} · Run 修订 v${run.revision} · 任务修订 v${task.revision}`}
     status={<span className={`status-chip status-chip--${run.status === "FAILED" ? "danger" : run.status === "PAUSED" ? "warning" : run.status === "COMPLETED" ? "success" : "neutral"}`}>{runLabels[run.status] ?? run.status}</span>}>
     <p className="helper-text">任务状态：{taskStatusLabels[task.status]} · 当前执行者：{executorLabels[task.executor]}</p>

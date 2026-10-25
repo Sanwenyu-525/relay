@@ -517,6 +517,27 @@ test('USER_IMPORT Review 的目标绑定失效后仍拒绝 direct approval', asy
   const stored = await sql<{ count: string }>`select count(*)::text as count from review_decisions
     where review_id = ${prepared.review_id}`.execute(app.db);
   assert.equal(stored.rows[0]?.count, '0');
+
+  // A non-Run USER_IMPORT authorization must not acquire a Run acceptance revision.
+  // Restore the operation-bound target and drift only this field to isolate that guard.
+  const acceptanceDriftTarget = { ...detail.target, acceptance_revision: '1' } as JsonObject;
+  const acceptanceDriftHash = reviewTargetHash(acceptanceDriftTarget);
+  const acceptanceDriftClient = new Client({ connectionString: MIGRATION_DATABASE_URL });
+  await acceptanceDriftClient.connect();
+  try {
+    await acceptanceDriftClient.query(
+      'update review_requests set target = $2::jsonb, target_hash = $3 where id = $1::uuid',
+      [prepared.review_id, JSON.stringify(acceptanceDriftTarget), acceptanceDriftHash]);
+  } finally {
+    await acceptanceDriftClient.end();
+  }
+  const acceptanceDriftDecision = await api.post(workspacePath(f.workspaceId,
+    `/reviews/${prepared.review_id}/decisions`), { command_id: randomUUID(),
+    expected_revision: detail.revision, target_hash: acceptanceDriftHash.toString('hex'), decision: 'APPROVE' });
+  assert.equal(acceptanceDriftDecision.status, 409, acceptanceDriftDecision.text);
+  const afterAcceptanceDrift = await sql<{ count: string }>`select count(*)::text as count from review_decisions
+    where review_id = ${prepared.review_id}`.execute(app.db);
+  assert.equal(afterAcceptanceDrift.rows[0]?.count, '0');
 });
 
 test('USER_ACTION Review stays non-executing after approval when its permission is revoked', async () => {

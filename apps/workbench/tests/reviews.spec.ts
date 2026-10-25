@@ -150,7 +150,7 @@ describe("P07 Review Inbox", () => {
 
     // 共享页头：名称 + 范围说明 + 首屏动作，不再是页面自带的内联标题块。
     const head = mounted.wrapper.get('[data-testid="review-page-head"]');
-    expect(head.get("h1").text()).toBe("等待你的判断");
+    expect(head.get("h1").text()).toBe("验证、审批与完成");
     expect(head.get(".page-head-meta").text()).toContain("1 项请求");
     expect(head.get('[data-testid="review-refresh"]').exists()).toBe(true);
 
@@ -342,7 +342,7 @@ describe("P07 Review Inbox", () => {
   it("示例模式展示只读请求，不提供可提交决定", async () => {
     const mounted = await mountWorkbench("/reviews");
     unmount = mounted.unmount;
-    expect(mounted.wrapper.text()).toContain("等待你的判断");
+    expect(mounted.wrapper.text()).toContain("验证、审批与完成");
     expect(mounted.wrapper.text()).toContain("只读示例");
     expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
   });

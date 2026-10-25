@@ -261,8 +261,22 @@ Migration：`0140_project_member_conversations.sql`，新增 `project_member_con
 
 **会话表用部分唯一索引表达「一线程」。** `(project_id, member_id) WHERE kind='DIRECT'`、`(project_id) WHERE kind='GROUP'`；`CHECK` 保证 DIRECT 必有成员、GROUP 必无。`close_reason` 是受限词表（六种终止原因），关闭保留记录、可重开，revision 走 CAS。
 
-**消息表只存协作记录。** `sender_kind ∈ {HUMAN, MEMBER}`（MEMBER 回信路径随包 C）；`recipient_member_ids jsonb` 数组是定向事实（私聊恒对方、群聊空集＝未定向由协调者接住）；`intent` 六种，`HANDOFF` 携带键词表封闭的 `handoff_payload`（只引用，`linked_task_id`/`linked_run_id` 为外键）；`processing_status` 词表已含 `CLAIMED/PROCESSED/FAILED` 但消费循环未实现（包 C），当前只落 `RECORDED`。`UNIQUE (conversation_id, seq)` 兜底 seq 竞争。
+**消息表只存协作记录。** `sender_kind ∈ {HUMAN, MEMBER}`（MEMBER 回信路径随包 C）；`recipient_member_ids jsonb` 数组是定向事实（私聊恒对方、群聊空集＝未定向由协调者接住）；`intent` 六种，`HANDOFF` 携带键词表封闭的 `handoff_payload`（只引用，`linked_task_id`/`linked_run_id` 为外键）；`processing_status` 词表含 `CLAIMED/PROCESSED/FAILED`，消费列与唤醒循环随 [0141 / §116](#116-0141-成员消息唤醒与消费结算2026-10-25adr-034-包-c-第一片) 接入。`UNIQUE (conversation_id, seq)` 兜底 seq 竞争。
 
 **权限。** `GRANT SELECT, INSERT, UPDATE`（无 DELETE）：讨论与消息不物理删除，终止靠状态列。
 
-**回滚。** 纯新增表、无回填；DROP 前须确认包 C 尚未开始消费（processing_status 尚无 CLAIMED 行）。
+**回滚。** 纯新增表、无回填；DROP 前须确认 0141 的消费循环已先回退（无 CLAIMED/终态行）。
+
+## 116. 0141 成员消息唤醒与消费结算（2026-10-25，ADR-034 包 C 第一片）
+
+Migration：`0141_member_wakeup_processing.sql`。**Breaking Change: No**（新列允许空/默认值，新枚举值旧客户端不感知）。
+
+**消息表补消费事实。** `claimed_by/claimed_at/lease_expires_at`（在途领取与租约）、`attempts`（崩溃重试计数）、`processed_at/failure_reason`（结算结果）。`ck_member_message_processing` 把领取/结算事实与 `processing_status` 绑死：RECORDED 不携带任何在途事实；CLAIMED 必须有租约且未结算；两个终态必须有结算时间，失败原因只属于 FAILED。部分索引 `project_member_messages_wakeup` 只覆盖 RECORDED 行的唤醒扫描。
+
+**领取与结算全部走条件更新（CAS）。** RECORDED→CLAIMED 是唯一领取点（`claimed_by` 参与终态 CAS），重复扫描与并发巡检不重复领取；过期租约清扫在尝试上限内退回 RECORDED、超上限按 `WAKEUP_ATTEMPTS_EXHAUSTED` 失败收口。唤醒裁决只在应用层（`member-wakeup.ts`）：私聊→对方、群聊定向→指定成员、未定向→协调者，一次只唤醒一个成员；**只有用户发送的消息是唤醒触发**，成员回信（未定向）不进候选——互相回应不形成唤醒链由结构保证。
+
+**model_calls 新增无作用域 kind 取值 `MEMBER`**（沿用 0091 给 COMPOSER 扩枚举的模式）：成员唤醒是一次真实模型调用，必须进既有账本（额度不上限不等于不计量）；新列 `member_message_id` 指回触发的消息行，`ck_model_calls_kind_origin` 要求 MEMBER 行携带该列且其他作用域全空。与 VERIFY/COMPOSER 一样不占 Run/会话预算。
+
+**权限。** 两张表的新列逐列补 `SELECT/INSERT/UPDATE`（新列不继承表级授权）。
+
+**回滚。** 回退需先删除 'MEMBER' 调用证据行并删除新列/约束；在途 CLAIMED 行应在回退前由应用收敛到终态。

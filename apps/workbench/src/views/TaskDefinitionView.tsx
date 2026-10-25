@@ -78,7 +78,7 @@ function FixtureTaskDefinitionView() {
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">任务定义</p><h1>正在读取任务定义</h1><p>示例提案尚未被接受或委托。</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">任务定义</p><h1>暂时无法显示任务定义</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!project) return <section className="page-state"><p className="eyebrow">任务定义</p><h1>尚未提供任务定义示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取或写入其他任务的定义。</p></section>;
-  return <section className="skill-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="task-definition-page-head"
+  return <section className="skill-page pv-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="task-definition-page-head"
     title="先说清楚，怎样才算完成" meta={project.task.title} lede={project.task.description}
     status={<span className="metadata-row">任务状态：{taskStatusLabels[project.task.status]} <span aria-hidden="true">|</span> 执行模式：{interactionModeLabels[project.task.mode]} <span aria-hidden="true">|</span> 当前执行者：{executorLabels[project.task.executor]}</span>} />
     <section className="surface-panel thought-panel" aria-labelledby="original-intent"><h2 id="original-intent">你的原始想法</h2><blockquote>{project.task.originalIntent}</blockquote></section>

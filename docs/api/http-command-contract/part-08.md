@@ -200,3 +200,20 @@ ADR-034 包 B 的服务端记录面：消息只是协作记录，投递不等于
 **讨论终止是会话级状态。** `CLOSED` 需要原因码（`RESOLVED / INSUFFICIENT_INFO / NO_NEW_EVIDENCE / NEEDS_USER_DECISION / TECHNICAL_BOUNDARY / NO_PROGRESS`）；关闭后拒发消息；`OPEN` 可重开（清原因、revision CAS）。关闭不是删除：记录与消息全部保留。多个 Agent 仅凭互相回复不能无限唤醒——无新证据的讨论由协调者或用户按原因码收口（执行侧边界归包 C）。
 
 **闸门与隔离。** 开私聊要求成员 `ACTIVE`；发送时再次核对（停用后拒发、拒开新私聊，历史仍可读）；项目归档拒绝开会话与发消息；跨 Workspace 读写一律 `404`。消息不给成员任何额外权限：不产生执行权、不代答验收、不自动改写确认事实。审计事件 `MEMBER_MESSAGE_SENT` / `MEMBER_CONVERSATION_STATUS_CHANGED`。
+
+### 10.115 一键启用内置插件（2026-10-25 源码实现）
+
+**Breaking Change: No。** 新增一个命令端点；两处既有校验放宽（见下），不改变任何既有端点的请求/响应形状。
+
+背景是两处事实缺口：`POST /projects/{id}/connections` 的能力白名单不含 `COMPUTER_*`/`BROWSER_*`/`GITHUB_READ`，高级表单选了插件能力提交即 422——插件连接此前**没有任何可用登记入口**；浏览器策略经 `policyScope` 落成目录前缀，与准入端 `browser://<origin>` 目标永远匹配不上（死策略）。本节同时补上入口与缺口。
+
+| 方法 | 路径（前缀 `/api/v1/workspaces/{workspace_id}`） | 命令 | 成功 | 请求体 | 回执 `result` |
+|---|---|---|---|---|---|
+| POST | `/projects/{project_id}/plugins/{plugin_key}/enable` | `EnableProjectPlugin` | `201` | `{command_id}` | `{project_id, plugin, created_connections, created_policies, blocked_disabled_connections, blocked_revoked_policies, skipped_no_resource}`（计数全为字符串） |
+
+- **`plugin_key ∈ {computer, browser, github}`**，未知值 422。`command_id` 幂等（作用域 Workspace）；重复执行（新 command_id）只补缺口，不产生第二套事实。
+- **一次命令一个短事务**：连接（缺的能力挂到一条新连接，插件能力不绑定目录/主机）＋每个 `(能力, 动作, 目标)` 一条策略。目标与准入同一语义：电脑 `computer://desktop`，浏览器 `browser://`（全部站点），GitHub 只读按项目内每个 `ACTIVE` 受管根逐目录授权（没有时 `skipped_no_resource` 计数、连接仍登记）。
+- **决定分族**：只读族（`COMPUTER_READ`/`BROWSER_READ`/`GITHUB_READ` 全部动作）直接 `AUTO`，与「打开目录即得 Git 只读」同一原则；操作族（`COMPUTER_INPUT`、`BROWSER_ACTION`、`BROWSER_COMMIT`）一律 `ASK`——即便用户事后改成 `AUTO`，非穿透适配器也在准入时降级 `ASK`（无「始终允许」）。`max_payload_bytes` 取契约上限 262144。
+- **不绕过既有撤销**：能力只有 `DISABLED` 连接时只计数 `blocked_disabled_connections`，不新建第二条；策略目标此前在历史版本出现过的动作只计数 `blocked_revoked_policies`，不自动恢复。显式 `DENY` 的 ACTIVE 策略视作已存在，不覆盖。
+- **既有端点放宽（同日）**：`POST /connections` 与 permission-policies 端点的 `capability` 联合补入 `COMPUTER_READ`/`COMPUTER_INPUT`/`GITHUB_READ`/`BROWSER_READ`/`BROWSER_ACTION`/`BROWSER_COMMIT`；permission-policies 对浏览器能力新增可选 `host`（`host[:port]`，缺省 `browser://` 即全部站点）并**拒绝** `resource_id`（浏览器策略没有受管根）。
+- 无新增 migration；审计走既有 authority 版本（写事实时 bump）。验证：`enable-project-plugin.integration.test.ts`（真实 PG + 真实 HTTP）覆盖计数、幂等重放、停用/撤销阻断、无资源跳过、能力白名单与 422。

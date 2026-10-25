@@ -45,3 +45,35 @@
 .scheduled-task-advanced .scheduled-task-schedule-row {
   margin-top: var(--relay-space-3);
 }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+
+.pv-page.scheduled-tasks-page .page-primary { padding: 0; max-width: none; }
+.pv-page.scheduled-tasks-page.page-layout { max-width: none; margin: 0; }
+.pv-page.scheduled-tasks-page .page-layout { max-width: none; margin: 0; }
+
+.pv-page .surface-panel {
+  margin-top: 13px;
+  padding: 0;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: 0 3px 15px #22553506;
+  overflow: hidden;
+}
+.pv-page .surface-panel h2 { margin: 0; padding: 14px 17px; border-bottom: 1px solid #edf1ec; font-size: 13px; color: #294635; }
+.pv-page .surface-panel > p { margin: 0; padding: 14px 17px; font-size: 12px; color: #52765e; }
+
+.pv-page .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pv-page .data-table th {
+  text-align: left; font-weight: 650; color: #7a8d80; font-size: 11px;
+  padding: 12px; border-bottom: 1px solid #e6eee7; white-space: nowrap;
+}
+.pv-page .data-table td { padding: 13px 12px; border-bottom: 1px solid #edf1ec; vertical-align: middle; font-size: 12px; color: #34523b; }
+.pv-page .data-table tr:last-child td { border-bottom: 0; }
+.pv-page .data-table td small { display: block; margin-top: 2px; font-size: 10.5px; color: #8b9a90; }
+
+.pv-page .form-actions { gap: 8px; }
+
+@media (max-width: 760px) {
+  .pv-page .data-table { min-width: 640px; display: block; overflow-x: auto; }
+}

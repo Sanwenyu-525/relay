@@ -52,6 +52,10 @@ const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
   { kind: 'AGENT_SUBAGENT', state: { role: 'INVESTIGATE', objective: '核对 src 下的改动',
     scope: [], baseline: null, output_requirements: '给出发现、证据位置与直接结论',
     required: false } },
+  // 0141：长期成员被定向消息唤醒的回信轮次。同一条互锁——登记在案就必须能被选中。
+  { kind: 'MEMBER_WAKEUP', state: { member_name: '开发成员', role_key: 'DEVELOPMENT',
+    duties: '在授权范围内实施修改', project_title: '唤醒项目', conversation_kind: 'GROUP',
+    undirected: true } },
   { kind: 'LEARNING_PARTNER', state: learningState, material: [] },
   { kind: 'SKILL', skill: fixtureSkill },
   { kind: 'METHOD', method: fixtureMethod, action: null, readTools: false },

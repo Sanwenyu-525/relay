@@ -195,6 +195,12 @@ const ALL_MIGRATIONS = [
   '0135_workspace_context_budget',
   '0136_artifact_task_workspace_scope',
   '0137_session_delete_memory_capture_grants',
+  // 0138–0141（2026-10-25 补齐）：0138–0140 为定时任务冻结、长期成员与成员会话
+  // （并行会话实施时未同步本清单），0141 为成员唤醒消费。同一排序规则。
+  '0138_scheduled_task_occurrence_freeze',
+  '0139_project_agent_members',
+  '0140_project_member_conversations',
+  '0141_member_wakeup_processing',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

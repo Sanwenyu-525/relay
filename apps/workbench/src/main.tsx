@@ -7,6 +7,8 @@ import { resolveMotionPreference } from "./lib/motionPreference";
 import { createWorkbenchRouter } from "./router";
 import "./styles.css";
 import "./migrated-scoped.css";
+// 原型复刻页面的设计语言层：全部 scope 在 .pv-page 下，见 views/proto/protoPage.css。
+import "./views/proto/protoPage.css";
 
 installDesignTokens();
 // 运行期动效总开关的初值。关动效只改展示：不发暂停或取消命令，也不隐藏状态文字与控制入口。

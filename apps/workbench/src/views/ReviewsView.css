@@ -86,3 +86,61 @@
 @media (max-height: 40rem) {
   .review-page .review-columns:has(> .review-reading) > .review-detail { position: static; max-height: none; overflow: visible; }
 }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page；数值取自原型 relay-v528-styles） ───────── */
+
+.pv-page .review-filters { gap: 7px; }
+.pv-page .review-filters > button {
+  font-size: 12px;
+  padding: 7px 10px;
+  min-height: 34px;
+  border: 1px solid #d6e5d8;
+  border-radius: 9px;
+  background: #fff;
+  color: #53705b;
+}
+.pv-page .review-filters > button[aria-pressed="true"] { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .review-filters > button span { opacity: .7; font-variant-numeric: tabular-nums; }
+
+.pv-page .review-list-item {
+  text-align: left;
+  border: 1px solid #e3ebe4;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 15px #22553506;
+  padding: 12px 14px;
+  margin-bottom: 9px;
+  gap: 8px;
+}
+.pv-page .review-list-item:hover { border-color: #c6ddcc; }
+.pv-page .review-list-item--selected { border-color: #9ccbab; background: #f7fcf8; }
+.pv-page .review-list-item strong { font-size: 12.5px; color: #33533d; }
+.pv-page .review-list-meta { font-size: 10.5px; color: #8b9a90; gap: 8px; }
+.pv-page .review-kind { text-transform: none; color: #759282; font-weight: 650; }
+
+.pv-page .review-detail,
+.pv-page .review-reading {
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 15px #22553506;
+}
+.pv-page .review-detail-heading h2,
+.pv-page .review-reading h2 { font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .review-reason { font-size: 12px; color: #486452; }
+.pv-page .review-request-facts dt { font-size: 11px; color: #899c8d; }
+.pv-page .review-request-facts dd { font-size: 12px; color: #486452; }
+
+@media (max-width: 760px) {
+  .pv-page .review-columns { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* pv 容器接管留白，内层不再二次加 padding */
+.pv-page .review-primary,
+.pv-page.review-page .review-detail,
+.pv-page .review-reading { padding: 0; }
+.pv-page.review-page .review-detail { border-top: none; margin-top: 13px; }
+.pv-page .review-reading { padding: 15px 17px; margin-top: 13px; }
+.pv-page .review-list { margin-top: 13px; }
+.pv-page .review-filters { border-top: none; margin-bottom: 12px; padding-top: 0; }
+.pv-page .review-jump { border-top: none; }

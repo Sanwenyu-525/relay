@@ -26,7 +26,7 @@ V1 对实质验收契约变更采用保守策略：记录变更并暂停/安全�
 
 Hard / Rule / Semantic 是职责分类，不强制每个任务都执行三个昂贵步骤。能确定性判定的用程序；重要过程约束在动作前阻止，并用执行证据审计；语义质量使用独立上下文判断，必要时交给人。
 
-普通 `SEMANTIC` criterion 只使用冻结的真实语义模型检查器；未配置时转为待人工提供证据，不能静默选用 Fake。HARD SEMANTIC Rule 没有真实检查器时必须阻止 Delegate。`fake-semantic-v1` 仅用于显式测试夹具，其 PASS 不构成生产 Verification 证据。
+普通 `SEMANTIC` criterion 只使用冻结的真实语义模型检查器；未配置时转为待人工提供证据，不能静默选用 Fake。HARD SEMANTIC Rule 没有真实检查器时必须阻止 Delegate。`fake-semantic-v1` 仅用于显式测试夹具，其 PASS 不构成生产 Verification 证据；完成入口还必须读取最新持久化 CheckResult，即使 Verification 汇总状态为 PASS，只要其中存在 `fake-semantic-v1` 的 PASS，就必须阻止生产 COMPLETE，且保留该结果作为不可变历史证据。
 
 | 必需检查情况 | Verification 总决策 | 后续 |
 |---|---|---|

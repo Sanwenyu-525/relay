@@ -61,7 +61,7 @@ export default function ArtifactLineageView() {
     finally { if (request === usesRequest.current) setUsesLoading(false); }
   }
 
-  return <section className="lineage-page" data-testid="artifact-lineage"><PageHeader testId="lineage-page-head"
+  return <section className="lineage-page pv-page" data-testid="artifact-lineage"><PageHeader testId="lineage-page-head"
     title="来源追溯" meta="产物来源"
     lede="这里展示这个版本在服务端确认过的直接来源；完整因果关系与正文仍以原版本和 Run 证据为准。" />
     {client === null ? <p className="warning-callout" role="status">示例数据没有真实产物来源关系。<Link to="/tasks">返回任务</Link></p> : <>

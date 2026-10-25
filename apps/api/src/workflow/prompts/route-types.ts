@@ -79,6 +79,15 @@ export type RuntimePromptRoute =
    * （角色、任务说明、范围、基线、输出要求），由调用方读出后原样交给模板。
    */
   | { readonly kind: 'AGENT_SUBAGENT'; readonly state: JsonObject }
+  /**
+   * 0141 / ADR-034 包 C：长期成员被一条定向消息唤醒后的一次回信轮次。
+   *
+   * `state` 是服务端保存的成员身份（名称、角色、职责）与讨论事实（项目、会话类型、
+   * 是否未定向），由调用方读出后原样交给模板；模板不查数据库。回信只是协作记录，
+   * 不产生 Task/Run、验收或权限变更——这与子 Agent 路由同一纪律，但成员是跨会话
+   * 稳定身份，不是一次性委派。
+   */
+  | { readonly kind: 'MEMBER_WAKEUP'; readonly state: JsonObject }
   | { readonly kind: 'LEARNING_PARTNER'; readonly state: JsonObject;
       readonly material: readonly JsonObject[] }
   | { readonly kind: 'SKILL'; readonly skill: FrozenSkill }
@@ -131,6 +140,7 @@ export type RuntimeRouteId =
   | 'AGENT_PLAN_MODE'
   | 'AGENT_GOAL_ROUND'
   | 'AGENT_SUBAGENT'
+  | 'MEMBER_WAKEUP'
   | 'LEARNING_PARTNER'
   | 'SKILL'
   | 'METHOD'
@@ -144,7 +154,8 @@ export type RuntimeRouteId =
   | 'COMPOSER_POLISH'
   | 'CONNECTION_VERIFY';
 
-export type RuntimeRouteGroup = 'CONVERSATION' | 'INTERPRETATION' | 'RUN' | 'VERIFICATION' | 'COMPOSER';
+export type RuntimeRouteGroup = 'CONVERSATION' | 'INTERPRETATION' | 'RUN' | 'VERIFICATION' | 'COMPOSER'
+  | 'MEMBER';
 
 /**
  * 一条路由的登记元数据。
@@ -215,6 +226,10 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',
     summary: '有界子 Agent 一次只读执行：冻结委派事实 + 只读边界，收尾输出 {reply, findings, conclusion}' },
+  MEMBER_WAKEUP: { routeId: 'MEMBER_WAKEUP', group: 'MEMBER',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/conversation-prompts.ts',
+    summary: '长期成员被定向消息唤醒：成员身份与职责 + 协作记录边界，只输出回信正文（0141）' },
   LEARNING_PARTNER: { routeId: 'LEARNING_PARTNER', group: 'CONVERSATION',
     templateVersion: '1.0.0', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/conversation-prompts.ts',

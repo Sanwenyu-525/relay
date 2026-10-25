@@ -9,6 +9,7 @@
 | 开发与启动 | [打开](../../README.md) | 原开发命令和 Workspace 初始化正文 |
 | 本机部署 | [打开](本机部署.md) | 配置、数据库、运行包和维护边界；设计/实施状态按原章节 |
 | 禅道接入 | [打开](禅道接入.md) | 当前问题登记与安全登录入口 |
+| 开发工具 Skills | [共享入口与检查](developer-skills.md) | 五工具真实入口、固定来源、备份与只读检查；不属于产品运行时 Skills |
 | Windows 决策 | [打开](../decisions/ADR-007-windows-desktop.md) | 窗口、安装与宿主目标 |
 | 备份恢复设计与根因 | [打开](../development/m07-backup-recovery.md) | 维护 Owner 与恢复门槛 |
 

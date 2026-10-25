@@ -340,12 +340,12 @@ export default function CreateScheduledTaskView() {
     </label>
   );
 
-  if (editing && loadingDetail && detail === null) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
-    <PageHeader testId="scheduled-task-create-head" title="编辑定时任务" meta="正在读取" lede="正在读取这条定时任务的当前设置…" />
+  if (editing && loadingDetail && detail === null) return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
+    <PageHeader testId="scheduled-task-create-head" title="编辑定时任务" overline="Edit Schedule" meta="正在读取" lede="正在读取这条定时任务的当前设置…" />
     <p role="status">正在读取定时任务…</p>
   </div></div>;
-  if (editing && detail === null) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
-    <PageHeader testId="scheduled-task-create-head" title="编辑定时任务" meta="读取失败" lede="这条定时任务当前无法读取，先核对后再修改。" />
+  if (editing && detail === null) return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
+    <PageHeader testId="scheduled-task-create-head" title="编辑定时任务" overline="Edit Schedule" meta="读取失败" lede="这条定时任务当前无法读取，先核对后再修改。" />
     <p className="action-error" role="alert">{loadError}</p>
     <div className="form-actions">
       <button className="secondary-button" type="button" onClick={() => setReloadToken((token) => token + 1)}>重新读取</button>
@@ -355,7 +355,7 @@ export default function CreateScheduledTaskView() {
 
   const statusLabel = detail === null ? "" : detail.status === "ENABLED" ? "启用中"
     : detail.status === "PAUSED" ? "已暂停" : detail.status === "DISABLED" ? "已停用" : "已到期";
-  return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
+  return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-create-head"
       title={editing ? "编辑定时任务" : "新建定时任务"}
       meta={editing ? `编辑 · ${statusLabel}` : "到点自动创建并启动任务"}

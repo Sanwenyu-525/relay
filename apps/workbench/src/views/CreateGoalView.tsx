@@ -217,7 +217,7 @@ export default function CreateGoalView({ client, onCancel }: {
     </div>
   </section>;
 
-  return <section className="skill-page" data-testid="goal-create-view">
+  return <section className="skill-page pv-page" data-testid="goal-create-view">
     <div className="page-layout"><div className="page-primary">
       <header className="page-head">
         <p className="eyebrow"><Target aria-hidden="true" />目标</p>

@@ -1,0 +1,657 @@
+/*
+ * 原型复刻页面设计语言（V5.28 基线）。
+ *
+ * 全部样式 scope 在 `.pv-page` 下：加上该类的页面（除 /agent 工作台外）按根目录
+ * HTML 原型的视觉规范呈现，工作台与其余未迁移页面不受影响。
+ * 原型 class 对照：v528-view→本文件容器，v528-card→.pv-card，v528-stat→.pv-stat，
+ * v528-chip→.pv-chip，v528-note→.pv-note，v528-row→.pv-row，v528-table→.pv-table，
+ * v528-field→.pv-field，v528-btn→共享按钮类的作用域覆写。
+ * 数值取自原型 relay-v528-styles 样式块；颜色不用 --relay-* token——那是工作台
+ * 契约，本层的色板按原型原值固定（差异见 docs/frontend/design-system 分册）。
+ */
+
+.pv-page {
+  /* 色板：原型 relay-v528-styles :root 四色 + 组件取值 */
+  --pv-ink: #263f31;
+  --pv-green: #23684b;
+  --pv-line: #dfe9df;
+  --pv-subtle: #f6faf7;
+  --pv-muted: #819589;
+  --pv-row-sub: #8b9a90;
+  --pv-primary: #23704d;
+  --pv-primary-hover: #165b3d;
+  --pv-btn-border: #d6e4d8;
+  --pv-btn-ink: #476b54;
+  --pv-btn-hover-bg: #f0f7f1;
+  --pv-btn-hover-border: #a3c8ae;
+  --pv-card-shadow: 0 3px 15px #22553506;
+  --pv-chip-ink: #4b7757;
+  --pv-chip-border: #dae9dd;
+  --pv-chip-bg: #f2f8f3;
+  --pv-warn-ink: #a07536;
+  --pv-warn-border: #f0dfc1;
+  --pv-warn-bg: #fff6e7;
+  --pv-danger-ink: #aa5347;
+  --pv-danger-border: #f5d6d0;
+  --pv-danger-bg: #fff1ed;
+  --pv-focus-ring: #9dd3ad;
+
+  width: min(1220px, 100%);
+  margin: 0 auto;
+  padding: 24px 30px 60px;
+  min-height: 100%;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--pv-ink);
+}
+
+.pv-page *,
+.pv-page *::before,
+.pv-page *::after { box-sizing: border-box; }
+
+/* ── 页头：overline + 紧凑标题 + 说明句 + 右侧动作（原型 v528-page-head） ── */
+.pv-page .page-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin: 2px 0 21px;
+}
+.pv-page .page-head-main { display: block; flex: 1 1 auto; }
+.pv-page .page-head-overline {
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 10px;
+  color: #759282;
+  font-weight: 700;
+}
+.pv-page .page-head-title { margin: 0; }
+.pv-page .page-head-title > h1 {
+  font-size: 22px;
+  margin: 5px 0;
+  letter-spacing: -.035em;
+  font-weight: 700;
+  color: #1e3529;
+}
+.pv-page .page-head-title > h2 { font-size: 17px; }
+.pv-page .page-head-meta,
+.pv-page .page-head-lede {
+  font-size: 12px;
+  line-height: 1.75;
+  color: #819287;
+  margin: 0;
+  max-width: 730px;
+}
+.pv-page .page-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── 按钮：尺寸与色板按原型 v528-btn，沿用共享类名与语义（danger 分级不变）。
+   :not(.rail-trigger) 与 [hidden] 守卫：rail-trigger 依赖媒体查询切换 display，
+   [hidden] 依赖 UA 的 display:none——两者都不能被这里的 display:inline-flex 压掉。 ── */
+.pv-page .primary-button:not(.rail-trigger),
+.pv-page .secondary-button:not(.rail-trigger),
+.pv-page .danger-button:not(.rail-trigger) {
+  border: 1px solid var(--pv-btn-border);
+  background: #fff;
+  color: var(--pv-btn-ink);
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  white-space: nowrap;
+}
+.pv-page [hidden] { display: none !important; }
+.pv-page .primary-button { background: var(--pv-primary); color: #fff; border-color: var(--pv-primary); }
+.pv-page .primary-button:hover:not(:disabled) { background: var(--pv-primary-hover); border-color: var(--pv-primary-hover); }
+.pv-page .secondary-button:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); color: #206846; }
+.pv-page .danger-button { color: #a14f41; border-color: #efdbd6; background: #fff; }
+.pv-page .danger-button:hover:not(:disabled) { background: #fdf3f0; border-color: #e3bfb6; }
+.pv-page .danger-button:active:not(:disabled) { background: #f6e2dc; }
+.pv-page .primary-button:focus-visible,
+.pv-page .secondary-button:focus-visible,
+.pv-page .danger-button:focus-visible,
+.pv-page .pv-filter:focus-visible { outline: 3px solid var(--pv-focus-ring); outline-offset: 1px; }
+.pv-page .primary-button:disabled,
+.pv-page .secondary-button:disabled,
+.pv-page .danger-button:disabled { opacity: .5; cursor: not-allowed; }
+.pv-page .text-button { color: #246c49; font-weight: 650; font-size: 12px; }
+.pv-page .text-button:hover:not(:disabled) { text-decoration: underline; }
+.pv-page .secondary-button.secondary-button--compact { min-height: 30px; padding: 4px 10px; }
+
+/* ── 卡片（v528-card） ── */
+.pv-card {
+  background: #fff;
+  border: 1px solid var(--pv-line);
+  border-radius: 13px;
+  margin: 13px 0;
+  overflow: hidden;
+  box-shadow: var(--pv-card-shadow);
+}
+.pv-card-h {
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf1ec;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.pv-card-h strong { font-size: 13px; color: #294635; display: flex; align-items: center; gap: 8px; }
+.pv-card-h small { color: #8b9c90; font-size: 11px; }
+.pv-card-b { padding: 15px 17px; }
+.pv-card.pad { padding: 17px; }
+.pv-card > .pv-card-b:first-child { padding-top: 15px; }
+
+/* ── 统计格（v528-stats / v528-stat） ── */
+.pv-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+  margin: 15px 0;
+  padding: 0;
+  list-style: none;
+}
+.pv-stats.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pv-stat {
+  border: 1px solid var(--pv-line);
+  background: #fff;
+  border-radius: 12px;
+  padding: 15px;
+}
+.pv-stat > span { display: block; font-size: 11px; color: #85998c; }
+.pv-stat strong { display: block; font-size: 22px; color: #286849; margin: 6px 0 3px; letter-spacing: -.02em; }
+.pv-stat strong.is-text { font-size: 18px; }
+
+/* ── 行（v528-row + v528-illustration） ── */
+.pv-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 15px;
+  border-bottom: 1px solid #edf1ec;
+  min-width: 0;
+}
+.pv-row:last-child { border-bottom: 0; }
+.pv-row-title { font-weight: 650; font-size: 12px; color: #33533d; }
+.pv-row-sub { font-size: 11px; color: var(--pv-row-sub); line-height: 1.65; margin-top: 4px; }
+.pv-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pv-row-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pv-illustration {
+  display: grid;
+  place-items: center;
+  background: #eaf5ec;
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  color: #36724e;
+  flex: 0 0 auto;
+}
+.pv-illustration svg { width: 16px; height: 16px; }
+
+/* ── Chip（v528-chip） ── */
+.pv-chip {
+  display: inline-flex;
+  padding: 4px 8px;
+  border: 1px solid var(--pv-chip-border);
+  border-radius: 7px;
+  background: var(--pv-chip-bg);
+  color: var(--pv-chip-ink);
+  font-size: 10px;
+  white-space: nowrap;
+  align-items: center;
+  gap: 5px;
+}
+.pv-chip.warn { background: var(--pv-warn-bg); color: var(--pv-warn-ink); border-color: var(--pv-warn-border); }
+.pv-chip.danger { background: var(--pv-danger-bg); color: var(--pv-danger-ink); border-color: var(--pv-danger-border); }
+.pv-chip.muted { background: var(--pv-subtle); color: var(--pv-muted); }
+
+/* ── 提示条（v528-note / warning / error / success） ── */
+.pv-note {
+  border: 1px solid #dcebdd;
+  background: #f3f9f4;
+  border-radius: 11px;
+  padding: 11px 14px;
+  color: #52765e;
+  line-height: 1.75;
+  font-size: 11px;
+  margin: 12px 0;
+}
+.pv-note strong { color: #3f6350; }
+.pv-note a { color: #246c49; }
+.pv-warning {
+  border: 1px solid #ecd8b5;
+  background: #fffbf2;
+  border-radius: 11px;
+  padding: 12px 15px;
+  color: #91672d;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 11px 0;
+}
+.pv-error {
+  border: 1px solid #eccdcc;
+  background: #fff7f5;
+  color: #a14f44;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 11px 0;
+}
+.pv-success {
+  border: 1px solid #c9e3d0;
+  background: #edf7f0;
+  color: #246d45;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 11px 0;
+}
+
+/* ── 网格与页签（v528-grid / v528-tabs） ── */
+.pv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.pv-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pv-tabs { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 14px 0; }
+
+/* ── 筛选按钮（v528-filter，active 形态取自 v528-btn.active） ── */
+.pv-filter {
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid #d6e5d8;
+  border-radius: 9px;
+  background: #fff;
+  color: #53705b;
+  cursor: pointer;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+}
+.pv-filter:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
+.pv-filter.active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-inline-filter { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+
+/* ── 步骤条（v528-steps） ── */
+.pv-steps { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pv-step {
+  font-size: 10px;
+  color: #66816e;
+  border: 1px solid #d8e6da;
+  padding: 6px 9px;
+  border-radius: 7px;
+}
+.pv-step.is-now { background: #e6f3e9; color: #1f6545; border-color: #a8d1b3; }
+
+/* ── 表格（v528-table） ── */
+.pv-table-wrap { overflow-x: auto; }
+.pv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pv-table th {
+  text-align: left;
+  font-weight: 650;
+  color: #7a8d80;
+  font-size: 11px;
+  padding: 12px;
+  border-bottom: 1px solid #e6eee7;
+  white-space: nowrap;
+}
+.pv-table td { padding: 13px 12px; border-bottom: 1px solid #edf1ec; vertical-align: middle; }
+.pv-table tr:last-child td { border-bottom: 0; }
+.pv-link {
+  border: 0;
+  background: transparent;
+  font-weight: 650;
+  color: #246c49;
+  text-align: left;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-link:hover { text-decoration: underline; }
+
+/* ── 表单（v528-field） ── */
+.pv-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.pv-field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #5c7764; font-weight: 650; margin: 5px 0; }
+.pv-field.wide { grid-column: 1 / -1; }
+.pv-field > span { display: block; }
+.pv-field input,
+.pv-field select,
+.pv-field textarea {
+  border: 1px solid #d7e4d8;
+  border-radius: 8px;
+  padding: 10px 11px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #34523b;
+  background: #fff;
+  min-width: 0;
+  width: 100%;
+  outline: none;
+  font-family: inherit;
+}
+.pv-field textarea { resize: vertical; min-height: 75px; line-height: 1.75; }
+.pv-field input:focus,
+.pv-field textarea:focus,
+.pv-field select:focus { border-color: #69a77b; box-shadow: 0 0 0 3px #eaf6ed; }
+.pv-field input:disabled,
+.pv-field select:disabled,
+.pv-field textarea:disabled { background: #f4f7f4; color: var(--pv-muted); cursor: not-allowed; }
+.pv-sep { height: 1px; background: #edf1ed; margin: 13px 0; }
+.pv-weekdays { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.pv-weekdays label {
+  border: 1px solid #dde8de;
+  border-radius: 8px;
+  padding: 8px 9px;
+  font-size: 11px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-weight: 400;
+  color: #46604e;
+  cursor: pointer;
+}
+.pv-weekdays input { accent-color: #267a52; margin: 0; }
+
+/* ── 键值明细（v528-proof-grid 的 dl 形态） ── */
+.pv-dl { margin: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; font-size: 11px; }
+.pv-dl dt { color: #899c8d; }
+.pv-dl dd { margin: 0; overflow-wrap: anywhere; color: #486452; }
+.pv-dl.wide { grid-template-columns: minmax(0, 1fr); }
+
+/* ── 验收清单（v528-checklist） ── */
+.pv-checklist { display: flex; flex-direction: column; gap: 9px; margin: 12px 0; }
+.pv-checklist label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #fbfdfb;
+  border: 1px solid #e9f0e9;
+  border-radius: 9px;
+  padding: 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-checklist label:has(input:disabled) { cursor: not-allowed; color: var(--pv-muted); }
+.pv-checklist input { margin-top: 3px; accent-color: #267a52; }
+
+/* ── 空态（v528-empty / v528-mini-empty） ── */
+.pv-empty { padding: 28px; text-align: center; color: #91a295; font-size: 12px; }
+.pv-mini-empty { font-size: 11px; color: #829588; border: 1px dashed #dce9de; padding: 13px; border-radius: 9px; text-align: center; }
+
+/* ── 进度条（V5.11 v511-progress 延续） ── */
+.pv-progress { height: 6px; border-radius: 999px; background: #e4eee5; overflow: hidden; }
+.pv-progress > span { display: block; height: 100%; border-radius: 999px; background: #2c7a52; }
+
+/* ── 目标横幅（v511-goal-banner） ── */
+.pv-banner {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: #f4faf5;
+  border: 1px solid #e2efe4;
+  border-radius: 13px;
+  padding: 16px 18px;
+}
+.pv-banner .pv-banner-symbol {
+  display: grid;
+  place-items: center;
+  background: #e4f2e8;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #2f6c4a;
+  flex: 0 0 auto;
+}
+.pv-banner .pv-banner-symbol svg { width: 20px; height: 20px; }
+.pv-banner strong { font-size: 13px; color: #294635; display: block; }
+.pv-banner p { margin: 3px 0 0; font-size: 11px; color: #7f948a; line-height: 1.65; }
+
+/* ── 作用域内的共享辅助类微调：helper/error 等与原型字号对齐 ── */
+.pv-page .helper-text { font-size: 11px; color: var(--pv-muted); }
+.pv-page .eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #759282; font-weight: 700; }
+.pv-page .warning-callout {
+  border: 1px solid #ecd8b5;
+  background: #fffbf2;
+  border-radius: 11px;
+  padding: 12px 15px;
+  color: #91672d;
+  font-size: 12px;
+  margin: 11px 0;
+}
+.pv-page .action-error {
+  border: 1px solid #eccdcc;
+  background: #fff7f5;
+  color: #a14f44;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  margin: 11px 0;
+}
+.pv-page .receipt-message {
+  border: 1px solid #c9e3d0;
+  background: #edf7f0;
+  color: #246d45;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  margin: 11px 0;
+}
+.pv-page .subnav { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pv-page .subnav-item {
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid #d6e5d8;
+  border-radius: 9px;
+  background: #fff;
+  color: #53705b;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+}
+.pv-page .subnav-item:hover { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
+.pv-page .subnav-item--active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .subnav-count { color: inherit; opacity: .75; }
+.pv-page .page-explanation > summary { color: #7a8d80; font-size: 11px; cursor: pointer; }
+.pv-page .page-explanation > summary::marker { color: #2c7a52; }
+
+/* ── 目标卡（V5.11 goals 页的两列卡形态） ── */
+.pv-goal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e3ebe4;
+  border-radius: 14px;
+  box-shadow: 0 4px 18px #203b2810;
+}
+.pv-goal-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pv-goal-card__rev { color: #91a096; font-size: 10px; }
+.pv-goal-card__title {
+  color: #2d4937;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.pv-goal-card__title:hover { text-decoration: underline; text-underline-offset: .2em; }
+.pv-goal-card__desc { margin: 0; color: #84948a; font-size: 11px; line-height: 1.65; }
+.pv-goal-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+.pv-goal-card__footer small { color: #91a096; font-size: 10px; }
+.pv-goal-card__open {
+  border: 0;
+  background: none;
+  color: #3c6c54;
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pv-goal-card__open:hover { text-decoration: underline; text-underline-offset: .2em; }
+
+/* ── 分区卡（resume-section：Goal 详情/项目恢复等页的分区在 pv 皮肤下统一卡片化） ── */
+.pv-page .resume-section {
+  margin-top: 0;
+  padding: 0 17px 15px;
+  background: #fff;
+  border: 1px solid var(--pv-line);
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+  overflow: hidden;
+}
+.pv-page .resume-section > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -17px 12px;
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf1ec;
+  font-size: 13px;
+  font-weight: 700;
+  color: #294635;
+}
+.pv-page .resume-section > h2 small { font-size: 11px; color: #8b9c90; font-weight: 400; }
+.pv-page .resume-section .run-list > li {
+  padding: 11px 0;
+  border-bottom: 1px solid #f0f3f0;
+  font-size: 12px;
+}
+.pv-page .resume-section .run-list > li:last-child { border-bottom: 0; }
+.pv-page .resume-section .run-list > li > small {
+  display: block;
+  margin-top: 2px;
+  color: #8b9a90;
+  font-size: 10.5px;
+}
+.pv-page .resume-section p { font-size: 12px; }
+.pv-page .resume-section .helper-text { font-size: 11px; }
+
+/* Goal 详情页：把「编辑目标」等分区间的空隙与页宽交给 pv 容器 */
+.pv-page .page-layout { max-width: none; padding: 0; margin: 0; }
+.pv-page .page-layout > .page-primary { max-width: none; }
+
+/* ── 数据表（data-table 行列表在 pv 皮肤下收紧为原型的表格密度） ── */
+.pv-page .data-row {
+  min-height: 0;
+  padding: 12px 10px;
+  border-bottom: 1px solid #edf1ec;
+}
+.pv-page .data-row--head { border-bottom: 1px solid #e6eee7; }
+.pv-page .data-row--head .data-cell {
+  font-size: 11px;
+  font-weight: 650;
+  color: #7a8d80;
+}
+.pv-page .data-row--interactive:hover { background: #f7fbf8; }
+.pv-page .data-cell strong {
+  font-size: 12px;
+  font-weight: 650;
+  color: #33533d;
+}
+.pv-page .data-cell small { font-size: 10.5px; color: #8b9a90; }
+.pv-page .data-cell--meta { font-size: 11px; color: #7f948a; }
+.pv-page .list-count-note,
+.pv-page .list-footer-note { font-size: 11px; color: #829588; }
+
+/* ── 筛选与搜索控件（pv 皮肤对齐原型 12px 控件） ── */
+.pv-page .filter-field { font-size: 11px; color: #5c7764; font-weight: 650; }
+.pv-page .filter-field select {
+  font-size: 12px;
+  font-weight: 400;
+  border-color: #d7e4d8;
+  border-radius: 8px;
+  color: #34523b;
+}
+.pv-page .search-field {
+  border-color: #d7e4d8;
+  border-radius: 8px;
+}
+.pv-page .search-field input { font-size: 12px; }
+
+/* ── 通用表单控件（.field / .create-form 在 pv 皮肤下对齐原型 12px 控件） ── */
+.pv-page .field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #5c7764; font-weight: 650; }
+.pv-page .field-label { display: block; }
+.pv-page .field input,
+.pv-page .field select,
+.pv-page .field textarea,
+.pv-page .create-form input,
+.pv-page .create-form select,
+.pv-page .create-form textarea {
+  border: 1px solid #d7e4d8;
+  border-radius: 8px;
+  padding: 10px 11px;
+  font-size: 12px;
+  color: #34523b;
+  background: #fff;
+}
+.pv-page .field input:focus,
+.pv-page .field select:focus,
+.pv-page .field textarea:focus,
+.pv-page .create-form input:focus,
+.pv-page .create-form select:focus,
+.pv-page .create-form textarea:focus { border-color: #69a77b; box-shadow: 0 0 0 3px #eaf6ed; outline: none; }
+
+/* ── 键值明细栏（rail-definition-list：设置与授权等事实行） ── */
+.pv-page .rail-definition-list { display: grid; gap: 0; margin: 0; }
+.pv-page .rail-definition-list > div {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f3f0;
+  font-size: 12px;
+}
+.pv-page .rail-definition-list > div:last-child { border-bottom: 0; }
+.pv-page .rail-definition-list dt { flex: 0 0 120px; color: #899c8d; font-size: 11px; }
+.pv-page .rail-definition-list dd { margin: 0; color: #486452; overflow-wrap: anywhere; }
+
+/* ── 状态 chip（status-chip 在 pv 皮肤下用原型 chip 形态） ── */
+.pv-page .status-chip {
+  display: inline-flex;
+  padding: 4px 8px;
+  border: 1px solid var(--pv-chip-border);
+  border-radius: 7px;
+  background: var(--pv-chip-bg);
+  color: var(--pv-chip-ink);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  align-items: center;
+  gap: 5px;
+}
+.pv-page .status-chip--success { background: var(--pv-chip-bg); color: var(--pv-chip-ink); border-color: var(--pv-chip-border); }
+.pv-page .status-chip--warning { background: var(--pv-warn-bg); color: var(--pv-warn-ink); border-color: var(--pv-warn-border); }
+.pv-page .status-chip--danger { background: var(--pv-danger-bg); color: var(--pv-danger-ink); border-color: var(--pv-danger-border); }
+.pv-page .status-chip--neutral { background: var(--pv-subtle); color: var(--pv-muted); }
+
+/* ── 响应式（原型 @1120 / @760 断点） ── */
+@media (max-width: 1120px) {
+  .pv-page { padding: 18px; }
+  .pv-stats, .pv-stats.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pv-table { font-size: 11px; }
+  .pv-table td, .pv-table th { padding: 9px 7px; }
+  .pv-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .pv-page { padding: 14px; }
+  .pv-page .page-head { flex-direction: column; }
+  .pv-grid, .pv-grid.three, .pv-form-grid { grid-template-columns: 1fr; }
+  .pv-field.wide { grid-column: 1; }
+  .pv-stats, .pv-stats.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pv-row { flex-wrap: wrap; }
+  .pv-row-right { width: 100%; justify-content: flex-start; }
+  .pv-table-wrap { overflow-x: auto; }
+  .pv-table { min-width: 640px; }
+  .pv-card-b { padding: 12px; }
+  .pv-dl { grid-template-columns: 110px minmax(0, 1fr); }
+}

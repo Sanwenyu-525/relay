@@ -5,7 +5,7 @@ import {
   addGatewayPolicyVersionCommand, copyGatewaySettingsCommand, createGatewayConnectionCommand,
   createGatewayPolicyCommand, createManagedResourceCommand,
   disableGatewayConnectionCommand, disableManagedResourceCommand,
-  revokeGatewayPolicyCommand,
+  enableProjectPluginCommand, revokeGatewayPolicyCommand,
 } from '../application/gateway-commands.js';
 import { reconcileReadonlyGatewayOperationCommand } from '../application/gateway-reconcile.js';
 import { createWebImportJob } from '../application/web-import-commands.js';
@@ -55,6 +55,14 @@ const capability = Type.Union([
   Type.Literal('GIT_READ'),
   Type.Literal('GIT_WRITE'),
   Type.Literal('CLI_RUN'),
+  // 2026-10-25：插件能力此前不在 HTTP 白名单里，高级表单选了也会被 400 拒掉——
+  // 插件连接因此没有任何可用登记入口。补全联合类型；逐动作授权仍走策略端点。
+  Type.Literal('COMPUTER_READ'),
+  Type.Literal('COMPUTER_INPUT'),
+  Type.Literal('GITHUB_READ'),
+  Type.Literal('BROWSER_READ'),
+  Type.Literal('BROWSER_ACTION'),
+  Type.Literal('BROWSER_COMMIT'),
 ]);
 const decision = Type.Union([Type.Literal('AUTO'), Type.Literal('ASK'), Type.Literal('DENY')]);
 const commandResult = Type.Record(Type.String(), Type.String());
@@ -87,6 +95,11 @@ const createResourceBody = Type.Object({ command_id: uuid, root_path: Type.Strin
 const disableResourceBody = Type.Object({ command_id: uuid, expected_revision: revision }, strict);
 /** 把来源项目的连接、受管资源与 ACTIVE 策略复制到当前项目（2026-10-19，沿用上次配置）。 */
 const copySettingsBody = Type.Object({ command_id: uuid, source_project_id: uuid }, strict);
+/** 一键启用内置插件：补齐插件连接与逐动作策略；决定与目标由服务端按插件族推导。 */
+const pluginKey = Type.Union([Type.Literal('computer'), Type.Literal('browser'), Type.Literal('github')]);
+const enablePluginBody = Type.Object({ command_id: uuid }, strict);
+const enablePluginParams = Type.Object(
+  { workspace_id: uuid, project_id: uuid, plugin_key: pluginKey }, strict);
 const localDirectoryAccessBody = Type.Object({ command_id: uuid, expected_revision: revision,
   write_tier: Type.Union([Type.Literal('READ_ONLY'), Type.Literal('ASK'), Type.Literal('AUTO'),
     Type.Literal('FULL')]) }, strict);
@@ -218,6 +231,19 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
       const outcome = await copyGatewaySettingsCommand(executor, { workspaceId: params.workspace_id ?? '',
         targetProjectId: params.project_id ?? '', commandId: body.command_id,
         sourceProjectId: body.source_project_id });
+      return { outcome, result: outcome.result };
+    } }));
+  /** 一键启用内置插件（2026-10-25）：日常入口。连接与逐动作策略在同一短事务补齐，
+   *  只读族 AUTO、操作族 ASK；停用/撤销过的事实只上报不绕过（见 EnableProjectPlugin 用例）。 */
+  app.post('/projects/:project_id/plugins/:plugin_key/enable', {
+    schema: { params: enablePluginParams, body: enablePluginBody,
+      response: { 201: commandEnvelopeSchema(commandResult) } },
+  }, createCommandHandler(dependencies, { commandType: 'EnableProjectPlugin', bodySchema: enablePluginBody,
+    execute: async ({ executor, params, body }) => {
+      // params 已由 enablePluginParams 校验为三个插件键之一；这里只做类型收窄。
+      const plugin = params.plugin_key as 'computer' | 'browser' | 'github';
+      const outcome = await enableProjectPluginCommand(executor, { workspaceId: params.workspace_id ?? '',
+        projectId: params.project_id ?? '', commandId: body.command_id, plugin });
       return { outcome, result: outcome.result };
     } }));
   app.get('/projects/:project_id/managed-resources/:resource_id', { schema: { params: resourceParams } }, async (request, reply) => {

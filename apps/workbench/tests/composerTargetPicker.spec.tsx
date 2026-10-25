@@ -35,10 +35,10 @@ const tasks = [
     hint: null }
 ];
 
-function stubClient(overrides: Partial<Record<"getProjectsPage" | "getProjectTasks", unknown>> = {}) {
+function stubClient(overrides: Partial<Record<"getProjectsPage" | "getProjectTasksPage", unknown>> = {}) {
   return {
     getProjectsPage: vi.fn(async () => projects),
-    getProjectTasks: vi.fn(async () => tasks),
+    getProjectTasksPage: vi.fn(async () => ({ items: tasks, nextCursor: null })),
     ...overrides
   } as unknown as RelayApiClient;
 }
@@ -78,10 +78,10 @@ describe("输入器的工作对象芯片", () => {
       expect(chip()?.textContent).toContain("选择任务");
       await click(chip());
       // 任务清单在选项目之前不读，避免拉全库任务。
-      expect(client.getProjectTasks).not.toHaveBeenCalled();
+      expect(client.getProjectTasksPage).not.toHaveBeenCalled();
       await click(row("composer-target-project-p-1"));
       await flush(0);
-      expect(client.getProjectTasks).toHaveBeenCalledWith("p-1");
+      expect(client.getProjectTasksPage).toHaveBeenCalledWith("p-1", null, undefined);
       expect(row("composer-target-task-t-1")?.textContent).toContain("写第 4 章");
       expect(row("composer-target-task-t-1")?.textContent).toContain("进行中");
       await click(row("composer-target-task-t-2"));
@@ -91,7 +91,7 @@ describe("输入器的工作对象芯片", () => {
 
   it("空清单与读取失败各有如实文案，不编造目标", async () => {
     const empty = { getProjectsPage: vi.fn(async () => ({ items: [], nextCursor: null })),
-      getProjectTasks: vi.fn(async () => []) } as unknown as RelayApiClient;
+      getProjectTasksPage: vi.fn(async () => ({ items: [], nextCursor: null })) } as unknown as RelayApiClient;
     const first = await mountReact(<ComposerTargetPicker client={empty} need="TASK" onPick={() => {}} />);
     try {
       await click(chip());

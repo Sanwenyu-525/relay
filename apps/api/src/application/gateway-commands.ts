@@ -11,7 +11,9 @@ import { httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { canonicalResourceIdentity, registrationFileWriteRootId, rootsOverlap } from './gateway-configuration.js';
+import { targetMatches } from './gateway-actions.js';
 import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
+import { BROWSER_ALL_TARGET } from '../browser/protocol.js';
 import { GITHUB_READ_ACTION_TYPES } from '../github/github-adapter.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
@@ -19,7 +21,10 @@ import { createRepositories, type Repositories } from './unit-of-work.js';
 
 type IdResult = { readonly project_id?: string; readonly connection_id?: string; readonly policy_id?: string;
   readonly resource_id?: string; readonly version?: string; readonly revision?: string;
-  readonly status?: string; readonly canonical_root?: string };
+  readonly status?: string; readonly canonical_root?: string;
+  readonly plugin?: string; readonly created_connections?: string; readonly created_policies?: string;
+  readonly blocked_disabled_connections?: string; readonly blocked_revoked_policies?: string;
+  readonly skipped_no_resource?: string };
 
 async function authorityWrite(repositories: Repositories, workspaceId: string): Promise<void> {
   if (await repositories.workspaces.lockAuthority(workspaceId, 'update') === undefined) {
@@ -134,6 +139,22 @@ function requireValidHost(host: string | undefined): string {
   return normalized;
 }
 
+/**
+ * 浏览器策略前缀（0105）：缺省 `browser://` 即「全部站点」；显式时只接受
+ * host[:port] 形式，不带 scheme、路径——与准入端 browser://<origin> 的合成目标
+ * 同一形状（站点可含端口，见 browser/protocol）。形状对不上会写成永远匹配不到
+ * 的死策略，所以在这里拒绝而不是存一份看似配置过的行。
+ */
+function browserPolicyPrefix(host: string | undefined): string {
+  if (host === undefined || host === '') return BROWSER_ALL_TARGET;
+  const normalized = host.trim().toLowerCase();
+  if (normalized.length > 253 ||
+      !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$/u.test(normalized)) {
+    throw validationFailed([{ field: 'host', message: 'browser policy prefix must be host[:port] without scheme or path' }]);
+  }
+  return `${BROWSER_ALL_TARGET}${normalized}`;
+}
+
 /** 允许清单的条目上限；与检查的冻结清单一样按可枚举、可核对的口径设上限。 */
 export const ALLOWED_EXECUTABLES_MAX = 32;
 
@@ -227,6 +248,21 @@ async function policyScope(repositories: Repositories, workspaceId: string, proj
     }
     return { actionType: actionType ?? defaultActionTypeOf(capability),
       targetPrefix: COMPUTER_DESKTOP_TARGET };
+  }
+  if (capability === 'BROWSER_READ' || capability === 'BROWSER_ACTION' ||
+      capability === 'BROWSER_COMMIT') {
+    // 0105：浏览器动作没有受管根，目标是 browser://<origin> 合成值，策略前缀同样按
+    // 站点表达（`browser://` 即全部站点）。resource_id 在这里只会写出永远匹配不上的
+    // 死策略，明确拒绝而不是静默忽略。
+    if (resourceId !== null) {
+      throw validationFailed([{ field: 'resource_id', message: 'browser policies have no resource' }]);
+    }
+    if (actionType !== undefined && !SUPPORTED_POLICY_ACTIONS[capability].includes(actionType)) {
+      throw validationFailed([{ field: 'action_type',
+        message: `unsupported action for ${capability}: ${SUPPORTED_POLICY_ACTIONS[capability].join(', ')}` }]);
+    }
+    return { actionType: actionType ?? defaultActionTypeOf(capability),
+      targetPrefix: browserPolicyPrefix(host) };
   }
   if (resourceId === null) throw validationFailed([{ field: 'resource_id', message: 'write permission requires a resource' }]);
   const resource = await repositories.gateway.readResource(resourceId);
@@ -371,6 +407,116 @@ export async function revokeGatewayPolicyCommand(db: DbExecutor, input: {
       await repositories.workspaces.bumpAuthority(input.workspaceId);
       return { project_id: input.projectId, policy_id: policy.id,
         revision: toDecimalString(revoked.revision), status: revoked.status };
+    } });
+}
+
+/** 三个内置插件各自覆盖的能力族（与工作台工具行、/plugins/status 同一套身份）。 */
+export const BUILTIN_PLUGIN_CAPABILITIES = {
+  computer: ['COMPUTER_READ', 'COMPUTER_INPUT'],
+  browser: ['BROWSER_READ', 'BROWSER_ACTION', 'BROWSER_COMMIT'],
+  github: ['GITHUB_READ'],
+} as const satisfies Record<string, readonly GatewayCapability[]>;
+export type BuiltinPluginKey = keyof typeof BUILTIN_PLUGIN_CAPABILITIES;
+
+/**
+ * 一键启用的策略决定：只读族直接 AUTO（与「打开目录即得 Git 只读」同一原则）；
+ * 操作族一律 ASK——即便用户后来在高级区改成 AUTO，非穿透适配器也会在准入时降级
+ * ASK（computer-plugin-v1「放行手段」），V1 不存在无人审批的桌面/页面输入。
+ */
+function enablePluginPolicyDecision(capability: GatewayCapability): GatewayDecision {
+  return capability === 'COMPUTER_READ' || capability === 'BROWSER_READ' || capability === 'GITHUB_READ'
+    ? 'AUTO' : 'ASK';
+}
+
+/** 与「打开目录」自动配置同一上限：机器/页面动作参数按 JSON 序列化计，取契约上限。 */
+const ENABLE_PLUGIN_MAX_PAYLOAD_BYTES = 262144;
+
+/**
+ * 一键启用内置插件（2026-10-25）：为项目补齐插件连接与逐动作策略，替代
+ * 「到高级区先理解能力/动作/前缀再逐条手填」的死路。此前这条链路有两处事实缺口：
+ * HTTP 建连接的能力白名单不含插件能力（表单提交即 400），浏览器策略还会被写成
+ * 永远匹配不上的目录前缀；本用例与 policyScope 的浏览器分支一起把入口补上。
+ *
+ * 一次命令、一个短事务：连接（缺的能力挂到一条新连接）+ 每个 (能力, 动作, 目标)
+ * 一条策略。目标族与准入一致：电脑是 computer://desktop，浏览器是 browser://
+ * （全部站点），GitHub 只读按项目内每个 ACTIVE 受管根逐目录授权。
+ *
+ * 三条不越权的纪律（与 ensureGitReadAccess 同源）：
+ *   * 已有 ACTIVE 事实就跳过，重放/重复执行不产生第二套；
+ *   * 显式 DENY 的策略不覆盖——那是用户的明确决定，不是缺口；
+ *   * 停用过的连接、撤销过的策略只计数上报，不新建一条绕过（撤销必须可留存）。
+ */
+export async function enableProjectPluginCommand(db: DbExecutor, input: {
+  workspaceId: string; projectId: string; commandId: string; plugin: BuiltinPluginKey;
+}): Promise<CommandOutcome<IdResult>> {
+  const capabilities = BUILTIN_PLUGIN_CAPABILITIES[input.plugin];
+  return runIdempotentCommand(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId, commandType: 'EnableProjectPlugin',
+    target: { project_id: input.projectId }, body: { plugin: input.plugin },
+    execute: async (repositories) => {
+      await authorityWrite(repositories, input.workspaceId);
+      await projectVisible(repositories, input.workspaceId, input.projectId);
+      const connections = await Promise.all((await repositories.gateway
+        .listConnections(input.workspaceId, input.projectId)).map(async (connection) => ({
+        status: connection.status,
+        capabilities: await repositories.gateway.listConnectionCapabilities(connection.id),
+      })));
+      let createdConnections = 0;
+      let blockedDisabledConnections = 0;
+      const missing: GatewayCapability[] = [];
+      for (const capability of capabilities) {
+        if (connections.some((row) => row.status === 'ACTIVE' && row.capabilities.includes(capability))) continue;
+        if (connections.some((row) => row.status === 'DISABLED' && row.capabilities.includes(capability))) {
+          blockedDisabledConnections += 1;
+          continue;
+        }
+        missing.push(capability);
+      }
+      if (missing.length > 0) {
+        const connection = await repositories.gateway.insertConnection({ id: randomUUID(),
+          workspaceId: input.workspaceId, projectId: input.projectId, config: {} });
+        for (const capability of missing) {
+          await repositories.gateway.addConnectionCapability(connection.id, capability);
+        }
+        createdConnections = 1;
+      }
+      // GitHub 只读绑定受管根；没有 ACTIVE 资源时连接仍可登记，策略留待目录出现。
+      const resourceTargets = input.plugin === 'github'
+        ? (await repositories.gateway.listProjectResources(input.workspaceId, input.projectId))
+          .filter((resource) => resource.status === 'ACTIVE')
+          .map((resource) => resource.canonical_root)
+        : [input.plugin === 'computer' ? COMPUTER_DESKTOP_TARGET : BROWSER_ALL_TARGET];
+      let createdPolicies = 0;
+      let blockedRevokedPolicies = 0;
+      let skippedNoResource = 0;
+      for (const capability of capabilities) {
+        for (const actionType of SUPPORTED_POLICY_ACTIONS[capability]) {
+          if (resourceTargets.length === 0) { skippedNoResource += 1; continue; }
+          for (const target of resourceTargets) {
+            const active = (await repositories.gateway.listActivePolicies(input.workspaceId,
+              input.projectId, capability, actionType))
+              .some((policy) => targetMatches(policy.target_prefix, target, capability));
+            if (active) continue;
+            const revoked = (await repositories.gateway.listPolicyTargetHistory(input.workspaceId,
+              input.projectId, capability, actionType))
+              .some((prefix) => targetMatches(prefix, target, capability));
+            if (revoked) { blockedRevokedPolicies += 1; continue; }
+            await repositories.gateway.insertPolicy({ id: randomUUID(), workspaceId: input.workspaceId,
+              projectId: input.projectId, capability, actionType, targetPrefix: target,
+              decision: enablePluginPolicyDecision(capability),
+              maxPayloadBytes: ENABLE_PLUGIN_MAX_PAYLOAD_BYTES });
+            createdPolicies += 1;
+          }
+        }
+      }
+      if (createdConnections > 0 || createdPolicies > 0) {
+        await repositories.workspaces.bumpAuthority(input.workspaceId);
+      }
+      return { project_id: input.projectId, plugin: input.plugin,
+        created_connections: String(createdConnections), created_policies: String(createdPolicies),
+        blocked_disabled_connections: String(blockedDisabledConnections),
+        blocked_revoked_policies: String(blockedRevokedPolicies),
+        skipped_no_resource: String(skippedNoResource) };
     } });
 }
 

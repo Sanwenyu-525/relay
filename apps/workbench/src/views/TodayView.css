@@ -174,3 +174,88 @@
 @media (min-width: 80rem) {
   .today-review-entry { display: none; }
 }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page；数值取自原型 relay-v528-styles） ───────── */
+
+.pv-page.today-page { max-width: min(1220px, 100%); padding: 24px 30px 60px; }
+.pv-page .today-stats { margin: 15px 0 4px; }
+
+.pv-page .today-group h2 {
+  margin: 18px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #294635;
+}
+
+.pv-page .today-task {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 15px;
+  background: #fff;
+  border: 1px solid #e3ebe4;
+  border-radius: 12px;
+  box-shadow: 0 3px 15px #22553506;
+  margin-bottom: 10px;
+}
+.pv-page .today-task__title { font-size: 12.5px; font-weight: 650; color: #33533d; }
+.pv-page .today-task__meta { margin: 3px 0 0; font-size: 11px; color: #8b9a90; }
+.pv-page .today-task__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pv-page .today-task__actions .text-button {
+  min-height: 28px;
+  font-size: 11px;
+  padding: 2px 10px;
+  border: 1px solid #d6e4d8;
+  border-radius: 8px;
+  background: #fff;
+}
+.pv-page .today-task__actions .text-button:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; text-decoration: none; }
+.pv-page .today-task__plans summary { font-size: 11px; color: #7a8d80; cursor: pointer; }
+.pv-page .today-task__forms { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.pv-page .today-task__forms form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #5c7764;
+  font-weight: 650;
+  border: 1px dashed #dce9de;
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+.pv-page .today-task__forms form strong { font-size: 11px; color: #3f6350; flex-basis: 100%; }
+.pv-page .today-task__forms input,
+.pv-page .today-task__forms select {
+  border: 1px solid #d7e4d8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #34523b;
+}
+.pv-page .today-task__trace summary { font-size: 11px; color: #7a8d80; cursor: pointer; }
+.pv-page .today-task__trace p { font-size: 11px; color: #829588; margin: 4px 0 0; overflow-wrap: anywhere; }
+
+.pv-page .today-focus__header h2 { font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .today-focus { padding-bottom: 14px; border-bottom: 1px solid #edf1ec; }
+.pv-page .today-focus__title a { font-size: 15px; letter-spacing: -.01em; color: #244431; }
+.pv-page .today-focus__meta { font-size: 11px; color: #8b9a90; }
+
+.pv-page .today-review-entry {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  background: #f4faf5;
+  border: 1px solid #e2efe4;
+  border-radius: 12px;
+}
+.pv-page .today-review-entry h2 { margin: 0; font-size: 12.5px; color: #294635; }
+.pv-page .today-review-entry p { margin: 2px 0 0; font-size: 11px; color: #7f948a; }
+
+@media (max-width: 760px) {
+  .pv-page.today-page { padding: 14px; }
+}

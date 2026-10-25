@@ -194,8 +194,8 @@ export default function GoalDetailView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveGoalDetail key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
-    : <section className="page-state" data-testid="goal-detail-fixture-gap">
-      <p className="eyebrow"><Target aria-hidden="true" />目标</p>
+    : <section className="page-state pv-page" data-testid="goal-detail-fixture-gap">
+      <p className="eyebrow"><Target aria-hidden="true" />Goal Detail</p>
       <h1>示例模式没有正式 Goal 详情</h1>
       <p>Goal 的编辑、归档与项目关联都需要连接本机 API。示例模式不生成目标事实。</p>
       <Link className="secondary-button" to="/projects">返回项目</Link>
@@ -363,11 +363,11 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
       expectedRevision: facts.goal.revision });
   }
 
-  if (loading) return <section className="page-state" role="status">
-    <p className="eyebrow">目标</p><h1>正在读取目标事实</h1>
+  if (loading) return <section className="page-state pv-page" role="status">
+    <p className="eyebrow">Goal Detail</p><h1>正在读取目标事实</h1>
     <p>只读查询 Goal、关联 Project 与工作上下文，不会创建或重绑会话。</p></section>;
-  if (error || facts === null) return <section className="page-state page-state--error" role="alert">
-    <p className="eyebrow">目标</p><h1>暂时无法读取目标</h1>
+  if (error || facts === null) return <section className="page-state page-state--error pv-page" role="alert">
+    <p className="eyebrow">Goal Detail</p><h1>暂时无法读取目标</h1>
     <p>{error ?? "目标事实不可用。"}</p>
     <button className="secondary-button" type="button" onClick={reloadFacts}>
       <RotateCcw aria-hidden="true" />重新读取</button>
@@ -388,10 +388,10 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
     }
   }
 
-  return <section className="skill-page project-overview" data-testid="goal-detail-live">
+  return <section className="skill-page project-overview pv-page" data-testid="goal-detail-live">
     <div className="page-layout"><div className="page-primary">
       <p className="metadata-row"><Link className="inline-link" to="/goals">← 全部目标</Link></p>
-      <PageHeader testId="goal-detail-head" title={goal.title}
+      <PageHeader testId="goal-detail-head" title={goal.title} overline="Goal Detail"
         meta={`Goal v${goal.revision} · 创建于 ${new Date(goal.createdAt).toLocaleString("zh-CN")}`}
         status={<span className={`status-chip ${archived ? "status-chip--neutral" : "status-chip--success"}`}>
           {goalStatusLabels[goal.status] ?? goal.status}</span>}

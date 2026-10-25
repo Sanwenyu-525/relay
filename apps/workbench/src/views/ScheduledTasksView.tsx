@@ -167,10 +167,16 @@ export default function ScheduledTasksView() {
     await sendChange(client, held.input);
   }
 
-  return <div className="page-layout scheduled-tasks-page">
+  return <div className="page-layout scheduled-tasks-page pv-page">
     <div className="page-primary">
-      <PageHeader testId="scheduled-tasks-head" title="定时任务" meta="到点自动创建并启动任务"
+      <PageHeader testId="scheduled-tasks-head" title="定时任务" overline="Scheduled Tasks" meta="到点自动创建并启动任务"
         lede="按天或按周重复：每次到点新建一个任务并交给 AI 执行。上一轮没有验收时，本轮不会启动。" />
+      {items.length > 0 && <ul className="pv-stats" aria-label="定时任务统计" data-testid="scheduled-tasks-stats">
+        <li className="pv-stat"><span>定时任务</span><strong>{items.length}</strong><span>当前已加载条目</span></li>
+        <li className="pv-stat"><span>启用中</span><strong>{items.filter((task) => task.status === "ENABLED").length}</strong><span>到点即创建任务（应用运行期间）</span></li>
+        <li className="pv-stat"><span>已暂停</span><strong>{items.filter((task) => task.status === "PAUSED").length}</strong><span>保留规则，不再触发</span></li>
+        <li className="pv-stat"><span>停用 / 到期</span><strong>{items.filter((task) => task.status === "DISABLED" || task.status === "EXPIRED").length}</strong><span>需要重建或调整后才会再触发</span></li>
+      </ul>}
       <div className="form-actions">
         <Link className="primary-button" to="/scheduled-tasks?view=create" data-testid="scheduled-tasks-create">新建定时任务</Link>
         <button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>刷新</button>

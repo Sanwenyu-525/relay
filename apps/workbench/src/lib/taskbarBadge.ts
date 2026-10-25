@@ -10,7 +10,7 @@ const INK_RIGHT = 30;
 const INK_BOTTOM = 30;
 // 取红色相的暖侧（H≈11°）而不是正红：与前一轮的 #BE3E2C 相比彩度、明度都低一档，和图标里的橙色圆环同族；
 // 白字对比 5.3:1，对 #1f1f1f / #e6e6e6 两种任务栏底色都在 3:1 以上，深浅底都不糊。
-const FILL_COLOR = "#B9452F";
+const FILL_COLOR = "#BC4630";
 // 纸面偏暖的白，避免纯白在红底上炸出光晕。
 const INK_COLOR = "#FFF7F3";
 // 600 而不是 700：缩小后 700 的白字会在红底上糊成一坨。字体优先 Segoe UI Variable Text
@@ -31,9 +31,9 @@ type Shape = { width: number; height: number; font: number };
 
 /** 位数决定外形：一位数小圆盘，两位数短胶囊（1.36 长宽比，不拉成药丸），三位数沿用同一胶囊只缩字号。 */
 function shapeFor(label: string): Shape {
-  if (label.length <= 1) return { width: 24, height: 24, font: 17.5 };
-  if (label.length === 2) return { width: 30, height: 22, font: 13.5 };
-  return { width: 30, height: 22, font: 11 };
+  if (label.length <= 1) return { width: 24, height: 24, font: 18.5 };
+  if (label.length === 2) return { width: 30, height: 22, font: 14.5 };
+  return { width: 30, height: 22, font: 11.5 };
 }
 
 /** 两端半圆加一段直边。宽度收到等于高度时 shoulder 为 0，两个圆心重合，正圆与胶囊共用这条路径。 */

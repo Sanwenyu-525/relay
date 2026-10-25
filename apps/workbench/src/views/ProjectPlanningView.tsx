@@ -68,6 +68,16 @@ function requiredString(record: Record<string, unknown>, camel: string, snake: s
   if (typeof value !== "string" || value === "") throw new Error(`命令结果缺少 ${camel} 身份。`);
   return value;
 }
+function revisionIsCurrentOrLater(current: string, committed: string): boolean {
+  return /^\d+$/.test(current) && /^\d+$/.test(committed) && BigInt(current) >= BigInt(committed);
+}
+type EstimateDraft = { readonly elapsedMinutes: string; readonly executionMinutes: string; readonly waitingMinutes: string;
+  readonly reviewMinutes: string; readonly humanMinutes: string; readonly sourceNote: string };
+const EMPTY_ESTIMATE_DRAFT: EstimateDraft = { elapsedMinutes: "", executionMinutes: "", waitingMinutes: "",
+  reviewMinutes: "", humanMinutes: "", sourceNote: "" };
+function estimateDraftDirty(draft: EstimateDraft): boolean {
+  return Object.values(draft).some((value) => value.trim() !== "");
+}
 
 export default function ProjectPlanningView() {
   const { id = "" } = useParams();
@@ -102,6 +112,9 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
   const [mainlineTaskIds, setMainlineTaskIds] = useState<readonly string[]>([]);
   const [goalIds, setGoalIds] = useState<readonly string[]>([]);
   const [estimates, setEstimates] = useState<ReadonlyMap<string, EstimateHistory>>(new Map());
+  const [estimateDrafts, setEstimateDrafts] = useState<ReadonlyMap<string, EstimateDraft>>(new Map());
+  const estimateDraftsRef = useRef(estimateDrafts);
+  estimateDraftsRef.current = estimateDrafts;
   const [estimateTaskRevisionOverrides, setEstimateTaskRevisionOverrides] = useState<ReadonlyMap<string, string>>(new Map());
   const [estimateError, setEstimateError] = useState<string | null>(null);
   const [resolutionReason, setResolutionReason] = useState("");
@@ -122,14 +135,26 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
   const cleanDraft = useRef(JSON.stringify({ title: "下一段工作", availableMinutes: "240", diagnosticMinutes: "30",
     selectedTaskIds: [], mainlineTaskIds: [], goalIds: [] }));
   const guard = useRef<DraftGuard>({
-    hasUnsavedChanges: () => pendingRef.current !== null || JSON.stringify(formDraftRef.current) !== cleanDraft.current,
+    hasUnsavedChanges: () => pendingRef.current !== null ||
+      [...estimateDraftsRef.current.values()].some(estimateDraftDirty) ||
+      JSON.stringify(formDraftRef.current) !== cleanDraft.current,
     discard: () => {
       if (pendingRef.current) return;
+      setEstimateDrafts(new Map());
       setTitle("下一段工作"); setAvailableMinutes("240"); setDiagnosticMinutes("30");
       setSelectedTaskIds([]); setMainlineTaskIds([]); setGoalIds([]);
     },
     pendingCommandId: () => pendingRef.current?.input.commandId ?? null,
-    pendingRecoversAfterLeave: () => true
+    pendingRecoversAfterLeave: () => true,
+    // 只聚焦仍挂载且可编辑的估时编辑器；目标已卸载时静默放弃（App 弹层维持默认回焦）。
+    restoreFocus: () => {
+      const dirty = [...estimateDraftsRef.current.entries()].find(([, draft]) => estimateDraftDirty(draft));
+      const editor = dirty === undefined ? null : document.getElementById(`planning-estimate-editor-${dirty[0]}`);
+      if (!(editor instanceof HTMLDetailsElement)) return;
+      editor.open = true;
+      const input = editor.querySelector("input");
+      if (input instanceof HTMLElement) input.focus();
+    }
   });
 
   const refreshPlans = useCallback(async (keepSelection = true) => {
@@ -188,6 +213,11 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
         saved.humanMs !== (intent.input.humanMs === null ? null : String(intent.input.humanMs)))
         throw new Error("估时历史未能核对原命令的记录 ID、载荷与用户声明来源；命令仍待核对。");
       setEstimates((current) => new Map(current).set(taskId, history));
+      // 原命令核对成功后清掉该任务的未保存草稿，成功写入口不再阻塞正常离页。
+      setEstimateDrafts((current) => {
+        if (!current.has(taskId)) return current;
+        const next = new Map(current); next.delete(taskId); return next;
+      });
       return history.current?.id === estimateId && history.current.applicable
         ? "用户声明估时已记录并读回，适用于当前验收版本。"
         : "用户声明估时已保留在历史中，但当前验收版本已变化，该记录不适用于当前验收。";
@@ -198,7 +228,7 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
       if (requiredString(result, "projectId", "project_id") !== projectId) throw new Error("计划回执项目身份不匹配。");
       const revision = requiredString(result, "revision", "revision");
       const plan = await readPlanForSelection(planId);
-      if (plan.revision !== revision) throw new Error("计划回执修订与详情读回不一致；命令仍待核对。");
+      if (!revisionIsCurrentOrLater(plan.revision, revision)) throw new Error("计划回执修订与详情读回不一致；命令仍待核对。");
       return "计划命令已核对，已读回并选中对应计划。";
     }
     if (intent.kind === "RESOLVE_ITEM") {
@@ -211,7 +241,7 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
       const plan = await readPlanForSelection(planId);
       const item = plan.items.find((candidate) => candidate.id === itemId);
       if (planId !== intent.input.planId || itemId !== intent.input.itemId || itemStatus !== expectedStatus ||
-        item?.status !== expectedStatus || plan.revision !== revision)
+        item?.status !== expectedStatus || !revisionIsCurrentOrLater(plan.revision, revision))
         throw new Error("计划项身份或读回状态与原操作不一致；命令仍待核对。");
       return "计划项命令已核对，已读回对应计划和处理状态。";
     }
@@ -223,7 +253,10 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
         throw new Error("范围推演回执身份或状态与原请求不匹配。");
       const plan = await readPlanForSelection(intent.input.planId);
       const [simulation, list] = await Promise.all([client.getScopeSimulation(simulationId), client.getPlanScopeSimulations(plan.planId)]);
-      if (simulation.revision !== revision || simulation.sourcePlanId !== plan.planId || simulation.projectId !== projectId || simulation.status !== "PROPOSED" ||
+      // 另一页面合法选定推演（PROPOSED→SELECTED）后原回执仍然有效；只按持久身份与读回一致性核对。
+      // 另一页面合法选定推演（PROPOSED→SELECTED）后原回执仍然有效；只按持久身份与读回一致性核对。
+      if (!revisionIsCurrentOrLater(simulation.revision, revision) || simulation.sourcePlanId !== plan.planId || simulation.projectId !== projectId ||
+        !["PROPOSED", "SELECTED"].includes(simulation.status) ||
         !list.items.some((item) => item.simulationId === simulationId)) throw new Error("范围推演详情与列表读回不一致；命令仍待核对。");
       setSimulations(list.items); setSelectedSimulationId(simulationId);
       return "范围推演命令已核对，已读回并选中对应推演。";
@@ -359,12 +392,17 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
     setter(ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
   }
   const loadedTasks = taskPages.items;
+  const availableMs = Number(availableMinutes) * 60000;
+  const diagnosticMs = Number(diagnosticMinutes) * 60000;
+  // 与服务端校验一致：容量 1–604800000 毫秒，诊断预算为正且不超过容量；毫秒必须保持安全整数。
+  const planInputValid = Number.isSafeInteger(availableMs) && availableMs >= 60000 && availableMs <= 604800000 &&
+    Number.isSafeInteger(diagnosticMs) && diagnosticMs >= 60000 && diagnosticMs <= availableMs;
 
   if (loading) return <section className="page-state" role="status"><h1>正在读取下一段工作…</h1></section>;
   if (error && projectTitle === "") return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目计划</h1>
     <p>{error}</p><button className="secondary-button" type="button" onClick={() => void refreshPlans(false)}>重新读取</button></section>;
 
-  return <section className="skill-page planning-page"><div className="page-layout"><main className="page-primary">
+  return <section className="skill-page planning-page pv-page"><div className="page-layout"><main className="page-primary">
     <PageHeader title="下一段工作" meta={projectTitle} lede="把本段时间和要推进的任务排成可审阅计划。接受计划只处理计划项，不授权执行。" />
     <ProjectNav projectId={projectId} active="planning" />
     {pending && <section className="surface-panel planning-pending" aria-label="计划命令待核对" data-testid="planning-pending-command">
@@ -383,9 +421,9 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
       <div className="planning-fields">
         <label className="field"><span className="field-label">计划名称</span><input value={title} maxLength={200}
           onChange={(event) => setTitle(event.target.value)} disabled={pending !== null} /></label>
-        <label className="field"><span className="field-label">可用时间（分钟）</span><input type="number" min="1" max="2592000"
+        <label className="field"><span className="field-label">可用时间（分钟）</span><input type="number" min="1" max="10080"
           value={availableMinutes} onChange={(event) => setAvailableMinutes(event.target.value)} disabled={pending !== null} /></label>
-        <label className="field"><span className="field-label">未知估时诊断预算（分钟）</span><input type="number" min="0" max="2592000"
+        <label className="field"><span className="field-label">未知估时诊断预算（分钟）</span><input type="number" min="1" max="10080"
           value={diagnosticMinutes} onChange={(event) => setDiagnosticMinutes(event.target.value)} disabled={pending !== null} /></label>
       </div>
       <h3>选择任务与主线</h3>
@@ -398,6 +436,8 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
         onMainline={() => toggleId(setMainlineTaskIds, mainlineTaskIds, task.id)} estimate={estimates.get(task.id)}
         estimateLoadFailed={estimateError !== null}
         taskRevision={estimateTaskRevisionOverrides.get(task.id) ?? task.revision}
+        draft={estimateDrafts.get(task.id) ?? EMPTY_ESTIMATE_DRAFT}
+        onDraftChange={(next) => setEstimateDrafts((current) => new Map(current).set(task.id, next))}
         onRecordEstimate={(elapsedMs, executionMs, waitingMs, reviewMs, humanMs, sourceNote) => {
           const history = estimates.get(task.id);
           const latest = history?.items[0];
@@ -416,10 +456,9 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
           onChange={() => toggleId(setGoalIds, goalIds, goal.goalId)} />
         <span>{goal.title}<small>{goal.status} · 目标修订 v{goal.revision}</small></span></label>)}
       <button className="primary-button" type="button" data-testid="period-plan-propose" disabled={submitting || pending !== null ||
-        title.trim() === "" || selectedTaskIds.length === 0 || !Number.isSafeInteger(Number(availableMinutes)) ||
-        Number(availableMinutes) < 1 || !Number.isSafeInteger(Number(diagnosticMinutes)) || Number(diagnosticMinutes) < 0}
+        title.trim() === "" || selectedTaskIds.length === 0 || !planInputValid}
         onClick={() => void send({ kind: "PROPOSE_PLAN", input: { commandId: createCommandId(), projectId,
-          title: title.trim(), availableMs: Number(availableMinutes) * 60000, diagnosticMs: Number(diagnosticMinutes) * 60000,
+          title: title.trim(), availableMs, diagnosticMs,
           taskIds: selectedTaskIds, mainlineTaskIds: mainlineTaskIds.filter((id) => selectedTaskIds.includes(id)), goalIds } })}>
         生成计划候选</button>
     </section>
@@ -449,25 +488,21 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
   </main></div></section>;
 }
 
-function TaskChoice({ task, selected, mainline, disabled, onSelect, onMainline, estimate, estimateLoadFailed, taskRevision, onRecordEstimate }: {
+function TaskChoice({ task, selected, mainline, disabled, onSelect, onMainline, estimate, estimateLoadFailed, taskRevision,
+  draft, onDraftChange, onRecordEstimate }: {
   readonly task: RelayTaskSummary; readonly selected: boolean; readonly mainline: boolean; readonly disabled: boolean;
   readonly onSelect: () => void; readonly onMainline: () => void;
   readonly estimate?: EstimateHistory;
   readonly estimateLoadFailed: boolean; readonly taskRevision: string;
+  readonly draft: EstimateDraft; readonly onDraftChange: (next: EstimateDraft) => void;
   readonly onRecordEstimate: (elapsedMs: number, executionMs: number | null, waitingMs: number | null,
     reviewMs: number | null, humanMs: number | null, sourceNote: string) => void;
 }) {
-  const [elapsedMinutes, setElapsedMinutes] = useState("");
-  const [executionMinutes, setExecutionMinutes] = useState("");
-  const [waitingMinutes, setWaitingMinutes] = useState("");
-  const [reviewMinutes, setReviewMinutes] = useState("");
-  const [humanMinutes, setHumanMinutes] = useState("");
-  const [sourceNote, setSourceNote] = useState("");
-  const elapsedMs = minutesToMilliseconds(elapsedMinutes);
-  const executionMs = minutesToMilliseconds(executionMinutes);
-  const waitingMs = minutesToMilliseconds(waitingMinutes);
-  const reviewMs = minutesToMilliseconds(reviewMinutes);
-  const humanMs = humanMinutes.trim() === "" ? null : minutesToMilliseconds(humanMinutes);
+  const elapsedMs = minutesToMilliseconds(draft.elapsedMinutes);
+  const executionMs = minutesToMilliseconds(draft.executionMinutes);
+  const waitingMs = minutesToMilliseconds(draft.waitingMinutes);
+  const reviewMs = minutesToMilliseconds(draft.reviewMinutes);
+  const humanMs = draft.humanMinutes.trim() === "" ? null : minutesToMilliseconds(draft.humanMinutes);
   const current = estimate?.current;
   const latest = estimate?.items[0];
   return <div className="planning-task-row" data-testid={`planning-task-${task.id}`}>
@@ -482,23 +517,23 @@ function TaskChoice({ task, selected, mainline, disabled, onSelect, onMainline, 
       {estimate && estimate.items.length > 0 && <details><summary>查看估时历史（{estimate.items.length} 条）</summary><ul>
         {estimate.items.map((item) => <li key={item.id}>估时 v{item.revision} · 验收 v{item.acceptanceRevision} · {estimateBreakdown(item)} · {item.sourceKind} · {item.sourceNote}</li>)}
       </ul></details>}
-      <details className="planning-estimate-editor"><summary>录入或更新估时</summary>
-        <label>总时长（分钟）<input type="number" min="0" step="1" value={elapsedMinutes} disabled={disabled}
-          onChange={(event) => setElapsedMinutes(event.target.value)} /></label>
-        <label>执行时长（分钟，可留空）<input type="number" min="0" step="1" value={executionMinutes} disabled={disabled}
-          onChange={(event) => setExecutionMinutes(event.target.value)} /></label>
-        <label>等待时长（分钟，可留空）<input type="number" min="0" step="1" value={waitingMinutes} disabled={disabled}
-          onChange={(event) => setWaitingMinutes(event.target.value)} /></label>
-        <label>复核时长（分钟，可留空）<input type="number" min="0" step="1" value={reviewMinutes} disabled={disabled}
-          onChange={(event) => setReviewMinutes(event.target.value)} /></label>
-        <label>人工投入（分钟，可留空）<input type="number" min="0" step="1" value={humanMinutes} disabled={disabled}
-          onChange={(event) => setHumanMinutes(event.target.value)} /></label>
-        <label>来源说明<input value={sourceNote} maxLength={4000} disabled={disabled}
-          onChange={(event) => setSourceNote(event.target.value)} /></label>
+      <details className="planning-estimate-editor" id={`planning-estimate-editor-${task.id}`}><summary>录入或更新估时</summary>
+        <label>总时长（分钟）<input type="number" min="0" step="1" value={draft.elapsedMinutes} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, elapsedMinutes: event.target.value })} /></label>
+        <label>执行时长（分钟，可留空）<input type="number" min="0" step="1" value={draft.executionMinutes} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, executionMinutes: event.target.value })} /></label>
+        <label>等待时长（分钟，可留空）<input type="number" min="0" step="1" value={draft.waitingMinutes} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, waitingMinutes: event.target.value })} /></label>
+        <label>复核时长（分钟，可留空）<input type="number" min="0" step="1" value={draft.reviewMinutes} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, reviewMinutes: event.target.value })} /></label>
+        <label>人工投入（分钟，可留空）<input type="number" min="0" step="1" value={draft.humanMinutes} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, humanMinutes: event.target.value })} /></label>
+        <label>来源说明<input value={draft.sourceNote} maxLength={4000} disabled={disabled}
+          onChange={(event) => onDraftChange({ ...draft, sourceNote: event.target.value })} /></label>
         <button type="button" className="secondary-button" disabled={disabled || elapsedMs === null ||
-          (executionMinutes.trim() !== "" && executionMs === null) || (waitingMinutes.trim() !== "" && waitingMs === null) ||
-          (reviewMinutes.trim() !== "" && reviewMs === null) || (humanMinutes.trim() !== "" && humanMs === null) || sourceNote.trim() === ""}
-          onClick={() => onRecordEstimate(elapsedMs!, executionMs, waitingMs, reviewMs, humanMs, sourceNote.trim())}>保存用户声明估时</button>
+          (draft.executionMinutes.trim() !== "" && executionMs === null) || (draft.waitingMinutes.trim() !== "" && waitingMs === null) ||
+          (draft.reviewMinutes.trim() !== "" && reviewMs === null) || (draft.humanMinutes.trim() !== "" && humanMs === null) || draft.sourceNote.trim() === ""}
+          onClick={() => onRecordEstimate(elapsedMs!, executionMs, waitingMs, reviewMs, humanMs, draft.sourceNote.trim())}>保存用户声明估时</button>
         <small>使用 Task v{taskRevision} 和最近估时修订 v{latest?.revision ?? "0"}；录入后会读回历史与当前适用状态。</small>
       </details>
     </div>
@@ -545,7 +580,7 @@ function PlanDetail({ plan, simulations, selectedSimulation, simulationId, setSi
         <button className="text-button" type="button" disabled={submitting || reason.trim() === ""}
           onClick={() => onResolve(item.id, "REJECT")}>拒绝此项</button></div>}
     </li>)}</ul>
-    {plan.items.some((item) => item.status === "CANDIDATE" && item.kind !== "DEFERRED") && <label className="field">
+    {plan.items.some((item) => item.status === "CANDIDATE") && <label className="field">
       <span className="field-label">逐项处理理由</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={4000}
         placeholder="说明接受或拒绝的依据" /></label>}
     <details className="planning-baseline"><summary>查看冻结来源（{baselineTasks.length} 项任务）</summary>

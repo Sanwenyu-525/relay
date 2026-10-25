@@ -70,7 +70,25 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 
 - 设计按 `对象与 Owner → 用例与事务 → 版本 / 执行权 / 幂等 → 持久化与恢复 → API / UI 契约` 复核，优先延续已有契约。设计须责任明确、场景闭合，待确认项可见且能映射验收条件。
 - 实施顺序以当前用户授权和 CODEX_NEXT_STEP 为准；接续 M01–M07 时遵守对应工作包与 A–E 前置约束，不因旧工作包重启已完成工作或扩大本次范围。
-- **UI 变更先查 skill。** 修改或新增 UI 前，先在当前 AI 可用的 skill 列表中查找匹配的 UI / 前端 / 设计系统 skill，有则先加载并按其流程执行；是否适用以该 skill 自述的 `description` 与 When to Apply 段为准，不匹配时说明理由，再按现有设计入口与 tokens 实施。当前工具没有可用的 skill 列表、或列表里没有合适项时，直接检索本机公共 skill 目录 `C:\Users\ASUS\.agents\skills`（各工具另读自己的目录，如 `~/.claude/skills`、`~/.codex/skills`，此处为公共全集），按同一标准挑选后读取该目录下的 SKILL.md 执行。
+- **UI 变更先查 Skill。** 先检查本 Agent 已发现的 Skills，再按[开发 Skills 清单与共享入口](docs/deployment/developer-skills.md)和[机器可读配置](scripts/dev-skills.config.json)定位所需条目；公共来源为 `%USERPROFILE%/.agents/skills`。普通任务只查相关条目，不反复全盘扫描。实际读取匹配的 `SKILL.md`，按其真实 description、When to Apply 和适用流程执行；不得仅凭名称宣称已使用。不适用时说明原因并跳过；不完整或不可访问时报告具体问题，不能假装加载成功。这些是开发工具 Skills，不是产品运行时 Skill 注册表。
+- **按任务组合 Skill。** 下表是优先路由，不要求全部加载；相似 Skill 选一个主 Skill，其余只补充本次检查。`impeccable` 的 audit/polish 等是子命令，不是独立 Skill。
+
+| 开发任务 | 优先读取的 Skill ID / 使用边界 |
+|---|---|
+| 新增页面、重新设计 UI | `frontend-design` + `ui-ux-pro-max`；产品工作台也可用 `impeccable` 作为主设计 Skill |
+| 现有页面视觉精修 | `impeccable`（polish / critique）；仅在适用页面加入 `design-taste-frontend` |
+| 排版、间距、颜色、视觉层级 | `ui-ux-pro-max` + 适用的 Taste；产品 UI 可用 `impeccable` typeset / layout |
+| Tooltip、Popover、悬浮层 | `impeccable`；涉及动效再加入 `emil-design-eng` / `animate` |
+| 加载、切换、展开收起、过渡动画 | `animate`；审查现有动效用 `review-animations`，性能问题用 `animation-performance` |
+| Agent 过程态、完成态、状态转换 UI | `impeccable` + 适用的 Emil 动效 Skill，保留既定业务状态语义 |
+| React 组件开发、重构、性能优化 | `vercel-react-best-practices`，只应用当前 React/Vite/Tauri 栈适用条目 |
+| Web 交互、无障碍和界面规范检查 | `web-design-guidelines`；按其要求读取当前规则来源 |
+| 完整前端页面交付 | 一个主设计 Skill + React Skill + UI 审查 Skill；动态交互增加动效及状态过渡检查 |
+| 纯后端、数据库、API | 不强制使用前端 Skill |
+| 仅文档修改 | 按内容选择，不机械调用前端 Skill |
+
+- **适用范围与项目规范优先。** Taste v2 明确不适用于 dashboard、数据表、多步骤产品 UI；Relay 工作台优先 `impeccable` / `ui-ux-pro-max`，不因名称相近强行调用 Taste 或其旧版。`design-engineer` 等候选只有资源完整且适用时才可使用。Skill 不得覆盖本次用户要求、已确认业务契约、[交互规范](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json)、确认的参考图和已有交互约束，不得另造设计语言。UI 改动至少完成一次适用的设计规范检查；动态交互增加动效/状态检查，React 行为增加工程质量检查。视觉精修不得无故修改业务逻辑、状态语义、测试选择器或 API。
+- **跨 Agent 共享。** Codex、Trae、WorkBuddy、Qoder、ZCode 的全局目录可能不同，不得假设沿用自己的目录。公共来源和各工具有效入口由上述统一配置管理；文件可读、自动发现、实际调用分开记录。需要重启/刷新时明确说明；不自动重启他人的活动会话。不能自动读取根 `AGENTS.md` 的工具，通过官方支持的规则入口引用本文件，不复制分叉规则。同步先 dry-run，遇同名异版先比较并备份，不静默覆盖；不递归删除 Junction 或穿透其目标。
 - **默认当前 Agent 完成。** 文件读取、小范围修改、常规测试、文档调整和单一问题定位不派子代理。仅在用户明确要求，或较大任务有边界清晰且确能受益的独立子任务时派发；相关工作优先复用已有子代理。
 - **派发须明确责任。** 派发前简述必要性、文件或模块所有权、验收条件；告知执行者共享工作区、不得回退他人改动。协调者负责集成和结果核对，不能把子代理自报完成直接当作独立验收。
 - 大模块执行 `自检 → 协调 Agent 独立验收 → 修复与复验 → 进入依赖模块`。该出口不要求为每次小修改另派代理；未做独立验收就明确标记未完成，不能将同一执行者的自检改称独立验收。用户明确调整的范围与顺序优先。

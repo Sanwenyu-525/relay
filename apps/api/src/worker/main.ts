@@ -19,6 +19,7 @@ import { runAssistGenerationTick } from '../application/assist-runner.js';
 import { runConversationExecutionAutoStartTick }
   from '../application/conversation-execution-autostart.js';
 import { runAssistGoalTick } from '../application/goal-advance.js';
+import { runMemberWakeupTick } from '../application/member-wakeup.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import { runOneCommand } from './run-command.js';
 import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
@@ -199,6 +200,15 @@ async function main(): Promise<void> {
             process.stdout.write(`${JSON.stringify({ type: 'worker_goal_tick',
               advanced: goalTick.advanced, settled: goalTick.settled,
               controls: goalTick.controls })}\n`);
+          }
+          // 0141 / ADR-034 包 C：成员消息唤醒。同一 tick 里有界推进——归档/停用/
+          // 外部成员不唤醒，租约清扫先于领取，回信只是协作记录不产生执行权。
+          const memberWakeup = await runMemberWakeupTick(database.executor, {
+            workerId, modelPort: assistModelPort, leaseMs, signal: controller.signal });
+          if (memberWakeup.processed.length > 0 || memberWakeup.requeued > 0 ||
+              memberWakeup.expiredFailed > 0) {
+            process.stdout.write(`${JSON.stringify({ type: 'worker_member_wakeup',
+              ...memberWakeup })}\n`);
           }
         }
       }

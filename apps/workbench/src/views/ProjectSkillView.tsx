@@ -33,7 +33,7 @@ export default function ProjectSkillView() {
     query.delete("skill"); query.set("project", projectId);
     return <Navigate to={`/agent?${query}`} replace />;
   }
-  return <div className="skill-shell">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link><Link className="secondary-button" to={`/projects/${projectId}/planning`}>下一段工作</Link><Link className="secondary-button" to={`/projects/${projectId}/task-chains`}>有限任务链</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
+  return <div className="skill-shell pv-page">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link><Link className="secondary-button" to={`/projects/${projectId}/planning`}>下一段工作</Link><Link className="secondary-button" to={`/projects/${projectId}/task-chains`}>有限任务链</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
 }
 
 /** UI-02 项目总览：只按真实 State revision / phase / Next Action 呈现，来源不可用不以摘要当真相。 */
@@ -119,8 +119,8 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
     return () => { version.current++; };
   }, [client, id, reload]);
 
-  if (loading) return <section className="page-state" role="status"><p className="eyebrow">项目</p><h1>正在读取项目当前状态</h1><p>只读查询 Project 与 State 事实，不会开始任务或恢复执行。</p></section>;
-  if (error || !facts) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">项目</p><h1>暂时无法读取项目总览</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
+  if (loading) return <section className="page-state pv-page" role="status"><p className="eyebrow">Projects</p><h1>正在读取项目当前状态</h1><p>只读查询 Project 与 State 事实，不会开始任务或恢复执行。</p></section>;
+  if (error || !facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
 
   const { project, state, goals, nextAction, reviews, decisions, artifacts } = facts;
   const { tasks, tasksNextCursor, tasksReadFailed } = facts;
@@ -136,7 +136,7 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
     ...blockedTasks.map((task) => `「${task.title}」${overviewTaskReason(task)}`),
     ...stateBlockers.map((blocker) => `State 登记阻塞「${blocker.reason}」（${blocker.targetKind} ${blocker.targetId}）`)
   ].filter(Boolean) as readonly string[];
-  return <section className="skill-page project-overview" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
+  return <section className="skill-page project-overview pv-page" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
     <p className="metadata-row"><Link className="inline-link" to="/projects">← 全部项目</Link></p>
     <PageHeader testId="project-overview-page-head" title={project.title} meta={`${type} · ${phaseLabel(state.phaseKey)}`}
       status={<span className={`status-chip ${archived ? "status-chip--neutral" : "status-chip--success"}`}>{archived ? "已归档" : phaseLabel(state.phaseKey)}</span>}

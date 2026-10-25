@@ -10,6 +10,8 @@ export interface ModelCallOrigin {
   readonly kind: ModelCallRow['kind'];
   readonly stepAttemptId?: string;
   readonly assistMessageId?: string;
+  /** 0141：成员唤醒调用的触发消息行；kind='MEMBER' 时必填。 */
+  readonly memberMessageId?: string;
   readonly manifestId?: string;
   readonly inputHash?: string;
   readonly readOperationId?: string;
@@ -48,13 +50,17 @@ export class ModelCallRepository {
 
   async begin(id: string, origin: ModelCallOrigin, identity: ModelIdentity): Promise<void> {
     const budget = identity.budget;
-    // VERIFY 是实例级连通性探针，COMPOSER 是发送前的草稿辅助（工作台 §30）：
-    // 两者都没有 Run/Assist 作用域，因此不占 Run 或会话预算，也不受项目归档闸门约束
-    // （没有项目可归档）。它们仍各占一行真实调用证据，不用同一个 kind 互相冒名。
-    if (origin.kind === 'VERIFY' || origin.kind === 'COMPOSER') {
+    // VERIFY 是实例级连通性探针，COMPOSER 是发送前的草稿辅助（工作台 §30），
+    // MEMBER（0141）是长期成员唤醒的模型调用：三者都没有 Run/Assist 作用域，
+    // 因此不占 Run 或会话预算（成员项目的归档闸门由唤醒用例在领取事务里先行）。
+    // 它们仍各占一行真实调用证据，不用同一个 kind 互相冒名。
+    if (origin.kind === 'VERIFY' || origin.kind === 'COMPOSER' || origin.kind === 'MEMBER') {
       if (origin.stepAttemptId !== undefined || origin.assistMessageId !== undefined ||
           origin.manifestId !== undefined || origin.criterionId !== undefined) {
         throw new Error(`${origin.kind} model call must not carry run or assist scope`);
+      }
+      if (origin.kind === 'MEMBER' && origin.memberMessageId === undefined) {
+        throw new Error('MEMBER model call must carry member message scope');
       }
       await this.db.transaction().execute(async (trx) => {
         await this.insert(trx, id, origin, identity);
@@ -238,12 +244,13 @@ export class ModelCallRepository {
   private async insert(db: DbExecutor, id: string, origin: ModelCallOrigin,
     identity: ModelIdentity): Promise<void> {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
-      assist_message_id, manifest_id, criterion_id, check_attempt,
+      assist_message_id, member_message_id, manifest_id, criterion_id, check_attempt,
       provider, model, config_fingerprint, input_sha256,
       read_operation_id, read_invocation_id, budget_reserved_tokens)
       values (${id}, ${origin.workspaceId}, ${origin.kind},
         ${origin.stepAttemptId ?? null}, ${origin.assistMessageId ?? null},
-        ${origin.manifestId ?? null}, ${origin.criterionId ?? null},
+        ${origin.memberMessageId ?? null}, ${origin.manifestId ?? null},
+        ${origin.criterionId ?? null},
         ${origin.checkAttempt ?? null}, ${identity.provider}, ${identity.model},
         ${identity.configFingerprint}, ${origin.inputHash ?? null},
         ${origin.readOperationId ?? null}, ${origin.readInvocationId ?? null},

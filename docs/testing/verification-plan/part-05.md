@@ -258,9 +258,12 @@
 - 真实 PG/HTTP：估时追加及历史、未知 elapsed 不从分项补算；明确主线与 BLOCKS 前置先排、容量不足延后；固定窗口重复读不重置，恰好排满容量在窗口内可接受，审阅后剩余时间缺口只提示。
 - 逐项应用：先接受前置，再保存主线选择，独立项拒绝不丢其他结果；既有 Task/Run 不改变；诊断沿原 Owner 建 ME/HUMAN/INBOX/独立验收，原命令重放只一项，原修复任务不完成。
 - 基础变更：改估时后旧候选可读但不可按旧依据接受，重新发起使用新估时；新迁移/CLI/工作段回归。
-- 客户端：明确五种时长/未知、固定窗口/冻结依据/诊断/延后、每项回执解析与准入性质；不做 UI。
+- Workbench：按分钟录入总耗时及执行/等待/Review/人工投入分项，校验安全整数毫秒转换和必填来源说明，并标为用户声明；写入以 Task revision 与估时 revision 做 CAS，成功后重读历史。覆盖来源与适用状态展示、验收版本变更后旧估时失效、revision 冲突，以及响应未知时保留原 command_id/载荷并核对原回执。
+- N04/N06 命令与准入：PROPOSE_PLAN、PROPOSE_SCOPE、SELECT_SCOPE、RESOLVE_ITEM 与任务链 CREATE/AUTHORIZE/STOP 的回执身份须与原请求一致；成功后重读并选中确切计划/模拟/任务链。RESOLVE_ITEM 按目标项确切状态核对，并允许其他项推进后的计划 revision 不早于原回执；全部为 DEFERRED 的候选也可填写理由后拒绝。回执或读回不一致时保留 pending，不以接受计划代替执行授权。AUTHORIZE 响应丢失时，只有持久授权历史精确匹配原 command_id、预算与期限，才可接受 API 重启后 WAITING_RESUME 等已知后继状态；恢复后重新要求明确勾选。STOP 的 PAUSING 回执须以读回的 PAUSED/REVOKED 为最终确认。任务链创建前检查必需验收条件、有效支持产物、BLOCKS 顺序和未解除 blocker；前端禁用与后端拒绝均需覆盖。
 
-2026-10-25 前端整改自检：`useProjectTaskPages` 覆盖 120 项、重复 ID 去重、同游标重试、暂态错误保留、401/403/404 清权，以及切 Project/Workspace/connection 时丢弃迟到响应；N04/N06 回执读回失败保留原 command/payload，成功回执按身份和状态选中确切计划/链。用户估时展示并读回 elapsed/execution/waiting/review/human、来源与 revision，CAS 冲突读取当前 Task/估时 revision，旧验收保留但提示不适用于当前验收。新增 `PROPOSE_PLAN` 错项目回执保留 pending 后按正确回执选中计划；`PROPOSE_SCOPE`、`SELECT_SCOPE`、`RESOLVE_ITEM` 错配时保留 pending，正确回执后读回/选中准确对象。当前 Agent 自检：Workbench 两个目标 spec 21/21；另 API 客户端 `taskChainsClient.spec.ts` 2/2（包含错 `command_id` 回执拒绝）；受控 API Chromium 2/2；真实临时 PG/HTTP 十个 suite 71/71，当前 API 源码 fresh build（run-integration.ps1 未用 -SkipBuild，已应用迁移 0136；详细结果归统一功能验收表）。完整 Workbench 尝试未全绿且被中止，相关消费者隔离复跑 23/27；完整 Windows/WebView2、Provider 和独立复核未运行，不得据分片结果宣称 PV04 完成。
+2026-10-25 前端整改自检更新：`useProjectTaskPages` 覆盖 120 项、重复 ID 去重、同游标重试、暂态错误保留、401/403/404 清权，以及切 Project/Workspace/connection 时丢弃迟到响应；N04/N06 回执读回失败保留原 command/payload，成功回执按身份与状态核对确切计划/链。估时保存使用 Task 与估时 revision CAS，历史与适用状态可读；全部 DEFERRED 项可填写理由拒绝，`RESOLVE_ITEM` 的目标项状态匹配且容许计划 revision 前进。授权恢复按持久 `authorization_history` 精确匹配原命令与额度/期限，支持读回 `WAITING_RESUME`，不匹配继续保留 pending；成功恢复后清除旧勾选并要求重新确认。STOP 覆盖 `PAUSING` 后读回 `PAUSED` 与 `REVOKED`。
+
+当前 Agent 定向自检：Workbench 七个相关 spec **50/50**；生产构建 `pnpm exec vite build` 通过（2202 modules，保留 chunk 与 Tauri 动态/静态 import 警告）；受控 API Chromium **2/2**。全量 Workbench `pnpm exec tsc --noEmit` 因未改的 `tests/taskbarBadge.spec.ts:21` TS2322 失败，需与并行改动方分别处理；本轮文件的新增类型错误已修正并复查。真实临时 PG/HTTP 十个 suite **71/71**，运行时包含 fresh build（`run-integration.ps1` 未用 `-SkipBuild`），迁移到 0140；这组 API 成绩早于并行中的 migration 0141/member-wakeup 改动，不覆盖它们。文档检查仍有 27 条既有缺失本地目标链接，未因本轮文档修改新增；逐条见命令输出。全量 Workbench、Windows/WebView2、Provider 与本轮修改后的独立验收未完成，不得据分片结果宣称 N04/N06 或 PV04 整体通过。
 
 未知估时、主线与前置、容量不足/阻塞和不重复相加另由纯排序单元检查；不扩展压力、进程故障或真实 Provider。本片不证明自动重排、自然语言发起或 N05/N06 前置全部通过。
 

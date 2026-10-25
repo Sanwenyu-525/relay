@@ -45,3 +45,12 @@
 /* 日常区一行一个工具：状态芯片与说明同排，窄窗口下换行而不是挤成两列。 */
 .connections-page .connections-tool-list > li { align-items: center; }
 .connections-page .connections-tool-list > li:last-child { border-bottom: 0; }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+
+.pv-page .surface-panel {
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: 0 3px 15px #22553506;
+}
+.pv-page .surface-panel > h2 { font-size: 13px; color: #294635; }

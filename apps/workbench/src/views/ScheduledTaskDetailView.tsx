@@ -190,9 +190,9 @@ export default function ScheduledTaskDetailView() {
     await sendCommand(client, held.command);
   }
 
-  if (loading) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
+  if (loading) return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <p role="status">正在读取定时任务…</p></div></div>;
-  if (task === null) return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
+  if (task === null) return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-detail-head" title="定时任务" meta="读取失败" lede="这条定时任务当前无法读取。" />
     {error && <p className="action-error" role="alert">{error}</p>}
     <div className="form-actions">
@@ -210,8 +210,8 @@ export default function ScheduledTaskDetailView() {
     }
     return [...merged.values()];
   })();
-  return <div className="page-layout scheduled-tasks-page"><div className="page-primary">
-    <PageHeader testId="scheduled-task-detail-head" title={task.title} meta={`定时任务 · ${describeRepeat(task)}`}
+  return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
+    <PageHeader testId="scheduled-task-detail-head" title={task.title} overline="Schedule Details" meta={`定时任务 · ${describeRepeat(task)}`}
       lede={`每次触发新建一个任务并交给 AI 执行；当前时区 ${task.timezone}，本地时刻 ${task.localTime}。`} />
     <div className="form-actions">
       <button className="secondary-button" type="button" onClick={() => void load()} disabled={frozen}>刷新</button>

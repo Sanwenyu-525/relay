@@ -44,6 +44,14 @@ export async function disableGatewayConnection(http: RelayHttp, input: { project
   }, 200));
 }
 
+/** 一键启用内置插件：服务端在同一事务补齐插件连接与逐动作策略（读取 AUTO、操作 ASK）。
+ *  result 的字段见 EnableProjectPlugin 用例（created_* / blocked_* / skipped_no_resource，全为字符串）。 */
+export async function enableProjectPlugin(http: RelayHttp, input: { projectId: string; plugin: "computer" | "browser" | "github"; commandId: string }): Promise<RelayCommandEnvelope> {
+  return commandEnvelopeFrom(await http.request(http.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/plugins/${input.plugin}/enable`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId })
+  }, 201));
+}
+
 export async function getGatewayPolicies(http: RelayHttp, projectId: string): Promise<readonly RelayGatewayPolicy[]> {
   const body = await http.request(http.workspacePath(`/projects/${encodeURIComponent(projectId)}/permission-policies`));
   return directList(body, "permission policies", (item) => {

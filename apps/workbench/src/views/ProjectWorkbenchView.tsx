@@ -267,9 +267,9 @@ export default function ProjectWorkbenchView() {
     } finally { if (request === epoch.current) setPageLoading(false); }
   }
 
-  if (kind === null) return <section className="page-state"><h1>没有这个工作台</h1><p>当前只提供通用、论文和开发三种内置视图。</p><Link className="text-link" to={`/projects/${id}/workbench/general`}>打开通用工作台</Link></section>;
-  if (loading || (snapshot !== null && (snapshot.projectId !== id || snapshot.client !== client))) return <section className="page-state" aria-live="polite"><h1>正在读取项目工作台</h1><p>{client ? "正在读取本机 API 的项目事实。" : "正在读取示例数据。"}</p></section>;
-  if (error) return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目工作台</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (kind === null) return <section className="page-state pv-page"><h1>没有这个工作台</h1><p>当前只提供通用、论文和开发三种内置视图。</p><Link className="text-link" to={`/projects/${id}/workbench/general`}>打开通用工作台</Link></section>;
+  if (loading || (snapshot !== null && (snapshot.projectId !== id || snapshot.client !== client))) return <section className="page-state pv-page" aria-live="polite"><h1>正在读取项目工作台</h1><p>{client ? "正在读取本机 API 的项目事实。" : "正在读取示例数据。"}</p></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><h1>暂时无法读取项目工作台</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!snapshot) return <section className="page-state"><h1>没有这个项目</h1><p>当前数据来源中没有该项目，页面不会自行创建项目或复制其他项目资料。</p><Link className="text-link" to="/projects">返回项目入口</Link></section>;
 
   const focusedTaskId = selectedTaskId ?? snapshot.nextAction?.id ?? snapshot.tasks[0]?.id ?? null;

@@ -111,7 +111,7 @@ function FixtureBlueprintView() {
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">项目蓝图</p><h1>正在读取蓝图预览</h1><p>示例数据正在加载，页面仍未提交任何变更。</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">项目蓝图</p><h1>暂时无法显示蓝图</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!project) return <section className="page-state"><p className="eyebrow">项目蓝图</p><h1>尚未提供项目蓝图示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取或写入其他项目的蓝图。</p></section>;
-  return <section className="skill-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="blueprint-page-head" title="让目标，有一条清晰的路径" meta={project.name}
+  return <section className="skill-page pv-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="blueprint-page-head" title="让目标，有一条清晰的路径" meta={project.name}
     lede="项目已创建，以下建议等待你确认。"
     status={<span className="metadata-row">蓝图建议 v{candidateVersion ?? project.blueprint.version ?? 1} <span aria-hidden="true">·</span> 基于项目状态 v{project.blueprint.baseRevision} <span aria-hidden="true">·</span> {statusLabel}</span>} />
     <section className="surface-panel blueprint-panel" aria-labelledby="blueprint-changes"><div className="section-heading-row"><h2 id="blueprint-changes">本次蓝图变更</h2>{!editing && project.blueprint.status !== "APPLIED" && <button className="text-button" type="button" data-testid="blueprint-edit" onClick={beginEdit}><Pencil aria-hidden="true" />修改建议</button>}</div>

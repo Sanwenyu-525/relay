@@ -35,6 +35,16 @@ function devCapabilitiesEnabled(): boolean {
 /** 服务端 rootBoundCaps：这类 Connection 必须绑定一个绝对根目录，Fake 能力不绑定任何边界。 */
 const rootBoundCapabilities: readonly RelayGatewayCapability[] =
   ["FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN"];
+/** 策略必须绑定受管资源的能力（准入目标就是那个根）。电脑/浏览器/Web 是合成目标或
+ *  主机前缀，不绑资源——此前把它们算进「要选资源」只会逼出永远匹配不上的死策略。 */
+const resourceBoundPolicyCapabilities: readonly RelayGatewayCapability[] =
+  ["FILE_READ", "FILE_QUERY", "FILE_WRITE", "GIT_READ", "GIT_WRITE", "CLI_RUN", "GITHUB_READ"];
+/** 浏览器三族：目标是 browser://<origin> 合成值，策略前缀按站点表达，站点字段可留空（=全部站点）。 */
+const isBrowserPolicyCapability = (capability: RelayGatewayCapability): boolean =>
+  capability === "BROWSER_READ" || capability === "BROWSER_ACTION" || capability === "BROWSER_COMMIT";
+const BROWSER_ALL_PREFIX = "browser://";
+const isResourceBoundPolicy = (capability: RelayGatewayCapability): boolean =>
+  resourceBoundPolicyCapabilities.includes(capability);
 /** 当前 Gateway 动作契约；提交后仍由服务端核对能力与动作的对应关系。 */
 const policyActions: Record<RelayGatewayCapability, readonly string[]> = {
   WEB_FETCH: ["WEB_FETCH"], FILE_READ: ["READ_FILE"],
@@ -55,9 +65,8 @@ const policyActions: Record<RelayGatewayCapability, readonly string[]> = {
     "BROWSER_PRESS_KEY", "BROWSER_CLOSE_PAGE"],
   BROWSER_COMMIT: ["BROWSER_SUBMIT_FORM", "BROWSER_UPLOAD_FILE"]
 };
-/** 除公共读取外的策略都按受管资源目录限定目标前缀（服务端 policyScope）。 */
-const isFileCapability = (capability: RelayGatewayCapability) =>
-  capability !== "WEB_FETCH" && capability !== "FAKE_PUBLIC_READ";
+/** 电脑（computer://desktop）与浏览器（browser://<origin>）是合成目标，Web 按主机；
+ *  其余策略按受管资源目录限定目标前缀（服务端 policyScope）。 */
 const connectionStatusText = (status: string): string => status === "ACTIVE" ? "已连接（尚未授权）"
   : status === "DISABLED" ? "已停用（失效）" : status === "REVOKED" ? "已撤销" : `未连接（${status}）`;
 /** 能力的中文显示名与「+」菜单连接器二级共用同一份（`lib/labels`），不另立第二套；未知枚举回退原文。 */
@@ -109,13 +118,13 @@ const toolRows: readonly ToolRowSpec[] = [
     capabilities: ["CLI_RUN"], next: "需要时在下方高级配置里登记目录与允许的可执行文件。" },
   { key: "computer", label: "电脑操控", purpose: "截图 · 窗口 · 鼠标键盘",
     capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"], plugin: "computer",
-    next: "授权在下方高级区登记连接与策略；本机运行时是否就绪看本行「本机」状态。" },
+    next: "点「一键启用」一次补齐连接与逐动作策略；本机运行时是否就绪看本行「本机」状态。" },
   { key: "browser", label: "浏览器操控", purpose: "页面读取 · 点击 · 填表",
     capabilities: ["BROWSER_READ", "BROWSER_ACTION", "BROWSER_COMMIT"], plugin: "browser",
-    next: "授权在下方高级区登记连接与策略；扩展配对与本机状态看本行「本机」说明。" },
+    next: "点「一键启用」一次补齐连接与逐动作策略；扩展配对与本机状态看本行「本机」说明。" },
   { key: "github", label: "GitHub", purpose: "仓库 · PR · Issue 只读",
     capabilities: ["GITHUB_READ"], plugin: "github",
-    next: "授权在下方高级区登记连接与策略；gh 是否安装与登录看本行「本机」状态。" },
+    next: "点「一键启用」补齐连接；逐目录授权还需要项目内有受管目录，gh 状态看本行「本机」。" },
 ];
 
 /** 安装级状态的中文短名；detail 与 remediation 进悬停提示，不在行内铺开。 */
@@ -126,11 +135,25 @@ const runtimeStateLabels: Record<string, string> = {
 /**
  * 返回位置（2026-10-21，R3-01）：`?from=` 由会话里的「管理连接与权限」写入，
  * 这里只接受站内绝对路径——外链不能当作返回目标，否则一次跳转就能把人带出站。
+ * `?tool=` 是同一跳的定位键（只认本页真实工具行），随项目选择继续传下去，不丢定位。
  */
 function returnPath(search: URLSearchParams): string | null {
   const from = search.get("from");
   if (from === null || !from.startsWith("/") || from.startsWith("//") || from.includes("\\")) return null;
   return from;
+}
+function locatedToolKey(search: URLSearchParams): string | null {
+  const tool = search.get("tool");
+  return tool !== null && toolRows.some((row) => row.key === tool) ? tool : null;
+}
+function projectLink(search: URLSearchParams, projectId: string): string {
+  const params = new URLSearchParams();
+  const from = returnPath(search);
+  const tool = locatedToolKey(search);
+  if (from !== null) params.set("from", from);
+  if (tool !== null) params.set("tool", tool);
+  const query = Array.from(params.keys()).length === 0 ? "" : `?${params.toString()}`;
+  return `/projects/${projectId}/connections${query}`;
 }
 
 function ReturnToConversation({ search }: { search: URLSearchParams }) {
@@ -173,7 +196,8 @@ interface Snapshot {
 interface PendingCommand {
   readonly id: string;
   readonly type: string;
-  readonly resultKey: "connection_id" | "policy_id" | "resource_id";
+  /** 插件启用（EnableProjectPlugin）的回执按 plugin 键核对，结果字段是计数而不是版本号。 */
+  readonly resultKey: "connection_id" | "policy_id" | "resource_id" | "plugin";
   readonly targetId: string | null;
   readonly expectedStatus: "ACTIVE" | "DISABLED" | "REVOKED";
   readonly send: (client: RelayApiClient, commandId: string) => Promise<RelayCommandEnvelope>;
@@ -182,12 +206,36 @@ interface PendingCommand {
 
 function matchingResult(envelope: RelayCommandEnvelope, pending: PendingCommand, projectId: string): string | null {
   const result = envelope.result;
+  if (pending.resultKey === "plugin") {
+    return envelope.commandId === pending.id && result.project_id === projectId &&
+      result.plugin === pending.targetId && typeof result.created_policies === "string"
+      ? (result.plugin as string) : null;
+  }
   if (envelope.commandId !== pending.id || result.project_id !== projectId ||
     typeof result[pending.resultKey] !== "string" || (result[pending.resultKey] as string).length === 0 ||
     (pending.targetId !== null && result[pending.resultKey] !== pending.targetId) ||
     result.status !== pending.expectedStatus ||
     !/^(0|[1-9][0-9]*)$/u.test(String(result[pending.resultKey === "connection_id" ? "version" : "revision"] ?? ""))) return null;
   return result[pending.resultKey] as string;
+}
+
+/** 一键启用回执的人话摘要：计数由服务端给出；停用/撤销/无目录的阻断必须原样说清，不吞掉。 */
+function pluginEnableMessage(result: Readonly<Record<string, unknown>>, confirmed: boolean): string {
+  const count = (key: string): number => {
+    const value = Number(result[key]);
+    return Number.isInteger(value) && value > 0 ? value : 0;
+  };
+  const parts: string[] = [];
+  const createdPolicies = count("created_policies");
+  if (count("created_connections") === 0 && createdPolicies === 0) {
+    parts.push("没有新的缺口需要补：连接与策略都已就绪");
+  } else {
+    parts.push(`已新建连接 ${count("created_connections")} 条、策略 ${createdPolicies} 条（读取类自动放行，操作类每次执行前需要批准）`);
+  }
+  if (count("blocked_disabled_connections") > 0) parts.push(`${count("blocked_disabled_connections")} 个能力存在已停用的连接，未新建绕过`);
+  if (count("blocked_revoked_policies") > 0) parts.push(`${count("blocked_revoked_policies")} 个动作的策略此前撤销过，不自动恢复，需人工重新授权`);
+  if (count("skipped_no_resource") > 0) parts.push(`${count("skipped_no_resource")} 个动作因项目还没有受管目录而未授权，登记目录后再点一次即可补上`);
+  return `一键启用：${parts.join("；")}。${confirmed ? "已由服务端回执和最新项目查询确认。" : "回执已提交；列表尚未确认最新状态，请刷新核对。"}`;
 }
 
 async function readSnapshot(client: RelayApiClient, projectId: string): Promise<Snapshot> {
@@ -237,19 +285,18 @@ export default function ConnectionsView() {
     void loadProjects();
     return () => { projectRequest.current++; };
   }, [client, connection.epoch]);
-  return <section className="connections-page">
-    <PageHeader testId="connections-page-head" title="连接与权限" meta="项目设置"
-      lede="选择项目，管理连接、受管目录与权限。" />
+  return <section className="connections-page pv-page">
+    <PageHeader testId="connections-page-head" title="连接与权限" overline="Connections" meta="项目设置"
+      lede="按能力族查看授权边界；连接成功不代表拥有所有权限，文件写入与命令执行仍需独立授权。" />
     <ReturnToConversation search={search} />
     {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
     {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
       {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
       {!loading && !error && projects.length === 0 && <p className="helper-text">当前没有进行中项目。<Link to="/projects">打开项目列表</Link></p>}
       <ul className="connections-list">{projects.map((project) => <li key={project.id}>
-        {/* 选定项目继续携带返回位置：范围选择这一跳不能把人原路丢在半路。 */}
+        {/* 选定项目继续携带返回位置与工具定位：范围选择这一跳不能把人原路丢在半路。 */}
         <Link className="text-link" data-testid="connections-picker-project"
-          to={`/projects/${project.id}/connections${returnPath(search) === null ? ""
-            : `?from=${encodeURIComponent(returnPath(search) ?? "")}`}`}>{project.title}</Link>
+          to={projectLink(search, project.id)}>{project.title}</Link>
         <span className="helper-text">v{project.revision}</span></li>)}</ul>
       {nextCursor && <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</button>}
     </section>}
@@ -260,11 +307,9 @@ export default function ConnectionsView() {
 export function ProjectConnectionsView() {
   const { id: projectId = "" } = useParams();
   const [search] = useSearchParams();
-  /**
-   * 从会话「+」的插件面板带进来的定位键（R3-01）：只认这一页真实存在的工具行，
-   * 未知键不猜某一行——猜错比不定位更糟，用户会对着一条无关结论做判断。
-   */
-  const locatedTool = toolRows.some((row) => row.key === search.get("tool")) ? search.get("tool") : null;
+  /** 从会话「+」的插件面板带进来的定位键：只认这一页真实存在的工具行，
+      未知键不猜某一行——猜错比不定位更糟，用户会对着一条无关结论做判断。 */
+  const locatedTool = locatedToolKey(search);
   const locatedRef = useRef<HTMLLIElement | null>(null);
   const locatedDone = useRef(false);
   const connection = useRelayConnection();
@@ -377,16 +422,27 @@ export function ProjectConnectionsView() {
       ? await activeClient.getManagedResource(projectId, resultId).catch(() => null) : null;
     const next = await refresh(activeClient, request);
     if (request !== scope.current) return;
-    const confirmed = command.resultKey === "connection_id"
-      ? (connectionDetail?.id === resultId && connectionDetail.projectId === projectId && connectionDetail.version === envelope.result.version && connectionDetail.status === envelope.result.status) ||
-        next?.connections.some((item) => item.id === resultId && item.version === envelope.result.version && item.status === envelope.result.status)
-      : command.resultKey === "policy_id"
-        ? next?.policies.some(({ policy }) => policy.id === resultId && policy.revision === envelope.result.revision &&
-          policy.status === envelope.result.status && (command.type === "RevokeGatewayPolicy"
-            ? policy.activeVersion === null : policy.activeVersion === envelope.result.version))
-        : (resourceDetail?.id === resultId && resourceDetail.projectId === projectId && resourceDetail.revision === envelope.result.revision && resourceDetail.status === envelope.result.status) ||
-          next?.resources.some((item) => item.id === resultId && item.revision === envelope.result.revision && item.status === envelope.result.status);
-    setMessage(confirmed ? `${command.label}已由服务端回执和最新项目查询确认。` : `${command.label}回执已提交；列表尚未确认最新状态，请刷新核对。`);
+    let confirmed: boolean;
+    if (command.resultKey === "plugin") {
+      // 插件启用的确认口径：刷新后的项目里已能读到覆盖该插件任一能力的 ACTIVE 连接。
+      const spec = toolRows.find((row) => row.key === command.targetId);
+      confirmed = next !== null && spec !== undefined && next.connections.some((item) =>
+        item.status === "ACTIVE" && item.capabilities.some((capability) =>
+          spec.capabilities.includes(capability as RelayGatewayCapability)));
+    } else if (command.resultKey === "connection_id") {
+      confirmed = (connectionDetail?.id === resultId && connectionDetail.projectId === projectId && connectionDetail.version === envelope.result.version && connectionDetail.status === envelope.result.status) ||
+        next?.connections.some((item) => item.id === resultId && item.version === envelope.result.version && item.status === envelope.result.status) === true;
+    } else if (command.resultKey === "policy_id") {
+      confirmed = next?.policies.some(({ policy }) => policy.id === resultId && policy.revision === envelope.result.revision &&
+        policy.status === envelope.result.status && (command.type === "RevokeGatewayPolicy"
+          ? policy.activeVersion === null : policy.activeVersion === envelope.result.version)) === true;
+    } else {
+      confirmed = (resourceDetail?.id === resultId && resourceDetail.projectId === projectId && resourceDetail.revision === envelope.result.revision && resourceDetail.status === envelope.result.status) ||
+        next?.resources.some((item) => item.id === resultId && item.revision === envelope.result.revision && item.status === envelope.result.status) === true;
+    }
+    setMessage(command.resultKey === "plugin"
+      ? pluginEnableMessage(envelope.result, confirmed)
+      : confirmed ? `${command.label}已由服务端回执和最新项目查询确认。` : `${command.label}回执已提交；列表尚未确认最新状态，请刷新核对。`);
     if (command.resultKey === "policy_id" && next?.policies.some(({ policy }) => policy.id === resultId)) setPolicyId(resultId);
     if (command.type === "CreateGatewayConnection") {
       setConnectionHost(""); setConnectionRoot(""); setConnectionExecutables("");
@@ -463,6 +519,16 @@ export function ProjectConnectionsView() {
       label: "受管资源创建", send: (api, commandId) => api.createManagedResource({ projectId, commandId, rootPath }) });
   }
 
+  /**
+   * 一键启用内置插件（2026-10-25）：连接与逐动作策略由服务端在同一事务补齐（读取
+   * AUTO、操作 ASK），这里不拼第二套授权。发送/回执/UNKNOWN 重试纪律与其他命令一致。
+   */
+  function submitEnablePlugin(plugin: "computer" | "browser" | "github") {
+    void sendCommand({ id: createCommandId(), type: "EnableProjectPlugin",
+      resultKey: "plugin", targetId: plugin, expectedStatus: "ACTIVE", label: "一键启用插件",
+      send: (api, commandId) => api.enableProjectPlugin({ projectId, plugin, commandId }) });
+  }
+
   function submitPolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selected = snapshot?.policies.find(({ policy }) => policy.id === policyId)?.policy ?? null;
@@ -470,14 +536,17 @@ export function ProjectConnectionsView() {
     const actionType = policyActionType;
     const decision = policyDecision;
     const host = policyHost.trim();
-    const resourceId = isFileCapability(capability) ? policyResourceId : null;
+    const resourceId = isResourceBoundPolicy(capability) ? policyResourceId : null;
     const bytes = Number(maxPayloadBytes);
-    if ((capability === "WEB_FETCH" && !host) || (isFileCapability(capability) && !resourceId) ||
+    if ((capability === "WEB_FETCH" && !host) || (isResourceBoundPolicy(capability) && !resourceId) ||
       !Number.isInteger(bytes) || bytes < 0 || bytes > 262144 ||
       (actionType !== "" && !policyActions[capability].includes(actionType)) ||
       (resourceId !== null && !snapshot?.resources.some((item) => item.id === resourceId && item.status === "ACTIVE"))) return;
     const input = { projectId, capability, resourceId, decision, maxPayloadBytes: bytes,
-      ...(capability === "WEB_FETCH" ? { host } : {}), ...(actionType === "" ? {} : { actionType }) };
+      ...(capability === "WEB_FETCH" ? { host }
+        // 浏览器策略的站点前缀可留空（= 全部站点）；形状由服务端 policyScope 校验。
+        : isBrowserPolicyCapability(capability) && host !== "" ? { host } : {}),
+      ...(actionType === "" ? {} : { actionType }) };
     void sendCommand(selected === null
       ? { id: createCommandId(), type: "CreateGatewayPolicy", resultKey: "policy_id", targetId: null, expectedStatus: "ACTIVE",
         label: "权限策略创建", send: (api, commandId) => api.createGatewayPolicy({ ...input, commandId }) }
@@ -495,14 +564,19 @@ export function ProjectConnectionsView() {
       setPolicyActionType(active.actionType);
       setPolicyDecision(active.decision as RelayGatewayDecision);
       setMaxPayloadBytes(String(active.maxPayloadBytes));
-      setPolicyHost(active.capability === "WEB_FETCH" ? active.targetPrefix : "");
+      setPolicyHost(active.capability === "WEB_FETCH" ? active.targetPrefix
+        // 浏览器：browser:// 是「全部站点」，回填时还原成空；具体站点去掉前缀回显。
+        : isBrowserPolicyCapability(active.capability as RelayGatewayCapability)
+          && active.targetPrefix !== BROWSER_ALL_PREFIX
+          && active.targetPrefix.startsWith(BROWSER_ALL_PREFIX)
+          ? active.targetPrefix.slice(BROWSER_ALL_PREFIX.length) : "");
     } else if (id === "") setPolicyDecision("DENY");
   }
 
   const selectedPolicy = snapshot?.policies.find(({ policy }) => policy.id === policyId) ?? null;
   const activeResources = snapshot?.resources.filter((item) => item.status === "ACTIVE") ?? [];
   const busy = submitting || pending !== null;
-  return <section className="connections-page">
+  return <section className="connections-page pv-page">
     <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置"
       lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。" />
     <ProjectNav projectId={projectId} active="connections" />
@@ -538,6 +612,12 @@ export function ProjectConnectionsView() {
               : pluginRuntimeError !== null ? { error: pluginRuntimeError as string }
               : pluginRuntime === null ? null
               : pluginRuntime[row.plugin] ?? null;
+            /* 只在服务端给出明确「未就绪」结论时挡下启用：读取失败或仍在读取时不拦，
+               登记本身不执行任何桌面动作；未就绪的原因走 title 原文。 */
+            const runtimeBlocked = runtime !== null && !("error" in runtime) && runtime.state !== "READY";
+            const runtimeTitle = runtimeBlocked && !("error" in runtime)
+              ? `本机未就绪：${runtime.detail}${runtime.remediation === null ? "" : ` 建议：${runtime.remediation}`}`
+              : "一次补齐这个插件的连接与逐动作策略：读取类自动放行，操作类每个动作执行前需要批准。";
             return <li key={row.key} data-testid={`connections-tool-${row.key}`}
               ref={row.key === locatedTool ? locatedRef : undefined}
               data-located={row.key === locatedTool ? "true" : undefined}
@@ -552,6 +632,11 @@ export function ProjectConnectionsView() {
                     本机：{runtimeStateLabels[runtime.state] ?? runtime.state}</small>)}</div>
               <div className="connections-actions">
                 <span className={`status-chip status-chip--${state.tone}`}>{state.text}</span>
+                {row.plugin !== undefined && <button className="secondary-button" type="button"
+                  data-testid={`connections-tool-enable-${row.key}`}
+                  disabled={busy || writeBlockedReason !== null || runtimeBlocked}
+                  title={runtimeTitle}
+                  onClick={() => { if (row.plugin !== undefined) submitEnablePlugin(row.plugin); }}>一键启用</button>}
               </div>
             </li>;
           })}</ul>
@@ -632,12 +717,13 @@ export function ProjectConnectionsView() {
             <label className="field"><span className="field-label">动作</span><select value={policyActionType} onChange={(event) => setPolicyActionType(event.target.value)} disabled={busy} data-testid="policy-action">
               <option value="">使用能力默认动作</option>{policyActions[policyCapability].map((action) => <option key={action} value={action}>{action}</option>)}</select><span className="field-hint">策略只匹配这一项动作。目录检索的列出、查找和搜索须分别配置。</span></label>
             {policyCapability === "WEB_FETCH" && <label className="field"><span className="field-label">策略主机</span><input value={policyHost} onChange={(event) => setPolicyHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="policy-host" /></label>}
-            {isFileCapability(policyCapability) && <label className="field"><span className="field-label">受管资源</span><select value={policyResourceId} onChange={(event) => setPolicyResourceId(event.target.value)} disabled={busy} required data-testid="policy-resource">
+            {isBrowserPolicyCapability(policyCapability) && <label className="field"><span className="field-label">站点前缀（可选）</span><input value={policyHost} onChange={(event) => setPolicyHost(event.target.value)} disabled={busy} placeholder="example.com:8080（留空 = 全部站点）" data-testid="policy-browser-origin" /><span className="field-hint">只填 host[:port]，不带协议和路径；目标站点未知或留空时按全部站点匹配。</span></label>}
+            {isResourceBoundPolicy(policyCapability) && <label className="field"><span className="field-label">受管资源</span><select value={policyResourceId} onChange={(event) => setPolicyResourceId(event.target.value)} disabled={busy} required data-testid="policy-resource">
               <option value="">明确选择一个有效资源</option>{activeResources.map((item) => <option key={item.id} value={item.id}>{item.canonicalRoot} · {item.id}</option>)}</select><span className="field-hint">版本接口不提供 resource_id；修订时须重新明确选择，不从目录字符串猜测。</span></label>}
             <label className="field"><span className="field-label">决定</span><select value={policyDecision} onChange={(event) => setPolicyDecision(event.target.value as RelayGatewayDecision)} disabled={busy} data-testid="policy-decision">
               <option value="DENY">DENY · 拒绝（默认）</option><option value="ASK">ASK · 每次请求审批</option><option value="AUTO">AUTO · 匹配时自动准入</option></select></label>
             <label className="field"><span className="field-label">最大载荷字节</span><input type="number" min="0" max="262144" step="1" value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} disabled={busy} required data-testid="policy-max-bytes" /><span className="field-hint">当前只读动作的空参数编码为 2 字节；上限由服务端校验。</span></label>
-            <div className="connections-actions"><button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null || (isFileCapability(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</button>
+            <div className="connections-actions"><button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null || (isResourceBoundPolicy(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</button>
               {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy("")}>取消修订</button>}</div>
           </form></details>
         </section>

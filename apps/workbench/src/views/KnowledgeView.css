@@ -196,3 +196,28 @@
   .knowledge-reader__source { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding: var(--relay-space-6) 0 0; }
   .knowledge-page h1 { font-size: var(--relay-font-size-compactPage); }
 }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+
+.pv-page .knowledge-tabs .subnav-item,
+.pv-page .knowledge-tabs button {
+  font-size: 12px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #d6e5d8;
+  border-radius: 9px;
+  background: #fff;
+  color: #53705b;
+}
+.pv-page .knowledge-tabs .subnav-item[aria-selected="true"],
+.pv-page .knowledge-tabs button[aria-selected="true"],
+.pv-page .knowledge-tabs .subnav-item.is-active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .knowledge-columns { gap: 14px; }
+.pv-page .knowledge-item-heading h2 { font-size: 15px; color: #244431; }
+.pv-page .knowledge-fact-paper {
+  border: 1px solid #e9f0e9;
+  background: #fbfdfb;
+  border-radius: 11px;
+  padding: 13px 15px;
+}
+.pv-page .knowledge-body { font-size: 12px; line-height: 1.8; color: #34523b; }

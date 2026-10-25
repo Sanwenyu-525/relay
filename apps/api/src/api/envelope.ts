@@ -34,7 +34,9 @@ const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion',
   // 分叉新建一条子会话（0113），不是对源会话的一次改写，因此与新建会话同一状态码。
   'ForkAssistSession',
   // 复制连接/资源/策略到目标项目（2026-10-19）：一次命令新建多行业务事实，与新建同类。
-  'CopyGatewaySettings'];
+  'CopyGatewaySettings',
+  // 一键启用插件（2026-10-25）：一次命令补齐连接与逐动作策略，同为新建多行业务事实。
+  'EnableProjectPlugin'];
 
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。

@@ -621,11 +621,11 @@ export default function TodayView() {
     return <section className="today-group"><h2>{title} · {count}</h2>{renderList(list, eligible)}</section>;
   }
 
-  return <section className="today-page">
+  return <section className="today-page pv-page">
     <div className="today-body">
       <div className="today-main">
-    <PageHeader testId="today-page-head" title="今天" meta={`${longDate} · ${weekday}`}
-      lede="从上次停下的地方，继续推进。" />
+    <PageHeader testId="today-page-head" title="今天" overline="Today" meta={`${longDate} · ${weekday}`}
+      lede="按可推进、受阻、等待中整理当前任务；优先显示原因与下一步。" />
     <div className="today-intro-note">
       <details className="today-arrange-note">
       <summary>安排说明</summary>
@@ -662,6 +662,14 @@ export default function TodayView() {
           {timezoneError && <p className="action-error" role="alert">{timezoneError}</p>}
         </form>}
       </div>
+      {current && <ul className="pv-stats cols-3 today-stats" aria-label="今日任务统计">
+        <li className="pv-stat"><span>可推进</span><strong>{current.eligibleItems.length}</strong>
+          <span>服务端按依赖与阻塞判定</span></li>
+        <li className="pv-stat"><span>已置顶待处理</span><strong>{current.blockedPinnedItems.length}</strong>
+          <span>已置顶但尚未满足开始条件</span></li>
+        <li className="pv-stat"><span>等待中</span><strong>{waitingOther.length}</strong>
+          <span>正在等待前置任务或回执</span></li>
+      </ul>}
       {readError && <p className="action-error" role="alert">读取失败：{readError}</p>}
       {message && <div className="success-callout" role="status"><p>{message}</p>
         {lastReceiptId && <details className="today-receipt-note"><summary>核对信息</summary>

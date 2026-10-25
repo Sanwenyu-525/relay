@@ -65,3 +65,26 @@
 /* 并入 48rem 折行档，原 700px：页面留白降级与筛选表单折行满宽；
    标题降级不再在此重复——全局已在 <64rem 档把 .page-head-title > h1 降为 compactPage。 */
 @media (width < 48rem) { .activity-page { padding: var(--relay-layout-main-smallPadding); } .activity-filter label { width: 100%; } .activity-filter label input { min-width: 0; width: 100%; } }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+
+.pv-page .activity-categories { gap: 7px; }
+.pv-page .activity-categories .text-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 12px;
+  border: 1px solid #d6e5d8;
+  border-radius: 9px;
+  background: #fff;
+  color: #53705b;
+}
+.pv-page .activity-categories .text-button[aria-pressed="true"] { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .activity-day { font-size: 12px; color: #759282; letter-spacing: .05em; }
+.pv-page .activity-list > li {
+  border: 1px solid #e3ebe4;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 15px #22553506;
+  margin-bottom: 9px;
+}
+.pv-page .activity-list > li:hover { border-color: #c6ddcc; }

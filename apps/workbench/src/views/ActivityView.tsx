@@ -251,9 +251,9 @@ export default function ActivityView() {
   }, [visibleItems]);
   const selected = selectedId !== null ? visibleItems.find((item) => item.id === selectedId) ?? null : null;
 
-  return <section className="activity-page">
-    <PageHeader testId="activity-page-head" title="动态" meta="工作空间"
-      lede="这里按时间记录项目里真实发生过的动作，可以按项目、任务、Run 或时间筛选，并直达相关对象。每一次改变都能找到依据。" />
+  return <section className="activity-page pv-page">
+    <PageHeader testId="activity-page-head" title="动态" overline="Activity" meta="工作空间"
+      lede="完整记录工具调用、命令执行、文件变更和重要决定，可按项目、任务、Run 或时间筛选。" />
     {client === null ? <p className="warning-callout" role="status">当前是示例数据预览，没有真实 Activity 记录。<Link to="/projects">打开项目</Link> 继续人工工作。</p> : <>
       <details className="activity-advanced-filter" data-testid="activity-advanced-filter" open={hasActiveFilter}>
         <summary>按项目、任务与时间筛选{hasActiveFilter ? " · 已应用范围" : ""}</summary>

@@ -18,7 +18,7 @@ describe("项目列表", () => {
     const mounted = await mountWorkbench("/projects");
     unmount = mounted.unmount;
 
-    expect(mounted.wrapper.text()).toContain("让长期目标有序推进，下一步始终清晰。");
+    expect(mounted.wrapper.text()).toContain("长期工作以项目为上下文，关联会话、任务、目标和成果。");
     expect(mounted.wrapper.get('[data-testid="projects-tab-all"]').text()).toContain("全部项目 (4)");
     expect(mounted.wrapper.get('[data-testid="projects-tab-active"]').text()).toContain("进行中 (3)");
     expect(mounted.wrapper.get('[data-testid="projects-tab-archived"]').text()).toContain("已归档 (1)");

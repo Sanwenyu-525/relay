@@ -193,7 +193,7 @@ describe("N03 项目知识导读", () => {
       detail: "expected_revision 不符" }, 409) });
     const mounted = await openGuide();
     await mounted.wrapper.findAll("button").filter((node) =>
-      node.text() === "全部加入（2）")[0]!.trigger("click");
+      node.text() === "加入已加载目标（2）")[0]!.trigger("click");
     await flush();
     await mounted.wrapper.findAll("button").filter((node) =>
       node.text() === "保存导读")[0]!.trigger("click");
@@ -202,14 +202,14 @@ describe("N03 项目知识导读", () => {
       .toContain("导读已被别处改动，本次未保存");
   });
 
-  it("空导读提供一次加入全部目标，且不自动写入", async () => {
+  it("空导读提供一次加入已加载目标，且不自动写入", async () => {
     stubFetch({ guide: () => json({ project_id: projectId, exists: false, revision: "0",
       entry_count: 0, entries: [], gaps: ["尚未编排任何条目"] }) });
     const mounted = await openGuide();
     const view = mounted.wrapper.get('[data-testid="project-knowledge-guide"]');
     expect(view.text()).toContain("尚未保存过编排");
     expect(view.text()).toContain("尚未编排任何条目");
-    await view.findAll("button").filter((node) => node.text() === "全部加入（3）")[0]!.trigger("click");
+    await view.findAll("button").filter((node) => node.text() === "加入已加载目标（3）")[0]!.trigger("click");
     await flush();
     expect(calls.some((call) => call.method === "PUT")).toBe(false);
     expect(mounted.wrapper.findAll(".knowledge-guide__entries li")).toHaveLength(3);

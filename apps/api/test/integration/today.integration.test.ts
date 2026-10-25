@@ -141,7 +141,8 @@ test('Pin cannot override an unmet dependency; AI-held work stays in waiting ite
     expected_task_revision: delegated.revision }), 202, delegateId);
   const taskDetail = await api.get(workspacePath(workspaceId, `/tasks/${delegated.id}`));
   assert.equal(taskDetail.status, 200, taskDetail.text);
-  const aiDetail = taskDetail.body as { status: string; allowed_actions: readonly string[] };
+  const aiDetail = taskDetail.body as { status: string; revision: string; acceptance_revision: string;
+    allowed_actions: readonly string[]; acceptance: { criteria: readonly { criterion_id: string; required: boolean }[] } };
   assert.equal(aiDetail.status, 'IN_PROGRESS');
   const taskActions = aiDetail.allowed_actions;
   assert.deepEqual(taskActions, ['EDIT_PRESENTATION', 'CANCEL']);
@@ -162,6 +163,17 @@ test('Pin cannot override an unmet dependency; AI-held work stays in waiting ite
   assert.equal(waitingAi?.allowed_actions.includes('SAVE_ARTIFACT_VERSION'), false);
   assert.equal(waitingAi?.allowed_actions.includes('COMPLETE'), false);
   assert.deepEqual(waitingAi?.allowed_actions.slice(0, taskActions.length), taskActions);
+
+  expectProblem(await api.post(workspacePath(workspaceId, `/tasks/${delegated.id}/artifacts`), {
+    command_id: randomUUID(), expected_task_revision: aiDetail.revision,
+    title: 'AI 持有任务的人工提交反例', media_type: 'text/markdown', content: 'must not persist',
+  }), 409, 'INVALID_TRANSITION');
+  expectProblem(await api.post(workspacePath(workspaceId, `/tasks/${delegated.id}/complete`), {
+    command_id: randomUUID(), expected_revision: aiDetail.revision,
+    acceptance_revision: aiDetail.acceptance_revision, artifact_version_ids: [],
+    acceptance: { statement: '人工核对', accepted_criterion_ids: aiDetail.acceptance.criteria
+      .filter((criterion) => criterion.required).map((criterion) => criterion.criterion_id) },
+  }), 409, 'INVALID_TRANSITION');
 });
 
 test('Focus preserves its timezone, effective inherited Goals and explicit empty alignment', async () => {

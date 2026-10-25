@@ -7,6 +7,8 @@ export interface PageHeaderProps {
   /** 状态、执行者与版本等并列事实，由调用方决定用哪种芯片表达。 */
   status?: ReactNode;
   meta?: ReactNode;
+  /** 页眉小字（overline）：原型 V5.28 页头的第一层。仅在加 `.pv-page` 皮肤的页面显示。 */
+  overline?: string;
   lede?: ReactNode;
   /** 首屏常驻动作。一个决策区只在这里放一个主操作。 */
   actions?: ReactNode;
@@ -26,7 +28,7 @@ export interface PageHeaderProps {
  * 页面页头：名称、状态、元信息、目标句与常驻动作各占固定层级。
  * 这里只负责结构与键盘行为，不持有业务状态，也不决定哪些动作可以折叠。
  */
-export default function PageHeader({ title, status, meta, lede, actions, more, titleHref, headingLevel = 1, testId, children }: PageHeaderProps) {
+export default function PageHeader({ title, status, meta, overline, lede, actions, more, titleHref, headingLevel = 1, testId, children }: PageHeaderProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const moreRef = useRef<HTMLDetailsElement>(null);
   // 「更多操作」是浮层：点到外面、按 Esc、或打开别的浮层时收起（焦点还给 ⋯）。
@@ -36,6 +38,7 @@ export default function PageHeader({ title, status, meta, lede, actions, more, t
 
   return <header className="page-head" data-testid={testId}>
     <div className="page-head-main">
+      {overline !== undefined && <p className="page-head-overline" aria-hidden="true">{overline}</p>}
       <div className="page-head-title">
         <Heading title={title}>{titleHref === undefined ? title : <Link className="page-head-title-link" to={titleHref}
           title={title} data-testid={testId === undefined ? undefined : `${testId}-title-link`}>{title}</Link>}</Heading>

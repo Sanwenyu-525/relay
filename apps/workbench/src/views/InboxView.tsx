@@ -179,10 +179,10 @@ function FixtureInboxBoard() {
   const clearFilters = () => { setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
   const openCreate = () => navigate("/tasks?view=create&tab=inbox");
   const openLightweight = () => navigate("/tasks?view=create&light=1&tab=inbox");
-  if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">收件箱</p><h1>正在读取收件箱任务</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
-  if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">收件箱</p><h1>暂时无法显示收件箱</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Task Inbox</p><h1>正在读取收件箱任务</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Task Inbox</p><h1>暂时无法显示收件箱</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   const rows = tasks.map(fixtureRow);
-  return <section className="skill-page inbox-page"><div className="inbox-inner">
+  return <section className="skill-page inbox-page pv-page"><div className="inbox-inner">
     <InboxHead onCreate={openCreate} onCreateLightweight={openLightweight} />
     <InboxScopeNav />
     <InboxStats rows={rows} />
@@ -254,7 +254,7 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
   const clearFilters = () => { setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
   const openCreate = () => navigate("/tasks?view=create&tab=inbox");
   const openLightweight = () => navigate("/tasks?view=create&light=1&tab=inbox");
-  return <section className="skill-page inbox-page" data-testid="tasks-live-inbox"><div className="inbox-inner">
+  return <section className="skill-page inbox-page pv-page" data-testid="tasks-live-inbox"><div className="inbox-inner">
     <InboxHead onCreate={openCreate} onCreateLightweight={openLightweight} />
     <InboxScopeNav />
     <InboxStats rows={visible} />

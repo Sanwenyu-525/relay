@@ -14,6 +14,17 @@
   padding: var(--relay-layout-main-padding);
 }
 
+/* pv 皮肤：容器宽度与留白交给 .pv-page（views/proto/protoPage.css），内层不再二次限宽。
+   三类连写提高特异性，压过文件尾部窄窗媒体查询对 .projects-inner 的 padding 覆写。 */
+.projects-page.pv-page .projects-inner {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pv-page .projects-footnote { margin-top: 22px; border-top: none; padding-top: 0; }
+.pv-page .projects-footnote__note { font-size: 11px; color: #829588; }
+
 /* ── 推进摘要条 ─────────────────────────────────────────────────────────── */
 
 .projects-summary {
@@ -186,104 +197,91 @@
   height: var(--relay-control-icon-size);
 }
 
-/* ── 卡片网格 ───────────────────────────────────────────────────────────── */
+/* ── 卡片网格（原型 V5.11 项目卡皮肤；数值同 views/proto/protoPage.css 的说明） ── */
 
-/* 对齐 V4.3 接续原型：紧凑卡按可用宽度自动铺满，每张保底 15.5rem，
- * 容器变窄时自动回落列数。列表视图仍走单列。 */
-.projects-grid {
+/* 对齐 V5.28 原型：三列卡片网格，1120px 降两列，窄窗单列。列表视图仍走单列。 */
+.pv-page .projects-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr));
-  gap: var(--relay-space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
   align-items: stretch;
-  margin-top: var(--relay-space-6);
+  margin-top: var(--relay-space-4);
 }
 
-.projects-grid.is-list {
+.pv-page .projects-grid.is-list {
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--relay-space-4);
 }
 
-.project-card {
-  position: relative;
+.pv-pcard {
   display: flex;
   flex-direction: column;
-  gap: var(--relay-space-2);
-  min-height: 8rem;
-  padding: var(--relay-space-4);
-  overflow: hidden;
-  background: var(--relay-color-bg-surface);
-  border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-panel);
-  /* 2026-10-25 视觉对齐：白卡浮起（与 .surface-panel、/agent 页输入卡同一卡片语言，
-     对齐项目重设计原型的柔投影卡片）。 */
-  box-shadow: var(--relay-shadow-card);
+  gap: 9px;
+  min-width: 0;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e3ebe4;
+  border-radius: 14px;
+  box-shadow: 0 4px 18px #203b2810;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-/* 顶缘细色条：用主色到选中色再淡出，不引入新色值。 */
-.project-card::before {
-  content: "";
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline: 0;
-  height: var(--relay-space-0-5);
-  background: linear-gradient(90deg, var(--relay-color-action-primary) 0%,
-    var(--relay-color-selection-bg) 45%, transparent 90%);
-}
+.pv-pcard:hover { border-color: #c6ddcc; }
 
-.project-card:hover {
-  border-color: var(--relay-color-border-control);
-}
+.pv-pcard--archived { opacity: .78; }
 
-.project-card__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--relay-space-2);
-}
-
-/* 阶段药丸与「⋯」入口并排靠右；「⋯」自带 stopPropagation，不抢整卡点击进入项目。 */
-.project-card__top-right {
+.pv-pcard__top {
   display: flex;
   align-items: center;
-  gap: var(--relay-space-1);
-  flex: none;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.project-card__control {
+.pv-pcard__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #64836e;
+  margin-left: auto;
+}
+
+.pv-pcard__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #55a579;
+}
+
+.pv-pcard__status.is-archived .pv-pcard__status-dot { background: #b7c2b9; }
+
+.pv-pcard__control {
   display: grid;
   place-items: center;
-  width: var(--relay-control-height-compact);
-  height: var(--relay-control-height-compact);
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: var(--relay-radius-control);
+  border-radius: 7px;
   background: none;
-  color: var(--relay-color-text-muted);
+  color: #84948a;
   cursor: pointer;
 }
 
-.project-card__control:hover {
-  color: var(--relay-color-text-primary);
-  background: var(--relay-color-selection-hover);
-}
+.pv-pcard__control:hover { color: #294635; background: #eef6ef; }
 
-.project-card__control > svg {
-  width: var(--relay-control-icon-size);
-  height: var(--relay-control-icon-size);
-}
+.pv-pcard__control > svg { width: 15px; height: 15px; }
 
-.project-card__name {
+.pv-pcard__name {
   margin: 0;
   min-width: 0;
-  font-size: var(--relay-font-size-rowTitle);
-  font-weight: var(--relay-font-weight-semibold);
-  line-height: var(--relay-font-lineHeight-heading);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #22422f;
+  line-height: 1.45;
 }
 
-/* 名称是键盘可达的进入项目入口；颜色与正文一致，不额外引入「链接蓝」。 */
-.project-card__name-button {
+.pv-pcard__name-button {
   padding: 0;
   border: none;
   background: none;
@@ -294,77 +292,68 @@
   cursor: pointer;
 }
 
-.project-card__name-button:hover {
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
+.pv-pcard__name-button:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 
-.project-card__caption {
+.pv-pcard__caption {
   margin: 0;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
+  color: #84948a;
+  font-size: 11px;
+  line-height: 1.65;
 }
 
-.project-card__status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--relay-space-1);
-  flex: none;
-  padding: var(--relay-space-0-5) var(--relay-space-2);
-  color: var(--relay-color-status-success-text);
-  background: var(--relay-color-status-success-bg);
-  border-radius: var(--relay-radius-round);
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
-  white-space: nowrap;
-}
-
-.project-card__status.is-archived {
-  color: var(--relay-color-status-neutral-text);
-  background: var(--relay-color-status-neutral-bg);
-}
-
-.project-card__status-dot {
-  width: var(--relay-space-1);
-  height: var(--relay-space-1);
-  border-radius: var(--relay-radius-round);
-  background: currentColor;
-}
-
-/* 下一步顶到卡底，用细线与上方分隔；缺下一步只是待补事实，故用警示文字色而非整块警示底。 */
-.project-card__next {
+.pv-pcard__metrics {
   display: flex;
-  gap: var(--relay-space-1);
-  margin: auto 0 0;
-  padding-top: var(--relay-space-2);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-ui);
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding-top: 2px;
+  color: #7d9283;
+  font-size: 11px;
 }
 
-.project-card__next > span {
-  min-width: 0;
-  color: var(--relay-color-text-primary);
-  overflow-wrap: anywhere;
+.pv-pcard__metrics .is-unset { color: #a07536; }
+
+.pv-pcard__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
 }
 
-.project-card__next.is-unset > span {
-  color: var(--relay-color-status-warning-text);
+.pv-pcard__ghost {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #526c5a;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
 }
 
-/* ── 「开启一个新项目」卡 ───────────────────────────────────────────────── */
+.pv-pcard__ghost:hover { color: #17664d; text-decoration: underline; text-underline-offset: 0.2em; }
+
+.pv-pcard__footer .secondary-button { min-height: 30px; padding: 4px 11px; font-size: 11px; }
+
+/* ── 「开启一个新项目」卡（V5.28 原型的虚线新建卡形态） ──────────────────── */
 
 .project-card--new {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--relay-space-3);
   padding: var(--relay-space-6);
   background: var(--relay-color-bg-subtle);
-  border-style: dashed;
-  border-color: var(--relay-color-border-control);
+  border: var(--relay-border-width) dashed var(--relay-color-border-control);
+  border-radius: var(--relay-radius-panel);
   text-align: center;
   cursor: pointer;
+}
+
+.pv-page .project-card--new {
+  border-radius: 14px;
+  box-shadow: none;
 }
 
 /* 新建卡没有顶缘色条，避免把入口读成已存在的项目。 */
@@ -375,6 +364,11 @@
 .project-card--new:hover {
   border-color: var(--relay-color-action-primary);
   background: var(--relay-color-selection-hover);
+}
+
+.pv-page .project-card--new:hover {
+  border-color: #a3c8ae;
+  background: #f0f7f1;
 }
 
 .project-card__new-icon {
@@ -423,22 +417,65 @@
   height: var(--relay-font-size-body);
 }
 
+/* ── 摘要条与工具栏（pv 皮肤：摘要条改为原型 note 语气，工具栏行距收紧） ── */
+
+.pv-page .projects-summary {
+  margin-top: 15px;
+  padding: 13px 16px;
+  background: #f4faf5;
+  border: 1px solid #e2efe4;
+  border-radius: 12px;
+}
+
+.pv-page .projects-summary__main { font-size: 12.5px; color: #294635; }
+.pv-page .projects-summary__desc { font-size: 11px; color: #7f948a; }
+.pv-page .projects-summary__right { font-size: 11px; color: #7f948a; }
+.pv-page .projects-summary__symbol {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #e4f2e8;
+  color: #2f6c4a;
+}
+.pv-page .projects-summary__symbol > svg { width: 15px; height: 15px; }
+
+.pv-page .projects-toolbar {
+  margin-top: 16px;
+  border-bottom: none;
+  gap: 10px;
+}
+
+.pv-page .projects-tools { padding-bottom: 0; }
+.pv-page .projects-tools .search-field { width: 14rem; }
+.pv-page .projects-view-toggle { background: #f1f6f1; border-radius: 9px; }
+.pv-page .projects-view-toggle__btn.is-active { background: #fff; color: #206846; }
+
+.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #829588; }
+
+/* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
+@media (width < 48rem) {
+  .projects-page .projects-inner {
+    padding: var(--relay-layout-main-smallPadding);
+  }
+
+  .pv-page .projects-grid { grid-template-columns: minmax(0, 1fr); }
+
+  .projects-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .projects-tools {
+    justify-content: space-between;
+  }
+
+  .projects-tools .search-field {
+    flex: 1;
+    width: auto;
+  }
+}
+
 /* ── 范围说明与详情抽屉 ─────────────────────────────────────────────────── */
-
-.projects-note {
-  display: flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-  margin-top: var(--relay-space-6);
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-meta);
-}
-
-.projects-note > svg {
-  flex: none;
-  width: var(--relay-font-size-body);
-  height: var(--relay-font-size-body);
-}
 
 /* 页脚附注：一条安静的收尾，不再摆成两块并排的盒子。
    说明文字直接以 muted 脚注呈现；「按 ID 打开」收成一条无边框的「高级」折叠，

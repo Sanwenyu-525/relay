@@ -134,9 +134,10 @@ export default function ReviewsView() {
     ? new Intl.DateTimeFormat("zh-CN", { timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
     : "时间不可读取";
 
-  return <section className="review-page" data-testid="review-inbox" ref={pageRef}><div className="review-columns">
+  return <section className="review-page pv-page" data-testid="review-inbox" ref={pageRef}><div className="review-columns">
     <div className="review-primary">
-      <PageHeader title="等待你的判断" testId="review-page-head"
+      <PageHeader title="验证、审批与完成" testId="review-page-head" overline="Verification & Approval"
+        lede="独立展示执行结果、检查证据、人工判断与动作批准；Run 结束 ≠ 检查通过 ≠ Review 通过 ≠ 正式完成。"
         meta={loading ? "正在核对请求" : `${reviews.length} 项请求 · 查看对象与依据后逐项处理`}
         actions={<button className="secondary-button" type="button" data-testid="review-refresh" disabled={loading || refreshing}
           onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button>} />

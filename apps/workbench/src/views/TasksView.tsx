@@ -94,10 +94,10 @@ export default function TasksView() {
   if (live && connection.client && scope === "attention") return <AttentionQueue key={connection.epoch} client={connection.client} />;
   if (live && connection.client) return <LiveTaskListView key={connection.epoch} client={connection.client} onCreate={openCreate} onCreateLightweight={openLightweight} />;
   if (scope === "attention") return <section className="skill-page"><h1>人工待处理</h1><p>当前是示例预览，无法读取跨项目待处理事实。连接本机 API 后再查看。</p><Link to="/tasks">返回任务</Link></section>;
-  if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">任务</p><h1>正在读取任务列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
-  if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">任务</p><h1>暂时无法显示任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
-  return <section className="skill-page task-list-page"><div className="page-layout"><div className="page-primary">
-    <PageHeader testId="tasks-page-head" title="任务"
+  if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Tasks</p><h1>正在读取任务列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Tasks</p><h1>暂时无法显示任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  return <section className="skill-page task-list-page pv-page"><div className="page-layout"><div className="page-primary">
+    <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
       lede="把目标拆成可执行的任务；完成依据是产物与验收。"
       actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
         <button className="secondary-button" type="button" data-testid="task-create-full" onClick={openCreate}>填写完整定义</button></>} />
@@ -202,9 +202,9 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
     (modeFilter === "all" || task.mode === modeFilter) &&
     (!needle || task.title.toLocaleLowerCase().includes(needle)));
   const hasFilters = projectFilter !== "all" || statusFilter !== "all" || modeFilter !== "all" || needle !== "";
-  return <section className="skill-page task-list-page" data-testid="tasks-live-all"><div className="page-layout">
+  return <section className="skill-page task-list-page pv-page" data-testid="tasks-live-all"><div className="page-layout">
     <div className="page-primary">
-      <PageHeader testId="tasks-page-head" title="任务"
+      <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
         lede="整个工作空间的任务；筛选只作用于已加载的页。"
         actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</button>
           <button className="secondary-button" type="button" data-testid="task-create-full" onClick={onCreate}>填写完整定义</button></>} />

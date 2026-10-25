@@ -291,7 +291,10 @@ describe("Goal↔Project 关联入口", () => {
     fetchStub.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       if (/\/commands\/[^/]+$/u.test(path)) {
-        return response(200, { command_id: posts[0]?.body.command_id,
+        // 回执身份必须是被核对的关联命令本身：若沿用 Goal 创建命令的 ID，
+        // command_id 校验会先失败，下面的 goal_ids 反例就永远轮不到。
+        const linkCommandId = posts.find((post) => post.path.endsWith("/goal-links"))?.body.command_id;
+        return response(200, { command_id: linkCommandId,
           command_type: "LinkProjectGoal", committed_at: "2026-10-04T00:00:05Z",
           result: { project_id: otherProjectId, revision: "3", goal_ids: [] } });
       }
@@ -311,43 +314,103 @@ describe("Goal↔Project 关联入口", () => {
     expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(1);
   });
 
-  it("续页明确失权（403）时撤下已读项目并阻止用旧数据提交", async () => {
-    connect();
-    const posts: { path: string; body: Record<string, unknown> }[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const path = url.pathname;
-      if (init?.method === "POST" && path === `${root}/goals`) {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        posts.push({ path, body });
-        return response(201, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
-          result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
-      }
-      if (init?.method === "POST" && path.endsWith("/goal-links")) {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        posts.push({ path, body });
-        throw new Error("失权后不得再用旧项目数据提交关联");
-      }
-      if (init?.method !== "POST" && path === `${root}/projects`) {
-        if (!url.searchParams.has("cursor")) {
-          return response(200, { items: [listItem(otherProjectId, "论文项目", "2")], next_cursor: "page-2" });
+  /**
+   * 回执路径与直接响应用同一套身份校验（verifiedLink + command_type）：
+   * 错命令类型、错 command_id、错 Project、旧修订的回执都不能宣告成功。
+   * 「缺目标 Goal」单独成例，见上一条用例。
+   */
+  const receiptMismatchCases: readonly { readonly name: string;
+    readonly receipt: (linkCommandId: string) => Record<string, unknown> }[] = [
+    { name: "命令类型不是 LinkProjectGoal", receipt: (linkCommandId) => ({
+      command_id: linkCommandId, command_type: "CreateGoal", committed_at: "2026-10-04T00:00:05Z",
+      result: { project_id: otherProjectId, revision: "3", goal_ids: [goalId] } }) },
+    { name: "command_id 与原命令不一致", receipt: () => ({
+      command_id: "99999999-9999-4999-8999-999999999999", command_type: "LinkProjectGoal",
+      committed_at: "2026-10-04T00:00:05Z",
+      result: { project_id: otherProjectId, revision: "3", goal_ids: [goalId] } }) },
+    { name: "Project 不是冻结的那个", receipt: (linkCommandId) => ({
+      command_id: linkCommandId, command_type: "LinkProjectGoal", committed_at: "2026-10-04T00:00:05Z",
+      result: { project_id: "77777777-7777-4777-8777-777777777777", revision: "3", goal_ids: [goalId] } }) },
+    { name: "修订仍是原修订未递增", receipt: (linkCommandId) => ({
+      command_id: linkCommandId, command_type: "LinkProjectGoal", committed_at: "2026-10-04T00:00:05Z",
+      result: { project_id: otherProjectId, revision: "2", goal_ids: [goalId] } }) },
+  ];
+
+  for (const testCase of receiptMismatchCases) {
+    it(`原回执与冻结请求错配（${testCase.name}）时不宣布成功，pending 原样保留`, async () => {
+      connect();
+      const posts: { path: string; body: Record<string, unknown> }[] = [];
+      vi.stubGlobal("fetch", router({
+        revision: "2",
+        link: () => { throw new TypeError("response lost after commit"); },
+      }, posts));
+      const fetchStub = vi.mocked(globalThis.fetch);
+      const original = fetchStub.getMockImplementation()!;
+      fetchStub.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        const receipt = /\/commands\/([^/]+)$/u.exec(path);
+        if (receipt) {
+          const linkCommandId = String(posts.find((post) => post.path.endsWith("/goal-links"))?.body.command_id ?? "");
+          return response(200, testCase.receipt(linkCommandId));
         }
-        return response(403, { code: "FORBIDDEN", detail: "访问已撤销" });
-      }
-      if (path.endsWith("/attention/interventions")) return response(200, { items: [] });
-      if (path === `${root}/tasks`) return response(200, { items: [], next_cursor: null });
-      throw new Error(`Unexpected request ${path}${url.search}`);
-    }));
-    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
-    await createGoalAndWait(view);
+        return original(input, init);
+      });
+      const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+      await createGoalAndWait(view);
 
-    await view.wrapper.get('[data-testid="goal-link-more"]').trigger("click");
-    await flush(); await flush();
+      await view.wrapper.get('[data-testid="goal-link-project"]').setValue(otherProjectId);
+      await flush();
+      await view.wrapper.get('[data-testid="goal-link-submit"]').trigger("click");
+      await flush(); await flush();
 
-    // 已失权的数据必须撤下，不能再出现在下拉里，也不能据此发出关联命令。
-    expect(view.wrapper.get('[data-testid="goal-link-projects-failed"]').exists()).toBe(true);
-    expect(view.wrapper.find('[data-testid="goal-link-project"]').exists()).toBe(false);
-    expect(view.wrapper.find('[data-testid="goal-link-submit"]').exists()).toBe(false);
-    expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(0);
-  });
+      expect(view.wrapper.find('[data-testid="goal-link-result"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="goal-link-pending"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="goal-link-error"]').text()).toContain("不匹配");
+      expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(1);
+    });
+  }
+
+  for (const scopeLostStatus of [401, 403, 404] as const) {
+    it(`续页明确失权（${scopeLostStatus}）时撤下已读项目并阻止用旧数据提交`, async () => {
+      connect();
+      const posts: { path: string; body: Record<string, unknown> }[] = [];
+      const scopeLostCode = scopeLostStatus === 401 ? "UNAUTHORIZED"
+        : scopeLostStatus === 403 ? "FORBIDDEN" : "NOT_FOUND";
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const path = url.pathname;
+        if (init?.method === "POST" && path === `${root}/goals`) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ path, body });
+          return response(201, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+            result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
+        }
+        if (init?.method === "POST" && path.endsWith("/goal-links")) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ path, body });
+          throw new Error("失权后不得再用旧项目数据提交关联");
+        }
+        if (init?.method !== "POST" && path === `${root}/projects`) {
+          if (!url.searchParams.has("cursor")) {
+            return response(200, { items: [listItem(otherProjectId, "论文项目", "2")], next_cursor: "page-2" });
+          }
+          return response(scopeLostStatus, { code: scopeLostCode, detail: "访问已撤销" });
+        }
+        if (path.endsWith("/attention/interventions")) return response(200, { items: [] });
+        if (path === `${root}/tasks`) return response(200, { items: [], next_cursor: null });
+        throw new Error(`Unexpected request ${path}${url.search}`);
+      }));
+      const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+      await createGoalAndWait(view);
+
+      await view.wrapper.get('[data-testid="goal-link-more"]').trigger("click");
+      await flush(); await flush();
+
+      // 已失权的数据必须撤下，不能再出现在下拉里，也不能据此发出关联命令。
+      expect(view.wrapper.get('[data-testid="goal-link-projects-failed"]').exists()).toBe(true);
+      expect(view.wrapper.find('[data-testid="goal-link-project"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="goal-link-submit"]').exists()).toBe(false);
+      expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(0);
+    });
+  }
 });

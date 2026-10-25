@@ -64,7 +64,7 @@ function FixtureVerificationPlanView() {
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">验收方案</p><h1>正在读取检查建议</h1><p>尚未运行任何检查，也没有形成有效 CheckPlan。</p></section>;
   if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">验收方案</p><h1>暂时无法显示检查建议</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   if (!project) return <section className="page-state"><p className="eyebrow">验收方案</p><h1>尚未提供验收方案示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取或写入其他任务的检查建议。</p></section>;
-  return <section className="skill-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="verification-plan-page-head"
+  return <section className="skill-page pv-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="verification-plan-page-head"
     title="把完成标准，变成可核对的依据。" meta="生成验收方案"
     lede="基于验收标准，梳理检查项与检查方式，便于后续实施与审查。"
     status={<span className={`status-chip status-chip--warning`}>{baselineStale ? "基线已过期" : "待确认"}</span>}>

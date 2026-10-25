@@ -1,17 +1,18 @@
 # Relay / Personal Workflow OS
 
-> 当前阶段、授权与下一步只看 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，已验证范围与剩余出口只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。取舍见 [ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md)，工作包见 [M01–M07](prompts/stack-migration.md)。
+面向长期项目的人与 AI 协作工作系统。产品定义由[总纲](Personal_Workflow_OS_Master_Spec.md)维护；当前阶段看[进度](CODEX_NEXT_STEP.md)，实际可用范围看[验收简表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
 
-当前已确认的产品主线是“用户表达意图 → Agent 推进工作并维护项目事实 → UI 展示变化、成果和必要决定”，减少重复填表、登记和衔接状态的操作。完整规则归[总纲 §0.8.1](Personal_Workflow_OS_Master_Spec.md#081-自然语言维护项目状态)；已有工程切片与完整产品目标分别核定，当前可用范围以功能验收表为准。
+## 快速入口
 
-面向长期项目的人与 AI 协作工作系统，交付目标为 Windows 可安装应用，具有独立窗口和启动入口。仓库包含产品设计、业务契约、研究实验、UI 视觉规范、Fastify/Kysely/PostgreSQL 后端、React 工作台与 Tauri 桌面宿主。显式连接本机 API 后可走人工路径——创建项目 → 创建任务（含 ready）→ 开始 → 任务详情 → 保存 Markdown 产物版本 → 选择接受版本 → 完成 → 重开（[前端预览记录第 9、10 节](docs/development/前端预览实施与验收.md#10-ui-10-任务详情与-ui-11-产物编辑2026-09-21)），也可在待审页处理 Review、在 Run 页查看控制和追溯、在资料页管理 Knowledge/Memory/Decision/Rule。仓库还提供 Mock Runtime、模型端口、Context、Assist/首批 Skill 与蓝图、Today、内置工作台及文件/Git/CLI 的实现；实现与验收边界由上述功能验收表限定。后端接口见 [HTTP 契约第 10 节](docs/api/http-command-contract.md)。本项目与 AI Manga Drama Studio 独立。
+| 目的 | 进入哪里 |
+|---|---|
+| 首次开发、启动与构建 | [开发运行说明](docs/deployment/development/part-01.md#当前可运行内容) |
+| Windows 桌面开发 | [桌面开发章节](docs/deployment/development/part-01.md#windows-桌面开发包m02) |
+| 后端配置与 API 开发 | [后端工程章节](docs/deployment/development/part-01.md#后端工程appsapi) |
+| 按任务查规格与代码资料 | [文档入口](docs/README.md)、[功能地图](docs/feature-map/README.md) |
+| AI 开工与接续 | [AGENTS](AGENTS.md) → [当前进度](CODEX_NEXT_STEP.md) |
 
-当前工作区为 D:/Develop/Relay-Agent。阶段、已有证据、缺口及下一步统一见 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)；旧迁入路径与变更经过见[交付审计](docs/development/design-audit.md)，不作为当前启动位置。
-
-产品目标补充（2026-09-26）：降低并行委托 AI 时的注意力切换与上下文恢复成本，让开发者依据关键行为的验证证据接受成果。问题定义与目标见[产品总纲第 0.4 节](Personal_Workflow_OS_Master_Spec.md#04-ai-并行开发中的注意力与验收依据)；统一待处理队列、恢复摘要和面向需求的验收视图仍是待细化的体验方案，不表示现有功能已解决上述问题，也不自动改变当前开发范围。
-
-P10 开发自检：后端真实 PostgreSQL 全量 158/158、P10 定向 7/7、Gateway 14/14、单测 57/57；前端 P10 定向组件 7/7，双方类型检查、构建及文档检查通过。四类信息有类型化根/版本、HTTP 命令与查询、真实资料页和有界字面搜索；Rule 在 Delegate 时冻结到执行契约，版本变化阻止旧 Run 继续准入。现阶段仍使用 Fake Runtime 与 Fake Gateway，生产进程停机证明、真实 Web/Git/CLI 与宿主外进程隔离尚未实现；这些开发自检不构成正式验收。下一段按 [P11 提示词](prompts/D-context-product.md#p11context-builder)接入 Context Builder。
-
+原 README 的命令、配置与初始化流程保留在下列正文分册；历史阶段说明已标记为当时上下文，不能替代当前验收。
 
 <!-- DOC-ROUTER -->
 

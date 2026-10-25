@@ -83,6 +83,8 @@ Markdown 文档内部标题按 `data-heading-level` 分三级，不用 `SafeMark
 
 2026-10-25 页头层级对齐（用户指令「除 agent 页外其他页面视觉对齐」）：普通页面主标题统一回 `font.size.compactPage`(1.75rem/28px)，与 `/agent` 页空态标题同档（此前仅项目列表页于 §9.7 试点覆写，本轮推广为全局默认并删除该覆写）；页头说明句 `page-head-lede`/`page-lede` 由 body 降为 meta。这**取代 2026-10-01 的 2.5rem 放大**（那次放大的语境是各页同为文档式页头；agent 页经多轮打磨后成为全站视觉基准，40px 标题与其 28px 空态标题形成全站断层），`font.size.section` 同步由 1.75rem 降回 **1.5rem**——否则页头 h1 与区域标题 h2 同为 28px、层级消失，恢复 page/section/rowTitle = 28/24/20px 的层级链。任务详情页的产物文档标题不再覆写为 page 档，回落到与 agent 页成果区同一档（compactPage）。实测（fixture 模式，1280×800）：`/tasks` h1 28px/600、首个区域 h2 24px/600；`/today` lede 14px；全站无 `font-size-page` 引用残留。
 
+同日第二轮（卡片语言与留白节奏，基准为用户自迭代的 `GPT页面原型/relay_projects_redesign.html`：卡片 17px 圆角＋白底＋柔投影、主区留白 34–58px）：`radius.panel` 由 0.75rem 提到 **1rem**(16px)，与 `/agent` 页输入卡 `radius.composer` 同档；`layout.main.padding`/`compactPadding` 由 space.6(24px) 提到 **space.8(32px)**、`smallPadding` 由 space.4 提到 space.6、`layout.section.gap` 由 space.6 提到 space.8——普通页面留白与区块节奏向 agent 页呼吸感靠拢。卡片语言推广：项目卡（`.project-card`）加 `shadow.card` 白卡浮起；今日页空态卡由 subtle 底细线升级为 surface＋`shadow.card`、行内表单框补 surface 白底；`.view-configuration-panel` 补 surface 白底；`.daily-continuation` 圆角由 control(8px) 统一到 panel 档。`.surface-panel`（白底＋细边＋`shadow.card`＋`radius.panel`）仍是该语言的唯一定义处；列表与页壳仍不使用阴影（既有规则不变）。实测（Playwright computed style）：`/today`、`/settings` 主区 padding 32px；`.project-card`/`.surface-panel` 白底＋16px 圆角＋`0 10px 32px rgba(30,57,37,.055)` 投影；几何断言套件（会话顶栏密度/近期工作栏/输入浮层）23 例全过、今日页组件 22 例全过、`vite build` exit 0。
+
 降级只在一处发生：`styles.css` 的 `@media (max-width: 40rem)` 统一把 `.page-primary h1` 与 `.skill-page h1` 降到 `compactPage`，各视图不再各自硬编码。实测 8 个普通路由在 1280 宽一律 40px / 28px，390 宽一律 28px，无横向溢出。`2026-09-19` 逐页图里的衬线大标题**不采纳**：`font.family.editorial` 保留给历史参考，所有 UI 标题继续用 `font.family.ui`。
 
 图中字体不可反推出精确 font-family。2026-09-30 实现使用本地自托管的 Noto Sans SC / Noto Serif SC 可变 WOFF2，分别以 `Relay Sans SC` / `Relay Serif SC` CSS 名称优先进入唯一 token 字体栈，后续保留系统回退。字体保留完整原字库，未做字符子集化；两文件合计约 18.8 MB，用离线包体积换取各机器中文排版的一致性。原始版权、来源、版本及转换前后哈希见[字体来源记录](../../../apps/workbench/src/assets/fonts/provenance.json)，完整 [SIL OFL 1.1](../../../apps/workbench/src/assets/fonts/OFL.txt) 随源码保存，生产分发同时携带完整许可与两份版权声明。工作主线图接续采用本地 Noto Sans SC 统一交互、所有 UI 标题与阅读正文；Serif 资源与历史参考保留，代码和 diff 继续使用 code 字体。此前生产字体身份核对不自动代表本轮最终构建；Windows WebView2 字形、IME 和 DPI 效果仍需实际窗口复验。
@@ -125,6 +127,19 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 ### 5.1 协作工作区的视觉层级
 
 2026-10-05 新对话空白页：使用单列主区，欢迎标题与输入卡居中，输入卡沿用 `layout.workspace.sideWidth` 宽度上限；「选择文件夹（可选）」和「接续已有任务」默认收起，无成果时不渲染右侧占位。边界、圆角、发送键、文字与间距复用现有 token，不新增配色或第二套尺寸。进入已有会话后继续使用原消息滚动区与输入器；真实 Windows/DPI 与安装出口仍需单独验证。
+
+### 5.2 原型复刻页面皮肤（.pv-page，2026-10-26）
+
+根目录 HTML 原型（Relay V5.28 完整补全版）决定除工作台外全部页面的视觉表现；实现为 `apps/workbench/src/views/proto/protoPage.css`，全部规则 scope 在 `.pv-page` 下，按页面加类启用，工作台 `/agent` 与未迁移页面不受影响。边界与要点：
+
+- **色板按原型原值固定，不并入 `--relay-*` token。** `.pv-page` 内以 `--pv-*` 局部变量承载原型色（ink #263f31、primary #23704d、line #dfe9df 等）；这是有意的第二层：工作台 token 契约保持不动，两层的差异集中在一处，后续若决定整体切换再合并，避免把原型值直接写进全局 token 造成工作台回归。
+- **页面骨架**：容器 max-width 1220px 居中，padding 24px 30px 60px，基准字号 13px；页头为 overline（10px 大写）+ 22px 主标题 + 12px 说明句 + 右侧动作。断点 1120px / 760px，与原型一致。
+- **共享组件在作用域内覆写**：`primary/secondary/danger-button`（34px 高、12px/600、9px 圆角）、`page-head`、`status-chip`、`subnav-item`、`data-table`、`field/create-form` 输入控件、`resume-section`（分区卡片化）、`warning-callout/action-error/receipt-message`。覆写不得改变语义类名与 data-testid。
+- **两条守卫**：按钮覆写用 `:not(.rail-trigger)` 且追加 `.pv-page [hidden]{display:none!important}`——`rail-trigger` 依赖媒体查询切换 display、`[hidden]` 依赖 UA 的 display:none，二者不能被作用域内的 display 声明压掉（2026-10-26 实际回归过一次，已修复并记入测试）。
+- **原语组件**：`pv-card/pv-card-h/pv-card-b`、`pv-stats/pv-stat`（统计格，ul 语义，list-style 归零）、`pv-chip(+warn/danger/muted)`、`pv-row(+pv-illustration)`、`pv-note/pv-warning/pv-error/pv-success`、`pv-table/pv-link`、`pv-field/pv-form-grid/pv-weekdays`、`pv-dl`、`pv-checklist`、`pv-filter/pv-tabs/pv-steps`、`pv-banner`、`pv-goal-card`、`pv-progress`、`pv-empty/pv-mini-empty`。原型的 class 前缀映射：`v528-*`/`v511-*` → `pv-*`。
+- **数据真实边界**：原型里没有接口支撑的展示（项目卡「N 个任务/N 个成果文件」指标、收件箱逐行分配项目、目标卡进度百分比）不冒充事实；用真实字段（下一步、待审数、状态分组计数）替代或留空。原型的演示元素（FRONTEND DEMO 后缀、共享状态丝带、入口审计、交互校准弹窗）不进产品。
+- **已启用页面**：/projects、/goals(+/:id)、/tasks(+inbox)、/reviews、/today、/knowledge、/activity、/scheduled-tasks 三视图、/settings、/connections、/runs/:id、/completion-records/:id、artifact lineage、working-directories、项目/任务内页签、各创建页与若干 page-state。项目工作台（/projects/:id/workbench/:kind）暂未加类，按同语言延伸待后续会话处理。
+- **验收回路**：`tests/screenshots/proto-baseline.spec.ts`（fixture 模式全路由）与 `tests/screenshots/proto-visual-mocks.spec.ts`（page.route 伪造 API 的 live 页）截图到 `results/proto-replica-20261026/`，与原型 `proto/` 目录并排对照；工作台防回归用 `tests/browser/workbench.spec.ts`。
 
 2026-09-29，用户已选方向 1「对话主轴 · 双页工作桌」；[完整窗口修订图](../mockups/2026-09-29/collaboration-dialogue-window.png)补入用户指出遗漏的 Windows 标题栏，[原选稿](../mockups/2026-09-29/collaboration-dialogue-selected.png)保留选择依据。本轮已授权实施并在 `/agent` 落地（开发自检），**真实 Windows 窗口验收仍未完成**；本文只定义呈现规则，操作与状态以[工作台第 14 节](../workbench-design/part-03.md#14-以目标协作为中心的工作台改造)为准。
 

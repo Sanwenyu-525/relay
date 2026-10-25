@@ -45,6 +45,27 @@ function resultString(result: Record<string, unknown>, camel: string, snake: str
   if (typeof value !== "string" || value === "") throw new Error(`任务链回执缺少 ${camel} 身份。`);
   return value;
 }
+function revisionIsCurrentOrLater(current: string, committed: string): boolean {
+  return /^\d+$/.test(current) && /^\d+$/.test(committed) && BigInt(current) >= BigInt(committed);
+}
+function authorizationHistoryMatchesIntent(intent: ChainIntent, history: readonly Record<string, unknown>[]): boolean {
+  return intent.kind === "AUTHORIZE" && history.some((entry) => entry.command_id === intent.input.commandId &&
+    entry.max_tasks === intent.input.maxTasks && entry.max_model_calls === intent.input.maxModelCalls &&
+    entry.expires_at === intent.input.expiresAt);
+}
+function currentStatusMatchesReceipt(intent: ChainIntent, receiptStatus: string, currentStatus: string,
+  authorizationHistory: readonly Record<string, unknown>[]): boolean {
+  if (intent.kind === "AUTHORIZE") return ["ACTIVE", "WAITING_RESUME"].includes(receiptStatus) &&
+    ["ACTIVE", "WAITING_RESUME", "PAUSING", "PAUSED", "REVOKED", "EXPIRED", "BLOCKED", "COMPLETED"].includes(currentStatus) &&
+    authorizationHistoryMatchesIntent(intent, authorizationHistory);
+  // 另一页面在恢复前把链从 DRAFT 合法推进（授权/停止/到期/完成）不推翻创建事实；身份核对在前。
+  if (intent.kind === "CREATE") return receiptStatus === "DRAFT" &&
+    ["DRAFT", "ACTIVE", "WAITING_RESUME", "PAUSING", "PAUSED", "REVOKED", "EXPIRED", "BLOCKED", "COMPLETED"].includes(currentStatus);
+  if (receiptStatus === currentStatus) return true;
+  if (intent.kind === "STOP") return receiptStatus === "PAUSING" &&
+    currentStatus === (intent.input.action === "PAUSE" ? "PAUSED" : "REVOKED");
+  return false;
+}
 function declaredOutputKinds(outputs: Readonly<Record<string, unknown>> | null): readonly string[] | null {
   if (outputs === null || !Array.isArray(outputs.artifacts) || outputs.artifacts.length === 0 ||
     outputs.artifacts.some((kind) => kind !== "MARKDOWN_DOCUMENT")) return null;
@@ -199,12 +220,13 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
       throw new Error("任务链回执身份与原请求不匹配。");
     const allowedStatuses = intent.kind === "CREATE" ? ["DRAFT"]
       : intent.kind === "AUTHORIZE" ? ["ACTIVE", "WAITING_RESUME"]
-      : intent.input.action === "REVOKE" ? ["REVOKED"] : ["PAUSED", "PAUSING"];
+      : intent.input.action === "REVOKE" ? ["REVOKED", "PAUSING"] : ["PAUSED", "PAUSING"];
     if (!allowedStatuses.includes(status)) throw new Error("任务链回执状态与原命令不匹配。");
     const [detail, list] = await Promise.all([client.getTaskChain(chainId), client.getProjectTaskChains(projectId)]);
     const listed = list.items.find((item) => item.chainId === chainId);
-    if (detail.chainId !== chainId || detail.projectId !== projectId || detail.status !== status || detail.revision !== revision ||
-      !listed || listed.projectId !== projectId || listed.status !== status || listed.revision !== revision)
+    if (detail.chainId !== chainId || detail.projectId !== projectId || !revisionIsCurrentOrLater(detail.revision, revision) ||
+      !currentStatusMatchesReceipt(intent, status, detail.status, detail.authorizationHistory) || !listed || listed.projectId !== projectId ||
+      listed.status !== detail.status || listed.revision !== detail.revision)
       throw new Error("任务链详情与项目列表读回的身份、状态或修订不一致；命令仍待核对。");
     setChains(list.items); setSelectedChainId(chainId);
     return intent.kind === "CREATE" ? "新建任务链已核对并选中。" : "任务链命令已核对，已重读当前状态。";
@@ -249,6 +271,7 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
         throw new Error("回执身份或命令类型不匹配；原请求仍保留供核对。");
       const confirmation = await applyVerifiedResult(pending, receipt.result);
       clearStored(); setNotice(`${confirmation} 已使用原回执恢复，没有再次提交。`);
+      if (pending.kind === "AUTHORIZE") setConfirmed(false);
     } catch (caught) {
       setActionError(`回执或服务端读回暂时无法核对，原请求仍保留：${describeLiveError(caught).message}`);
     } finally { setBusy(false); }
@@ -272,7 +295,7 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
   if (error && projectTitle === "") return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目任务链</h1>
     <p>{error}</p><button className="secondary-button" type="button" onClick={() => void refresh()}>重新读取</button></section>;
 
-  return <section className="skill-page task-chain-page"><div className="page-layout"><main className="page-primary">
+  return <section className="skill-page task-chain-page pv-page"><div className="page-layout"><main className="page-primary">
     <PageHeader title="有限任务链" meta={projectTitle} lede="先固定任务顺序，再单独确认预算与授权期限。创建草稿不会启动任务。" />
     <ProjectNav projectId={projectId} active="chains" />
     {archived && <p className="action-error" role="status">项目已归档；任务链不能创建或授权。</p>}

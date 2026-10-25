@@ -1268,9 +1268,9 @@ export default function KnowledgeView() {
     </div>
   </section>;
 
-  return <section className={`knowledge-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
-    {!reading && !capturing && <><PageHeader testId="knowledge-page-head" title="资料"
-      meta={projectId ? "项目资料" : "工作空间资料"} lede="资料、记忆、决定与规则" />
+  return <section className={`knowledge-page pv-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
+    {!reading && !capturing && <><PageHeader testId="knowledge-page-head" title="资料" overline="Knowledge"
+      meta={projectId ? "项目资料" : "工作空间资料"} lede="按资料、记忆、决定、规则组织内容，并保留项目归属和来源范围。" />
     {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
 
     {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">

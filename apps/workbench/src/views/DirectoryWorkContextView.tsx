@@ -61,7 +61,7 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
   const { directory, linkedGoals, sessions } = facts;
   const project = directory.project;
 
-  return <section className="skill-page project-overview" data-testid="directory-context-live">
+  return <section className="skill-page project-overview pv-page" data-testid="directory-context-live">
     <div className="page-layout"><div className="page-primary">
       <p className="metadata-row"><Link className="inline-link" to={`/projects/${project.id}`}>← 打开所属项目</Link></p>
       <PageHeader testId="directory-context-head" title={directory.canonicalRoot}

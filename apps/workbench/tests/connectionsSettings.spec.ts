@@ -734,8 +734,81 @@ describe("从会话插件面板跳进来的定位与返回", () => {
     const mounted = await mountWorkbench(`/projects/${projectId}/connections?tool=computer`);
     unmount = mounted.unmount;
     const detail = mounted.wrapper.get('[data-testid="connections-tool-state-computer"]').text();
-    expect(detail).toContain("登记");
-    expect(detail).toContain("高级");
+    expect(detail).toContain("一键启用");
+    expect(detail).toContain("本机");
+  });
+
+  it("一键启用：一次命令补齐插件连接与逐动作策略，回执计数如实呈现", async () => {
+    locate();
+    const data = state();
+    // locate() 里已 stub 一次 fetch，这里换成带 POST 的版本（state 是同一份引用）。
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(path).toBe(`/projects/${projectId}/plugins/computer/enable`);
+      expect(body).toEqual({ command_id: expect.any(String) });
+      data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+        capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"], allowed_host: null, created_at: created }];
+      return response(201, receipt(String(body.command_id), { project_id: projectId, plugin: "computer",
+        created_connections: "1", created_policies: "11", blocked_disabled_connections: "0",
+        blocked_revoked_policies: "0", skipped_no_resource: "0" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    const button = mounted.wrapper.get('[data-testid="connections-tool-enable-computer"]');
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("已新建连接 1 条、策略 11 条");
+    expect(mounted.wrapper.text()).toContain("操作类每次执行前需要批准");
+    expect(mounted.wrapper.text()).toContain("已由服务端回执和最新项目查询确认");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-computer"]').text()).toContain("已连接");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("一键启用：重复执行只补缺口，停用/撤销/无目录的阻断原样说明", async () => {
+    locate();
+    const data = state();
+    // github 默认夹具是「未登录」会挡下按钮；这个用例只测回执口径，先把本机置为就绪。
+    data.pluginStatus = [
+      { plugin: "computer", state: "READY", detail: "电脑运行时已就位。", remediation: null },
+      { plugin: "browser", state: "READY", detail: "浏览器桥接扩展已配对。", remediation: null },
+      { plugin: "github", state: "READY", detail: "GitHub CLI 已安装并已登录。", remediation: null }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET") return baseGet(path, data) ?? response(404, {});
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(path).toBe(`/projects/${projectId}/plugins/github/enable`);
+      return response(201, receipt(String(body.command_id), { project_id: projectId, plugin: "github",
+        created_connections: "0", created_policies: "0", blocked_disabled_connections: "1",
+        blocked_revoked_policies: "2", skipped_no_resource: "5" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="connections-tool-enable-github"]').trigger("click"); await flush();
+    expect(mounted.wrapper.text()).toContain("没有新的缺口需要补");
+    expect(mounted.wrapper.text()).toContain("1 个能力存在已停用的连接，未新建绕过");
+    expect(mounted.wrapper.text()).toContain("2 个动作的策略此前撤销过");
+    expect(mounted.wrapper.text()).toContain("5 个动作因项目还没有受管目录");
+  });
+
+  it("本机明确未就绪时一键启用禁用并给出原因；读取不到本机状态不拦登记", async () => {
+    Element.prototype.scrollIntoView = () => {};
+    const data = locate();
+    data.pluginStatus = [{ plugin: "computer", state: "NOT_PAIRED",
+      detail: "没有找到电脑运行时：C:\\app\\relay-computer-runtime.exe",
+      remediation: "通过桌面版打开应用会带上随包运行时。" },
+      { plugin: "github", state: "NOT_AUTHENTICATED", detail: "GitHub CLI 已安装，但当前没有登录。",
+        remediation: "在终端执行 gh auth login 完成登录。" }];
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`);
+    unmount = mounted.unmount;
+    expect(mounted.wrapper.get('[data-testid="connections-tool-enable-computer"]').attributes("disabled")).toBeDefined();
+    // github 默认夹具是「已装未登录」：同样挡下，标题里带原因。
+    const githubButton = mounted.wrapper.get('[data-testid="connections-tool-enable-github"]');
+    expect(githubButton.attributes("disabled")).toBeDefined();
+    expect(githubButton.attributes("title")).toContain("未就绪");
+    // 本机状态没读到（browser 不在返回里）时不拦登记：登记本身不执行桌面动作。
+    expect(mounted.wrapper.get('[data-testid="connections-tool-enable-browser"]').attributes("disabled")).toBeUndefined();
   });
 
   it("三个插件行展示安装级运行时状态，与项目授权分开呈现", async () => {
@@ -796,5 +869,27 @@ describe("从会话插件面板跳进来的定位与返回", () => {
     // 选完项目仍回得到原会话：返回路径随这一跳继续传下去。
     expect(link.attributes("href")).toContain("from=%2Fagent");
     expect(mounted.wrapper.get('[data-testid="connections-return"]').attributes("href")).toBe("/agent");
+  });
+
+  it("范围选择继续携带工具定位：选完项目仍落在那一行插件前", async () => {
+    connect();
+    const data = state();
+    data.connections = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(root.length);
+      if ((init?.method ?? "GET") === "GET" && path === "/projects?status=active") {
+        return response(200, { items: [{ id: projectId, title: "真实项目", project_type: "GENERAL",
+          revision: "1", state_revision: "1", archived_at: null, archive_status: "ACTIVE",
+          phase_key: "M01", next_action_task_id: null, created_at: created, updated_at: created }],
+        next_cursor: null });
+      }
+      return baseGet(path, data) ?? response(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench(`/settings/connections?from=%2Fagent&tool=computer`);
+    unmount = mounted.unmount;
+    const link = mounted.wrapper.get('[data-testid="connections-picker-project"]');
+    expect(link.attributes("href")).toContain("from=%2Fagent");
+    expect(link.attributes("href")).toContain("tool=computer");
   });
 });

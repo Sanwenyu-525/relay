@@ -77,6 +77,9 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
     case 'AGENT_SUBAGENT':
       return systemSelection('AGENT_SUBAGENT',
         conversationPrompts.subagentSystemPrompt(route.state));
+    case 'MEMBER_WAKEUP':
+      return systemSelection('MEMBER_WAKEUP',
+        conversationPrompts.memberWakeupSystemPrompt(route.state));
     case 'LEARNING_PARTNER':
       return systemSelection('LEARNING_PARTNER',
         conversationPrompts.learningPartnerSystemPrompt(route.state, route.material));

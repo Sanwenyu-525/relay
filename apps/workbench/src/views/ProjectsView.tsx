@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Archive, ArrowRight, Check, FolderPlus, Info, LayoutGrid, List,
+import { Archive, ArrowRight, Check, Folder, FolderPlus, Info, LayoutGrid, List,
   MoreHorizontal, Package, Plus, RotateCcw, Search, Sparkles, Target, TriangleAlert } from "lucide-react";
 import { createCommandId, projectArchiveResultFrom, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope,
@@ -227,31 +227,38 @@ function ProjectsToolbar({ scope, counts, search, onSearch, view, onView, search
 }
 
 /**
- * V4.3 紧凑卡：整卡主点击「进入项目」（onNavigate），右上角「⋯」打开详情抽屉
- * （onOpen，承载归档等真实操作）。不展示目标/阻塞行——项目列表接口没有这两个字段，
- * 硬放会成假数据；要看目标与状态走抽屉或项目页。
+ * V5.28 复刻卡：图标块 + 状态点 + 标题 + 说明 + 事实行 + 底部双钮。
+ * 数据仍来自真实接口：说明行展示类型/阶段，事实行展示下一步与待审数；
+ * 原型里的「N 个任务/N 个成果文件」在列表接口没有对应事实，不造假数据。
  */
 function ProjectCard({ project, onOpen, onNavigate }: {
   readonly project: ProjectCardModel; readonly onOpen: () => void; readonly onNavigate: () => void;
 }) {
   const unset = project.nextAction === null;
-  return <article className={`project-card${project.archived ? " project-card--archived" : ""}`}
+  return <article className={`pv-pcard${project.archived ? " pv-pcard--archived" : ""}`}
     data-testid={`project-row-${project.id}`} onClick={onNavigate}>
-    <div className="project-card__top">
-      <h3 className="project-card__name">
-        <button className="project-card__name-button" type="button"
-          data-testid={`project-card-open-${project.id}`} onClick={onNavigate}>{project.title}</button>
-      </h3>
-      <div className="project-card__top-right">
-        <span className={`project-card__status${project.archived ? " is-archived" : ""}`}>
-          <span className="project-card__status-dot" aria-hidden="true" />{project.archived ? "已归档" : project.phase}</span>
-        <button className="project-card__control" type="button" data-testid={`project-card-more-${project.id}`}
-          aria-label={`查看「${project.title}」的详情与操作`}
-          onClick={(event) => { event.stopPropagation(); onOpen(); }}><MoreHorizontal aria-hidden="true" /></button>
-      </div>
+    <div className="pv-pcard__top">
+      <span className="pv-illustration" aria-hidden="true"><Folder aria-hidden="true" /></span>
+      <span className={`pv-pcard__status${project.archived ? " is-archived" : ""}`}>
+        <span className="pv-pcard__status-dot" aria-hidden="true" />{project.archived ? "已归档" : project.phase}</span>
+      <button className="pv-pcard__control" type="button" data-testid={`project-card-more-${project.id}`}
+        aria-label={`查看「${project.title}」的详情与操作`}
+        onClick={(event) => { event.stopPropagation(); onOpen(); }}><MoreHorizontal aria-hidden="true" /></button>
     </div>
-    <p className="project-card__caption">{project.typeLabel}项目</p>
-    <p className={`project-card__next${unset ? " is-unset" : ""}`}>下一步：<span>{unset ? "尚未明确" : project.nextAction}</span></p>
+    <h3 className="pv-pcard__name">
+      <button className="pv-pcard__name-button" type="button"
+        data-testid={`project-card-open-${project.id}`} onClick={onNavigate}>{project.title}</button>
+    </h3>
+    <p className="pv-pcard__caption">{project.typeLabel}项目</p>
+    <div className="pv-pcard__metrics">
+      <span className={unset ? "is-unset" : undefined}>下一步：{unset ? "尚未明确" : project.nextAction}</span>
+    </div>
+    <div className="pv-pcard__footer">
+      <button className="pv-pcard__ghost" type="button"
+        onClick={(event) => { event.stopPropagation(); onOpen(); }}>项目详情 →</button>
+      <button className="secondary-button" type="button"
+        onClick={(event) => { event.stopPropagation(); onNavigate(); }}>进入项目</button>
+    </div>
   </article>;
 }
 
@@ -392,15 +399,16 @@ export default function ProjectsView() {
     key={`${connection.epoch}:${scope}`} client={connection.client} scope={scope}
     onCreate={() => navigate("/projects?view=create")} />;
 
-  if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">项目</p><h1>正在读取项目列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
-  if (error) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">项目</p><h1>暂时无法显示项目</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Projects</p><h1>正在读取项目列表</h1><p>数据正在加载，页面尚未提交任何变更。</p></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法显示项目</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
 
   const counts: Record<ProjectScope, number | null> = {
     all: projects.length, active: activeProjects.length, archived: archivedProjects.length };
 
-  return <section className="skill-page projects-page">
+  return <section className="skill-page projects-page pv-page">
     <div className="projects-inner">
-      <PageHeader title="项目" testId="projects-page-head" lede="让长期目标有序推进，下一步始终清晰。"
+      <PageHeader title="项目" testId="projects-page-head" overline="Projects"
+        lede="长期工作以项目为上下文，关联会话、任务、目标和成果。"
         actions={<><Link className="secondary-button" data-testid="goal-list-open" to="/goals"><Target aria-hidden="true" />目标列表</Link>
           <Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
           <button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button></>} />
@@ -767,9 +775,10 @@ function LiveProjectsListView({ client, scope, onCreate }: {
     if (target) setDetailId(target.id);
   };
 
-  return <section className="skill-page projects-page" data-testid="projects-live-list">
+  return <section className="skill-page projects-page pv-page" data-testid="projects-live-list">
     <div className="projects-inner">
-      <PageHeader title="项目" testId="projects-page-head" lede="让长期目标有序推进，下一步始终清晰。"
+      <PageHeader title="项目" testId="projects-page-head" overline="Projects"
+        lede="长期工作以项目为上下文，关联会话、任务、目标和成果。"
         actions={<><Link className="secondary-button" data-testid="goal-list-open" to="/goals"><Target aria-hidden="true" />目标列表</Link>
           <Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
           <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></>} />

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayApiClient, RelayApiError, type RelayPeriodPlan, type RelayProjectState, type RelayScopeSimulation, type RelayTaskChain,
   type RelayTaskDetail, type RelayTaskSummary } from "../src/api/relayClient";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, DomWrapper } from "./mountApp";
 
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "55555555-5555-4555-8555-555555555555";
@@ -29,7 +29,7 @@ function projectState(): RelayProjectState {
   return { projectId, revision: "0", phaseKey: "DISCOVERY", nextActionTaskId: null, inProgress: [], blockers: [],
     risks: [], selectedArtifactVersionRefs: [], completedHighlightRefs: [], allowedActions: [] };
 }
-function chain(status: string) {
+function chain(status: string): RelayTaskChain {
   return { chainId: "chain-1", projectId, status, revision: "1", title: "有限任务链",
     baseline: { tool_scope: "INTERNAL_MARKDOWN_ARTIFACTS_ONLY" }, maxTasks: 0, maxModelCalls: 0,
     taskReservations: 0, callsStarted: 0, expiresAt: null as string | null, reason: null, controlRequestId: null,
@@ -436,7 +436,7 @@ describe("项目计划与有限任务链页面", () => {
     } finally { mounted.unmount(); }
   });
 
-  it("RESOLVE_ITEM 回执状态与服务端计划不一致时保留原命令，重读后确认准确项", async () => {
+  it("RESOLVE_ITEM 的原命令完成后另一项推进计划修订，仍按准确项状态恢复", async () => {
     connect();
     let activePlan = twoTaskPlan();
     let commandId = "";
@@ -457,6 +457,8 @@ describe("项目计划与有限任务链页面", () => {
     });
     const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
       receiptCount++;
+      if (receiptCount === 2) activePlan = { ...activePlan, revision: "5", items: activePlan.items.map((item) => item.id === "item-2"
+        ? { ...item, status: "REJECTED", resolutionReason: "另一项由另一页面处理" } : item) };
       return { commandId: id, commandType: "ResolvePeriodPlanItem", committedAt: "2026-10-25T00:00:00Z",
         result: { plan_id: "plan-scope", item_id: "item-1", project_id: projectId,
           item_status: receiptCount === 1 ? "REJECTED" : "ACCEPTED", revision: "4" } };
@@ -479,6 +481,193 @@ describe("项目计划与有限任务链页面", () => {
     } finally { mounted.unmount(); }
   });
 
+  it("全为延后候选的计划仍提供填写理由并拒绝计划项", async () => {
+    connect();
+    const original = twoTaskPlan();
+    let activePlan: RelayPeriodPlan = { ...original, items: original.items.map((item) => ({ ...item, kind: "DEFERRED" })) };
+    const resolve = vi.spyOn(RelayApiClient.prototype, "resolvePeriodPlanItem").mockImplementation(async (input) => {
+      activePlan = { ...activePlan, revision: "4", items: activePlan.items.map((item) => item.id === input.itemId
+        ? { ...item, status: "REJECTED", resolutionReason: input.reason } : item) };
+      return { planId: activePlan.planId, projectId, revision: activePlan.revision, itemId: input.itemId,
+        itemStatus: "REJECTED", createdTaskId: null };
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProjectPeriodPlans").mockImplementation(async () => ({ projectId, items: [activePlan] }));
+    vi.spyOn(RelayApiClient.prototype, "getPeriodPlan").mockImplementation(async () => activePlan);
+    vi.spyOn(RelayApiClient.prototype, "getPlanScopeSimulations").mockResolvedValue({ sourcePlanId: "plan-scope", items: [] });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectGoals").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockResolvedValue({ items: [task,
+      { ...task, id: task2Id, title: "独立工作" }], nextCursor: null });
+    vi.spyOn(RelayApiClient.prototype, "getTaskTimeEstimates").mockImplementation(async (id) => ({ taskId: id, current: null, items: [] }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/planning`);
+    try {
+      await flush();
+      expect(mounted.wrapper.find('input[placeholder="说明接受或拒绝的依据"]').exists()).toBe(true);
+      await mounted.wrapper.get('input[placeholder="说明接受或拒绝的依据"]').setValue("本段容量不足，确认延后");
+      await mounted.wrapper.get('[data-testid="period-plan-item-item-1"] button').trigger("click"); await flush();
+      expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ planId: "plan-scope", itemId: "item-1",
+        action: "REJECT", reason: "本段容量不足，确认延后" }));
+      expect(mounted.wrapper.get('[data-testid="period-plan-item-item-1"]').text()).toContain("已拒绝");
+    } finally { mounted.unmount(); }
+  });
+
+  it("PROPOSE_PLAN 原计划创建后另一页面处理计划项，仍按持久身份恢复", async () => {
+    connect();
+    let planVisible = false;
+    let commandId = "";
+    const propose = vi.spyOn(RelayApiClient.prototype, "proposePeriodPlan").mockImplementation(async (input) => {
+      commandId = input.commandId;
+      throw new Error("response lost after commit");
+    });
+    const advancedPlan: RelayPeriodPlan = { ...twoTaskPlan(), planId: "plan-advanced", revision: "3",
+      items: twoTaskPlan().items.map((item, index) => index === 0 ? { ...item, status: "ACCEPTED" as const } : item) };
+    const readPlan = vi.spyOn(RelayApiClient.prototype, "getPeriodPlan").mockImplementation(async () => advancedPlan);
+    vi.spyOn(RelayApiClient.prototype, "getProjectPeriodPlans").mockImplementation(async () => ({
+      projectId, items: planVisible ? [advancedPlan] : [] }));
+    const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
+      expect(id).toBe(commandId);
+      planVisible = true;
+      return { commandId: id, commandType: "ProposePeriodPlan", committedAt: "2026-10-25T00:00:00Z",
+        result: { plan_id: "plan-advanced", project_id: projectId, revision: "1" } };
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectGoals").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockResolvedValue({ items: [task], nextCursor: null });
+    vi.spyOn(RelayApiClient.prototype, "getTaskTimeEstimates").mockImplementation(async (id) => ({ taskId: id, current: null, items: [] }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/planning`);
+    try {
+      await flush();
+      await mounted.wrapper.get(`[data-testid="planning-task-${taskId}"] input[type="checkbox"]`).setValue(true);
+      await mounted.wrapper.get('[data-testid="period-plan-propose"]').trigger("click"); await flush();
+      expect(propose).toHaveBeenCalledTimes(1);
+      expect(readPlan).not.toHaveBeenCalled();
+      expect(mounted.wrapper.find('[data-testid="planning-pending-command"]').exists()).toBe(true);
+      await mounted.wrapper.get('[data-testid="planning-pending-command"] button').trigger("click"); await flush();
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(propose).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="planning-pending-command"]').exists()).toBe(false);
+      expect((mounted.wrapper.get(".planning-history select").element as HTMLSelectElement).value).toBe("plan-advanced");
+      expect(mounted.wrapper.find('[data-testid="period-plan-item-item-1"]').text()).toContain("已接受");
+      expect(mounted.wrapper.get(".receipt-message").text()).toContain("已使用原回执恢复，没有重新提交");
+    } finally { mounted.unmount(); }
+  });
+
+  it("PROPOSE_SCOPE 原推演被另一页面选择后，按已选定状态恢复原命令", async () => {
+    connect();
+    const activePlan = twoTaskPlan();
+    const created = scopeSimulation();
+    let simulations: RelayScopeSimulation[] = [];
+    let commandId = "";
+    const propose = vi.spyOn(RelayApiClient.prototype, "proposeScopeSimulation").mockImplementation(async (input) => {
+      commandId = input.commandId;
+      simulations = [created];
+      throw new Error("response lost after commit");
+    });
+    vi.spyOn(RelayApiClient.prototype, "getScopeSimulation").mockImplementation(async (id) =>
+      simulations.find((item) => item.simulationId === id)!);
+    vi.spyOn(RelayApiClient.prototype, "getPlanScopeSimulations").mockImplementation(async () => ({ sourcePlanId: "plan-scope", items: simulations }));
+    vi.spyOn(RelayApiClient.prototype, "getPeriodPlan").mockResolvedValue(activePlan);
+    vi.spyOn(RelayApiClient.prototype, "getProjectPeriodPlans").mockResolvedValue({ projectId, items: [activePlan] });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectGoals").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockResolvedValue({ items: [task, { ...task, id: task2Id, title: "独立工作" }], nextCursor: null });
+    vi.spyOn(RelayApiClient.prototype, "getTaskTimeEstimates").mockImplementation(async (id) => ({ taskId: id, current: null, items: [] }));
+    const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
+      // 另一页面在核对前把推演合法选定（PROPOSED→SELECTED，修订推进）
+      simulations = [{ ...created, revision: "2", status: "SELECTED", selectedOption: "SHRINK", selectedPlanId: "plan-next" }];
+      return { commandId: id, commandType: "ProposeScopeSimulation", committedAt: "2026-10-25T00:00:00Z",
+        result: { simulation_id: created.simulationId, source_plan_id: "plan-scope", project_id: projectId,
+          revision: "1", status: "PROPOSED" } };
+    });
+    const mounted = await mountWorkbench(`/projects/${projectId}/planning`);
+    try {
+      await flush();
+      const rows = mounted.wrapper.findAll(".planning-scope-row");
+      await rows[0]!.findAll('input[type="checkbox"]')[0]!.setValue(true);
+      await rows[1]!.findAll('input[type="checkbox"]')[1]!.setValue(true);
+      await mounted.wrapper.get(".planning-scope button").trigger("click"); await flush();
+      expect(propose).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="planning-pending-command"]').exists()).toBe(true);
+      await mounted.wrapper.get('[data-testid="planning-pending-command"] button').trigger("click"); await flush();
+      expect(receipt).toHaveBeenCalledWith(commandId);
+      expect(propose).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="planning-pending-command"]').exists()).toBe(false);
+      expect((mounted.wrapper.get(".planning-scope select").element as HTMLSelectElement).value).toBe(created.simulationId);
+      expect(mounted.wrapper.get(".planning-scope").text()).toContain("已选定 · v2");
+      expect(mounted.wrapper.get('[data-testid="scope-simulation"]').text()).toContain("推演修订 v2");
+      expect(mounted.wrapper.get(".receipt-message").text()).toContain("已使用原回执恢复，没有重新提交");
+    } finally { mounted.unmount(); }
+  });
+
+  it("未保存估时离开受草稿保护；成功保存后不再拦截", async () => {
+    connect();
+    const estimateItem = { id: "estimate-1", taskId, revision: "1", acceptanceRevision: "2", elapsedMs: "720000",
+      executionMs: null, waitingMs: null, reviewMs: null, humanMs: null, sourceNote: "基于最近三次复盘",
+      sourceKind: "USER_DECLARED" as const, createdAt: "2026-10-25T00:00:00Z" };
+    let history: Awaited<ReturnType<RelayApiClient["getTaskTimeEstimates"]>> = { taskId, current: null, items: [] };
+    let taskPageCount = 0;
+    const record = vi.spyOn(RelayApiClient.prototype, "recordTaskTimeEstimate").mockImplementation(async () => {
+      history = { taskId, current: { ...estimateItem, applicable: true }, items: [estimateItem] };
+      return { taskId, estimateId: estimateItem.id, revision: estimateItem.revision };
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectGoals").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockImplementation(async () => {
+      taskPageCount += 1;
+      return taskPageCount === 1 ? { items: [task], nextCursor: "cursor-1" }
+        : { items: [task, { ...task, id: task2Id, title: "独立工作" }], nextCursor: null };
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProjectPeriodPlans").mockResolvedValue({ projectId, items: [] });
+    vi.spyOn(RelayApiClient.prototype, "getTaskTimeEstimates").mockImplementation(async () => history);
+    const mounted = await mountWorkbench(`/projects/${projectId}/planning`);
+    const elapsedValue = () => (mounted.wrapper
+      .get(`[data-testid="planning-task-${taskId}"] .planning-estimate-editor input`).element as HTMLInputElement).value;
+    try {
+      await flush();
+      const editor = mounted.wrapper.get(`[data-testid="planning-task-${taskId}"] .planning-estimate-editor`);
+      await editor.find("summary").trigger("click");
+      const inputs = editor.findAll("input");
+      await inputs[0]!.setValue("12"); await inputs[5]!.setValue("基于最近三次复盘");
+      await flush();
+      // 加载更多任务后原任务草稿仍在
+      await mounted.wrapper.findAll("button").find((button) => button.text() === "加载更多任务")!.trigger("click");
+      await flush();
+      expect(elapsedValue()).toBe("12");
+      // 未保存离开被拦截；保留并继续编辑后输入保留
+      await mounted.router.push("/settings/connections"); await flush();
+      expect(mounted.router.currentRoute.value.path).toBe(`/projects/${projectId}/planning`);
+      const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+      expect(dialog.text()).toContain("即将离开的页面还有未保存的修改");
+      await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+      await flush();
+      expect(elapsedValue()).toBe("12");
+      // 明确丢弃后才离开；回到页面草稿已清空
+      await mounted.router.push("/settings/connections"); await flush();
+      await new DomWrapper(document.querySelector('[role="dialog"]')).findAll("button")
+        .find((button) => button.text() === "丢弃草稿并离开")!.trigger("click");
+      await flush();
+      expect(mounted.router.currentRoute.value.path).toBe("/settings/connections");
+      await mounted.router.push(`/projects/${projectId}/planning`); await flush();
+      expect(elapsedValue()).toBe("");
+      // 再次填写并成功保存核对后，正常离页不再拦截
+      const editor2 = mounted.wrapper.get(`[data-testid="planning-task-${taskId}"] .planning-estimate-editor`);
+      await editor2.find("summary").trigger("click");
+      const inputs2 = editor2.findAll("input");
+      await inputs2[0]!.setValue("12"); await inputs2[5]!.setValue("基于最近三次复盘");
+      await editor2.get("button").trigger("click"); await flush();
+      expect(record).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.get(".receipt-message").text()).toContain("适用于当前验收版本");
+      expect(elapsedValue()).toBe("");
+      await mounted.router.push("/settings/connections"); await flush();
+      expect(mounted.router.currentRoute.value.path).toBe("/settings/connections");
+    } finally { mounted.unmount(); }
+  });
+
+
   it("创建任务链后仍保持 DRAFT；只有单独勾选授权确认才提交预算", async () => {
     connect();
     const chainState: { rows: ReturnType<typeof chain>[]; nextId: number } = { rows: [], nextId: 0 };
@@ -490,7 +679,9 @@ describe("项目计划与有限任务链页面", () => {
     const authorize = vi.spyOn(RelayApiClient.prototype, "authorizeTaskChain").mockImplementation(async (input) => {
       const index = chainState.rows.findIndex((row) => row.chainId === input.chainId);
       chainState.rows[index] = { ...chain("ACTIVE"), chainId: input.chainId, revision: "2", maxTasks: input.maxTasks, maxModelCalls: input.maxModelCalls,
-        taskReservations: 0, callsStarted: 0, expiresAt: input.expiresAt };
+        taskReservations: 0, callsStarted: 0, expiresAt: input.expiresAt,
+        authorizationHistory: [{ command_id: input.commandId, max_tasks: input.maxTasks,
+          max_model_calls: input.maxModelCalls, expires_at: input.expiresAt }] };
       return { chainId: input.chainId, projectId, status: "ACTIVE", revision: "2" };
     });
     vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
@@ -533,10 +724,13 @@ describe("项目计划与有限任务链页面", () => {
     } finally { mounted.unmount(); }
   });
 
-  it("第二条任务链丢响应后按原回执选中，并恢复授权和暂停的准确任务链", async () => {
+  it("第二条任务链按授权历史恢复 API 重启后的 WAITING_RESUME 和 PAUSING 后撤销", async () => {
     connect();
     const rows: RelayTaskChain[] = [{ ...chain("DRAFT"), chainId: "chain-1" }];
     const receipts = new Map<string, Awaited<ReturnType<RelayApiClient["getCommandReceipt"]>>>();
+    let firstAuthorization: Record<string, unknown> | null = null;
+    let authorizationSubmissions = 0;
+    let corruptAuthorizationHistory = true;
     const create = vi.spyOn(RelayApiClient.prototype, "createTaskChain").mockImplementation(async (input) => {
       const created = { ...chain("DRAFT"), chainId: "chain-2" };
       rows.push(created);
@@ -545,24 +739,44 @@ describe("项目计划与有限任务链页面", () => {
       throw new TypeError("create response lost after commit");
     });
     const authorize = vi.spyOn(RelayApiClient.prototype, "authorizeTaskChain").mockImplementation(async (input) => {
+      authorizationSubmissions += 1;
       const index = rows.findIndex((row) => row.chainId === input.chainId);
-      rows[index] = { ...rows[index]!, status: "ACTIVE", revision: "2", maxTasks: input.maxTasks,
-        maxModelCalls: input.maxModelCalls, expiresAt: input.expiresAt };
+      const authorization = { command_id: input.commandId, max_tasks: input.maxTasks,
+        max_model_calls: input.maxModelCalls, expires_at: input.expiresAt };
+      if (authorizationSubmissions === 1) firstAuthorization = authorization;
+      rows[index] = { ...rows[index]!, status: "ACTIVE", revision: "3", maxTasks: input.maxTasks,
+        maxModelCalls: input.maxModelCalls, expiresAt: input.expiresAt,
+        authorizationHistory: [...rows[index]!.authorizationHistory, authorization] };
+      if (authorizationSubmissions > 1) {
+        rows[index] = { ...rows[index]!, status: "ACTIVE", revision: "5" };
+        return { chainId: input.chainId, projectId, status: "ACTIVE", revision: "5" };
+      }
       receipts.set(input.commandId, { commandId: input.commandId, commandType: "AuthorizeTaskChain",
         committedAt: "2026-10-25T00:00:00Z", result: { chainId: input.chainId, projectId, status: "ACTIVE", revision: "2" } });
       throw new TypeError("authorize response lost after commit");
     });
     const stop = vi.spyOn(RelayApiClient.prototype, "stopTaskChain").mockImplementation(async (input) => {
       const index = rows.findIndex((row) => row.chainId === input.chainId);
-      rows[index] = { ...rows[index]!, status: input.action === "PAUSE" ? "PAUSED" : "REVOKED", revision: "3", reason: input.reason };
+      rows[index] = { ...rows[index]!, status: input.action === "PAUSE" ? "PAUSED" : "REVOKED", revision: "7", reason: input.reason };
       receipts.set(input.commandId, { commandId: input.commandId, commandType: "StopTaskChain",
         committedAt: "2026-10-25T00:00:00Z", result: { chainId: input.chainId, projectId,
-          status: input.action === "PAUSE" ? "PAUSED" : "REVOKED", revision: "3" } });
+          status: input.action === "PAUSE" ? "PAUSED" : "PAUSING", revision: "6" } });
       throw new TypeError("stop response lost after commit");
     });
     const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
       const found = receipts.get(id);
       if (!found) throw new Error("receipt not found");
+      if (found.commandType === "AuthorizeTaskChain") {
+        const index = rows.findIndex((row) => row.chainId === (found.result as { chainId: string }).chainId);
+        const authorizationHistory = rows[index]!.authorizationHistory.map((entry) => ({ ...entry }));
+        if (corruptAuthorizationHistory) {
+          const last = authorizationHistory.at(-1)!;
+          authorizationHistory[authorizationHistory.length - 1] = { ...last, max_tasks: Number(last.max_tasks) + 1 };
+          corruptAuthorizationHistory = false;
+        }
+        rows[index] = { ...rows[index]!, status: "WAITING_RESUME", revision: "4",
+          authorizationHistory, reason: "API_RESTART_REQUIRES_CONFIRMATION" };
+      }
       return found;
     });
     vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
@@ -594,19 +808,111 @@ describe("项目计划与有限任务链页面", () => {
       expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(true);
       await mounted.wrapper.get('[data-testid="task-chain-pending"] button').trigger("click"); await flush();
       expect(receipt).toHaveBeenCalledTimes(2);
-      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已授权执行");
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(true);
+      expect(firstAuthorization).not.toBeNull();
+      rows[1] = { ...rows[1]!, authorizationHistory: [firstAuthorization!] };
+      await mounted.wrapper.get('[data-testid="task-chain-pending"] button').trigger("click"); await flush();
+      expect(receipt).toHaveBeenCalledTimes(3);
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(false);
+      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("等待明确继续");
+      expect(check(mounted.wrapper.get('[aria-label="明确任务链授权"] input[type="checkbox"]').element!)).toBe(false);
       expect((mounted.wrapper.get(".task-chain-history select").element as HTMLSelectElement).value).toBe("chain-2");
 
-      await mounted.wrapper.get(".task-chain-stop input").setValue("暂停并检查进度");
-      await mounted.wrapper.get(".task-chain-stop button").trigger("click"); await flush();
+      await mounted.wrapper.get('[aria-label="明确任务链授权"] input[type="checkbox"]').setValue(true);
+      await mounted.wrapper.get('[data-testid="task-chain-authorize"]').trigger("click"); await flush();
+      expect(authorize).toHaveBeenCalledTimes(2);
+      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已授权执行");
+      await mounted.wrapper.get(".task-chain-stop input").setValue("撤销并检查在途 Run");
+      await mounted.wrapper.get(".task-chain-stop button.danger-button").trigger("click"); await flush();
       expect(stop).toHaveBeenCalledTimes(1);
       expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(true);
       await mounted.wrapper.get('[data-testid="task-chain-pending"] button').trigger("click"); await flush();
-      expect(receipt).toHaveBeenCalledTimes(3);
-      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已暂停");
+      expect(receipt).toHaveBeenCalledTimes(4);
+      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已撤销");
       expect(create).toHaveBeenCalledTimes(1);
-      expect(authorize).toHaveBeenCalledTimes(1);
+      expect(authorize).toHaveBeenCalledTimes(2);
       expect(stop).toHaveBeenCalledTimes(1);
+    } finally { mounted.unmount(); }
+  });
+
+  it("PAUSE 回执显示 PAUSING 时按读回 PAUSED 恢复原命令", async () => {
+    connect();
+    const active = { ...chain("ACTIVE"), revision: "2", maxTasks: 1, maxModelCalls: 2,
+      expiresAt: "2026-10-25T23:00:00Z" };
+    const rows: RelayTaskChain[] = [active];
+    const receipts = new Map<string, Awaited<ReturnType<RelayApiClient["getCommandReceipt"]>>>();
+    const stop = vi.spyOn(RelayApiClient.prototype, "stopTaskChain").mockImplementation(async (input) => {
+      rows[0] = { ...rows[0]!, status: "PAUSED", revision: "4", reason: input.reason };
+      receipts.set(input.commandId, { commandId: input.commandId, commandType: "StopTaskChain",
+        committedAt: "2026-10-25T00:00:00Z", result: { chainId: input.chainId, projectId, status: "PAUSING", revision: "3" } });
+      throw new TypeError("pause response lost after commit");
+    });
+    const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
+      const found = receipts.get(id);
+      if (!found) throw new Error("receipt not found");
+      return found;
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockResolvedValue({ items: [task], nextCursor: null });
+    vi.spyOn(RelayApiClient.prototype, "getTask").mockResolvedValue(detail);
+    vi.spyOn(RelayApiClient.prototype, "getTaskChain").mockImplementation(async (id) => rows.find((row) => row.chainId === id)!);
+    vi.spyOn(RelayApiClient.prototype, "getReviews").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTaskChains").mockImplementation(async () => ({ projectId, items: rows }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/task-chains`);
+    try {
+      await flush();
+      await mounted.wrapper.get(".task-chain-stop input").setValue("暂停并等待人工恢复");
+      await mounted.wrapper.get(".task-chain-stop button.secondary-button").trigger("click"); await flush();
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(true);
+      await mounted.wrapper.get('[data-testid="task-chain-pending"] button').trigger("click"); await flush();
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(false);
+      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已暂停");
+    } finally { mounted.unmount(); }
+  });
+
+  it("创建任务链响应丢失后被另一页面授权至 ACTIVE，原命令按当前状态恢复", async () => {
+    connect();
+    const rows: RelayTaskChain[] = [];
+    let commandId = "";
+    const create = vi.spyOn(RelayApiClient.prototype, "createTaskChain").mockImplementation(async (input) => {
+      commandId = input.commandId;
+      rows.push(chain("DRAFT"));
+      throw new TypeError("create response lost after commit");
+    });
+    const receipt = vi.spyOn(RelayApiClient.prototype, "getCommandReceipt").mockImplementation(async (id) => {
+      expect(id).toBe(commandId);
+      // 另一页面在核对前把链从 DRAFT 合法授权至 ACTIVE（不同 command_id 的授权历史）
+      rows[0] = { ...rows[0]!, status: "ACTIVE", revision: "2", maxTasks: 1, maxModelCalls: 3,
+        expiresAt: "2026-10-26T00:00:00Z",
+        authorizationHistory: [{ command_id: "other-page-command", max_tasks: 1, max_model_calls: 3,
+          expires_at: "2026-10-26T00:00:00Z" }] };
+      return { commandId: id, commandType: "CreateTaskChain", committedAt: "2026-10-25T00:00:00Z",
+        result: { chain_id: "chain-1", project_id: projectId, status: "DRAFT", revision: "1" } };
+    });
+    vi.spyOn(RelayApiClient.prototype, "getProject").mockResolvedValue(project());
+    vi.spyOn(RelayApiClient.prototype, "getProjectState").mockResolvedValue(projectState());
+    vi.spyOn(RelayApiClient.prototype, "getProjectTasksPage").mockResolvedValue({ items: [task], nextCursor: null });
+    vi.spyOn(RelayApiClient.prototype, "getTask").mockResolvedValue(detail);
+    vi.spyOn(RelayApiClient.prototype, "getTaskChain").mockImplementation(async (id) => rows.find((row) => row.chainId === id)!);
+    vi.spyOn(RelayApiClient.prototype, "getReviews").mockResolvedValue([]);
+    vi.spyOn(RelayApiClient.prototype, "getProjectTaskChains").mockImplementation(async () => ({ projectId, items: rows }));
+    const mounted = await mountWorkbench(`/projects/${projectId}/task-chains`);
+    try {
+      await flush();
+      await mounted.wrapper.get('.task-chain-task-list input[type="checkbox"]').setValue(true); await flush();
+      await mounted.wrapper.get('[data-testid="task-chain-create"]').trigger("click"); await flush();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(true);
+      await mounted.wrapper.get('[data-testid="task-chain-pending"] button').trigger("click"); await flush();
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(mounted.wrapper.find('[data-testid="task-chain-pending"]').exists()).toBe(false);
+      expect((mounted.wrapper.get(".task-chain-history select").element as HTMLSelectElement).value).toBe("chain-1");
+      expect(mounted.wrapper.get('[data-testid="task-chain-detail"]').text()).toContain("已授权执行");
+      expect(mounted.wrapper.text()).toContain("已使用原回执恢复，没有再次提交");
     } finally { mounted.unmount(); }
   });
 

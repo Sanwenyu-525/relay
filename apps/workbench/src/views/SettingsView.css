@@ -96,3 +96,30 @@
 .settings-image-input h3 { margin: 0; font-size: var(--relay-font-size-body); }
 .settings-image-input .field { display: grid; gap: var(--relay-space-1); }
 .settings-image-input .settings-save-actions { margin-top: 0; }
+
+/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+
+.pv-page .settings-navigation {
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 15px #22553506;
+  overflow: hidden;
+}
+.pv-page .settings-navigation > button {
+  font-size: 12px;
+  min-height: 38px;
+  color: #53705b;
+  border-bottom: 1px solid #f0f3f0;
+}
+.pv-page .settings-navigation > button[aria-selected="true"] { color: #206846; background: #eaf5eb; font-weight: 650; }
+.pv-page .surface-panel.settings-card {
+  margin-top: 0;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: 0 3px 15px #22553506;
+}
+.pv-page .surface-panel.settings-card + .surface-panel.settings-card { margin-top: 13px; }
+.pv-page .surface-panel.settings-card > h2 { font-size: 13px; color: #294635; }
+.pv-page .settings-definition-list dt { color: #899c8d; font-size: 11px; }
+.pv-page .settings-definition-list dd { color: #486452; font-size: 12px; }

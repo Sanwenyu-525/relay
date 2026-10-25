@@ -1,26 +1,21 @@
 # 编码提示词：使用顺序与完成证据
 
-- 2026-10-24 [右侧工具面板与内置网页预览任务书](workbench-browser-preview.md)：P0 宿主隔离、P1 面板整合、P2 人工网页预览、P3 修复与真实验收，映射 TP-01–09。复用现有工具与 Chrome 扩展路线；推荐规划未实施，本轮仅补任务书，不启动开发。
+角色：开发任务书路由。先核对[当前进度](../CODEX_NEXT_STEP.md)与[相关验收](../docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)，再按当前用户授权选取任务书；已有实现不按旧任务书重做。
 
-- 2026-10-24 [项目级长期 Agent 团队任务书](persistent-project-agent-team.md)：补齐成员/授权、私聊群聊/交接、范围内工作、事件巡检/恢复与真实闭环五包，映射总纲 §0.18、ADR-034、PT-01–12。产品已确认，工程协议待核定，增量待实现、未验收；本文交付不启动开发。原临时委派、外部共享任务及三轮返工边界保留，不套用 N06 项目累计额度。
+## 选择任务书
 
-- 2026-10-24 [差异化体验统一任务书](differentiated-project-experience.md)：覆盖总纲 §0.17 七方向，映射 DX-01–10。A 成果守护、B 接手演练、C 软件成果试用验收及专用工作台、D1 决策重审、D2 修改前影响预演、D3 待决定事项。已确认细节与推荐/待核定部分分开，按当前源码补缺口；本轮仅文档，不启动任何包或改变实施顺序。
+| 目标 | 入口 |
+|---|---|
+| 技术栈与 M01–M07 工作包 | [stack-migration](stack-migration.md) |
+| 后续长期协作与 N 阶段 | [post-v1-collaboration](post-v1-collaboration.md) |
+| 长期 Agent 团队 | [persistent-project-agent-team](persistent-project-agent-team.md) |
+| 外部 Agent 共享任务 | [external-agent-shared-tasks](external-agent-shared-tasks.md) |
+| 长期项目差异化体验 | [differentiated-project-experience](differentiated-project-experience.md) |
+| 工具面板与网页预览 | [workbench-browser-preview](workbench-browser-preview.md) |
+| 缺陷整改与复验 | [remediation](remediation/README.md) |
+| 其他功能及代码/测试关联 | [功能地图](../docs/feature-map/README.md) |
 
-- 2026-10-18 [新会话的默认工作目录（可用户配置）](default-working-directory.md)：用户确认「未选目录的新会话应落在一个可配置的默认目录，写权限未配置即只读兜底」，本轮选择先落文档与任务书，**未实施产品代码**。不变量归契约 01 §5，产品规则归工作台 §18.1.5，责任与持久化归运行架构 §2.8，检查归 DD-01–10，上游证据归研究 §1.8。与在途[本地目录交付链整改](remediation/local-directory-delivery-20261018.md)改同一批文件，开工前须按任务书第 3 节协调顺序。
-- 2026-10-17 [本地目录免手工配置与文件 CRUD 接续](local-directory-access.md)：用户已确认基础文件配置由应用管理，默认只读、写档位三选一，高级设置不再是日常必经页面；沿原 Luna 会话实际实施，替代旧 CRUD 任务书第 8 节“简化待确认、不实施”的范围限制。行为归工作台 §18.1.4，检查归 LA-01–12；从零基础配置的真实入口验收，不扩大 CLI/Git/浏览器/电脑或外部服务权限。本轮只完成文档与任务书，未实施产品代码。
-
-- 2026-10-24 [外部 Agent 共享任务任务书](external-agent-shared-tasks.md)：补齐事项/原子领取、确切结果/独立验收/返工、人工批准/集成/完成、本机 API/MCP 与用户闭环，映射 ES-01–12。产品已确认，工程协议待核定，待实现、未验收；本轮只编制任务书，不直接调度外部工具、不迁移禅道。
-
-本目录导航给编码 Agent 的开发任务书。产品内部调用模型时使用的模板、触发条件、组合、版本与源码入口统一查阅[当前运行时提示词路由](../docs/architecture/agent-prompt-design.md#21-当前运行时提示词路由)；运行程序不从本目录自动选择任务书。按功能查找两类资料可使用[功能地图](../docs/feature-map/README.md)。
-
-2026-09-29 文档改造接续：后续 UI 工作须区分既有维护与协作体验改造。改造以[工作台第 14 节](../docs/frontend/workbench-design.md#14-以目标协作为中心的工作台改造)为主输入，先确定视觉目标与完整工作路径，再按[逐页公共约束](../docs/frontend/page-development-prompts.md#公共开发提示词)映射既有能力，验收见[第 16 节](../docs/testing/verification-plan.md#16-agent-协作主线验收提案)。旧图不冻结主导航；新增聊天入口不等于完成改造。本轮仅改文档，不启动以下任何编码提示词，也不扩大现有 goal。
-
-2026-09-28 整体验收后：[整体整改提示词](overall-remediation-2026-09-28.md)按回归/启动配置、真实模型闭环、逐页 UI、桌面交付组织后续工作，输入为[整体记录](../docs/testing/overall-acceptance-2026-09-28.md)。提示词交付不等于本轮已经开发或真实 Provider 已获放行。
-
-本项目设计包已位于独立工作区，选择当前阶段的一段提示词交给编码 Agent 即可，无需再次迁入。提示词要求读取仓库中的事实源，因此只复制短提示词而不提供文档包是不完整的交接。所有提示词是待执行任务，不表示功能已实现。
-
-当前 PROJECT_ROOT 为 D:/Develop/Relay-Agent，来源路径仅作历史保留，无需再次询问目录。不得使用 Manga 仓库。真实已有代码优先核对，不按草案重建覆盖。当前阶段只看 [CODEX_NEXT_STEP](../CODEX_NEXT_STEP.md)，事实源归属见[文档地图](../docs/README.md)；下列提示词不是独立执行授权，当前用户范围优先。旧 P 阶段提示词中的模型标注只作历史记录，不作为当前执行配置。
-
+公共约束、产品补充映射与历史 P 阶段关系见下方原章节路由；产品运行时提示词另见[运行时设计](../docs/architecture/agent-prompt-design.md#21-当前运行时提示词路由)，不会自动执行本目录任务书。
 
 <!-- DOC-ROUTER -->
 

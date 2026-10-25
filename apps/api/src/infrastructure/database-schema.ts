@@ -1699,9 +1699,10 @@ export interface RunDraftPreviewRow {
 export interface ModelCallRow {
   readonly id: string;
   readonly workspace_id: string;
-  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST' | 'VERIFY' | 'COMPOSER';
+  readonly kind: 'DRAFT' | 'SEMANTIC_CHECK' | 'ASSIST' | 'VERIFY' | 'COMPOSER' | 'MEMBER';
   readonly step_attempt_id: string | null;
   readonly assist_message_id: string | null;
+  readonly member_message_id: string | null;
   readonly manifest_id: string | null;
   readonly criterion_id: string | null;
   readonly check_attempt: number | null;

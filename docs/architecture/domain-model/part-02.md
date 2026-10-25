@@ -159,7 +159,7 @@ PersonalPlanning 继续拥有用户主动发起的范围比较和选择，不引
 
 ## 23. 长期 Agent 成员与跨会话协作的应用边界
 
-2026-10-23 确认；2026-10-25 包 A（成员稳定身份、角色模板、配置修订、协调者单点）已实现（[HTTP §10.113](../../api/http-command-contract/part-08.md#10113-项目级长期-agent-成员2026-10-25-源码实现迁移-0139)、[数据库 §114](../../database/physical-design-postgresql/part-05.md#114-0139-项目级长期-agent-成员2026-10-25adr-034-包-a)），包 B 的服务端记录面（私聊/群聊线程、消息身份与定向接收者、交接引用、讨论终止）已于同日实现（[HTTP §10.114](../../api/http-command-contract/part-08.md#10114-成员私聊群聊与消息2026-10-25-源码实现迁移-0140)、[数据库 §115](../../database/physical-design-postgresql/part-05.md#115-0140-成员私聊群聊与消息2026-10-25adr-034-包-b)），成员回信、互相唤醒、消费结算、执行权与生命周期恢复仍未实现、未验收。依据：[总纲 §0.18](../../requirements/product-spec/part-02.md#018-项目级长期-agent-团队与跨会话协作)、[ADR-034](../../decisions/ADR-034-persistent-project-agent-team.md)。这是职责映射，不预定一个对象一个模块、服务或表。
+2026-10-23 确认；2026-10-25 包 A（成员稳定身份、角色模板、配置修订、协调者单点）已实现（[HTTP §10.113](../../api/http-command-contract/part-08.md#10113-项目级长期-agent-成员2026-10-25-源码实现迁移-0139)、[数据库 §114](../../database/physical-design-postgresql/part-05.md#114-0139-项目级长期-agent-成员2026-10-25adr-034-包-a)），包 B 的服务端记录面（私聊/群聊线程、消息身份与定向接收者、交接引用、讨论终止）已于同日实现（[HTTP §10.114](../../api/http-command-contract/part-08.md#10114-成员私聊群聊与消息2026-10-25-源码实现迁移-0140)、[数据库 §115](../../database/physical-design-postgresql/part-05.md#115-0140-成员私聊群聊与消息2026-10-25adr-034-包-b)）；包 C 第一片（成员消息唤醒循环：定向唤醒裁决、成员回信、消费结算与 MEMBER 计量，[数据库 §116](../../database/physical-design-postgresql/part-05.md#116-0141-成员消息唤醒与消费结算2026-10-25adr-034-包-c-第一片)）亦于同日实现——只有用户发送的消息触发唤醒、一次只唤醒一个成员，成员间定向互相唤醒、协调者自动推进（Task/Run）、外部领取、执行权与生命周期恢复仍未实现、未验收。依据：[总纲 §0.18](../../requirements/product-spec/part-02.md#018-项目级长期-agent-团队与跨会话协作)、[ADR-034](../../decisions/ADR-034-persistent-project-agent-team.md)。这是职责映射，不预定一个对象一个模块、服务或表。
 
 | 事实或用例 | 唯一责任及复用边界 |
 |---|---|

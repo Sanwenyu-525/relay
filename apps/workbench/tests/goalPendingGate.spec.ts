@@ -66,8 +66,9 @@ function router(routes: Routes, state: RouterState) {
         return response(201, { command_id: body.command_id, committed_at: "2026-10-22T00:00:00Z",
           result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
       }
+      // 关联成功的回执要能通过 verifiedLink：project_id 用路径里那个确切 Project。
       return response(200, { command_id: body.command_id, committed_at: "2026-10-22T00:00:00Z",
-        result: { project_id: body.project_id, revision: "3", goal_ids: [goalId] } });
+        result: { project_id: projectId, revision: "3", goal_ids: [goalId] } });
     }
     const receipt = /\/commands\/([^/]+)$/u.exec(path);
     if (receipt) {
@@ -280,5 +281,54 @@ describe("Goal 创建与关联的未决命令准入", () => {
     vi.stubGlobal("fetch", router({ loseWrite: true }, state));
     const back = await mountWorkbench("/projects?view=goal"); unmount = back.unmount; await flush();
     expect(back.wrapper.get('[data-testid="goal-pending"]').text()).toContain(originalCommandId);
+  });
+
+  it("关联待核对不跨 Workspace 出现：另一工作区可正常收口新关联，切回原作用域仍可核对", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({}, state));
+    const first = await mountWorkbench("/projects?view=goal");
+    await first.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await first.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    expect(first.wrapper.get('[data-testid="goal-link-panel"]').exists()).toBe(true);
+
+    // 原工作区的关联丢响应：pending 冻结原 ID。
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    await first.wrapper.get('[data-testid="goal-link-project"]').setValue(projectId); await flush();
+    await first.wrapper.get('[data-testid="goal-link-submit"]').trigger("click"); await flush();
+    const linkCommandId = state.posts.find((post) => post.path.endsWith("/goal-links"))?.body.command_id as string;
+    expect(first.wrapper.get('[data-testid="goal-link-pending"]').text()).toContain(linkCommandId);
+    first.unmount();
+
+    // 切换到另一个 Workspace：原关联待核对不出现，可正常发起并收口一条新关联（新 command ID）。
+    connect(otherWorkspaceId);
+    vi.stubGlobal("fetch", router({ rootOverride: otherRoot }, state));
+    const switched = await mountWorkbench("/projects?view=goal"); unmount = switched.unmount;
+    await switched.wrapper.get('[data-testid="goal-intent"]').setValue("另一个工作区的目标");
+    await switched.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    expect(switched.wrapper.get('[data-testid="goal-link-panel"]').exists()).toBe(true);
+    expect(switched.wrapper.find('[data-testid="goal-link-pending"]').exists()).toBe(false);
+    await switched.wrapper.get('[data-testid="goal-link-project"]').setValue(projectId); await flush();
+    await switched.wrapper.get('[data-testid="goal-link-submit"]').trigger("click"); await flush(); await flush();
+    const otherLinks = state.posts.filter((post) =>
+      post.path.startsWith(`${otherRoot}/projects/`) && post.path.endsWith("/goal-links"));
+    expect(otherLinks).toHaveLength(1);
+    expect(otherLinks[0]?.body.command_id).not.toBe(linkCommandId);
+    expect(switched.wrapper.get('[data-testid="goal-link-receipt"]').text()).toContain(projectId);
+    switched.unmount(); unmount = null;
+
+    // 切回原 Workspace：原关联核对身份按原作用域恢复，确认不发第二条关联命令。
+    connect();
+    vi.stubGlobal("fetch", router({}, state));
+    const back = await mountWorkbench("/projects?view=goal"); unmount = back.unmount;
+    await back.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await back.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const restored = back.wrapper.get('[data-testid="goal-link-pending"]');
+    expect(restored.text()).toContain(linkCommandId);
+    await back.wrapper.get('[data-testid="goal-link-submit"]').trigger("click"); await flush();
+    const homeLinks = state.posts.filter((post) =>
+      post.path.startsWith(`${root}/projects/`) && post.path.endsWith("/goal-links"));
+    expect(homeLinks).toHaveLength(1);
+    expect(homeLinks[0]?.body.command_id).toBe(linkCommandId);
   });
 });

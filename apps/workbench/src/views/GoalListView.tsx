@@ -38,8 +38,8 @@ export default function GoalListView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveGoalList key={`${connection.epoch}:${scope}`} client={connection.client} scope={scope} />
-    : <section className="page-state" data-testid="goal-list-fixture-gap">
-      <p className="eyebrow"><Target aria-hidden="true" />目标</p>
+    : <section className="page-state pv-page" data-testid="goal-list-fixture-gap">
+      <p className="eyebrow"><Target aria-hidden="true" />Goals</p>
       <h1>示例模式没有正式 Goal 列表</h1>
       <p>Goal 是工作空间级事实，需要连接本机 API 才能读取。示例模式不生成目标、关联或进度。</p>
       <Link className="secondary-button" to="/projects">返回项目</Link>
@@ -97,17 +97,17 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
     return () => { disposed.current = true; requestVersion.current++; };
   }, [loadPage]);
 
-  return <section className="skill-page projects-page" data-testid="goal-list-live">
+  return <section className="skill-page projects-page pv-page" data-testid="goal-list-live">
     <div className="projects-inner">
-      <PageHeader title="目标" testId="goal-list-head"
-        lede="目标属于整个工作空间，可以关联多个项目；它与聊天里的自主执行目标是两套事实。"
+      <PageHeader title="目标" testId="goal-list-head" overline="Goals"
+        lede="目标定义预期结果、验收条件和可追溯证据；它与聊天里的自主执行目标是两套事实。"
         actions={<>
           <Link className="secondary-button" to="/projects" data-testid="goal-list-back-projects">返回项目</Link>
           <Link className="primary-button" to="/projects?view=goal" data-testid="goal-list-create"><Plus aria-hidden="true" />记录目标</Link>
         </>} />
-      <nav className="skill-tabs" aria-label="目标范围">
+      <nav className="skill-tabs pv-inline-filter" aria-label="目标范围">
         {scopes.map((item) => <Link key={item.key}
-          className={`skill-tab${item.key === scope ? " skill-tab--active" : ""}`}
+          className={`pv-filter skill-tab${item.key === scope ? " active skill-tab--active" : ""}`}
           aria-current={item.key === scope ? "page" : undefined}
           to={item.key === "active" ? "/goals" : `/goals?scope=${item.key}`}
           data-testid={`goal-list-scope-${item.key}`}>{item.label}</Link>)}
@@ -137,15 +137,25 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
               <p className="list-footer-note" data-testid="goal-list-count">
                 已加载 {items.length} 个目标{nextCursor ? " · 仍有后续页，未读部分不计入任何结论" : " · 已到列表末页"}。
               </p>
-              <ul className="run-list" data-testid="goal-list-items">
-                {items.map((goal) => <li key={goal.id} data-testid={`goal-list-item-${goal.id}`}>
-                  <Link className="inline-link" to={`/goals/${goal.id}`} data-testid={`goal-open-${goal.id}`}>
-                    <strong>{goal.title}</strong></Link>
-                  {" "}· {goalStatusLabels[goal.status] ?? goal.status} · v{goal.revision}
-                  <p className="helper-text">{goal.description || "（没有说明）"}</p>
-                  <small>更新于 {new Date(goal.updatedAt).toLocaleString("zh-CN")}</small>
-                </li>)}
-              </ul>
+              {/* V5.28 原型目标卡：两列网格，kicker 状态 + 标题 + 说明 + 页脚时间与入口。
+                  列表接口没有验收标准计数，进度行不造假数据。 */}
+              <div className="pv-grid" data-testid="goal-list-items">
+                {items.map((goal) => <article className="pv-goal-card" key={goal.id}
+                  data-testid={`goal-list-item-${goal.id}`}>
+                  <div className="pv-goal-card__top">
+                    <span className={`pv-chip${goal.status === "ARCHIVED" ? " muted" : ""}`}>
+                      {goalStatusLabels[goal.status] ?? goal.status}</span>
+                    <small className="pv-goal-card__rev">v{goal.revision}</small>
+                  </div>
+                  <Link className="pv-goal-card__title" to={`/goals/${goal.id}`} data-testid={`goal-open-${goal.id}`}>
+                    {goal.title}</Link>
+                  <p className="pv-goal-card__desc">{goal.description || "（没有说明）"}</p>
+                  <div className="pv-goal-card__footer">
+                    <small>更新于 {new Date(goal.updatedAt).toLocaleString("zh-CN")}</small>
+                    <Link className="pv-goal-card__open" to={`/goals/${goal.id}`}>查看目标 →</Link>
+                  </div>
+                </article>)}
+              </div>
               {moreError && <p className="action-error" role="alert" data-testid="goal-list-more-error">
                 {moreError}；已读目标与原游标保留。
                 <button className="text-button" type="button" data-testid="goal-list-more-retry"

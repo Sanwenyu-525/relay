@@ -924,6 +924,11 @@ export class RelayApiClient {
     return gatewayApi.disableGatewayConnection(this.#http, input);
   }
 
+  /** 一键启用内置插件：一次命令补齐插件连接与逐动作策略（HTTP §10，EnableProjectPlugin）。 */
+  async enableProjectPlugin(input: { projectId: string; plugin: "computer" | "browser" | "github"; commandId: string }): Promise<RelayCommandEnvelope> {
+    return gatewayApi.enableProjectPlugin(this.#http, input);
+  }
+
   async getGatewayPolicies(projectId: string): Promise<readonly RelayGatewayPolicy[]> {
     return gatewayApi.getGatewayPolicies(this.#http, projectId);
   }

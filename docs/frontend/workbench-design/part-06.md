@@ -141,12 +141,12 @@ UNKNOWN、PARTIAL、控制请求待安全点、执行失败、权限/归档写�
 
 ## 19. 下一段工作计划（N04，已确认规划）
 
-2026-10-25 N04 UI 首片已实现并完成实施者自检：live 路由 `/projects/:id/planning` 读取真实项目、Goal、Task 分页和用户声明估时，发起周期计划候选；逐项接受/拒绝和 ALL/SHRINK/DEFER 范围推演沿既有命令；推演提交后按原计划回读并选中新推演，展示候选版本、容量、依赖、未知、延后与变更依据。命令在本机保留原 ID/载荷并提供回执核对。计划接受不创建执行授权、不启动 Run。`apps/workbench/tests/projectPlanningFlows.spec.tsx` 与真实 Chromium 受控 API 流程、真实临时 PG/HTTP 结果见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。尚未做独立验收、真实 Provider 或 Windows/WebView2 验收；本节下列条款继续作为完整产品约束，不把 UI 首片自检升级为完整 N04 验收。产品取舍只在[后续路线 N04](../../requirements/post-v1-roadmap/part-01.md#n04-周期计划与重排建议)维护，不继承 Today、Task 提案或旧页面的成绩。
+2026-10-25 N04 UI 首片已实现并完成实施者自检：live 路由 `/projects/:id/planning` 读取真实项目、Goal、Task 分页和用户声明估时，支持按分钟录入/更新总耗时及执行、等待、Review、人工投入分项；要求填写来源说明并标为用户声明，按 Task revision 与估时 revision 做 CAS。保存后重读历史并显示当前版本、来源及适用状态；验收版本变化后旧估时继续可查但标为不适用；响应未知时保留原 command_id/载荷并核对原回执。页面可发起周期计划候选，逐项接受/拒绝和 ALL/SHRINK/DEFER 范围推演沿既有命令；提交后按回执身份回读并选中确切计划或推演。计划接受不创建执行授权、不启动 Run。`apps/workbench/tests/projectPlanningFlows.spec.tsx` 与真实 Chromium 受控 API 流程、真实临时 PG/HTTP 结果见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。尚未做真实 Provider 或 Windows/WebView2 验收；独立复核和定向证据见该验收表，不把实施者自检升级为完整 N04 验收。产品取舍只在[后续路线 N04](../../requirements/post-v1-roadmap/part-01.md#n04-周期计划与重排建议)维护，不继承 Today、Task 提案或旧页面的成绩。
 
 - 发起时显示用户选定的项目/目标、来源范围和本段时间窗口。窗口的起止时点可辨认，重新读取或核对原请求不自动重置；它不是执行授权。可用时长不从点击行为、Today 置顶或模型判断推导。
 - 候选先说明本段主线、必要前置、可做部分和延后原因。每项列输出/检查依据、已登记依赖、估时来源及未知项；预计执行/等待/审阅时间与人工投入分列，重叠时间不重复相加。缺少估时不显示为零，未设置优先级不冒充用户确认的 NORMAL，INFORMS 不冒充 BLOCKS。
 - 关键任务估时未知时展示有时间边界和明确输出的诊断候选，后续任务保持未知。诊断达到预算仍未定位时，阶段成果明确写未定位，提供证据、排除项与下一步入口；不自动延长或将原修复任务显示为完成。
-- 用户逐项接受仍经原 Task/提案入口，未接受的候选不成为正式任务。计划中的诊断目标与原修复目标可区分，任何完成结论绑定自己的条件和确切成果；接受计划不自动 Delegate 或批准工具。
+- 用户逐项接受仍经原 Task/提案入口，未接受的候选不成为正式任务；包括全部为 `DEFERRED` 的候选也必须能填写理由后逐项拒绝。计划中的诊断目标与原修复目标可区分，任何完成结论绑定自己的条件和确切成果；接受计划不自动 Delegate 或批准工具。其他项推进计划 revision 后，`RESOLVE_ITEM` 仍须核对目标项确切状态，并允许当前 revision 不早于原回执。
 - 来源变化、读取失败或部分应用时保留已提交事实、草稿与原命令核对入口；活动任务不静默改写。没有额外执行授权时只呈现计划，后续明确执行仍复用原应用用例和 N06 授权边界。
 
 ## 20. 一次性继续项目提醒（N05，已确认规划）
@@ -160,7 +160,7 @@ UNKNOWN、PARTIAL、控制请求待安全点、执行失败、权限/归档写�
 
 ## 21. 有限任务链的授权与接续（N06，已确认规划）
 
-2026-10-14 基础后端/客户端接续归 HTTP §10.77，固定 Markdown 链、明确累计额度和原控制/完成引用沿用既有 Owner。2026-10-25 live 路由 `/projects/:id/task-chains` 已实现：检查本项目可执行 Task、固定顺序/依赖，独立创建 DRAFT 与显式预算/有效期授权；展示累计用量、Task/Run/Review/Completion、授权历史、回执恢复及暂停/撤销控制。由 N04 跳入只预选已接受 Task，不自动创建或授权。未知用量阻止新增/恢复授权；ACTIVE 是授权有效，PAUSING 是请求尚未安全应用，实际 Run 状态和业务完成沿原事实呈现。组件与受控 API Chromium 自检、真实临时 PG/HTTP 相关范围见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；真实 Provider、Windows/WebView2、完整 N06 及独立验收仍未验证。
+2026-10-14 基础后端/客户端接续归 HTTP §10.77，固定 Markdown 链、明确累计额度和原控制/完成引用沿用既有 Owner。2026-10-25 live 路由 `/projects/:id/task-chains` 已实现：检查本项目可执行 Task、固定顺序/依赖，独立创建 DRAFT 与显式预算/有效期授权；展示累计用量、Task/Run/Review/Completion、授权历史、回执恢复及暂停/撤销控制。由 N04 跳入只预选已接受 Task，不自动创建或授权。未知用量阻止新增/恢复授权；ACTIVE 是授权有效，PAUSING 是请求尚未安全应用，实际 Run 状态和业务完成沿原事实呈现。丢失授权响应后，只有授权历史中的原命令 ID、预算和期限均匹配，且详情/列表读回一致，才接受 `WAITING_RESUME` 等已知后继状态与不早于回执的当前 revision；恢复后再次明确授权须重新勾选确认。组件与受控 API Chromium 自检、真实临时 PG/HTTP 相关范围见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)；真实 Provider、Windows/WebView2、完整 N06 及本轮修改后的独立验收仍未完成。
 
 以下条款记录 N06 完整产品边界；当前前端首片不改变任务链范围、预算、到期或执行权规则。需求归[后续路线 N06](../../requirements/post-v1-roadmap/part-01.md#n06-有限连续委托)，工程协议仍见 [ADR-013](../../decisions/ADR-013-bounded-project-continuation.md) 的 Proposed 边界。
 

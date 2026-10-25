@@ -692,8 +692,8 @@ export default function SettingsView() {
     });
   };
 
-return <section className="settings-page" data-testid="settings-page">
-    <PageHeader testId="settings-page-head" title="设置" lede="本设备偏好与服务配置" />
+return <section className="settings-page pv-page" data-testid="settings-page">
+    <PageHeader testId="settings-page-head" title="设置" overline="Settings" lede="以服务状态、模型端口、基本设置和执行策略为主；选项即时生效，不需要填写配置表。" />
     <div className="settings-layout">
       <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
         {([['basic', '基本设置'], ['model', 'AI 设置'], ['execution', '执行策略'], ['workbench', '工作台']] as const)

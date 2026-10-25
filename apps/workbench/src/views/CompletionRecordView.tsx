@@ -43,7 +43,7 @@ export default function CompletionRecordView() {
       timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     }).format(date);
   }
-  return <section className="completion-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><Link className="text-link completion-back" to="/tasks">返回任务列表</Link><PageHeader testId="completion-page-head"
+  return <section className="completion-page pv-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><Link className="text-link completion-back" to="/tasks">返回任务列表</Link><PageHeader testId="completion-page-head"
     title={evidence === null ? "完成凭据" : evidence.isCurrent ? "这项工作已完成" : "历史完成依据"}
     lede="按这一次完成提交时的验收版本与证据读取；重开后旧凭据仍是历史记录，不用当前最新版替代。" />
     {client === null ? <p className="warning-callout" role="status">示例数据没有真实完成凭据。<Link to="/tasks">返回任务</Link></p> : <>
