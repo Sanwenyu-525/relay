@@ -78,6 +78,8 @@ export class RelayHttp {
         actualRevision: optionalString(conflict, "actual_revision"),
         blockingReasons: Array.isArray(conflict.blocking_reasons)
           ? conflict.blocking_reasons.filter((reason): reason is string => typeof reason === "string") : [],
+        impactedTaskIds: Array.isArray(conflict.impacted_task_ids)
+          ? conflict.impacted_task_ids.filter((id): id is string => typeof id === "string") : [],
         recallPaths: Array.isArray(conflict.recall_paths)
           ? conflict.recall_paths.filter((path): path is string => typeof path === "string") : []
       });

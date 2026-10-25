@@ -1,6 +1,6 @@
 import type { DecimalRevision } from "../../types";
 import { array, boolean, decimal, integer, nullableString, object, string, taskStatus } from "../core/primitives";
-import type { RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRefChange, RelayContinuationRefKind, RelayGoalCreation, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectListItem, RelayProjectState, RelayStateMutation, RelayViewConfiguration } from "../dtos/projects";
+import type { RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRefChange, RelayContinuationRefKind, RelayDirectoryWorkContext, RelayGoalArchiveResult, RelayGoalCreation, RelayGoalEditResult, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectGoalLinkDetail, RelayProjectGoalUnlinkResult, RelayProjectListItem, RelayProjectRenameResult, RelayProjectState, RelayStateMutation, RelayViewConfiguration, RelayWorkContextProject, RelayWorkContextSession } from "../dtos/projects";
 
 export function projectFrom(value: unknown): RelayProject {
   const record = object(value, "project");
@@ -209,6 +209,169 @@ export function stateMutationFrom(result: Readonly<Record<string, unknown>>): Re
   };
 }
 
+/* ── 正式 Goal 管理 ─────────────────────────────────────────────────────────── */
+
+export function goalRecordFrom(value: unknown): RelayGoalRecord {
+  const record = object(value, "goal");
+  return { id: string(record, "id", "goal"), title: string(record, "title", "goal"),
+    description: string(record, "description", "goal"), status: string(record, "status", "goal"),
+    revision: decimal(record, "revision", "goal"),
+    createdAt: string(record, "created_at", "goal"), updatedAt: string(record, "updated_at", "goal") };
+}
+
+export function goalPageFrom(value: unknown): RelayGoalPage {
+  const record = object(value, "goal list");
+  return { items: array(record, "items", "goal list").map(goalRecordFrom),
+    nextCursor: nullableString(record, "next_cursor", "goal list") };
+}
+
+export function goalProjectFrom(value: unknown): RelayGoalProject {
+  const record = object(value, "goal project");
+  const archiveStatus = string(record, "archive_status", "goal project");
+  const archivedAt = nullableString(record, "archived_at", "goal project");
+  if (archiveStatus !== "ACTIVE" && archiveStatus !== "ARCHIVED" ||
+    (archiveStatus === "ACTIVE") !== (archivedAt === null)) {
+    throw new Error("goal project.archive_status 响应格式无效。");
+  }
+  return { projectId: string(record, "project_id", "goal project"),
+    title: string(record, "title", "goal project"),
+    projectType: string(record, "project_type", "goal project"),
+    archivedAt, archiveStatus,
+    projectRevision: decimal(record, "project_revision", "goal project"),
+    linkedAt: string(record, "linked_at", "goal project") };
+}
+
+export function goalProjectListFrom(value: unknown): readonly RelayGoalProject[] {
+  return array(object(value, "goal projects"), "items", "goal projects").map(goalProjectFrom);
+}
+
+export function projectGoalLinkDetailFrom(value: unknown): RelayProjectGoalLinkDetail {
+  const record = object(value, "project goal");
+  return { goalId: string(record, "goal_id", "project goal"),
+    title: string(record, "title", "project goal"),
+    status: string(record, "status", "project goal"),
+    revision: decimal(record, "revision", "project goal"),
+    explicitTaskIds: array(record, "explicit_task_ids", "project goal")
+      .map((id) => {
+        if (typeof id !== "string") throw new Error("project goal.explicit_task_ids 响应格式无效。");
+        return id;
+      }) };
+}
+
+export function projectGoalLinkDetailListFrom(value: unknown): readonly RelayProjectGoalLinkDetail[] {
+  return array(object(value, "project goals"), "items", "project goals").map(projectGoalLinkDetailFrom);
+}
+
+export function goalEditResultFrom(result: Readonly<Record<string, unknown>>): RelayGoalEditResult {
+  return { goalId: string(result, "goal_id", "goal revision result"),
+    title: string(result, "title", "goal revision result"),
+    description: string(result, "description", "goal revision result"),
+    status: string(result, "status", "goal revision result"),
+    revision: decimal(result, "revision", "goal revision result") };
+}
+
+export function goalArchiveResultFrom(result: Readonly<Record<string, unknown>>): RelayGoalArchiveResult {
+  if (string(result, "status", "goal archive result") !== "ARCHIVED") {
+    throw new Error("goal archive result.status 响应格式无效。");
+  }
+  return { goalId: string(result, "goal_id", "goal archive result"),
+    status: "ARCHIVED", revision: decimal(result, "revision", "goal archive result") };
+}
+
+export function projectRenameResultFrom(result: Readonly<Record<string, unknown>>): RelayProjectRenameResult {
+  return { projectId: string(result, "project_id", "project rename result"),
+    title: string(result, "title", "project rename result"),
+    revision: decimal(result, "revision", "project rename result") };
+}
+
+export function projectGoalUnlinkResultFrom(result: Readonly<Record<string, unknown>>): RelayProjectGoalUnlinkResult {
+  return { projectId: string(result, "project_id", "goal unlink result"),
+    revision: decimal(result, "revision", "goal unlink result"),
+    impactedTasks: array(result, "impacted_tasks", "goal unlink result").map((value) => {
+      const task = object(value, "goal unlink result.impacted_tasks");
+      return { taskId: string(task, "task_id", "goal unlink result.impacted_tasks"),
+        revision: decimal(task, "revision", "goal unlink result.impacted_tasks") };
+    }) };
+}
+
+function workContextSessionFrom(value: unknown): RelayWorkContextSession {
+  const record = object(value, "work context session");
+  return { id: string(record, "id", "work context session"),
+    projectId: string(record, "project_id", "work context session"),
+    title: string(record, "title", "work context session"),
+    status: string(record, "status", "work context session"),
+    revision: decimal(record, "revision", "work context session"),
+    workingResourceId: nullableString(record, "working_resource_id", "work context session") };
+}
+
+function workContextDirectoryFrom(value: unknown): { readonly id: string;
+  readonly canonicalRoot: string; readonly status: string; readonly revision: DecimalRevision } {
+  const record = object(value, "work context directory");
+  return { id: string(record, "id", "work context directory"),
+    canonicalRoot: string(record, "canonical_root", "work context directory"),
+    status: string(record, "status", "work context directory"),
+    revision: decimal(record, "revision", "work context directory") };
+}
+
+function workContextProjectFrom(value: unknown): RelayWorkContextProject {
+  const record = object(value, "work context project");
+  const archiveStatus = string(record, "archive_status", "work context project");
+  const archivedAt = nullableString(record, "archived_at", "work context project");
+  if (archiveStatus !== "ACTIVE" && archiveStatus !== "ARCHIVED" ||
+    (archiveStatus === "ACTIVE") !== (archivedAt === null)) {
+    throw new Error("work context project.archive_status 响应格式无效。");
+  }
+  return { id: string(record, "id", "work context project"),
+    title: string(record, "title", "work context project"),
+    projectType: string(record, "project_type", "work context project"),
+    archiveStatus, archivedAt,
+    revision: decimal(record, "revision", "work context project"),
+    // 目录工作上下文的 project 不带 directories；Goal 上下文才投影目录清单。
+    directories: Array.isArray(record["directories"])
+      ? record["directories"].map(workContextDirectoryFrom) : [] };
+}
+
+export function goalWorkContextFrom(value: unknown): RelayGoalWorkContext {
+  const record = object(value, "goal work context");
+  if (string(record, "kind", "goal work context") !== "GOAL") {
+    throw new Error("goal work context.kind 响应格式无效。");
+  }
+  const goal = object(record["goal"], "goal work context.goal");
+  return { kind: "GOAL",
+    goal: { id: string(goal, "id", "goal work context.goal"),
+      title: string(goal, "title", "goal work context.goal"),
+      description: string(goal, "description", "goal work context.goal"),
+      status: string(goal, "status", "goal work context.goal"),
+      revision: decimal(goal, "revision", "goal work context.goal") },
+    projects: array(record, "projects", "goal work context").map(workContextProjectFrom),
+    sessions: array(record, "sessions", "goal work context").map(workContextSessionFrom) };
+}
+
+export function directoryWorkContextFrom(value: unknown): RelayDirectoryWorkContext {
+  const record = object(value, "directory work context");
+  if (string(record, "kind", "directory work context") !== "DIRECTORY") {
+    throw new Error("directory work context.kind 响应格式无效。");
+  }
+  const directory = object(record["directory"], "directory work context.directory");
+  return { kind: "DIRECTORY",
+    directory: { ...workContextDirectoryFrom(directory),
+      project: workContextProjectFrom(object(directory["project"],
+        "directory work context.directory.project")) },
+    linkedGoals: array(record, "linked_goals", "directory work context").map((value) => {
+      const goal = object(value, "directory work context.linked_goals");
+      return { id: string(goal, "id", "directory work context.linked_goals"),
+        title: string(goal, "title", "directory work context.linked_goals"),
+        status: string(goal, "status", "directory work context.linked_goals"),
+        revision: decimal(goal, "revision", "directory work context.linked_goals") };
+    }),
+    sessions: array(record, "sessions", "directory work context").map(workContextSessionFrom) };
+}
+
+function optionalArray(record: Record<string, unknown>, key: string): unknown[] {
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
+
 export function projectStateFrom(value: unknown): RelayProjectState {
   const record = object(value, "project state");
   return {
@@ -216,6 +379,36 @@ export function projectStateFrom(value: unknown): RelayProjectState {
     revision: decimal(record, "revision", "project state"),
     phaseKey: string(record, "phase_key", "project state"),
     nextActionTaskId: nullableString(record, "next_action_task_id", "project state"),
+    inProgress: optionalArray(record, "in_progress").map((item) => {
+      const task = object(item, "project state.in_progress");
+      return { taskId: string(task, "task_id", "project state.in_progress"),
+        title: string(task, "title", "project state.in_progress"),
+        status: string(task, "status", "project state.in_progress"),
+        mode: string(task, "mode", "project state.in_progress"),
+        revision: decimal(task, "revision", "project state.in_progress") };
+    }),
+    blockers: optionalArray(record, "blockers").map((item) => {
+      const blocker = object(item, "project state.blockers");
+      const targetKind = string(blocker, "target_kind", "project state.blockers");
+      if (targetKind !== "PROJECT" && targetKind !== "TASK" && targetKind !== "GOAL") {
+        throw new Error("project state.blockers.target_kind 响应格式无效。");
+      }
+      return { blockerId: string(blocker, "blocker_id", "project state.blockers"),
+        targetKind, targetId: string(blocker, "target_id", "project state.blockers"),
+        reason: string(blocker, "reason", "project state.blockers"),
+        sourceRef: string(blocker, "source_ref", "project state.blockers"),
+        resolvedAt: nullableString(blocker, "resolved_at", "project state.blockers"),
+        createdAt: string(blocker, "created_at", "project state.blockers") };
+    }),
+    risks: optionalArray(record, "risks").map((item) => {
+      const risk = object(item, "project state.risks");
+      return { riskId: string(risk, "risk_id", "project state.risks"),
+        statement: string(risk, "statement", "project state.risks"),
+        sourceRef: string(risk, "source_ref", "project state.risks"),
+        confirmationRef: string(risk, "confirmation_ref", "project state.risks"),
+        resolvedAt: nullableString(risk, "resolved_at", "project state.risks"),
+        createdAt: string(risk, "created_at", "project state.risks") };
+    }),
     selectedArtifactVersionRefs: array(record, "selected_artifact_version_refs", "project state").map(
       (item) => {
         const ref = object(item, "project state.selected_artifact_version_refs");
@@ -232,8 +425,11 @@ export function projectStateFrom(value: unknown): RelayProjectState {
       return {
         completionId: string(ref, "completion_id", "completion ref"),
         taskId: string(ref, "task_id", "completion ref"),
-        acceptanceRevision: decimal(ref, "acceptance_revision", "completion ref")
+        acceptanceRevision: decimal(ref, "acceptance_revision", "completion ref"),
+        committedAt: typeof ref["committed_at"] === "string" ? ref["committed_at"] : null
       };
-    })
+    }),
+    allowedActions: optionalArray(record, "allowed_actions")
+      .filter((action): action is string => typeof action === "string")
   };
 }

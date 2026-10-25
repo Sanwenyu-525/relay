@@ -14,7 +14,7 @@ import { archiveAssistSession, deleteAssistSession, forkAssistSession, renameAss
   reopenAssistSession, setAssistSessionPin, setAssistSessionUnread }
   from '../application/assist-session-controls.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
-  readAssistSession, readAssistSessionContexts, projectAssistSkillMessage, readAssistLivePreview,
+  readAssistSession, readAssistSessionContexts, readAssistSessionWithActivity, projectAssistSkillMessage, readAssistLivePreview,
   listAssistMessageAttachmentMeta, readAssistMessageAttachment,
   type AssistMessageAttachmentMeta }
   from '../application/assist-queries.js';
@@ -66,6 +66,13 @@ const AssistSessionDto = Type.Object({
   unread_at: Type.Union([Type.String(), Type.Null()]),
   /** 0111：最后一条消息落库或生成结算的时刻（活动排序键）。还没有消息为 null。 */
   last_message_at: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * 读时派生：这段讨论有没有消息（直接看 `assist_messages` 是否存在行）。
+   *
+   * 与 `last_message_at` 分开：活动键是排序用的可空列，写入路径漏推进时不能拿它
+   * 推断内容存在性；界面上的「未开始」与分叉入口只读这一枚事实。
+   */
+  has_messages: Type.Boolean(),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   /**
@@ -382,6 +389,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   pinned_at: Date | null;
   unread_at: Date | null;
   last_message_at: Date | null;
+  has_messages: boolean;
   conversation_mode: ConversationMode; chat_mode: 'CHAT' | 'PLAN' | 'GOAL';
   assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
@@ -397,6 +405,8 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     unread_at: row.unread_at === null ? null : row.unread_at.toISOString(),
     // 0111：活动排序键逐字返回。NULL 只表示这段会话还没有消息，顺序仍由服务端决定。
     last_message_at: row.last_message_at === null ? null : row.last_message_at.toISOString(),
+    // 读时派生的事实：有没有消息只看消息表，不从活动键的可空性推断。
+    has_messages: row.has_messages,
     conversation_mode: row.conversation_mode,
     chat_mode: row.chat_mode,
     assistant_profile_id: row.assistant_profile_id,
@@ -640,13 +650,13 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     response: { 200: AssistSessionDto } } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      const session = await readAssistSession(dependencies.database.executor, {
+      const { session, hasMessages } = await readAssistSessionWithActivity(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
       const q = request.query as { include_context?: 'true' | 'false' };
       const readContext = q.include_context === 'true' ? (await readAssistSessionContexts(dependencies.database.executor,
         { workspaceId: p.workspace_id, sessionIds: [session.id] }))[0] : undefined;
       const context = readContext?.session_revision === session.revision ? readContext : undefined;
-      return { ...sessionDto(session), ...(context === undefined ? {} : { context: {
+      return { ...sessionDto({ ...session, has_messages: hasMessages }), ...(context === undefined ? {} : { context: {
         project_goals: context.project_goals, working_directory: context.working_directory } }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });

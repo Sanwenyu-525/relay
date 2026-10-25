@@ -34,6 +34,17 @@ export interface AssistSessionContext {
 }
 
 /**
+ * 会话列表投影：`has_messages` 是**读时派生**的事实，不是 `assist_sessions` 的列。
+ *
+ * 它回答「这段讨论有没有消息」，与 `last_message_at` 分开：后者是导航排序键，
+ * 由消息落库与生成结算推进；前者直接数 `assist_messages` 行，任何写入路径漏推进
+ * 活动键都不会让空会话判断说谎（2026-10-24 用户确认的口径）。
+ */
+export interface AssistSessionListRow extends AssistSessionRow {
+  readonly has_messages: boolean;
+}
+
+/**
  * Assist 模块独占 assist_sessions / assist_messages / assist_proposals 的写入口
  * （红线 1：每类事实只有一个逻辑写入 Owner）。Assist 行不参与业务判定；
  * 提案接受效果由既有业务命令产生，这里只保存提案事实本身。
@@ -94,17 +105,22 @@ export class AssistRepository {
    * 不再追加第二枚布尔排序键，避免「同现同缺」写成两套规则。
    * 活动序用 `coalesce(last_message_at, created_at)`：说过话的按最后一次消息落库或生成结算排，
    * 还没说话的按创建时间留在原位，不因本列为空而沉底；`id desc` 只作同值决胜。
+   *
+   * 每行附带 `has_messages`：直接按 `assist_messages` 派生「有没有消息」，供界面判断
+   * 「未开始」与分叉入口。它与排序键分开，不因活动键漏写而说谎。
    */
   async listSessions(workspaceId: string, projectId?: string, taskId?: string,
-    status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionRow[]> {
-    const project = projectId === undefined ? sql`` : sql`and project_id = ${projectId}`;
-    const task = taskId === undefined ? sql`` : sql`and task_id = ${taskId}`;
+    status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionListRow[]> {
+    const project = projectId === undefined ? sql`` : sql`and s.project_id = ${projectId}`;
+    const task = taskId === undefined ? sql`` : sql`and s.task_id = ${taskId}`;
     const active = status === undefined || status === 'ALL' ? sql``
-      : sql`and status = ${status}`;
-    return (await sql<AssistSessionRow>`select * from assist_sessions
-      where workspace_id = ${workspaceId} ${project} ${task} ${active}
-      order by pinned_at desc nulls last,
-        coalesce(last_message_at, created_at) desc, id desc`.execute(this.db)).rows;
+      : sql`and s.status = ${status}`;
+    return (await sql<AssistSessionListRow>`select s.*, exists(
+        select 1 from assist_messages m where m.session_id = s.id) as has_messages
+      from assist_sessions s
+      where s.workspace_id = ${workspaceId} ${project} ${task} ${active}
+      order by s.pinned_at desc nulls last,
+        coalesce(s.last_message_at, s.created_at) desc, s.id desc`.execute(this.db)).rows;
   }
 
   /**
@@ -117,6 +133,19 @@ export class AssistRepository {
     await sql`update assist_sessions
       set last_message_at = greatest(last_message_at, now())
       where id = ${sessionId}`.execute(this.db);
+  }
+
+  /**
+   * 读时派生「这段讨论有没有消息」：直接数 `assist_messages`，不读 `last_message_at`。
+   *
+   * 活动键是排序用的可空列，任何写入路径漏了 `touchLastMessage` 都会让「NULL ⇒ 没消息」
+   * 的推断说谎（2026-10-24 的 0111 回填就是这种历史缺陷）。这里返回的是消息行是否存在，
+   * 与排序键分开；单条读取与会话列表共用同一口径。
+   */
+  async sessionHasMessages(sessionId: string): Promise<boolean> {
+    const rows = await sql<{ present: boolean }>`select exists(
+      select 1 from assist_messages where session_id = ${sessionId}) as present`.execute(this.db);
+    return rows.rows[0]?.present === true;
   }
 
   /**

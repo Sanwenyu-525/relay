@@ -80,7 +80,7 @@ const SESSION_URI_PREFIX = "relay://sessions/";
  *    分叉同改名/置顶一样被服务端拒掉，这里就不出现。
  *    **还没有消息的会话同样不出现**（2026-10-24）：分叉的语义是「连历史复制一份」，历史为空时
  *    服务端按 `INVALID_TRANSITION` 拒绝；与其让人点一下再读一条拒绝，不如照归档态的先例不给这一项。
- *    判据是服务端给的 `lastMessageAt`（0111 的活动键），不在本地数消息。
+ *    判据是服务端读时派生的 `hasMessages`（直接数消息表），不在本地数消息，也不看活动键是否为空。
  * 9. **删除的确认改成就地浮层（2026-10-19 用户指令）。** 条目由「删除这段讨论」收成「删除」，
  *    确认不再是 `AppDialog` 那种带遮罩、长正文与关闭叉的对话框，而是贴着 ⋯ 的一张窄卡：
  *    标题 + 一句后果 + 取消／删除两键。两条理由：这一行刚在菜单里点过「删除」，再铺一层遮罩
@@ -372,8 +372,9 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
           </button>
           {/* 分叉留在常用这一组：它新建一条讨论，不带归档那种不可逆读感。
               编号（1）（2）由服务端决定，界面不自己拼（2026-10-18 用户指令）。
-              还没有消息的讨论不给这一项：没有可搬的历史，服务端只会拒绝（2026-10-24）。 */}
-          {session.lastMessageAt !== null && <button type="button"
+              还没有消息的讨论不给这一项：没有可搬的历史，服务端只会拒绝（2026-10-24）。
+              判据是服务端读时派生的 hasMessages，不从活动键的可空性推断。 */}
+          {session.hasMessages && <button type="button"
             className="text-button recent-work-row-action" disabled={busy}
             data-testid={`recent-work-fork-${session.id}`}
             onClick={() => void run((commandId) => client.forkAssistSession({ sessionId: session.id,

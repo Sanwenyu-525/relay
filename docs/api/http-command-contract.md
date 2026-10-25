@@ -1568,13 +1568,14 @@ F26 浏览器自动化 M3 的任务状态面。物理边界归[数据库 §96](.
 
 ### 10.91 会话列表的活动排序键（2026-10-18 源码实现，迁移 0111）
 
-工作区前缀为 `/api/v1/workspaces/{workspace_id}`。**Breaking Change：No**——没有新命令、没有新端点，只给既有会话投影加一个可空只读字段，并改掉 `GET /assist-sessions` 那一列的默认顺序。迁移与写入 Owner 见[数据库 §100](../database/physical-design-postgresql.md#100-0111-会话活动排序键2026-10-18-源码实现)，界面读法见[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。
+工作区前缀为 `/api/v1/workspaces/{workspace_id}`。**Breaking Change：No**——没有新命令、没有新端点，只给既有会话投影加只读字段（`last_message_at` 可空、`has_messages` 为读时派生布尔），并改掉 `GET /assist-sessions` 那一列的默认顺序。迁移与写入 Owner 见[数据库 §100](../database/physical-design-postgresql.md#100-0111-会话活动排序键2026-10-18-源码实现)，界面读法见[工作台 §28.1](../frontend/workbench-design.md#281-左栏recentworkrail)。
 
 | 端点 | 变化 | 说明 |
 |---|---|---|
-| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `last_message_at` | 逐字回显活动时刻（ISO 8601）或 `null`；`null` 只表示这段会话还没有消息。缺字段只来自 0111 之前的响应，客户端同样回落 `created_at`。**`null ⇔ 没有消息` 这个语义 2026-10-24 才真正成立**：0111 不回填，0111 之前就已有消息的旧行原本也是 `null`，由迁移 0135 按消息真实时刻补齐（见[数据库 §112](../database/physical-design-postgresql.md#112-0135-会话活动键回填2026-10-24缺陷修复)）；左栏「未开始」标记正是按这个语义读的 |
+| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `last_message_at` | 逐字回显活动时刻（ISO 8601）或 `null`。**`null ⇔ 没有消息` 这个语义 2026-10-24 才真正成立**：0111 不回填，0111 之前就已有消息的旧行原本也是 `null`，由迁移 0135 按消息真实时刻补齐（见[数据库 §112](../database/physical-design-postgresql.md#112-0135-会话活动键回填2026-10-24缺陷修复)）。活动键自 2026-10-24 起**只用于排序**；界面的「有没有消息」改读下面的 `has_messages` |
+| `GET /assist-sessions`、`GET /assist-sessions/{session_id}` | 投影新增只读字段 `has_messages`（2026-10-24） | **读时派生**，不是表列：`exists(select 1 from assist_messages m where m.session_id = s.id)`。列表在查询中逐行附带，单条读取单独派生一次。界面「未开始」标记与分叉入口只读这一枚事实，不从 `last_message_at` 的可空性推断——活动键漏推进时最坏只影响排序，不会再把有正文的会话说成空会话。缺字段只来自尚未提供该字段的旧服务端，客户端按活动键回落一次 |
 | `GET /assist-sessions` | 列表顺序 | `order by pinned_at desc nulls last, coalesce(last_message_at, created_at) desc, id desc` |
-| `POST .../title`、`/pin`、`/archive`、`/reopen`、`/unread` | 无 | 命令体与回执字段都不变，回执里**不**带 `last_message_at` |
+| `POST .../title`、`/pin`、`/archive`、`/reopen`、`/unread` | 无 | 命令体与回执字段都不变，回执里**不**带 `last_message_at`／`has_messages` |
 
 **排序口径。** 活动序＝这段讨论最近一次真正说过话是什么时候，不分发送方：用户消息落库与 AI 生成结算都算一次活动，所以失败或取消的那一轮同样上浮。置顶仍是第一排序键，活动序只在未置顶的组内生效；`coalesce` 让还没开口的会话按创建时间留在原位，不会因为新列为空而沉底。这是**导航排序键，不是业务事实**，与 0090 的 `pinned_at`、0104 的 `unread_at` 同性质，不参与任何准入判定。
 
@@ -2060,3 +2061,19 @@ Windows 安装应用与真实 Provider 未验。
 
 **错误码汇总**：`RECALL_PREFLIGHT_BLOCKED`、`RECALL_EFFECT_UNCERTAIN`（存在 UNKNOWN 工具调用/变更集）、`RECALL_IN_PROGRESS`、`RECALL_MULTIPLE_ROOTS`、`RECALL_ROOT_UNAVAILABLE`、`RECALL_ROOT_CHANGED`、`RECALL_UNDO_PREFLIGHT_BLOCKED`、`RECALL_UNDO_IN_PROGRESS`、`COMMAND_ID_REUSED`、`INVALID_TRANSITION`。除重放外均不改变文件；响应沿用统一 problem 形状。
 
+
+### 10.112 人工受管目录浏览与文件读取（2026-10-24 源码实现，迁移 0134）
+
+右侧工具面板「文件」页签的后端入口。机制与边界归[工具适配器 2026-10-24 段](../architecture/tool-adapters.md)，物理设计归[数据库 §112](../database/physical-design-postgresql.md#113-0134-人工受管目录浏览与文件读取2026-10-24)。**Breaking Change: No**：新增一个端点与迁移 0134（只放宽一条 CHECK），既有端点与表结构不变。
+
+| 端点 | 请求 / 响应 |
+|---|---|
+| `POST /projects/{project_id}/managed-resources/{resource_id}/file-read` | `{command_id, connection_id, action_type: LIST_DIRECTORY \| READ_FILE, path?, limit?}`；200 命令信封，`result` 为读取结果；同命令重放附 `Command-Replayed: true` |
+
+- **动作词表**：`LIST_DIRECTORY`（`FILE_QUERY` 能力，浏览查询目录一层条目，受保护路径与构建产物目录跳过并计入 `skipped`）与 `READ_FILE`（`FILE_READ` 能力，读取一个既有普通文件全文，≤128 KiB，二进制/超大返回类型化失败）。`FIND_PATHS`/`SEARCH_TEXT`/写动作不接受（409 `GATEWAY_ORIGIN_DENIED`）。
+- **路径语义**：`path` 是受管根内相对路径，不接受绝对路径与 `..`（422 `VALIDATION_FAILED`）；`LIST_DIRECTORY` 缺省＝受管根本身；`READ_FILE` 必填且不接受 `limit`。根内存在性、真实目录/普通文件、链接逃逸与受保护路径由 prepare 归一裁决（409 `GATEWAY_TARGET_DENIED`）。
+- **权限**：复用 Gateway 准入——连接须具备对应能力且 `root_path` 匹配受管根（否则 409 `GATEWAY_CONNECTION_DENIED`）；策略 AUTO 直通、ASK 创建绑定确切参数的 `ACTION_APPROVAL`（等待形态不携带任何结果字段）、DENY/缺策略 409 `GATEWAY_PERMISSION_DENIED`；在途写入占用目录时 409 `RESOURCE_OCCUPIED`（可重试）。
+- **幂等与刷新语义（与 §10.103 Git 人工读取的分界）**：同一 `command_id` 重放原回执；确定性 Operation ID 纳入 `command_id`——同命令崩溃重投收敛到同一次读取（适配器不二次执行），**新命令产生新的读取事实**，目录列表因此可刷新。`LIST_DIRECTORY` 的 `limit`（1..200，默认 200）在适配器内生效并进冻结参数；`truncated` 显式透出，截断列表不冒充完整证据。
+- **结果三形态**：目录投影 `{directory, entries[{path,kind,size}], count, limit, truncated, skipped, target, action_type, invocation_id, operation_id}`；文件投影 `{target, size, sha256, truncated, content, invocation_id, operation_id}`；失败投影 `{reason, detail?}`（`FILE_BINARY_UNSUPPORTED`/`FILE_TOO_LARGE`/`FILE_QUERY_RESULT_MISSING` 等类型化，空条目列表绝不冒充失败）。人工审计事件 `MANAGED_FILE_READ_REQUESTED` 与动作同事务落账。
+
+前端接线未做（入口与交互以[开发提示词](../../prompts/devtools-file-browse-frontend.md)交付）；错误码沿用统一 problem 形状，响应不泄漏 SQL 或堆栈。

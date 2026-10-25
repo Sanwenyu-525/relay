@@ -64,24 +64,29 @@
           "name": "阶段与显式项目状态",
           "description": "通过带修订的状态命令修改阶段和状态，保留业务依据。",
           "code": [
-            "apps/api/src/application/state-commands.ts",
-            "apps/api/src/application/state-queries.ts",
-            "apps/api/src/project/project-phase.ts"
-          ],
-          "docs": [
-            "docs/architecture/domain-model.md",
-            "contracts/01-facts-and-ownership.md",
-            "docs/api/http-command-contract.md"
-          ],
-          "prompts": [
-            "prompts/A-human-core.md"
-          ],
-          "tests": [
-            "apps/api/test/integration/api-state.integration.test.ts"
-          ],
-          "acceptance": [
-            "人工项目/任务/产物/完成与重开"
-          ],
+        "apps/api/src/application/state-commands.ts",
+        "apps/api/src/application/state-queries.ts",
+        "apps/api/src/project/project-phase.ts",
+        "apps/workbench/src/components/ProjectStatePanel.tsx",
+        "apps/workbench/src/api/resources/projects.ts"
+      ],
+      "docs": [
+        "docs/architecture/domain-model.md",
+        "contracts/01-facts-and-ownership.md",
+        "docs/api/http-command-contract.md",
+        "docs/frontend/workbench-design.md"
+      ],
+      "prompts": [
+        "prompts/A-human-core.md"
+      ],
+      "tests": [
+        "apps/api/test/integration/api-state.integration.test.ts",
+        "apps/workbench/tests/projectManagementPanels.spec.tsx"
+      ],
+      "acceptance": [
+        "人工项目/任务/产物/完成与重开",
+        "Project State 阶段/下一步/风险/阻塞人工写入口（2026-10-24）"
+      ],
           "intent": "current"
         },
         {
@@ -89,23 +94,34 @@
           "name": "工作空间目标列表",
           "description": "建立目标并提供跨项目的工作空间级目标查询。",
           "code": [
-            "apps/api/src/application/create-goal.ts",
-            "apps/api/src/api/project-api.ts",
-            "apps/api/src/project/project-repository.ts"
-          ],
-          "docs": [
-            "docs/architecture/information-planning.md",
-            "docs/api/http-command-contract.md"
-          ],
-          "prompts": [
-            "prompts/A-human-core.md"
-          ],
-          "tests": [
-            "apps/api/test/integration/api-lists.integration.test.ts"
-          ],
-          "acceptance": [
-            "Goal 工作空间级列表与跨项目反向读（2026-10-01）"
-          ],
+        "apps/api/src/application/create-goal.ts",
+        "apps/api/src/application/goal-commands.ts",
+        "apps/api/src/api/project-api.ts",
+        "apps/api/src/api/project-maintenance-api.ts",
+        "apps/api/src/project/project-repository.ts",
+        "apps/workbench/src/views/GoalListView.tsx",
+        "apps/workbench/src/views/GoalDetailView.tsx",
+        "apps/workbench/src/api/resources/projects.ts"
+      ],
+      "docs": [
+        "docs/architecture/information-planning.md",
+        "docs/api/http-command-contract.md",
+        "docs/api/project-goal-maintenance.md",
+        "docs/frontend/workbench-design.md"
+      ],
+      "prompts": [
+        "prompts/A-human-core.md"
+      ],
+      "tests": [
+        "apps/api/test/integration/api-lists.integration.test.ts",
+        "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
+        "apps/workbench/tests/createGoalEntry.spec.ts",
+        "apps/workbench/tests/goalManagementLive.spec.tsx"
+      ],
+      "acceptance": [
+        "Goal 工作空间级列表与跨项目反向读（2026-10-01）",
+        "正式 Goal 列表/详情/编辑/归档与 Project 改名（2026-10-24）"
+      ],
           "intent": "current"
         },
         {
@@ -113,27 +129,63 @@
           "name": "项目与目标关联",
           "description": "关联或解除项目目标，保留目标作用域和在用约束。",
           "code": [
-            "apps/api/src/application/project-goal-links.ts",
-            "apps/api/src/api/project-api.ts"
-          ],
-          "docs": [
-            "contracts/01-facts-and-ownership.md",
-            "docs/architecture/information-planning.md",
-            "docs/api/http-command-contract.md"
-          ],
-          "prompts": [
-            "prompts/A-human-core.md"
-          ],
-          "tests": [
-            "apps/api/test/integration/api.integration.test.ts"
-          ],
-          "acceptance": [
-            "人工项目/任务/产物/完成与重开"
-          ],
+        "apps/api/src/application/project-goal-links.ts",
+        "apps/api/src/api/project-api.ts",
+        "apps/workbench/src/views/GoalProjectLinkPanel.tsx",
+        "apps/workbench/src/views/GoalDetailView.tsx"
+      ],
+      "docs": [
+        "contracts/01-facts-and-ownership.md",
+        "docs/architecture/information-planning.md",
+        "docs/api/http-command-contract.md",
+        "docs/api/project-goal-maintenance.md"
+      ],
+      "prompts": [
+        "prompts/A-human-core.md"
+      ],
+      "tests": [
+        "apps/api/test/integration/api.integration.test.ts",
+        "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
+        "apps/workbench/tests/goalProjectLink.spec.ts",
+        "apps/workbench/tests/goalProjectLinkPagination.spec.tsx",
+        "apps/workbench/tests/goalManagementLive.spec.tsx"
+      ],
+      "acceptance": [
+        "人工项目/任务/产物/完成与重开",
+        "Goal 关联分页、回执核对与解除影响清单（2026-10-24）"
+      ],
           "intent": "current"
         },
         {
-          "id": "project-archive-fence",
+      "id": "goal-project-work-context",
+      "name": "目标与目录工作上下文",
+      "description": "只读汇集 Goal 关联项目、受管目录与普通会话，保留原 Session ID，不创建或重绑会话。",
+      "code": [
+        "apps/api/src/api/work-context-api.ts",
+        "apps/api/src/application/work-context-queries.ts",
+        "apps/api/src/project/work-context-repository.ts",
+        "apps/workbench/src/views/GoalDetailView.tsx",
+        "apps/workbench/src/views/DirectoryWorkContextView.tsx",
+        "apps/workbench/src/api/resources/projects.ts"
+      ],
+      "docs": [
+        "docs/api/goal-directory-work-context.md",
+        "docs/frontend/workbench-design.md"
+      ],
+      "prompts": [
+        "prompts/A-human-core.md"
+      ],
+      "tests": [
+        "apps/api/test/integration/work-contexts.integration.test.ts",
+        "apps/workbench/tests/goalManagementLive.spec.tsx"
+      ],
+      "acceptance": [
+        "Goal 跨项目工作上下文与目录精确会话（2026-10-24）"
+      ],
+      "intent": "current"
+    },
+    {
+      "id": "project-archive-fence",
           "name": "归档与关联写入栅栏",
           "description": "归档项目时核对活动执行并阻止后续关联写入。",
           "code": [

@@ -114,18 +114,44 @@ export interface RelayActivityFilter {
   readonly limit?: number;
 }
 
+export interface RelayStateBlocker {
+  readonly blockerId: string;
+  readonly targetKind: "PROJECT" | "TASK" | "GOAL";
+  readonly targetId: string;
+  readonly reason: string;
+  readonly sourceRef: string;
+  readonly resolvedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface RelayStateRisk {
+  readonly riskId: string;
+  readonly statement: string;
+  readonly sourceRef: string;
+  readonly confirmationRef: string;
+  readonly resolvedAt: string | null;
+  readonly createdAt: string;
+}
+
 /** Project State 的只读投影中与本轮相关的部分（“当前选用”来自服务端，不来自本地记忆）。 */
 export interface RelayProjectState {
   readonly projectId: string;
   readonly revision: DecimalRevision;
   readonly phaseKey: string;
   readonly nextActionTaskId: string | null;
+  readonly inProgress: readonly { readonly taskId: string; readonly title: string;
+    readonly status: string; readonly mode: string; readonly revision: DecimalRevision }[];
+  readonly blockers: readonly RelayStateBlocker[];
+  readonly risks: readonly RelayStateRisk[];
   readonly selectedArtifactVersionRefs: readonly RelayStateArtifactRef[];
   readonly completedHighlightRefs: readonly {
     readonly completionId: string;
     readonly taskId: string;
     readonly acceptanceRevision: DecimalRevision;
+    readonly committedAt: string | null;
   }[];
+  /** 服务端类型化命令提示；不是授权凭证。 */
+  readonly allowedActions: readonly string[];
 }
 
 export interface RelayStateArtifactRef {
@@ -140,6 +166,25 @@ export interface RelayStateMutation {
   readonly action: string;
   readonly revision: DecimalRevision;
 }
+
+/** 类型化 State 命令的客户端载荷；一次只允许一个 action 及其固定参数。 */
+export type RelayStateCommandInput =
+  | { readonly projectId: string; readonly commandId: string;
+      readonly expectedRevision: DecimalRevision; readonly action: "SET_PHASE";
+      readonly phaseKey: string }
+  | { readonly projectId: string; readonly commandId: string;
+      readonly expectedRevision: DecimalRevision; readonly action: "SET_NEXT_ACTION";
+      readonly nextActionTaskId: string | null }
+  | { readonly projectId: string; readonly commandId: string;
+      readonly expectedRevision: DecimalRevision; readonly action: "ADD_CONFIRMED_RISK";
+      readonly statement: string; readonly sourceRef: string; readonly confirmationRef: string }
+  | { readonly projectId: string; readonly commandId: string;
+      readonly expectedRevision: DecimalRevision; readonly action: "ADD_BLOCKER";
+      readonly targetKind: "PROJECT" | "TASK" | "GOAL"; readonly targetId: string;
+      readonly reason: string; readonly sourceRef: string }
+  | { readonly projectId: string; readonly commandId: string;
+      readonly expectedRevision: DecimalRevision; readonly action: "RESOLVE_BLOCKER";
+      readonly blockerId: string };
 
 export interface RelayCommandEnvelope {
   readonly commandId: string;
@@ -173,4 +218,114 @@ export interface RelayGoalCreation {
   readonly revision: DecimalRevision;
   /** 回执本身不带标题；成功页用它显示关联对象，仍以原输入为准。 */
   readonly title: string;
+}
+
+/** 正式 Goal 的单读/列表事实；与聊天 /goal 的 RelayGoalView 是两套对象。 */
+export interface RelayGoalRecord {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RelayGoalPage {
+  readonly items: readonly RelayGoalRecord[];
+  readonly nextCursor: string | null;
+}
+
+/** Goal 视角下的关联 Project；project_revision 是 Project 自己的修订。 */
+export interface RelayGoalProject {
+  readonly projectId: string;
+  readonly title: string;
+  readonly projectType: string;
+  readonly archivedAt: string | null;
+  readonly archiveStatus: "ACTIVE" | "ARCHIVED";
+  readonly projectRevision: DecimalRevision;
+  readonly linkedAt: string;
+}
+
+/** 解除关联前的影响清单：显式对齐该 Goal 的 Task。 */
+export interface RelayProjectGoalLinkDetail {
+  readonly goalId: string;
+  readonly title: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly explicitTaskIds: readonly string[];
+}
+
+export interface RelayGoalEditResult {
+  readonly goalId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+}
+
+export interface RelayGoalArchiveResult {
+  readonly goalId: string;
+  readonly status: "ARCHIVED";
+  readonly revision: DecimalRevision;
+}
+
+export interface RelayProjectRenameResult {
+  readonly projectId: string;
+  readonly title: string;
+  readonly revision: DecimalRevision;
+}
+
+export interface RelayProjectGoalUnlinkResult {
+  readonly projectId: string;
+  readonly revision: DecimalRevision;
+  readonly impactedTasks: readonly { readonly taskId: string; readonly revision: DecimalRevision }[];
+}
+
+/* ── Goal 与目录工作上下文（只读） ─────────────────────────────────────────── */
+
+export interface RelayWorkContextSession {
+  readonly id: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+  readonly workingResourceId: string | null;
+}
+
+export interface RelayWorkContextDirectory {
+  readonly id: string;
+  readonly canonicalRoot: string;
+  readonly status: string;
+  readonly revision: DecimalRevision;
+}
+
+export interface RelayWorkContextProject {
+  readonly id: string;
+  readonly title: string;
+  readonly projectType: string;
+  readonly archiveStatus: "ACTIVE" | "ARCHIVED";
+  readonly archivedAt: string | null;
+  readonly revision: DecimalRevision;
+  readonly directories: readonly RelayWorkContextDirectory[];
+}
+
+export interface RelayGoalWorkContext {
+  readonly kind: "GOAL";
+  readonly goal: {
+    readonly id: string; readonly title: string; readonly description: string;
+    readonly status: string; readonly revision: DecimalRevision;
+  };
+  readonly projects: readonly RelayWorkContextProject[];
+  readonly sessions: readonly RelayWorkContextSession[];
+}
+
+export interface RelayDirectoryWorkContext {
+  readonly kind: "DIRECTORY";
+  readonly directory: RelayWorkContextDirectory & {
+    readonly project: RelayWorkContextProject;
+  };
+  readonly linkedGoals: readonly { readonly id: string; readonly title: string;
+    readonly status: string; readonly revision: DecimalRevision }[];
+  readonly sessions: readonly RelayWorkContextSession[];
 }

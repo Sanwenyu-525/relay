@@ -634,7 +634,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       {groupRows.map((row) => {
         const session = row.kind === "session" ? sessionById.get(row.id) : undefined;
         // 「未开始」进可访问名称：标记是视觉上的，读屏与键盘用户同样要能分辨这条还没说过话。
-        const notStarted = session !== undefined && session.lastMessageAt === null;
+        // 判据是服务端读时派生的 hasMessages（数消息表），不是活动键的可空性。
+        const notStarted = session !== undefined && !session.hasMessages;
         const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${notStarted ? " · 未开始" : ""}${row.unread ? " · 未读" : ""}`;
         // 同一组里出现同名行时，时刻要带上时分才分得清是哪一条；完整时间留在摘要卡的 time 上。
         const sameTitle = groupRows.some((other) => other.key !== row.key && other.title === row.title);

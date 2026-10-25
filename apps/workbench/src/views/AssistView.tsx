@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, CircleCheck, Compass, Copy, FileCode, FileSearch, FileText, Folder, GitBranch, Globe, History, Lightbulb, ListChecks, ListTree, MessageSquareText, Monitor, NotebookPen, Plug, Plus, RotateCcw, Search, Settings, Sparkles, Terminal, Wrench } from "lucide-react";
-import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistLivePreview,
+import { ArrowDown, ArrowUp, Bug, Check, ChevronDown, ChevronRight, CircleCheck, Compass, Copy, FileCode, FileSearch, FileText, Folder, GitBranch, Globe, History, Lightbulb, ListChecks, ListTree, MessageSquareText, Monitor, NotebookPen, Package, Paperclip, Plug, Plus, RotateCcw, Search, Settings, Sparkles, Terminal, Wrench } from "lucide-react";
+import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact, type RelayAssistLivePreview,
   type RelayAssistMessage, type RelayAssistMessageRecall, type RelayAssistMessageRecallSummary,
   type RelayAssistProposal,
   type RelayAssistSession, type RelayAssistSourceRef, type RelayAssistantProfile,
   type RelayCommandReceipt, type RelayConversationExecution, type RelayConversationMode,
+  type RelayDirectoryEntry,
   type RelayGatewayConnection, type RelayKnowledge, type RelaySkillDefinition, type RelaySkillInput, type RelayStateMaintenanceChange,
   type RelayStateMaintenanceRequest,
   type RelayChatMode, type RelayGoalView, type RelayPlanView,
@@ -20,7 +21,7 @@ import ChatTimelineNav from "../components/ChatTimelineNav";
 import ChatCommandInput, { chatCommandScope, chatCommandStatus } from "../components/ChatCommandInput";
 import ComposerAttachmentChips from "../components/ComposerAttachmentChips";
 import MessageAttachments from "../components/MessageAttachments";
-import { uploadCandidateFrom, uploadStagedAttachments } from "../components/composerAttachments";
+import { formatAttachmentBytes, uploadCandidateFrom, uploadStagedAttachments } from "../components/composerAttachments";
 import { useStagedAttachments } from "../components/useStagedAttachments";
 import { ComposerDraftBar, ComposerPolishButton, useComposerDraftAssist } from "../components/ComposerDraftAssist";
 import PageHeader from "../components/PageHeader";
@@ -322,14 +323,23 @@ function restoreComposerFocus(textarea: HTMLTextAreaElement | null, container: H
  * 插件 mention 插入（DEV-0099）：点「+ → 连接器与插件 → 某个插件」把 `@标签 ` 写进草稿，
  * 位置取当前光标/选区；没有光标时追加到末尾。前置缺分隔符就补一个空格，
  * 不改写既有正文、不发送消息。插件仍只是提示，执行准入照旧由权限链裁决。
+ *
+ * 文件与产物二级同样只把 `@路径 ` / `@产物 vN ` 插进草稿，因此与这里共用同一条插入规则：
+ * mention 是用户写下的文字提示，不是消息附件，也不授予读取或执行权限。
  */
-export function insertPluginMention(draft: string, label: string,
+export function insertMention(draft: string, label: string,
   textarea: Pick<HTMLTextAreaElement, "selectionStart" | "selectionEnd"> | null): string {
   const start = textarea?.selectionStart ?? draft.length;
   const end = textarea?.selectionEnd ?? draft.length;
   const before = draft.slice(0, start);
   const lead = before === "" || /\s$/u.test(before) ? "" : " ";
   return `${before}${lead}@${label} ${draft.slice(end)}`;
+}
+
+/** 保持既有导出名：插件入口与契约测试都按这个名字调用。 */
+export function insertPluginMention(draft: string, label: string,
+  textarea: Pick<HTMLTextAreaElement, "selectionStart" | "selectionEnd"> | null): string {
+  return insertMention(draft, label, textarea);
 }
 
 function targetMatches(session: RelayAssistSession, target: AssistTarget): boolean {
@@ -1424,6 +1434,14 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
           onPickPlugin={(label) => { updateFirst({ draft: insertPluginMention(first.draft, label, firstDraftRef.current) });
             firstDraftRef.current?.focus(); }}
+          onUploadAttachments={(files) => { stagedFirst.add(files); firstDraftRef.current?.focus(); }}
+          uploadDisabled={firstBusy || creating || pendingFirst !== null || firstAttaching}
+          workspace={executionScope?.association === null || executionScope?.association === undefined ? null
+            : { projectId: executionScope.association.projectId,
+              resourceId: executionScope.association.resourceId, displayName: executionScope.displayName }}
+          artifactTaskId={firstScope.taskId}
+          onInsertMention={(label) => { updateFirst({ draft: insertMention(first.draft, label, firstDraftRef.current) });
+            firstDraftRef.current?.focus(); }}
           projectId={firstScope.projectId}
           /* 首条消息也能选资料（DEV-0100）：候选来自项目资料与最近引用，
              选中项随建会话载荷冻结，发送后由新会话的资料选择器清空本次选择。 */
@@ -1807,7 +1825,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
  * ↑↓ 在当前层内移动，→ 展开二级并聚焦其首行，← 收二级回到原一级行，Enter 激活。
  * 二级在右侧放不下时翻到左侧、下方放不下时按底部对齐，都不放不下时面板内滚动。
  */
-type AttachSection = "sources" | "skill" | "command" | "connectors";
+type AttachSection = "files" | "artifacts" | "sources" | "skill" | "command" | "connectors";
 
 /**
  * 输入卡上方的状态行（2026-10-17 用户指定的布局；2026-10-18 合并后只服务嵌入态）：
@@ -1844,6 +1862,7 @@ function writeTierSummary(tier: Tier | null): string {
 }
 
 const attachSectionLabels: Record<AttachSection, string> = {
+  files: "文件", artifacts: "我的产物",
   sources: "选择文件与资料", skill: "选择 Skill 生成",
   command: "输入命令", connectors: "连接器与插件"
 };
@@ -1869,6 +1888,15 @@ const attachSourceLimit = 10;
 
 /** 二级资料面板里直接平铺的项目资料条数上限；超出部分指向检索，避免一次渲染上百行。 */
 const attachProjectSourceLimit = 20;
+
+/** 「文件」二级的失败码 → 人话（HTTP §10.112 的码表）；未知码原样回显，不猜语义。 */
+const fileListingFailureLabels: Record<string, string> = {
+  GATEWAY_TARGET_DENIED: "目标不可读取（路径不存在、不是目录或受保护）",
+  GATEWAY_CONNECTION_DENIED: "文件浏览连接不可用（缺 FILE_QUERY 能力或已停用）",
+  GATEWAY_PERMISSION_DENIED: "当前项目没有授予目录浏览权限",
+  RESOURCE_OCCUPIED: "目录正被在途写入占用，请稍后重试",
+  GATEWAY_ORIGIN_DENIED: "该动作不在人工只读入口词表"
+};
 
 type AttachRowSpec = {
   readonly testId: string;
@@ -1917,7 +1945,8 @@ function AttachRow({ testId, level, label, icon, hint, title, disabled, selected
 /** 导出给契约测试直接挂载：菜单框架（两级开合、键盘、翻转）不依赖整条 /agent 路由。 */
 
 export function ComposerAttach({
-  onCommand, onSources, onSkill, onPickCommand, onPickPlugin,
+  onCommand, onSources, onSkill, onPickCommand, onPickPlugin, onUploadAttachments,
+  uploadDisabled = false, workspace = null, artifactTaskId = null, onInsertMention,
   client = null, mode = "AGENT", hasSession = false,
   selectedRefs = [], conversationRefs = [], recentRefs = [], onToggleSourceRef,
   skillSelected = false, notes,
@@ -1929,6 +1958,16 @@ export function ComposerAttach({
   onPickCommand?: (name: string) => void;
   /** 把插件 mention（`@标签 `）插进草稿（DEV-0099）：只编辑草稿，不发送、不授予任何能力。 */
   onPickPlugin?: (label: string) => void;
+  /** 上传附件：把本机图片交给既有的暂存链路；这里不上传、不发送。 */
+  onUploadAttachments?: (files: readonly File[]) => void;
+  /** 输入器当前不接受新附件（在途/发送中）：上传行如实禁用。 */
+  uploadDisabled?: boolean;
+  /** 当前工作目录：「文件」二级按它读取受管目录的一层条目。 */
+  workspace?: { readonly projectId: string; readonly resourceId: string; readonly displayName: string } | null;
+  /** 当前任务：「我的产物」二级按它读取任务已保存的产物版本。 */
+  artifactTaskId?: string | null;
+  /** 把文件路径 / 产物版本作为 mention 插进草稿：只编辑草稿，不发送、不授予任何能力。 */
+  onInsertMention?: (label: string) => void;
   client?: RelayApiClient | null;
   /** 命令清单按档过滤 METHOD 项：与输入框内联菜单同一条规则。 */
   mode?: RelayConversationMode;
@@ -1979,6 +2018,16 @@ export function ComposerAttach({
   const [connectors, setConnectors] = useState<{ client: RelayApiClient; projectId: string;
     items: readonly RelayGatewayConnection[] | null; error: string | null } | null>(null);
   const connectorsLoaded = useRef<{ client: RelayApiClient; projectId: string } | null>(null);
+  /** 本机图片选择器：「上传附件」直接动作，文件只交给既有暂存链路。 */
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  /** 工作目录的一层条目：每次打开/进目录都是新的读取命令（新 command_id），不缓存内容。 */
+  const [fileView, setFileView] = useState<{ client: RelayApiClient; projectId: string;
+    resourceId: string; path: string; entries: readonly RelayDirectoryEntry[] | null;
+    loading: boolean; error: string | null; truncated: boolean; skipped: number } | null>(null);
+  const fileRequest = useRef(0);
+  /** 当前任务的产物清单：打开二级时按需读取一次，失败如实说明。 */
+  const [artifactView, setArtifactView] = useState<{ client: RelayApiClient; taskId: string;
+    items: readonly RelayArtifact[] | null; error: string | null } | null>(null);
   /** hover 收起二级的延时器：指针跨过一级与二级之间的缝隙时会被二级的 pointerenter 取消。 */
   const hoverCloseTimer = useRef<number | null>(null);
   /** 二级是「hover 打开」的这一事实：只有它随指针移开自动收起，点击打开的固定下来不收。 */
@@ -2185,6 +2234,88 @@ export function ComposerAttach({
     });
     return () => { live = false; };
   }, [sub, client, projectId]);
+  /**
+   * 「文件」二级：列受管目录的一层条目（HTTP §10.112）。
+   *
+   * 每次打开面板、每次进入子目录都是一次**新的读取命令**（新 `command_id`）——刷新就是
+   * 重新读当前目录，不缓存目录内容，也不把截断列表当完整目录。连接按项目登记：
+   * 打开目录时服务端已确保 FILE_QUERY 连接与只读策略，因此这里只取一条 ACTIVE 连接；
+   * 一条都没有时如实说明缺口，不伪造条目。
+   */
+  const loadFiles = (path: string) => {
+    if (client === null || workspace === null) return;
+    const request = ++fileRequest.current;
+    const projectId = workspace.projectId;
+    const resourceId = workspace.resourceId;
+    const show = (patch: { entries?: readonly RelayDirectoryEntry[] | null; loading: boolean;
+      error: string | null; truncated?: boolean; skipped?: number }) => {
+      if (request !== fileRequest.current) return;
+      setFileView({ client, projectId, resourceId, path, entries: patch.entries ?? null,
+        loading: patch.loading, error: patch.error, truncated: patch.truncated ?? false,
+        skipped: patch.skipped ?? 0 });
+    };
+    const failure = (message: string) => show({ loading: false, error: message });
+    show({ loading: true, error: null });
+    let reading = false;
+    void (async () => {
+      try {
+        const connections = await client.getGatewayConnections(projectId);
+        if (request !== fileRequest.current) return;
+        const connection = connections.find((item) => item.status === "ACTIVE" &&
+          item.capabilities.includes("FILE_QUERY"));
+        if (connection === undefined) {
+          failure("这个目录没有可用的文件浏览连接；先到「管理连接与权限」配置 FILE_QUERY。");
+          return;
+        }
+        reading = true;
+        const response = await client.readManagedFileState({ projectId, resourceId,
+          connectionId: connection.id, commandId: createCommandId(), actionType: "LIST_DIRECTORY",
+          ...(path === "" ? {} : { relativePath: path }), limit: 200 });
+        const outcome = response.outcome;
+        if (!("result" in outcome)) {
+          failure(outcome.reason || "目录读取等待批准或结果未决。");
+          return;
+        }
+        if (outcome.result.kind === "FAILURE") {
+          const reason = outcome.result.reason;
+          const known = fileListingFailureLabels[reason];
+          failure(`${reason}${known === undefined ? "" : `：${known}`}` +
+            `${outcome.result.detail === null ? "" : `（服务端原文：${outcome.result.detail}）`}`);
+          return;
+        }
+        if (outcome.result.kind !== "LISTING") {
+          failure("目录读取返回的不是目录列表。");
+          return;
+        }
+        show({ entries: outcome.result.entries, loading: false, error: null,
+          truncated: outcome.result.truncated, skipped: outcome.result.skipped });
+      } catch (caught) {
+        failure(reading && needsReceiptCheck(caught) ? "文件读取结果无法核对，请稍后重新打开这个目录。"
+          : describeLiveError(caught).message);
+      }
+    })();
+  };
+  useEffect(() => {
+    if (sub !== "files" || client === null || workspace === null) return;
+    loadFiles("");
+    return () => { fileRequest.current++; };
+    // 只在打开「文件」二级时读一次；目录内导航由 loadFiles 自己发起。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub, client, workspace?.projectId, workspace?.resourceId]);
+  /* 我的产物：打开二级时读一次当前任务的产物。产物按任务归属，没有任务就不猜一个，
+     在面板里说明从任务进入对话后可选；读取失败不显示为空清单。 */
+  useEffect(() => {
+    if (sub !== "artifacts" || client === null || artifactTaskId === null || artifactTaskId === undefined) return;
+    const taskId = artifactTaskId;
+    let live = true;
+    setArtifactView({ client, taskId, items: null, error: null });
+    void client.getTaskArtifacts(taskId).then((result) => {
+      if (live) setArtifactView({ client, taskId, items: result.items, error: null });
+    }).catch(() => {
+      if (live) setArtifactView({ client, taskId, items: null, error: "任务产物读取失败；可在任务的工作详情里查看。" });
+    });
+    return () => { live = false; };
+  }, [sub, client, artifactTaskId]);
   const run = (fn?: () => void) => () => { close(true); fn?.(); };
   /**
    * 点击一级行：显式开关。
@@ -2243,11 +2374,28 @@ export function ComposerAttach({
       /* 禁用行没有二级，hover 也不能把它打开：与 chevron / aria-expanded 同一条约束。 */
       onHover: spec.disabled === true ? undefined : hoverSub(key) });
   const level1: readonly AttachRowSpec[] = [
+    /* 上传附件是对标参考菜单的直接动作（2026-10-24 用户指令）：不做二级，点开本机图片
+       选择器，选中即进既有暂存链路；这里不上传、不发送，附件芯片负责后续状态。 */
+    { testId: "assist-attach-upload", level: 1, icon: <Paperclip />, label: "上传附件",
+      disabled: onUploadAttachments === undefined || uploadDisabled,
+      title: onUploadAttachments === undefined ? "当前输入器不支持附件"
+        : uploadDisabled ? "当前消息在途或正在发送，稍后再上传附件"
+          : "从本机选择图片作为本次消息的附件（PNG/JPEG/GIF/WebP，单张 ≤ 2MB）",
+      onSelect: () => uploadInputRef.current?.click() },
+    /* 工作目录的文件与我的产物各自带二级；没有目录/任务时仍可点开，缺口由面板第一句说明，
+       不让入口点了没反应。 */
+    level1Row("files", { icon: <Folder />, label: workspace === null ? "文件" : `${workspace.displayName}的文件`,
+      title: workspace === null ? "先绑定工作目录后再浏览文件；目录归协作页目录细条"
+        : `浏览 ${workspace.displayName} 根目录的一层文件；点文件把相对路径插入草稿` }),
+    level1Row("artifacts", { icon: <Package />, label: attachSectionLabels.artifacts,
+      title: artifactTaskId === null || artifactTaskId === undefined
+        ? "当前会话没有关联任务；产物按任务归属，从任务进入对话后可选择"
+        : "列出当前任务已保存的产物版本；点一项把标题与版本插入草稿" }),
     level1Row("sources", { icon: <FileText />, label: attachSectionLabels.sources,
       hint: selectedRefs.length > 0 ? String(selectedRefs.length) : undefined,
       disabled: onSources === undefined && onToggleSourceRef === undefined }),
-    /* 一级只有四项（2026-10-19）：目录入口从「+」撤出——它有常驻 Owner（协作页目录细条），
-       在这里既重复又读成「用之前必须先选目录」。见 §32.3。 */
+    /* 目录入口不在「+」里（2026-10-19）：目录有常驻 Owner（协作页目录细条），
+       既重复又读成「用之前必须先选目录」。见 §32.3。 */
     level1Row("skill", { icon: <Sparkles />, label: attachSectionLabels.skill,
       selected: skillSelected || (selectedSkillKey !== null && selectedSkillKey !== ""),
       title: skillNeedsTarget
@@ -2261,6 +2409,80 @@ export function ComposerAttach({
   ];
 
   const submenu = (section: AttachSection) => {
+    if (section === "files") {
+      /* 只读一层：目录行进入子目录（在同一片二级面板里换内容，不出现第三级），
+         文件行把相对路径插进草稿。截断、跳过与失败各有明确说法，失败不显示成空目录。 */
+      const view = fileView !== null && fileView.client === client &&
+        fileView.projectId === workspace?.projectId && fileView.resourceId === workspace?.resourceId
+        ? fileView : null;
+      const joinPath = (base: string, name: string) => base === "" ? name : `${base}/${name}`;
+      const parentPath = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+      return <>
+        {sectionLabel(workspace === null ? "文件" : `${workspace.displayName} 根目录`)}
+        {workspace === null ? emptyLine("当前对话还没有绑定工作目录；先在目录细条选择目录。")
+          : client === null ? emptyLine("连接本机 API 后才能浏览工作目录文件。")
+          : view === null || view.loading ? emptyLine("正在读取目录…")
+          : view.error !== null ? emptyLine(view.error)
+          : <>
+            {view.path !== "" && <AttachRow level={2} testId="assist-attach-files-up" icon={<Folder />}
+              label="返回上级" hint={view.path} onSelect={() => loadFiles(parentPath(view.path))} />}
+            {(view.entries ?? []).length === 0 ? emptyLine("这个目录里没有可列出的文件。")
+              : (view.entries ?? []).map((entry, index) => {
+                const fullPath = joinPath(view.path, entry.path);
+                if (entry.kind === "directory") {
+                  return <AttachRow key={`${entry.path}:${index}`} level={2}
+                    testId={`assist-attach-file-${index}`} icon={<Folder />}
+                    label={entry.path} hint="目录" title={`进入 ${fullPath}`}
+                    onSelect={() => loadFiles(fullPath)} />;
+                }
+                if (entry.kind === "file") {
+                  return <AttachRow key={`${entry.path}:${index}`} level={2}
+                    testId={`assist-attach-file-${index}`} icon={<FileText />}
+                    label={entry.path}
+                    hint={entry.size === null ? undefined : formatAttachmentBytes(entry.size)}
+                    title={onInsertMention === undefined ? "当前输入器不支持把文件插入草稿"
+                      : `把 @${fullPath} 插入草稿`}
+                    disabled={onInsertMention === undefined}
+                    onSelect={run(() => onInsertMention?.(fullPath))} />;
+                }
+                return <AttachRow key={`${entry.path}:${index}`} level={2}
+                  testId={`assist-attach-file-${index}`} icon={<FileText />}
+                  label={entry.path} hint="其他" disabled onSelect={() => {}} />;
+              })}
+            {view.truncated && emptyLine(`已截断：只列出前 ${(view.entries ?? []).length} 项。`)}
+            {view.skipped > 0 && emptyLine(`已跳过 ${view.skipped} 个受保护或构建目录。`)}
+          </>}
+      </>;
+    }
+    if (section === "artifacts") {
+      /* 产物按任务归属：没有任务时只说明去向，不跨任务猜一份清单。 */
+      const view = artifactView !== null && artifactView.client === client &&
+        artifactView.taskId === artifactTaskId ? artifactView : null;
+      const artifactItems = view === null ? null : view.items;
+      const artifactError = view === null ? null : view.error;
+      return <>
+        {sectionLabel("当前任务产物")}
+        {client === null ? emptyLine("连接本机 API 后才能列出任务产物。")
+          : artifactTaskId === null || artifactTaskId === undefined
+            ? emptyLine("当前会话没有关联任务；产物按任务归属，从任务进入对话后可选择。")
+            : artifactError !== null ? emptyLine(artifactError)
+              : artifactItems === null ? emptyLine("正在读取任务产物…")
+                : artifactItems.length === 0 ? emptyLine("这个任务还没有保存的产物。")
+                  : artifactItems.map((artifact, index) => {
+                    const latest = artifact.versions.at(-1);
+                    const mention = latest === undefined ? artifact.title
+                      : `${artifact.title} v${latest.versionNumber}`;
+                    return <AttachRow key={artifact.id} level={2}
+                      testId={`assist-attach-artifact-${index}`} icon={<Package />}
+                      label={artifact.title}
+                      hint={latest === undefined ? "无版本" : `v${latest.versionNumber}`}
+                      title={onInsertMention === undefined ? "当前输入器不支持把产物插入草稿"
+                        : `把 @${mention} 插入草稿`}
+                      disabled={latest === undefined || onInsertMention === undefined}
+                      onSelect={run(() => onInsertMention?.(mention))} />;
+                  })}
+      </>;
+    }
     if (section === "sources") return <>
       {/* 列表优先：项目资料 → 对话中的资料 → 最近引用，都是可直接勾选的条目；
           检索与「选择本地文件」这两个动作行放到列表之后，不挡在第一条目前面。 */}
@@ -2450,6 +2672,20 @@ export function ComposerAttach({
     onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) { hoverOpened.current = null; setSub(null); } }}>
     <summary className="agent-chat-attach-btn" data-testid="assist-attach" aria-label="添加上下文与附件" title="添加上下文与附件">
       <Plus aria-hidden="true" /></summary>
+    {/* 「上传附件」的宿主：原生文件选择器，格式与服务端暂存上限一致；选中后交给调用方的
+        既有暂存链路，菜单立即收起，不在菜单里上传或发送。放在 summary 之后、菜单之前：
+        summary 仍是 details 的第一个子件（原生开合依赖它），工具行子件序也不变。 */}
+    <input ref={uploadInputRef} type="file" hidden multiple
+      accept="image/png,image/jpeg,image/gif,image/webp"
+      data-testid="assist-attach-upload-input"
+      onChange={(event) => {
+        const files = Array.from(event.currentTarget.files ?? []);
+        // 清空 value，同一张图片再选一次也会触发 change。
+        event.currentTarget.value = "";
+        if (files.length === 0 || onUploadAttachments === undefined) return;
+        onUploadAttachments(files);
+        close(false);
+      }} />
     <div className="agent-chat-attach-menu" ref={menuRef} data-level="1" onPointerLeave={scheduleHoverClose}>
       {level1.map((row) => <AttachRow key={row.testId} {...row} />)}
       {sub !== null && <div className="agent-chat-attach-submenu" ref={subRef} data-submenu="true"
@@ -2609,14 +2845,16 @@ function formatUsagePercent(value: number, limit: number): string {
  * 输入区底栏的用量指示：左文字是缓存命中率，右圆环是最近一次调用的上下文占用。
  * 命中率只在 Provider 真的上报缓存读数时出现；没有读数时这一格直接留空，
  * 既不写"未采集"也不把 null 画成 0%，更不拿配置值冒充实际用量。占用圆环始终在。
+ * 读数文案说「上下文」不说「输入」（2026-10-24 用户反馈）：input_tokens 是该次调用
+ * 重发的完整上下文（含全部历史），写成「输入」会被读成本轮新增或会话累计出错账。
  */
 function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   hitRate: number | null; call: RelayAssistMessage | null; limit: number | null }) {
   const percent = ratio === null ? null : formatUsagePercent(ratio, 1);
   const high = ratio !== null && ratio >= 0.8;
   const meterText = call === null ? "尚无模型调用"
-    : ratio === null ? `输入 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
-      : `输入 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
+    : ratio === null ? `上下文 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
+      : `上下文 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
   const hitText = hitRate === null ? null : `缓存命中 ${formatUsagePercent(hitRate, 1)}%`;
   // 悬停效果改走应用内浮层（2026-10-22 用户指令）：原生 `title` 在 Chromium/WebView2 要等约一秒、
   // 样式不可控，圆环又只有 24px，扫过去时读不到东西。这里与目录细条共用 `usePathTooltip` 那一套
@@ -2626,7 +2864,7 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
     {hitText !== null && <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>}
     <span className="agent-chat-context-meter" data-testid="assist-context-meter"
       data-state={ratio === null ? "unknown" : high ? "high" : "normal"}
-      role="img" aria-label={`上下文占用 ${meterText}`} {...tooltipHandlers}>
+      role="img" aria-label={meterText} {...tooltipHandlers}>
       <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
         <circle className="agent-chat-context-meter-track" cx="18" cy="18" r="15" />
         <circle className="agent-chat-context-meter-fill" cx="18" cy="18" r="15"
@@ -2840,7 +3078,9 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
           () => setCopyDone(message.id), () => setCopyDone(null))}>
         <Copy aria-hidden="true" />
       </button>
-      <p className="helper-text agent-message-usage" data-testid={`assist-usage-${message.id}`}>用量：输入 {message.usage.inputTokens ?? "未知"}、输出 {message.usage.outputTokens ?? "未知"} tokens</p>
+      {/* 用量口径：input_tokens 是该次调用重发的完整上下文（含全部历史），故叫「上下文」
+          不叫「输入」——2026-10-24 用户把「输入 4757」读成了会话累计的错账。 */}
+      <p className="helper-text agent-message-usage" data-testid={`assist-usage-${message.id}`}>用量：上下文 {message.usage.inputTokens ?? "未知"}、输出 {message.usage.outputTokens ?? "未知"} tokens</p>
     </div>}
     </div>
   </article>;
@@ -3362,7 +3602,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   /* 目标状态字符串进依赖：状态不变不重读，状态变化（含 PAUSING→PAUSED）才重读。 */
   const goalStatus = goalView?.goal?.status ?? null;
   /* 0127：计划与目标投影随会话与推进重读。目标仍在推进时每 15 秒轮询一次：
-     推进器在服务端 tick 里工作，界面不参与推进，只把它的结果读出来。 */
+     推进器在服务端 tick 里工作，界面不参与推进，只把它的结果读出来。
+     首条消息确认（202 回执落定）也要重读一次：/goal 开会话时目标行由那条消息的
+     命令建立，本次挂载时它还不存在（2026-10-24 实机验收抓到：目标卡直到下一次
+     手动操作才出现）。 */
   useEffect(() => {
     if (client === null) return;
     let alive = true;
@@ -3379,7 +3622,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       || goalStatus === "CANCELLING");
     const timer = live ? window.setInterval(() => void load(), 15000) : null;
     return () => { alive = false; if (timer !== null) window.clearInterval(timer); };
-  }, [client, session.id, projectionReload, goalStatus]);
+  }, [client, session.id, projectionReload, goalStatus, confirmedFirstMessageCommandId]);
   const transcriptContentRef = useRef<HTMLDivElement>(null);
   /** 时间线导航只认这一个正文滚动容器：它读位置、它执行跳转，不新增第二个消息流滚动区。 */
   const getTranscriptOwner = useCallback(() => transcriptRef.current, []);
@@ -4989,6 +5232,17 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             onPickCommand={(name) => { setDraft(`${draft.match(/^\s*/u)?.[0] ?? ""}/${name} `);
               composerBoxRef.current?.querySelector("textarea")?.focus(); }}
             onPickPlugin={(label) => { setDraft(insertPluginMention(draft, label, draftRef.current));
+              draftRef.current?.focus(); }}
+            onUploadAttachments={(files) => { stagedSession.add(files); draftRef.current?.focus(); }}
+            uploadDisabled={pending !== null || busy || uploadingAttachments}
+            workspace={session.projectId === null || session.context?.workingDirectory === null ||
+              session.context?.workingDirectory === undefined ? null
+              : { projectId: session.projectId,
+                resourceId: session.context.workingDirectory.resourceId,
+                displayName: session.context.workingDirectory.canonicalRoot
+                  ?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "工作目录" }}
+            artifactTaskId={session.taskId}
+            onInsertMention={(label) => { setDraft(insertMention(draft, label, draftRef.current));
               draftRef.current?.focus(); }}
             /* 「+」二级里的两个入口都开同一枚合体浮层（2026-10-24 合并）：检索项目资料与
                选择 Skill 分别是这片浮层的下节与上节，入口合一后不再有两颗芯片可分别打开。 */

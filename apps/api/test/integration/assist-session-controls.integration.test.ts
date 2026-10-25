@@ -551,6 +551,33 @@ test('列表按最后消息时间上浮，还没说话的会话按创建时间�
   assert.deepEqual((await listed()).map((item) => item.id), [newest, oldest]);
 });
 
+test('has_messages 读时派生：活动键为空也照实给出「有没有消息」', async () => {
+  const workspaceId = await newWorkspace('has-messages-derived');
+  const sessionId = await newSession(workspaceId);
+  type ListedSession = { id: string; last_message_at: string | null; has_messages: boolean };
+  const listed = async (): Promise<readonly ListedSession[]> =>
+    ((await api.get(workspacePath(workspaceId, '/assist-sessions')))
+      .body as { items: ListedSession[] }).items;
+  const single = async (): Promise<ListedSession> =>
+    (await api.get(workspacePath(workspaceId, `/assist-sessions/${sessionId}`))).body as ListedSession;
+
+  // 新会话：列表与单条读取都如实给出 false。
+  assert.equal((await listed())[0]?.has_messages, false);
+  assert.equal((await single()).has_messages, false);
+
+  // 模拟写消息的路径漏推进活动键（0111 之前的历史形态）：消息表有行，活动键为空。
+  await seedMessage(sessionId, 'USER');
+  await sql`update assist_sessions set last_message_at = null where id = ${sessionId}`
+    .execute(app.db);
+  assert.equal((await readRow(sessionId)).last_message_at, null, '活动键确实为空');
+
+  const drifted = (await listed())[0];
+  assert.equal(drifted?.last_message_at, null, '排序键仍按事实返回 NULL');
+  assert.equal(drifted?.has_messages, true,
+    '有没有消息必须数消息表，不能从活动键的可空性推断');
+  assert.equal((await single()).has_messages, true, '单条读取与列表同一口径');
+});
+
 test('生成结算推进活动键，迟到的旧 Worker 结算不推进', async () => {
   const workspaceId = await newWorkspace('last-message-settle');
   const sessionId = await newSession(workspaceId);

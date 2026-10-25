@@ -62,6 +62,8 @@ GitHub 内置 Skill 作为 V1 交付项 `[F25]` 进入主线，归 E 阶段（�
 
 **2026-10-18 增量**：只读动作由四个扩到五个（新增 `GITHUB_ISSUE_VIEW`，仍属 `GITHUB_READ`，无迁移、无权限分支）。本决策的其余边界不变：写动作仍须先冻结核对协议，官方包登记与运行时提示注入仍未建。
 
+**2026-10-24 增量**：官方包独立登记落地为 `apps/api/src/skills/official-skills.ts`（不在 `FIRST_PARTY_REGISTRY`，同一取舍再次成立）——不可变身份（`github-gh` + 上游提交）、随包三文件（上游原文、新增 Relay 边界附录 `skills/builtin/gh/RELAY_NOTES.md`、许可）按钉住 SHA-256 逐字校验、按轮按需注入（仅当轮词表出现 `github_` 工具时附加约 1 KiB 冻结摘要与边界块，注入点在只读轮次共用执行器与会话主流程装配处，**跟随工具而不跟随会话模式**；上游正文不进上下文）、`RELAY_OFFICIAL_SKILL_GITHUB=disabled` 设备级禁用（界面入口与 workspace 级持久化、Run 工具循环与学习档轮次的注入仍未做，为已记边界）。随包接线由 `package.json` `files` 与 `build-release.ps1` 校验闭合。GitHub 写动作的最小工程协议冻结于[工具适配器 §4.2](../architecture/tool-adapters.md#42-github-写动作最小工程协议2026-10-24-冻结未实施)（操作身份、批准与撤销、幂等回执、只读核对、UNKNOWN 禁盲重试）；写动作本身仍未实施，进入词表前还需用户对该切片单独授权。
+
 **未落地。** 官方包独立登记表/API、随包资源与 `bundle.resources` 接线、运行时提示注入、内置项禁用设置、BC-05 文件形态迁移均不存在；GitHub 侧写动作未开工；本机没有安装 `gh`，已认证的真实读取与限流/权限错误只能靠单元与注入式探测验证，不能算真实服务取证；真实 Windows 窗口、安装包与独立验收未做。首片不构成 F25 验收通过，也不满足「一句话提交并创建 PR」。
 
 ## 决策原因

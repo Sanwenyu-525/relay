@@ -419,6 +419,52 @@ test('adds a confirmed risk and resolves a blocker with typed actions', async ()
   expectProblem(unknown, 404, 'RESOURCE_NOT_FOUND');
 });
 
+test('adds a blocker through the typed ADD_BLOCKER action', async () => {
+  const project = await createProject();
+  const task = await createTask(project.project_id);
+  const commandId = randomUUID();
+  const added = await stateCommand(project.project_id, {
+    command_id: commandId,
+    expected_revision: '0',
+    action: 'ADD_BLOCKER',
+    target_kind: 'TASK',
+    target_id: task.task_id,
+    reason: '实验设备尚未就绪',
+    source_ref: 'human:test',
+  });
+
+  assert.equal(added.status, 200, added.text);
+  const replay = await stateCommand(project.project_id, {
+    command_id: commandId,
+    expected_revision: '0',
+    action: 'ADD_BLOCKER',
+    target_kind: 'TASK',
+    target_id: task.task_id,
+    reason: '实验设备尚未就绪',
+    source_ref: 'human:test',
+  });
+  assert.equal(replay.status, 200, replay.text);
+
+  const state = await readState(project.project_id);
+  assert.equal(state.revision, '1');
+  assert.deepEqual(
+    (state.blockers as readonly { target_kind: string; target_id: string; reason: string }[])
+      .map((blocker) => [blocker.target_kind, blocker.target_id, blocker.reason]),
+    [['TASK', task.task_id, '实验设备尚未就绪']],
+  );
+
+  const invalid = await stateCommand(project.project_id, {
+    command_id: randomUUID(),
+    expected_revision: '1',
+    action: 'ADD_BLOCKER',
+    target_kind: 'PROJECT',
+    target_id: randomUUID(),
+    reason: '目标不属于本项目',
+    source_ref: 'human:test',
+  });
+  expectProblem(invalid, 422, 'VALIDATION_FAILED');
+});
+
 test('keeps in_progress and project goals in the dependency versions', async () => {
   const project = await createProject();
   const task = await createTask(project.project_id);

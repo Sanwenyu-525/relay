@@ -166,6 +166,21 @@ export function phaseLabel(phase: string): string {
   return phaseLabels[phase] ?? phase;
 }
 
+/**
+ * 阶段选项必须与 API `project-phase.ts` 的固定词汇一致：这里只做展示投影，
+ * 服务端仍按 Project Type 校验；客户端不提供跨类型阶段，也不允许自由输入。
+ */
+export const phaseOptionsByProjectType: Record<string, readonly string[]> = {
+  GENERAL: ["PLANNING", "EXECUTING", "REVIEW"],
+  THESIS: ["TOPIC", "LITERATURE", "METHOD", "EXPERIMENT", "WRITING", "REVIEW"],
+  DEVELOPMENT: ["DISCOVERY", "DESIGN", "IMPLEMENTATION", "VALIDATION", "RELEASE"]
+};
+
+export const goalStatusLabels: Record<string, string> = {
+  ACTIVE: "进行中",
+  ARCHIVED: "已归档"
+};
+
 /* ── 自然语言状态维护（总纲 §0.8.1）────────────────────────────
    服务端枚举开放扩展：未知值一律回退原枚举展示，原值经 title 保留供核对。 */
 

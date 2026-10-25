@@ -56,8 +56,18 @@ export interface RelayAssistSession {
    * 它和置顶一样只是**导航排序键**，不是业务事实：左栏按 `lastMessageAt ?? createdAt`
    * 倒序排，与列表读法的 `coalesce(last_message_at, created_at)` 同一口径。缺字段只来自
    * 0111 之前的响应，同样读成「还没有消息」，回落到创建时间。
+   *
+   * 「有没有消息」不要读这一列：活动键是可空列，写入路径漏推进时会说谎。判内容存在性
+   * 用 `hasMessages`（服务端读时派生）。
    */
   readonly lastMessageAt: string | null;
+  /**
+   * 读时派生：这段讨论有没有消息（服务端直接看消息表是否存在行）。
+   *
+   * 左栏「未开始」标记与分叉入口只读这里，不读 `lastMessageAt` 的可空性。
+   * 缺字段只来自尚未提供该字段的旧服务端，此时按活动键回落一次，保持旧行为。
+   */
+  readonly hasMessages: boolean;
   readonly revision: DecimalRevision;
   readonly createdAt: string;
   readonly updatedAt: string;

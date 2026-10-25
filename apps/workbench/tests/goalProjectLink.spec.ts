@@ -54,7 +54,7 @@ function router(routes: Routes, posts: { path: string; body: Record<string, unkn
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       posts.push({ path, body });
       return response(201, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
-        result: { goal_id: goalId, status: "ACTIVE", revision: "1" } });
+        result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
     }
     if (init?.method === "POST" && path.endsWith("/goal-links")) {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -147,8 +147,9 @@ describe("Goal↔Project 关联入口", () => {
           return response(409, { code: "REVISION_CONFLICT", detail: "修订已变化",
             conflict: { expected_revision: "2", actual_revision: "5" } });
         }
+        // 第二次基于重新读取到的新修订 v5 提交，成功后回执应是 v6。
         return response(200, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
-          result: { project_id: otherProjectId, revision: "3", goal_ids: [goalId] } });
+          result: { project_id: otherProjectId, revision: "6", goal_ids: [goalId] } });
       },
     }, posts));
     const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
@@ -236,5 +237,117 @@ describe("Goal↔Project 关联入口", () => {
     await flush(); await flush();
 
     expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(1);
+  });
+
+  /** 直接 200 也不能只信 HTTP 成功：必须与冻结请求逐项对齐。 */
+  const mismatchCases: readonly { readonly name: string;
+    readonly patch: (body: Record<string, unknown>) => Record<string, unknown> }[] = [
+    { name: "command_id", patch: (_body) => ({ command_id: "99999999-9999-4999-8999-999999999999",
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { project_id: otherProjectId, revision: "3", goal_ids: [goalId] } }) },
+    { name: "project_id", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { project_id: "77777777-7777-4777-8777-777777777777", revision: "3", goal_ids: [goalId] } }) },
+    { name: "goal_ids", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { project_id: otherProjectId, revision: "3", goal_ids: [] } }) },
+    { name: "revision", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { project_id: otherProjectId, revision: "4", goal_ids: [goalId] } }) },
+  ];
+
+  for (const testCase of mismatchCases) {
+    it(`直接成功响应与冻结请求错配（${testCase.name}）时不宣布成功、不清 pending、不自动重发`, async () => {
+      connect();
+      const posts: { path: string; body: Record<string, unknown> }[] = [];
+      vi.stubGlobal("fetch", router({
+        revision: "2",
+        link: (body) => response(200, testCase.patch(body)),
+      }, posts));
+      const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+      await createGoalAndWait(view);
+
+      await view.wrapper.get('[data-testid="goal-link-project"]').setValue(otherProjectId);
+      await flush();
+      await view.wrapper.get('[data-testid="goal-link-submit"]').trigger("click");
+      await flush(); await flush();
+
+      expect(view.wrapper.find('[data-testid="goal-link-result"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="goal-link-pending"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="goal-link-error"]').text()).toContain("不匹配");
+      expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(1);
+    });
+  }
+
+  it("原回执缺少目标 Goal 时不宣布成功，pending 原样保留", async () => {
+    connect();
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", router({
+      revision: "2",
+      link: () => { throw new TypeError("response lost after commit"); },
+    }, posts));
+    const fetchStub = vi.mocked(globalThis.fetch);
+    const original = fetchStub.getMockImplementation()!;
+    fetchStub.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (/\/commands\/[^/]+$/u.test(path)) {
+        return response(200, { command_id: posts[0]?.body.command_id,
+          command_type: "LinkProjectGoal", committed_at: "2026-10-04T00:00:05Z",
+          result: { project_id: otherProjectId, revision: "3", goal_ids: [] } });
+      }
+      return original(input, init);
+    });
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await createGoalAndWait(view);
+
+    await view.wrapper.get('[data-testid="goal-link-project"]').setValue(otherProjectId);
+    await flush();
+    await view.wrapper.get('[data-testid="goal-link-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="goal-link-result"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="goal-link-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="goal-link-error"]').text()).toContain("不匹配");
+    expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(1);
+  });
+
+  it("续页明确失权（403）时撤下已读项目并阻止用旧数据提交", async () => {
+    connect();
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const path = url.pathname;
+      if (init?.method === "POST" && path === `${root}/goals`) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push({ path, body });
+        return response(201, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+          result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
+      }
+      if (init?.method === "POST" && path.endsWith("/goal-links")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push({ path, body });
+        throw new Error("失权后不得再用旧项目数据提交关联");
+      }
+      if (init?.method !== "POST" && path === `${root}/projects`) {
+        if (!url.searchParams.has("cursor")) {
+          return response(200, { items: [listItem(otherProjectId, "论文项目", "2")], next_cursor: "page-2" });
+        }
+        return response(403, { code: "FORBIDDEN", detail: "访问已撤销" });
+      }
+      if (path.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (path === `${root}/tasks`) return response(200, { items: [], next_cursor: null });
+      throw new Error(`Unexpected request ${path}${url.search}`);
+    }));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await createGoalAndWait(view);
+
+    await view.wrapper.get('[data-testid="goal-link-more"]').trigger("click");
+    await flush(); await flush();
+
+    // 已失权的数据必须撤下，不能再出现在下拉里，也不能据此发出关联命令。
+    expect(view.wrapper.get('[data-testid="goal-link-projects-failed"]').exists()).toBe(true);
+    expect(view.wrapper.find('[data-testid="goal-link-project"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="goal-link-submit"]').exists()).toBe(false);
+    expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(0);
   });
 });

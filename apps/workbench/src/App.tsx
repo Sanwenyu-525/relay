@@ -126,6 +126,18 @@ export default function App() {
     await getCurrentWindow().destroy();
   }
 
+  /**
+   * 待核对未收口仍要关窗：命令已经发出，关窗不取消它；用户已从弹层知晓
+   * 「重新打开后不再提醒、生效结果去列表确认」，这是显式的人工决定，
+   * 不属于应用侧盲重试。与丢弃关闭不同，这里不清任何守卫状态。
+   */
+  async function closeWithPending(): Promise<void> {
+    allowClose.current = true;
+    setCloseDialogOpen(false);
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().destroy();
+  }
+
   if (desktopStatus !== "idle") {
     return <div className="desktop-window"><DesktopTitleBar available={false} onSearch={() => setCommandOpen(true)} /><main className="page-state" data-testid={desktopStatus === "error" ? "desktop-service-unavailable" : "desktop-service-connecting"} role="status">
       {desktopStatus === "error" ? <>
@@ -145,6 +157,7 @@ export default function App() {
   const preserveDraftCreation = (location.pathname === "/tasks" && new URLSearchParams(location.search).get("view") === "create")
     || (location.pathname === "/scheduled-tasks" && new URLSearchParams(location.search).get("view") === "create");
   const pendingCommandId = currentDraftGuard()?.pendingCommandId?.() ?? null;
+  const pendingRecovers = pendingCommandId !== null && (currentDraftGuard()?.pendingRecoversAfterLeave?.() ?? false);
   return <div className="desktop-window">
     {/* 跳转链接由窗口框架持有并排在标题栏之前：它 position:fixed，视觉位置不变，
         但必须是第一个 Tab 站位，否则键盘用户先落在标题栏按钮上（WCAG 2.4.1）。 */}
@@ -153,18 +166,42 @@ export default function App() {
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveDraftCreation ? "draft-creation" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
-    <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => blocker.reset?.()}>
-      <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请留在当前建议区查询回执。` : "即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。"}</p>
+    <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"}
+      subtitle={pendingCommandId ? "离开不会取消这条命令" : undefined}
+      onClose={() => blocker.reset?.()}>
+      {pendingCommandId
+        ? <>
+          <p>{pendingRecovers
+            ? "这条命令已发给服务端，结果还没有确认。留在本页可以立即查询回执收口；离开也不会取消它——本页会保留原命令 ID，回来可继续核对，期间不会创建第二个。"
+            : "这条命令已发给服务端，结果还没有确认。现在离开会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复创建。请留在本页查询回执收口后再离开。"}</p>
+          <p className="dialog-command-id">原命令 ID <code className="hash-code">{pendingCommandId}</code></p>
+        </>
+        : <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>}
       <div className="dialog-actions">
-        <button className="secondary-button" type="button"
-          onClick={() => { keepEditingFocus.current = true; blocker.reset?.(); }}>保留并继续编辑</button>
+        <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
+          onClick={() => { keepEditingFocus.current = true; blocker.reset?.(); }}>
+          {pendingCommandId ? "留在本页核对回执" : "保留并继续编辑"}</button>
+        {pendingCommandId && pendingRecovers && <button className="secondary-button" type="button"
+          data-testid="pending-keep-and-leave" onClick={() => blocker.proceed?.()}>离开并保留待核对</button>}
         {!pendingCommandId && <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>}
       </div>
     </AppDialog>
-    <AppDialog open={closeDialogOpen} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"} onClose={() => setCloseDialogOpen(false)}>
-      <p>{pendingCommandId ? `原命令 ${pendingCommandId} 的结果仍待核对，请先查询回执再关闭窗口。` : "窗口里还有未保存的修改。你可以继续编辑，或丢弃草稿并关闭窗口。"}</p>
+    <AppDialog open={closeDialogOpen} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"}
+      subtitle={pendingCommandId ? "关闭不会取消这条命令" : undefined}
+      onClose={() => setCloseDialogOpen(false)}>
+      {pendingCommandId
+        ? <>
+          <p>这条命令已发给服务端，结果还没有确认。关闭窗口不会取消它；重新打开后这里不再提醒。
+            如果命令已在服务端生效，请先在对应列表里确认结果，不要重复创建。</p>
+          <p className="dialog-command-id">原命令 ID <code className="hash-code">{pendingCommandId}</code></p>
+        </>
+        : <p>窗口里还有未保存的修改。你可以继续编辑，或丢弃草稿后关闭窗口。</p>}
       <div className="dialog-actions">
-        <button className="secondary-button" type="button" onClick={() => setCloseDialogOpen(false)}>保留并继续编辑</button>
+        <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
+          onClick={() => setCloseDialogOpen(false)}>
+          {pendingCommandId ? "留在本页核对回执" : "保留并继续编辑"}</button>
+        {pendingCommandId && <button className="danger-button" type="button"
+          data-testid="pending-close-anyway" onClick={() => void closeWithPending()}>仍要关闭窗口</button>}
         {!pendingCommandId && <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>}
       </div>
     </AppDialog>

@@ -159,6 +159,9 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     // 助手会话缺冻结快照说明响应不完整，不能当成普通会话显示。
     throw new Error(SESSION_FORMAT_ERROR);
   }
+  // 0111：last_message_at 缺失只来自该迁移之前的响应，读成「还没有消息」，
+  // 排序回落到 created_at——它与 updated_at 一样自 0015 就在响应里。
+  const lastMessageAt = optionalNullable(row, "last_message_at", "assist session");
   return { id: string(row, "id", "assist session"),
     projectId: nullableString(row, "project_id", "assist session"),
     taskId: nullableString(row, "task_id", "assist session"),
@@ -168,9 +171,11 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     pinnedAt: optionalNullable(row, "pinned_at", "assist session"),
     // 0104：unread_at 同理，缺失读成已读——未读是后加的可选标记，不是第三种状态。
     unreadAt: optionalNullable(row, "unread_at", "assist session"),
-    // 0111：last_message_at 同理，缺失只来自该迁移之前的响应，读成「还没有消息」，
-    // 排序回落到 created_at——它与 updated_at 一样自 0015 就在响应里。
-    lastMessageAt: optionalNullable(row, "last_message_at", "assist session"),
+    lastMessageAt,
+    // 读时派生的事实：有没有消息只看服务端数消息表。缺失只来自尚未提供该字段的旧服务端，
+    // 此时按活动键回落一次，保持旧行为（不把整条会话读失败）。
+    hasMessages: row.has_messages === undefined
+      ? lastMessageAt !== null : boolean(row, "has_messages", "assist session"),
     // created_at 只作「还没有消息」那一档的排序回落（服务端 coalesce 的同义读法）。
     // 它自 0015 起恒在会话投影里；这里容缺是因为缺字段不该让整条会话读不出来，
     // 退到 updated_at——同样是 0015 就有的时刻列，最多让位置略偏，不会把行丢掉。

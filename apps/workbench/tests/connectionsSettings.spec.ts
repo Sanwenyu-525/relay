@@ -30,7 +30,7 @@ function connect() {
 function baseGet(path: string, state: {
   connections: Record<string, unknown>[]; policies: Record<string, unknown>[];
   resources: Record<string, unknown>[]; versions: Record<string, unknown>[];
-  archivedAt: string | null;
+  archivedAt: string | null; pluginStatus: Record<string, unknown>[];
 }): Response | null {
   if (path === `/projects/${projectId}`) return response(200, { id: projectId, title: "真实项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: state.archivedAt });
   if (path === `/projects/${projectId}/view-configuration`) return response(200, { project_id: projectId,

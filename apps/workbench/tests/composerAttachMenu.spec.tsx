@@ -2,10 +2,28 @@ import { useState } from "react";
 import { type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { ComposerAttach, insertPluginMention } from "../src/views/AssistView";
-import type { RelayApiClient, RelayAssistSourceRef, RelayKnowledge, RelaySkillDefinition } from "../src/api/relayClient";
-import { flush, mountReact } from "./mountApp";
+import { ComposerAttach, insertMention, insertPluginMention } from "../src/views/AssistView";
+import type { RelayApiClient, RelayArtifact, RelayAssistSourceRef, RelayDirectoryEntry, RelayKnowledge, RelaySkillDefinition } from "../src/api/relayClient";
+
+/**
+ * 本文件直接挂载 `ComposerAttach`，因此不经过 `tests/mountApp` 的整条路由器：
+ * 一个组件测试不应把 `/agent` 之外的所有页面（及其并行改动）拖进模块图。
+ * 两个辅助函数与 `mountApp` 的同名实现保持同一行为。
+ */
+async function flush(milliseconds = 40): Promise<void> {
+  await act(async () => { await new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)); });
+  await act(async () => { await new Promise<void>((resolve) => window.setTimeout(resolve, 10)); });
+}
+
+async function mountReact(element: ReactElement) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(element); });
+  return { unmount: () => { act(() => root.unmount()); container.remove(); } };
+}
 
 /**
  * 「+」两级菜单（工作台 §32）的契约测试。
@@ -50,11 +68,43 @@ const connections = [
   { id: "conn-computer", status: "DISABLED", capabilities: ["COMPUTER_READ"], allowedHost: null, allowedExecutables: null }
 ] as const;
 
-function stubClient(getChatCommands = vi.fn(async () => catalog),
-  getKnowledge = vi.fn(async () => knowledge),
-  getGatewayConnections = vi.fn(async () => connections)) {
-  return { getChatCommands, getKnowledge, getGatewayConnections } as unknown as RelayApiClient;
+/** 「文件」二级的真实读取回执：与 HTTP §10.112 的成功投影同形。 */
+function listingResponse(entries: readonly RelayDirectoryEntry[],
+  patch: { readonly truncated?: boolean; readonly skipped?: number } = {}) {
+  return { commandId: "listing", committedAt: "2026-10-24T00:00:00Z",
+    outcome: { state: "SUCCEEDED", actionType: "LIST_DIRECTORY", operationId: "op-1", invocationId: "inv-1",
+      result: { kind: "LISTING", entries, count: entries.length, limit: 200,
+        truncated: patch.truncated ?? false, skipped: patch.skipped ?? 0 } } } as const;
 }
+
+const artifactFixture: readonly RelayArtifact[] = [{
+  id: "artifact-1", taskId: "task-1", title: "需求说明", revision: "2", latestVersionId: "version-3",
+  versionCount: 1, versions: [{ artifactVersionId: "version-3", versionNumber: "3",
+    mediaType: "text/markdown", sha256: "abc", size: "12", sourceKind: "HUMAN", createdAt: "2026-10-24T00:00:00Z" }]
+}];
+
+function stubClient(getChatCommands: () => Promise<unknown> = vi.fn(async () => catalog),
+  getKnowledge: () => Promise<unknown> = vi.fn(async () => knowledge),
+  getGatewayConnections: () => Promise<unknown> = vi.fn(async () => connections),
+  readManagedFileState: (input: { relativePath?: string }) => Promise<unknown> =
+    vi.fn(async () => listingResponse([])),
+  getTaskArtifacts: () => Promise<unknown> =
+    vi.fn(async () => ({ items: artifactFixture, currentAcceptedVersionIds: [] }))) {
+  return { getChatCommands, getKnowledge, getGatewayConnections, readManagedFileState,
+    getTaskArtifacts } as unknown as RelayApiClient;
+}
+
+const fileConnections = [
+  { id: "conn-files", status: "ACTIVE", capabilities: ["FILE_QUERY", "FILE_READ"],
+    allowedHost: null, allowedExecutables: null }
+] as const;
+
+const workspaceFixture = { projectId: "p-1", resourceId: "r-1", displayName: "Relay-Agent" } as const;
+const fileEntries: readonly RelayDirectoryEntry[] = [
+  { path: "src", kind: "directory", size: null },
+  { path: "README.md", kind: "file", size: 1234 },
+  { path: "socket", kind: "other", size: null }
+];
 
 type HarnessProps = {
   readonly initialRefs?: readonly RelayAssistSourceRef[];
@@ -78,6 +128,11 @@ type HarnessProps = {
   readonly client?: RelayApiClient;
   /** 菜单所在的站内位置：「管理连接与权限」要带着它作为返回路径。 */
   readonly path?: string;
+  /** 新入口的调用方事实：工作目录、当前任务与上传回调。 */
+  readonly workspace?: { readonly projectId: string; readonly resourceId: string; readonly displayName: string } | null;
+  readonly artifactTaskId?: string | null;
+  readonly onUploadAttachments?: (files: readonly File[]) => void;
+  readonly uploadDisabled?: boolean;
 };
 
 /** 路由落点探针：只读当前位置，不渲染可见内容。 */
@@ -88,6 +143,7 @@ function PathProbe() {
 
 function Harness(props: HarnessProps) {
   const [draft, setDraft] = useState("");
+  const [uploaded, setUploaded] = useState<readonly string[]>([]);
   const [selected, setSelected] = useState<readonly RelayAssistSourceRef[]>(props.initialRefs ?? []);
   return <MemoryRouter initialEntries={[props.path ?? "/agent"]}>
     <div className="agent-chat-composer-actions">
@@ -104,11 +160,17 @@ function Harness(props: HarnessProps) {
         projectId={props.projectId ?? null}
         skills={props.skills} selectedSkillKey={props.selectedSkillKey ?? null}
         onPickSkill={props.onPickSkill} skillContext={props.skillContext ?? null}
+        workspace={props.workspace ?? null} artifactTaskId={props.artifactTaskId ?? null}
+        uploadDisabled={props.uploadDisabled ?? false}
+        onUploadAttachments={(files) => { setUploaded(files.map((file) => file.name));
+          props.onUploadAttachments?.(files); }}
         onCommand={() => setDraft((value) => value.startsWith("/") ? value : `/${value}`)}
         onPickCommand={(name) => setDraft((value) => `${value.match(/^\s*/u)?.[0] ?? ""}/${name} `)}
         onPickPlugin={(label) => setDraft((value) => insertPluginMention(value, label, null))}
+        onInsertMention={(label) => setDraft((value) => insertMention(value, label, null))}
         notes={props.notes} />
       <textarea data-testid="draft" aria-label="本次消息" value={draft} readOnly />
+      <span data-testid="harness-uploaded">{uploaded.join(",")}</span>
     </div>
     <PathProbe />
   </MemoryRouter>;
@@ -161,16 +223,24 @@ async function pointerOut(element: Element | null, relatedTarget: Element): Prom
 afterEach(() => { window.localStorage.clear(); vi.unstubAllGlobals(); });
 
 describe("「+」两级菜单", () => {
-  it("点击「+」打开一级：四项保留，状态提示来自真实事实", async () => {
+  it("点击「+」打开一级：参考图的七个入口都在，状态提示来自真实事实", async () => {
     const view = await mountReact(<Harness initialRefs={refs} skillSelected />);
     try {
       expect(attach()?.open).toBe(false);
       await openMenu();
       expect(attach()?.open).toBe(true);
+      expect(row("assist-attach-upload")).not.toBeNull();
+      expect(row("assist-attach-files")).not.toBeNull();
+      expect(row("assist-attach-artifacts")).not.toBeNull();
       expect(row("assist-attach-sources")).not.toBeNull();
       expect(row("assist-attach-skill")).not.toBeNull();
       expect(row("assist-attach-command")).not.toBeNull();
       expect(row("assist-attach-connectors")).not.toBeNull();
+      // 上传附件是直接动作（没有二级），文件与产物各自可展开。
+      expect(row("assist-attach-upload")?.hasAttribute("aria-expanded")).toBe(false);
+      expect(row("assist-attach-upload")?.querySelector(".agent-chat-attach-item-chevron")).toBeNull();
+      expect(row("assist-attach-files")?.getAttribute("aria-expanded")).toBe("false");
+      expect(row("assist-attach-artifacts")?.getAttribute("aria-expanded")).toBe("false");
       // 目录入口已从「+」撤出（2026-10-19）：它有常驻 Owner（协作页目录细条），
       // 在这里既重复、又读成「用之前必须先选目录」。
       expect(row("assist-attach-folder")).toBeNull();
@@ -181,6 +251,134 @@ describe("「+」两级菜单", () => {
       expect(row("assist-attach-command")?.getAttribute("aria-expanded")).toBe("false");
       // 再点「+」收起一级。
       await click(document.querySelector('[data-testid="assist-attach"]'));
+      expect(attach()?.open).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("上传附件：直接打开本机图片选择器，选中后交给调用方的暂存链路", async () => {
+    const onUpload = vi.fn();
+    const view = await mountReact(<Harness onUploadAttachments={onUpload} />);
+    try {
+      const input = document.querySelector<HTMLInputElement>('[data-testid="assist-attach-upload-input"]');
+      expect(input).not.toBeNull();
+      const clickSpy = vi.spyOn(input!, "click");
+      await openMenu();
+      await click(row("assist-attach-upload"));
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      const file = new File(["png"], "截图.png", { type: "image/png" });
+      await act(async () => {
+        Object.defineProperty(input, "files", { configurable: true, value: [file] });
+        input!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await flush(0);
+      expect(onUpload).toHaveBeenCalledTimes(1);
+      expect((onUpload.mock.calls[0]?.[0] as readonly File[]).map((item) => item.name)).toEqual(["截图.png"]);
+      expect(document.querySelector('[data-testid="harness-uploaded"]')?.textContent).toBe("截图.png");
+      expect(attach()?.open).toBe(false);
+    } finally { view.unmount(); }
+
+    /* 输入器在途/发送中时如实禁用，不打开一个选完也用不上的对话框。 */
+    const busy = await mountReact(<Harness uploadDisabled />);
+    try {
+      await openMenu();
+      expect(row("assist-attach-upload")?.disabled).toBe(true);
+      expect(row("assist-attach-upload")?.getAttribute("title")).toContain("稍后再上传附件");
+    } finally { busy.unmount(); }
+  });
+
+  it("文件二级：读取受管目录一层条目，目录内导航，点文件把相对路径插入草稿", async () => {
+    const readManagedFileState = vi.fn(async (input: { relativePath?: string }) =>
+      input.relativePath === "src"
+        ? listingResponse([{ path: "index.ts", kind: "file", size: 42 }])
+        : listingResponse(fileEntries, { skipped: 2 }));
+    const client = stubClient(undefined, undefined,
+      vi.fn(async () => fileConnections), readManagedFileState);
+    const view = await mountReact(<Harness client={client} workspace={workspaceFixture} />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(submenu()?.getAttribute("data-section")).toBe("files");
+      expect(submenu()?.textContent).toContain("Relay-Agent 根目录");
+      expect(row("assist-attach-file-0")?.textContent).toContain("src");
+      expect(row("assist-attach-file-0")?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("目录");
+      expect(row("assist-attach-file-1")?.textContent).toContain("README.md");
+      // 非文件非目录的条目（socket 等）如实禁用，不冒充可插入文件。
+      expect(row("assist-attach-file-2")?.disabled).toBe(true);
+      expect(submenu()?.textContent).toContain("已跳过 2 个受保护或构建目录");
+
+      await click(row("assist-attach-file-0"));
+      await flush();
+      expect(readManagedFileState.mock.calls.at(-1)?.[0]).toMatchObject(
+        { actionType: "LIST_DIRECTORY", relativePath: "src" });
+      expect(row("assist-attach-file-0")?.textContent).toContain("index.ts");
+      expect(row("assist-attach-files-up")).not.toBeNull();
+
+      await click(row("assist-attach-file-0"));
+      expect((document.querySelector('[data-testid="draft"]') as HTMLTextAreaElement).value)
+        .toBe("@src/index.ts ");
+      expect(attach()?.open).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("文件二级：无目录 / 无连接 / 失败 / 截断各有如实说法，不显示成空目录", async () => {
+    const noWorkspace = await mountReact(<Harness />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(submenu()?.textContent).toContain("当前对话还没有绑定工作目录");
+      expect(row("assist-attach-file-0")).toBeNull();
+    } finally { noWorkspace.unmount(); }
+
+    const noConnection = await mountReact(<Harness workspace={workspaceFixture}
+      client={stubClient(undefined, undefined, vi.fn(async () => []))} />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(submenu()?.textContent).toContain("没有可用的文件浏览连接");
+      expect(row("assist-attach-file-0")).toBeNull();
+    } finally { noConnection.unmount(); }
+
+    const failed = await mountReact(<Harness workspace={workspaceFixture} client={stubClient(undefined,
+      undefined, vi.fn(async () => fileConnections), vi.fn(async () => ({
+        commandId: "listing", committedAt: "2026-10-24T00:00:00Z",
+        outcome: { state: "FAILED", actionType: "LIST_DIRECTORY", operationId: "op-1", invocationId: null,
+          result: { kind: "FAILURE", reason: "GATEWAY_TARGET_DENIED", detail: "不是目录" } } }))) } />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(submenu()?.textContent).toContain("GATEWAY_TARGET_DENIED");
+      expect(submenu()?.textContent).not.toContain("没有可列出的文件");
+    } finally { failed.unmount(); }
+
+    const truncated = await mountReact(<Harness workspace={workspaceFixture} client={stubClient(undefined,
+      undefined, vi.fn(async () => fileConnections),
+      vi.fn(async () => listingResponse([fileEntries[1]!], { truncated: true }))) } />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(submenu()?.textContent).toContain("已截断：只列出前 1 项");
+    } finally { truncated.unmount(); }
+  });
+
+  it("我的产物：列当前任务产物，点一项把标题与版本插入草稿；无任务时说明去向", async () => {
+    const noTask = await mountReact(<Harness />);
+    try {
+      await openSub("assist-attach-artifacts");
+      await flush();
+      expect(submenu()?.textContent).toContain("当前会话没有关联任务");
+      expect(row("assist-attach-artifact-0")).toBeNull();
+    } finally { noTask.unmount(); }
+
+    const view = await mountReact(<Harness artifactTaskId="task-1" />);
+    try {
+      await openSub("assist-attach-artifacts");
+      await flush();
+      expect(row("assist-attach-artifact-0")?.textContent).toContain("需求说明");
+      expect(row("assist-attach-artifact-0")?.querySelector(".agent-chat-attach-item-hint")?.textContent)
+        .toBe("v3");
+      await click(row("assist-attach-artifact-0"));
+      expect((document.querySelector('[data-testid="draft"]') as HTMLTextAreaElement).value)
+        .toBe("@需求说明 v3 ");
       expect(attach()?.open).toBe(false);
     } finally { view.unmount(); }
   });

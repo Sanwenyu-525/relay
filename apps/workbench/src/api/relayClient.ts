@@ -80,9 +80,9 @@ import type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageReca
 import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
   RelayUndoPlan } from "./dtos/stateMaintenance";
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
-import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
+import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
 import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
-import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayGoalCreation, RelayProject, RelayProjectCreation, RelayProjectGoalLink, RelayProjectPage, RelayProjectState, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
+import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 import type { RelayReadiness } from "./dtos/readiness";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
 import type { RelayCompletion, RelayCompletionEvidence, RelayReopen, RelayTaskAcceptanceRevision, RelayTaskAcceptanceRevisionInput, RelayTaskCheckPlanPreview, RelayTaskCreation, RelayTaskDetail, RelayTaskMutation, RelayTaskPage, RelayTaskSummary, RelayToday, RelayTodayPriority } from "./dtos/tasks";
@@ -98,16 +98,16 @@ export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandida
 export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistMessageRecall, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistSession, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayContextBudgetTokens, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "./dtos/assist";
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
-export type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
+export type { RelayDirectoryEntry, RelayDirectoryListingResult, RelayFileBrowseAction, RelayFileContentResult, RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedFileReadInput, RelayManagedFileReadOutcome, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
 export type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
-export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayGoalCreation, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectListItem, RelayProjectPage, RelayProjectState, RelayStateArtifactRef, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
+export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayDirectoryWorkContext, RelayGoalArchiveResult, RelayGoalCreation, RelayGoalEditResult, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectGoalLinkDetail, RelayProjectGoalUnlinkResult, RelayProjectListItem, RelayProjectPage, RelayProjectRenameResult, RelayProjectState, RelayStateArtifactRef, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind, RelayWorkContextDirectory, RelayWorkContextProject, RelayWorkContextSession } from "./dtos/projects";
 export type { RelayReadiness } from "./dtos/readiness";
 export type { RelayCommandOutput, RelayContextBuild, RelayContextManifestDetail, RelayContextManifestList, RelayContextManifestSummary, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayGatewayInvocationResult, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayReviewKind, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
 export type { RelayAcceptanceCriterion, RelayCompletion, RelayCompletionEvidence, RelayReopen, RelayTaskAcceptance, RelayTaskAcceptanceRevision, RelayTaskAcceptanceRevisionInput, RelayTaskCheckPlanPreview, RelayTaskCreation, RelayTaskDependency, RelayTaskDetail, RelayTaskMutation, RelayTaskPage, RelayTaskSummary, RelayToday, RelayTodayItem, RelayTodayPriority } from "./dtos/tasks";
 export { artifactVersionResultFrom } from "./parse/artifacts";
-export { managedGitReadOutcomeFrom } from "./parse/gateway";
+export { managedFileReadOutcomeFrom, managedGitReadOutcomeFrom } from "./parse/gateway";
 export type { RelayWriteReadiness, RelayWriteTier } from "./dtos/gateway";
-export { continuationPointSummaryFrom, goalCreationFrom, projectArchiveResultFrom, projectCreationFrom, projectGoalLinkFrom, selectionRevisionFrom, stateMutationFrom, viewConfigurationFrom } from "./parse/projects";
+export { continuationPointSummaryFrom, goalArchiveResultFrom, goalCreationFrom, goalEditResultFrom, projectArchiveResultFrom, projectCreationFrom, projectGoalLinkFrom, projectGoalUnlinkResultFrom, projectRenameResultFrom, selectionRevisionFrom, stateMutationFrom, viewConfigurationFrom } from "./parse/projects";
 export { delegateSubmissionFrom } from "./parse/run";
 export { completionFrom, reopenFrom, taskAcceptanceRevisionFrom, taskCreationFrom, taskMutationFrom } from "./parse/tasks";
 
@@ -314,6 +314,52 @@ export class RelayApiClient {
     return projectsApi.getGoal(this.#http, goalId);
   }
 
+  async getGoalDetail(goalId: string): Promise<RelayGoalRecord> {
+    return projectsApi.getGoalDetail(this.#http, goalId);
+  }
+
+  async listGoals(status: "active" | "archived" | "all", cursor: string | null = null): Promise<RelayGoalPage> {
+    return projectsApi.listGoals(this.#http, status, cursor);
+  }
+
+  async getGoalProjects(goalId: string): Promise<readonly RelayGoalProject[]> {
+    return projectsApi.getGoalProjects(this.#http, goalId);
+  }
+
+  async getProjectGoalLinks(projectId: string): Promise<readonly RelayProjectGoalLinkDetail[]> {
+    return projectsApi.getProjectGoalLinks(this.#http, projectId);
+  }
+
+  async editGoal(input: { readonly goalId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision; readonly title: string;
+    readonly description: string }): Promise<RelayCommandEnvelope> {
+    return projectsApi.editGoal(this.#http, input);
+  }
+
+  async archiveGoal(input: { readonly goalId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return projectsApi.archiveGoal(this.#http, input);
+  }
+
+  async renameProject(input: { readonly projectId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision; readonly title: string }): Promise<RelayCommandEnvelope> {
+    return projectsApi.renameProject(this.#http, input);
+  }
+
+  async unlinkProjectGoal(input: { readonly projectId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision; readonly goalId: string;
+    readonly expectedImpactedTaskIds: readonly string[] }): Promise<RelayCommandEnvelope> {
+    return projectsApi.unlinkProjectGoal(this.#http, input);
+  }
+
+  async getGoalWorkContext(goalId: string, status: "ACTIVE" | "ARCHIVED" | "ALL" = "ACTIVE"): Promise<RelayGoalWorkContext> {
+    return projectsApi.getGoalWorkContext(this.#http, goalId, status);
+  }
+
+  async getDirectoryWorkContext(resourceId: string, status: "ACTIVE" | "ARCHIVED" | "ALL" = "ACTIVE"): Promise<RelayDirectoryWorkContext> {
+    return projectsApi.getDirectoryWorkContext(this.#http, resourceId, status);
+  }
+
   async getBlueprintProposals(projectId: string): Promise<readonly RelayBlueprintProposal[]> {
     return projectsApi.getBlueprintProposals(this.#http, projectId);
   }
@@ -392,7 +438,7 @@ export class RelayApiClient {
   * 与 Project 的关联是独立命令（LinkProjectGoal），这里刻意不隐式关联任何 Project，
   * 也不由前端代填项目——作用域与关联仍归各自 Owner。
   */
-  async createGoal(input: { readonly commandId: string; readonly title: string; readonly description: string; }): Promise<RelayGoalCreation> {
+  async createGoal(input: { readonly commandId: string; readonly title: string; readonly description: string; }): Promise<RelayCommandEnvelope> {
     return projectsApi.createGoal(this.#http, input);
   }
 
@@ -401,7 +447,7 @@ export class RelayApiClient {
   * 创建 Goal 不隐式关联任何 Project，关联必须由用户明确发起。
   * expectedRevision 是 Project 当前修订：服务端按它做 CAS，修订变化时返回冲突而不是覆盖。
   */
-  async linkProjectGoal(input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision; readonly goalId: string; }): Promise<RelayProjectGoalLink> {
+  async linkProjectGoal(input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision; readonly goalId: string; }): Promise<RelayCommandEnvelope> {
     return projectsApi.linkProjectGoal(this.#http, input);
   }
 
@@ -920,6 +966,10 @@ export class RelayApiClient {
     return gatewayApi.readManagedGitState(this.#http, input);
   }
 
+  async readManagedFileState(input: RelayManagedFileReadInput): Promise<RelayManagedFileReadResponse> {
+    return gatewayApi.readManagedFileState(this.#http, input);
+  }
+
   async createManagedResource(input: { projectId: string; commandId: string; rootPath: string }): Promise<RelayCommandEnvelope> {
     return gatewayApi.createManagedResource(this.#http, input);
   }
@@ -1206,6 +1256,10 @@ export class RelayApiClient {
 
   async getProjectState(projectId: string): Promise<RelayProjectState> {
     return projectsApi.getProjectState(this.#http, projectId);
+  }
+
+  async runProjectStateCommand(input: RelayStateCommandInput): Promise<RelayCommandEnvelope> {
+    return projectsApi.runProjectStateCommand(this.#http, input);
   }
 
   /**

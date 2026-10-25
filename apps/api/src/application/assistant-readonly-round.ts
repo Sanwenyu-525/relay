@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 import { SessionToolCallRepository } from '../assist/session-tool-call-repository.js';
+import { officialGithubSkillGuidanceForTools } from '../skills/official-skills.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import type { AssistMessageRow, AssistSessionRow, GatewayCapability } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
@@ -422,6 +423,13 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     ...declaredToolSpecs(assistantToolNames(input.availableTools, input.allowWrite ?? false)),
     ...(input.allowDelegate === true ? [DELEGATE_SUBAGENT_SPEC] : []),
   ];
+  // 官方 GitHub Skill（§10）按需激活：只读轮次**实际声明**的词表里出现 github_ 工具时，
+  // 把冻结的摘要与边界块随 system 注入。人设档、普通 Agent 档与子代理轮次同走本入口，
+  // 注入跟随工具而不是跟随会话模式；无工具、被禁用或内容校验失败都不注入（失败关闭）。
+  const officialSkillNotice = officialGithubSkillGuidanceForTools(
+    assistantToolNames(input.availableTools, input.allowWrite ?? false));
+  const baseSystem = officialSkillNotice === null
+    ? input.system : `${input.system}\n\n${officialSkillNotice}`;
   const toolTurns: ModelToolTurn[] = [];
   const providerRequestIds: string[] = [];
   let usage: ModelUsage = EMPTY_USAGE;
@@ -480,8 +488,8 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       }
       const request: AssistRequest = { intent: 'DISCUSS',
         system: executionNotice === undefined || executionNotice === null
-          ? (hasSteers ? `${input.system}\n\n${ASSIST_STEERING_RULES}` : input.system)
-          : `${hasSteers ? `${input.system}\n\n${ASSIST_STEERING_RULES}` : input.system}\n\n${executionNotice}`,
+          ? (hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem)
+          : `${hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem}\n\n${executionNotice}`,
         turns: wrapUp ? [...turns, { role: 'user', content: TOOL_BUDGET_WRAP_UP }] : turns,
         ...(wrapUp ? { tools: [] } : { tools: declared }),
         toolTurns, ...(steers.length === 0 ? {} : { steers: [...steers] }), signal: input.signal };

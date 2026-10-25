@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Info, Link2 } from "lucide-react";
-import { createCommandId, RelayApiError, type RelayApiClient,
+import { createCommandId, projectGoalLinkFrom, RelayApiError, type RelayApiClient,
   type RelayProjectGoalLink, type RelayProjectListItem } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
@@ -54,6 +54,41 @@ function saveLinkPending(key: string, pending: PendingLink | null): void {
   } catch { /* 会话存储不可用只影响整页重开后的恢复；页内待核对状态不受影响。 */ }
 }
 
+/** 2xx 与回执都只说明服务端返回了一份响应；仍需和冻结的关联命令逐项对齐。 */
+class LinkResponseMismatch extends Error {}
+
+/** 401/403/404 是已确认失权或对象不存在：受保护的旧项目数据必须撤下。 */
+function isScopeLost(caught: unknown): boolean {
+  return caught instanceof RelayApiError &&
+    (caught.problem.status === 401 || caught.problem.status === 403 || caught.problem.status === 404);
+}
+
+function verifiedLink(record: PendingLink,
+  envelope: { readonly commandId: string; readonly result: Readonly<Record<string, unknown>> }): RelayProjectGoalLink {
+  if (envelope.commandId !== record.commandId) {
+    throw new LinkResponseMismatch("回执 command_id 与原命令不一致。");
+  }
+  let result: RelayProjectGoalLink;
+  try { result = projectGoalLinkFrom(envelope.result); }
+  catch (caught) {
+    throw new LinkResponseMismatch(caught instanceof Error ? caught.message : "回执结构无效。");
+  }
+  if (result.projectId !== record.projectId) {
+    throw new LinkResponseMismatch(`回执 Project ${result.projectId} 不是冻结的 Project ${record.projectId}。`);
+  }
+  if (!result.goalIds.includes(record.goalId)) {
+    throw new LinkResponseMismatch(`回执关联集合不含冻结的 Goal ${record.goalId}。`);
+  }
+  let expectedNext: bigint | null = null;
+  try { expectedNext = BigInt(record.expectedRevision) + 1n; } catch { expectedNext = null; }
+  let actual: bigint | null = null;
+  try { actual = BigInt(result.revision); } catch { actual = null; }
+  if (expectedNext === null || actual === null || actual !== expectedNext) {
+    throw new LinkResponseMismatch(`回执修订 v${result.revision} 不是原修订 v${record.expectedRevision} 推进后的下一版。`);
+  }
+  return result;
+}
+
 export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLinked }: {
   client: RelayApiClient; goalId: string; goalTitle: string;
   /** 关联成功后把新的 Project 修订与 Goal 集合交回调用方。 */
@@ -83,11 +118,13 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
 
   useEffect(() => () => { disposed.current = true; scope.current++; }, []);
 
-  // 待核对关联不能靠离页丢弃收口：离页保护只拦不放（#20）。
+  // 待核对关联不能靠离页丢弃收口；原 ID 已按 Goal 作用域暂存（#20），离开后
+  // 回到关联区仍可核对，守卫弹层据此提供离开出口。
   const guard = useRef<DraftGuard>({
     hasUnsavedChanges: () => pendingRef.current !== null,
     discard: () => {},
-    pendingCommandId: () => pendingRef.current?.commandId ?? null
+    pendingCommandId: () => pendingRef.current?.commandId ?? null,
+    pendingRecoversAfterLeave: () => pendingRef.current !== null
   });
   useEffect(() => {
     setDraftGuard(guard.current);
@@ -128,7 +165,9 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       setNextCursor(null);
       moreBusyRef.current = false;
       setLoadingMore(false);
-      setError(`项目列表本次读取失败，不能据此关联：${describeLiveError(caught).message}`);
+      setError(isScopeLost(caught)
+        ? "项目列表当前不可读：权限或作用域已失效，不能据此关联。请核对当前工作空间与访问权限后重新读取。"
+        : `项目列表本次读取失败，不能据此关联：${describeLiveError(caught).message}`);
     }
   }, [client]);
 
@@ -156,7 +195,11 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       setNextCursor(page.nextCursor);
     } catch (caught) {
       if (disposed.current || scopeId !== scope.current || request !== readToken.current) return;
-      setMoreError(`后续项目读取失败：${describeLiveError(caught).message}；已读项目与原游标保留，可重试。`);
+      if (isScopeLost(caught)) {
+        // 失权后已读项目不再是可提交的当前事实：撤下列表与游标，提交入口随之消失。
+        setProjects(null); setNextCursor(null); setMoreError(null);
+        setError("项目列表当前不可读：权限或作用域已失效，已清除之前读到的项目。请核对当前工作空间与访问权限后重新读取。");
+      } else setMoreError(`后续项目读取失败：${describeLiveError(caught).message}；已读项目与原游标保留，可重试。`);
     } finally {
       moreBusyRef.current = false;
       if (!disposed.current) setLoadingMore(false);
@@ -168,23 +211,24 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     try {
       const receipt = await client.getCommandReceipt(record.commandId);
       if (disposed.current || request !== scope.current) return;
-      if (receipt.commandId !== record.commandId || receipt.commandType !== "LinkProjectGoal") {
-        throw new Error("原回执不是本次 LinkProjectGoal。");
+      if (receipt.commandType !== "LinkProjectGoal") {
+        throw new LinkResponseMismatch("原回执不是本次 LinkProjectGoal。");
       }
-      const raw = receipt.result.goal_ids;
-      if (receipt.result.project_id !== record.projectId || !Array.isArray(raw) ||
-          raw.some((id) => typeof id !== "string") || typeof receipt.result.revision !== "string") {
-        throw new Error("关联回执与原命令不匹配。");
-      }
-      const next: RelayProjectGoalLink = { projectId: receipt.result.project_id,
-        revision: receipt.result.revision, goalIds: raw as string[] };
+      const next = verifiedLink(record, receipt);
       holdPending(null); setMayRetry(false); setBusy(false); setError(null);
       setLink(next); onLinked?.(next);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
-      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+      if (caught instanceof LinkResponseMismatch) {
+        setError(`关联回执与冻结请求不匹配：${caught.message}已保留原 command_id，不宣布成功。`);
+      } else if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+        // 回执 404 是「原命令未找到」，不是项目列表失权；已读项目必须保留，才可按原 ID 原样重试。
         setMayRetry(true);
         setError("服务端明确未找到原命令；只能用原 command ID、原 Project 与原修订重试。");
+      } else if (isScopeLost(caught)) {
+        // 回执读取本身失权时，已读项目同样不再可信；原待核对命令必须保留，不能换 ID 重发。
+        setProjects(null); setNextCursor(null);
+        setError("关联回执当前不可读：权限或作用域已失效，已清除之前读到的项目；待核对命令仍保留原 command_id。");
       } else setError(`关联结果仍不可核对；请保留原 command_id，不能重复关联。${describeLiveError(caught).message}`);
     } finally {
       if (!disposed.current && request === scope.current) setBusy(false);
@@ -195,11 +239,18 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     if (disposed.current || request !== scope.current) return;
     setError(null); setMayRetry(false); setBusy(true);
     try {
-      const result = await client.linkProjectGoal({ projectId: record.projectId,
+      const envelope = await client.linkProjectGoal({ projectId: record.projectId,
         commandId: record.commandId, expectedRevision: record.expectedRevision, goalId: record.goalId });
+      const result = verifiedLink(record, envelope);
       holdPending(null); setBusy(false); setLink(result); onLinked?.(result);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
+      if (caught instanceof LinkResponseMismatch) {
+        // 错配不宣布成功、不清 pending、不自动重发；只能由用户按原 ID 查回执或原样重试。
+        setBusy(false);
+        setError(`关联响应与冻结请求不匹配：${caught.message}已保留原 command_id，不宣布成功。`);
+        return;
+      }
       if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
         // Project 修订变了：重新读取，让用户按新事实重新确认，不覆盖他人变更。
         holdPending(null); setBusy(false);

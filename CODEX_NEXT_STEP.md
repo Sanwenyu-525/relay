@@ -1,6 +1,102 @@
 # Relay 当前状态与下一步
 
-更新：2026-10-24。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+更新：2026-10-25。角色：唯一阶段、模块与下一步入口。功能通过/未通过/未验收只看[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)；长篇经过保存在[历史快照](docs/development/codex-next-step-history-20260930.md)，不作为默认交接输入。
+
+## 待核对弹窗补离开出口＋弹层重排（2026-10-25，当前 Agent 直接执行，未 commit/push）
+
+用户附「新建目标」页截图指认：命令结果待核对时弹窗只有「保留并继续编辑」一个出口，人被锁在页面里；并要求顺带优化弹层 UI。事实核对：#20/#22 的「只拦不放」把有恢复途径的命令也一并锁死——CreateGoalView/GoalProjectLinkPanel/TodayView 的原 ID 本就按作用域持久化、回页即恢复，协作页恢复区（collab-recovery）也按 sessionStorage 保留命令身份，硬拦与恢复设计自相矛盾。按最小实现修复，**不改任何命令发送/回执核对逻辑**：
+
+- **DraftGuard 新增可选 `pendingRecoversAfterLeave`**：守卫自报「离开后回原入口仍能核对」；合并守卫要求所有在拦待核对命令都可恢复才放行出口，任一不可恢复维持只拦不放（默认 false，ReviewDecisionPanel/TaskAcceptanceEditPanel/WebImportPanel/KnowledgeView/定时任务族等无恢复途径的守卫行为不变）。
+- **App 路由守卫弹层**：待核对态重排——副标题「离开不会取消这条命令」、正文区分可恢复（离开保留原 ID，回页继续核对）与不可恢复（说明为何拦）两种口径、原命令 ID 以 `.hash-code` 短码独立成行（`.dialog-command-id`）；「保留并继续编辑」在待核对态更名「留在本页核对回执」（草稿态不变）；可恢复时新增「离开并保留待核对」（`pending-keep-and-leave`，`blocker.proceed()` 不清任何状态）。**关窗弹层**同口径重排，新增「仍要关闭窗口」（`pending-close-anyway`，明示重开后不再提醒、生效结果去列表确认、不要重复创建）——关窗是用户显式决定，不属于应用侧盲重试。
+- **CreateGoalView/GoalProjectLinkPanel/TodayView** 上报可恢复；**协作页**以「pending 已进恢复区」为判据上报，页内切换弹窗（requestTransition）保留 proceed 并新增「切换并保留待核对」（`collab-pending-switch`）。切换出口先把导航状态摘下（`navigationRef = cleanNavigation`），否则新会话首轮「无待核对」上报会被 reportNavigation 当成收口、把恢复区里未核对命令过滤掉。
+- **已运行**：`goalPendingGate` 7/7（新增离开出口往返用例）、`narrowWindowNewConversation` 6/6、`newConversationEntry` 16/16（断言无任务作用域不出现离开出口）、`collaborationWorkspace` 83/84（新增切换出口用例；仅剩的「会话选项Escape」红为并行会话 AssistView 重写删掉 `agent-chat-source-options` 类的存量断裂）、`reviews` 28/28（断言面板 pending 无离开出口）、`taskAcceptanceEdit`＋`navigation`＋`knowledge` 50/50、`folderFirstConversation`＋定时任务族恢复回归全绿、`todayCommandRecovery/todayFormBaseline/todayView` 22/22。`tsc --noEmit` 本片文件零错误（全量仍被并行 `managedFileBrowse.spec.ts` 8 条既有错误挡住）。**文档**：本条即 CODEX_NEXT_STEP；验收表未新增行（属既有 #20/#22 行为的出口补齐，随下批验收归档）。
+- **未验边界**：真实 Windows/WebView2 关窗路径（`pending-close-anyway` 仅在 Tauri 环境可达，jsdom 未覆盖）；视觉只核对过结构 token 未截图过真实渲染；独立验收未做。
+
+## 「+」菜单补齐参考图三项：上传附件、文件、我的产物（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+用户附参考产品加号菜单截图指认「红框部分还差一点」，并在范围问询中选择「补三项真实入口」。按最小实现落在 `apps/workbench/src/views/AssistView.tsx` 的 `ComposerAttach`，**不改后端、迁移、路由与既有四项的 `data-testid`**：
+
+- **上传附件**：一级直接动作，隐藏 `<input type="file" accept="image/*">` 交给既有 `useStagedAttachments`；只编辑本次输入，不上传、不发送。
+- **<工作目录>的文件**：二级按 `getGatewayConnections` 取 `FILE_QUERY` 连接，用后端已实现的 `readManagedFileState` 列受管根一层；同面板内进子目录/返回上级，文件插入 `@相对路径 ` mention；截断/跳过/失败/未决与缺口各有文案，失败不显示为空目录。
+- **我的产物**：二级按当前 `taskId` 读 `getTaskArtifacts`，点一项插入 `@标题 vN ` mention；无任务归属说明去向，不跨任务猜清单。
+- **边界**：文件与产物只是草稿 mention，不是消息附件/资料来源，也不授予权限；任意本地文件作为消息输入仍未接入。
+
+**已运行**：`tests/composerAttachMenu.spec.tsx` **35/35**（新增四组用例：上传、文件读取与导航、文件失败/截断、产物）；`AssistView.tsx` 定向 `tsc --noEmit` exit 0；`vite build` exit 0。工作台全量 `tsc --noEmit` 当时被并行会话在途的 `tests/managedFileBrowse.spec.ts` 挡住；`assistantModeSwitch` 的「资料入口邻接」1 红为登记在案存量，与本片无关。**文档**：工作台 §32.1/§32.2/§32.3/§32.5/§32.8/§32.17、§33 段末与验收表本轮行。**未验**：真实 Windows/WebView2、真实 Chromium 几何、真实 API＋真实受管目录读取、原生图片选择器在 WebView2 的打开/取消；独立验收未做。
+
+## Qoder 会话接续：空 diff 不占位确认＋「未开始」判据改读时派生（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+接续 Qoder 会话 `edf6c298…` 的两个未完成任务（源自 WorkBuddy 会话 `4ae726ee`「无 git diff 时隐藏红框部分」与 `6f608295`「解释未开始状态的含义」，两会话均因 429/额度中断）：
+
+- **任务一已实现并复核**：`ConversationDiffSummary.tsx` 的 `nothingToReport` 使「完整且空」与首读中整行不渲染；缺起点/非 Git 根/失权/读取失败仍出现。复跑 `conversationDiffSummary.spec.tsx` **29/29**；真实链路与三态截图证据已在验收表「会话 diff 入口」行。
+- **任务二解释**：左栏「未开始」= 这段讨论还没有落过一条消息（不是任务状态、不是未读；行首圆点是未读，两者独立）。**同日接续用户已确认的加固**：标记与分叉入口的判据由 `lastMessageAt === null` 改为服务端读时派生的 `has_messages`（`exists(select 1 from assist_messages …)`）。API 列表逐行附带、单条 GET 单独派生（`readAssistSessionWithActivity`），HTTP `AssistSessionDto` 与前端 DTO/parse 同步；旧服务端缺字段时客户端按活动键回落。`last_message_at` 只保留排序职责。
+- **已运行**：真实临时 PG18.6＋HTTP `assist-session-controls` **23/23 PASSED**（新增「活动键为空但确有消息」用例）；`sessionRowMenu.spec.ts` **26/26**（新增反例）；`conversationDiffSummary.spec.tsx` 29/29；`apps/api tsc --noEmit` exit 0。工作台全量 `tsc --noEmit` 仍有错误，但全部位于并行会话在改文件（`FileBrowsePanel.tsx`、`goalManagementLayout.spec.ts`、`relayClient.ts` 未用类型），本片文件零错误。
+- **文档**：HTTP §10.91、数据库 §112、工作台 §28.1、验收表「左栏未开始误标」行。**未验**：独立验收、真实 Windows/WebView2；两个 0135 迁移编号重复仍未裁决（运行器按文件名各自登记，已实测两迁移均可应用）。
+
+## 正式目标管理与项目状态写入：P0–P2 实施＋自检（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+按任务书完成三阶段实施。**P0-A**：CreateGoal 与 LinkProjectGoal 的成功响应/原回执核对 `command_id`、Project、目标 Goal 与预期 revision（错配不清 pending、不宣布成功、不自动重发），续页 401/403/404 撤下受保护项目；新增 9 条反例先红后绿。**P0-B**：新增 `/goals` 列表（三范围、游标、去重、续页重试、失权撤数据）与 `/goals/:id` 详情，接入 EditGoal/ArchiveGoal、Project 改名、解除关联的 `explicit_task_ids` 影响清单与 `GOAL_LINK_IN_USE` 重确认。**P1-A**：修复真实缺陷——`StateCommandBodySchema` 的 action 联合漏 `ADD_BLOCKER` 且缺 `target_kind/target_id/reason`，HTTP 入口此前必然拒绝；新增 `ProjectStatePanel`（阶段按类型限词、下一步仅本项目任务、风险/阻塞/解除，单一 action＋State revision CAS＋冻结回执）。**P1-B**：Goal 详情与 `/working-directories/:id` 只读工作上下文，会话保留原 `session` 深链接。**P2**：Goal 详情汇总关联项目进展与 x/y 覆盖、失败项目单列；项目总览补 State 风险/阻塞、最近 5 条活动与覆盖说明。
+
+**已运行**：工作台定向 **41/41**（`goalManagementLive` 8、`projectManagementPanels` 7、`goalProjectLink` 11、`goalProjectLinkPagination` 4、`createGoalEntry` 9、`goalPendingGate` 2 个新增相关用例）；真实 Chromium `goalManagementLayout` **2/2**（宽窗键盘/语义与 390px 无横向溢出、右栏抽屉 Esc）；真实临时 PG18.6＋HTTP `api-state` **11/11**（新增 ADD_BLOCKER 用例，schema 回退时先红、恢复后转绿）、`project-goal-maintenance` **4/4**（新增 P0 端到端场景：两项目关联→编辑→改名→解除→归档→历史可读）、`work-contexts` 2/2，合计 **17/17 status PASSED**。受影响既有回归 79/81：`projectOverview` 的 daily-view-confirmation 红在 HEAD 基线工作树复现（用例未桩 `GET /projects/:id/daily-continuation`）；`projectWorkbench` 的「和/与」文案断言与未改源码不一致；`taskSkillLive` 的 `assist-new-session` 红在 HEAD 基线复现。三条均非本片引入、未代修。
+
+**真实桌面验收（2026-10-24，Computer Use，部分完成）**：真实 `relay-desktop.exe` 窗口内已验证项目页「目标列表」入口、`/goals` 空态与范围导航、`记录目标` 表单输入与真实 CreateGoal 提交。**抓到并修复两处真实缺陷**：①`goals.revision` 数据库默认值为 0，而 CreateGoal 回执核对把「新建必为 v1」写死，真实成功响应被误判为错配并留下 pending；改为 v0 并同步 6 处夹具。②回执 404（`COMMAND_NOT_FOUND`）被 `isScopeLost` 先捕获，误清项目列表并隐藏关联提交入口；调整为先处理 COMMAND_NOT_FOUND。修复后工作台定向 41/41。桌面 Goal 详情、State 面板与 390px 窄窗尚未点验：Computer Use 被用户物理 Esc 停止，需恢复后继续。
+
+**并行阻塞**：并行会话新增 `apps/workbench/src/components/FileBrowsePanel.tsx` 停在半成品，孤立重复行导致 Vite 语法错误并阻断桌面与全部测试；本 Agent 只移除两条孤立重复行、未改语义，原文件备份于 `.relay-test/parallel-blocked/FileBrowsePanel.tsx.broken`（SHA-256 `73469BBF…F2A03`）。该文件与 `AssistView.tsx` 的类型错误仍在，工作台 `tsc --noEmit` 当前被这些并行文件阻断；本片文件在并行改动落地前曾 exit 0。
+
+**未验边界**：独立验收、桌面 Goal 详情/State/390px、多 DPI、全量工作台套件；`feature-map --check` 报告验收表第 189 行格式变化（并发文档改动），未在本片修复。完整证据归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「正式目标管理与项目状态写入」行，交互归[工作台 §51](docs/frontend/workbench-design.md#51-正式目标管理与项目状态写入2026-10-24已实施实机未验)。
+
+## 工具面板「文件」页签后端：人工受管目录浏览与文件读取（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+用户指令「开发工具面板的后端」（附右侧工具面板截图）。核对结论：六页签中网页（P0–P2 已落地）、变更（git-read）、运行记录/轨迹/执行输出（既有 Run 投影）均有后端，真实缺口是文件页签的**受管目录浏览与工作目录文件读取**——面板文案明示「目录浏览接口尚未接入」，0058 起 `USER_ACTION` 词表只放行 GIT_READ，tool-adapters 明记「人工触发的目录浏览仍无公开入口」。按推荐口径实施（用户未答范围问询）：只开 LIST_DIRECTORY＋READ_FILE，FIND_PATHS/SEARCH_TEXT 与交互终端不做（终端协议仍待设计）：
+
+- **迁移 0134**（apps/api 与 src-tauri/resources 两处镜像）：只放宽 `ck_logical_operation_resource` 一支（FILE_READ/FILE_QUERY×USER_ACTION×绑定资源，正文以 0126 最新版逐支重述）；不建表、不回填、不改另两条 CHECK。
+- **词表**（gateway-actions.ts）：`originAllows` USER_ACTION 分支改「能力×动作」双维放行；单测先红后绿抓到并修复一处真实漏洞（FILE_READ 动作名单误含 LIST_DIRECTORY，错位组合可借道）；prepare 的 USER_ACTION 分支按动作归一目标（原实现把 target 一律折叠成受管根本身，目录子路径被丢弃——集成探针定位后修复），admit 根内判定与 0060/0087 会话读取同口径，FILE_QUERY 派发 managedRoot 不再退化为查询目录自身。
+- **新模块与端点**：`application/file-user-action.ts`＋`POST /projects/:p/managed-resources/:r/file-read`（api/file-user-action-api.ts，routes.ts 注册）。动作身份**纳入 command_id**（与 git 人工读取的仅参数确定性分界）：同命令崩溃重投只执行一次适配器、新命令产生新读取事实——目录浏览因此可刷新；审计事件 MANAGED_FILE_READ_REQUESTED 同事务落账；权限/排他/回执全复用 Gateway 既有裁决。
+- **验证（实施者自检）**：真实临时 PG＋真实目录＋真实 HTTP——`file-user-action` 集成 **17/17**（含 ASK 确认链、类型化失败不折叠、幂等/崩溃重投/新命令新事实正反例、DB CHECK 行级守卫、迁移正文只放宽）；受影响回归 `git-user-action` 15/15、`gateway` 3、`gateway-reconcile` 6、`assistant-readonly-round` 6、`assist-session-tool-calls` 30、`agent-main-loop-execution` 32（会话写 admit 分支同改）、`local-directory-access` 8 全绿；词表单测 4 文件 55/55；`apps/api tsc --noEmit` exit 0。
+- **文档**：tool-adapters 2026-10-24 段、HTTP §10.112、数据库 §113、workbench-design §14.9（三处「无服务端接口」表述更新）＋§50.6、验证计划 §20.7.1、验收表新行；`check-docs` 本片文件零错误。
+- **交付**：前端提示词 [prompts/devtools-file-browse-frontend.md](prompts/devtools-file-browse-frontend.md)（连接选择复用 GitReadPanel、树形懒展开、三态硬性要求、测试范围）——前端接线未做，不构成授权当前 Agent 实施。
+
+**剩余限制**：前端未接线（占位文案保留）；独立验收未做；真实 Windows junction/替换窗口沿 FILE_READ/FILE_QUERY 既有未闭合限制。**并行冲突观察**：工作树出现**两个 0135 迁移**（`0135_assist_session_last_message_backfill.sql` 与 `0135_workspace_context_budget.sql`，分别属不同并行会话，数据库文档 §112 归前者）——两者均不碰本片约束、互不冲突于运行面，但编号重复违反迁移惯例，需协调方重编号其一，本片未代改任何并行文件。
+
+**同日前端接线（用户指令「继续做前端」，按本 Agent 交付的前端提示词执行）**：`FileBrowsePanel`（新组件）挂入「文件」页签受管目录列表之下——连接按能力分选（浏览 FILE_QUERY／读正文 FILE_READ，缺任一给独立指引与反馈）；树形懒展开（展开未读目录才发命令、收起再展开用快照、行内「刷新」强制新 command_id）；文件预览显示正文＋size＋sha256（只读）；三态硬性要求落地（截断显式、类型化失败不折叠成空目录、ASK 等待无结果字段＋Review 链接＋批准后沿原命令继续）；命令身份四阶段恢复沿用 GitReadPanel 同一套 sessionStorage 模式。API 层新增 `readManagedFileState` client 方法＋DTO/parse（复用 git-read 同构链路）。过程中抓到并修复两处组件缺陷：失败后 open-root 的守卫挡住重试；等待批准期间目录行悬挂「正在读取」。验证：新 spec `managedFileBrowse` **8/8**＋受影响回归 `devToolsPanel` 6/6、`gitReadPanel` 21/21、`browserPreview` 11/11、`gitReadClient` 13/13；工作台 `tsc --noEmit` 本片文件零错误（全仓剩余错误属并行会话 AssistView 在途）。**并行观察**：并行会话正基于同一 client 层在 AssistView「文件」二级入口实现另一处浏览（在途、含 TS 未收窄错误），两入口并存的产品归并待裁决，本片未触碰其文件。前端实机（真实浏览器/Windows/WebView2、真实 ASK 审批）未验。
+
+## 三插件接续：GitHub 官方 Skill 登记、浏览器 Run 停止入队修复、安装级状态接线、电脑真实输入复验（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+用户 `/goal` 指令「三个内置插件（GitHub/Chrome/Windows 电脑）完整接续」。先核对工作树（40+ 并行未提交文件，全程未触碰其文件），按 P0→P1→P2 顺序落地四件事：
+
+- **GitHub 官方 Skill（§10/ADR-023 的最大遗留缺口）**：新增 `apps/api/src/skills/official-skills.ts` 独立登记（不进被归档校验冻结的 `FIRST_PARTY_REGISTRY`）——不可变身份 `github-gh@4537a92f…`、许可 MIT、来源 `cli/cli` 入登记；随包 `SKILL.md`、新增 Relay 边界附录 `skills/builtin/gh/RELAY_NOTES.md`、`LICENSE` 三文件按钉住 SHA-256 逐字校验（缺失/篡改即失败关闭，不注入）；**按需激活**＝当轮词表真实出现 `github_` 工具时在主流程 system 能力事实块后附加约 1 KiB 冻结摘要与边界块（上游 20 KB 正文从不进上下文）；`RELAY_OFFICIAL_SKILL_GITHUB=disabled` 设备级禁用（与 `RELAY_BROWSER_PROVIDER` 同一承载先例，界面入口留待后续）。上游正文未改一字；打包链核对确认 `package.json` `files` 与 `build-release.ps1` 校验均已含 `skills/builtin/gh`，`UPSTREAM.md` 过时的「尚未随包分发」接线状态行已更正。单测 `official-skills` **13/13**（身份冻结、三文件逐字校验红绿、无工具不注入、禁用生效、注入块与附录同源防漂移）。`assist-runner.ts` 主聊天路径接线注入；人设档/子代理/Run 轮次暂不注入，为已记边界。
+- **GitHub 只读片收尾**：`github-read.integration.test.ts` 的逐动作列表由四个补齐为五个（`GITHUB_ISSUE_VIEW` 进 `GITHUB_ACTIONS`/`GITHUB_TOOLS` 与已认证用例的逐动作/回执断言）；真实临时 PG 集成 **8 通过＋1 跳过**——已认证用例因本机无 gh 登录态（`%APPDATA%\GitHub CLI` 不存在）保持 skip，如实记 NOT_RUN。**GitHub 写动作边界**：按任务书在[工具适配器 §4.2](docs/architecture/tool-adapters.md#42-github-写动作最小工程协议2026-10-24-冻结未实施) 冻结最小工程协议（`GITHUB_WRITE`/RUN 来源/幂等键/逐动作只读核对/UNKNOWN 禁盲重试），未实施、未放权。
+- **浏览器 P0 缺陷（本轮最重要的修复）**：`requestBrowserSessionStop` 复用电脑 Esc 通道 `requestComputerControlStop`，而纯浏览器的 Run 根本没有 `computer_control_state` 行——`markStopRequested` 失败抛 409，**CANCEL 入队随同一事务整体回滚**，浏览器 stop 返回 200 却没有任何控制意图落库、任务永远停不下来（`browser-actions` 集成用例 `control_request_id` 断言 object≠string 暴露）。修复：新增 `requestBrowserRunStop`（锁内核对执行权→入队 CANCEL，不依赖电脑操控单行 CAS；电脑展示位尽力刷新），`browser/sessions.ts` 改走新通道；集成由红转绿 **PASSED**（6 通过＋1 真机用例显式 opt-in 跳过）。规则已写进[工作台 §36.3](docs/frontend/workbench-design.md#363-浏览器使用现有-chrome-的非激活标签页)。
+- **统一体验**：`/plugins/status`（HTTP §10.104）此前在**前端零消费者**——连接页「本机运行时是否就绪回到会话的插件面板核对」与会话面板「运行时诊断归连接页」互指成环。`ConnectionsView` 三插件行新增 `connections-tool-runtime-*` 安装级状态（就绪/未安装/未配对/未登录/不可用＋悬停原因与补救，读取失败仅本行如实说明），与「已连接/已授权」分开呈现；`connectionsSettings` **31/31**（新增 2 例）。工作台 `tsc` 本轮文件零错误（全量仍被并行在途文件挡住）。
+- **电脑**：`installShutdownHandlers` 补 `shutdownComputerRuntimeClient()`——API 停机时回收懒拉起的 runtime 子进程，不留孤儿输入通道。**真实 Windows 输入复验**：复用 10-18 遗留的自有测试记事本（内容即那条固定标记、无敏感内容），`RELAY_TEST_COMPUTER_WINDOW_ID` 显式 opt-in 跑 `computer-control` 集成 **11/11**（此前多轮该用例因桌面会话阻塞跳过；本轮桌面会话可访问，真实键鼠输入经完整 Gateway→桌面租约→Runtime 链落盘，截图读回确认两段标记并留档 `output/acceptance-raw/computer-browser-github-20261024/`）。
+
+**同日验收接续（用户指令「开始验收」，同一 Agent 实施＋复验，不冒充独立验收）**：按验收角色重跑全部声明测试并补两处证据缺口，**抓到并修复一处实施缺口**——①官方 Skill 注入初版只接普通 Agent 主流程，验收新增的集成正例经人设档（ASSISTANT_READONLY）夹具实测**不注入**；已把注入下沉到只读轮次共用执行器 `runSessionReadonlyRounds`（`assistant-readonly-round.ts`，跟随工具而不跟随会话模式，人设档/普通 Agent/子代理一致覆盖），并补三例集成断言（system 携带 `github-gh@4537a92f` 身份与边界块且不含上游正文、停用连接后消失、`RELAY_OFFICIAL_SKILL_GITHUB=disabled` 不注入且工具词表不受影响）；②`GET /plugins/status` 补真实 API 探针（`browser-read` 集成新例：三插件恒在、状态在词表内、detail 非空、no-store、响应无凭据形态）。**验收复跑成绩**：API 全量 `tsc -p tsconfig.json` exit 0（并行会话已解除阻塞）、`official-skills`+`github-read`+`github-executable` 单测 40/40、`agent-conversation-main-loop`+`tool-loop`+前两者 55/55、浏览器八套件 57/57、电脑四套件 58/58、`computer-runtime` Rust `cargo test` **20/20**；真实临时 PG 集成 `github-read` **10 通过＋1 认证跳过 PASSED**、`browser-read` **7/7 PASSED**、`browser-actions` 6 通过＋1 真机跳过 PASSED（停止修复保持绿）、`computer-control` 10 通过＋1 跳过 PASSED（真实输入 11/11 同日已通过并留档；收尾复跑时用户已关闭测试记事本，按「不结束用户活动进程、不复开窗口打断使用」沿用当日证据）。相关文档（tool-adapters §4.1、relay-skills §10、ADR-023 增量）已同步「注入跟随工具」的最终口径。
+
+**未验边界**：真实日常 Chrome 的保活复验与扩展重载（需用户手动操作）；桌面固定端口 43117 占用回退的真实启动路径（dev 窗口在用该端口，未实测）；真实已认证 GitHub 读取（无登录态）；安装包与安装态；ConnectionsView 安装级状态接线的真实浏览器点验；Run 工具循环与学习档轮次的注入；独立验收（需另一协调方，本行自检＋复验不替代）。成绩与限制归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)本轮行。**下一轮有限任务**：①用户重载扩展后复验日常 Chrome 保活/登录态复用；②官方 Skill 禁用的界面入口与 workspace 级持久化（需迁移与 UI 授权）；③按 §4.2 协议实施 GITHUB_WRITE 首片（待用户对该切片单独授权）；④Connection 页安装级状态接线的真实浏览器点验。
+
+## 聊天用量文案：「输入」改「上下文」（2026-10-24，当前 Agent 直接修复，未 commit/push）
+
+用户截图指认「每次回复下面的输入 token 看着像是本会话的而不是单次会话的」。取证 `relay_trial` 库 `model_calls`（127.0.0.1:12525）当晚两行：20:49:00 输入 4710/输出 47、20:49:50 输入 4757/输出 15，各有独立 `provider_request_id`——**数字没有算错**：聊天 API 每次调用重发完整历史，Provider 上报的 `input_tokens` 本就是该次调用的完整上下文，「输入」二字让它被读成本轮新增、把逐条递增读成会话累计错账。修复只改措辞不动口径：`AssistView.tsx` 圆环浮层与 `aria-label` 统一为「上下文 X / 65536 tokens（N%）」（`aria-label` 不再叠「上下文占用」前缀，就是浮层同一句），消息用量行改「用量：上下文 X、输出 Y tokens」；读数来源、四态区分、缓存命中率、百分比规则、`data-testid` 全部未动。验证：受影响两 spec 133 例 131 绿，2 红均为登记在案的并行存量（`assistantModeSwitch` 资料入口邻接断言、`collaborationWorkspace` `.agent-chat-source-options` 结构选择器，均不读文案）；`tsc --noEmit` 报错全在并行会话文件（relayClient/goal 族），`AssistView.tsx` 零错误；check-docs 的 28 条失败均为存量断链、不涉及本轮文件。规则同步[工作台 §28.8 尾部 2026-10-24 条](docs/frontend/workbench-design.md#288-v42-工作详情与成果预览接续2026-10-15)。未验：真实 WebView2 下长句浮层的实际宽度与换行。
+
+## 验收结果优化轮：goal 控制归一缺口＋DEV-0110＋首条目标投影（2026-10-24，用户指令「根据验收结果优化」，当前 Agent 直接执行，未 commit/push）
+
+接上一轮电脑操控插件实机验收的三条发现，逐条定性并修复：
+
+- **①goal 控制意图归一缺口（确定性缺陷，最高价值）**：验收观察项「PAUSING 约 2 分钟未收敛」经查库定性为真缺陷——试用库里另有**一条用户真实目标 CANCELLING 停留 3 天**（10-21 至今）。根因：桌面 supervisor 按需拉起一次性 worker（`--once`/`--assist-once`，supervisor 日志 UTC 时间戳与 21:42 生成记录互证），而 `runAssistGoalTick` 只在持续 Worker 循环里运行——桌面拓扑下 PAUSING/CANCELLING、轮次归一与下一轮投递在两次派发之间**无人收口**。修复（`supervisor-main.ts`）：主循环加时间闸 goal tick（`RELAY_SUPERVISOR_GOAL_TICK_MS` 默认 2s，测试可调 0），调用同一个 `runAssistGoalTick`，置于 assist 派发之后（刚结算的轮次同一 pass 归一）；函数级唯一推进 Owner 不变，租约与锁定行短事务保证并发安全。**端到端验证**：独立 supervisor 直连试用库（真循环）＋真实领域入口 `resumeGoal`→`pauseGoal`，6 秒内自动归一 PAUSED，期间 supervisor 自动投递并结算一轮（round_count 1→2），日志 `supervisor_goal_tick` 在案；修复前同状态停留 30 分钟/3 天。API `tsc` exit 0、dist 已重建，桌面下次启动经 stage-api 写入时间自动暂存。
+- **②DEV-0110（缓存命中率致工具栏换行/输入卡增高，2026-10-22 退回项）修复**：`.agent-chat-usage` `flex:none`→可收缩，命中率文本作收缩承担者（ellipsis），圆环 `flex:none` 恒不缩——命中文本出现先截断自己，不挤工具行换行。新增浏览器回归 `tests/browser/composerCacheHitStability.spec.ts` **2/2**（1280/1600 两档，有无命中率两夹具下输入卡与底栏高度差 <0.5px，并断言命中率文本在场证明条件真实切换）。
+- **③首条 `/goal` 投影缺口**：实机核对确认**前缀解析服务端全链路生效**（库中会话 `chat_mode=GOAL`、目标行由首条消息命令建立并挂上回复）——验收时目标卡不出现是客户端投影缺口：目标重读效果增加 `confirmedFirstMessageCommandId` 依赖，首条 202 确认后目标卡随服务端事实出现。
+
+**验证**：①见上；②浏览器 2/2；③`chatPlanGoal` 15/15、`draftGuardCoexistence`、`folderFirstConversation`、`sessionRoundTrace`、`firstMessageSendStability` 隔离全绿，`collaborationWorkspace` 仅余存量 `agent-chat-source-options` 红；本轮改动文件双端 `tsc` 零错误（工作台全量剩余错误均在并行会话在改文件）。期间并行会话的 `FileBrowsePanel.tsx` 一度语法错误挡住全部 vitest/浏览器（恢复后复跑）。成绩与未验边界归[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)「验收结果优化轮」行。**未验边界**：桌面整链真机复验未做（同一代码路径已由独立 supervisor 验证）；DEV-0110 的 A/B 摘除对照未做；关窗守卫仍未真机点验。未 commit/push。
+
+## Agent 基础闭环 UI 一致性专项：DEV-0105 停止文案＋非持久附件离页保护（2026-10-24，当前 Agent 直接执行，未 commit/push）
+
+用户 `/goal` 指令「基础 Agent 执行闭环与 UI 一致性专项」，P0×2 已修复、P1-1/P1-2 完成核验：
+
+- **P0-1（DEV-0105 退回项「停止提示误报计划模式」）**：`ChatModeHint` 此前在 `goalStopping` 时无条件写「停下后才会进入计划模式」；服务端 `setChatMode` 切走 GOAL 时会话模式立即落 CHAT/PLAN、目标才慢慢进 `PAUSING`，退出到普通模式时该句是错的。改为按**服务端目标状态**（`PAUSING`/`CANCELLING`）投影：只报目标事实（暂停可从目标卡恢复／取消终止不再推进），不按会话模式宣称去向；当前档位由徽标承担。`AssistView` 改传 `goalStatus`。回归：`chatPlanGoal` 15/15（新增接线用例「活动目标在途退出 GOAL：说明行报安全停止不误报计划模式；目标 PAUSED 后说明行消失」＝迟到回执与重载恢复同投影）。
+- **P0-2（协作页守卫恒 false）**：`CollaborationView` 的 `DraftGuard` 原写死 `hasUnsavedChanges: () => false`，暂存/上传中附件、技能输入、来源选择等**无本机持久化**的输入离页即丢且无人拦。修法：`AssistNavigationState` 新增 `unsaved`（与 `dirty` 分开——可恢复的会话/首条正文草稿只进 `dirty`），AssistView 两处导航上报、`LearningRecordsPanel` 同步投影；协作页守卫照实上报，App 路由阻断/beforeunload/桌面关闭确认随之生效；页内切换（换目录、选会话、切任务）在无未决命令但 `unsaved` 为真时弹「丢弃并继续/保留并继续编辑」确认，丢弃只清本页输入器登记的事实。期间修正一处自错：首条草稿其实已按 `firstDraftScope` 持久化（`folderFirstConversation` P2/A1 反例拦住），已从 `unsaved` 移除。回归：新增 `collaborationWorkspace`「不可恢复输入的离页保护」3 例（页内切目录保留/丢弃、跨页导航拦附件、首条附件拦而正文不拦）。
+- **P1-1 核验（无确定性缺陷，未改代码）**：`SessionRoundTrace` 已按服务端五态呈现（REQUESTED/SETTLED/REJECTED/ABANDONED/UNKNOWN），拒绝原因原样回显——ASK 写入的「等待人工批准，原 operation_id=…」以 REJECTED+原因如实可见（会话无异步审批通道，服务端设计如此，不冒充已排队）；Run 轨迹另有 WAITING_APPROVAL 档（既有用例「等待批准与拒绝各有各的说法」）。在途 2s 轮询、终态补读一次；流式预览已实现（400ms 轮询、终态删预览回源数据库，最终回复以 DB 结算为唯一权威）。消息行区分 正在生成/生成失败(+errorCode+providerErrorKind 指引)/已取消；停止键 stopping 态承载「正在停止」。
+- **P1-2 核验**：DEV-0117 已于 2026-10-23 修复（本轮 `folderFirstConversation` 含「首条消息绑定目录后左栏与顶栏按服务端事实重分组」通过）；DEV-0103 三层版式已落地（`goalCardLayout.spec.ts` 为浏览器侧证据，本轮未复跑 Playwright）。**DEV-0110「缓存命中率出现导致工具栏换行、输入卡增高」仍标退回**：hit-rate 文本有 12rem 上限与省略号，但出现时右端组变宽是否仍挤压换行需真实 Chromium 几何复测；本轮预算已满，记为下一轮候选（复现步骤：真实窗口 1280px 会话内首次命中缓存后逐帧量输入卡高度）。
+
+**验证**：受影响面定向 7 文件 199 例 196 通过（`collaborationWorkspace`+`chatPlanGoal`+`draftGuardCoexistence`+`folderFirstConversation`+`sessionRoundTrace`+`composerImageAttachments`+`assistantModeSwitch`），3 失败均为存量/并行在途红（`agent-chat-source-options`、`message-attachment-image` 选择器已被并行改造移除，本轮未触碰其文件；`agent-chat-source-options` 在 src 全文检索为零命中）；本轮改动文件 `tsc --noEmit` 零错误，API 侧 `tsc` exit 0，剩余工作台错误全部位于并行会话在改文件（`relayClient.ts`/`createGoalEntry`/`goalProjectLink` 等，两轮采样间清单已变动，非本轮产物）。文档：工作台 §17.13.2、§44.2；`check-docs` 本轮触及文件零新增错误。**未验边界**：独立验收未做；真实 Windows/WebView2、真实切目录/关窗行为、Playwright 浏览器几何未复验。未 commit/push。
 
 ## 左栏「未开始」误标：0111 未回填的历史会话（2026-10-24，当前 Agent 直接修复，未 commit/push）
 

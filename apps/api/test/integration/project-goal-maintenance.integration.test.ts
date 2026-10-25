@@ -283,3 +283,55 @@ test('Project 改名只更新展示标题并通过各入口读回', async () => 
   assert.equal((await editProject(workspaceId, project.id, archivedRevision, randomUUID(), '归档后改名')).status, 409);
   assert.equal((await editProject(workspaceId, project.id, projectBefore.revision, commandId, '新项目名')).status, 200);
 });
+
+test('P0 场景：Goal 关联两个项目、编辑、改名、解除一个、归档后仍可读历史', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const foreignWorkspaceId = await createWorkspace(app.db);
+  const goal = await createGoal(workspaceId, '端到端目标');
+  const first = await createProject(workspaceId, '项目一');
+  const second = await createProject(workspaceId, '项目二');
+  await linkGoal(workspaceId, first.id, goal.id);
+  await linkGoal(workspaceId, second.id, goal.id);
+
+  const editCommand = randomUUID();
+  const edited = await editGoal(workspaceId, goal.id, goal.revision, editCommand, '端到端目标（修订）', '修订说明');
+  expectCommandAccepted(edited, 200, editCommand);
+  const goalRevision = (edited.body as { result: { revision: string } }).result.revision;
+
+  const firstBeforeRename = await readProject(workspaceId, first.id);
+  const renameCommand = randomUUID();
+  const renamed = await editProject(workspaceId, first.id, firstBeforeRename.revision, renameCommand, '项目一（改名）');
+  expectCommandAccepted(renamed, 200, renameCommand);
+  assert.equal((await readProject(workspaceId, first.id)).title, '项目一（改名）');
+
+  const firstBeforeUnlink = await readProject(workspaceId, first.id);
+  const unlinkCommand = randomUUID();
+  const unlinked = await api.post(workspacePath(workspaceId, `/projects/${first.id}/goal-unlinks`), {
+    command_id: unlinkCommand, expected_revision: firstBeforeUnlink.revision,
+    goal_id: goal.id, expected_impacted_task_ids: [],
+  });
+  expectCommandAccepted(unlinked, 200, unlinkCommand);
+  assert.deepEqual((await api.get(workspacePath(workspaceId, `/projects/${first.id}/goals`))).body, { items: [] });
+
+  const archiveCommand = randomUUID();
+  const archived = await archiveGoal(workspaceId, goal.id, goalRevision, archiveCommand);
+  expectCommandAccepted(archived, 200, archiveCommand);
+  const archivedRevision = (archived.body as { result: { revision: string } }).result.revision;
+
+  const goalAfter = await readGoal(workspaceId, goal.id);
+  assert.deepEqual(goalAfter, { id: goal.id, title: '端到端目标（修订）', description: '修订说明',
+    status: 'ARCHIVED', revision: archivedRevision });
+  const projectsAfter = await api.get(workspacePath(workspaceId, `/goals/${goal.id}/projects`));
+  assert.deepEqual((projectsAfter.body as { items: { project_id: string }[] }).items.map((item) => item.project_id),
+    [second.id]);
+  const contextAfter = await api.get(workspacePath(workspaceId, `/goals/${goal.id}/work-context?status=ALL`));
+  assert.deepEqual((contextAfter.body as { projects: { id: string }[] }).projects.map((item) => item.id),
+    [second.id]);
+  assert.equal((await readProject(workspaceId, first.id)).title, '项目一（改名）');
+  assert.equal((await readProject(workspaceId, second.id)).id, second.id);
+  const archivedList = await api.get(workspacePath(workspaceId, '/goals?status=archived'));
+  assert.equal((archivedList.body as { items: { id: string }[] }).items.some((item) => item.id === goal.id), true);
+  assert.equal((await api.get(workspacePath(foreignWorkspaceId, `/goals/${goal.id}`))).status, 404);
+  assert.equal((await archiveGoal(workspaceId, goal.id, goalRevision, archiveCommand)).status, 200);
+  assert.equal((await archiveGoal(workspaceId, goal.id, archivedRevision, randomUUID())).status, 409);
+});

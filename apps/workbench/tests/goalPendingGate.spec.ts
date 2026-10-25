@@ -64,7 +64,7 @@ function router(routes: Routes, state: RouterState) {
       }
       if (path === `${apiRoot}/goals`) {
         return response(201, { command_id: body.command_id, committed_at: "2026-10-22T00:00:00Z",
-          result: { goal_id: goalId, status: "ACTIVE", revision: "1" } });
+          result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
       }
       return response(200, { command_id: body.command_id, committed_at: "2026-10-22T00:00:00Z",
         result: { project_id: body.project_id, revision: "3", goal_ids: [goalId] } });
@@ -76,7 +76,7 @@ function router(routes: Routes, state: RouterState) {
       if (routes.receiptHit === true && issued) {
         const commandType = issued.path.endsWith("/goal-links") ? "LinkProjectGoal" : "CreateGoal";
         const result = commandType === "CreateGoal"
-          ? { goal_id: goalId, status: "ACTIVE", revision: "1" }
+          ? { goal_id: goalId, status: "ACTIVE", revision: "0" }
           : { project_id: issued.body.project_id, revision: "3", goal_ids: [goalId] };
         return response(200, { command_id: commandId, command_type: commandType,
           committed_at: "2026-10-22T00:00:05Z", result });
@@ -164,6 +164,29 @@ describe("Goal 创建与关联的未决命令准入", () => {
     expect(dialog).toContain(commandId);
     expect(dialog).not.toContain("丢弃草稿并离开");
     expect(view.wrapper.get('[data-testid="goal-pending"]').exists()).toBe(true);
+  });
+
+  it("待核对时可经「离开并保留待核对」离开，回到本页仍按原 ID 核对", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await view.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = state.posts[0]?.body.command_id as string;
+
+    // 离开出口：原 ID 已按作用域暂存，导航放行，不靠弹层硬拦在本页。
+    await view.router.push("/projects"); await flush();
+    const leave = document.querySelector('[data-testid="pending-keep-and-leave"]');
+    expect(leave).not.toBeNull();
+    leave!.dispatchEvent(new MouseEvent("click", { bubbles: true })); await flush();
+    expect(view.router.currentRoute.value.query).toEqual({});
+    expect(view.wrapper.find('[data-testid="goal-pending"]').exists()).toBe(false);
+
+    // 回到本页：原命令按作用域恢复，期间没有发出第二条 Goal 命令。
+    await view.router.push("/projects?view=goal"); await flush();
+    expect(view.wrapper.get('[data-testid="goal-pending"]').text()).toContain(commandId);
+    expect(state.posts.filter((post) => post.path === `${root}/goals`)).toHaveLength(1);
   });
 
   it("整页重开按当前 Workspace 作用域恢复原命令，原 ID 重试可收口", async () => {

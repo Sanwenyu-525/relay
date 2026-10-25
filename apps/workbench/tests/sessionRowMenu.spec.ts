@@ -42,22 +42,24 @@ interface Row {
   created_at: string;
   updated_at: string;
   /**
-   * 0111 的活动键：为 null 就是「这段讨论还没有消息」。行上的「未开始」标记与菜单里
-   * 有没有「分叉」都只认这一个字段（2026-10-24）。
+   * 0111 的活动键：只用于排序，不再承担「有没有消息」的判断（2026-10-24 起）。
+   * 行上的「未开始」标记与菜单里的「分叉」改读服务端读时派生的 `has_messages`。
    */
   last_message_at: string | null;
+  /** 服务端读时派生：这段讨论有没有消息（直接数消息表）。 */
+  has_messages: boolean;
 }
 
 const row = (n: number, title: string, at: string): Row => ({
   id: id(n), project_id: null, task_id: null, title, status: "ACTIVE", revision: "1",
   pinned_at: null, unread_at: null,
   created_at: `2026-10-0${n}T${at}:00Z`, updated_at: `2026-10-0${n}T${at}:00Z`,
-  last_message_at: `2026-10-0${n}T${at}:00Z`
+  last_message_at: `2026-10-0${n}T${at}:00Z`, has_messages: true
 });
 
-/** 还没有落过一条消息的会话：除活动键外与普通行同形（这正是它难分辨的地方）。 */
+/** 还没有落过一条消息的会话：除活动键与派生事实外与普通行同形（这正是它难分辨的地方）。 */
 const emptyRow = (n: number, title: string, at: string): Row =>
-  ({ ...row(n, title, at), last_message_at: null });
+  ({ ...row(n, title, at), last_message_at: null, has_messages: false });
 
 const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
@@ -409,10 +411,28 @@ it("还没有消息的会话：行上标「未开始」，菜单里没有分叉�
   expect(actions).not.toContain("分叉这段讨论");
   expect(actions).toContain("重命名");
 
-  // 说过话的那一条照旧能分叉：判据是活动键，不是「这一列里有没有空会话」。
+  // 说过话的那一条照旧能分叉：判据是消息事实，不是「这一列里有没有空会话」。
   await openMenu(container, id(2));
   expect([...panelOf(container, id(2))!.querySelectorAll(".recent-work-row-action")]
     .map((button) => (button.textContent ?? "").trim())).toContain("分叉这段讨论");
+});
+
+it("活动键为空但确有消息：不标「未开始」且照常可分叉（读时派生的事实，2026-10-24 用户确认）", async () => {
+  // 历史缺陷的形态：0111 之前的会话有消息、活动键却是 NULL。标记与分叉必须信消息表的派生事实，
+  // 否则同一条会话会在左栏说「未开始」、点进去却有正文（用户截图指认的那处自相矛盾）。
+  const drifted: Row = { ...row(1, "活动键漏推进的讨论", "01"), last_message_at: null, has_messages: true };
+  const fake = fakeServer([drifted, emptyRow(2, "真的空会话", "02")]);
+  const { container } = await mount(fake);
+
+  expect(rowOf(container, id(1))?.querySelector('[data-testid="recent-work-not-started"]')).toBeNull();
+  expect(container.querySelector(`[data-testid="recent-work-${id(1)}"]`)?.getAttribute("aria-label"))
+    .not.toContain("未开始");
+  // 确有历史，分叉入口照常出现；空会话那一条仍不出现。
+  await openMenu(container, id(1));
+  expect([...panelOf(container, id(1))!.querySelectorAll(".recent-work-row-action")]
+    .map((button) => (button.textContent ?? "").trim())).toContain("分叉这段讨论");
+  expect(rowOf(container, id(2))?.querySelector('[data-testid="recent-work-not-started"]')?.textContent)
+    .toBe("未开始");
 });
 
 it("归档即隐藏：行移出默认列表，「已归档」那一段按需才读，重开回到原处", async () => {

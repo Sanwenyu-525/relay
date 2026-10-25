@@ -246,7 +246,9 @@ describe("P07 Review Inbox", () => {
     const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
     expect(dialog.text()).toContain(commandId);
     expect(mounted.wrapper.find('[data-testid="discard-draft-leave"]').exists()).toBe(false);
-    await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
+    // ReviewDecisionPanel 的待核对命令没有离页恢复途径：弹层不提供离开出口，只有留在本页。
+    expect(mounted.wrapper.find('[data-testid="pending-keep-and-leave"]').exists()).toBe(false);
+    await dialog.findAll("button").find((button) => button.text() === "留在本页核对回执")!.trigger("click");
     await mounted.wrapper.get('[data-testid="relay-connection-open"]').trigger("click");
     const connectionDialog = new DomWrapper(document.body);
     await connectionDialog.get('[data-testid="relay-disconnect"]').trigger("click");

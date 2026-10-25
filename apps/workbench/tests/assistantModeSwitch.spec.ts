@@ -684,7 +684,8 @@ describe("会话模式单选框", () => {
       expect(document.querySelector('[data-testid="assist-attach-skill"]')?.hasAttribute("disabled")).toBe(false);
       expect(document.querySelector('[data-testid="assist-attach-connectors"]')?.getAttribute("title"))
         .toContain("连接器随项目配置");
-      // 目录入口不在「+」里（2026-10-19）：一级只有四项，目录归协作页目录细条。
+      // 目录入口不在「+」里（2026-10-19）：目录归协作页目录细条；2026-10-24 新增的
+      // 上传附件/文件/我的产物不改变这条（文件二级只读当前已绑定目录，不提供改目录入口）。
       expect(document.querySelector('[data-testid="assist-attach-folder"]')).toBeNull();
     } finally { view.unmount(); }
   });
@@ -700,7 +701,8 @@ describe("会话模式单选框", () => {
     try {
       await view.wrapper.get('[data-testid="assist-attach"]').trigger("click");
       await flush();
-      // 一级只剩四项；目录与「更换目录」只由目录细条一处承担，弹层里不再放第二个入口。
+      // 一级仍保留四个既有入口（2026-10-24 另增三项，见 composerAttachMenu 契约测试）；
+      // 目录与「更换目录」只由目录细条一处承担，弹层里不再放第二个入口。
       for (const key of ["sources", "skill", "command", "connectors"]) {
         expect(document.querySelector(`[data-testid="assist-attach-${key}"]`)).not.toBeNull();
       }

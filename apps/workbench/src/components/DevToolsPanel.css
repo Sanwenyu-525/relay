@@ -114,3 +114,16 @@
 .devtools[data-tab="WEB"] { max-height: none; flex: 1 1 auto; min-height: 0; }
 .devtools[data-tab="WEB"] .devtools-body { overflow: hidden; display: flex; flex-direction: column; }
 .devtools[data-tab="WEB"] > .devtools-pane > .devtools-body > div { flex: 1 1 auto; min-height: 0; display: flex; }
+
+/* 文件页签的目录浏览与文件预览（2026-10-24 接入 HTTP §10.112）。 */
+.file-browse { display: flex; flex-direction: column; gap: var(--relay-space-2); }
+.file-browse-fields { display: flex; flex-direction: column; gap: var(--relay-space-2); }
+.file-browse-list { list-style: none; margin: 0; padding: 0 0 0 var(--relay-space-2); }
+.file-browse-item { display: block; }
+.file-browse-row { display: flex; align-items: center; gap: var(--relay-space-1); min-width: 0; }
+.file-browse-row > .file-browse-toggle { flex: 0 0 auto; }
+.file-browse-refresh { flex: 0 0 auto; font-size: var(--relay-font-size-meta); }
+.file-browse-file { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-align: left; font-size: var(--relay-font-size-meta); }
+.file-browse-toggle { font-size: var(--relay-font-size-meta); }
+.file-browse pre.devtools-output { margin: var(--relay-space-2) 0 0; }

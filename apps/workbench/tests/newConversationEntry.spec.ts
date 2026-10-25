@@ -322,7 +322,9 @@ describe("新对话直接起步", () => {
       await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
       expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
       expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
-      const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "保留并继续编辑");
+      // 无任务作用域的首条命令没进本页恢复区：离开即丢核对入口，弹层不提供离开出口。
+      expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
+      const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "留在本页核对回执");
       keep!.click(); await flush();
       // 未决命令在正文只留一行状态；核对弹窗从那一行点开（不再自动弹出，也不再把细节铺在正文）。
       await openUnresolvedDialog(failure === "CREATE_RESPONSE_LOST" ? "assist-first-create-pending" : "assist-first-pending");

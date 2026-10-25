@@ -7,8 +7,10 @@ import ProjectResumeView from "./ProjectResumeView";
 import ResponsiveRail from "../components/ResponsiveRail";
 import PageHeader from "../components/PageHeader";
 import DailyContinuationCard from "../components/DailyContinuationCard";
+import ProjectStatePanel from "../components/ProjectStatePanel";
+import ProjectTitleEditor from "../components/ProjectTitleEditor";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
-import type { RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
+import type { RelayActivityItem, RelayApiClient, RelayDecision, RelayProject, RelayProjectState, RelayReview, RelayTaskSummary } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { executorLabels, interactionModeLabels, phaseLabel, projectTypeLabels, reviewKindLabels, taskStatusLabels } from "../lib/labels";
@@ -74,7 +76,8 @@ function overviewTaskReason(task: RelayTaskSummary): string {
 async function readOverviewFacts(client: RelayApiClient, id: string): Promise<OverviewFacts> {
   const [project, state] = await Promise.all([client.getProject(id), client.getProjectState(id)]);
   if (project.id !== id || state.projectId !== id) throw new Error("总览查询返回了其他项目的事实。");
-  const [goalResult, reviewResult, decisionResult, nextResult, taskPageResult, ...artifactResults] = await Promise.allSettled([
+  const [goalResult, reviewResult, decisionResult, nextResult, taskPageResult,
+    ...artifactResults] = await Promise.allSettled([
     client.getProjectGoals(id), client.getReviews(), client.getDecisions(id),
     state.nextActionTaskId ? client.getTask(state.nextActionTaskId) : Promise.resolve(null),
     client.getProjectTasksPage(id),
@@ -127,9 +130,11 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   // 阻塞来自真实任务事实：BLOCKED 状态、前置未完成或未解除阻塞项（口径同 ProjectTasksView）。
   const blockedTasks = tasks.filter((task) => task.status === "BLOCKED" ||
     task.blockingTaskIds.length > 0 || task.unresolvedBlockerIds.length > 0);
+  const stateBlockers = state.blockers.filter((blocker) => blocker.resolvedAt === null);
   const blockerNotes = [
     facts.nextActionFailed ? `State 引用的下一步 Task ${state.nextActionTaskId} 本次单读失败。` : null,
-    ...blockedTasks.map((task) => `「${task.title}」${overviewTaskReason(task)}`)
+    ...blockedTasks.map((task) => `「${task.title}」${overviewTaskReason(task)}`),
+    ...stateBlockers.map((blocker) => `State 登记阻塞「${blocker.reason}」（${blocker.targetKind} ${blocker.targetId}）`)
   ].filter(Boolean) as readonly string[];
   return <section className="skill-page project-overview" data-testid="project-overview-live"><div className="page-layout"><div className="page-primary">
     <p className="metadata-row"><Link className="inline-link" to="/projects">← 全部项目</Link></p>
@@ -161,7 +166,9 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
         <div><dt>状态版本</dt><dd>State v{state.revision} · Project v{project.revision}</dd></div>
         <div><dt>当前阶段</dt><dd>{phaseLabel(state.phaseKey)}</dd></div>
         <div><dt>当前目标</dt><dd>{goals === null ? <span className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</span>
-          : activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : "当前没有关联 Goal；不据此推断项目没有目标。"}</dd></div>
+          : activeGoals && activeGoals.length ? activeGoals.map((goal, index) => <span key={goal.goalId}>
+            {index > 0 ? "；" : null}<Link className="inline-link" to={`/goals/${goal.goalId}`}>{goal.title}</Link>
+          </span>) : "当前没有关联 Goal；不据此推断项目没有目标。"}</dd></div>
         <div><dt>下一步</dt><dd>{state.nextActionTaskId === null ? "尚未指定" : nextAction
           ? <Link className="inline-link" to={`/tasks/${nextAction.id}`}>{nextAction.title}</Link>
           : `State 引用 Task ${state.nextActionTaskId}，本次单读失败；不以其他任务替代。`}</dd></div>
@@ -169,7 +176,12 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       </dl>
       {/* 2026-10-24 用户指令：服务端待接入字段收成开发注记；页面呈现原则归代码与文档，不再上屏。 */}
       <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：State 的确认人与确认时间、「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、任务、选用产物与 Decision。</p>
+      <ProjectTitleEditor client={client} project={project} archived={archived}
+        onChanged={() => setReload((value) => value + 1)} />
     </section>
+    <ProjectStatePanel client={client} projectId={id} projectType={project.projectType}
+      state={state} tasks={tasks} goals={goals} archived={archived}
+      onChanged={() => setReload((value) => value + 1)} />
     <section className="resume-section" data-testid="project-overview-tasks"><h2>任务</h2>
       {tasksReadFailed ? <p className="warning-callout">任务列表本次读取失败，无法列出项目任务；State 下一步仍单独核对。</p>
         : <>
@@ -198,7 +210,11 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       {decisions === null ? <p className="warning-callout">Decision 本次读取失败，决定清单待核对。</p>
         : decisions.length ? <ul className="run-list">{decisions.slice(0, 5).map((decision) => <li key={decision.id}><strong>{decision.title}</strong> · {decision.status} · v{decision.currentVersion}<small><Link className="inline-link" to={`/projects/${id}/knowledge?kind=DECISION&item=${decision.id}`}>查看依据</Link> · 更新于 {new Date(decision.updatedAt).toLocaleDateString("zh-CN")}</small></li>)}</ul>
           : <p className="helper-text">本次查询未返回项目 Decision。</p>}
+      {state.risks.length > 0 && <><h3>已确认风险</h3>
+        <ul className="run-list">{state.risks.map((risk) => <li key={risk.riskId}>
+          <strong>{risk.statement}</strong><small>确认引用 {risk.confirmationRef} · 来源 {risk.sourceRef}</small></li>)}</ul></>}
     </section>
+    <ProjectRecentActivity client={client} projectId={id} />
     <details className="page-explanation"><summary>状态与版本说明</summary><p className="helper-text">项目状态来自人工确认的 State；AI 提案不会自动改写 State，摘要可追溯到对应版本。产物只列 State 当前选用的版本引用，不代表最新版本；决定来自项目 Decision 查询。</p></details>
   </div><ResponsiveRail label="查看待判断与项目入口" title="待判断与入口">
     <div className="rail-content">
@@ -210,6 +226,34 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       <section className="rail-section"><h3>项目入口</h3><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/tasks`}>项目任务</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/knowledge`}>项目资料</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/workbench`}>项目工作台</Link></section>
     </div>
   </ResponsiveRail></div></section>;
+}
+
+/** 最近活动单独读取：失败只影响本区，不拖慢或改写接续摘要与状态事实。 */
+function ProjectRecentActivity({ client, projectId }: { client: RelayApiClient; projectId: string }) {
+  const [items, setItems] = useState<readonly RelayActivityItem[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const version = useRef(0);
+  useEffect(() => {
+    const request = ++version.current;
+    void client.getActivities({ projectId, limit: 5 }).then((page) => {
+      if (request !== version.current) return;
+      setItems(page.items); setNextCursor(page.nextCursor);
+    }).catch(() => {
+      if (request === version.current) { setItems(null); setFailed(true); }
+    });
+    return () => { version.current++; };
+  }, [client, projectId]);
+  return <section className="resume-section" data-testid="project-overview-activity"><h2>最近活动</h2>
+    <p className="helper-text">只读最近 5 条项目活动{nextCursor ? "；还有更早记录未读，不能当作完整历史"
+      : "；本次查询未返回更早记录"}。</p>
+    {failed ? <p className="warning-callout">活动本次读取失败，最近进展待核对。</p>
+      : items === null ? <p className="helper-text">正在读取最近活动…</p>
+      : items.length ? <ul className="run-list">{items.map((item) => <li key={item.id}>
+        <strong>{item.summary}</strong><small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.eventType}</small>
+      </li>)}</ul> : <p className="helper-text">本次读取的最近 5 条中没有活动记录。</p>}
+    <Link className="inline-link" to={`/activity?project_id=${encodeURIComponent(projectId)}`}>查看完整动态</Link>
+  </section>;
 }
 
 function FixtureProjectOverview() {

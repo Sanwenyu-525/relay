@@ -28,10 +28,10 @@ import SessionRowMenu, { type SessionRowMenuHandle, type SessionRowPatch } from 
  *    悬停/聚焦/已勾选时换成 14px 复选框，标题可用宽一像素都不减——这一列的下限只有 160px，
  *    常驻让出一列会直接吃掉两个汉字。显形规则与 ⋯ 完全一致（`display` 切换，静止态不占位），
  *    因此行高、行距与密度基线都不变（`recentWorkRailDensity.spec.ts` 仍在守）。
- * 6. **「未开始」只在还没有消息的会话上出现（2026-10-24）。** 服务端的 `lastMessageAt` 为空
- *    就是这段讨论还没有落过一条消息；这类空会话与说过话的会话在左栏同形同标题，点开只有
- *    欢迎空态。标记用与置顶徽标同一形制的一枚 caption 文字，不新开颜色、不加第二行：
- *    它说的是「这一行还没有内容」，不是强调。
+ * 6. **「未开始」只在还没有消息的会话上出现（2026-10-24）。** 服务端读时派生的
+ *    `hasMessages` 为 false 就是这段讨论还没有落过一条消息；这类空会话与说过话的会话在左栏
+ *    同形同标题，点开只有欢迎空态。标记用与置顶徽标同一形制的一枚 caption 文字，
+ *    不新开颜色、不加第二行：它说的是「这一行还没有内容」，不是强调。
  */
 
 /** 浮层与锚点之间的间距、以及离视口边缘的留边；都取 space.2（8px）。 */
@@ -136,11 +136,11 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
   const cardId = `recent-work-summary-${testId}`;
   /**
    * 还没有消息的会话（2026-10-24 用户截图指认「已有会话打开是新建会话欢迎页」）。
-   * 判据只认服务端给的 `lastMessageAt`（0111 的活动键）：空会话与说过话的会话在左栏
-   * 同形同标题（标题只由 `关于<目标>` 生成），点进去只剩欢迎空态，读起来像「已有会话被清空了」。
-   * 标记因此必须在这一行就看得见，而不是等点开才发现。
+   * 判据只认服务端读时派生的 `hasMessages`：它直接看消息表有没有行，不拿活动键
+   * `lastMessageAt` 的可空性推断——活动键漏推进时，空会话标记就会对正文说谎。
+   * 标记必须在这一行就看得见，而不是等点开才发现。
    */
-  const notStarted = session !== undefined && session.lastMessageAt === null;
+  const notStarted = session !== undefined && !session.hasMessages;
   const show = useCallback((element: HTMLElement) => setAnchor(element), []);
   const hide = useCallback(() => setAnchor(null), []);
   // 操作面板打开时不再压一张摘要卡：同一时刻这一行只出一个浮层。

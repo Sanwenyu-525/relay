@@ -3564,6 +3564,16 @@ html[data-motion="off"] .feedback-card {
   margin-top: var(--relay-space-4);
 }
 
+/* 守卫弹层里的原命令 ID：独立成行、标签弱化，ID 用 .hash-code 等宽短码呈现，不折进正文句子。 */
+.dialog-command-id {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-3) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+}
+
 .mobile-navigation-list {
   display: flex;
   flex-direction: column;

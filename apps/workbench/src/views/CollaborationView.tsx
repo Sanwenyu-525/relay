@@ -256,11 +256,16 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   /**
    * 唯一还会拦住切换的事实：原命令结果待核对。未发送草稿不再进入这里——
    * 它按会话留在本机，切走不丢，回来原样恢复（2026-10-19 用户指令）。
+   * proceed 只在待核对命令已进本页恢复区（recoveries）时保留：那种切换不丢
+   * 命令身份，弹层提供「切换并保留待核对」出口（2026-10-24 用户指令）。
    */
-  const [transition, setTransition] = useState<{ commandId: string } | null>(null);
+  const [transition, setTransition] = useState<{ commandId: string; proceed: () => void } | null>(null);
   /** 页内切换的丢弃确认（P0-2）：不可恢复输入在场时切换先过这里。 */
   const [unsavedTransition, setUnsavedTransition] = useState<{ proceed: () => void } | null>(null);
   const [recoveries, setRecoveries] = useState<readonly RecoveryRecord[]>(() => readRecovery(client));
+  // 守卫闭包要读「当前」恢复区（判定待核对命令离开后是否仍可核对），state 闭包会过期。
+  const recoveriesRef = useRef(recoveries);
+  recoveriesRef.current = recoveries;
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -354,6 +359,12 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
        */
       hasUnsavedChanges: () => navigationRef.current.unsaved,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
+      // 本页恢复区（collab-recovery）按 sessionStorage 持久化命令身份：pending 已进
+      // 恢复区时离开页面不丢核对入口，App 守卫弹层据此提供「离开并保留待核对」。
+      pendingRecoversAfterLeave: () => {
+        const commandId = navigationRef.current.pending?.commandId;
+        return commandId != null && recoveriesRef.current.some((item) => item.commandId === commandId);
+      },
       discard: () => { navigationRef.current.discard?.(); navigationRef.current = cleanNavigation; },
       // 「保留并继续编辑」的焦点恢复交给编辑器登记的存活恢复目标（AssistView 上报）；
       // 恢复由 App 守卫弹层在关闭与默认回焦之后调用，这里只做转发。
@@ -770,9 +781,22 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     const state = navigationRef.current;
     const guard = currentDraftGuard();
     const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
-    if (commandId) { setTransition({ commandId }); return; }
+    if (commandId) { setTransition({ commandId, proceed }); return; }
     if (state.unsaved) { setUnsavedTransition({ proceed }); return; }
     proceed();
+  }
+
+  /**
+   * 「切换并保留待核对」：原命令已在本页恢复区，切换后仍可查回执收口。切换前先把
+   * 导航状态里的 pending 摘下来——否则新会话挂载后的首轮「无待核对」上报会被
+   * reportNavigation 当成收口，把恢复区里这条未核对命令过滤掉。
+   */
+  function keepPendingAndProceed() {
+    const target = transition;
+    setTransition(null);
+    if (target === null) return;
+    navigationRef.current = cleanNavigation;
+    target.proceed();
   }
 
   /**
@@ -1224,6 +1248,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       </>}
   </WorkDetailsFrame>;
 
+  /** 切换出口只对已进恢复区的待核对命令开放；其余（如页内面板的命令）保持只拦不放。 */
+  const transitionRecovers = transition !== null && recoveries.some((item) => item.commandId === transition.commandId);
   return <section className="collab-page" data-testid="collab-page">
     <div className="collab-main">
       {recoveries.length > 0 && <section className="collab-recovery" role="status" data-testid="collab-recovery">
@@ -1567,10 +1593,16 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     </div>
 
     <AppDialog open={transition !== null} title="命令结果待核对"
+      subtitle="切换不会取消这条命令"
       onClose={() => setTransition(null)}>
-      <p>{`原命令 ${transition?.commandId ?? ""} 的结果仍待核对。请留在当前工作区查询回执；不会以新命令重试。`}</p>
+      <p>{transitionRecovers
+        ? "这条命令已发给服务端，结果还没有确认。留在当前工作区可以立即查询回执收口；切换工作不会取消它——命令 ID 会留在本页的待核对区，随时回来查回执，期间不会以新命令重试。"
+        : "这条命令已发给服务端，结果还没有确认。现在切换会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复提交。请留在当前工作区查询回执收口。"}</p>
+      <p className="dialog-command-id">原命令 ID <code className="hash-code">{transition?.commandId ?? ""}</code></p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
+        <button className="primary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
+        {transitionRecovers && <button className="secondary-button" type="button" data-testid="collab-pending-switch"
+          onClick={keepPendingAndProceed}>切换并保留待核对</button>}
       </div>
     </AppDialog>
 

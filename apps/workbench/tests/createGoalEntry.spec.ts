@@ -42,7 +42,7 @@ function router(routes: Routes, posts: { path: string; body: Record<string, unkn
       posts.push({ path, body });
       if (routes.loseCreateResponse === true) throw new TypeError("response lost after commit");
       return response(201, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
-        result: { goal_id: goalId, status: "ACTIVE", revision: "1" } });
+        result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
     }
     const receipt = /\/commands\/([^/]+)$/u.exec(path);
     if (receipt) return routes.receipt?.(receipt[1]!) ??
@@ -139,7 +139,7 @@ describe("轻量 Goal 创建入口", () => {
           throw new Error(`回执被用错误的 command_id 核对：${commandId}`);
         }
         return response(200, { command_id: commandId, command_type: "CreateGoal",
-          committed_at: "2026-10-04T00:00:05Z", result: { goal_id: goalId, status: "ACTIVE", revision: "1" } });
+          committed_at: "2026-10-04T00:00:05Z", result: { goal_id: goalId, status: "ACTIVE", revision: "0" } });
       },
     }, posts));
     const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
@@ -204,6 +204,55 @@ describe("轻量 Goal 创建入口", () => {
 
     expect(posts.filter((post) => post.path === `${root}/goals`)).toHaveLength(1);
   });
+
+  /** 201 也不能只信 HTTP 成功：command_id、状态与修订都必须与本次命令对齐。 */
+  const mismatchCases: readonly { readonly name: string;
+    readonly body: (commandId: string) => Record<string, unknown> }[] = [
+    { name: "command_id", body: (_commandId) => ({ command_id: "99999999-9999-4999-8999-999999999999",
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, status: "ACTIVE", revision: "0" } }) },
+    { name: "status", body: (commandId) => ({ command_id: commandId,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, status: "ARCHIVED", revision: "1" } }) },
+    { name: "revision", body: (commandId) => ({ command_id: commandId,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, status: "ACTIVE", revision: "2" } }) },
+  ];
+
+  for (const testCase of mismatchCases) {
+    it(`创建成功响应与本次命令错配（${testCase.name}）时不生成第二个 Goal 也不显示成功`, async () => {
+      connect();
+      const posts: { path: string; body: Record<string, unknown> }[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const path = url.pathname;
+        if (init?.method === "POST" && path === `${root}/goals`) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ path, body });
+          return response(201, testCase.body(String(body.command_id)));
+        }
+        const receipt = /\/commands\/([^/]+)$/u.exec(path);
+        if (receipt) return response(404, { code: "COMMAND_NOT_FOUND", detail: "命令回执不存在" });
+        if (init?.method !== "POST" && path === `${root}/projects`) {
+          return response(200, { items: [], next_cursor: null });
+        }
+        if (path.endsWith("/attention/interventions")) return response(200, { items: [] });
+        if (path === `${root}/tasks`) return response(200, { items: [], next_cursor: null });
+        throw new Error(`Unexpected request ${path}${url.search}`);
+      }));
+      const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+
+      await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+      await flush();
+      await view.wrapper.get('[data-testid="goal-form"]').trigger("submit");
+      await flush(); await flush();
+
+      expect(view.wrapper.find('[data-testid="goal-created"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="goal-pending"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="goal-error"]').text()).toContain("不匹配");
+      expect(posts.filter((post) => post.path === `${root}/goals`)).toHaveLength(1);
+    });
+  }
 
   it("示例模式如实说明不能保存目标，不生成假 Goal", async () => {
     resetRelayConnectionForTest();

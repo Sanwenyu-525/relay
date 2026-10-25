@@ -1443,5 +1443,15 @@ Migration：`0135_assist_session_last_message_backfill.sql`。**单条 `UPDATE`*
 - **缺陷**：0111 刻意不回填（兼容段写「旧行取 NULL（无消息）」），那个括号里的前提不成立——0111 应用**之前就已经有消息**的会话同样落在 NULL 上。当时只影响排序（回落 `created_at`），所以没人发现；2026-10-24 左栏把 `lastMessageAt === null` 读成「这段讨论还没有消息」之后，这些老会话被标成「未开始」，点进去却有完整正文。本机实例实测 5 条：2026-10-16 15:35 建的 6 消息会话（含一次 `MODEL_FAILED`）、2026-10-16 15:29 的 2 消息会话、2026-10-18 的「你好」、2026-10-15 的 4 消息与 6 消息（后者已归档）。
 - **修复**：按 `assist_messages.created_at` 的真实最大值回填，只填 `last_message_at IS NULL` 的行，因此可重复执行（本机复跑 `UPDATE 0`）。用消息时刻而不是 `now()`：活动键说的是「最后一条消息是什么时候」，回填不该把 10-16 的会话记成今天。
 - **不动 `updated_at` / `revision`**：本列自 0111 起就是导航排序键，回填属数据校准而不是人工控制命令；推进 `revision` 会打翻改名／置顶／未读那一组命令的 CAS 基线。
-- **写入 Owner 不变**：仍只有 `insertMessage` 与 `settleGeneration`（0111 口径，`greatest(last_message_at, now())` 单调推进），本迁移不新增写入方。回填完成后 `NULL ⇔ 这条会话没有任何消息` 才真正成立——这是左栏「未开始」标记唯一依赖的前提。
+- **写入 Owner 不变**：仍只有 `insertMessage` 与 `settleGeneration`（0111 口径，`greatest(last_message_at, now())` 单调推进），本迁移不新增写入方。回填完成后 `NULL ⇔ 这条会话没有任何消息` 才真正成立——这是左栏「未开始」标记在 2026-10-24 之前的唯一前提。
+- **读时派生、不改表（同日接续）**：会话投影另给 `has_messages`＝`exists(select 1 from assist_messages …)`（列表逐行附带，单条读取单独派生）。界面「未开始」与分叉入口改读这一枚事实，`last_message_at` 只保留排序职责；将来若有写入路径漏推进活动键，最坏后果退回「排序略偏」，不再把有正文的会话说成空会话。`assist_sessions` 无新列、无新索引、无新授权。
 - **回滚**：不提供反向语句。把已填行改回 NULL 只会重新引入本缺陷；旧代码读到更精确的活动时刻只影响排序，属改善。
+
+## 113. 0134 人工受管目录浏览与文件读取（2026-10-24）
+
+Migration：`0134_user_action_file_read.sql`（apps/api 与桌面打包资源两处镜像）。机制与词表归[工具适配器 2026-10-24 段](../architecture/tool-adapters.md)，HTTP 入口归[HTTP §10.112](../api/http-command-contract.md#10112-人工受管目录浏览与文件读取2026-10-24-源码实现迁移-0134)。**Breaking Change: No**。
+
+- **只放宽一条 CHECK**：`ck_logical_operation_resource` 以 0126 最新正文逐支重述，追加 `(capability_key IN ('FILE_READ','FILE_QUERY') AND origin='USER_ACTION' AND resource_id IS NOT NULL)` 一支；`ck_logical_operation_origin` 与 `ck_invocation_run_identity` 不动（USER_ACTION 的来源形状与调用身份自 0058 已成立）。不建表、不加列/索引/授权、不回填。
+- **只影响新行**：既有行没有 USER_ACTION 的 FILE_READ/FILE_QUERY 动作，重述正文与既有约束等价；迁移正文的数据库级守卫由集成套件锁定（只读两能力×绑定资源可入，GIT_WRITE/CLI_RUN/FILE_WRITE 与脱离资源形态仍被拒）。
+- **应用层双层词表**：`originAllows` 另收一层到「能力×动作」（FILE_QUERY×LIST_DIRECTORY、FILE_READ×READ_FILE）；数据库 CHECK 与应用词表各说各的边界，两层都在集成测试中证明。
+- **回滚**：恢复 0126 版约束文本即可；已产生的 USER_ACTION 文件读取行会因收紧而违反约束，回滚前需先清理这类行（或接受不回滚）。

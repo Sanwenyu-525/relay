@@ -5,20 +5,20 @@
   "blockers": [],
   "deleteStatus": 200,
   "deleteBody": {
-    "command_id": "6a054edd-7e7f-47e4-bf4c-0e538c78880e",
-    "committed_at": "2026-10-24T12:13:08.495Z",
+    "command_id": "778a8b09-bd80-41b9-a7c5-f24378578b46",
+    "committed_at": "2026-10-25T02:32:44.711Z",
     "result": {
-      "session_id": "b237b56b-315a-4c20-92be-78071c450f74",
+      "session_id": "7482784d-0777-446f-92bb-d9adf2b41fcf",
       "revision": "1",
       "deleted_messages": 2,
       "deleted_attachments": 0,
-      "deleted_at": "2026-10-24T12:13:08.525Z"
+      "deleted_at": "2026-10-25T02:32:44.742Z"
     },
     "links": {
-      "resource": "/api/v1/workspaces/e4b6c1fd-3064-4d71-9ab7-036b50c8e955/"
+      "resource": "/api/v1/workspaces/b8e66626-4e0e-48f0-809b-a85ca0afa884/"
     }
   },
-  "deleteText": "{\"command_id\":\"6a054edd-7e7f-47e4-bf4c-0e538c78880e\",\"committed_at\":\"2026-10-24T12:13:08.495Z\",\"result\":{\"session_id\":\"b237b56b-315a-4c20-92be-78071c450f74\",\"revision\":\"1\",\"deleted_messages\":2,\"deleted_attachments\":0,\"deleted_at\":\"2026-10-24T12:13:08.525Z\"},\"links\":{\"resource\":\"/api/v1/workspaces/e4b6c1fd-3064-4d71-9ab7-036b50c8e955/\"}}",
+  "deleteText": "{\"command_id\":\"778a8b09-bd80-41b9-a7c5-f24378578b46\",\"committed_at\":\"2026-10-25T02:32:44.711Z\",\"result\":{\"session_id\":\"7482784d-0777-446f-92bb-d9adf2b41fcf\",\"revision\":\"1\",\"deleted_messages\":2,\"deleted_attachments\":0,\"deleted_at\":\"2026-10-25T02:32:44.742Z\"},\"links\":{\"resource\":\"/api/v1/workspaces/b8e66626-4e0e-48f0-809b-a85ca0afa884/\"}}",
   "sessionPreserved": false,
   "messagePreserved": false,
   "plansPreserved": 0

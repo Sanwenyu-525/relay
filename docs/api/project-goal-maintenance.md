@@ -48,3 +48,7 @@
 已归档 Project 沿用 `PROJECT_ARCHIVED`（409）；revision 冲突返回既有 `REVISION_CONFLICT`（409）；不存在或跨 Workspace 的 Project 返回 404；无效标题返回 422。改名不修改 `project_type`、ProjectState、Goal 关联、目录、会话、Task 验收或 Run。相同 command ID 和载荷重放原回执；旧 revision 或载荷冲突按既有错误处理。
 
 三条命令各在同一短事务中保存业务变化、对应 Activity 和回执；审计只记录必要引用，不复制完整 Goal 说明。实现使用现有行与 revision，不创建 Goal 版本表；Goal 标题与说明是原位 CAS 修改，不是 Artifact 式不可变版本。
+
+## 工作台入口（2026-10-24）
+
+正式 Goal 的列表（`/goals`，支持 Active/Archived/All 与游标）、详情（`/goals/:id`）、编辑、归档、解除关联与 Project 改名已接入工作台；入口在项目页「目标列表」，不新增一级导航。详情页在解除前调用 `GET /projects/:id/goals` 展示 `explicit_task_ids`，提交时携带 `expected_impacted_task_ids`；服务端清单变化返回 409 `GOAL_LINK_IN_USE` 与当前 `impacted_task_ids`，界面重读并要求再次确认。编辑/归档/解除与改名都冻结 `command_id` 与载荷，结果不明先查回执。实现与测试边界归[工作台 §51](../frontend/workbench-design.md#51-正式目标管理与项目状态写入2026-10-24已实施实机未验)与[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。

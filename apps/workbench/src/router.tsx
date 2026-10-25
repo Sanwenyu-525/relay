@@ -12,6 +12,9 @@ import ProjectTasksView from "./views/ProjectTasksView";
 import ProjectWorkbenchView from "./views/ProjectWorkbenchView";
 import ProjectWorkbenchEntry from "./views/ProjectWorkbenchEntry";
 import ProjectsView from "./views/ProjectsView";
+import GoalListView from "./views/GoalListView";
+import GoalDetailView from "./views/GoalDetailView";
+import DirectoryWorkContextView from "./views/DirectoryWorkContextView";
 import ReviewsView from "./views/ReviewsView";
 import RunView from "./views/RunView";
 import SettingsView from "./views/SettingsView";
@@ -40,6 +43,9 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "artifact-versions/:id/lineage", element: <ArtifactLineageView /> },
     { path: "completion-records/:id", element: <CompletionRecordView /> },
     { path: "projects", element: <ProjectsView /> },
+    { path: "goals", element: <GoalListView /> },
+    { path: "goals/:id", element: <GoalDetailView /> },
+    { path: "working-directories/:id", element: <DirectoryWorkContextView /> },
     { path: "projects/:id/tasks", element: <ProjectTasksView /> },
     { path: "projects/:id/knowledge", element: <KnowledgeView /> },
     { path: "projects/:id/connections", element: <ProjectConnectionsView /> },

@@ -60,6 +60,25 @@ function deriveDescription(input: string): string {
   return input.trim().slice(0, 2000);
 }
 
+/** 2xx 只说明服务端回了一个响应；回执身份与新建语义仍要逐项和冻结命令对齐。 */
+class GoalCreationMismatch extends Error {}
+
+function verifiedGoalCreation(command: PendingGoalCommand,
+  envelope: { readonly commandId: string; readonly result: Readonly<Record<string, unknown>> }): RelayGoalCreation {
+  if (envelope.commandId !== command.commandId) {
+    throw new GoalCreationMismatch("回执 command_id 与原命令不一致。");
+  }
+  const creation = goalCreationFrom(envelope.result);
+  if (creation.status !== "ACTIVE") {
+    throw new GoalCreationMismatch(`回执状态为 ${creation.status}，不是新建 Goal 的 ACTIVE。`);
+  }
+  // `goals.revision` 的数据库默认值是 0；新建回执不是 v0 说明它不属于这次新建。
+  if (creation.revision !== "0") {
+    throw new GoalCreationMismatch(`回执修订 v${creation.revision}，不是新建 Goal 的 v0。`);
+  }
+  return creation;
+}
+
 export default function CreateGoalView({ client, onCancel }: {
   client: RelayApiClient; onCancel: () => void }) {
   const [input, setInput] = useState("");
@@ -81,11 +100,13 @@ export default function CreateGoalView({ client, onCancel }: {
 
   useEffect(() => () => { disposed.current = true; scope.current++; }, []);
 
-  // 待核对命令无法靠「丢弃」收口：只能核对回执或明确拒绝后解除，所以离页保护只拦不放（#20）。
+  // 待核对命令无法靠「丢弃」收口：只能核对回执或明确拒绝后解除；但原 ID 已按
+  // API/Workspace 作用域暂存（#20），离开后回本页仍可核对，守卫弹层据此提供离开出口。
   const guard = useRef<DraftGuard>({
     hasUnsavedChanges: () => pendingRef.current !== null,
     discard: () => {},
-    pendingCommandId: () => pendingRef.current?.commandId ?? null
+    pendingCommandId: () => pendingRef.current?.commandId ?? null,
+    pendingRecoversAfterLeave: () => pendingRef.current !== null
   });
   useEffect(() => {
     setDraftGuard(guard.current);
@@ -120,13 +141,15 @@ export default function CreateGoalView({ client, onCancel }: {
     try {
       const receipt = await client.getCommandReceipt(command.commandId);
       if (disposed.current || request !== scope.current) return;
-      if (receipt.commandId !== command.commandId || receipt.commandType !== "CreateGoal") {
-        throw new Error("原回执不是本次 CreateGoal。");
+      if (receipt.commandType !== "CreateGoal") {
+        throw new GoalCreationMismatch("原回执不是本次 CreateGoal。");
       }
-      await finish(goalCreationFrom(receipt.result), request, command.title);
+      await finish(verifiedGoalCreation(command, receipt), request, command.title);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
-      if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
+      if (caught instanceof GoalCreationMismatch) {
+        setError(`Goal 回执与本次命令不匹配：${caught.message}已保留原 command_id，不能创建第二个 Goal。`);
+      } else if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
         setMayRetry(true);
         setError("服务端明确未找到原命令；只能用原 command ID 与原载荷重试。");
       } else setError(`Goal 回执仍不可核对；请保留原 command_id，不能创建第二个 Goal。${describeLiveError(caught).message}`);
@@ -139,11 +162,17 @@ export default function CreateGoalView({ client, onCancel }: {
     if (disposed.current || request !== scope.current) return;
     setError(null); setMayRetry(false); setBusy(true);
     try {
-      const creation = await client.createGoal({ commandId: command.commandId,
+      const envelope = await client.createGoal({ commandId: command.commandId,
         title: command.title, description: command.description });
-      await finish(creation, request, command.title);
+      await finish(verifiedGoalCreation(command, envelope), request, command.title);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
+      // 响应与冻结命令错配时不宣布成功、不清 pending，也不自动换 ID 重建。
+      if (caught instanceof GoalCreationMismatch) {
+        setBusy(false);
+        setError(`Goal 创建响应与本次命令不匹配：${caught.message}已保留原 command_id，不能创建第二个 Goal。`);
+        return;
+      }
       // 明确的业务拒绝可以改载荷重试；传输/5xx/冲突一律先核对，不换 ID 重建。
       if (caught instanceof RelayApiError && caught.problem.status < 500 &&
           caught.problem.status !== 409 && caught.problem.code !== "COMMAND_ID_REUSED") {

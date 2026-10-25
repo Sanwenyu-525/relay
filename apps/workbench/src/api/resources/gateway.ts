@@ -2,9 +2,9 @@ import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { decimal, directList, integer, nullableString, nullableStringArray, object, string, stringArray } from "../core/primitives";
-import { gatewayConnectionSettingsFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
+import { gatewayConnectionSettingsFrom, managedFileReadOutcomeFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
+import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
 import type { RelayWriteReadiness, RelayWriteTier } from "../dtos/gateway";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
@@ -139,6 +139,22 @@ export async function readManagedGitState(http: RelayHttp, input: RelayManagedGi
     return { commandId: envelope.commandId, committedAt: envelope.committedAt,
       outcome: managedGitReadOutcomeFrom(envelope.result, input.actionType) };
   } catch { throw new RelayTransportError("Git 读取响应无法核对，请查询原 command_id 回执。"); }
+}
+
+/** 人工目录浏览/文件读取（HTTP §10.112）。READ_FILE 无参数——路径只进 target，
+ * 这里的 path 字段按服务端契约映射到 target 的相对路径。 */
+export async function readManagedFileState(http: RelayHttp, input: RelayManagedFileReadInput): Promise<RelayManagedFileReadResponse> {
+  const body = await http.request(http.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/managed-resources/${encodeURIComponent(input.resourceId)}/file-read`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId, connection_id: input.connectionId,
+      action_type: input.actionType, ...(input.relativePath === undefined ? {} : { path: input.relativePath }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }) })
+  }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("文件读取回执与原 command_id 不符。");
+    return { commandId: envelope.commandId, committedAt: envelope.committedAt,
+      outcome: managedFileReadOutcomeFrom(envelope.result, input.actionType) };
+  } catch { throw new RelayTransportError("文件读取响应无法核对，请查询原 command_id 回执。"); }
 }
 
 export async function createManagedResource(http: RelayHttp, input: { projectId: string; commandId: string; rootPath: string }): Promise<RelayCommandEnvelope> {

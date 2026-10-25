@@ -293,3 +293,31 @@ test('GET /browser/status 跨进程读到同一份健康投影', async () => {
     await api.stop();
   }
 });
+
+test('GET /plugins/status 经真实 API 返回三个内置插件的安装级状态（不缓存、无凭据）', async () => {
+  const workspaceId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.insertWorkspace({ id: workspaceId, name: `f26-plugins-${workspaceId}` });
+    await repositories.workspaces.insertAuthorityRow(workspaceId);
+  });
+  const api = await startTestApi();
+  try {
+    const response = await api.get(`/api/v1/workspaces/${workspaceId}/plugins/status`);
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    const body = response.body as { items: Array<{ plugin: string; state: string;
+      detail: string; remediation: string | null }> };
+    assert.deepEqual(body.items.map((item) => item.plugin).sort(),
+      ['browser', 'computer', 'github'], '三个内置插件恒在');
+    for (const item of body.items) {
+      assert.match(item.state,
+        /^(READY|NOT_INSTALLED|NOT_PAIRED|NOT_AUTHENTICATED|UNAVAILABLE)$/u,
+        `${item.plugin} 状态必须在词表内：${item.state}`);
+      assert.ok(item.detail.length > 0, `${item.plugin} 必须带可读 detail`);
+      // 安装级探测不携带任何凭据形态。
+      assert.doesNotMatch(JSON.stringify(item), /token|gho_|ghp_/iu);
+    }
+  } finally {
+    await api.stop();
+  }
+});

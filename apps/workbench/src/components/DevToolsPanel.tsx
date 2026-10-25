@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { FileText, GitBranch, Globe, ListTree, Play, SquareTerminal, Terminal, X } from "lucide-react";
 import RunToolTrajectoryPanel from "./RunToolTrajectoryPanel";
 import GitReadPanel from "./GitReadPanel";
+import FileBrowsePanel from "./FileBrowsePanel";
 import BrowserPreviewPanel from "./BrowserPreviewPanel";
 import type { RelayApiClient, RelayManagedResource, RelayRun, RelayRunGatewayOperation } from "../api/relayClient";
 import type { PreviewBridge } from "../lib/previewBridge";
@@ -117,7 +118,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
             </div>
             : <>
               <h3>受管目录</h3>
-              <p className="helper-text">这里只列出该 Project 已登记的受管目录。目录浏览接口尚未接入（待接入），因此不推断本机任意路径可读。</p>
+              <p className="helper-text">这里只列出该 Project 已登记的受管目录；目录浏览与文件读取走下方「目录浏览」的显式只读动作，不推断本机任意路径可读。</p>
               <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
                 都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
               {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
@@ -129,6 +130,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
               </li>)}</ul>}
               <button className="secondary-button" type="button" data-testid="devtools-reload-resources"
                 disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
+              <FileBrowsePanel client={client} projectId={projectId} resources={resources}
+                resourceLoading={loading} resourceError={resourceError} />
               <h3>本任务的受管产物</h3>
               <p className="helper-text">受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。产物正文在右侧产物区按确切版本阅读。</p>
               {taskId === null

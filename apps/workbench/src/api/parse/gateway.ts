@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, nullableString, nullableStringArray, object, optionalString, string, stringArray } from "../core/primitives";
-import type { RelayGatewayDecision, RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedGitReadOutcome, RelayManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission, RelayWriteReadiness } from "../dtos/gateway";
+import type { RelayDirectoryEntry, RelayFileBrowseAction, RelayGatewayDecision, RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedFileReadOutcome, RelayManagedGitReadOutcome, RelayManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission, RelayWriteReadiness } from "../dtos/gateway";
 
 /** 写档位投影：缺档位当作「未核对」，无法识别的档位显式失败，不当成空值蒙混。 */
 export function writeReadinessFrom(value: unknown): RelayWriteReadiness {
@@ -86,6 +86,51 @@ export function managedGitReadOutcomeFrom(value: unknown, expectedAction: RelayG
   return { ...settled, result: { kind: "DIFF", diff: string(result, "diff", "git-read.result"),
     limitBytes: count(result, "limit_bytes"), truncated: boolean(result, "truncated", "git-read.result"),
     returnedBytes: count(result, "returned_bytes"), omittedBytes: count(result, "omitted_bytes") } };
+}
+
+/** 人工目录浏览/文件读取结果（HTTP §10.112）。与 git 读取同一纪律：未决形态不携带结果字段，
+ * 失败先于分形判读，形状不符抛错而不是猜。 */
+export function managedFileReadOutcomeFrom(value: unknown, expectedAction: RelayFileBrowseAction): RelayManagedFileReadOutcome {
+  const row = object(value, "file-read");
+  const actionType = string(row, "action_type", "file-read");
+  if (actionType !== expectedAction) throw new Error("文件读取结果与原动作不符。");
+  const operationId = string(row, "operation_id", "file-read");
+  if (row.state === "WAITING_APPROVAL" || row.state === "UNRESOLVED") {
+    if (row.result !== undefined) throw new Error("未决文件读取不能携带已结算结果。");
+    return { state: row.state, actionType, operationId,
+      reviewId: nullableString(row, "review_id", "file-read"), reason: string(row, "reason", "file-read") };
+  }
+  if (row.state !== "SUCCEEDED" && row.state !== "FAILED") throw new Error("文件读取状态无效。");
+  const result = object(row.result, "file-read.result");
+  const settled = { state: row.state, actionType, operationId,
+    invocationId: nullableString(row, "invocation_id", "file-read") } as const;
+  if (result.reason !== undefined) return { ...settled,
+    result: { kind: "FAILURE", reason: string(result, "reason", "file-read.result"),
+      detail: result.detail === undefined ? null : string(result, "detail", "file-read.result") } };
+  if (row.state === "FAILED") throw new Error("失败的文件读取缺少失败原因。");
+  const count = (key: string): number => {
+    const value = integer(result, key, "file-read.result");
+    if (value < 0) throw new Error("文件读取计数不能为负数。");
+    return value;
+  };
+  if (actionType === "LIST_DIRECTORY") {
+    if (!Array.isArray(result.entries)) throw new Error("目录读取缺少条目列表。");
+    return { ...settled, result: { kind: "LISTING",
+      entries: result.entries.map((entry): RelayDirectoryEntry => {
+        const item = object(entry, "file-read.result.entries");
+        const kind = string(item, "kind", "file-read.result.entries");
+        if (kind !== "directory" && kind !== "file" && kind !== "other") {
+          throw new Error("目录条目类型无法识别。");
+        }
+        const size = item.size === null ? null : integer(item, "size", "file-read.result.entries");
+        return { path: string(item, "path", "file-read.result.entries"), kind, size };
+      }),
+      count: count("count"), limit: count("limit"),
+      truncated: boolean(result, "truncated", "file-read.result"), skipped: count("skipped") } };
+  }
+  return { ...settled, result: { kind: "CONTENT", content: string(result, "content", "file-read.result"),
+    size: count("size"), sha256: string(result, "sha256", "file-read.result"),
+    truncated: boolean(result, "truncated", "file-read.result") } };
 }
 
 export function webImportSubmissionFrom(value: unknown, projectId: string, connectionId: string): RelayWebImportSubmission {

@@ -1,4 +1,5 @@
 import type { AssistMessageRow, AssistProposalRow, AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
+import type { AssistSessionListRow } from '../assist/assist-repository.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { resourceNotFound } from './domain-error.js';
@@ -19,7 +20,7 @@ import { toDecimalString } from '../shared/decimal.js';
 
 export async function listAssistSessions(db: DbExecutor, input: { workspaceId: string;
   projectId?: string; taskId?: string; status?: AssistSessionStatus | 'ALL' }):
-Promise<readonly AssistSessionRow[]> {
+Promise<readonly AssistSessionListRow[]> {
   const r = createRepositories(db);
   return r.assist.listSessions(input.workspaceId, input.projectId, input.taskId, input.status);
 }
@@ -32,6 +33,21 @@ export async function readAssistSession(db: DbExecutor, input: {
     throw resourceNotFound('Assist session');
   }
   return session;
+}
+
+/**
+ * 单条会话读取 + 读时派生的 `has_messages`（与会话列表同一口径）。
+ *
+ * 保留 `readAssistSession` 的窄返回：命令、锁与内部定位只关心会话行本身。
+ * 只有面向界面的单条 GET 需要这枚派生事实，所以单独成函数，不把派生查询
+ * 塞进每条读写路径。
+ */
+export async function readAssistSessionWithActivity(db: DbExecutor, input: {
+  workspaceId: string; sessionId: string }):
+Promise<{ readonly session: AssistSessionRow; readonly hasMessages: boolean }> {
+  const session = await readAssistSession(db, input);
+  const hasMessages = await createRepositories(db).assist.sessionHasMessages(session.id);
+  return { session, hasMessages };
 }
 
 export async function readAssistSessionContexts(db: DbExecutor, input: {

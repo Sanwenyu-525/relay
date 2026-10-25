@@ -151,14 +151,17 @@ async function fixture(options: {
 async function ask(fx: GithubFixture, content: string,
   port?: AssistModelPort): Promise<{ readonly status: string; readonly errorCode: string | null;
   readonly declaredTools: readonly string[];
-  readonly fedBack: readonly { name: string; content: string }[] }> {
+  readonly fedBack: readonly { name: string; content: string }[];
+  readonly system: string | null }> {
   const storage = new ManagedContentStore(dataRoot);
   const modelPort = port ?? new FakeModelPort();
   const original = modelPort.assist.bind(modelPort);
   let declaredTools: readonly string[] = [];
   let fedBack: readonly { name: string; content: string }[] = [];
+  let system: string | null = null;
   modelPort.assist = async (request) => {
     declaredTools = (request.tools ?? []).map((spec) => spec.name);
+    system ??= request.system;
     if ((request.toolTurns?.length ?? 0) > fedBack.length) {
       fedBack = request.toolTurns!.flatMap((turn) => turn.results
         .map((result) => ({ name: result.name, content: result.content })));
@@ -173,7 +176,7 @@ async function ask(fx: GithubFixture, content: string,
   const message = await createRepositories(app.db).assist.readMessage(
     sent.result.assistant_message_id);
   return { status: message?.status ?? 'MISSING', errorCode: message?.error_code ?? null,
-    declaredTools, fedBack };
+    declaredTools, fedBack, system };
 }
 
 /** 按脚本发工具的便捷入口。 */
@@ -357,6 +360,43 @@ test('受管根真的有 GitHub remote 时身份闸门放行，派发走到真�
     /GH_CLI_UNAVAILABLE|GH_UNAUTHENTICATED|GH_NETWORK_ERROR|GH_FORBIDDEN|GH_NOT_FOUND|GH_TIMEOUT|GH_ERROR/u
       .test(fedBack.content),
   `派发结果要么带不可信标记，要么是类型化失败：${fedBack.content.slice(0, 200)}`);
+});
+
+test('官方 Skill 按需注入：有 github 工具的轮次 system 携带冻结摘要与边界块，停用连接后消失', async () => {
+  const fx = await fixture();
+  const first = await askWithScript(fx, [[{ name: 'github_repo_view', arguments: {} }]]);
+  assert.ok(first.system !== null, '主流程必须向模型发送 system');
+  // 不可变身份与边界关键词都在（整块约 1 KiB；上游正文不出现）。
+  assert.match(first.system, /github-gh@4537a92f/u, 'system 必须带官方 Skill 的不可变身份');
+  assert.match(first.system, /不是授权/u);
+  assert.match(first.system, /gh api/u);
+  assert.match(first.system, /不可信外部内容/u);
+  assert.match(first.system, /issue_view/u);
+  assert.doesNotMatch(first.system, /Interactivity policy/u,
+    '上游 SKILL.md 正文不得进入上下文');
+
+  await createRepositories(app.db).gateway.setConnection({ id: fx.connectionId, status: 'DISABLED',
+    config: {} });
+  const second = await askWithScript(fx, []);
+  assert.ok(second.system !== null);
+  assert.doesNotMatch(second.system, /github-gh@/u,
+    '词表为空的轮次不注入官方 Skill 块（按需激活）');
+});
+
+test('RELAY_OFFICIAL_SKILL_GITHUB=disabled 时本轮不注入官方 Skill 块', async () => {
+  const fx = await fixture();
+  process.env.RELAY_OFFICIAL_SKILL_GITHUB = 'disabled';
+  try {
+    const outcome = await askWithScript(fx, [[{ name: 'github_repo_view', arguments: {} }]]);
+    assert.ok(outcome.system !== null);
+    assert.doesNotMatch(outcome.system, /github-gh@/u,
+      '设备级禁用后即使工具在词表里也不注入');
+    // 工具本身不受禁用影响：禁用只停注入，不停能力。
+    assert.ok(outcome.declaredTools.includes('github_repo_view'),
+      `禁用不得收回工具词表：${JSON.stringify(outcome.declaredTools)}`);
+  } finally {
+    delete process.env.RELAY_OFFICIAL_SKILL_GITHUB;
+  }
 });
 
 test('已认证真实 GitHub：五个只读工具经会话与 Gateway 成功并保存回执', {

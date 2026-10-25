@@ -530,6 +530,58 @@ describe("协作工作区主路径", () => {
     }
   });
 
+  it("未决命令已进恢复区时可「切换并保留待核对」，命令身份留在本页可继续核对", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const oldSessionId = "99999999-9999-4999-8999-999999999999";
+    const oldCommandId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const key = `relay-agent-chat-pending:http://127.0.0.1:8787:${workspaceId}`;
+    const previous = window.sessionStorage.getItem(key);
+    window.sessionStorage.setItem(key, JSON.stringify([{ commandId: oldCommandId, commandType: "RequestAssistMessage",
+      sessionId: oldSessionId, targetKind: "TASK", targetId: taskId }]));
+    const read = router({ sessions: () => response({ items: [sessionId, oldSessionId].map((id, index) => ({ id,
+      workspace_id: workspaceId, project_id: projectId, task_id: taskId, title: `讨论${index + 1}`,
+      status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:40:00Z" })) }) });
+    let currentCommandId = ""; const posts: Record<string, unknown>[] = []; const receiptPaths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `${prefix}/assist-sessions/${sessionId}/messages` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body); currentCommandId = String(body.command_id); throw new TypeError("response lost");
+      }
+      if (path === `${prefix}/commands/${oldCommandId}`) {
+        receiptPaths.push(path);
+        return response({ command_id: oldCommandId, command_type: "RequestAssistMessage", committed_at: "2026-09-30T04:00:00Z",
+          result: { session_id: oldSessionId, assistant_message_id: "old-reply", user_message_id: "old-request" } });
+      }
+      if (currentCommandId && path === `${prefix}/commands/${currentCommandId}`) {
+        receiptPaths.push(path); return response({ code: "COMMAND_NOT_FOUND", detail: "not found yet" }, 404);
+      }
+      return read(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("结果不明的讨论");
+      await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush();
+      await view.wrapper.get(`[data-testid="collab-recovery-${oldCommandId}"]`).trigger("click"); await flush();
+      // 任务作用域的未决命令已进恢复区：弹层提供切换出口，切走不丢命令身份。
+      const escape = document.querySelector('[data-testid="collab-pending-switch"]');
+      expect(escape).not.toBeNull();
+      expect(dialogText()).toContain(currentCommandId);
+      escape!.dispatchEvent(new MouseEvent("click", { bubbles: true })); await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(toolbarSessionTitle()).toBe("讨论2");
+      // 原命令仍留在本页恢复区，可继续按原 ID 查回执；期间没有第二条消息命令。
+      const recovery = view.wrapper.get(`[data-testid="collab-recovery-${currentCommandId}"]`);
+      expect(recovery.exists()).toBe(true);
+      await recovery.trigger("click"); await flush();
+      expect(receiptPaths).toEqual([`${prefix}/commands/${oldCommandId}`, `${prefix}/commands/${currentCommandId}`]);
+      expect(posts).toHaveLength(1);
+    } finally {
+      view.unmount();
+      if (previous === null) window.sessionStorage.removeItem(key); else window.sessionStorage.setItem(key, previous);
+    }
+  });
+
   it("非空文档提案先显示摘要，展开后接受仍沿原Assist命令Owner提交", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const proposalId = "99999999-9999-4999-8999-999999999999";
@@ -2198,7 +2250,8 @@ describe("协作工作区主路径", () => {
  */
 describe("不可恢复输入的离页保护", () => {
   /** jsdom 没有剪贴板实现，自己造一个带 clipboardData 的 paste 事件（与 composerImageAttachments 同法）。 */
-  async function pasteFile(target: Element, file: File): Promise<void> {
+  async function pasteFile(target: Element | null, file: File): Promise<void> {
+    if (target === null) throw new Error("粘贴目标元素不存在（输入器未渲染）");
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", { value: {
       items: [{ kind: "file", type: file.type, getAsFile: () => file }],
@@ -2280,7 +2333,7 @@ describe("不可恢复输入的离页保护", () => {
       // 保留并继续编辑：回到本页，附件仍在。
       const keep = Array.from(document.querySelectorAll('[role="dialog"] button'))
         .find((button) => button.textContent === "保留并继续编辑");
-      if (keep === null) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
+      if (keep === undefined) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
       await act(async () => { keep.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
       await flush();
       expect(view.router.currentRoute.value.path).toBe("/agent");
@@ -2312,7 +2365,7 @@ describe("不可恢复输入的离页保护", () => {
       expect(view.router.currentRoute.value.path).toBe("/agent");
       const keep = Array.from(document.querySelectorAll('[role="dialog"] button'))
         .find((button) => button.textContent === "保留并继续编辑");
-      if (keep === null) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
+      if (keep === undefined) throw new Error("App 守卫弹层没有「保留并继续编辑」按钮");
       await act(async () => { keep.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
       await flush();
 

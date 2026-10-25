@@ -368,11 +368,13 @@ export default function TodayView() {
     if (client !== null) saveTodayCommand(todayCommandKey(client), next);
   }, [client]);
 
-  // 未决命令不能靠离页丢弃收口：切页保护只拦不放，核对回执或明确拒绝后才解除（#22）。
+  // 未决命令不能靠离页丢弃收口；原 ID 已按连接作用域持久化（#22），切页后回本页
+  // 仍可核对，守卫弹层据此提供离开出口。
   const guard = useRef<DraftGuard>({
     hasUnsavedChanges: () => pendingRef.current !== null,
     discard: () => {},
-    pendingCommandId: () => pendingRef.current?.id ?? null
+    pendingCommandId: () => pendingRef.current?.id ?? null,
+    pendingRecoversAfterLeave: () => pendingRef.current !== null
   });
   useEffect(() => {
     setDraftGuard(guard.current);

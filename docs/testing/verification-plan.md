@@ -856,6 +856,19 @@ SW-03 的判据是行数与轮次：若历史没有从已落库行重建，Fake 
 
 尚未覆盖、不得据此声称通过：`USER_ACTION` 的**崩溃后自动恢复驱动**（`reconcileGatewayInvocation` 分支已就位但无调度器调用，停在 `DISPATCHING`/`UNKNOWN` 的调用永久未决、须人工核对、不盲重试）；并发双投递的**真实 HTTP 竞争**用例（代码路径与集成断言存在，但未写专门的并发 HTTP 用例）；Windows junction/hardlink 根替换竞争（与 `FILE_READ`/`FILE_QUERY` 同一未闭合限制）；真实 Windows 窗口、中文 IME、DPI；前端接入；安装、升级、卸载。独立验收未做。GU-01–GU-07 通过不改变 M06 模块状态，也不放行 Git 写侧、目录浏览或受控 CLI。
 
+### 20.7.1 人工触发的受管目录浏览与文件读取（2026-10-24 实施，迁移 0134）
+
+补 0058 遗留的人工只读缺口：`USER_ACTION` 词表新增 `FILE_QUERY`×`LIST_DIRECTORY` 与 `FILE_READ`×`READ_FILE`，服务右侧工具面板「文件」页签（前端未接线）。规则归[工具适配器 2026-10-24 段](../architecture/tool-adapters.md)，契约归[命令契约 §10.112](../api/http-command-contract.md#10112-人工受管目录浏览与文件读取2026-10-24-源码实现迁移-0134)，物理设计归[第 113 节](../database/physical-design-postgresql.md#113-0134-人工受管目录浏览与文件读取2026-10-24)。出口是 `apps/api/test/integration/file-user-action.integration.test.ts`，跑真实 PostgreSQL、真实目录与真实 HTTP。
+
+| 编号 | 场景及必须成立的反例 | 判定 |
+|---|---|---|
+| FU-01 | 受管根内浏览与读取 | 真实目录一层条目（排序稳定、`kind` 区分目录/文件）、相对子目录、`limit` 截断显式；`READ_FILE` 读到正文与 SHA-256；审计 `MANAGED_FILE_READ_REQUESTED` 与动作同事务落账 |
+| FU-02 | 参数与路径反例 | `READ_FILE` 缺 path / 带 limit、绝对路径、`..` 段 → `VALIDATION_FAILED` 且不留 Operation；不存在路径 → `GATEWAY_TARGET_DENIED`；`FIND_PATHS`/`SEARCH_TEXT`/写动作 → `GATEWAY_ORIGIN_DENIED` |
+| FU-03 | 能力×动作双维词表 | 单测锁定错位组合（借 `FILE_QUERY` 读文件、借 `FILE_READ` 列目录）不放行；DB CHECK 直写证明 FILE_READ/FILE_QUERY×USER_ACTION 可入、写能力与脱资源形态仍 `23514` |
+| FU-04 | 类型化失败不折叠 | 二进制 → `FILE_BINARY_UNSUPPORTED`、超大 → `FILE_TOO_LARGE`，结算 FAILED、无 `content` 字段、Invocation 状态如实 |
+| FU-05 | 策略与连接 | AUTO 直通；ASK 先等待（无结果字段、无 Invocation）→ 确认后同命令读取一次；DENY/缺策略 → `GATEWAY_PERMISSION_DENIED`；连接缺能力或不存在 → `GATEWAY_CONNECTION_DENIED` |
+| FU-06 | 幂等与刷新分界 | 同 `command_id` 重放原回执且恰一次 Invocation；**新 `command_id` 读到目录新变化**（与 GU-05 的冻结语义分界）；崩溃重投返回同一次落库结果 |
+
 ### 20.8 创建后人工补验收条件（2026-10-05 实施）
 
 补「轻量起步建的 Task 无公开入口补验收条件」的服务端缺口：此前只能靠 AI 提案接受或 Skill 提案补齐。契约归[命令契约 §10.58](../api/http-command-contract.md#1058-创建后人工补验收条件2026-10-05-源码实现)。出口是 `apps/api/test/integration/task-acceptance-command.integration.test.ts`（真实 PG + 真实 HTTP）与 `apps/api/test/unit/task-acceptance-command.test.ts`。
@@ -1415,14 +1428,15 @@ CT-12 的完整图反例单独成文件（`check-trust-refusal-lifecycle.integra
 
 2026-10-16 定义规格，同日实施并按下列范围运行。业务与交互契约以[工作台 §32](../frontend/workbench-design.md#32-两级上下文菜单与二级能力入口)为准，视觉以[设计系统 §9.14](../frontend/design-system.md#914-两级上下文菜单视觉补充)为准。
 
-- 一级五项保留原身份与顺序（第五项「连接器与插件」2026-10-17 新增）；状态提示只反映真实事实（已选资料数、已绑定目录、已选 Skill），没有对应事实时不显示提示，也不编造计数。
+- 一级七项（2026-10-24 起）保留原身份与顺序并在顶部补齐参考菜单三项：上传附件、文件、我的产物、选择文件与资料、选择 Skill 生成、输入命令、连接器与插件；状态提示只反映真实事实（已选资料数、已绑定目录、已选 Skill），没有对应事实时不显示提示，也不编造计数。
 - 点击一级行展开/收起二级且一级保持打开；点二级行执行后收起两级，且**不改动未发送草稿**；点击外部一次收起两级；Esc 先收二级（焦点回原一级行）再收一级（焦点回「+」）。
 - **hover 展开（2026-10-17 用户指令）**：指针悬停一级行即展开该行二级，在两行之间移动即切换；指针移开两级后二级延时收起而一级保持打开；hover 打开的二级被点一次是「固定」（之后移开不收），再点一次才收起；禁用的行 hover 不展开。二级纵向**相对一级弹层居中**（2026-10-19 用户指令，取代「贴住当前那一行」）：`top = (一级高 − 二级高) / 2`，二级更高时上探出一级顶边、唯一硬边是视口顶边；一级贴近视口底部时改为二级底边与一级底边对齐；两档都放不下交给 `max-height` 内部滚动。
-- **二级列表在前（2026-10-17 用户指令「子菜单应该直接将文件、skill 列出来」）**：资料二级先列项目资料（当前项目 `ACTIVE` 知识、取 `currentVersion`、最多 20 条、超出指向检索）→ 对话中的资料 → 最近引用 → 检索 → 本地文件（禁用）；Skill 二级先列发送选项那一份 `skills`（每个 id 只列最新版本、不可调用项禁用并标「不可调用」、点击写入同一处 `selectedSkillKey`）→ 生成类两条（禁用）→ 在发送选项里选择。项目资料读取失败只在该节说明，不遮挡其余入口。
+- **二级列表在前（2026-10-17 用户指令「子菜单应该直接将文件、skill 列出来」）**：资料二级先列项目资料（当前项目 `ACTIVE` 知识、取 `currentVersion`、最多 20 条、超出指向检索）→ 对话中的资料 → 最近引用 → 检索；本地文件行已于 2026-10-19 移除（图片选择由一级「上传附件」承担，任意本地文件仍不接入）。Skill 二级先列发送选项那一份 `skills`（每个 id 只列最新版本、不可调用项禁用并标「不可调用」、点击写入同一处 `selectedSkillKey`）→ 生成类两条（禁用）→ 在发送选项里选择。项目资料读取失败只在该节说明，不遮挡其余入口。
+- **参考菜单三项（2026-10-24）**：一级「上传附件」是直接动作，打开本机图片选择器（PNG/JPEG/GIF/WebP）并交给既有 `useStagedAttachments`，不上传、不发送；「文件」二级用 `POST …/managed-resources/:r/file-read` 的 `LIST_DIRECTORY` 列受管根一层，目录行在同一面板内进入子目录（出现「返回上级」）、文件行插入 `@相对路径 ` mention，`truncated`/`skipped`/失败/未决与无目录/无连接各有文案，失败不显示成空目录；「我的产物」二级用 `getTaskArtifacts` 列当前任务产物最新版本、点一项插入 `@标题 vN ` mention，无任务归属说明去向。文件与产物只是草稿 mention，不是消息附件或 `RelayAssistSourceRef`；不出现第三级。
 - 二级方向按实际空间决定：右侧放不下且左侧放得下时翻到左侧；纵向贴住当前行、越界向上收、放不下时收窄面板高度由内部滚动兜住；不得出现横向溢出或改变页面布局。
 - 「对话中的资料」只列当前会话消息上真实出现过的引用（去重、三元组齐全、只收知识/记忆/决定三类），没有时给空态文案；开关只改本次候选输入，不发送、不落库、不发新命令；达到每次消息 10 个的上限时未选中项禁用而不是静默丢弃点击。
 - 「最近使用」目录来自真实近期目录并复用协作页的目录入口与草稿守卫；无记录时给空态。命令清单来自 `GET /chat-commands` 真实登记、与输入框内联菜单同一套过滤与状态口径，点击只把命令填进草稿。
-- 尚未接入的能力（本地文件选择、管理工作区、Skill 生成两条）如实禁用：行内只写「暂未接入」，原因与接入点只在行的 `title` 里；菜单不再有整段脚注（2026-10-19 用户指认「很影响体验」，见工作台 §32.12）。禁用的行不显示 chevron、不进入焦点顺序，也不带 `aria-expanded`。
+- 尚未接入的能力（任意本地文件作为消息输入——一级「上传附件」只收图片、管理工作区、Skill 生成两条）如实禁用：行内只写「暂未接入」，原因与接入点只在行的 `title` 里；菜单不再有整段脚注（2026-10-19 用户指认「很影响体验」，见工作台 §32.12）。禁用的行不显示 chevron、不进入焦点顺序，也不带 `aria-expanded`。
 - **「选择 Skill 生成」与「连接器与插件」恒可展开（2026-10-18 用户指认「点击不了」）**：没有项目/任务归属、未连接本机 API 这些情况下保留 `disabled === false` 与 chevron，缺口由二级面板第一句（`noteFor` 的同一句文案）说明；连接器面板在无项目时不再停在「正在读取连接器…」，而是直接说明按项目登记，「管理连接与权限」仍可点。仅「没有二级可讲」的行（首条消息的资料、无目录入口时的文件夹）保持禁用。
 - **Skill 清单全量 + 目标芯片（2026-10-18 第二轮，用户指令「不应该跟工作区产生强关联」）**：两处输入器的「+ → 选择 Skill 生成」都列出全部内置 Skill（只按输出契约白名单过滤，不按 `target.kind` 过滤）；缺上下文的行尾标 `需任务 / 需项目` 并在 `title` 说明。首条输入器选中这类 Skill 后，工具行出现目标芯片：项目来自 `GET /projects?status=active`、任务来自 `GET /tasks?project_id=`，前端不写死；选定后交回宿主以 `?work=` / `?project=` 切作用域并带 `?skill=` 预选、`?new=` 新开对话。会话输入器（归属已冻结）只标注 + 禁用，`<select>` 同步不可选并说明去哪补。芯片不建会话、不改归属。
 - 键盘：Tab 按原生顺序、↑↓ 在当前层内移动、→ 展开二级并把焦点交给第一个可用项、← 收二级回原一级行、Enter 激活、Esc 两段关闭；组词期间的键不触发菜单动作。
@@ -1762,3 +1776,17 @@ Fake/受控端口只证明输入、顺序、规则接线与执行边界。真实
 | TP-09 | 首版模型不能读取/操作内置页面；面板关闭不取消 Run；网页查看不产生 PASS、批准或 Task 完成；Chrome 扩展路径保持 | 相关权限/领域回归＋现有扩展链验证 |
 
 先完成 P0 隔离与布局实证，再启动 P2；不能用 jsdom、浏览器截图或 Tauri 编译成功替代原生出口。自检、独立验收、真实 Windows 与安装验证分别记录，实际结果仅更新统一功能验收表。收益比较按路线 §17 先冻结基线，本轮不填数值或通过项。
+
+## 46. 正式目标管理与项目状态写入的验收映射（2026-10-24）
+
+| 编号 | 场景 | 验证方式 |
+|---|---|---|
+| GM-01 | 创建 Goal 后列表按 Active/Archived/All 读取，续页去重、末页收口、暂态失败保游标、401/403/404 撤数据 | 组件级 `goalManagementLive.spec.tsx`＋真实 PG `api-lists`／`project-goal-maintenance` |
+| GM-02 | 编辑 Goal 按 revision CAS；响应错配不清 pending、不宣布成功；归档后停止编辑与新增关联 | `goalManagementLive`＋真实 PG `project-goal-maintenance` |
+| GM-03 | 解除关联先展示受影响 Task 清单；清单变化返回 `GOAL_LINK_IN_USE` 并要求再次确认；命令冻结 | `goalManagementLive`＋真实 PG `project-goal-maintenance` |
+| GM-04 | Project 改名只改标题与 revision，回执绑定原命令 | `projectManagementPanels.spec.tsx`＋真实 PG `project-goal-maintenance` |
+| GM-05 | Project State 阶段限词、下一步只引用本项目 Task、风险/阻塞/解除走单一 action 与 CAS；`ADD_BLOCKER` 可经 HTTP 提交 | `projectManagementPanels.spec.tsx`＋真实 PG `api-state`（schema 回归先红后绿） |
+| GM-06 | Goal 与目录工作上下文只读、会话保留原 ID、目录精确过滤、归档/停用按事实呈现 | `goalManagementLive.spec.tsx`＋真实 PG `work-contexts` |
+| GM-07 | Goal 关联需求与前端入口不被误当成聊天 `/goal`；不创建 Project/Task/Run/Session | 组件级请求断言与真实 PG 回执 |
+
+未覆盖：真实 Windows/WebView2、390px 与多 DPI 人工走查、真实浏览器导航、独立验收；全量工作台套件未跑。

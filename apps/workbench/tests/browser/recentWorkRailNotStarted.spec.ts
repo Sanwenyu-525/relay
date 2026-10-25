@@ -38,7 +38,8 @@ async function fulfillJson(route: Route, body: unknown): Promise<void> {
 function session(id: string, title: string, updatedAt: string, lastMessageAt: string | null): unknown {
   return { id, workspace_id: workspaceId, project_id: null, task_id: null, title,
     status: "ACTIVE", revision: "1", created_at: updatedAt, updated_at: updatedAt,
-    last_message_at: lastMessageAt, pinned_at: null, unread_at: null,
+    last_message_at: lastMessageAt, has_messages: lastMessageAt !== null,
+    pinned_at: null, unread_at: null,
     working_resource_id: null,
     context: { project_goals: [], working_directory: null } };
 }

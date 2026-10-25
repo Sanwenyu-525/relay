@@ -9,8 +9,8 @@ import type { RelayProjectGoal } from "../blueprintDtos";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, nullableString, object } from "../core/primitives";
-import { activityPageFrom, commandEnvelopeFrom, continuationComparisonFrom, continuationPointSummaryFrom, goalCreationFrom, projectCreationFrom, projectFrom, projectGoalLinkFrom, projectListItemFrom, projectStateFrom, viewConfigurationFrom } from "../parse/projects";
-import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayGoalCreation, RelayProject, RelayProjectCreation, RelayProjectGoalLink, RelayProjectPage, RelayProjectState, RelayViewConfiguration, RelayViewKind } from "../dtos/projects";
+import { activityPageFrom, commandEnvelopeFrom, continuationComparisonFrom, continuationPointSummaryFrom, directoryWorkContextFrom, goalPageFrom, goalProjectListFrom, goalRecordFrom, goalWorkContextFrom, projectCreationFrom, projectFrom, projectGoalLinkDetailListFrom, projectListItemFrom, projectStateFrom, viewConfigurationFrom } from "../parse/projects";
+import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayViewConfiguration, RelayViewKind } from "../dtos/projects";
 
 export async function getProject(http: RelayHttp, projectId: string): Promise<RelayProject> {
   return projectFrom(await http.request(http.workspacePath(`/projects/${encodeURIComponent(projectId)}`)));
@@ -87,6 +87,86 @@ export async function getGoal(http: RelayHttp, goalId: string): Promise<RelayGoa
   return goalFrom(await http.request(http.workspacePath(`/goals/${encodeURIComponent(goalId)}`)));
 }
 
+/** 正式 Goal 的完整单读；与 Blueprint 使用的紧凑 getGoal 分开，避免改坏既有调用方。 */
+export async function getGoalDetail(http: RelayHttp, goalId: string): Promise<RelayGoalRecord> {
+  return goalRecordFrom(await http.request(http.workspacePath(`/goals/${encodeURIComponent(goalId)}`)));
+}
+
+export async function listGoals(http: RelayHttp, status: "active" | "archived" | "all",
+  cursor: string | null = null): Promise<RelayGoalPage> {
+  const query = new URLSearchParams({ status });
+  if (cursor !== null) query.set("cursor", cursor);
+  return goalPageFrom(await http.request(`${http.workspacePath("/goals")}?${query.toString()}`));
+}
+
+export async function getGoalProjects(http: RelayHttp, goalId: string): Promise<readonly RelayGoalProject[]> {
+  return goalProjectListFrom(await http.request(http.workspacePath(
+    `/goals/${encodeURIComponent(goalId)}/projects`)));
+}
+
+/**
+ * 带解绑影响清单的 Project→Goal 读：`explicit_task_ids` 是解除关联前必须展示并提交的集合。
+ * 与 getProjectGoals 分开，避免既有调用方为不需要的字段承担新响应要求。
+ */
+export async function getProjectGoalLinks(http: RelayHttp,
+  projectId: string): Promise<readonly RelayProjectGoalLinkDetail[]> {
+  return projectGoalLinkDetailListFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(projectId)}/goals`)));
+}
+
+export async function editGoal(http: RelayHttp, input: { readonly goalId: string;
+  readonly commandId: string; readonly expectedRevision: DecimalRevision;
+  readonly title: string; readonly description: string; }): Promise<RelayCommandEnvelope> {
+  return commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/goals/${encodeURIComponent(input.goalId)}/revisions`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision, title: input.title,
+      description: input.description })
+  }, 200));
+}
+
+export async function archiveGoal(http: RelayHttp, input: { readonly goalId: string;
+  readonly commandId: string; readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
+  return commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/goals/${encodeURIComponent(input.goalId)}/archive`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision })
+  }, 200));
+}
+
+export async function renameProject(http: RelayHttp, input: { readonly projectId: string;
+  readonly commandId: string; readonly expectedRevision: DecimalRevision;
+  readonly title: string; }): Promise<RelayCommandEnvelope> {
+  return commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(input.projectId)}`), {
+    method: "PATCH", body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision, title: input.title })
+  }, 200));
+}
+
+export async function unlinkProjectGoal(http: RelayHttp, input: { readonly projectId: string;
+  readonly commandId: string; readonly expectedRevision: DecimalRevision;
+  readonly goalId: string; readonly expectedImpactedTaskIds: readonly string[] }): Promise<RelayCommandEnvelope> {
+  return commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(input.projectId)}/goal-unlinks`), {
+    method: "POST", body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision, goal_id: input.goalId,
+      expected_impacted_task_ids: input.expectedImpactedTaskIds })
+  }, 200));
+}
+
+export async function getGoalWorkContext(http: RelayHttp, goalId: string,
+  status: "ACTIVE" | "ARCHIVED" | "ALL" = "ACTIVE"): Promise<RelayGoalWorkContext> {
+  return goalWorkContextFrom(await http.request(
+    `${http.workspacePath(`/goals/${encodeURIComponent(goalId)}/work-context`)}?status=${status}`));
+}
+
+export async function getDirectoryWorkContext(http: RelayHttp, resourceId: string,
+  status: "ACTIVE" | "ARCHIVED" | "ALL" = "ACTIVE"): Promise<RelayDirectoryWorkContext> {
+  return directoryWorkContextFrom(await http.request(
+    `${http.workspacePath(`/working-directories/${encodeURIComponent(resourceId)}/work-context`)}?status=${status}`));
+}
+
 export async function getBlueprintProposals(http: RelayHttp, projectId: string): Promise<readonly RelayBlueprintProposal[]> {
   const body = object(await http.request(http.workspacePath(
     `/projects/${encodeURIComponent(projectId)}/blueprint-proposals`)), "blueprint proposals");
@@ -158,7 +238,7 @@ export async function createProject(http: RelayHttp, input: { readonly commandId
    * 与 Project 的关联是独立命令（LinkProjectGoal），这里刻意不隐式关联任何 Project，
    * 也不由前端代填项目——作用域与关联仍归各自 Owner。
    */
-export async function createGoal(http: RelayHttp, input: { readonly commandId: string; readonly title: string; readonly description: string; }): Promise<RelayGoalCreation> {
+export async function createGoal(http: RelayHttp, input: { readonly commandId: string; readonly title: string; readonly description: string; }): Promise<RelayCommandEnvelope> {
   const body = await http.request(http.workspacePath("/goals"), {
     method: "POST",
     body: JSON.stringify({
@@ -167,7 +247,8 @@ export async function createGoal(http: RelayHttp, input: { readonly commandId: s
       description: input.description
     })
   });
-  return goalCreationFrom(commandEnvelopeFrom(body).result);
+  // 回执身份与结果一起交回调用方：只信 HTTP 201 无法排除 command_id 错配。
+  return commandEnvelopeFrom(body);
 }
 
 /**
@@ -175,7 +256,7 @@ export async function createGoal(http: RelayHttp, input: { readonly commandId: s
    * 创建 Goal 不隐式关联任何 Project，关联必须由用户明确发起。
    * expectedRevision 是 Project 当前修订：服务端按它做 CAS，修订变化时返回冲突而不是覆盖。
    */
-export async function linkProjectGoal(http: RelayHttp, input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision; readonly goalId: string; }): Promise<RelayProjectGoalLink> {
+export async function linkProjectGoal(http: RelayHttp, input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision; readonly goalId: string; }): Promise<RelayCommandEnvelope> {
   const body = await http.request(
     http.workspacePath(`/projects/${encodeURIComponent(input.projectId)}/goal-links`), {
       method: "POST",
@@ -185,11 +266,33 @@ export async function linkProjectGoal(http: RelayHttp, input: { readonly project
         goal_id: input.goalId
       })
     });
-  return projectGoalLinkFrom(commandEnvelopeFrom(body).result);
+  // 成功响应同样交给调用方核对 command_id / Project / Goal / revision，不在这里默认可信。
+  return commandEnvelopeFrom(body);
 }
 
 export async function getProjectState(http: RelayHttp, projectId: string): Promise<RelayProjectState> {
   return projectStateFrom(
     await http.request(http.workspacePath(`/projects/${encodeURIComponent(projectId)}/state`))
   );
+}
+
+/**
+ * Project State 只接受类型化 action；这里按 action 组装固定参数，禁止整对象覆盖。
+ * 调用方仍须按原 command_id、action 与 revision 核对响应/回执。
+ */
+export async function runProjectStateCommand(http: RelayHttp,
+  input: RelayStateCommandInput): Promise<RelayCommandEnvelope> {
+  const base = { command_id: input.commandId, expected_revision: input.expectedRevision,
+    action: input.action };
+  const body = input.action === "SET_PHASE" ? { ...base, phase_key: input.phaseKey }
+    : input.action === "SET_NEXT_ACTION" ? { ...base, next_action_task_id: input.nextActionTaskId }
+      : input.action === "ADD_CONFIRMED_RISK" ? { ...base, statement: input.statement,
+        source_ref: input.sourceRef, confirmation_ref: input.confirmationRef }
+        : input.action === "ADD_BLOCKER" ? { ...base, target_kind: input.targetKind,
+          target_id: input.targetId, reason: input.reason, source_ref: input.sourceRef }
+          : { ...base, blocker_id: input.blockerId };
+  return commandEnvelopeFrom(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(input.projectId)}/state-commands`), {
+    method: "POST", body: JSON.stringify(body)
+  }, 200));
 }

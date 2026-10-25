@@ -189,7 +189,7 @@ describe("窄窗抽屉里的新对话入口", () => {
 
 /**
  * 命令结果待核对时的焦点回退（2026-10-19 调整）。
- * 未发送草稿不再弹确认框，「保留并继续编辑」只剩「留在当前工作区」一个出口；
+ * 未保存草稿不再弹确认框，守卫弹层的「留在本页核对回执」是唯一出口；
  * 没有可续写的编辑器时，焦点必须停在打开导航按钮上，不得被塞进输入器。
  * 焦点断言针对 document.activeElement，不只看 ref 是否存在。
  */
@@ -201,7 +201,7 @@ describe("命令结果待核对时的焦点回退", () => {
     return menuButton;
   }
 
-  it("命令结果待核对时，弹层只有「留在当前工作区」，焦点停在打开导航按钮", async () => {
+  it("命令结果待核对时，弹层只有「留在本页核对回执」，焦点停在打开导航按钮", async () => {
     const view = await mount("/agent", { sessions: false });
     const draft = view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement;
     draft.focus();
@@ -219,7 +219,7 @@ describe("命令结果待核对时的焦点回退", () => {
     await navigationAction().trigger("click");
     await flush();
     expect(dialogText()).toContain("待核对");
-    clickButtonByText("保留并继续编辑");
+    clickButtonByText("留在本页核对回执");
     await flush(120);
 
     expect(document.querySelector('[role="dialog"]')).toBeNull();

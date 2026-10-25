@@ -13,6 +13,7 @@ import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { applySafeControl } from '../application/control-requests.js';
+import { runAssistGoalTick } from '../application/goal-advance.js';
 import { recoverStoppedDesktopLaunch, runSupervisedWorkerOnce,
   type DesktopStopEvidence } from './supervisor.js';
 import { desktopDispatchReadyLine, desktopLaunchRecoveryAckLine } from './desktop-supervisor-protocol.js';
@@ -172,6 +173,18 @@ async function main(): Promise<void> {
   if (!Number.isInteger(workerLeaseMs) || workerLeaseMs < 100 || workerLeaseMs > 600_000) {
     throw new Error('supervisor configuration invalid');
   }
+  // 2026-10-24 实机验收抓到的缺口（修复）：桌面 supervisor 按 `--once` / `--assist-once`
+  // 按需拉起一次性 worker，而 goal tick 原本只在持续 Worker 的循环里运行——桌面拓扑下
+  // worker 干完即退，PAUSING/CANCELLING 控制意图、轮次归一与下一轮投递在两次派发之间
+  // 无人收口（实机一条 CANCELLING 停留 3 天；验收目标 PAUSING 停留至进程退出）。
+  // supervisor 常驻，这里按时间闸调用**同一个** runAssistGoalTick：函数级唯一推进 Owner
+  // 不变，租约与锁定行短事务保证与 worker tick 并发安全。0 表示每个 pass 都跑（测试用）。
+  const goalTickIntervalMs = Number(process.env.RELAY_SUPERVISOR_GOAL_TICK_MS ?? '2000');
+  if (!Number.isInteger(goalTickIntervalMs) || goalTickIntervalMs < 0 ||
+      goalTickIntervalMs > 60_000) {
+    throw new Error('supervisor configuration invalid');
+  }
+  let lastGoalTickAt = 0;
   const database = new RelayDatabase({
     databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
@@ -286,6 +299,22 @@ async function main(): Promise<void> {
         process.stdout.write(`${JSON.stringify({ type: 'worker_exit', code: result.exitCode,
           requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds })}\n`);
         if (result.exitCode !== 0 && !controller.signal.aborted) throw new Error('worker failed');
+      }
+      if (controller.signal.aborted) break;
+      // 控制意图收口（见上方 goalTickIntervalMs 注释）：放在 assist 派发之后，
+      // 刚结算完的在途轮次能在同一个 pass 里把 PAUSING/CANCELLING 归一。
+      if (!controller.signal.aborted &&
+          Date.now() - lastGoalTickAt >= goalTickIntervalMs) {
+        lastGoalTickAt = Date.now();
+        const goalTick = await runAssistGoalTick(database.executor, {
+          workerId: `supervisor:${desktopFrame?.launchId ?? process.pid}`,
+          leaseMs: workerLeaseMs });
+        if (goalTick.advanced.length > 0 || goalTick.settled.length > 0 ||
+            goalTick.controls.length > 0) {
+          process.stdout.write(`${JSON.stringify({ type: 'supervisor_goal_tick',
+            advanced: goalTick.advanced.length, settled: goalTick.settled.length,
+            controls: goalTick.controls })}\n`);
+        }
       }
       if (once) break;
       await new Promise<void>((done) => {

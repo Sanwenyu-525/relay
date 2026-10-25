@@ -151,6 +151,64 @@ export interface RelayManagedGitReadResponse {
   readonly outcome: RelayManagedGitReadOutcome;
 }
 
+/** 人工受管目录浏览与文件读取（HTTP §10.112，迁移 0134）。 */
+export type RelayFileBrowseAction = "LIST_DIRECTORY" | "READ_FILE";
+
+export interface RelayManagedFileReadInput {
+  readonly projectId: string;
+  readonly resourceId: string;
+  readonly connectionId: string;
+  readonly commandId: string;
+  readonly actionType: RelayFileBrowseAction;
+  /** 受管根内相对路径：LIST_DIRECTORY 缺省＝根自身；READ_FILE 必填。 */
+  readonly relativePath?: string;
+  readonly limit?: number;
+}
+
+export interface RelayDirectoryEntry {
+  readonly path: string;
+  readonly kind: "directory" | "file" | "other";
+  readonly size: number | null;
+}
+
+export interface RelayDirectoryListingResult {
+  readonly kind: "LISTING";
+  readonly entries: readonly RelayDirectoryEntry[];
+  readonly count: number;
+  readonly limit: number;
+  readonly truncated: boolean;
+  readonly skipped: number;
+}
+
+export interface RelayFileContentResult {
+  readonly kind: "CONTENT";
+  readonly content: string;
+  readonly size: number;
+  readonly sha256: string;
+  readonly truncated: boolean;
+}
+
+export type RelayManagedFileReadOutcome = {
+  readonly state: "WAITING_APPROVAL" | "UNRESOLVED";
+  readonly actionType: RelayFileBrowseAction;
+  readonly operationId: string;
+  readonly reviewId: string | null;
+  readonly reason: string;
+} | {
+  readonly state: "SUCCEEDED" | "FAILED";
+  readonly actionType: RelayFileBrowseAction;
+  readonly operationId: string;
+  readonly invocationId: string | null;
+  readonly result: RelayDirectoryListingResult | RelayFileContentResult |
+    { readonly kind: "FAILURE"; readonly reason: string; readonly detail: string | null };
+};
+
+export interface RelayManagedFileReadResponse {
+  readonly commandId: string;
+  readonly committedAt: string;
+  readonly outcome: RelayManagedFileReadOutcome;
+}
+
 export type RelayMockGatewayConnection = RelayGatewayConnection;
 
 export interface RelayWebImportSubmission {

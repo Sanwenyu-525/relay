@@ -764,7 +764,10 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   align-items: center;
   gap: var(--relay-space-1);
   min-width: 0;
-  flex: none;
+  /* DEV-0110（2026-10-24 修复）：命中率文本首次出现时整组不得把工具行挤到换行、
+     把输入卡顶高——组改为可收缩，收缩由命中率文本自己的省略号承担（圆环恒不缩，
+     见 .agent-chat-context-meter 的 flex:none）。 */
+  flex: 0 1 auto;
   min-height: var(--relay-control-height-compact);
 }
 /* 工具行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
@@ -796,6 +799,9 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 12rem;
+  /* DEV-0110：被挤占时先截断的是这条文本（ellipsis），不是换工具行。 */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .agent-chat-context-meter {
   display: inline-flex;
@@ -805,6 +811,8 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   height: var(--relay-control-meter-size);
   border-radius: var(--relay-radius-round);
   cursor: default;
+  /* DEV-0110：圆环是计量本体，不参与收缩。 */
+  flex: none;
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 .agent-chat-context-meter:hover {
