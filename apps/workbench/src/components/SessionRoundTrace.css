@@ -1,5 +1,12 @@
 /* 这一轮做了什么（工作台 §18.10）。开合、缩进与列表间距都沿用 .tech-details 既有规则，
-   这里只补轮次行本身的排布与状态色——不新造一套视觉语义。 */
+   这里只补摘要行的分档与轮次行本身的排布——不新造一套视觉语义。 */
+/* 摘要行只有三档：说清楚做了什么（activity，正文次级色）、还有多少步（同上）、
+   以及必须让人看见的例外（待核对 / 未执行）。不给整体加底色或图标，它不是一块面板。 */
+.session-round-trace-label { color: var(--relay-color-text-secondary); }
+.session-round-trace-activity { color: var(--relay-color-text-secondary); }
+/* 例外用警示色，但仍只是文字：不是徽牌、不是进度条，避免与消息行的三点抢同一档注意力。 */
+.session-round-trace-pending { color: var(--relay-color-status-warning-text); }
+.session-round-trace-rejected { color: var(--relay-color-text-muted); }
 .session-round-trace-round-title {
   margin: 0;
   color: var(--relay-color-text-secondary);
@@ -29,4 +36,6 @@
   font-size: var(--relay-font-size-meta);
   overflow-wrap: anywhere;
 }
-.session-round-trace-live { color: var(--relay-color-status-warning-text); }
+/* 展开后的路径可能是整段绝对路径：单行截断会藏掉末尾那个真正区分对象的目录名，
+   所以按任意位置折行，并且限定在消息列宽度内——窄窗口下不产生页面级横向溢出。 */
+.session-round-trace-calls .hash-code { max-width: 100%; overflow-wrap: anywhere; }

@@ -9,6 +9,7 @@ import type { RelayApiClient, RelayCommandEnvelope, RelayGoalProject,
   RelayTaskSummary, RelayWorkContextSession } from "../api/relayClient";
 import { createCommandId, goalArchiveResultFrom, goalEditResultFrom,
   projectGoalUnlinkResultFrom, RelayApiError, RelayTransportError } from "../api/relayClient";
+import { RelayContractError } from "../api/core/errors";
 import { goalStatusLabels, phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -86,7 +87,7 @@ function savePending(key: string, pending: GoalCommand | null): void {
 }
 
 function isUncertain(caught: unknown): boolean {
-  return caught instanceof RelayTransportError ||
+  return caught instanceof RelayContractError || caught instanceof RelayTransportError ||
     caught instanceof RelayApiError && (caught.problem.status >= 500 ||
       caught.problem.code === "COMMAND_ID_REUSED");
 }

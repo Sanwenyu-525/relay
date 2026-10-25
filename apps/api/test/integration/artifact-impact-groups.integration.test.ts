@@ -321,5 +321,66 @@ test('N02 组合检查绑定确切版本集合，且不把单项事实折算成�
       `/combination-checks/${String(afterEdgeGone.combination_check_id)}`))).body as { gaps: string[] };
     assert.equal(reopened.gaps.filter((gap) =>
       gap.includes(targetOne.versionId) && gap.includes('登记引用')).length, 1);
+
+    const candidateId = await seedCandidate({ workspaceId, projectId: project.result.project_id,
+      taskId, checkId, targetArtifactId: targetOne.artifactId, targetVersionId: targetOne.versionId });
+    const applyCommandId = randomUUID();
+    const applied = expectCommandAccepted(await api.post(workspacePath(workspaceId,
+      `/impact-candidates/${candidateId}/apply`), { command_id: applyCommandId,
+      expected_target_revision: targetOne.artifactRevision }), 200, applyCommandId);
+    const appliedVersionId = String(applied.version_id);
+    const appliedCombinationCommandId = randomUUID();
+    const appliedCombination = expectCommandAccepted(await api.post(workspacePath(workspaceId, path),
+      { command_id: appliedCombinationCommandId,
+        artifact_version_ids: [sourceV2.versionId, appliedVersionId] }), 201, appliedCombinationCommandId);
+    const appliedSnapshot = (await api.get(workspacePath(workspaceId,
+      `/combination-checks/${String(appliedCombination.combination_check_id)}`))).body as {
+        items: { artifact_version_id: string }[] };
+    assert.deepEqual(appliedSnapshot.items.map((item) => item.artifact_version_id),
+      [sourceV2.versionId, appliedVersionId]);
+  } finally { await api.stop(); }
+});
+
+test('N02 正文正好到上限不标记截断，超过一字符才标记', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const project = await createProject(app.db, { workspaceId, commandId: randomUUID(),
+    title: 'impact input truncation boundary', projectType: 'DEVELOPMENT' });
+  const api = await startTestApi();
+  try {
+    const taskId = await startTask(api, workspaceId, project.result.project_id,
+      'check model input excerpt truncation boundaries');
+    const sourceV1 = await saveVersion(api, workspaceId, taskId, 'source', '# source v1\n');
+    const target999 = await saveVersion(api, workspaceId, taskId, 'target 999', 'x'.repeat(999));
+    const target1000 = await saveVersion(api, workspaceId, taskId, 'target 1000', 'x'.repeat(1000));
+    const target1001 = await saveVersion(api, workspaceId, taskId, 'target 1001', 'x'.repeat(1001));
+    const sourceV2 = await saveVersion(api, workspaceId, taskId, 'source', '# source v2\n', sourceV1);
+    await withTransaction(app.db, async (r) => {
+      for (const child of [target999, target1000, target1001]) {
+        await r.lineage.insertExactEdge({ workspaceId, childVersionId: child.versionId,
+          relation: 'DERIVED_FROM', parentKind: 'ARTIFACT_VERSION', parentId: sourceV1.versionId });
+      }
+    });
+    async function modelInput(checkId: string) {
+      return withTransaction(app.db, async (r) => {
+        const check = await r.impacts.read(checkId);
+        assert.ok(check);
+        const messages = await r.assist.listMessages(check.assist_session_id);
+        const userMessage = messages.find((message) => message.role === 'USER');
+        assert.ok(userMessage?.content);
+        return JSON.parse(userMessage.content) as { input_truncated: boolean;
+          direct_targets: { version_id: string; excerpt: string }[] };
+      });
+    }
+    for (const target of [target999, target1000]) {
+      const checkId = await startImpactCheck(api, workspaceId, sourceV1, sourceV2, [target.versionId]);
+      const input = await modelInput(checkId);
+      assert.equal(input.input_truncated, false);
+      assert.equal(input.direct_targets[0]?.excerpt.length, target === target999 ? 999 : 1000);
+    }
+    const overflowCheckId = await startImpactCheck(api, workspaceId, sourceV1, sourceV2,
+      [target1001.versionId]);
+    const overflowInput = await modelInput(overflowCheckId);
+    assert.equal(overflowInput.input_truncated, true);
+    assert.equal(overflowInput.direct_targets[0]?.excerpt.length, 1000);
   } finally { await api.stop(); }
 });

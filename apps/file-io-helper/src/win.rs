@@ -532,6 +532,29 @@ fn create_file(parent: &Handle, name: &str) -> Result<Handle, Failure> {
 }
 
 fn read_bytes(handle: &Handle) -> Result<Vec<u8>, Failure> {
+    read_bounded_bytes(
+        handle,
+        MAX_FILE_BYTES,
+        "FILE_TOO_LARGE",
+        "file exceeds 1 MiB read limit",
+    )
+}
+
+fn read_content_bytes(handle: &Handle) -> Result<Vec<u8>, Failure> {
+    read_bounded_bytes(
+        handle,
+        MAX_CONTENT_BYTES,
+        "CONTENT_TAMPERED",
+        "managed content exceeds 256 KiB",
+    )
+}
+
+fn read_bounded_bytes(
+    handle: &Handle,
+    limit: usize,
+    error_code: &'static str,
+    error_message: &'static str,
+) -> Result<Vec<u8>, Failure> {
     if unsafe { SetFilePointerEx(handle.0, 0, null_mut(), FILE_BEGIN) } == 0 {
         return Err(win_error("READ_FAILED"));
     }
@@ -554,11 +577,8 @@ fn read_bytes(handle: &Handle) -> Result<Vec<u8>, Failure> {
         if count == 0 {
             return Ok(output);
         }
-        if output.len() + count as usize > MAX_FILE_BYTES {
-            return Err(Failure::new(
-                "FILE_TOO_LARGE",
-                "file exceeds 1 MiB read limit",
-            ));
+        if output.len() + count as usize > limit {
+            return Err(Failure::new(error_code, error_message));
         }
         output.extend_from_slice(&chunk[..count as usize]);
     }

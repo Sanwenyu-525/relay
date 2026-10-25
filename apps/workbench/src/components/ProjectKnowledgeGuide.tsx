@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { createCommandId, RelayApiError, type RelayApiClient,
   type RelayKnowledgeGuideEntryInput, type RelayProjectKnowledgeGuide } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 
 interface Props {
   readonly client: RelayApiClient;
@@ -76,29 +77,86 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const taskPages = useProjectTaskPages(client, projectId, true, projectId, 12);
+  const artifactScope = useRef({ client, projectId });
+  const requestedArtifactTasks = useRef(new Set<string>());
+  const pendingArtifactTasks = useRef(new Set<string>());
+  const failedArtifactTasks = useRef(new Set<string>());
+  const [artifactTasksLoading, setArtifactTasksLoading] = useState(false);
+  const [artifactTasksError, setArtifactTasksError] = useState<string | null>(null);
+  const [artifactRetryVersion, setArtifactRetryVersion] = useState(0);
 
   const load = useCallback(() => {
     setError(null);
     return Promise.all([client.getProjectKnowledgeGuide(projectId), client.getDecisions(projectId),
-      client.getRules(projectId), client.getKnowledge(projectId), client.getProjectTasks(projectId)])
-      .then(async ([nextGuide, decisions, rules, knowledge, tasks]) => {
-        const artifacts = await Promise.all(tasks.map((task) => client.getTaskArtifacts(task.id)
-          .then((result) => result.items).catch(() => [])));
-        setTargets([...decisions.filter((item) => item.projectId === projectId)
+      client.getRules(projectId), client.getKnowledge(projectId)])
+      .then(([nextGuide, decisions, rules, knowledge]) => {
+        const ordinaryTargets = [...decisions.filter((item) => item.projectId === projectId)
           .map((item) => ({ refKind: "DECISION" as const, id: item.id, label: item.title })),
         ...rules.filter((item) => item.projectId === projectId)
           .map((item) => ({ refKind: "RULE" as const, id: item.id, label: item.ruleKey })),
         ...knowledge.filter((item) => item.projectId === projectId)
-          .map((item) => ({ refKind: "KNOWLEDGE" as const, id: item.id, label: item.title })),
-        ...artifacts.flatMap((items) => items.flatMap((artifact) => artifact.versions
-          .map((version) => ({ refKind: "ARTIFACT_VERSION" as const, id: version.artifactVersionId,
-            label: `${artifact.title} · v${version.versionNumber}` }))))]);
+          .map((item) => ({ refKind: "KNOWLEDGE" as const, id: item.id, label: item.title }))];
+        setTargets((current) => [...ordinaryTargets,
+          ...current.filter((target) => target.refKind === "ARTIFACT_VERSION")]);
         setGuide(nextGuide);
         setDraft(null);
       }).catch((caught: unknown) => { setError(describeLiveError(caught).message); });
   }, [client, projectId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    artifactScope.current = { client, projectId };
+    requestedArtifactTasks.current.clear(); pendingArtifactTasks.current.clear();
+    failedArtifactTasks.current.clear();
+    setArtifactTasksLoading(false); setArtifactTasksError(null);
+    setTargets((current) => current.filter((target) => target.refKind !== "ARTIFACT_VERSION"));
+  }, [client, projectId]);
+
+  useEffect(() => {
+    if (taskPages.scopeLost) {
+      requestedArtifactTasks.current.clear(); pendingArtifactTasks.current.clear();
+      failedArtifactTasks.current.clear();
+      setTargets((current) => current.filter((target) => target.refKind !== "ARTIFACT_VERSION"));
+      setArtifactTasksLoading(false);
+      setArtifactTasksError(taskPages.error ?? "项目任务读取权限已失效；已清除受限产物候选。");
+      return;
+    }
+    const pending = taskPages.items.filter((task) => !requestedArtifactTasks.current.has(task.id));
+    if (pending.length === 0) return;
+    for (const task of pending) {
+      requestedArtifactTasks.current.add(task.id); pendingArtifactTasks.current.add(task.id);
+    }
+    setArtifactTasksLoading(true);
+    const scope = artifactScope.current;
+    void Promise.all(pending.map(async (task) => {
+      try { return { task, artifacts: (await client.getTaskArtifacts(task.id)).items, error: null }; }
+      catch (caught) { return { task, artifacts: [], error: describeLiveError(caught).message }; }
+    })).then((results) => {
+      if (artifactScope.current.client !== scope.client || artifactScope.current.projectId !== scope.projectId) return;
+      for (const task of pending) pendingArtifactTasks.current.delete(task.id);
+      const additions = results.flatMap(({ task, artifacts, error: taskError }) => {
+        if (taskError !== null) { failedArtifactTasks.current.add(task.id); return []; }
+        return artifacts.flatMap((artifact) => artifact.versions.map((version) => ({
+          refKind: "ARTIFACT_VERSION" as const, id: version.artifactVersionId,
+          label: `${artifact.title} · v${version.versionNumber}`
+        })));
+      });
+      if (results.some((result) => result.error !== null)) setArtifactTasksError("部分任务的产物暂时无法读取。");
+      setTargets((current) => {
+        const byId = new Map(current.map((target) => [target.id, target]));
+        for (const target of additions) byId.set(target.id, target);
+        return [...byId.values()];
+      });
+    }).finally(() => setArtifactTasksLoading(pendingArtifactTasks.current.size > 0));
+  }, [client, taskPages.items, taskPages.error, taskPages.scopeLost, artifactRetryVersion]);
+
+  function retryArtifactTasks() {
+    for (const taskId of failedArtifactTasks.current) requestedArtifactTasks.current.delete(taskId);
+    failedArtifactTasks.current.clear(); setArtifactTasksError(null);
+    setArtifactRetryVersion((version) => version + 1);
+  }
 
   const rows = draft ?? (guide === null ? [] : toDraft(guide));
   const dirty = draft !== null;
@@ -149,7 +207,7 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
         {guide.exists ? "" : " · 尚未保存过编排"}</p>
 
       {rows.length === 0
-        ? <p>还没有编排条目。可一次加入本项目全部可选目标再逐项调整，也可从零逐项添加。</p>
+        ? <p>还没有编排条目。可加入已加载的可选目标再逐项调整，也可从零逐项添加。</p>
         : <ol className="knowledge-guide__entries">{rows.map((row, index) => {
           const warning = resolutionText(row.resolution);
           const canPin = row.refKind === "KNOWLEDGE" && row.resolvedVersionId !== null;
@@ -203,8 +261,26 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
             refKind: target.refKind, referenceMode: "CURRENT" as const, targetId: target.id,
             label: "", title: target.label, version: null, resolution: null, note: null,
             targetStatus: null, resolvedVersionId: null }))])}>
-          全部加入（{available.length}）</button>
+          加入已加载目标（{available.length}）</button>
       </div>
+
+      <p className="helper-text">{taskPages.loading && taskPages.items.length === 0
+        ? "正在读取项目任务…"
+        : `成果候选覆盖已加载的项目任务：${taskPages.items.length} 项${taskPages.nextCursor === null ? "，任务列表已到末页。" : "，可继续加载任务。"}`}
+        {artifactTasksLoading ? " 正在读取这些任务的产物版本。" : ""}</p>
+      {taskPages.error !== null && <div className="action-error" role="alert">
+        已保留已读取任务、成果候选和原游标。{taskPages.error}
+        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
+          onClick={taskPages.retry}>重试任务列表</button>
+      </div>}
+      {taskPages.nextCursor !== null && <button className="secondary-button" type="button"
+        disabled={taskPages.loadingMore || taskPages.loading}
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多成果候选任务"}</button>}
+      {artifactTasksError !== null && !taskPages.scopeLost && <div className="action-error" role="alert">
+        {artifactTasksError}
+        {failedArtifactTasks.current.size > 0 && <button className="text-button" type="button"
+          disabled={artifactTasksLoading} onClick={retryArtifactTasks}>重试失败的产物读取</button>}
+      </div>}
 
       {available.length === 0 && rows.length > 0 && <p className="helper-text">本项目可收录的决定、规则、资料与成果版本都已在导读中。</p>}
 

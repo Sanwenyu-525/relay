@@ -614,3 +614,157 @@ describe("本目录写入档位", () => {
     } finally { mounted.unmount(); }
   });
 });
+
+/**
+ * 读取失败后的只读重新核对（禅道 #128）。
+ *
+ * 首次读取投影失败时三行禁用是闸门（投影没读到就不能改），但菜单必须留下一个只读的
+ * 「重新核对」出口：绑定档位与工作区默认档位两条作用域都要有，成功即清掉旧错误，
+ * 再失败可继续重试。重试只调 load/loadDefault——不建 command_id、不发写命令、不查回执；
+ * 请求中由 checking 挡重复，不自动轮询；作用域切换后迟到回包由 scope token 丢弃。
+ */
+
+function readFailure(status: number, code: string, detail: string): RelayApiError {
+  return new RelayApiError({ status, code, detail, retryable: status >= 500, retryAction: null,
+    fieldErrors: [], expectedRevision: null, actualRevision: null });
+}
+
+const recheckButton = () => document.querySelector<HTMLButtonElement>('[data-testid="write-permission-recheck-tier"]');
+
+describe("读取失败后的只读重新核对（禅道 #128）", () => {
+  it("绑定目录首次503后菜单里有重新核对，成功即清错误并启用三行，全程只读", async () => {
+    let reads = 0;
+    const client = stub(async () => {
+      reads += 1;
+      if (reads === 1) throw readFailure(503, "DATABASE_UNAVAILABLE", "投影读取暂时失败。");
+      return readiness();
+    });
+    const mounted = await mount(client);
+    try {
+      expect(document.querySelector('[data-testid="write-permission-error"]')?.textContent).toContain("数据库不可达");
+      for (const tier of ["ask", "auto", "full"]) expect(button(tier)?.disabled).toBe(true);
+      expect(recheckButton()?.disabled).toBe(false);
+      await click(recheckButton());
+      expect(document.querySelector('[data-testid="write-permission-error"]')).toBeNull();
+      expect(chip()?.textContent).toContain("请求批准");
+      for (const tier of ["ask", "auto", "full"]) expect(button(tier)?.disabled).toBe(false);
+      expect(reads).toBe(2);
+      // 只读恢复：没发档位命令，也没查任何命令回执。
+      expect(vi.mocked(client.setLocalDirectoryWriteTier)).not.toHaveBeenCalled();
+      expect(vi.mocked(client.getCommandReceipt)).not.toHaveBeenCalled();
+    } finally { mounted.unmount(); }
+  });
+
+  it("连续失败可再次重试，不点击时不自动轮询", async () => {
+    let reads = 0;
+    const client = stub(async () => {
+      reads += 1;
+      if (reads <= 2) throw readFailure(503, "DATABASE_UNAVAILABLE", "投影读取暂时失败。");
+      return readiness();
+    });
+    const mounted = await mount(client);
+    try {
+      await click(recheckButton());
+      expect(document.querySelector('[data-testid="write-permission-error"]')?.textContent).toContain("数据库不可达");
+      expect(recheckButton()?.disabled).toBe(false);
+      await click(recheckButton());
+      expect(document.querySelector('[data-testid="write-permission-error"]')).toBeNull();
+      expect(reads).toBe(3);
+      // 不点就不再读：恢复入口是显式的，不是后台轮询。
+      await flush(80);
+      expect(reads).toBe(3);
+    } finally { mounted.unmount(); }
+  });
+
+  it("工作区默认档位首次503同样能重新核对，恢复后三行可选且没发过默认档位命令", async () => {
+    let reads = 0;
+    const client = stub(async () => readiness(), {
+      getWorkspaceDefaultDirectory: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) throw readFailure(503, "DATABASE_UNAVAILABLE", "默认档位读取暂时失败。");
+        return workspaceDefault({ defaultWriteTier: "ASK", revision: "1" });
+      }),
+    });
+    const mounted = await mountProps({ client, projectId: null, resourceId: null, canonicalRoot: null });
+    try {
+      expect(document.querySelector('[data-testid="write-permission-error"]')?.textContent).toContain("数据库不可达");
+      expect(recheckButton()).not.toBeNull();
+      for (const tier of ["ask", "auto", "full"]) expect(button(tier)?.disabled).toBe(true);
+      await click(recheckButton());
+      expect(document.querySelector('[data-testid="write-permission-error"]')).toBeNull();
+      expect(chip()?.textContent).toContain("请求批准");
+      for (const tier of ["ask", "auto", "full"]) expect(button(tier)?.disabled).toBe(false);
+      expect(reads).toBe(2);
+      expect(vi.mocked(client.setWorkspaceDefaultWriteTier)).not.toHaveBeenCalled();
+    } finally { mounted.unmount(); }
+  });
+
+  it("403、404 与 503 给出各自不同的说明，都有重新核对出口", async () => {
+    const samples: readonly { readonly status: number; readonly code: string; readonly fragment: string }[] = [
+      { status: 503, code: "DATABASE_UNAVAILABLE", fragment: "数据库不可达" },
+      { status: 403, code: "PERMISSION_DENIED", fragment: "请求来源未被允许" },
+      { status: 404, code: "NOT_FOUND", fragment: "当前 API 未更新" }
+    ];
+    for (const sample of samples) {
+      const client = stub(async () => { throw readFailure(sample.status, sample.code, `${sample.code} detail`); });
+      const mounted = await mount(client);
+      try {
+        const error = document.querySelector('[data-testid="write-permission-error"]')?.textContent ?? "";
+        expect(error).toContain(sample.fragment);
+        expect(recheckButton()).not.toBeNull();
+      } finally { mounted.unmount(); }
+    }
+  });
+
+  it("核对进行中按钮禁用且连点只发一次", async () => {
+    let reads = 0;
+    let release!: (value: RelayWriteReadiness) => void;
+    const held = new Promise<RelayWriteReadiness>((resolve) => { release = resolve; });
+    const client = stub(async () => {
+      reads += 1;
+      if (reads === 1) throw readFailure(503, "DATABASE_UNAVAILABLE", "投影读取暂时失败。");
+      return held;
+    });
+    const mounted = await mount(client);
+    try {
+      await click(recheckButton());
+      expect(reads).toBe(2);
+      expect(recheckButton()?.disabled).toBe(true);
+      expect(recheckButton()?.textContent).toContain("正在核对");
+      // 请求中再点：不发第二次。
+      await click(recheckButton());
+      expect(reads).toBe(2);
+      await act(async () => {
+        release(readiness());
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+      });
+      await flush(0);
+      expect(document.querySelector('[data-testid="write-permission-error"]')).toBeNull();
+      expect(reads).toBe(2);
+    } finally { mounted.unmount(); }
+  });
+
+  it("切换作用域后迟到的旧读取不写入新作用域", async () => {
+    let release!: (value: RelayWriteReadiness) => void;
+    const held = new Promise<RelayWriteReadiness>((resolve) => { release = resolve; });
+    const oldClient = stub(async () => held);
+    // 新作用域读到默认那一档 ASK；旧作用域迟到回包带着 FULL，必须被丢弃。
+    const newClient = stub(async () => readiness());
+    const mounted = await mountProps({ client: oldClient, projectId, resourceId, canonicalRoot: root });
+    try {
+      await mounted.rerender(createElement(MemoryRouter, null, createElement(WritePermissionControl, {
+        client: newClient, projectId: "44444444-4444-4444-8444-444444444444",
+        resourceId: "55555555-5555-4555-8555-555555555555", canonicalRoot: "D:\\Develop\\Other" })));
+      await flush(0);
+      expect(chip()?.getAttribute("data-tier")).toBe("ask");
+      await act(async () => {
+        release(readiness({ policyDecision: "AUTO", writeTier: "FULL" }));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+      });
+      await flush(0);
+      expect(chip()?.getAttribute("data-tier")).toBe("ask");
+      expect(vi.mocked(newClient.getWriteReadiness)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(oldClient.getWriteReadiness)).toHaveBeenCalledTimes(1);
+    } finally { mounted.unmount(); }
+  });
+});

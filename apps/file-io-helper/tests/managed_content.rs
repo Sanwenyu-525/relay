@@ -43,6 +43,18 @@ impl Fixture {
             .join(CONTENT_VERSION)
             .join("content.md")
     }
+    fn version_directory(&self) -> PathBuf {
+        self.0
+            .join("artifacts")
+            .join(ARTIFACT)
+            .join(CONTENT_VERSION)
+    }
+    fn read(&self, content: &[u8]) -> Value {
+        json!({ "version": VERSION, "op": "read-content", "root_path": self.0,
+            "artifact_id": ARTIFACT, "version_id": CONTENT_VERSION,
+            "expected_sha256": format!("{:x}", Sha256::digest(content)),
+            "expected_size": content.len().to_string() })
+    }
     fn invoke(&self, request: Value) -> Value {
         let mut child = command().spawn().unwrap();
         writeln!(child.stdin.take().unwrap(), "{request}").unwrap();
@@ -293,4 +305,77 @@ fn content_over_256_kib_is_rejected_before_any_content_io() {
     );
     assert!(!fixture.0.join("staging").exists());
     assert!(!fixture.0.join("artifacts").exists());
+}
+
+#[test]
+fn content_read_returns_exact_bytes_and_checks_the_frozen_hash_and_size() {
+    let fixture = Fixture::new();
+    let content = vec![b'x'; 96 * 1024];
+    assert_eq!(fixture.invoke(fixture.publish(&content))["ok"], true);
+
+    let read = fixture.invoke(fixture.read(&content));
+    assert_eq!(read["op"], "read-content");
+    assert_eq!(read["sha256"], format!("{:x}", Sha256::digest(&content)));
+    assert_eq!(read["size"], content.len().to_string());
+    let returned = read["content_hex"].as_str().unwrap();
+    assert_eq!(returned.len(), content.len() * 2);
+    let expected_hex = content
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(returned, expected_hex);
+    assert!(returned.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+    let mut wrong_size = fixture.read(&content);
+    wrong_size["expected_size"] = json!((content.len() + 1).to_string());
+    assert_eq!(
+        fixture.invoke(wrong_size)["error"]["code"],
+        "CONTENT_TAMPERED"
+    );
+}
+
+#[test]
+fn content_read_rejects_version_junctions_and_hard_links() {
+    let fixture = Fixture::new();
+    let content = b"matching immutable content";
+    assert_eq!(fixture.invoke(fixture.publish(content))["ok"], true);
+
+    let external = Fixture::new();
+    fs::write(external.0.join("content.md"), content).unwrap();
+    fs::remove_dir_all(fixture.version_directory()).unwrap();
+    assert!(
+        Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                fixture.version_directory().to_str().unwrap(),
+                external.0.to_str().unwrap(),
+            ])
+            .stdout(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(
+        fixture.invoke(fixture.read(content))["error"]["code"],
+        "UNSAFE_ENTRY"
+    );
+}
+
+#[test]
+fn content_read_rejects_hard_linked_content_files() {
+    let fixture = Fixture::new();
+    let content = b"matching immutable content";
+    assert_eq!(fixture.invoke(fixture.publish(content))["ok"], true);
+    fs::hard_link(
+        fixture.target(),
+        fixture.version_directory().join("alias.md"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fixture.invoke(fixture.read(content))["error"]["code"],
+        "HARD_LINK"
+    );
 }

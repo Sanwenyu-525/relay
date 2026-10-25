@@ -60,7 +60,9 @@ export type RuntimePromptRoute =
    * 0126：写工具可见性同样是模板必须跟随的事实。`writeEnabled` 为真时模板要声明
    * 「你可以直接改文件」并给出基线纪律；为假时保持只读表述与执行候选协议。
    */
-  | { readonly kind: 'AGENT_MAIN_LOOP'; readonly writeEnabled?: boolean }
+  | { readonly kind: 'AGENT_MAIN_LOOP'; readonly writeEnabled?: boolean;
+      /** 本轮词表里是否有只读工具；未归属会话借机器插件走主流程时为 false。 */
+      readonly readTools?: boolean }
   /**
    * 0127：`/plan` 规划模式。只读模板——写工具根本不在词表里，因此这段文本不需要
    * 「用户要求修改时声明执行候选」那套协议；它要求的是形成结构化计划。

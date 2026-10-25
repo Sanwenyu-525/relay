@@ -12,6 +12,13 @@ interface Comparison {
 function changedLines(before: string, after: string) {
   const normalizedBefore = before.replaceAll("\r\n", "\n");
   const normalizedAfter = after.replaceAll("\r\n", "\n");
+  const withoutTrailingNewlines = (text: string) => text.replace(/(?:\r\n|\n)+$/u, "");
+  const trailingNewlineCount = (text: string) => {
+    const trailing = text.match(/(?:\r\n|\n)+$/u)?.[0] ?? "";
+    return (trailing.match(/\n/gu) ?? []).length;
+  };
+  const normalizedBodyBefore = normalizedBefore.replace(/\n+$/u, "");
+  const normalizedBodyAfter = normalizedAfter.replace(/\n+$/u, "");
   const oldLines = normalizedBefore.split("\n");
   const newLines = normalizedAfter.split("\n");
   let prefix = 0;
@@ -19,7 +26,12 @@ function changedLines(before: string, after: string) {
   let suffix = 0;
   while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix &&
     oldLines[oldLines.length - suffix - 1] === newLines[newLines.length - suffix - 1]) suffix++;
+  const trailingNewlineOnly = before !== after && normalizedBefore !== normalizedAfter &&
+    withoutTrailingNewlines(before) === withoutTrailingNewlines(after);
   return { same: before === after, lineEndingOnly: before !== after && normalizedBefore === normalizedAfter,
+    trailingNewlineOnly,
+    lineEndingAndTrailingNewline: before !== after && normalizedBodyBefore === normalizedBodyAfter &&
+      trailingNewlineCount(before) !== trailingNewlineCount(after) && !trailingNewlineOnly,
     before: oldLines.slice(prefix, oldLines.length - suffix).join("\n"),
     after: newLines.slice(prefix, newLines.length - suffix).join("\n"),
     prefix, suffix };
@@ -94,7 +106,7 @@ export default function ArtifactVersionCompare({ client, lineage }: {
       {comparison && diff && <section className="lineage-diff" data-testid="artifact-compare-result"><h3>v{comparison.version.versionNumber} → v{lineage.versionNumber}</h3>
         <p className="helper-text">基线 {comparison.version.artifactVersionId} · sha256 {comparison.version.sha256} · {comparison.lineage.sourceKind} · {comparison.version.createdAt}。<Link className="inline-link" to={`/artifact-versions/${comparison.version.artifactVersionId}/lineage`}>查看基线完整来源</Link></p>
         <p className="helper-text">基线的直接父来源 {comparison.lineage.directParents.length} 项；缺失的来源不从正文猜测。{comparison.lineage.directParents.map((edge) => `${edge.relation}:${edge.availability === "AVAILABLE" ? edge.parentId : "不可用"}`).join("；")}</p>
-        {diff.same ? <p role="status">两个确切版本正文相同。</p> : diff.lineEndingOnly ? <p role="status">正文文字相同，但 CRLF/LF 换行字节不同；两个版本的内容摘要仍分别保留。</p> : <><p>共同前缀 {diff.prefix} 行，共同后缀 {diff.suffix} 行；以下展示中间全部变化行。</p>
+        {diff.same ? <p role="status">两个确切版本正文相同。</p> : diff.lineEndingOnly ? <p role="status">正文文字相同，但 CRLF/LF 换行字节不同；两个版本的内容摘要仍分别保留。</p> : diff.lineEndingAndTrailingNewline ? <p role="status">正文文字相同，但内部 CRLF/LF 换行字节与末尾换行数量均不同；两个版本的内容摘要仍分别保留。</p> : diff.trailingNewlineOnly ? <p role="status">正文字符相同，仅末尾换行数量不同；两个版本的内容摘要仍分别保留。</p> : <><p>共同前缀 {diff.prefix} 行，共同后缀 {diff.suffix} 行；以下展示中间全部变化行。</p>
           <div className="lineage-diff-columns"><div><h4>基线独有或被替换</h4><pre className="lineage-text">{diff.before || "（无）"}</pre></div><div><h4>当前新增或替换</h4><pre className="lineage-text">{diff.after || "（无）"}</pre></div></div></>}
       </section>}
     </>}

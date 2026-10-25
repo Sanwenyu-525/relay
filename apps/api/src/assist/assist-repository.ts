@@ -439,6 +439,11 @@ export class AssistRepository {
     await sql`delete from assist_memory_state where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_memory_requests where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_memory_checkpoints where session_id = ${sessionId}`.execute(this.db);
+    // 0137 / ADR-030：自动记忆的捕获账本与来源绑定都外键指向本会话的消息（NO ACTION），
+    // 删消息前必须先摘掉，否则整条删除撞外键失败。只删**凭据**（哪条消息的哪一段），
+    // 不动 memory_items / memory_versions——长期记忆有自己的停用入口，删会话不等于遗忘。
+    await sql`delete from memory_auto_captures where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from memory_message_sources where session_id = ${sessionId}`.execute(this.db);
     const attachments = await sql<{ id: string }>`delete from assist_message_attachments
       where session_id = ${sessionId} returning id`.execute(this.db);
     await sql`delete from assist_message_previews where message_id in (

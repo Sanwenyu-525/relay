@@ -1,0 +1,12 @@
+/* 内置插件图标的基础样式。尺寸经 CSS 变量 --plugin-icon-size 下发，默认跟随
+   输入器/菜单的 body 字号档；消费方（菜单行、输入器徽标、消息 mention）用
+   既有 token 覆盖该变量，不新建第二套尺寸常量。 */
+.plugin-icon {
+  flex: none;
+  width: var(--plugin-icon-size, var(--relay-font-size-body));
+  height: var(--plugin-icon-size, var(--relay-font-size-body));
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}

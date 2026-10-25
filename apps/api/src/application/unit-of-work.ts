@@ -33,6 +33,8 @@ import { WorkSegmentRepository } from '../work-segment/work-segment-repository.j
 import { PersonalPlanningRepository } from '../planning/personal-planning-repository.js';
 import { ProjectReminderRepository } from '../planning/project-reminder-repository.js';
 import { ScheduledTaskRepository } from '../planning/scheduled-task-repository.js';
+import { AgentMemberRepository } from '../team/agent-member-repository.js';
+import { MemberConversationRepository } from '../team/member-conversation-repository.js';
 import { TaskChainRepository } from '../planning/task-chain-repository.js';
 import { VerificationRepository } from '../verification/verification-repository.js';
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
@@ -110,6 +112,8 @@ export interface Repositories {
   readonly personalPlanning: PersonalPlanningRepository;
   readonly projectReminders: ProjectReminderRepository;
   readonly scheduledTasks: ScheduledTaskRepository;
+  readonly agentMembers: AgentMemberRepository;
+  readonly memberConversations: MemberConversationRepository;
   readonly taskChains: TaskChainRepository;
   readonly verifications: VerificationRepository;
   readonly workspaces: WorkspaceRepository;
@@ -181,6 +185,8 @@ export function createRepositories(db: DbExecutor): Repositories {
     personalPlanning: new PersonalPlanningRepository(db),
     projectReminders: new ProjectReminderRepository(db),
     scheduledTasks: new ScheduledTaskRepository(db),
+    agentMembers: new AgentMemberRepository(db),
+    memberConversations: new MemberConversationRepository(db),
     taskChains: new TaskChainRepository(db),
     verifications: new VerificationRepository(db),
     workspaces: new WorkspaceRepository(db),

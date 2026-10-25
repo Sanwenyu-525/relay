@@ -575,11 +575,17 @@ export async function retireInformation(db: DbExecutor, input: ScopeInput & {
       sameRevision(input.kind, item.revision, expected);
       if (item.status !== 'ACTIVE') throw invalidTransition(`${input.kind} 已非有效状态。`);
       await r.information.setRootStatus(input.kind, item.id, status);
+      // P1-B：Memory 是长期记忆的唯一正文 Owner，但「停用」这个业务动作同时覆盖自动捕获
+      // 账本。只改 memory_items.status 会让同一件事在两处入口里状态互相矛盾（列表仍显示为
+      // 有效自动记忆，按自动记忆撤销却报「记忆已非有效状态」）。同一事务里一起走。
+      const capturesRetired = input.kind === 'memory'
+        ? await r.memoryCaptures.retireByMemory(item.id, LOCAL_ACTOR_REF) : 0;
       if (input.kind === 'rule') await r.workspaces.bumpRuleRevision(input.workspaceId);
       else await r.workspaces.bumpContextRevision(input.workspaceId);
       const reviewCount = input.kind === 'knowledge' ? await prepareDecisionReviews(r, {
         workspaceId: input.workspaceId, commandId: input.commandId, knowledgeId: item.id }) : undefined;
       return { [`${input.kind}_id`]: item.id, revision: toDecimalString(item.revision + 1n), status,
+        ...(capturesRetired === 0 ? {} : { auto_capture_retired: capturesRetired }),
         ...(reviewCount === undefined || reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
         ...(reviewCount === undefined || reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
     } });
@@ -608,6 +614,10 @@ export async function restoreInformation(db: DbExecutor, input: ScopeInput & {
       const retiredStatus = input.kind === 'knowledge' ? 'ARCHIVED' : 'RETIRED';
       if (item.status !== retiredStatus) throw invalidTransition(`${input.kind} 当前状态不能恢复。`);
       await r.information.setRootStatus(input.kind, item.id, 'ACTIVE');
+      // 停用的正向补偿（P1-B）：捕获记账随记忆一起回到 ACTIVE，两处状态始终一致。
+      // 「撤销过的内容不再被提取」由捕获行的存在性保证，不依赖这里的状态。
+      const capturesRestored = input.kind === 'memory'
+        ? await r.memoryCaptures.reactivateByMemory(item.id) : 0;
       if (input.kind === 'rule') await r.workspaces.bumpRuleRevision(input.workspaceId);
       else await r.workspaces.bumpContextRevision(input.workspaceId);
       const revision = toDecimalString(item.revision + 1n);
@@ -618,8 +628,10 @@ export async function restoreInformation(db: DbExecutor, input: ScopeInput & {
           : input.kind === 'memory' ? 'MEMORY_REACTIVATED' : 'RULE_REACTIVATED',
         factRefs: { [`${input.kind}_id`]: item.id, previous_status: item.status, status: 'ACTIVE',
           previous_revision: toDecimalString(item.revision), revision,
+          ...(capturesRestored === 0 ? {} : { auto_capture_restored: capturesRestored }),
           current_version: toDecimalString(item.current_version) } });
-      return { [`${input.kind}_id`]: item.id, revision, status: 'ACTIVE' };
+      return { [`${input.kind}_id`]: item.id, revision, status: 'ACTIVE',
+        ...(capturesRestored === 0 ? {} : { auto_capture_restored: capturesRestored }) };
     } });
 }
 

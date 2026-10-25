@@ -79,6 +79,7 @@ V1 对同一规范化真实工作根目录采用单写执行。重叠根目录�
 → 锁定/条件更新 Task、Run 及必要 State revision
 → 核对 Task owner、claim/epoch、无待处理控制请求
 → 核对确切产物已保存、验证仍适用、必要 Review 已解决
+→ 核对每个 Verification target 的 ArtifactVersion ID 与 content digest 精确一致
 → 核对不存在影响完成的 UNKNOWN / 在途必要动作
 → 写 Task DONE 与 completion_basis
 → 应用必要的确定性 Project State delta（可能为空）

@@ -98,6 +98,16 @@ export default function ProjectTasksView() {
   const [receipt, setReceipt] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [liveDependencies, setLiveDependencies] = useState<readonly ProjectTaskDependencyRow[]>([]);
+  /**
+   * 前置详情读取状态与所属任务（#113）：局部失败必须可见、可重试，不能把失败静默等价成
+   * 空依赖。status 区分读取中 / 已读到 / 失败；denied 标记 403/404 这类失权失败——
+   * 按既有失权策略撤下重试入口，与暂时性失败（可重试）分开说明。
+   */
+  const [dependencyRead, setDependencyRead] = useState<{ readonly taskId: string;
+    readonly status: "loading" | "loaded" | "error"; readonly denied: boolean;
+    readonly message: string | null } | null>(null);
+  /** 显式重读触发器：重试按钮与同项再点都递增它，让同一 selectedTaskId 也能重新请求。 */
+  const [dependencyRetry, setDependencyRetry] = useState(0);
   const requestVersion = useRef(0);
   const dependencyVersion = useRef(0);
   const disposed = useRef(false);
@@ -112,7 +122,13 @@ export default function ProjectTasksView() {
   const tasks = (result?.tasks ?? []).filter((task) => !needle ||
     [task.title, taskStatusLabels[task.status], executorLabels[task.executor]].some((value) => value.toLowerCase().includes(needle)));
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
-  const notes = result?.source === "live" ? liveDependencies : result?.dependencies ?? [];
+  /* 前置详情只认「为当前选中任务读到的」那份：读取中/失败/换选期间一律不拿旧任务的行
+     冒充当前任务的事实，避免跨任务串名。 */
+  const selectedDependencyRead = dependencyRead !== null && dependencyRead.taskId === selectedTaskId
+    ? dependencyRead : null;
+  const notes = result?.source === "live"
+    ? (selectedDependencyRead?.status === "loaded" ? liveDependencies : [])
+    : result?.dependencies ?? [];
   const selectedDependencies = selectedTask ? notes.filter((note) => selectedTask.dependencyIds.includes(note.id)) : [];
   const pendingInScope = pendingStart.current !== null && client !== null && id === pendingStart.current.projectId &&
     client.baseUrl === pendingStart.current.client.baseUrl && client.workspaceId === pendingStart.current.client.workspaceId;
@@ -128,20 +144,31 @@ export default function ProjectTasksView() {
     if (loadedScope.current !== scopeKey) {
       loadedScope.current = scopeKey; hasLoaded.current = false;
       setResult(null); setSelectedTaskId(null); selectedTaskIdRef.current = null;
-      setLiveDependencies([]); setReceipt(null); setActionError(null); setSearch("");
+      setLiveDependencies([]); setDependencyRead(null); setReceipt(null); setActionError(null); setSearch("");
       setSubmitting(false); setLoading(true); setRefreshing(false);
     } else if (hasLoaded.current) setRefreshing(true); else setLoading(true);
     setError(null); setMoreError(null); setLoadingMore(false);
     try {
       const response = client ? await loadLive(client, id) : fromFixture(await fixtureAdapter.loadProjectTasks(id, mode));
       if (request !== requestVersion.current || disposed.current || activeScope.current !== scopeKey) return;
-      setResult(response); setLiveDependencies([]); hasLoaded.current = true;
+      setResult(response); setLiveDependencies([]); setDependencyRead(null); hasLoaded.current = true;
       const next = response?.tasks.find((task) => task.id === pendingStart.current?.taskId)?.id ??
         response?.tasks.find((task) => task.blockedReason !== null)?.id ?? response?.tasks[0]?.id ?? null;
       setSelectedTaskId(next); selectedTaskIdRef.current = next;
+      // 列表重读后重新读取选中任务的前置详情（#113）：列表刷新会清掉旧详情，
+      // 若选中的还是同一任务，effect 不会因 selectedTaskId 不变而重跑，这里显式触发重读，
+      // 不让局部详情在刷新后悄悄消失。
+      setDependencyRetry((value) => value + 1);
     } catch (caught) {
       if (request !== requestVersion.current || disposed.current || activeScope.current !== scopeKey) return;
-      if (live) { const described = describeLiveError(caught); setError(described.message); }
+      if (live) {
+        const described = describeLiveError(caught);
+        setError(described.message);
+        if (caught instanceof RelayApiError && [401, 403, 404].includes(caught.problem.status)) {
+          setResult(null); setSelectedTaskId(null); selectedTaskIdRef.current = null;
+          setLiveDependencies([]); setDependencyRead(null);
+        }
+      }
       else { const fixtureError = caught as FixtureError; setError(caught instanceof Error && "kind" in caught ? fixtureError.message.trim() : caught instanceof Error ? caught.message.trim() : "读取示例项目任务时发生未知错误。"); }
     } finally { if (request === requestVersion.current && !disposed.current && activeScope.current === scopeKey) { setLoading(false); setRefreshing(false); } }
   }
@@ -164,8 +191,13 @@ export default function ProjectTasksView() {
         nextCursor: page.nextCursor
       });
     } catch (caught) {
-      if (request === requestVersion.current && !disposed.current && activeScope.current === scopeKey)
-        setMoreError(describeLiveError(caught).message);
+      if (request === requestVersion.current && !disposed.current && activeScope.current === scopeKey) {
+        if (caught instanceof RelayApiError && [401, 403, 404].includes(caught.problem.status)) {
+          setResult(null); setSelectedTaskId(null); selectedTaskIdRef.current = null;
+          setLiveDependencies([]); setDependencyRead(null); setMoreError(null);
+          setError(`项目任务权限或范围已失效：${describeLiveError(caught).message}`);
+        } else setMoreError(describeLiveError(caught).message);
+      }
     } finally {
       if (request === requestVersion.current && !disposed.current && activeScope.current === scopeKey) setLoadingMore(false);
     }
@@ -182,9 +214,27 @@ export default function ProjectTasksView() {
     const taskId = selectedTaskId;
     if (!client) return;
     const token = ++dependencyVersion.current;
-    void client.getTask(taskId).then((detail) => { if (token === dependencyVersion.current && selectedTaskIdRef.current === taskId && !disposed.current) setLiveDependencies(detail.dependencies.map((dependency) => ({ id: dependency.taskId, title: dependency.title, status: dependency.status, executor: null, reason: null, downstreamNote: null }))); }).catch(() => { if (token === dependencyVersion.current && !disposed.current) setLiveDependencies([]); });
-  }, [client, scopeKey, selectedTaskId]);
-  function selectTask(task: ProjectTaskRow) { setSelectedTaskId(task.id); setReceipt(null); setActionError(null); }
+    setDependencyRead({ taskId, status: "loading", denied: false, message: null });
+    void client.getTask(taskId).then((detail) => {
+      if (token !== dependencyVersion.current || selectedTaskIdRef.current !== taskId || disposed.current) return;
+      setLiveDependencies(detail.dependencies.map((dependency) => ({ id: dependency.taskId, title: dependency.title, status: dependency.status, executor: null, reason: null, downstreamNote: null })));
+      setDependencyRead({ taskId, status: "loaded", denied: false, message: null });
+    }).catch((caught) => {
+      // 失败不等于没有前置（#113）：局部失败如实表达并可原地重试，不再静默清成空依赖。
+      // 版本守卫保留：换选、换作用域后的迟到失败一律丢弃，不污染新选择。
+      if (token !== dependencyVersion.current || disposed.current) return;
+      const denied = caught instanceof RelayApiError && [403, 404].includes(caught.problem.status);
+      setLiveDependencies([]);
+      setDependencyRead({ taskId, status: "error", denied,
+        message: denied ? "前置任务详情当前不可见或无权读取；已撤下这条详情读取。"
+          : describeLiveError(caught).message });
+    });
+  }, [client, scopeKey, selectedTaskId, dependencyRetry, live]);
+  function selectTask(task: ProjectTaskRow) {
+    // 同项再点也是一次显式重读（#113）：不切页就能在网络恢复后重新请求同一任务。
+    if (task.id === selectedTaskId) setDependencyRetry((value) => value + 1);
+    setSelectedTaskId(task.id); setReceipt(null); setActionError(null);
+  }
   async function startSelected() {
     const task = selectedTask;
     if (!task || submitting || !canStart || unresolvedStart) return;
@@ -264,7 +314,7 @@ export default function ProjectTasksView() {
     {tasks.length === 0 ? <div className="page-state"><p>{search.trim() ? (result.nextCursor ? "已加载范围未命中该关键词，后续页尚未读取；请先继续加载后再判断。" : "当前项目没有匹配该关键词的任务。") : (result.nextCursor ? "已加载范围还没有任务，后续页尚未读取；请先继续加载后再判断。" : live ? "这个项目还没有任务。" : "这个示例项目还没有任务。")}</p>{search.trim() && <button className="secondary-button" type="button" onClick={() => setSearch("")}>清除搜索</button>}</div> : <div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--project-tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">状态</span><span className="data-cell">执行模式</span><span className="data-cell">依赖</span></div><ul className="data-list">{tasks.map((task) => <li key={task.id}><button className={`data-row data-row--project-tasks data-row--interactive${task.id === selectedTaskId ? " data-row--selected" : ""}`} type="button" aria-current={task.id === selectedTaskId ? "true" : undefined} data-testid={`project-task-row-${task.id}`} onClick={() => selectTask(task)}><span className="data-cell"><strong>{task.title}</strong><small>任务修订 v{task.revision}</small></span><span className="data-cell"><StatusChip status={task.status} /></span><span className="data-cell data-cell--meta">{interactionModeLabels[task.mode]}</span><span className="data-cell data-cell--meta">{dependencyLabel(task)}</span></button></li>)}</ul></div></div>}
     {result.source === "live" && result.nextCursor && <button className="secondary-button" type="button" data-testid="project-tasks-load-more" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取下一页" : "继续加载下一页"}</button>}
     <p className="list-footer-note"><Info aria-hidden="true" />{live ? "该页面固定在当前项目范围内；可开始性来自服务端 allowed_actions，界面不自行推断授权。" : "该页面固定在当前项目范围内；依赖是否成环由服务端判断，界面不自行推断。"}</p></div>
-    <ResponsiveRail label="查看任务判断" title="任务判断"><div className="rail-content">{selectedTask ? <><h2>{selectedTask.title}</h2><p className="rail-intro">任务修订 v{selectedTask.revision}</p><section className="rail-section"><h3>当前状态</h3><dl className="rail-definition-list"><div><dt>任务状态</dt><dd><StatusChip status={selectedTask.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[selectedTask.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[selectedTask.executor]}</dd></div></dl></section>{selectedTask.blockedReason && <section className="rail-section"><h3>为什么暂不能开始</h3><p>{selectedTask.blockedReason}</p></section>}{selectedDependencies.length > 0 && <section className="rail-section"><h3>前置依赖</h3><p>完成以下前置任务后，方可开始本任务。</p>{selectedDependencies.map((note) => <Link key={note.id} className="dependency-card" to={`/tasks/${note.id}`}><FileText aria-hidden="true" /><span className="dependency-card-copy"><strong>{note.title}</strong><small>状态：{taskStatusLabels[note.status]}{note.executor && <> · 执行者：{executorLabels[note.executor]}</>}</small></span><ChevronRight aria-hidden="true" /></Link>)}{selectedDependencies[0].reason && <p className="helper-text">{selectedDependencies[0].reason}</p>}</section>}{selectedDependencies.length > 0 && selectedDependencies[0].downstreamNote && <section className="rail-section"><h3>后续影响</h3><p>{selectedDependencies[0].downstreamNote}</p></section>}{receipt && <p className="receipt-message" role="status">{receipt}</p>}{actionError && <p className="action-error" role="alert">{actionError}</p>}{recovery}<button className="primary-button primary-button--wide" type="button" data-testid="project-task-start" disabled={submitting || unresolvedStart || !canStart} onClick={() => void startSelected()}>{submitting ? "正在开始" : "开始任务"}</button>{!canStart && <p className="disabled-reason" data-testid="project-task-start-reason"><Info aria-hidden="true" />{startBlockedReason}</p>}{selectedDependencies.length ? selectedDependencies.map((note) => <Link key={`link-${note.id}`} className="secondary-button secondary-button--wide" to={`/tasks/${note.id}`}>查看前置任务</Link>) : <Link className="secondary-button secondary-button--wide" to={`/tasks/${selectedTask.id}`}>打开任务详情</Link>}</> : <p className="rail-intro" data-testid="project-tasks-rail-empty">{tasks.length === 0
+    <ResponsiveRail label="查看任务判断" title="任务判断"><div className="rail-content">{selectedTask ? <><h2>{selectedTask.title}</h2><p className="rail-intro">任务修订 v{selectedTask.revision}</p><section className="rail-section"><h3>当前状态</h3><dl className="rail-definition-list"><div><dt>任务状态</dt><dd><StatusChip status={selectedTask.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[selectedTask.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[selectedTask.executor]}</dd></div></dl></section>{selectedTask.blockedReason && <section className="rail-section"><h3>为什么暂不能开始</h3><p>{selectedTask.blockedReason}</p></section>}{selectedTask.dependencyIds.length > 0 && selectedDependencyRead?.status === "loading" && <section className="rail-section" data-testid="project-task-dependency-reading"><h3>前置依赖</h3><p className="helper-text">正在读取前置任务详情；读取完成前只保留已知数量（{selectedTask.dependencyIds.length} 个），不显示未核实的名称。</p></section>}{selectedDependencyRead?.status === "error" && selectedTask.dependencyIds.length > 0 && <section className="rail-section" data-testid="project-task-dependency-error"><h3>前置依赖</h3><p className="action-error" role="alert">{selectedDependencyRead.denied ? selectedDependencyRead.message : `前置任务详情读取失败：${selectedDependencyRead.message}`}</p>{!selectedDependencyRead.denied && <button className="secondary-button" type="button" data-testid="project-task-dependency-retry" onClick={() => setDependencyRetry((value) => value + 1)}>重新读取前置详情</button>}</section>}{result?.source === "live" && selectedDependencyRead?.status === "loaded" && selectedDependencies.length === 0 && selectedTask.dependencyIds.length > 0 && <section className="rail-section" data-testid="project-task-dependency-empty"><h3>前置依赖</h3><p className="helper-text">详情已读取，服务端没有返回可展示的前置任务行；已知前置数量以列表为准（{selectedTask.dependencyIds.length} 个）。</p></section>}{selectedDependencies.length > 0 && <section className="rail-section"><h3>前置依赖</h3><p>完成以下前置任务后，方可开始本任务。</p>{selectedDependencies.map((note) => <Link key={note.id} className="dependency-card" to={`/tasks/${note.id}`}><FileText aria-hidden="true" /><span className="dependency-card-copy"><strong>{note.title}</strong><small>状态：{taskStatusLabels[note.status]}{note.executor && <> · 执行者：{executorLabels[note.executor]}</>}</small></span><ChevronRight aria-hidden="true" /></Link>)}{selectedDependencies[0].reason && <p className="helper-text">{selectedDependencies[0].reason}</p>}</section>}{selectedDependencies.length > 0 && selectedDependencies[0].downstreamNote && <section className="rail-section"><h3>后续影响</h3><p>{selectedDependencies[0].downstreamNote}</p></section>}{receipt && <p className="receipt-message" role="status">{receipt}</p>}{actionError && <p className="action-error" role="alert">{actionError}</p>}{recovery}<button className="primary-button primary-button--wide" type="button" data-testid="project-task-start" disabled={submitting || unresolvedStart || !canStart} onClick={() => void startSelected()}>{submitting ? "正在开始" : "开始任务"}</button>{!canStart && <p className="disabled-reason" data-testid="project-task-start-reason"><Info aria-hidden="true" />{startBlockedReason}</p>}{selectedDependencies.length ? selectedDependencies.map((note) => <Link key={`link-${note.id}`} className="secondary-button secondary-button--wide" to={`/tasks/${note.id}`}>查看前置任务</Link>) : <Link className="secondary-button secondary-button--wide" to={`/tasks/${selectedTask.id}`}>打开任务详情</Link>}</> : <p className="rail-intro" data-testid="project-tasks-rail-empty">{tasks.length === 0
       ? "这个项目当前没有可选择的任务，这里不会有依赖与阻塞原因。新建任务后可回到本页核对。"
       : "请先在列表中选择一个任务，这里会显示它的依赖与阻塞原因。"}</p>}</div></ResponsiveRail></div></section>;
 }

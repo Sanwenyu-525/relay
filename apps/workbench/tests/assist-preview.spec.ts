@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { flush, mountWorkbench, switchToolbarSession } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -183,8 +183,9 @@ describe("M04 Assist DISCUSS 生成中草稿", () => {
     expect(view.wrapper.text()).toContain("原会话已显示草稿");
     await flush(450);
     expect(releaseOld).not.toBeNull();
-    await view.wrapper.get('[data-testid="assist-session-select"]').setValue(secondSessionId);
-    await flush();
+    // 2026-10-17 起顶栏按用户指令不再放会话下拉：同作用域 ≥2 条讨论时，切换入口是右翼
+    // 「切换讨论」浮层，与旧下拉走同一个 selectSession。按当前真实入口切换，验收事实不变。
+    await switchToolbarSession(secondSessionId);
     releaseOld!(response(preview("迟到的原会话草稿")));
     await flush();
     expect(view.wrapper.text()).toContain("新会话完整消息");

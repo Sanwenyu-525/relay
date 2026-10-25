@@ -27,7 +27,8 @@ import { describeLiveRunExecution } from './assist-execution-notice.js';
 import { describeSessionCapabilities } from './assist-capability-notice.js';
 import { officialGithubSkillGuidanceForTools } from '../skills/official-skills.js';
 import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
-  recordConversationExecutionCandidate } from './conversation-execution.js';
+  recordConversationExecutionCandidate, resolveWorkspaceMachineAttribution }
+  from './conversation-execution.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
   recordStateMaintenanceCandidate } from './conversation-state.js';
 import { runLearningRounds } from './learning-round.js';
@@ -218,8 +219,10 @@ export async function runAssistGenerationTick(db: DbExecutor,
     // 工具：工具结果回到同一个模型上下文，回复也落在同一行消息上。
     //
     // 只在「本轮确实有可用只读工具」时走这条路径。词表为空（没有 FILE_QUERY/FILE_READ
-    // 连接、或会话没有项目）时保持既有单次生成路径逐字不变——那不是缺陷，是配置事实，
-    // 不该由编排方式去掩盖。
+    // 连接、或会话没有项目）时保持既有单次生成路径——那不是缺陷，是配置事实，
+    // 不该由编排方式去掩盖。**例外（2026-10-25）**：未归属会话但工作区有可借用的
+    // 机器插件连接时也走主流程——执行候选输出协议只在主流程里，纯文本路径会让
+    // @电脑操控 这类请求只剩「做不到」一种回答（用户截图的复现路径）。
     //
     // Skill 与提案意图**不走**这里：它们各有自己的输出协议（Skill 产出类型化提案，
     // PROPOSE_* 产出提案 JSON），把它们并进普通聊天就会重演「合成一个通用 schema」
@@ -262,16 +265,27 @@ export async function runAssistGenerationTick(db: DbExecutor,
       // 官方 GitHub Skill（§10）按需激活：本轮词表里真实出现 github_ 工具时，才把
       // 冻结的摘要与边界块附在能力事实块之后；无工具、被禁用或内容校验失败都不注入。
       const officialSkillNotice = officialGithubSkillGuidanceForTools(availableTools);
+      // 未归属会话的插件可用性（2026-10-25）：与落库门、能力事实块共用同一份归属
+      // 解析（连接 + 该项目的受管资源齐备才算可用）。可用即走主流程，模型才能按
+      // 执行候选协议给出 interaction="COMPUTER"/"BROWSER"，而不是用纯文本拒绝。
+      const machineRepositories = createRepositories(db);
+      const machinePluginAvailable = session.project_id === null &&
+        session.working_resource_id === null &&
+        ((await resolveWorkspaceMachineAttribution(machineRepositories, session.workspace_id,
+          'COMPUTER_INPUT')) !== undefined ||
+         (await resolveWorkspaceMachineAttribution(machineRepositories, session.workspace_id,
+          'BROWSER_ACTION')) !== undefined);
       // 计划/目标轮次即使没有可用工具也走主流程：它们的输出协议是信封，单次生成路径
       // 没有解析与落库入口，走那条路等于把结构化结果丢掉。
-      if (availableTools.length > 0 || planMode || goalRound) {
+      if (availableTools.length > 0 || planMode || goalRound || machinePluginAvailable) {
         const system = planMode
           ? selectRuntimeSystemPrompt({ kind: 'AGENT_PLAN_MODE' }).system
           : goalRound ? await goalRoundSystem(db, session, message, allowWrite)
-          : method !== null
-            ? selectRuntimeSystemPrompt({ kind: 'METHOD', method,
-              action: message.method_action, readTools: true, writeEnabled: allowWrite }).system
-            : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP', writeEnabled: allowWrite }).system;
+            : method !== null
+              ? selectRuntimeSystemPrompt({ kind: 'METHOD', method,
+                action: message.method_action, readTools: true, writeEnabled: allowWrite }).system
+            : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP', writeEnabled: allowWrite,
+              readTools: availableTools.length > 0 }).system;
         return runAgentMainLoopGeneration(db, { message, session, options, controller,
           availableTools,
           system: `${system}\n\n${capabilityNotice}` +
@@ -507,6 +521,16 @@ export async function runAssistGenerationTick(db: DbExecutor,
           finalSources: input.sourceRecords });
         return { settled, cancelled };
       });
+      // ADR-030：没有可用工具时的普通 Agent 轮次走的是这条**单次生成**路径（不是主循环），
+      // 自动记忆必须在这里也接上——否则「工作区还没绑目录」的日常对话永远记不住任何东西。
+      // 只有 DISCUSS（真正的对话）才提取；提案/影响检查轮的正文是协议信封，不是用户原话。
+      if (settled && !cancelled && message.intent === 'DISCUSS') {
+        try {
+          await captureMemoriesForTurn(db, { sessionId: session.id,
+            assistantMessageId: message.id, modelPort: modelRoute.modelPort,
+            ...(options.signal === undefined ? {} : { signal: options.signal }) });
+        } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
+      }
       return { messageId: message.id, sessionId: session.id,
         status: settled ? cancelled ? 'CANCELLED' : 'COMPLETED' : 'DISCARDED',
         errorCode: null, proposalIds: [] };
@@ -955,8 +979,29 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     // 持久化复用同一张请求行。
     const decided = readMainLoopOutcome(outcome.content);
     const sourceMessageId = await previousUserMessageId(db, session, message);
+    /*
+     * 未归属会话的插件执行（2026-10-25）：纯浏览器/电脑操作候选（无文件改动、无检查）
+     * 可借用工作区已登记的插件连接进入执行——「插件哪里都能用」的落点。归属解析与
+     * 主流程落库门共用 resolveWorkspaceMachineAttribution：工作区没有可借用的连接与
+     * 资源时不记录执行请求（能力事实块已如实说明缺项），也不让这次落库失败拖垮整条
+     * 回复的结算。文件类候选照旧要求会话先归入项目并绑定目录，不借用。
+     */
+    const machineCapability = decided.kind === 'PREPARE' &&
+        decided.candidate.interaction !== undefined &&
+        decided.candidate.file_changes.length === 0 && !decided.candidate.writes_files &&
+        decided.candidate.check === undefined
+      ? decided.candidate.interaction === 'COMPUTER' ? 'COMPUTER_INPUT' as const
+        : 'BROWSER_ACTION' as const
+      : undefined;
+    let borrowedCapability: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | undefined;
+    if (session.working_resource_id === null && session.project_id === null &&
+        machineCapability !== undefined &&
+        (await resolveWorkspaceMachineAttribution(createRepositories(db), session.workspace_id,
+          machineCapability)) !== undefined) {
+      borrowedCapability = machineCapability;
+    }
     if (sourceMessageId !== null && (decided.kind === 'PREPARE' || decided.kind === 'CLARIFY') &&
-        session.working_resource_id !== null) {
+        (session.working_resource_id !== null || borrowedCapability !== undefined)) {
       // 方法身份在消息写入时冻结，候选落库时一并绑定；丢了它，apply 阶段就取不到
       // execution_method，方法 MODIFY 会退化成一条没有方法依据的普通执行请求。
       // 形状由 readRunMethodBinding 校验：非法绑定显式失败，不静默降级。
@@ -967,7 +1012,9 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
         : undefined;
       await recordConversationExecutionCandidate(db, { workspaceId: session.workspace_id,
         sessionId: session.id, sourceMessageId,
-        resourceId: session.working_resource_id, commandId: mainLoopCommandId(message.id),
+        resourceId: session.working_resource_id,
+        commandId: mainLoopCommandId(message.id),
+        ...(borrowedCapability === undefined ? {} : { machineCapability: borrowedCapability }),
         ...(method === undefined ? {} : { method }), outcome: decided });
     }
     if (sourceMessageId !== null && session.project_id !== null) {
@@ -989,9 +1036,14 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     if (settled) {
       // ADR-030：结算之后的自动记忆提取。它是一次独立模型调用，失败只放弃这一轮提取，
       // 绝不改写已经落库的回复；因此这里吞掉异常，也不把结果并进 AssistGenerationOutcome。
+      //
+      // 只传 id：调用方手里的 `message` 是**领取时**的 RUNNING 快照，拿它判断「本轮是否
+      // 完成」永远为假（2026-10-25 的真实入口缺陷）。提取入口按 id 重读已结算的行，
+      // 判定依据只来自数据库。
       try {
-        await captureMemoriesForTurn(db, { session, message, reply: decided.reply,
-          modelPort: options.modelPort, ...(options.signal === undefined ? {} : { signal: options.signal }) });
+        await captureMemoriesForTurn(db, { sessionId: session.id,
+          assistantMessageId: message.id, modelPort: options.modelPort,
+          ...(options.signal === undefined ? {} : { signal: options.signal }) });
       } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
     }
     return { messageId: message.id, sessionId: session.id,

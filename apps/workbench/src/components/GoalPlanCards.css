@@ -23,33 +23,157 @@
 }
 
 /*
- * 2026-10-22 DEV-0103：目标卡从「整块同字号」收成三层——
- * 标题带的标签/状态/轮次、目标正文、可展开事实。字段、actions 与服务端事实都不变；
- * 计划卡共享的基座不动，避免一张卡的视觉调整波及另一张卡。
+ * 2026-10-25：目标卡收成输入框上方的单行状态条（用户指令，参照 Codex 的目标行）。
+ * 单行只放「状态 + 目标（截断）+ 轮次计数 + 动作」；步骤、进展、成功条件、停止原因、
+ * 轮次历史都在展开区。字段、服务端 actions 与呈现口径不变；计划卡共享的基座不动。
+ * 容器宽度与 `.agent-chat-prereq-row` / 输入卡同轴（chat-measure 居中），
+ * 且仍在输入卡**外**——条的出现/展开不改变输入卡自己的形状。
  */
-.goal-card {
-  gap: var(--relay-space-2);
-  padding: var(--relay-space-3) var(--relay-space-4);
-  border-color: var(--relay-color-palette-forest);
+.goal-strip {
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin-inline: auto;
 }
 
-.goal-card-title {
-  gap: var(--relay-space-2);
+.goal-strip-line {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-0-5) var(--relay-space-1) var(--relay-space-0-5) var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-palette-forest);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  font-size: var(--relay-font-size-meta);
 }
 
-.goal-card-eyebrow {
+/* 整段左侧都是展开/收起的命中区；文本截断只发生在目标正文上，状态徽标与计数不折行。 */
+.goal-strip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font-family: var(--relay-font-family-ui);
+  font-size: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.goal-strip-toggle > svg {
+  flex: none;
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  color: var(--relay-color-text-secondary);
+}
+
+.goal-strip-objective {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--relay-font-weight-medium);
+}
+
+/* 轮次是辅助事实：flex:none 保住它，空间不够时先牺牲目标正文的截断宽度。 */
+.goal-strip-meta {
+  flex: none;
+  white-space: nowrap;
+}
+
+.goal-strip-toggle > svg[data-expanded="true"] {
+  transform: rotate(180deg);
+}
+
+/* 动作：暂停/取消是图标键（后果在 title/确认框里说），「继续/确认完成」带文字——
+   它们是这条事实的主行动，只靠图标不足以区分「恢复推进」与「确认完成」。 */
+.goal-strip-actions {
   display: inline-flex;
   align-items: center;
   gap: var(--relay-space-1);
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-caption);
-  font-weight: var(--relay-font-weight-semibold);
+  flex: none;
 }
 
-.goal-card-eyebrow > svg {
+.goal-strip-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-1);
+  height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.goal-strip-action > svg {
   flex: none;
-  width: var(--relay-font-size-meta);
-  height: var(--relay-font-size-meta);
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+}
+
+.goal-strip-action--icon {
+  width: var(--relay-control-height-compact);
+  padding: 0;
+}
+
+.goal-strip-action--primary {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+}
+
+.goal-strip-action:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-text-primary);
+}
+
+.goal-strip-action--primary:hover:not(:disabled) {
+  color: var(--relay-color-selection-text);
+}
+
+.goal-strip-action:disabled {
+  color: var(--relay-color-disabled-text);
+  background: var(--relay-color-disabled-bg);
+  cursor: not-allowed;
+}
+
+/* 展开区：与单行同宽的一块事实面板，仍沿 `.execution-summary` 那一课先让出高度；
+   内容超过 42vh 时面板内滚动，单行状态条与动作键不被证据挤走。 */
+.goal-strip-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  min-height: 0;
+  max-height: 42vh;
+  overflow: auto;
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-palette-forest);
+  border-top: 0;
+  border-radius: 0 0 var(--relay-radius-panel) var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  font-size: var(--relay-font-size-meta);
+}
+
+.goal-strip-details .goal-plan-objective {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-strip-details .goal-card-note {
+  margin: 0;
 }
 
 /* 状态徽标只给「目标状态」长色点；计划版本徽标仍是一句说明，不冒充状态。 */
@@ -57,6 +181,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--relay-space-0-5);
+  flex: none;
   padding: 1px var(--relay-space-2);
   line-height: var(--relay-font-lineHeight-ui);
 }
@@ -68,23 +193,6 @@
   height: var(--relay-space-1);
   border-radius: 50%;
   background: currentColor;
-}
-
-/* 轮次是辅助事实：右侧一枚轻胶囊，宽窗下不至于飘在离标题很远的一条空带上。 */
-.goal-card-rounds {
-  flex: none;
-  padding: 1px var(--relay-space-2);
-  border-radius: var(--relay-radius-badge);
-  background: var(--relay-color-bg-subtle);
-  color: var(--relay-color-text-secondary);
-  line-height: var(--relay-font-lineHeight-ui);
-}
-
-/* 目标是这张卡的主信息：正文档 + 中等字重，不再与辅助行同字号。 */
-.goal-card .goal-plan-objective {
-  font-size: var(--relay-font-size-body);
-  font-weight: var(--relay-font-weight-medium);
-  line-height: var(--relay-font-lineHeight-ui);
 }
 
 .goal-card-step,
@@ -120,42 +228,10 @@
   background: currentColor;
 }
 
-.goal-card .goal-plan-list > li[data-status="MET"] .goal-card-criterion-status {
-  color: var(--relay-color-status-success-text);
-}
-
-.goal-card .goal-plan-list > li[data-status="UNMET"] .goal-card-criterion-status {
-  color: var(--relay-color-status-warning-text);
-}
-
-/* 动作行与事实分开；说明推到右端，宽窗下不再缩在按钮后面留下一条空白。
-   卡片内容超过 42vh 时卡内滚动，控制键必须停在底边——暂停/取消不该被证据挤到滚动区外。 */
-.goal-card .goal-plan-actions {
-  position: sticky;
-  inset-block-end: 0;
-  z-index: 1;
-  margin-top: var(--relay-space-1);
-  padding-top: var(--relay-space-2);
-  padding-bottom: var(--relay-space-1);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-  background: var(--relay-color-bg-surface);
-}
-
-/* 共享基座 `.goal-plan-actions > .helper-text` 会把 margin 清零，这里必须用同层更高特异度。 */
-.goal-card .goal-plan-actions > .goal-card-note {
-  margin-inline-start: auto;
-  text-align: end;
-}
-
 @media (max-width: 48rem) {
-  .goal-card {
-    padding: var(--relay-space-3);
-  }
-
-  .goal-card .goal-plan-actions > .goal-card-note {
-    flex-basis: 100%;
-    margin-inline-start: 0;
-    text-align: start;
+  /* 窄窗先收掉轮次计数：状态与目标正文仍在一行，动作键不折到第二行。 */
+  .goal-strip-meta {
+    display: none;
   }
 }
 
@@ -249,12 +325,6 @@
 .goal-card-details > summary {
   cursor: pointer;
   color: var(--relay-color-text-muted);
-}
-
-.goal-card-criterion-status {
-  margin-right: var(--relay-space-1);
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
 }
 
 /* 条件状态用字重与色阶区分，不加新色值：达成=次级文字，未达成=警告文字。 */

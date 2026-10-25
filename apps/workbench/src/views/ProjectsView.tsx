@@ -470,7 +470,7 @@ function FixtureDetail({ project, submitting, onArchive }: {
     ]} />
     <p className="helper-text">状态修订 v{project.stateRevision} · 待审 {project.pendingReviewCount} 项</p>
     <div className="projects-detail__divider" />
-    <h3 className="projects-detail__heading">明确目标</h3>
+    <h3 className="projects-detail__heading">项目目标</h3>
     <p className="projects-detail__text">{project.goal}</p>
     {!project.archived && <>
       <div className="projects-detail__divider" />

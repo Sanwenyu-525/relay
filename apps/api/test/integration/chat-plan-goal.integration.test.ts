@@ -11,7 +11,7 @@ import { pauseGoal, cancelGoal, confirmGoalCompletion, readSessionGoal, resumeGo
   '../../src/application/assist-goals.js';
 import { readSessionPlan } from '../../src/application/assist-plans.js';
 import { setChatMode } from '../../src/application/chat-mode.js';
-import { runAssistGoalTick } from '../../src/application/goal-advance.js';
+import { goalRoundMessageId, runAssistGoalTick } from '../../src/application/goal-advance.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { DomainError } from '../../src/application/domain-error.js';
@@ -34,6 +34,7 @@ import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDat
  *   * 推进器 tick 在无人操作时接续下一轮、把 COMPLETE 结算成 AWAITING_ACCEPTANCE；
  *   * 暂停/恢复/确认完成各自沿目标行的 CAS 推进；
  *   * 切走活动目标时先记 PAUSING 意图，tick 把它安全落成 PAUSED；
+ *   * 并发 tick 对同一目标只产生一轮投递：租约 CAS 落败方只报 LEASE_RACE，不重复建消息；
  *   * 领取是**全库单步**的：一次生成 tick 领的是 `session_id` 最小的那条 PENDING，
  *     与「我刚发了哪条」无关，所以本文件用 `settleAssistant` 轮到目标消息为止，
  *     末尾一条用例把这个排序事实钉死（它也是「/plan 的计划没落库」这条红的根因）。
@@ -993,4 +994,60 @@ test('积压恢复按原始顺序结算：早期回复不缺账，成功条件�
     first.result.assistant_message_id) !== undefined
     && await repositories.planGoals.readRoundByMessage(
       second.result.assistant_message_id) !== undefined, true);
+});
+
+test('并发 tick：租约 CAS 只放行一个 worker，同一轮次不会投递两次', async () => {
+  /*
+   * Supervisor 常驻 + Worker 一次性：多个推进者可能同时看到同一条 ACTIVE 目标。
+   * 租约是唯一互斥点（`listAdvanceCandidates` 过滤未过期租约，claim 用 revision CAS），
+   * 这里让 4 个 tick 真并发，证明「只会投递一轮」：
+   *   * `advanced` 里这条目标恰好一条；
+   *   * 库里恰好一条目标轮次 PENDING，id 就是按 round_count 确定性派生的那条；
+   *   * 落败方只出现在 skipped（LEASE_RACE / INFLIGHT_ROUND），没有第二条消息；
+   *   * 成功方清掉租约，进程重启后的下一个 tick 仍能继续（不会卡在永久租约上）。
+   */
+  await drainQueue();
+  const workspaceId = await newWorkspace('goal-tick-race');
+  const sessionId = await newSession(workspaceId, '并发推进');
+  const sent = await send(workspaceId, sessionId, '/goal 并发也只能推进一轮', 'GOAL');
+  const goalId = sent.result.goal_id;
+  assert.ok(goalId !== null);
+  const repositories = createRepositories(app.db);
+  await settleAssistant(sent.result.assistant_message_id, [JSON.stringify({
+    reply: '读完现状，下一轮继续。',
+    goal: { state: 'CONTINUE',
+      success_criteria: [{ key: 'c1', statement: '并发下只推进一轮', required: true }],
+      criteria_status: [{ key: 'c1', status: 'UNMET', evidence: '尚未验证' }],
+      steps: [], current_step: null, progress: '读完现状', questions: [],
+      blocked_reason: null, adjustment: null } })]);
+
+  const ticks = await Promise.all([0, 1, 2, 3].map(() =>
+    runAssistGoalTick(app.db, { workerId: `race-${randomUUID()}` })));
+  const advanced = ticks.flatMap((tick) => tick.advanced)
+    .filter((entry) => entry.goalId === goalId);
+  assert.equal(advanced.length, 1,
+    `同一目标只应有一个 tick 拿到租约，实得 ${JSON.stringify(advanced)}`);
+  assert.equal(advanced[0]?.roundIndex, 2, '结算已记第 1 轮，新投递是第 2 轮');
+
+  const goalMessages = (await repositories.assist.listMessages(sessionId, 50))
+    .filter((row) => row.goal_id === goalId);
+  const pending = goalMessages.filter((row) => row.status === 'PENDING');
+  assert.equal(pending.length, 1, '并发 tick 不得产生第二条待生成的目标轮次消息');
+  assert.equal(pending[0]?.id, goalRoundMessageId(goalId, 2),
+    '轮次消息身份按「目标 + 第几轮」确定性派生，重扫不会长出第二条');
+  assert.equal(advanced[0]?.messageId, pending[0]?.id);
+
+  const goalRow = await repositories.planGoals.readGoal(goalId);
+  assert.equal(goalRow?.round_count, 1, '并发 tick 只结算了已生成的那一轮，不重复记账');
+  assert.equal(goalRow?.status, 'ACTIVE');
+  assert.equal(goalRow?.lease_owner, null, '投递完成后必须释放租约，重启后的 tick 才能接手');
+  assert.equal((await repositories.planGoals.listRounds(goalId)).length, 1);
+
+  // 在途轮次存在时再跑一个 tick：既不重复投递，也不动租约。
+  const after = await runAssistGoalTick(app.db, { workerId: `race-after-${randomUUID()}` });
+  assert.equal(after.advanced.some((entry) => entry.goalId === goalId), false);
+  assert.equal(after.skipped.some((entry) => entry.goalId === goalId
+    && entry.reason === 'INFLIGHT_ROUND'), true);
+  assert.equal((await repositories.assist.listMessages(sessionId, 50))
+    .filter((row) => row.goal_id === goalId && row.status === 'PENDING').length, 1);
 });

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { MemorySourceKind } from '../infrastructure/database-schema.js';
-import type { AssistModelPort } from '../workflow/fake-model-port.js';
+import type { AssistModelPort, AssistResult } from '../workflow/fake-model-port.js';
 import { withTransaction, createRepositories } from './unit-of-work.js';
+import { recordModelInvocation } from './model-call-recorder.js';
 import { MEMORY_AUTO_CAPTURE_DAILY_LIMIT, MEMORY_AUTO_CAPTURE_MAX_ITEMS,
   recordAutoCapture } from './memory-captures.js';
 
@@ -14,6 +14,11 @@ import { MEMORY_AUTO_CAPTURE_DAILY_LIMIT, MEMORY_AUTO_CAPTURE_MAX_ITEMS,
  *   1. 它在**结算提交之后**才被调用——提取失败不能把已经写好的回复变成失败；
  *   2. 它的任何异常都由调用方吞掉——自动记忆是附带收益，不是本轮结果的一部分；
  *   3. 它只送这一轮的原文与回复——不重发历史、不读外部来源，输入有上限。
+ *
+ * 2026-10-25：入口不再接受调用方手里的消息对象，而是按 id **重读**已结算的助手消息。
+ * 原因是真实聊天路径传入的是领取时那份 `RUNNING` 行，`status === 'COMPLETED'` 永远不成立，
+ * 于是自动记忆在真实入口上恒为 0（只有直接调用本函数的测试是绿的）。
+ * 传 id、在这里重读，让「本轮真的完成了吗」由数据库回答，而不是由调用方转述。
  */
 
 /** 输入上限：一轮对话里值得记的东西不会超过这个量级，超出的部分对提取没有帮助。 */
@@ -96,20 +101,26 @@ function normalizeEvidence(value: string): string {
 }
 
 /**
- * 来源核验（DEV-0042）：`quote` 必须逐字出现在它声明的那一段里。
+ * 来源核验（DEV-0042）：`quote` 必须逐字出现在**它声明的那一段**里。
  *
  * 这是确定性检查，不是模型的自我声明：模型说这条来自用户原话，就得能在用户原话里
  * 找到这句话；找不到就丢弃（宁缺勿滥，也不给「编造的用户陈述」留位置）。
- * 落在用户原话的是 USER_STATEMENT（可以说成用户的事实），落在助手答复的是
- * MODEL_OBSERVATION（模型叙述，可能含工具结果或网页正文，只能作观察）。
+ *
+ * 2026-10-25 修正：此前先查用户原话、再查助手答复，`source` 只被当作「有没有填」，
+ * 于是**助手答复里恰好复述过的用户原话**会被记成 USER_STATEMENT——观察被升级成用户陈述。
+ * 现在声明决定类别、类别决定去哪一段核对：
+ *   source=user      → 只在用户原话里找，找到 USER_STATEMENT，找不到丢弃；
+ *   source=assistant → 只在助手答复里找，找到 MODEL_OBSERVATION，找不到丢弃。
+ * 降级是允许的（观察比用户陈述弱），升级永远不成立。
  */
 export function classifyExtractedSource(item: { readonly source: MemoryExtractionSource;
   readonly quote: string }, userText: string, replyText: string): MemorySourceKind | null {
   const quote = normalizeEvidence(item.quote);
   if (quote === '') return null;
-  if (normalizeEvidence(userText).includes(quote)) return 'USER_STATEMENT';
-  if (normalizeEvidence(replyText).includes(quote)) return 'MODEL_OBSERVATION';
-  return null;
+  if (item.source === 'user') {
+    return normalizeEvidence(userText).includes(quote) ? 'USER_STATEMENT' : null;
+  }
+  return normalizeEvidence(replyText).includes(quote) ? 'MODEL_OBSERVATION' : null;
 }
 
 /**
@@ -129,21 +140,42 @@ export function capturePrompt(userText: string, replyText: string): string {
   return combined.length > MAX_INPUT_CHARS ? combined.slice(0, MAX_INPUT_CHARS) : combined;
 }
 
+/** 提取调用与主流程同一套账本口径：取消记 CANCELLED，其余按内容/失败落真实用量。 */
+function settleExtractionCall(result: AssistResult) {
+  return result.kind === 'CANCELLED'
+    ? { status: 'CANCELLED' as const, providerRequestId: result.providerRequestId ?? null,
+      ...(result.usage === undefined ? {} : { usage: result.usage }) }
+    : result.kind === 'CONTENT'
+      ? { status: 'COMPLETED' as const, providerRequestId: result.providerRequestId,
+        usage: result.usage }
+      : { status: 'FAILED' as const, errorKind: `EXTRACTION_${result.kind}` };
+}
+
 /**
  * 一轮结算后的自动捕获入口。
  *
  * 返回写入的条数，仅用于日志与测试；生产调用方忽略返回值，也不因异常改变本轮状态。
+ *
+ * 输入是 id 而不是行：调用方手里那份消息对象是**领取时**的快照（`RUNNING`），
+ * 用它判断「本轮是否真的完成」永远为假。这里按 id 重读，判定依据只来自数据库。
  */
 export async function captureMemoriesForTurn(db: DbExecutor, input: {
-  readonly session: AssistSessionRow;
-  readonly message: AssistMessageRow;
-  readonly reply: string;
+  readonly sessionId: string;
+  /** 已结算的助手消息 id（轮次身份）。 */
+  readonly assistantMessageId: string;
   readonly modelPort: AssistModelPort;
   readonly signal?: AbortSignal | undefined;
 }): Promise<number> {
-  const { session, message } = input;
-  if (!session.remember || message.role !== 'ASSISTANT' || message.status !== 'COMPLETED') return 0;
   const repositories = createRepositories(db);
+  const session = await repositories.assist.readSession(input.sessionId);
+  if (session === undefined || session.status !== 'ACTIVE' || !session.remember) return 0;
+  const message = await repositories.assist.readMessage(input.assistantMessageId);
+  // 只认真正完成的普通助手轮次：失败、取消、撤回过的正文都不是可提取的事实。
+  if (message === undefined || message.role !== 'ASSISTANT' || message.status !== 'COMPLETED' ||
+      message.withdrawn_at !== null) return 0;
+  const reply = message.content ?? '';
+  if (reply.trim() === '') return 0;
+
   const settings = await repositories.information.readMemorySettings(session.workspace_id);
   if (settings?.auto_capture === false) return 0;
   if (await repositories.memoryCaptures.countToday(session.id) >= MEMORY_AUTO_CAPTURE_DAILY_LIMIT) return 0;
@@ -151,11 +183,27 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   const previous = message.seq <= 0n ? undefined
     : await repositories.assist.readMessageAtSeq(session.id, message.seq - 1n);
   if (previous === undefined || previous.role !== 'USER' || previous.status !== 'COMPLETED' ||
-      previous.content === null || previous.content.trim() === '') return 0;
+      previous.withdrawn_at !== null || previous.content === null ||
+      previous.content.trim() === '') return 0;
+  const userText = previous.content;
 
-  const result = await input.modelPort.assist({ intent: 'DISCUSS', system: EXTRACTION_SYSTEM,
-    turns: [{ role: 'user', content: capturePrompt(previous.content, input.reply) }],
-    ...(input.signal === undefined ? {} : { signal: input.signal }) });
+  // 提取是一次真实外呼，必须与主流程同账本（#140）：STARTED 先提交，结果/失败/取消落真实
+  // 用量，预算与归档闸门在 `begin` 里生效。预算不足时这里直接收口，不产生无账本调用。
+  let result: AssistResult;
+  try {
+    result = (await recordModelInvocation<AssistResult>(db, {
+      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+      identity: input.modelPort.identity,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      invoke: async () => input.modelPort.assist({ intent: 'DISCUSS', system: EXTRACTION_SYSTEM,
+        turns: [{ role: 'user', content: capturePrompt(userText, reply) }],
+        ...(input.signal === undefined ? {} : { signal: input.signal }) }),
+      settle: settleExtractionCall,
+    })).result;
+  } catch {
+    // 预算耗尽、项目归档、Provider 失败都在这里收口：这一轮不提取，主回复不受影响。
+    return 0;
+  }
   if (result.kind !== 'CONTENT') return 0;
 
   const extracted = parseExtractedMemories(result.content);
@@ -165,13 +213,19 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   const writtenKinds: MemorySourceKind[] = [];
   for (const item of extracted) {
     // 来源核验不过就丢弃这一条：模型说它来自用户原话，就得能在用户原话里找到这句话。
-    const sourceKind = classifyExtractedSource(item, previous.content, input.reply);
+    const sourceKind = classifyExtractedSource(item, userText, reply);
     if (sourceKind === null) continue;
+    // 证据身份随类别走：用户陈述绑定用户消息，模型观察绑定助手回复。
+    // 此前两者都记助手消息 + 回复哈希，于是「引自用户原话」的条目指不回它真正的那句话。
+    const fromUser = sourceKind === 'USER_STATEMENT';
     try {
       const saved = await withTransaction(db, (r) => recordAutoCapture(r, {
         workspaceId: session.workspace_id, projectId: session.project_id, sessionId: session.id,
-        messageId: message.id, messageText: input.reply, title: item.title, text: item.text,
-        reason: item.reason, sourceKind, sourceQuote: item.quote }));
+        triggerMessageId: message.id,
+        evidenceMessageId: fromUser ? previous.id : message.id,
+        evidenceText: fromUser ? userText : reply,
+        title: item.title, text: item.text, reason: item.reason,
+        sourceKind, sourceQuote: item.quote }));
       if (saved !== null) { written += 1; writtenKinds.push(sourceKind); }
     } catch {
       // 单条失败（并发冲突、范围变化）不牵连其余候选；这一轮已经写下的照常保留。

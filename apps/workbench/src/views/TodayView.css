@@ -141,7 +141,8 @@
 .today-task__plans > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .today-task__forms, .today-task__forms form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--relay-space-3); }
 .today-task__forms { margin-top: var(--relay-space-3); }
-.today-task__forms form { padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); }
+/* 2026-10-25 视觉对齐：行内表单框加白卡底，与页面卡片语言一致（不投影，行内编辑场景保持轻）。 */
+.today-task__forms form { padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
 .today-task__forms strong { align-self: center; font-size: var(--relay-font-size-meta); }
 .today-task__forms label { display: grid; gap: var(--relay-space-1); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-task__forms input, .today-task__forms select { min-width: 8rem; max-width: 12rem; }
@@ -151,10 +152,12 @@
   color: var(--relay-color-text-secondary); cursor: pointer; }
 .today-task__trace > summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 
-/* 全空：单一空态与真实入口，不重复三份零组说明。 */
+/* 全空：单一空态与真实入口，不重复三份零组说明。
+   2026-10-25 视觉对齐：空态卡从 subtle 底细线升级为白卡浮起（surface + shadow.card），
+   与 .surface-panel 和 /agent 页输入卡同一卡片语言。 */
 .today-empty { margin-top: var(--relay-space-8); padding: var(--relay-space-8) var(--relay-space-6);
-  background: var(--relay-color-bg-subtle); border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-panel); }
+  background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel); box-shadow: var(--relay-shadow-card); }
 .today-empty__title { font-size: var(--relay-font-size-body); font-weight: var(--relay-font-weight-medium); }
 .today-empty__hint { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .today-empty__actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-6); }

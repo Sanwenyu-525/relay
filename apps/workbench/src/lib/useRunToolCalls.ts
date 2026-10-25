@@ -70,6 +70,10 @@ export function useRunToolCalls(client: RelayApiClient, runId: string | null,
       }
       // 整体替换而不是合并：断线重读后不允许复活已被清除的旧行。
       setSnapshot({ runId, projection: next, readAt: new Date().toISOString() });
+      // 成功读取同时结清这个 Run 的旧失败（#115）：错误与快照必须属于同一次有效读取，
+      // 否则新快照已渲染、页面还继续宣称「数据库不可达」，用户无从判断服务已恢复。
+      // 身份与版本守卫在上面已经落过，迟到或串号的响应到不了这里。
+      setFailure(null);
     } catch (caught) {
       if (current !== version.current) return;
       setSnapshot(null);

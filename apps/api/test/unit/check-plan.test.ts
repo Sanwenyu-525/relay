@@ -83,13 +83,23 @@ test('every method maps to a registered checker and an unknown method throws', (
 
   assert.deepEqual(
     plan.entries.map((entry) => entry.checkerId),
-    ['human-evidence-v1', 'markdown-structure-v1', 'citation-exists-v1', 'fake-semantic-v1'],
+    ['human-evidence-v1', 'markdown-structure-v1', 'citation-exists-v1', 'human-evidence-v1'],
   );
 
   assert.throws(
     () => planOf([criterion('c5', 'PDF_TEXT' as CriterionMethod, { required: true })]),
     /unregistered criterion method/u,
   );
+});
+
+test('a configured semantic checker is frozen explicitly while Fake remains test-only', () => {
+  const plan = planOf([
+    { ...criterion('c-model', 'SEMANTIC'), checkerId: 'semantic-model-v1' },
+    { ...criterion('c-fake', 'SEMANTIC'), checkerId: 'fake-semantic-v1' },
+  ]);
+
+  assert.deepEqual(plan.entries.map((entry) => entry.checkerId),
+    ['semantic-model-v1', 'fake-semantic-v1']);
 });
 
 test('the plan hash is stable for the same plan and 32 bytes long', () => {

@@ -80,6 +80,13 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
   const addressRef = useRef<HTMLInputElement | null>(null);
   const bridgeRef = useRef(bridge);
   bridgeRef.current = bridge;
+  /**
+   * 「未触碰」标记：首次挂载与作用域切换后的空白态**不写盘**。
+   * 此时写空 entries 会删掉该作用域已有的恢复描述；作用域切换瞬间还会拿旧作用域的
+   * 标签把来源瞬写进新作用域（串页）。只有用户真的打开过页面、或关掉了带页面的
+   * 标签，才允许持久化——后者同时覆盖「关闭全部后的显式清空」。
+   */
+  const untouchedRef = useRef(true);
   const current = tabs[Math.min(activeIndex, tabs.length - 1)] ?? tabs[0]!;
   const occluded = useOccludingOverlay(active);
 
@@ -137,6 +144,7 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
 
   // 作用域切换：释放旧作用域的原生实例。网页请求不因此撤销，工作台也不宣称已停止。
   useEffect(() => {
+    untouchedRef.current = true;
     setTabs([blankTab()]);
     setActiveIndex(0);
     setRestorable(store.read(scope).entries.map((entry) => entry.origin));
@@ -148,6 +156,10 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
 
   // 待恢复描述：只写来源，不写 path / query / fragment / 正文。
   useEffect(() => {
+    // 初始化空态与作用域切换都不写盘：写空会删掉该作用域已有的恢复描述，
+    // 切换瞬间还会把旧作用域的来源写进新作用域。用户打开页面或关闭带页面的
+    // 标签后 untouchedRef 置 false，此后才持久化（含关闭全部后的显式清空）。
+    if (untouchedRef.current) return;
     const origins: string[] = [];
     for (const tab of tabs) {
       const origin = previewOriginOf(tab.url);
@@ -213,10 +225,12 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
           bounds: { x: bounds?.left ?? 0, y: bounds?.top ?? 0,
             width: Math.max(bounds?.width ?? 0, 1), height: Math.max(bounds?.height ?? 0, 1) }
         });
+        untouchedRef.current = false;
         patchTab(tab.key, (value) => ({ ...value, handle: { id: snapshot.id, generation: snapshot.generation },
           input: checked.url, url: snapshot.url || checked.url, status: "LOADING", notice: null }));
       } else {
         const snapshot = await target.navigate(tab.handle, checked.url);
+        untouchedRef.current = false;
         patchTab(tab.key, (value) => ({ ...value, input: checked.url, url: snapshot.url || checked.url,
           status: "LOADING", notice: null }));
       }
@@ -236,9 +250,14 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
   async function closeTab(key: string) {
     const tab = tabs.find((item) => item.key === key);
     const target = bridge;
-    if (tab?.handle != null && target !== null) {
-      // 关闭只销毁容器，不承诺撤销页面已经发出的请求。
-      await target.close(tab.handle).catch(() => { /* 已关闭 */ });
+    // 关掉带页面的标签才算「用户主动清空」：此后允许写盘（含关闭全部后删描述）。
+    // 关空白标签不置位——那不该抹掉上次会话留下的恢复描述。
+    if (tab?.handle != null) {
+      untouchedRef.current = false;
+      if (target !== null) {
+        // 关闭只销毁容器，不承诺撤销页面已经发出的请求。
+        await target.close(tab.handle).catch(() => { /* 已关闭 */ });
+      }
     }
     setTabs((currentTabs) => {
       const next = currentTabs.filter((item) => item.key !== key);

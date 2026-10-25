@@ -240,6 +240,11 @@ export async function createCombinationCheck(db: DbExecutor, storage: ManagedCon
       }
       const inScope = new Set([group.source_after_version_id,
         ...items.map((item) => item.target_version_id)]);
+      for (const item of items) {
+        const candidate = await r.impacts.findCandidateByTarget(group.impact_check_id,
+          item.target_version_id);
+        if (candidate?.applied_version_id != null) inScope.add(candidate.applied_version_id);
+      }
       if (selected.some((id) => !inScope.has(id))) {
         throw invalidTransition('组合检查的版本集合须落在该候选组的来源与目标范围内。');
       }

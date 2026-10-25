@@ -31,6 +31,10 @@ const reasonLabels: Record<string, string> = {
   MISSED: "应用关闭期间错过，未自动执行",
   PREVIOUS_TASK_NOT_ACCEPTED: "上一轮任务还没有验收",
   SCHEDULE_UNAVAILABLE: "定时任务已不可读取",
+  PLAN_NOT_ENABLED: "计划已暂停、停用或到期，这次触发没有启动",
+  SCHEDULE_GENERATION_STALE: "规则已变更，这次触发属于旧代次",
+  PROJECT_ARCHIVED: "所属项目已归档",
+  EXECUTION_SCOPE_DRIFT: "触发时冻结的执行范围已失效",
 };
 
 function describeReason(reason: string | null): string {
@@ -211,14 +215,23 @@ export default function ScheduledTaskDetailView() {
       lede={`每次触发新建一个任务并交给 AI 执行；当前时区 ${task.timezone}，本地时刻 ${task.localTime}。`} />
     <div className="form-actions">
       <button className="secondary-button" type="button" onClick={() => void load()} disabled={frozen}>刷新</button>
+      <Link className="secondary-button" to={`/scheduled-tasks/${task.scheduledTaskId}/edit`}
+        aria-disabled={frozen} onClick={frozen ? (event) => event.preventDefault() : undefined}
+        data-testid="scheduled-task-edit-entry">编辑</Link>
       {task.status === "ENABLED" && <button className="secondary-button" type="button" disabled={frozen}
         onClick={() => void changeStatus("PAUSED")}>暂停</button>}
-      {task.status === "PAUSED" && <button className="secondary-button" type="button" disabled={frozen}
+      {(task.status === "PAUSED" || task.status === "EXPIRED") && <button className="secondary-button" type="button" disabled={frozen}
+        data-testid="scheduled-task-resume"
         onClick={() => void changeStatus("ENABLED")}>继续</button>}
       {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="secondary-button" type="button" disabled={frozen}
         onClick={() => void changeStatus("DISABLED")}>停用</button>}
       <button className="text-button" type="button" onClick={() => navigate("/scheduled-tasks")}>返回列表</button>
     </div>
+    {task.status === "EXPIRED" && <p className="warning-callout" role="alert">
+      <Info aria-hidden="true" />
+      这条定时任务已到期（授权到期或次数用尽），不会产生新的触发。先「编辑」延长授权或提高次数上限——保存后仍保持已到期——
+      再回到这里点「继续」显式重新启用。
+    </p>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {notice && <p className="receipt-message" role="status">{notice}</p>}
     {pending && <div className="warning-callout" role="alert" data-testid="scheduled-detail-pending">

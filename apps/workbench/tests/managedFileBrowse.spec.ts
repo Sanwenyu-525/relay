@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import DevToolsPanel from "../src/components/DevToolsPanel";
 import { RelayApiClient, RelayApiError, RelayTransportError,
-  type RelayFileBrowseAction, type RelayManagedFileReadInput, type RelayRun } from "../src/api/relayClient";
+  type RelayFileBrowseAction, type RelayManagedFileReadInput, type RelayManagedFileReadResponse } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
 
 /**
@@ -49,7 +49,7 @@ function setup() {
 
 /** 读取结果回执形态：按动作给出真实投影字段。 */
 async function settle(input: RelayManagedFileReadInput, result: Record<string, unknown>,
-  state = "SUCCEEDED"): Promise<{ commandId: string; committedAt: string; outcome: unknown }> {
+  state = "SUCCEEDED"): Promise<RelayManagedFileReadResponse> {
   const { managedFileReadOutcomeFrom } = await import("../src/api/relayClient");
   const raw = { state, action_type: input.actionType, operation_id: `operation-${input.actionType}`,
     invocation_id: "invocation-1", result };

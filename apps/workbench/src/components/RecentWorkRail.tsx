@@ -102,6 +102,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   /** 归档区按需读取：null 表示这一段还没打开过，不为了一个收起的分组先打一趟请求。 */
   const [archived, setArchived] = useState<readonly RelayAssistSession[] | null>(null);
   const [archivedError, setArchivedError] = useState<string | null>(null);
+  const [archivedLoading, setArchivedLoading] = useState(false);
   /** 拖拽落位记下来的行序（本机偏好）；空数组表示还没拖过，完全按服务端顺序显示。 */
   const [ranked, setRanked] = useState<readonly string[]>(readRailSessionOrder);
   /** 正在拖的那一行与落位横线的位置；null 表示没有拖拽在进行。 */
@@ -197,10 +198,12 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
 
   /**
    * 读取已归档那一段（0090）。归档的会话不在默认列表里，只有展开这一段时才读。
-   * 失败只影响这一段自己的提示，不把上面已经读到的任务与会话一起清掉。
+   * 失败只影响这一段自己的提示，不把上面已经读到的任务与会话一起清掉；
+   * 失败也不把列表写成 []——空结果与读取失败是两个事实（禅道 #134）。
    */
   const loadArchived = useCallback(async () => {
     const version = ++archivedRequest.current;
+    setArchivedLoading(true);
     setArchivedError(null);
     try {
       const items = await client.getAssistSessions({ status: "ARCHIVED" });
@@ -209,6 +212,9 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     } catch (caught) {
       if (version !== archivedRequest.current) return;
       setArchivedError(describeLiveError(caught).message);
+    } finally {
+      // 只有仍是最新一次请求时才能动 loading：被更新的读取接管的旧回包不负责收尾。
+      if (version === archivedRequest.current) setArchivedLoading(false);
     }
   }, [client]);
 
@@ -733,7 +739,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
           措辞必须限定「未归档」：把唯一一条讨论归档后这一段也会出现，说「还没有任何会话」就是假话。 */}
       {!loading && !error && !sessionsError && loadedCount === 0 &&
         <EmptyState size="compact" title="还没有任务"
-          description="当前工作空间还没有未归档的任务或会话。项目、任务与产物版本都只从本机服务端读取，不会从别处自动出现；已归档的讨论在下方「已归档」里。"
+          description="当前工作空间还没有未归档的任务或会话。归档过的讨论收在下方「已归档」里。项目、任务与产物版本都只从本机服务端读取，不会从别处自动出现。"
           testId="recent-work-empty"
           actions={<button className="text-button" type="button"
             onClick={() => { void navigate("/tasks?view=create"); onOpen?.(); }}>新建任务</button>} />}
@@ -804,17 +810,28 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
             只覆盖相邻兄弟，2026-10-16 第七轮实测，包装层曾隔断「任务入口 ↔ 已归档」的相邻关系，
             任务入口收起时间隙塌成 0px，四个根区读成三档。 */}
         {!loading && error === null && <details className="recent-work-section" data-testid="recent-work-archived"
-          onToggle={(event) => { if (event.currentTarget.open && archived === null) void loadArchived(); }}>
+          onToggle={(event) => {
+            if (!event.currentTarget.open || archived !== null || archivedLoading) return;
+            void loadArchived();
+          }}>
           <summary title="归档只是不再接收新消息；历史、提案与命令回执都保留，重开后照旧可读">
             <ChevronDown aria-hidden="true" /><span className="recent-work-group-title">已归档</span>
             {archived !== null && <span className="recent-work-group-count">{archived.length}</span>}</summary>
-          {archived === null
-            ? <p className="helper-text recent-work-scope-note">展开时读取归档列表</p>
+          {/* 状态优先级（禅道 #134）：读取中 → 失败（不落回占位）→ 初始未读 → 成功的空／非空。
+              失败必须盖过「还没展开」的占位：请求已经结束，界面不能装作还没发起。 */}
+          {archivedLoading
+            ? <p className="helper-text recent-work-scope-note" role="status">正在读取归档列表…</p>
             : archivedError !== null
-              ? <p className="action-error" role="alert" data-testid="recent-work-archived-error">{archivedError}</p>
-              : archivedRows.length === 0
-                ? <p className="helper-text recent-work-scope-note">{needle ? "已加载范围内没有匹配项" : "暂无归档会话"}</p>
-                : renderRows(archivedRows.map(toRow), "archived")}
+              ? <p className="action-error recent-work-scope-note" role="alert"
+                data-testid="recent-work-archived-error">{archivedError}
+                {/* 失败后的只读重试：与收起再展开（archived 仍为 null，重开会重读）等效，都在本页内。 */}
+                <button type="button" className="text-button" data-testid="recent-work-archived-retry"
+                  onClick={() => void loadArchived()}>重试</button></p>
+              : archived === null
+                ? <p className="helper-text recent-work-scope-note">展开时读取归档列表</p>
+                : archivedRows.length === 0
+                  ? <p className="helper-text recent-work-scope-note">{needle ? "已加载范围内没有匹配项" : "暂无归档会话"}</p>
+                  : renderRows(archivedRows.map(toRow), "archived")}
         </details>}
       </div>
       {pagingError && <p className="action-error" role="alert">{pagingError}</p>}

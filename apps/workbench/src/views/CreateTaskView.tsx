@@ -11,6 +11,7 @@ import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import type { CreateTaskDraft, FixtureError, InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
 import "./CreateTaskView.css";
 
@@ -125,7 +126,6 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
   const [draft, setDraft] = useState<CreateTaskDraft>(emptyDraft);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [candidates, setCandidates] = useState<TaskSummary[]>([]);
-  const [liveCandidates, setLiveCandidates] = useState<readonly DependencyOption[]>([]);
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -154,19 +154,18 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
   const draftRef = useRef(draft);
   const createdRef = useRef(createdTaskId);
   const disposed = useRef(false);
-  const candidatesVersion = useRef(0);
   const previousScope = useRef(liveScope);
   const previousConnectionEpoch = useRef(connection.epoch);
   draftRef.current = draft; createdRef.current = createdTaskId;
   const guard = useRef<DraftGuard>({ hasUnsavedChanges: () => createdRef.current === null && JSON.stringify(draftRef.current) !== savedDraft.current,
     discard: () => { const next = baselineDraft.current; draftRef.current = next; savedDraft.current = JSON.stringify(next); setDraft(next); } });
-  useEffect(() => { disposed.current = false; setDraftGuard(guard.current); return () => { disposed.current = true; candidatesVersion.current++; clearDraftGuard(guard.current); }; }, []);
+  useEffect(() => { disposed.current = false; setDraftGuard(guard.current); return () => { disposed.current = true; clearDraftGuard(guard.current); }; }, []);
   useEffect(() => {
     if (previousScope.current === liveScope && previousConnectionEpoch.current === connection.epoch) return;
     const scopeChanged = previousScope.current !== liveScope;
     previousScope.current = liveScope;
     previousConnectionEpoch.current = connection.epoch;
-    candidatesVersion.current++; setLiveCandidates([]); setOptionsError(null); setOptionsLoading(false);
+    setOptionsError(null); setOptionsLoading(false);
     if (pendingStep.current !== null) setActionError({ kind: liveScope === pendingStep.current.scope ? "transport" : "scope",
       message: liveScope === pendingStep.current.scope
         ? "原创建命令仍待核对；请先查询原 command ID 回执。"
@@ -180,28 +179,23 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
     }
   }, [liveScope, connection.epoch]);
   const projectId = draft.projectId ?? "";
-  const dependencyOptions: readonly DependencyOption[] = live ? liveCandidates : candidates.filter((task) => task.projectId === (projectId || null)).map((task) => ({ id: task.id, title: task.title, status: task.status }));
+  const canReadDependencyTasks = live && projectId.trim() !== "" && previousScope.current === liveScope &&
+    (pendingStep.current === null || pendingStep.current.scope === liveScope);
+  const taskPages = useProjectTaskPages(connection.client, canReadDependencyTasks ? projectId : "",
+    canReadDependencyTasks, connection.epoch);
+  const dependencyOptions: readonly DependencyOption[] = live
+    ? taskPages.items.map((task) => ({ id: task.id, title: task.title, status: task.status }))
+    : candidates.filter((task) => task.projectId === (projectId || null))
+      .map((task) => ({ id: task.id, title: task.title, status: task.status }));
   function updateDraft(patch: Partial<CreateTaskDraft>) {
     if (submitting || pendingStep.current !== null) return;
     commandId.current = null; setDraft((current) => ({ ...current, ...patch }));
   }
   function clearField(key: keyof FieldErrors) { setFieldErrors((current) => ({ ...current, [key]: undefined })); }
 
-  async function refreshLiveCandidates(id = draftRef.current.projectId ?? "") {
-    if (!live) return;
-    const token = ++candidatesVersion.current;
-    const client = liveClient();
-    setLiveCandidates([]);
-    if (!client) { setOptionsError("连接已断开：无法读取该项目的依赖候选。"); return; }
-    if (!id.trim()) { setOptionsError(null); setOptionsLoading(false); return; }
-    setOptionsLoading(true);
-    try { const tasks = await client.getProjectTasks(id.trim()); if (token !== candidatesVersion.current || disposed.current) return; setLiveCandidates(tasks.map((task) => ({ id: task.id, title: task.title, status: task.status }))); setOptionsError(null); }
-    catch (caught) { if (token !== candidatesVersion.current || disposed.current) return; setLiveCandidates([]); setOptionsError(`无法读取该项目的依赖候选：${describeLiveError(caught).message}。可以不选依赖继续创建。`); }
-    finally { if (token === candidatesVersion.current && !disposed.current) setOptionsLoading(false); }
-  }
   useEffect(() => {
     let active = true;
-    if (live) { setOptionsLoading(false); savedDraft.current = JSON.stringify(draftRef.current); void refreshLiveCandidates(); return () => { active = false; }; }
+    if (live) { setOptionsLoading(false); savedDraft.current = JSON.stringify(draftRef.current); return () => { active = false; }; }
     setOptionsLoading(true); setOptionsError(null);
     void fixtureAdapter.loadTaskOptions(mode).then((options) => { if (!active) return; setProjects(options.projects); setCandidates(options.candidates); if (routeProjectId && options.projects.some((project) => project.id === routeProjectId)) setDraft((current) => ({ ...current, projectId: routeProjectId })); savedDraft.current = JSON.stringify({ ...draftRef.current, projectId: routeProjectId || draftRef.current.projectId }); }).catch((caught: unknown) => { if (active) setOptionsError(caught instanceof Error ? caught.message.trim() : "读取示例项目时发生未知错误。"); }).finally(() => { if (active) setOptionsLoading(false); });
     return () => { active = false; };
@@ -212,7 +206,6 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
     setFieldErrors({}); setActionError(null); setReceipt(null); setReadyBlockedReason(null);
     commandId.current = null; submittedIntent.current = null; pendingStep.current = null; setMayRetryCreate(false);
     setCreatedTaskId(null); createdRef.current = null; setLiveCreate(null);
-    if (live) void refreshLiveCandidates(next.projectId ?? "");
   }
   function validate(intent: Intent): boolean {
     const errors: FieldErrors = {};
@@ -386,7 +379,7 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
   }
   function setProjectId(id: string) {
     if (submitting || pendingStep.current !== null) return;
-    updateDraft({ projectId: id || null, dependencyId: null }); setLiveCandidates([]);
+    updateDraft({ projectId: id || null, dependencyId: null });
   }
   const formFrozen = submitting || pendingStep.current !== null;
   const field = (key: keyof FieldErrors, label: string, value: string, set: (value: string) => void, multiline = false) => <label className={`field${fieldErrors[key] ? " field--invalid" : ""}`}><span className="field-label">{label}<span className="field-required" aria-hidden="true">*</span></span>{multiline ? <textarea value={value} onChange={(event) => { set(event.target.value); clearField(key); }} name="task-acceptance" rows={4} required disabled={formFrozen} maxLength={criteriaLimit} aria-invalid={fieldErrors[key] ? "true" : undefined} aria-describedby={fieldErrors[key] ? "task-acceptance-error" : "task-acceptance-hint"} /> : <input value={value} onChange={(event) => { set(event.target.value); clearField(key); }} name={key === "title" ? "task-title" : "task-expected-result"} required disabled={formFrozen} aria-invalid={fieldErrors[key] ? "true" : undefined} aria-describedby={fieldErrors[key] ? `${key === "title" ? "task-title" : "task-result"}-error` : `${key === "title" ? "task-title" : "task-result"}-hint`} />}{fieldErrors[key] ? <span id={key === "acceptanceCriteria" ? "task-acceptance-error" : `${key === "title" ? "task-title" : "task-result"}-error`} className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors[key]}</span> : <span id={key === "acceptanceCriteria" ? "task-acceptance-hint" : `${key === "title" ? "task-title" : "task-result"}-hint`} className="field-hint">{key === "title" ? "用简洁明确的语言描述这项任务要完成的工作。" : key === "expectedResult" ? "说明这项任务完成后应得到的具体成果或交付物。" : "每行一条，写下明确、可判断的验收条件；检查通过不等于任务完成。"}</span>}{key === "acceptanceCriteria" && <span className="field-counter">{value.length} / {criteriaLimit}</span>}</label>;
@@ -430,12 +423,22 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
     </form> : <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("ready"); }}>
       {field("title", "任务名称", draft.title, (value) => updateDraft({ title: value }))}
       {live && connection.client && <LiveProjectPicker key={connection.epoch} client={connection.client}
-        selectedId={projectId} disabled={formFrozen} onSelect={(id) => { setProjectId(id); void refreshLiveCandidates(id); }} />}
-      {live ? <details className="task-project-manual"><summary>{projectId ? "已关联项目" : "暂不归属项目"} · 手动查看或指定</summary><label className="field"><span className="field-label">项目 ID（可选）</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} onBlur={() => void refreshLiveCandidates()} name="task-project-id" autoComplete="off" disabled={formFrozen} placeholder="已知项目 ID，留空表示未归属项目" /><span className="field-hint">项目列表暂时不可用时，可填写已知项目 ID。清空后任务暂不归属项目，只登记人工事项。</span></label></details> : <label className="field"><span className="field-label">所属项目（可选）</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} name="task-project" disabled={optionsLoading}><option value="">未归属项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="field-hint">选择任务所属的项目，或暂不归属。未归属项目的任务只允许人工事项，不会自动创建项目。</span></label>}
+        selectedId={projectId} disabled={formFrozen} onSelect={setProjectId} />}
+      {live ? <details className="task-project-manual"><summary>{projectId ? "已关联项目" : "暂不归属项目"} · 手动查看或指定</summary><label className="field"><span className="field-label">项目 ID（可选）</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} name="task-project-id" autoComplete="off" disabled={formFrozen} placeholder="已知项目 ID，留空表示未归属项目" /><span className="field-hint">项目列表暂时不可用时，可填写已知项目 ID。清空后任务暂不归属项目，只登记人工事项。</span></label></details> : <label className="field"><span className="field-label">所属项目（可选）</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} name="task-project" disabled={optionsLoading}><option value="">未归属项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="field-hint">选择任务所属的项目，或暂不归属。未归属项目的任务只允许人工事项，不会自动创建项目。</span></label>}
       {field("expectedResult", "预期结果", draft.expectedResult, (value) => updateDraft({ expectedResult: value }))}
       {field("acceptanceCriteria", "验收标准", draft.acceptanceCriteria, (value) => updateDraft({ acceptanceCriteria: value }), true)}
       <fieldset className="field"><legend className="field-label">开始方式<span className="field-required" aria-hidden="true">*</span></legend><div className="choice-list">{startIntents.map((intent) => <label key={intent.value} className="choice-option"><input checked={draft.startIntent === intent.value} onChange={() => updateDraft({ startIntent: intent.value })} type="radio" name="task-intent" value={intent.value} disabled={formFrozen || live && intent.value === "DELEGATE_AI"} /><span>{interactionModeLabels[intent.value]}<small>{intent.hint}</small></span></label>)}</div><span className="field-hint">{live ? "创建页只登记人工执行或 AI 辅助任务；若要委托，请在任务 READY 后到详情页单独发起。创建不会启动 Run。" : "委托将在任务就绪后单独确认范围；这里只记录你的意图，不会直接设置执行者。"}</span></fieldset>
-      <label className="field"><span className="field-label">依赖任务（可选）</span><select value={draft.dependencyId ?? ""} onChange={(event) => updateDraft({ dependencyId: event.target.value || null })} name="task-dependency" disabled={formFrozen || optionsLoading || dependencyOptions.length === 0}><option value="">无</option>{dependencyOptions.map((task) => <option key={task.id} value={task.id}>{task.title}（{taskStatusLabels[task.status]}）</option>)}</select><span className="field-hint">{live ? !projectId.trim() ? "请先选择所属项目，再选择前置任务。" : !dependencyOptions.length ? "该项目暂时没有可选的前置任务，可以不选依赖继续创建。" : "仅列出所属项目的任务；前置任务完成后才能准备开始。" : !dependencyOptions.length ? "当前项目范围内没有可选的前置任务。" : "如需先完成其他任务，请选择依赖的任务；依赖未完成时不能转为可开始。"}</span></label>
+      <label className="field"><span className="field-label">依赖任务（可选）</span><select value={draft.dependencyId ?? ""} onChange={(event) => updateDraft({ dependencyId: event.target.value || null })} name="task-dependency" disabled={formFrozen || (live ? taskPages.loading : optionsLoading) || dependencyOptions.length === 0}><option value="">无</option>{dependencyOptions.map((task) => <option key={task.id} value={task.id}>{task.title}（{taskStatusLabels[task.status]}）</option>)}</select><span className="field-hint">{live ? !projectId.trim() ? "请先选择所属项目，再选择前置任务。" : taskPages.loading && dependencyOptions.length === 0 ? "正在读取已登记的任务……" : !dependencyOptions.length ? "当前没有已加载的依赖候选，可以不选依赖继续创建。" : "依赖候选按项目分页读取；前置任务完成后才能准备开始。" : !dependencyOptions.length ? "当前项目范围内没有可选的前置任务。" : "如需先完成其他任务，请选择依赖的任务；依赖未完成时不能转为可开始。"}</span></label>
+      {live && taskPages.error !== null && <div className="action-error" role="alert" data-testid="task-dependency-page-error">
+        已保留已读取的任务和原游标。{taskPages.error}
+        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
+          onClick={taskPages.retry}>重试读取任务</button>
+      </div>}
+      {live && taskPages.items.length > 0 && <p className="helper-text" data-testid="task-dependency-page-count">
+        已加载 {taskPages.items.length} 项{taskPages.nextCursor === null ? "，已到列表末页。" : "；还有后续页。"}</p>}
+      {live && taskPages.nextCursor !== null && <button className="secondary-button" type="button"
+        data-testid="task-dependency-page-more" disabled={taskPages.loadingMore}
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多依赖任务"}</button>}
       <div className="form-actions"><button className="primary-button" type="submit" data-testid="task-create-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存任务"}</button><button className="secondary-button" type="button" data-testid="task-create-inbox" disabled={formFrozen} onClick={() => void submit("inbox")}>暂存待整理</button><button className="text-button" type="button" disabled={formFrozen} onClick={onCancel}>返回列表</button></div>
       {receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}
       {live && pendingStep.current && <p className="helper-text" data-testid="task-create-command-id">原 command ID：{pendingStep.current.commandId}</p>}

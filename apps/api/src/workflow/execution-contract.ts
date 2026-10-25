@@ -30,7 +30,7 @@ export interface FrozenContractCriterion {
   readonly required: boolean;
   readonly method: string;
   readonly targetSpec: JsonObject;
-  /** 显式检查器覆盖（HARD SEMANTIC 规则的真实语义检查器）。 */
+  /** 冻结时选择的检查器（配置的语义模型或人工证据）。 */
   readonly checkerId?: string | undefined;
 }
 

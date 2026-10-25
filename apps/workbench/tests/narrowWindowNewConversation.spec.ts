@@ -4,8 +4,9 @@ import { dialogText, DomWrapper, flush, folderStripName, mountWorkbench, openWor
 
 // 2026-10-08 窄窗/短窗「新对话」入口可发现性。
 // 抽屉入口与近期工作栏入口必须共用同一条 /agent?new=… 语义：进入空白讨论，
-// 不继承目录、任务或旧会话。2026-10-19 用户指令：未发送草稿不再弹确认框，
-// 换工作区直接切、草稿按会话留在本机（见 src/lib/composerDrafts.ts）。
+// 不继承任务或旧会话；目录沿用本机最近一次打开的工作目录（2026-10-25 用户指令），
+// 仍由协作页按同一条 openFolder 打开并由服务端核对。2026-10-19 用户指令：未发送草稿
+// 不再弹确认框，换工作区直接切、草稿按会话留在本机（见 src/lib/composerDrafts.ts）。
 // 本文件只断言行为（进入哪个上下文、草稿留在原会话并在回去时恢复）；真实可见性、
 // 几何与键盘路径由 tests/browser/narrowWindowNewConversation.spec.ts 在 Chromium 里核对。
 
@@ -139,25 +140,25 @@ describe("窄窗抽屉里的新对话入口", () => {
     expect(view.posts).toHaveLength(0);
   });
 
-  it("从已打开目录的讨论进入新对话：目录作用域不跟着带过去", async () => {
+  it("从已打开目录的讨论进入新对话：目录沿用最近一次打开，任务上下文仍不继承", async () => {
     const view = await mount("/agent?new=seed", { sessions: false, directory: true });
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists(), view.wrapper.text()).toBe(true);
     expect(folderStripName()).toContain("NarrowWindowProject");
 
     await openNavigation(view);
     await navigationAction().trigger("click");
-    await flush(120);
+    await flush(120); await flush(120);
 
     expect(view.router.currentRoute.value.query.new).not.toBe("seed");
-    // 目录作用域清空：细条回到「选择工作目录」那颗键，写准入说明一并消失。
-    expect(folderStripName()).toBe("选择工作目录");
-    expect(view.wrapper.find('[data-testid="folder-write-readiness"]').exists()).toBe(false);
+    // 2026-10-25 用户指令「新对话要记住最后打开的会话所在的工作目录」：目录按本机
+    // 最近打开的目录续记，仍走同一条 openFolder 由服务端核对；任务上下文不继承。
+    expect(folderStripName()).toContain("NarrowWindowProject");
     expect(view.wrapper.find('[data-testid="collab-goal"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
     expect(view.wrapper.find('[data-testid="assist-session"]').exists()).toBe(false);
-    // 新对话本身不新建会话，也不重复写目录。
+    // 新对话本身不新建会话；目录是续记重新打开（第二次 open），不是只摆一个名字。
     expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(0);
-    expect(view.posts.filter((post) => post.path === `${root}/working-directories/open`)).toHaveLength(1);
+    expect(view.posts.filter((post) => post.path === `${root}/working-directories/open`)).toHaveLength(2);
   });
 
   it("有未发送草稿时抽屉入口直接进入新对话；草稿留在原会话，回去时原样恢复", async () => {

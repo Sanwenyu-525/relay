@@ -303,13 +303,18 @@ describe("会话模式单选框", () => {
       const toolIndexOf = (token: string) => toolClasses.findIndex((classes) => classes.includes(token));
       // 这次只搬两枚：「+」与写档位仍相邻；资料入口仍紧跟「普通讨论」浮层之后。
       expect(toolIndexOf("agent-chat-permission")).toBe(toolIndexOf("agent-chat-attach") + 1);
-      // 资料入口（DEV-0100）有两种形态且都在同一格：能看到项目资料时是真实选择入口
-      // `agent-chat-source-options`，没有项目归属或非普通档时是禁用说明芯片 `agent-chat-tool`。
-      // 只认「紧跟 options 之后的那一个」，不写死是哪一种——本 fixture 打开了工作目录、
-      // 有项目归属，因此渲染的是前一种。
-      const afterOptions = toolClasses[toolIndexOf("agent-chat-options") + 1] ?? [];
-      expect(afterOptions.includes("agent-chat-source-options") || afterOptions.includes("agent-chat-tool"))
-        .toBe(true);
+      // 资料入口（DEV-0100）在 2026-10-24 换了格子位置：用户指令「这两个合成一个芯片就好了」
+      // 之后，它不再是模式浮层之后的单独一格（旧类名 `agent-chat-source-options`），而是并进
+      // 同一枚芯片的浮层里——上节模式说明、下节资料选择。原始验收标准不换 Owner：资料入口仍
+      // 可达、仍紧跟模式说明、仍按形态二选一（有项目归属＝真实检索入口，否则＝一句禁用说明）。
+      // 因此这里断言合并后的同构，而不是删掉这条邻接关系。
+      const optionsIndex = toolIndexOf("agent-chat-options");
+      expect(optionsIndex).toBeGreaterThanOrEqual(0);
+      expect(optionsIndex).toBe(toolClasses.length - 1);
+      const sourceSection = tools.children[optionsIndex].querySelector(".agent-chat-options-section");
+      expect(sourceSection).not.toBeNull();
+      expect(sourceSection!.querySelector("#assist-source-query") !== null
+        || sourceSection!.querySelector(".helper-text") !== null).toBe(true);
     } finally { view.unmount(); }
   });
 

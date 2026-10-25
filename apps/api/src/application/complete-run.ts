@@ -87,6 +87,11 @@ export async function evaluateCompletionGate(
     return { ok: false, reason: COMPLETION_BLOCKED_REASON.VERIFICATION_NOT_PASSED };
   }
 
+  const checkResults = await repositories.verifications.listLatestCheckResults(latest.id);
+  if (checkResults.some((result) => result.checker_id === 'fake-semantic-v1' && result.result === 'PASS')) {
+    return { ok: false, reason: COMPLETION_BLOCKED_REASON.VERIFICATION_NOT_PASSED };
+  }
+
   // 完成前重新核对适用性：被显式撤销的 PASS 不能再作为完成依据（contracts/03 第 5 节）。
   if (!(await repositories.verifications.isApplicable(latest.id))) {
     return { ok: false, reason: COMPLETION_BLOCKED_REASON.VERIFICATION_REVOKED };
@@ -162,6 +167,10 @@ export async function completeRun(
 
     if (artifact === undefined) {
       throw evidenceUnavailable({ artifactVersionId: version.id, reason: 'MISSING' });
+    }
+
+    if (!target.content_hash.equals(version.content_hash)) {
+      throw evidenceUnavailable({ artifactVersionId: version.id, reason: 'TARGET_HASH_MISMATCH' });
     }
 
     const read = await input.storage.readWithHashCheck(version.storage_ref, {

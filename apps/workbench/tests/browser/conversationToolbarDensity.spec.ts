@@ -76,6 +76,10 @@ async function installRoutes(page: Page, rounds = 0): Promise<void> {
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route, { items });
+    // 目标/计划投影必须给出合法空响应：落到兜底 `{items:[]}` 会被前端判为契约无效，
+    // 页面在消息区上方插一条读取失败告警，像素取样就落到告警底色上（DEV-0110 纸面对称用例）。
+    if (path === `${prefix}/assist-sessions/${sessionId}/plans`) return fulfillJson(route, { latest: null, versions: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
     const runtime = modelRuntimePath.exec(path);
     if (runtime) return fulfillJson(route, modelRuntimeBody(decodeURIComponent(runtime[1])));
     return fulfillJson(route, { items: [], next_cursor: null });
@@ -120,6 +124,8 @@ async function installTaskRoutes(page: Page): Promise<void> {
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [taskSession] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, taskSession);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route, { items: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/plans`) return fulfillJson(route, { latest: null, versions: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
     const runtime = modelRuntimePath.exec(path);
     if (runtime) return fulfillJson(route, modelRuntimeBody(decodeURIComponent(runtime[1])));
     return fulfillJson(route, { items: [], next_cursor: null });
@@ -164,6 +170,10 @@ async function installTwoTaskSessions(page: Page): Promise<void> {
     if (path === `${prefix}/assist-sessions/${secondSessionId}`) return fulfillJson(route, secondTaskSession);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route, { items: first });
     if (path === `${prefix}/assist-sessions/${secondSessionId}/messages`) return fulfillJson(route, { items: second });
+    if (path === `${prefix}/assist-sessions/${sessionId}/plans`) return fulfillJson(route, { latest: null, versions: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
+    if (path === `${prefix}/assist-sessions/${secondSessionId}/plans`) return fulfillJson(route, { latest: null, versions: [] });
+    if (path === `${prefix}/assist-sessions/${secondSessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
     const runtime = modelRuntimePath.exec(path);
     if (runtime) return fulfillJson(route, modelRuntimeBody(decodeURIComponent(runtime[1])));
     return fulfillJson(route, { items: [], next_cursor: null });
@@ -180,9 +190,15 @@ function lookAtToolbar() {
   const scope = document.querySelector<HTMLElement>('[data-testid="collab-conversation-scope"]')!;
   const details = document.querySelector<HTMLElement>('[data-testid="collab-conversation-inspector-toggle"]')!;
   const detailsIcon = details.querySelector("svg")?.getBoundingClientRect() ?? null;
+  // 普通会话右翼另有工具面板键（2026-10-24），按 2026-10-17 指令排在「工作详情」之前；
+  // 任务会话没有这颗键，读取按可选处理，由用例各自断言自己那一档。
+  const tools = document.querySelector<HTMLElement>('[data-testid="collab-conversation-tools-toggle"]');
+  const toolsIcon = tools?.querySelector("svg")?.getBoundingClientRect() ?? null;
+  const rightButtons = [...document.querySelectorAll<HTMLElement>(".collab-toolbar-right button")];
   const t = title?.getBoundingClientRect();
   const sc = scope.getBoundingClientRect();
   const d = details.getBoundingClientRect();
+  const tl = tools?.getBoundingClientRect() ?? null;
   const b = bar.getBoundingClientRect();
   const titleStyle = title === null ? null : getComputedStyle(title);
   const detailsStyle = getComputedStyle(details);
@@ -195,6 +211,11 @@ function lookAtToolbar() {
     detailsRight: d.right, detailsHeight: d.height, detailsWidth: d.width,
     detailsText: (details.textContent ?? "").trim(), detailsTitle: details.getAttribute("title"),
     detailsLabel: details.getAttribute("aria-label"), detailsIconWidth: detailsIcon?.width ?? null,
+    toolsRight: tl?.right ?? null, toolsHeight: tl?.height ?? null, toolsWidth: tl?.width ?? null,
+    toolsText: (tools?.textContent ?? "").trim(), toolsTitle: tools?.getAttribute("title") ?? null,
+    toolsLabel: tools?.getAttribute("aria-label") ?? null, toolsIconWidth: toolsIcon?.width ?? null,
+    rightButtonIds: rightButtons.map((node) => node.dataset.testid ?? ""),
+    lastButtonRight: rightButtons.at(-1)!.getBoundingClientRect().right,
     detailsBackground: detailsStyle.backgroundColor, detailsBorder: detailsStyle.borderLeftColor,
     detailsRadius: detailsStyle.borderRadius,
     compactHeight: rem("--relay-control-height-compact"),
@@ -218,6 +239,9 @@ test.describe("会话顶栏单行密度", () => {
     await connect(page);
     const toolbar = page.getByTestId("collab-conversation-toolbar");
     await expect(toolbar).toBeVisible({ timeout: 20_000 });
+    // 会话名随会话读取完成后才渲染；先等它落定再一次性量几何，
+    // 避免把「工具栏已出、会话仍在读」的中间帧当成版式失败。
+    await expect(page.getByTestId("collab-session-title")).toHaveText("关于Relay-Agent");
     const look = await page.evaluate(lookAtToolbar);
     // 高度：两行档仍只比 compact 多出不到一档 space.8（2026-10-17 接续指令把作用域挪到第二行，
     // 同时要求整条往上贴；两行的代价封顶在 32px 内，不再回到此前 75px 那种双层壳）。
@@ -236,8 +260,14 @@ test.describe("会话顶栏单行密度", () => {
     expect(look.scopeLeft).toBeCloseTo(look.titleLeft!, 0);
     // 长标题在名字上截断，不撑高顶栏。
     expect(look.titleOverflow).toBe("ellipsis");
-    // 右翼：工作详情贴内容盒右缘，compact 一档；「新建会话」已按用户指令从顶栏删除。
-    expect(look.toolbarRight - look.detailsRight).toBeLessThanOrEqual(16);
+    // 右翼：两种开关成组贴内容盒右缘（顶栏自身右内边距 space.3），compact 一档；
+    // 「新建会话」已按用户指令从顶栏删除。普通会话有工具面板键，按 2026-10-17 指令
+    // 排在「工作详情」之前，详情键固定最后。
+    expect(look.rightButtonIds).toEqual([
+      "collab-conversation-tools-toggle", "collab-conversation-inspector-toggle"
+    ]);
+    expect(look.toolbarRight - look.lastButtonRight).toBeLessThanOrEqual(16);
+    expect(look.detailsRight).toBeCloseTo(look.lastButtonRight, 0);
     expect(look.detailsHeight).toBeCloseTo(look.compactHeight, 0);
     // 2026-10-17 用户指令：工作详情是纯图标键——32×32 命中区、18px 图标、无可见文字；
     // 可访问名称与悬停提示按展开态说清下一次点击做什么。
@@ -246,8 +276,15 @@ test.describe("会话顶栏单行密度", () => {
     expect(look.detailsText).toBe("");
     expect(look.detailsTitle).toBe("展开工作详情");
     expect(look.detailsLabel).toBe("展开工作详情");
+    // 工具面板键同一档：纯图标、compact 命中区、18px，名称说清它打开什么。
+    expect(look.toolsHeight).toBeCloseTo(look.compactHeight, 0);
+    expect(look.toolsWidth).toBeCloseTo(look.compactHeight, 0);
+    expect(look.toolsIconWidth).toBeCloseTo(18, 0);
+    expect(look.toolsText).toBe("");
+    expect(look.toolsTitle).toBe("工具面板（文件、变更与网页）");
+    expect(look.toolsLabel).toBe(look.toolsTitle);
     expect(look.newSessionButtons).toBe(0);
-    expect(look.rightButtons).toBe(1);
+    expect(look.rightButtons).toBe(2);
     await toolbar.screenshot({ path: "results/conversation-toolbar-density.png" });
   });
 
@@ -290,6 +327,10 @@ test.describe("会话顶栏单行密度", () => {
     await connect(page);
     const toolbar = page.getByTestId("collab-conversation-toolbar");
     await expect(toolbar).toBeVisible({ timeout: 20_000 });
+    // 会话详情读回前目录位是占位。先等会话身份落定再量样式，否则会把
+    // 「顶栏已出、会话仍在读」的中间帧误判成目录未绑定。
+    await expect(page.getByTestId("collab-current-directory"))
+      .toHaveAttribute("aria-label", "会话目录：D:\\Develop\\Relay-Agent");
     const look = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement);
       const asRgb = (value: string): string => {

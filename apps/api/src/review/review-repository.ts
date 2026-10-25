@@ -65,11 +65,17 @@ export class ReviewRepository {
   }
 
   async listByWorkspace(workspaceId: string, status?: 'OPEN' | 'DECIDED' | 'EXPIRED'): Promise<readonly ReviewRequestRow[]> {
-    const result = await sql<ReviewRequestRow>`
-      select ${REQUEST_COLUMNS} from review_requests
-      where workspace_id = ${workspaceId} and (${status ?? null}::text is null or status = ${status ?? null})
-      order by created_at, id
-    `.execute(this.db);
+    const result = status === undefined
+      ? await sql<ReviewRequestRow>`
+          select ${REQUEST_COLUMNS} from review_requests
+          where workspace_id = ${workspaceId}
+          order by created_at, id
+        `.execute(this.db)
+      : await sql<ReviewRequestRow>`
+          select ${REQUEST_COLUMNS} from review_requests
+          where workspace_id = ${workspaceId} and status = ${status}
+          order by created_at, id
+        `.execute(this.db);
     return result.rows;
   }
 

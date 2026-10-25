@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
 pub(super) const VERSION: &str = "relay-managed-content-v1";
+pub(super) const CONTENT_REPLY_BYTES: usize = 256 * 1024 * 2 + 16 * 1024;
 
 #[derive(Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
@@ -14,6 +15,15 @@ pub(super) enum Request {
         artifact_id: String,
         version_id: String,
         content_hex: String,
+    },
+    #[serde(rename = "read-content")]
+    Read {
+        version: String,
+        root_path: String,
+        artifact_id: String,
+        version_id: String,
+        expected_sha256: String,
+        expected_size: String,
     },
     #[serde(rename = "hold-content-freeze")]
     Freeze {
@@ -78,12 +88,24 @@ pub(super) fn frame(
 }
 
 pub(super) fn output(writer: &mut impl Write, value: Value) -> Result<(), super::Failure> {
+    output_with_limit(writer, value, 16 * 1024)
+}
+
+pub(super) fn output_content(writer: &mut impl Write, value: Value) -> Result<(), super::Failure> {
+    output_with_limit(writer, value, CONTENT_REPLY_BYTES)
+}
+
+fn output_with_limit(
+    writer: &mut impl Write,
+    value: Value,
+    limit: usize,
+) -> Result<(), super::Failure> {
     let bytes = serde_json::to_vec(&value)
         .map_err(|_| super::Failure::new("IO_FAILED", "private output failed"))?;
-    if bytes.len() > 16 * 1024 {
+    if bytes.len() > limit {
         return Err(super::Failure::new(
             "IO_FAILED",
-            "private output exceeds limit",
+            "private output exceeds its bounded limit",
         ));
     }
     writer

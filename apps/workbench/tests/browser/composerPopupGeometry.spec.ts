@@ -1,16 +1,18 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// 输入器两枚浮层（普通讨论＝发送选项、资料）的几何与互斥常驻用例（工作台 §32.16，2026-10-24）。
+// 输入器浮层（2026-10-24 用户指令「这两个合成一个芯片就好了」：发送选项说明与资料合成
+// 一枚芯片一片浮层）的几何与常驻用例（工作台 §32.16）。
 //
-// 背景：用户截图「浮层宽度跟输入框一样而且样式不好看」+「两个弹窗同时开着」。
-// 本轮三组改动各有一条不变式在这里锁：
+// 背景与仍然成立的不变式（原「两枚浮层」的现场按结构已不可能重现，这里换成同等强度判据）：
 //   ① 锚定与定宽：details 自建包含块，面板左缘贴芯片（或翻面后右缘贴芯片），
 //      宽度 max(内容, 芯片) 且封顶 20rem；**必须待在输入卡内**——中栏 .collab-center 是
 //      overflow:hidden，越出即被裁（1000px 视口实测右缘 1035 越界后检索行不可达）。
-//   ② 翻面现算（usePopupFlip 写 data-flip）：资料芯片窄窗会随工具行换行到卡片左缘，
+//   ② 翻面现算（usePopupFlip 写 data-flip）：合并芯片窄窗会随工具行换行到卡片左缘，
 //      静态翻面在那时会裁左缘，所以不断言「一定翻/一定不翻」，只断言「两缘必有一缘贴芯片」。
-//   ③ 多开互斥：首条资料浮层补注册 useDetailsMenu 前，它能和「普通讨论」说明浮层同时开着
-//      （用户截图现场）；点外面也曾不收。
+//   ③ 多开防护：合并后每档输入器只有一枚浮层芯片，且它与「+」、模式、档位、模型共用
+//      popoverMenu 的独占注册表（src/lib/popoverMenu.ts）——断言改成「输入器内只有一枚
+//      details.agent-chat-options」「同一时刻开着的浮层计数为 1」「开别的芯片会收掉这枚」
+//      「点浮层外面必收」「开合不改草稿与发送键几何」。一片浮层同时承载说明节与资料节。
 //   ④ 在途不裁：输入卡 data-inflight 不再 overflow:hidden（收边移到 .agent-chat-composer-spark-clip），
 //      在途态开资料浮层，检索行必须可达。
 //
@@ -46,7 +48,8 @@ const runningMessage = { id: "77777777-7777-4777-8777-777777777777", session_id:
   usage: { input_tokens: 0, output_tokens: 0 }, sources: [], skill: null, skill_input: null, skill_output: null,
   attachments: [], created_at: "2026-10-24T00:00:00Z", updated_at: "2026-10-24T00:00:00Z", revision: "1" };
 
-async function installRoutes(page: Page, inflight = false): Promise<void> {
+async function installRoutes(page: Page, inflight = false,
+  override: { messages?: unknown[]; maxCallTokens?: number | null } = {}): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -66,11 +69,12 @@ async function installRoutes(page: Page, inflight = false): Promise<void> {
       archived_at: null });
     if (path === `${prefix}/search`) return fulfillJson(route, { items: [], next_cursor: null });
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "fake",
-      configured: false, model: null, base_url: null, max_call_tokens: null });
+      configured: false, model: null, base_url: null,
+      max_call_tokens: override.maxCallTokens ?? null });
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
-      return fulfillJson(route, { items: inflight ? [runningMessage] : [] });
+      return fulfillJson(route, { items: override.messages ?? (inflight ? [runningMessage] : []) });
     }
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     return fulfillJson(route, { items: [], next_cursor: null });
@@ -120,8 +124,23 @@ async function measurePopup(page: Page, detailsSelector: string): Promise<PopupS
   }, detailsSelector);
 }
 
+/** 浮层里的分节：合并后一片浮层同时承载发送选项（说明/生成方式）与资料选择器。 */
+async function panelSections(page: Page, panelSelector: string): Promise<{
+  skill: boolean; intent: boolean; picker: boolean; query: boolean; sections: number } | null> {
+  return page.evaluate((selector) => {
+    const panel = document.querySelector(selector);
+    if (panel === null) return null;
+    return {
+      skill: panel.querySelector('[data-testid="assist-skill"]') !== null,
+      intent: panel.querySelector('[data-testid="assist-intent"]') !== null,
+      picker: panel.querySelector('[data-testid="assist-source-picker"]') !== null,
+      query: panel.querySelector("#assist-source-query") !== null,
+      sections: panel.querySelectorAll(":scope > .agent-chat-options-section").length };
+  }, panelSelector);
+}
+
 for (const viewport of [{ width: 1162, height: 782 }, { width: 1000, height: 800 }, { width: 860, height: 800 }] as const) {
-  test(`${viewport.width}×${viewport.height}：资料/普通讨论浮层锚定芯片、紧凑宽、待在卡内、不压发送键`, async ({ page }) => {
+  test(`${viewport.width}×${viewport.height}：合体浮层锚定芯片、紧凑宽、待在卡内、不压发送键`, async ({ page }) => {
     const label = `${viewport.width}×${viewport.height}`;
     await page.setViewportSize(viewport);
     await installRoutes(page);
@@ -130,47 +149,49 @@ for (const viewport of [{ width: 1162, height: 782 }, { width: 1000, height: 800
     const composer = page.getByTestId("assist-composer");
     await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
 
-    // 资料浮层：开 → 量 → 关（点 summary 即关）。
+    // 会话输入器只有这一枚浮层芯片，资料入口的 testid 仍挂在它的 summary 上（AssistView.tsx:4999）。
     await page.getByTestId("assist-open-sources").click();
     await composer.locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
-    const sources = await measurePopup(page, ".agent-chat-source-options");
+    const merged = await measurePopup(page, ".agent-chat-send-options");
+    const sections = await panelSections(page,
+      '[data-testid="assist-composer"] .agent-chat-send-options > .agent-chat-options-panel');
     await page.getByTestId("assist-open-sources").click();
-
-    // 普通讨论（发送选项）浮层：互斥注册保证上一枚已收，这里直接量。
-    const sendSummary = page.locator(".agent-chat-send-options > summary");
-    await sendSummary.click();
-    await expect(page.locator(".agent-chat-send-options > .agent-chat-options-panel")).toBeVisible();
-    const send = await measurePopup(page, ".agent-chat-send-options");
+    await expect(composer.locator(".agent-chat-send-options > .agent-chat-options-panel")).toBeHidden();
 
     // 原始几何留在日志里作为证据（数值只反映夹具布局，不连真实 API）。
-    console.log(JSON.stringify({ label, sources, send }));
+    console.log(JSON.stringify({ label, merged, sections }));
 
-    for (const [name, shot] of [["资料", sources], ["普通讨论", send]] as const) {
-      const { chip, panel, card, draft, send: sendBox, pageOverflowX, viewport: vp } = shot;
-      if (chip === null || panel === null || card === null) throw new Error(`${label} · ${name} 缺少采样`);
-      // 1. 贴芯片：左缘或右缘必有一缘与芯片对齐（翻面由 usePopupFlip 现算，哪个视口翻不一定）。
-      const leftAligned = Math.abs(panel.left - chip.left) <= 1;
-      const rightAligned = Math.abs(panel.right - chip.right) <= 1;
-      expect(leftAligned || rightAligned, `${label} · ${name} 浮层两缘都不贴芯片`).toBe(true);
-      // 2. 宽度：不小于芯片、不超过 20rem 封顶。
-      expect(panel.width, `${label} · ${name} 浮层窄于芯片`).toBeGreaterThanOrEqual(chip.width - 0.5);
-      expect(panel.width, `${label} · ${name} 浮层超过 20rem 封顶`).toBeLessThanOrEqual(320.5);
-      // 3. 待在输入卡内（中栏 overflow:hidden，越出即被裁）、不越视口、页面不横向溢出。
-      expect(panel.left, `${label} · ${name} 浮层左缘越出输入卡`).toBeGreaterThanOrEqual(card.left - 0.5);
-      expect(panel.right, `${label} · ${name} 浮层右缘越出输入卡`).toBeLessThanOrEqual(card.right + 0.5);
-      expect(panel.left, `${label} · ${name} 浮层左缘越出视口`).toBeGreaterThanOrEqual(-0.5);
-      expect(panel.right, `${label} · ${name} 浮层右缘越出视口`).toBeLessThanOrEqual(vp.width + 0.5);
-      expect(pageOverflowX, `${label} · ${name} 页面横向溢出`).toBe(0);
-      // 4. 草稿仍在视口内（浮层开着时短暂盖住草稿，与档位菜单同一模式，DEV-0116 起接受）；
-      //    发送键不被浮层压住。
-      if (draft !== null) {
-        expect(draft.top, `${label} · ${name} 草稿上缘越出视口`).toBeGreaterThanOrEqual(-0.5);
-        expect(draft.bottom, `${label} · ${name} 草稿下缘越出视口`).toBeLessThanOrEqual(vp.height + 0.5);
-      }
-      const overlap = (a: Box, b: Box | null) => b === null ? 0 :
-        Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-      expect(overlap(panel, sendBox), `${label} · ${name} 浮层压住发送键`).toBeLessThanOrEqual(0.5);
+    // 1. 一片浮层两节同场：发送选项（生成方式/意图）与资料节（选择器 + 检索行）。
+    if (sections === null) throw new Error(`${label} · 缺少合体浮层的分节采样`);
+    expect(sections.skill || sections.intent, `${label} · 发送选项节不在合体浮层里`).toBe(true);
+    expect(sections.picker, `${label} · 资料节不在合体浮层里`).toBe(true);
+    expect(sections.query, `${label} · 检索行不在合体浮层里`).toBe(true);
+    expect(sections.sections, `${label} · 资料节不是面板的直接子节`).toBe(1);
+
+    // 2. 几何：贴芯片、紧凑宽、待在输入卡内、不越视口、页面不横向溢出、不压发送键。
+    const { chip, panel, card, draft, send: sendBox, pageOverflowX, viewport: vp } = merged;
+    if (chip === null || panel === null || card === null) throw new Error(`${label} · 合体浮层缺少采样`);
+    // 左缘或右缘必有一缘与芯片对齐（翻面由 usePopupFlip 现算，哪个视口翻不一定）。
+    const leftAligned = Math.abs(panel.left - chip.left) <= 1;
+    const rightAligned = Math.abs(panel.right - chip.right) <= 1;
+    expect(leftAligned || rightAligned, `${label} · 合体浮层两缘都不贴芯片`).toBe(true);
+    expect(panel.width, `${label} · 合体浮层窄于芯片`).toBeGreaterThanOrEqual(chip.width - 0.5);
+    expect(panel.width, `${label} · 合体浮层超过 20rem 封顶`).toBeLessThanOrEqual(320.5);
+    expect(panel.left, `${label} · 合体浮层左缘越出输入卡`).toBeGreaterThanOrEqual(card.left - 0.5);
+    expect(panel.right, `${label} · 合体浮层右缘越出输入卡`).toBeLessThanOrEqual(card.right + 0.5);
+    expect(panel.left, `${label} · 合体浮层左缘越出视口`).toBeGreaterThanOrEqual(-0.5);
+    expect(panel.right, `${label} · 合体浮层右缘越出视口`).toBeLessThanOrEqual(vp.width + 0.5);
+    expect(panel.top, `${label} · 合体浮层上缘越出视口`).toBeGreaterThanOrEqual(-0.5);
+    expect(pageOverflowX, `${label} · 合体浮层造成页面横向溢出`).toBe(0);
+    // 草稿仍在视口内（浮层开着时短暂盖住草稿，与档位菜单同一模式，DEV-0116 起接受）；
+    // 发送键不被浮层压住。
+    if (draft !== null) {
+      expect(draft.top, `${label} · 合体浮层开着时草稿上缘越出视口`).toBeGreaterThanOrEqual(-0.5);
+      expect(draft.bottom, `${label} · 合体浮层开着时草稿下缘越出视口`).toBeLessThanOrEqual(vp.height + 0.5);
     }
+    const overlap = (a: Box, b: Box | null) => b === null ? 0 :
+      Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    expect(overlap(panel, sendBox), `${label} · 合体浮层压住发送键`).toBeLessThanOrEqual(0.5);
   });
 }
 
@@ -197,64 +218,168 @@ test("在途态（data-inflight）：资料浮层不被输入卡裁掉，检索�
   expect(hit, "在途态检索行应可达（不被输入卡裁掉）").toBe("self");
 });
 
-test("多开防护：首条输入器两枚浮层互斥且点外面可收，会话内同样互斥", async ({ page }) => {
+test("单枚浮层：合体芯片与模式/「+」互斥、点外面可收、开合不改几何（首条与会话内两档输入器）", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page);
-  // 首条输入器（带项目作用域，资料入口才在场）：用户截图「两个弹窗同时开着」的现场。
+  // 首条输入器（带项目作用域，资料节才在场）：用户截图「两个弹窗同时开着」的现场。
   // ?new= 强制新对话（不带它 work= 会恢复该任务最近会话，渲染的就是会话输入器）；
-  // task 深链给 firstScope.projectId，资料入口因此在场。
+  // task 深链给 firstScope.projectId，资料节因此在场。
   await page.goto(`/agent?work=${taskId}&new=1`);
   await connect(page);
   const first = page.getByTestId("assist-first-send-options");
-  const firstSources = page.getByTestId("assist-first-source-options");
   await first.locator("> summary").waitFor({ state: "visible", timeout: 20_000 });
-  await firstSources.locator("> summary").waitFor({ state: "visible", timeout: 20_000 });
 
-  const openState = () => page.evaluate(() => {
-    const root = document.querySelector('[data-testid="assist-first-source-options"]')?.closest(".agent-chat-composer")
-      ?? document.querySelector(".agent-chat-composer");
-    if (root === null || root === undefined) return { options: -1, firstOptions: false, firstSources: false };
-    return {
-      options: root.querySelectorAll("details.agent-chat-options[open]:not(.assist-options-expanded)").length,
-      firstOptions: root.querySelector("details.agent-chat-options:not(.agent-chat-source-options)")?.hasAttribute("open") ?? false,
-      firstSources: root.querySelector("details.agent-chat-source-options")?.hasAttribute("open") ?? false,
+  /** 输入器内的浮层计数与草稿/发送键几何：合并后每档只有一枚 details.agent-chat-options，
+   *  「两枚里哪枚开着」改为锁「芯片总数 1 且开着的计数 1」，互斥对象换成同排的模式与「+」。 */
+  const openState = (scope: "first" | "session") => page.evaluate((which) => {
+    const root = which === "first"
+      ? document.querySelector('[data-testid="assist-first-send-options"]')?.closest(".agent-chat-composer")
+      : document.querySelector('[data-testid="assist-composer"]');
+    if (!(root instanceof Element)) return { chips: -1, options: -1, mode: false, attach: false, draft: null, send: null };
+    const box = (selector: string) => {
+      const element = root.querySelector(selector);
+      if (element === null) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
     };
-  });
+    return {
+      chips: root.querySelectorAll("details.agent-chat-options").length,
+      options: root.querySelectorAll("details.agent-chat-options[open]:not(.assist-options-expanded)").length,
+      mode: root.querySelector("details.agent-chat-mode-select-field")?.hasAttribute("open") ?? false,
+      attach: root.querySelector("details.agent-chat-attach")?.hasAttribute("open") ?? false,
+      draft: box(which === "first" ? '[data-testid="assist-first-draft"]' : '[data-testid="assist-draft"]'),
+      send: box(which === "first" ? '[data-testid="assist-first-send"]' : '[data-testid="assist-send"]'),
+    };
+  }, scope);
 
-  // 1. 先开「普通讨论」说明浮层，再点「资料」：只剩资料开着。
+  // 1. 构造上不可能多开：首条输入器只有一枚浮层芯片，展开时开着的也只有这一枚。
+  const before = await openState("first");
+  expect(before.chips, "合并后首条输入器只应有一枚浮层芯片").toBe(1);
+  expect(before.options, "未点击时不该有浮层开着").toBe(0);
   await first.locator("> summary").click();
-  expect((await openState()).firstOptions).toBe(true);
-  await firstSources.locator("> summary").click();
-  const afterSources = await openState();
-  expect(afterSources.firstSources, "点资料后资料浮层应打开").toBe(true);
-  expect(afterSources.firstOptions, "资料浮层打开后普通讨论浮层应被收起（互斥）").toBe(false);
-  expect(afterSources.options, "同一时刻只应有一枚输入器浮层开着").toBe(1);
+  const opened = await openState("first");
+  expect(opened.options, "同一时刻只应有一枚输入器浮层开着").toBe(1);
+  // 一片浮层里说明节与资料节同时在场（原来的两枚浮层现在是一段面板里的两节）。
+  const firstSections = await panelSections(page,
+    '[data-testid="assist-first-send-options"] > .agent-chat-options-panel');
+  if (firstSections === null) throw new Error("缺少首条输入器合体浮层的分节采样");
+  expect(firstSections.query, "首条合体浮层应含资料节（检索行）").toBe(true);
+  expect(firstSections.picker, "首条合体浮层应含资料选择器").toBe(true);
+  expect(firstSections.sections, "首条合体浮层的资料节应是面板的直接子节").toBe(1);
+  // 2. 开合不改几何：浮层是浮层，草稿与发送键的矩形不因展开而移动。
+  expect(opened.draft, "展开浮层后草稿几何变了").toEqual(before.draft);
+  expect(opened.send, "展开浮层后发送键几何变了").toEqual(before.send);
 
-  // 2. 反序：先开资料，再点「普通讨论」——只剩普通讨论开着。
-  await firstSources.locator("> summary").click();
+  // 3. 互斥仍在：接着开模式浮层，合体浮层必须被独占注册表收起（原「点另一枚资料芯片」现场）。
+  await page.locator("details.agent-chat-mode-select-field > summary").click();
+  const afterMode = await openState("first");
+  expect(afterMode.mode, "模式浮层应打开").toBe(true);
+  expect(afterMode.options, "模式浮层打开后合体浮层应被收起（互斥）").toBe(0);
+
+  // 4. 「+」菜单同样互斥，且开合体浮层要反过来收「+」。
+  //    先把自己刚开的模式浮层收掉，否则它的浮层可能盖住待点的「+」芯片。
+  await page.locator("details.agent-chat-mode-select-field > summary").click();
+  expect((await openState("first")).mode, "再点一次模式芯片应收起自己的浮层").toBe(false);
+  await page.locator("details.agent-chat-attach > summary").click();
+  expect((await openState("first")).attach, "「+」菜单应打开").toBe(true);
   await first.locator("> summary").click();
-  const afterOptions = await openState();
-  expect(afterOptions.firstOptions).toBe(true);
-  expect(afterOptions.firstSources, "普通讨论浮层打开后资料浮层应被收起（互斥）").toBe(false);
-  expect(afterOptions.options).toBe(1);
+  const afterAttach = await openState("first");
+  expect(afterAttach.options, "点合体芯片后合体浮层应打开").toBe(1);
+  expect(afterAttach.attach, "合体浮层打开后「+」菜单应被收起（互斥）").toBe(false);
 
-  // 3. 点浮层外面要收（此前首条资料浮层没接外部关闭，点哪儿都不收）。
+  // 5. 点浮层外面要收（此前首条资料浮层没接外部关闭，点哪儿都不收）。
   await page.locator("body").click({ position: { x: 5, y: 5 } });
-  await expect.poll(async () => (await openState()).options, { timeout: 5_000 }).toBe(0);
+  await expect.poll(async () => (await openState("first")).options, { timeout: 5_000 }).toBe(0);
 
-  // 4. 会话内两枚同样互斥（回归：它们本就注册过，修复不能破坏）。
+  // 6. 会话内输入器同样：只有一枚芯片、开着一枚、开模式即收、点外面收、几何不动。
   await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  const sendSummary = page.locator(".agent-chat-send-options > summary");
+  const sessionBefore = await openState("session");
+  expect(sessionBefore.chips, "合并后会话输入器只应有一枚浮层芯片").toBe(1);
   await page.getByTestId("assist-open-sources").click();
-  await sendSummary.click();
-  const sessionState = await page.evaluate(() => ({
-    send: document.querySelector("details.agent-chat-send-options")?.hasAttribute("open") ?? false,
-    sources: document.querySelector("details.agent-chat-source-options")?.hasAttribute("open") ?? false,
-    total: document.querySelectorAll("details.agent-chat-options[open]").length,
-  }));
-  expect(sessionState.send, "会话内点普通讨论后应打开").toBe(true);
-  expect(sessionState.sources, "会话内资料浮层应被收起").toBe(false);
-  expect(sessionState.total).toBe(1);
+  await page.getByTestId("assist-composer").locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
+  const sessionOpen = await openState("session");
+  expect(sessionOpen.options, "会话内同一时刻只应有一枚输入器浮层开着").toBe(1);
+  expect(sessionOpen.draft, "会话内展开浮层后草稿几何变了").toEqual(sessionBefore.draft);
+  expect(sessionOpen.send, "会话内展开浮层后发送键几何变了").toEqual(sessionBefore.send);
+  await page.locator("details.agent-chat-mode-select-field > summary").click();
+  const sessionAfterMode = await openState("session");
+  expect(sessionAfterMode.mode, "会话内模式浮层应打开").toBe(true);
+  expect(sessionAfterMode.options, "会话内模式浮层打开后合体浮层应被收起（互斥）").toBe(0);
+  // 先收掉刚开的模式浮层，免得它的浮层盖住待重开的合体芯片。
+  await page.locator("details.agent-chat-mode-select-field > summary").click();
+  expect((await openState("session")).mode, "会话内再点模式芯片应收起自己的浮层").toBe(false);
+  await page.getByTestId("assist-open-sources").click();
+  expect((await openState("session")).options, "会话内重新点芯片应重新展开").toBe(1);  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await expect.poll(async () => (await openState("session")).options, { timeout: 5_000 }).toBe(0);
+});
+
+test("上下文圆环浮层（2026-10-25）：点击圆环打开用量详情，待在卡内，与模型下拉互斥，Esc 还焦点", async ({ page }) => {
+  // 窄档视口（1000×800）是圆环浮层向左展开的最紧情形；夹具给一次真实读数
+  // （input 4710 / max_call_tokens 65536 ≈ 7%，缓存命中 4200/4710 ≈ 89%），
+  // 圆环浮层走「最近一次模型调用」完整分支而不是尚无调用的空态。
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const usageRow = (id: string, seq: number, role: "USER" | "ASSISTANT", content: string): unknown => ({
+    id, session_id: sessionId, role, status: "COMPLETED", seq: String(seq), intent: "DISCUSS",
+    created_at: "2026-10-25T00:00:00Z", updated_at: "2026-10-25T00:01:00Z", content,
+    error_code: null, provider_error_kind: null, sources: [], skill: null, cancel_requested: false,
+    steer_requested: false,
+    usage: role === "ASSISTANT" ? { input_tokens: 4710, output_tokens: 47,
+      cache_read_tokens: 4200, cache_creation_tokens: null }
+      : { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
+    skill_input: null, skill_output: null, attachments: [], revision: "1" });
+  await installRoutes(page, false, {
+    messages: [usageRow("u-ctx", 1, "USER", "帮我看看上下文用量"),
+      usageRow("x-ctx", 2, "ASSISTANT", "读数如下")],
+    maxCallTokens: 65_536 });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await connect(page);
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  const meter = page.getByTestId("assist-context-meter");
+  await meter.click();
+  const panel = page.getByTestId("assist-context-meter-panel");
+  await panel.waitFor({ state: "visible", timeout: 5_000 });
+  await expect(meter).toHaveAttribute("aria-expanded", "true");
+  await expect(panel).toContainText("最近一次模型调用");
+  await expect(panel).toContainText("4,710");
+  await expect(panel).toContainText("89%");
+
+  // 几何：右缘贴圆环右缘、待在输入卡与视口内（中栏 overflow:hidden，越出即被裁）。
+  const geo = await page.evaluate(() => {
+    const box = (el: Element | null) => {
+      if (el === null) return null;
+      const rect = el.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, width: rect.width };
+    };
+    return {
+      ring: box(document.querySelector('[data-testid="assist-composer"] [data-testid="assist-context-meter"]')),
+      panel: box(document.querySelector('[data-testid="assist-context-meter-panel"]')),
+      card: box(document.querySelector('[data-testid="assist-composer"]')),
+      viewport: { width: window.innerWidth, height: window.innerHeight } };
+  });
+  if (geo.ring === null || geo.panel === null || geo.card === null) throw new Error("圆环浮层缺少几何采样");
+  expect(Math.abs(geo.panel.right - geo.ring.right), "圆环浮层右缘应贴圆环右缘").toBeLessThanOrEqual(1);
+  expect(geo.panel.left, "圆环浮层左缘越出输入卡").toBeGreaterThanOrEqual(geo.card.left - 0.5);
+  expect(geo.panel.right, "圆环浮层右缘越出输入卡").toBeLessThanOrEqual(geo.card.right + 0.5);
+  expect(geo.panel.left, "圆环浮层左缘越出视口").toBeGreaterThanOrEqual(-0.5);
+  expect(geo.panel.top, "圆环浮层上缘越出视口").toBeGreaterThanOrEqual(-0.5);
+
+  // 互斥（popoverMenu 注册表）：开模型下拉收圆环浮层；反向开圆环也收模型下拉。
+  await page.getByTestId("model-selector-open").click();
+  await expect(panel).toBeHidden();
+  await expect(page.getByTestId("model-selector-menu")).toBeVisible();
+  await meter.click();
+  await expect(page.getByTestId("model-selector-menu")).toBeHidden();
+  await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
+
+  // Esc 收起并把焦点还给圆环；点浮层外一次即收。
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("assist-context-meter-panel")).toBeHidden();
+  await expect(meter).toBeFocused();
+  await meter.click();
+  await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await expect(page.getByTestId("assist-context-meter-panel")).toBeHidden();
 });

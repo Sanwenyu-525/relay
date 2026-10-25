@@ -38,8 +38,14 @@ export async function createTaskChain(db:DbExecutor,input:Scope & {projectId:str
    if(t?.workspace_id!==input.workspaceId || t.project_id!==input.projectId) throw resourceNotFound('Task');
    if(t.revision!==requireRevision(selected.expectedRevision,'expected_revision') || t.acceptance_revision!==requireRevision(selected.expectedAcceptanceRevision,'expected_acceptance_revision')) throw invalidTransition('任务或验收版本已变化。');
    if(!['INBOX','READY'].includes(t.status) || t.executor_kind!=='HUMAN') throw invalidTransition('首片任务链仅接待执行的人工所属任务。');
-   const acceptance=(await r.tasks.readAcceptanceVersion(t.id,t.acceptance_revision))!;
-   requireDeclaredOutputs({task:t,acceptanceRevision:t.acceptance_revision,requiredOutputSpec:acceptance.required_output_spec});
+    const acceptance=await r.tasks.readAcceptanceVersion(t.id,t.acceptance_revision);
+    if(acceptance===undefined) throw invalidTransition('当前验收版本不可读取。');
+    const criteria=await r.tasks.listCriteria(t.id,t.acceptance_revision);
+    if(!criteria.some(criterion=>criterion.required)) throw invalidTransition('任务至少需要一个必需验收条件才能进入固定任务链。');
+    const declaredOutputs=requireDeclaredOutputs({task:t,acceptanceRevision:t.acceptance_revision,requiredOutputSpec:acceptance.required_output_spec});
+    if(declaredOutputs.length===0) throw invalidTransition('任务需要声明至少一种当前支持的预期产物才能进入固定任务链。');
+    const unresolvedBlockers=await r.projects.listUnresolvedBlockersForTask(input.projectId,t.id);
+    if(unresolvedBlockers.length>0) throw invalidTransition('任务或项目仍有未解除 blocker，不能进入固定任务链。',{blockerIds:unresolvedBlockers.map(blocker=>blocker.id)});
    const deps=(await r.tasks.listDependencies(t.id)).filter(d=>d.dependency_kind==='BLOCKS');
    if(deps.some(d=>d.depends_on_status!=='DONE' && !input.tasks.slice(0,index).some(p=>p.taskId===d.depends_on_task_id))) throw invalidTransition('固定顺序需把未完成的必要前置排在当前任务之前。');
    const execution=await freezeTaskChainExecution(r,input.workspaceId,input.projectId,t.id,selected.execution);

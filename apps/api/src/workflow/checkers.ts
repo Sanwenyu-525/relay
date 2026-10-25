@@ -13,7 +13,8 @@ import { validateCandidate, REQUIRED_SECTIONS } from './markdown-deliverable.js'
  * 边界：
  *   * registry 只注册内置 checker，不下载插件、不执行用户表达式；
  *   * 每个 checker 声明检测范围；存在性检查不等于论断被支持；
- *   * FakeSemanticChecker 是 P06 替身，真实语义接入属 P12，不声称验证绝对正确；
+ *   * FakeSemanticChecker 仅供显式测试夹具；普通 SEMANTIC 在 Delegate 时冻结真实模型检查器，
+ *     无真实模型时冻结 human-evidence-v1，不把测试替身当作 PASS 依据；
  *   * Worker 不能通过改计划绕过 registry——计划在 session 创建时已冻结。
  */
 
@@ -118,7 +119,7 @@ class CitationExistsChecker implements Checker {
 }
 
 /**
- * FakeSemanticChecker：确定性语义替身，真实模型语义接入属 P12。
+ * FakeSemanticChecker：确定性测试替身，不得成为真实 Run 的语义验证证据。
  *
  * 场景标记（进入正文或 fakeScenario）：
  *   * SEMANTIC_FAIL / EVIDENCE_UNSUPPORTED → FAIL（论断无支持）
@@ -139,7 +140,7 @@ class FakeSemanticChecker implements Checker {
       checker: this.id,
       checker_version: this.version,
       fake: true,
-      note: 'P06 FakeSemanticChecker：不保证事实绝对正确；真实语义接入属 P12。',
+      note: '仅供显式测试夹具；不保证事实绝对正确，不可作为真实 Run 的语义验证证据。',
       artifact_version_id: input.artifactVersionId,
       content_sha256: input.contentHashHex,
     };
@@ -306,12 +307,21 @@ export function hasChecker(checkerId: string, checkerVersion: string): boolean {
 export function resolveCheckerForScenario(
   entry: CheckPlanEntry,
   fakeScenario: string | undefined,
+  semanticModel?: { readonly identity: ModelIdentity;
+    readonly evaluate: SemanticEvaluate },
 ): Checker {
   if (
     fakeScenario === 'CHECKER_ERROR' &&
     (entry.checkerId === 'markdown-structure-v1' || entry.checkerId === 'citation-exists-v1')
   ) {
     return new ErrorChecker();
+  }
+
+  // Run 冻结计划解析出的语义模型优先于 registry 的进程默认端口：语义检查必须与
+  // DRAFT 使用同一个冻结身份，否则账本与契约会指向两个模型（P0-1）。
+  if (semanticModel !== undefined && entry.checkerId === 'semantic-model-v1' &&
+      entry.checkerVersion === '1') {
+    return new ModelSemanticChecker(semanticModel.evaluate, semanticModel.identity);
   }
 
   const checker = resolveChecker(entry.checkerId, entry.checkerVersion);

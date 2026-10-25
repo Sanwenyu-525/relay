@@ -132,7 +132,7 @@ describe("工作空间级会话", () => {
     }));
     const { wrapper } = await mountedUnassignedAssist();
     await flush(20);
-    expect(wrapper.text()).not.toContain("正在核对对话目标与会话");
+    expect(wrapper.text()).not.toContain("正在核对对话作用域与会话");
     expect(wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
     // 标题只能来自这条消息本身：没有 target，也就没有 target.title。
     await wrapper.get('[data-testid="assist-first-draft"]').setValue("先聊聊这个目录要怎么改");
@@ -298,7 +298,7 @@ describe("工作空间级会话", () => {
     const { wrapper } = await mountedTaskAssist();
     await flush(30);
     // 旧的停顿页文案不再出现；主入口唯一且是输入卡。
-    expect(wrapper.text()).not.toContain("目标已选。可以新建会话");
+    expect(wrapper.text()).not.toContain("工作对象已选。可以新建会话");
     expect(wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
     // 只读打开不发任何写命令。
     expect(posts).toHaveLength(0);

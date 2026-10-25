@@ -35,6 +35,24 @@ export class GatewayRepository {
       order by created_at, id limit 100`.execute(this.db)).rows;
   }
 
+  /**
+   * 工作区级能力检索（未归属会话的插件执行借用连接归属项目）。
+   *
+   * 机器族能力（电脑/浏览器）不依赖受管根，连接登记在哪个项目下只决定账本归属，
+   * 不改变能力本身；这里跨项目按能力找 ACTIVE 连接，供「会话没有归入项目、但用户
+   * 明确要求插件操作」的执行请求解析归属。文件族能力不走这条查询——它们的边界
+   * 就是项目与目录，跨项目借用等于越权。
+   */
+  async listActiveConnectionsByCapability(workspaceId: string,
+    capability: GatewayCapability): Promise<readonly GatewayConnectionRow[]> {
+    return (await sql<GatewayConnectionRow>`
+      select c.* from gateway_connections c
+      join gateway_connection_capabilities cap on cap.connection_id = c.id
+      where c.workspace_id = ${workspaceId} and c.status = 'ACTIVE'
+        and cap.capability_key = ${capability}
+      order by c.created_at, c.id limit 100`.execute(this.db)).rows;
+  }
+
   async setConnection(input: { id: string; status: 'ACTIVE' | 'DISABLED'; config: JsonObject }): Promise<GatewayConnectionRow> {
     const result = await sql<GatewayConnectionRow>`
       update gateway_connections set status = ${input.status}, config = ${JSON.stringify(input.config)}::jsonb,

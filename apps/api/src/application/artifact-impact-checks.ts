@@ -80,6 +80,7 @@ export async function startArtifactImpactCheck(db: DbExecutor, storage: ManagedC
       const selectedTargets = new Set(input.analysisTargetVersionIds);
       const directTargets: JsonObject[] = [];
       const modelTargets: JsonObject[] = [];
+      let targetTruncated = false;
       for (const edge of edges.slice(0, MAX_TARGETS)) {
         const child = await r.artifacts.readArtifactVersion(edge.child_version_id);
         const owner = child === undefined ? undefined : await r.artifacts.readArtifact(child.artifact_id);
@@ -91,13 +92,15 @@ export async function startArtifactImpactCheck(db: DbExecutor, storage: ManagedC
           relation: edge.relation, version_number: child.version_number.toString(),
           availability: available ? 'AVAILABLE' : 'UNAVAILABLE',
           analysed: available && selectedTargets.has(child.id) });
-        if (available && selectedTargets.has(child.id)) modelTargets.push({ version_id: child.id,
-          excerpt: content.content.toString('utf8').slice(0, MAX_TARGET_CHARS) });
+        if (available && selectedTargets.has(child.id)) {
+          const text = content.content.toString('utf8');
+          targetTruncated ||= text.length > MAX_TARGET_CHARS;
+          modelTargets.push({ version_id: child.id, excerpt: text.slice(0, MAX_TARGET_CHARS) });
+        }
       }
       const oldText = oldRead.content.toString('utf8');
       const newText = newRead.content.toString('utf8');
-      const truncated = oldText.length > MAX_SOURCE_CHARS || newText.length > MAX_SOURCE_CHARS ||
-        modelTargets.some((target) => String(target.excerpt).length === MAX_TARGET_CHARS);
+      const truncated = oldText.length > MAX_SOURCE_CHARS || newText.length > MAX_SOURCE_CHARS || targetTruncated;
       const sessionId = randomUUID();
       const userMessageId = randomUUID();
       const assistantMessageId = randomUUID();

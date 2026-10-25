@@ -300,7 +300,7 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
   return <div className="page-layout"><div className="page-primary">
     <PageHeader testId="create-project-page-head" title="开始一个长期项目"
       lede="先创建项目，再单独登记初始资料并预览蓝图意图。" />
-    <div className="warning-callout" role="status">创建命令（CreateProject）只保存名称与类型。填写的目标会暂存为待预览的蓝图意图，不会自动创建 Goal、调用模型或应用蓝图；可选文本资料在项目创建成功后用独立的 Knowledge 命令登记。</div>
+    <div className="warning-callout" role="status">创建命令（CreateProject）只保存名称与类型。填写的项目目标会暂存为待预览的蓝图意图，不会自动创建 Goal、调用模型或应用蓝图；可选文本资料在项目创建成功后用独立的 Knowledge 命令登记。</div>
     <form className="create-form" noValidate onSubmit={(event) => void submit(event)}>
       <label className="field"><span className="field-label">项目名称<span className="field-required" aria-hidden="true">*</span></span>
         <input name="project-title" value={flow.title} disabled={locked} maxLength={200}
@@ -336,7 +336,7 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
         <button className="secondary-button" type="button" disabled={submitting || Boolean(flow.projectCommand)}
           onClick={() => { if (clearFlow()) onCancel(); }}>取消创建并返回列表</button></div>}
       {flow.projectCommand && !flow.projectId && <div className="warning-callout" data-testid="project-create-pending">
-        <p>原 CreateProject command_id：{flow.projectCommand.id}。名称与类型载荷已冻结，目标和资料仍保留。</p>
+        <p>原 CreateProject command_id：{flow.projectCommand.id}。名称与类型载荷已冻结，项目目标和资料仍保留。</p>
         <button className="secondary-button" type="button" disabled={submitting}
           onClick={() => void run((request) => projectReceipt(flow.projectCommand!, request))}>查询项目回执</button>
         {mayRetryProject && <button className="secondary-button" type="button" disabled={submitting}
@@ -348,12 +348,12 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
     {flow.projectId && <section className="surface-panel" data-testid="project-created-result">
       <h2>项目已创建</h2><p>Project ID：{flow.projectId}。创建命令只保存名称与类型；后续资料导入失败不会撤销项目。</p>
       {flow.goal.trim() && goalReady ? <p>待预览蓝图意图已暂存；前往蓝图页后需明确生成候选并核对 Diff，尚未成为 Goal。</p> :
-        flow.goal.trim() ? <p>目标暂存失败。请留在此页并重试暂存，避免离开后丢失待预览意图。
+        flow.goal.trim() ? <p>项目目标暂存失败。请留在此页并重试暂存，避免离开后丢失待预览意图。
           <button className="text-button" type="button" onClick={() => {
             if (flow.projectId && saveInitialBlueprintIntent(client, flow.projectId, flow.goal.trim())) {
               setStorageError(null); setFlow({ ...flowRef.current });
             }
-          }}>重试暂存目标</button></p> :
+          }}>重试暂存项目目标</button></p> :
         <p>未填写蓝图意图，可直接开始任务。</p>}
       {flow.knowledgeResult ? <p>初始资料「{flow.knowledgeResult.fileName}」已登记为 Knowledge {flow.knowledgeResult.id} v{flow.knowledgeResult.version}。
         <Link className="inline-link" to={`/projects/${flow.projectId}/knowledge?item=${flow.knowledgeResult.id}`}>查看资料</Link></p> :
@@ -370,7 +370,7 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
           }}>重新发起资料导入</button></p> : <p>本次没有选择初始资料。</p>}
       <div className="form-actions">{goalReady ? <Link className="primary-button" to={`/projects/${flow.projectId}?skill=blueprint`}>
         {flow.goal.trim() ? "预览蓝图意图" : "打开项目蓝图"}</Link> :
-        <button className="primary-button" type="button" disabled>暂存目标后打开蓝图</button>}
+        <button className="primary-button" type="button" disabled>暂存项目目标后打开蓝图</button>}
         <Link className="secondary-button" to={`/projects/${flow.projectId}/tasks`}>打开项目任务</Link>
         {!flow.knowledgeCommand && goalReady && <button className="secondary-button" type="button" onClick={() => {
           if (clearFlow()) { setError(null); setImportError(null); }

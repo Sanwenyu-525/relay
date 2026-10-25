@@ -73,7 +73,10 @@ describe("在途轮次", () => {
     const { wrapper } = await mount(message());
     const details = wrapper.get(`[data-testid="session-round-trace-${messageId}"]`);
     expect(details.attributes("open")).toBeDefined();
-    expect(details.text()).toContain("这一轮做了什么 · 2 步");
+    expect(details.text()).toContain("这一轮做了什么");
+    // 摘要行先说人话：最后一件还没结算的事 + 规模；工具名与路径留在展开内容里。
+    expect(details.text()).toContain("正在列目录");
+    expect(details.text()).toContain("2 步");
     expect(details.text()).toContain("第 1 轮");
     expect(details.text()).toContain("第 2 轮");
     expect(details.text()).toContain("read_file");
@@ -93,7 +96,7 @@ describe("在途轮次", () => {
       pollIntervalMs={10} />);
     unmount = mounted.unmount;
     await flush(40);
-    expect(mounted.wrapper.text()).toContain("这一轮做了什么 · 1 步");
+    expect(mounted.wrapper.text()).toContain("1 步");
     const duringFlight = fetchMock.mock.calls.length;
     finished = true;
     await mounted.rerender(<SessionRoundTrace client={client}
@@ -101,11 +104,58 @@ describe("在途轮次", () => {
     await flush(40);
     // 终态只补读收尾那一次，之后不再有定时器。
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(duringFlight + 2);
-    expect(mounted.wrapper.text()).toContain("这一轮做了什么 · 2 步");
+    expect(mounted.wrapper.text()).toContain("读取文件 1 次、搜索内容 1 次 · 2 步");
     expect(mounted.wrapper.text()).not.toContain("进行中");
     const afterTerminal = fetchMock.mock.calls.length;
     await flush(40);
     expect(fetchMock.mock.calls.length).toBe(afterTerminal);
+  });
+
+  /**
+   * 原生 `<details>` 在 React 改 `open` 属性时同样派发 toggle。此前那段回声被写进 touched，
+   * 于是「完成时自动收起」只生效一次、之后永久失效——用户看到的是过程区在终态仍然大敞着，
+   * 把正文顶到屏幕之外。这里钉住两条：程序化收起不算人工操作；人手展开过就尊重。
+   */
+  it("程序化收起不写成人工开合；人手展开过则完成时保持展开", async () => {
+    stub(() => json(trace([round(0, [call()])])));
+    const mounted = await mountReact(<SessionRoundTrace client={client} message={message()}
+      pollIntervalMs={2_000} />);
+    unmount = mounted.unmount;
+    await flush(20);
+    const details = () => mounted.wrapper.get(`[data-testid="session-round-trace-${messageId}"]`);
+    expect(details().attributes("open")).toBeDefined();
+    // 在途 → 终态：默认收起（这次收起是程序化的，不能算人工开合）。
+    await mounted.rerender(<SessionRoundTrace client={client}
+      message={message({ status: "COMPLETED" })} pollIntervalMs={2_000} />);
+    await flush(20);
+    expect(details().attributes("open")).toBeUndefined();
+
+    // 人手展开一次。
+    await mounted.wrapper.get("summary").trigger("click");
+    await flush(20);
+    expect(details().attributes("open")).toBeDefined();
+
+    // 再回到在途、又结束：人工展开的选择优先，不再自动收起。
+    await mounted.rerender(<SessionRoundTrace client={client} message={message()} pollIntervalMs={2_000} />);
+    await flush(20);
+    await mounted.rerender(<SessionRoundTrace client={client}
+      message={message({ status: "COMPLETED" })} pollIntervalMs={2_000} />);
+    await flush(20);
+    expect(details().attributes("open")).toBeDefined();
+  });
+
+  it("被拒与未知在摘要行就要看得见，但不给成功样式", async () => {
+    stub(() => json(trace([round(0, [call({ status: "REJECTED", rejection_reason: "OUTSIDE_SCOPE" }),
+      call({ id: "88888888-8888-4888-8888-888888888888", ordinal: 1, tool_name: "search_text",
+        status: "UNKNOWN", settled_at: null })])], "COMPLETED")));
+    const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
+    await wrapper.get("summary").trigger("click");
+    await flush(20);
+    const summary = wrapper.get("summary").text();
+    expect(summary).toContain("1 项未执行");
+    expect(summary).toContain("1 项待核对");
+    expect(wrapper.get(`[data-testid="session-round-trace-${messageId}"]`).attributes("data-state"))
+      .toBe("settled");
   });
 });
 
@@ -126,16 +176,15 @@ describe("终态与缺口", () => {
     expect(details.text()).toContain("OUTSIDE_SCOPE · 目标不在本次绑定的目录内。");
   });
 
-  it("没有轮次就什么都不摆：不显示失败，也不补解释段", async () => {
-    stub(() => json(trace([], "COMPLETED")));
+  it("没有轮次就什么都不摆：读取成功后连折叠行一起消失", async () => {
+    const fetchMock = stub(() => json(trace([], "COMPLETED")));
     const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
     await wrapper.get("summary").trigger("click");
     await flush(20);
-    const details = wrapper.get(`[data-testid="session-round-trace-${messageId}"]`);
-    // 解释段与脚注已按用户指令删除：没有轮次时面板里不该出现任何说明文字。
-    expect(details.text()).not.toContain("没有调用任何工具");
-    expect(details.text()).not.toContain("已落账");
-    expect(details.text()).not.toContain("read_file");
+    // 终态首次展开才读，因此点击前保留入口是读取所需；读回空轮次后不能留下「点开是空的壳」。
+    expect(fetchMock.mock.calls.length).toBe(1);
+    expect(wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("这一轮做了什么");
     expect(wrapper.find('[data-testid^="session-round-trace-error-"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid^="session-round-trace-list-"]').exists()).toBe(false);
   });

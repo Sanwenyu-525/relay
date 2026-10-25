@@ -122,8 +122,14 @@ export default function ReviewsView() {
   const visibleReviews = kind === "ALL" ? reviews : reviews.filter((review) => review.kind === kind);
   const title = (review: RelayReview) => labels?.reviewId === review.id && labels.targetTitle
     ? labels.targetTitle : reviewReasonText(review.reason);
-  const status = (review: RelayReview) => review.status === "OPEN"
-    ? isReviewExpired(review) ? "已过期" : "待判断" : "已处理";
+  const status = (review: RelayReview) => {
+    if (review.status === "EXPIRED") {
+      const expiresAt = review.expiresAt === null ? Number.NaN : Date.parse(review.expiresAt);
+      return Number.isFinite(expiresAt) && expiresAt <= Date.now() ? "已过期" : "目标已失效";
+    }
+    return review.status === "OPEN" ? isReviewExpired(review) ? "已过期" : "待判断"
+      : review.status === "DECIDED" ? "已处理" : review.status;
+  };
   const requestTime = (value: string) => Number.isFinite(Date.parse(value))
     ? new Intl.DateTimeFormat("zh-CN", { timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
     : "时间不可读取";
@@ -161,7 +167,7 @@ export default function ReviewsView() {
             : <p className="helper-text">{reviews.length ? "当前类型没有待处理请求。" : "当前没有待处理请求。只有验证或动作准入确实需要人工判断时，才会出现新请求。"}</p>)}
           {visibleReviews.map((review) => <button key={review.id} className={`review-list-item${selected?.id === review.id ? " review-list-item--selected" : ""}`} type="button" aria-current={selected?.id === review.id ? "true" : undefined} onClick={() => selectReview(review.id)}>
             <strong>{title(review)}</strong>
-            <span className={`status-chip status-chip--${review.status === "OPEN" ? "warning" : "neutral"}`}>{status(review)}</span>
+        <span className={`status-chip status-chip--${review.status === "OPEN" || review.status === "EXPIRED" ? "warning" : "neutral"}`}>{status(review)}</span>
             <span className="review-list-meta">
               <span className="review-kind">{kindLabels[review.kind]}</span>
               <span className="review-project">{review.projectId === null ? "未归属项目" : labels?.projectTitle && selected?.projectId === review.projectId ? labels.projectTitle : "项目名称暂不可读"}</span>
@@ -178,7 +184,7 @@ export default function ReviewsView() {
         <ArtifactReaderPanel key={`${connection.epoch}:${selected.id}:${selected.revision}`} client={connection.client} taskId={selected.taskId} projectId={selected.projectId}
           selectedVersionId={selected.target.artifact_version_id} draft={null} /></section>}
     {selected && (selectedId === null || selected.id === selectedId) ? <article className="review-detail" aria-label="所选待审请求详情">
-      <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" ? "warning" : "neutral"}`}>{status(selected)}</span></div>
+      <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" || selected.status === "EXPIRED" ? "warning" : "neutral"}`}>{status(selected)}</span></div>
       <p className="review-reason">{reviewReasonText(selected.reason)}</p>
       <dl className="review-request-facts"><div><dt>请求事项 · {kindLabels[selected.kind]}</dt><dd>{title(selected)}</dd></div><div><dt>请求时间</dt><dd><time dateTime={selected.createdAt}>{requestTime(selected.createdAt)}</time></dd></div></dl>
       <details className="review-request-identity"><summary>请求身份 · v{selected.revision}</summary><p className="helper-text">请求 ID：<code className="hash-code">{selected.id}</code> · 请求 v{selected.revision}</p>{selected.projectId && <p className="helper-text">Project ID：{selected.projectId}</p>}{selected.taskId && <p className="helper-text">Task ID：{selected.taskId}</p>}</details>

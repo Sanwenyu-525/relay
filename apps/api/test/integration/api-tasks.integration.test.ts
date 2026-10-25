@@ -239,6 +239,8 @@ test('moves INBOX to READY to IN_PROGRESS only through explicit commands', async
 
   assert.equal(readyResult.status, 'READY');
   assert.equal(readyResult.revision, '1');
+  assert.deepEqual((await readTask(task.task_id)).allowed_actions,
+    ['EDIT_PRESENTATION', 'START', 'CANCEL']);
 
   const started = await api.post(workspacePath(workspaceId, `/tasks/${task.task_id}/start`), {
     command_id: randomUUID(),
@@ -257,6 +259,7 @@ test('moves INBOX to READY to IN_PROGRESS only through explicit commands', async
 
   assert.equal(cancelResult.status, 'CANCELLED');
   assert.equal(cancelResult.revision, '3');
+  assert.deepEqual((await readTask(task.task_id)).allowed_actions, []);
 
   const again = await api.post(workspacePath(workspaceId, `/tasks/${task.task_id}/cancel`), {
     command_id: randomUUID(),
@@ -644,6 +647,14 @@ test('blocks ready while a BLOCKS dependency is unfinished and allows it after r
   );
 
   expectProblem(missing, 404, 'RESOURCE_NOT_FOUND');
+});
+
+test('archived project task detail returns no allowed write actions', async () => {
+  const project = await createProject('archived-actions-project');
+  const task = await createTask({ projectId: project.project_id });
+  await app.db.updateTable('projects').set({ archived_at: new Date() }).where('id', '=', project.project_id).execute();
+  const detail = await readTask(task.task_id);
+  assert.deepEqual(detail.allowed_actions, []);
 });
 
 test('paginates project and inbox task lists with a bound cursor', async () => {

@@ -1,9 +1,12 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// 目标卡（工作台 §44.2）的版式回归。DEV-0103（2026-10-22）把「整块同字号」收成
-// 标题带 / 目标正文 / 可展开事实三层：目标正文必须达到正文档，状态与轮次是标题带上的
-// 两枚轻芯片，成功条件的状态同时有文字与色点，动作行用分隔线收口并把说明推到右端。
-// 另外卡片内容超过 42vh 时在卡内滚动，暂停/取消必须 sticky 停在卡底，不能被证据挤出去。
+// 目标单行状态条（工作台 §44.2，2026-10-25 收成单行，参照 Codex 的目标行）的版式回归。
+// 单行只放「目标图标、状态芯片（文字 + 色点）、目标正文（超长截断）、轮次计数、动作」，
+// 细节（成功条件、步骤、轮次历史、说明）全部收进展开区。要锁的不变量：
+//   * 状态条紧贴输入卡上方、同宽对齐；收起时恒为单行，正文截断而不是换行；
+//   * 展开区内容超过 42vh 时在区内滚动，单行与动作键不被证据挤走；
+//   * 成功条件的状态同时有文字与色点（MET/UNMET 用成功/警告文字色）；
+//   * 第 0 轮空态不放空壳。
 // API 全部由 page.route 伪造，不连数据库、不调 Provider。
 
 const apiBase = "http://127.0.0.1:8787";
@@ -84,139 +87,149 @@ async function openGoal(page: Page): Promise<void> {
   await page.goto("/agent");
   await connect(page);
   await page.getByTestId(`recent-work-${sessionId}`).first().click();
-  // 点行先换 URL，AssistView 随后按会话 key 重挂载：卡片会短暂卸下再按目标投影挂回。
-  // 先等这一轮请求静下来，再等卡片重新可见，避免在重挂载的空窗里量到 null。
+  // 点行先换 URL，AssistView 随后按会话 key 重挂载：状态条会短暂卸下再按目标投影挂回。
+  // 先等这一轮请求静下来，再等状态条重新可见，避免在重挂载的空窗里量到 null。
   await page.waitForLoadState("networkidle");
   await expect(page.getByTestId("goal-card")).toBeVisible();
-  // 指针停在左栏上会弹出会话摘要浮层，遮住卡片截图和宽度测量。
+  // 指针停在左栏上会弹出会话摘要浮层，遮住状态条截图和宽度测量。
   await page.mouse.move(900, 700);
 }
 
-test.describe("目标卡版式", () => {
-  test("目标正文升为正文档，状态/轮次是标题带芯片，动作行收口且说明右对齐", async ({ page }) => {
-    await page.setViewportSize({ width: 1600, height: 1000 });
+test.describe("目标单行状态条版式", () => {
+  test("收起恒为单行：状态/轮次在行上，正文截断，条贴输入卡上方且同宽", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page);
     await openGoal(page);
 
     const look = await page.evaluate(() => {
-      const card = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
-      const objective = card.querySelector<HTMLElement>('[data-testid="goal-card-objective"]')!;
-      const badge = card.querySelector<HTMLElement>('[data-testid="goal-card-status"]')!;
+      const strip = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
+      const line = strip.querySelector<HTMLElement>(".goal-strip-line")!;
+      const objective = strip.querySelector<HTMLElement>('[data-testid="goal-card-objective"]')!;
+      const badge = strip.querySelector<HTMLElement>('[data-testid="goal-card-status"]')!;
       const badgeDot = getComputedStyle(badge, "::before");
-      const rounds = card.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!;
-      const actions = card.querySelector<HTMLElement>(".goal-plan-actions")!;
-      const note = card.querySelector<HTMLElement>('[data-testid="goal-card-note"]')!;
-      const met = card.querySelector<HTMLElement>('[data-testid="goal-criterion-c1"] .goal-card-criterion-status')!;
-      const unmet = card.querySelector<HTMLElement>('[data-testid="goal-criterion-c2"] .goal-card-criterion-status')!;
-      const pending = card.querySelector<HTMLElement>('[data-testid="goal-criterion-c3"] .goal-card-criterion-status')!;
+      const rounds = strip.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!;
+      const toggle = strip.querySelector<HTMLElement>('[data-testid="goal-card-toggle"]')!;
+      const composer = document.querySelector<HTMLElement>('[data-testid="assist-composer"]')!;
       const probe = document.createElement("span");
       document.body.append(probe);
       probe.style.background = "var(--relay-color-bg-subtle)";
       const subtle = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      const lineBox = line.getBoundingClientRect();
+      const composerBox = composer.getBoundingClientRect();
+      return {
+        statusText: (badge.textContent ?? "").trim(),
+        roundsText: (rounds.textContent ?? "").trim(),
+        toggleExpanded: toggle.getAttribute("aria-expanded"),
+        badgeDotWidth: Number.parseFloat(badgeDot.width),
+        badgeDotBackground: badgeDot.backgroundColor,
+        badgeColor: getComputedStyle(badge).color,
+        // 单行事实：行高紧凑、正文与轮次不换行。
+        lineHeight: lineBox.height,
+        objectiveWrapped: objective.getBoundingClientRect().height
+          > lineBox.height + 1,
+        objectiveClipped: objective.scrollWidth > objective.clientWidth,
+        // 状态条贴输入卡上方、同一列宽。
+        gapToComposer: composerBox.top - lineBox.bottom,
+        widthDelta: Math.abs(lineBox.width - composerBox.width),
+        roundsColorIsMuted: getComputedStyle(rounds).color !== getComputedStyle(badge).color,
+        subtle,
+        overflowX: line.scrollWidth - line.clientWidth
+      };
+    });
+
+    const detail = JSON.stringify(look);
+    expect(look.statusText, detail).toBe("正在推进");
+    expect(look.roundsText, detail).toBe("第 2 轮 · 成功条件 1/3");
+    expect(look.toggleExpanded, detail).toBe("false");
+    // 状态是文字 + 色点，颜色不是唯一线索。
+    expect(look.badgeDotWidth, detail).toBeGreaterThanOrEqual(4);
+    expect(look.badgeDotBackground, detail).toBe(look.badgeColor);
+    // 单行不变量：行高紧凑、正文截断而不是换行。
+    expect(look.lineHeight, detail).toBeLessThanOrEqual(48);
+    expect(look.objectiveWrapped, detail).toBe(false);
+    // 状态条紧贴输入卡上方、同宽对齐（同一 chat-measure 列）。
+    expect(look.gapToComposer, detail).toBeGreaterThanOrEqual(0);
+    expect(look.gapToComposer, detail).toBeLessThanOrEqual(24);
+    expect(look.widthDelta, detail).toBeLessThanOrEqual(1);
+    // 收起态不渲染展开区。
+    expect(await page.locator('[data-testid="goal-card-details"]').count()).toBe(0);
+    // 版式调整不能换来横向溢出。
+    expect(look.overflowX, detail).toBeLessThanOrEqual(0);
+
+    await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-line.png" });
+  });
+
+  test("展开区锁事实与色彩，超高内容在区内滚动，单行与动作键不被挤走", async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 640 });
+    await installRoutes(page);
+    await openGoal(page);
+    await page.getByTestId("goal-card-toggle").click();
+    await expect(page.getByTestId("goal-card-details")).toBeVisible();
+
+    const read = () => page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
+      const line = strip.querySelector<HTMLElement>(".goal-strip-line")!;
+      const details = strip.querySelector<HTMLElement>('[data-testid="goal-card-details"]')!;
+      const pause = strip.querySelector<HTMLElement>('[data-testid="goal-card-pause"]')!;
+      const cancel = strip.querySelector<HTMLElement>('[data-testid="goal-card-cancel"]')!;
+      const met = strip.querySelector<HTMLElement>('[data-testid="goal-criterion-c1"] .goal-card-criterion-status')!;
+      const unmet = strip.querySelector<HTMLElement>('[data-testid="goal-criterion-c2"] .goal-card-criterion-status')!;
+      const pending = strip.querySelector<HTMLElement>('[data-testid="goal-criterion-c3"] .goal-card-criterion-status')!;
+      const probe = document.createElement("span");
+      document.body.append(probe);
       probe.style.color = "var(--relay-color-status-success-text)";
       const success = getComputedStyle(probe).color;
       probe.style.color = "var(--relay-color-status-warning-text)";
       const warning = getComputedStyle(probe).color;
       probe.remove();
-      const cardBox = card.getBoundingClientRect();
-      const noteBox = note.getBoundingClientRect();
-      const inlinePadding = Number.parseFloat(getComputedStyle(card).paddingRight);
+      const inViewport = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        return box.top >= 0 && box.bottom <= window.innerHeight;
+      };
       return {
-        objectiveFont: Number.parseFloat(getComputedStyle(objective).fontSize),
-        objectiveWeight: Number.parseInt(getComputedStyle(objective).fontWeight, 10),
-        bodyFont: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
-        badgeDotWidth: Number.parseFloat(badgeDot.width),
-        badgeDotBackground: badgeDot.backgroundColor,
-        badgeColor: getComputedStyle(badge).color,
-        roundsBackground: getComputedStyle(rounds).backgroundColor,
-        subtle,
-        actionsBorderTop: Number.parseFloat(getComputedStyle(actions).borderTopWidth),
-        noteRightInset: cardBox.right - inlinePadding - noteBox.right,
-        noteTextAlign: getComputedStyle(note).textAlign,
-        // 成功条件的状态既有文字也有同色圆点；三种状态分别取成功/警告/静默三档。
         criterionTexts: [met.textContent ?? "", unmet.textContent ?? "", pending.textContent ?? ""],
         metColor: getComputedStyle(met).color, unmetColor: getComputedStyle(unmet).color,
         pendingColor: getComputedStyle(pending).color, success, warning,
-        overflowX: card.scrollWidth - card.clientWidth
-      };
-    });
-
-    const detail = JSON.stringify(look);
-    // 目标是这张卡的主信息：16px（body）且中等字重，不再和辅助行同为 14px 常规。
-    expect(look.objectiveFont, detail).toBeCloseTo(look.bodyFont, 1);
-    expect(look.objectiveWeight, detail).toBeGreaterThanOrEqual(500);
-    // 状态是文字 + 色点，颜色不是唯一线索。
-    expect(look.badgeDotWidth, detail).toBeGreaterThanOrEqual(4);
-    expect(look.badgeDotBackground, detail).toBe(look.badgeColor);
-    expect(look.roundsBackground, detail).toBe(look.subtle);
-    // 动作行与事实之间有一条分隔线，说明压到内容盒右缘。
-    expect(look.actionsBorderTop, detail).toBeGreaterThanOrEqual(1);
-    expect(look.noteRightInset, detail).toBeLessThan(2);
-    expect(look.noteTextAlign, detail).toBe("end");
-    // 条件状态文字必须存在，且 MET/UNMET 各自使用成功/警告文字色。
-    expect(look.criterionTexts, detail).toEqual(["已达成", "未达成", "待验证"]);
-    expect(look.metColor, detail).toBe(look.success);
-    expect(look.unmetColor, detail).toBe(look.warning);
-    expect(look.pendingColor, detail).not.toBe(look.metColor);
-    // 版式调整不能换来横向溢出。
-    expect(look.overflowX, detail).toBeLessThanOrEqual(0);
-
-    await page.getByTestId("goal-card").screenshot({ path: "results/goal-card-layout.png" });
-  });
-
-  test("窄窗卡内滚动时暂停/取消 sticky 停在卡底，不被证据挤出视口", async ({ page }) => {
-    await page.setViewportSize({ width: 1000, height: 900 });
-    await installRoutes(page);
-    await openGoal(page);
-
-    const read = () => page.evaluate(() => {
-      const card = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
-      const actions = card.querySelector<HTMLElement>(".goal-plan-actions")!;
-      const pause = card.querySelector<HTMLElement>('[data-testid="goal-card-pause"]')!;
-      const cancel = card.querySelector<HTMLElement>('[data-testid="goal-card-cancel"]')!;
-      const cardBox = card.getBoundingClientRect();
-      const actionBox = actions.getBoundingClientRect();
-      const within = (element: Element) => {
-        const box = element.getBoundingClientRect();
-        return box.top >= cardBox.top - 1 && box.bottom <= cardBox.bottom + 1;
-      };
-      return {
-        clientHeight: card.clientHeight, scrollHeight: card.scrollHeight,
-        scrollTop: card.scrollTop,
-        position: getComputedStyle(actions).position,
-        actionsVisible: actionBox.top >= cardBox.top - 1 && actionBox.bottom <= cardBox.bottom + 1,
-        pauseVisible: within(pause), cancelVisible: within(cancel),
-        overflowX: card.scrollWidth - card.clientWidth
+        clientHeight: details.clientHeight, scrollHeight: details.scrollHeight,
+        scrollTop: details.scrollTop,
+        lineVisible: inViewport(line), pauseVisible: inViewport(pause),
+        cancelVisible: inViewport(cancel),
+        overflowX: details.scrollWidth - details.clientWidth
       };
     });
 
     const top = await read();
     const detail = JSON.stringify(top);
-    // 这一档确实触发卡内滚动，才谈得上 sticky。
+    // 条件状态文字必须存在，且 MET/UNMET 各自使用成功/警告文字色；色点同色（CSS ::before currentColor）。
+    expect(top.criterionTexts, detail).toEqual(["已达成", "未达成", "待验证"]);
+    expect(top.metColor, detail).toBe(top.success);
+    expect(top.unmetColor, detail).toBe(top.warning);
+    expect(top.pendingColor, detail).not.toBe(top.metColor);
+    // 这一档确实触发展开区内部滚动，才谈得上「单行不被挤走」。
     expect(top.scrollHeight, detail).toBeGreaterThan(top.clientHeight);
-    expect(top.position, detail).toBe("sticky");
-    expect(top.actionsVisible, detail).toBe(true);
+    expect(top.lineVisible, detail).toBe(true);
     expect(top.pauseVisible, detail).toBe(true);
     expect(top.cancelVisible, detail).toBe(true);
     expect(top.overflowX, detail).toBeLessThanOrEqual(0);
 
-    // 滚到卡内中部：控制键仍贴着卡底，不跟着证据滚走。
+    // 滚到展开区中部：单行与动作键仍在视口里，不跟着证据滚走。
     await page.evaluate(() => {
-      document.querySelector<HTMLElement>('[data-testid="goal-card"]')!.scrollTop = 120;
+      document.querySelector<HTMLElement>('[data-testid="goal-card-details"]')!.scrollTop = 80;
     });
     const scrolled = await read();
     expect(scrolled.scrollTop, JSON.stringify(scrolled)).toBeGreaterThan(0);
-    expect(scrolled.actionsVisible, JSON.stringify(scrolled)).toBe(true);
+    expect(scrolled.lineVisible, JSON.stringify(scrolled)).toBe(true);
     expect(scrolled.pauseVisible, JSON.stringify(scrolled)).toBe(true);
     expect(scrolled.cancelVisible, JSON.stringify(scrolled)).toBe(true);
 
-    await page.getByTestId("goal-card").screenshot({ path: "results/goal-card-layout-narrow.png" });
+    await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-expanded.png" });
   });
 
-  // 工单截图就是这一档：第 0 轮、没有步骤与成功条件。空态同样按三层排，
-  // 不因为事实少而退回一整块同字号；轮次与动作说明仍分别落在标题带右端与动作行右端。
-  test("第 0 轮空态不放空壳：目标正文仍为主信息，轮次与动作说明各在右端", async ({ page }) => {
-    await page.setViewportSize({ width: 2000, height: 900 });
+  // 工单截图就是这一档：第 0 轮、没有步骤与成功条件。空态同样是一条单行，
+  // 不因为事实少而退回空壳；展开区只放「目标正文 + 说明」，没有成功条件/步骤的占位。
+  test("第 0 轮空态不放空壳：单行仍完整，展开区没有成功条件与步骤占位", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page);
     await page.route(`${apiBase}/**`, async (route) => {
       const path = new URL(route.request().url()).pathname;
@@ -225,40 +238,36 @@ test.describe("目标卡版式", () => {
       return route.fallback();
     });
     await openGoal(page);
+    await page.getByTestId("goal-card-toggle").click();
+    await expect(page.getByTestId("goal-card-details")).toBeVisible();
 
     const look = await page.evaluate(() => {
-      const card = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
-      const objective = card.querySelector<HTMLElement>('[data-testid="goal-card-objective"]')!;
-      const rounds = card.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!;
-      const note = card.querySelector<HTMLElement>('[data-testid="goal-card-note"]')!;
-      const cardBox = card.getBoundingClientRect();
-      const noteBox = note.getBoundingClientRect();
-      const inlinePadding = Number.parseFloat(getComputedStyle(card).paddingRight);
+      const strip = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
+      const line = strip.querySelector<HTMLElement>(".goal-strip-line")!;
+      const rounds = strip.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!;
+      const objective = strip.querySelector<HTMLElement>('[data-testid="goal-card-objective"]')!;
       return {
-        objectiveFont: Number.parseFloat(getComputedStyle(objective).fontSize),
-        objectiveWeight: Number.parseInt(getComputedStyle(objective).fontWeight, 10),
         roundsText: (rounds.textContent ?? "").trim(),
-        criteriaCount: card.querySelectorAll('[data-testid="goal-card-criteria"] li').length,
-        steps: card.querySelector('[data-testid="goal-card-steps"]'),
-        noteRightInset: cardBox.right - inlinePadding - noteBox.right,
-        actionsVisible: card.querySelector<HTMLElement>(".goal-plan-actions")!
-          .getBoundingClientRect().height > 0,
+        objectiveText: (objective.textContent ?? "").trim(),
         objectiveColor: getComputedStyle(objective).color,
-        overflowX: card.scrollWidth - card.clientWidth
+        criteriaCount: strip.querySelectorAll('[data-testid="goal-card-criteria"] li').length,
+        steps: strip.querySelector('[data-testid="goal-card-steps"]'),
+        note: strip.querySelector('[data-testid="goal-card-note"]'),
+        lineHeight: line.getBoundingClientRect().height,
+        overflowX: line.scrollWidth - line.clientWidth
       };
     });
 
     const detail = JSON.stringify(look);
-    expect(look.objectiveFont, detail).toBeGreaterThanOrEqual(16);
-    expect(look.objectiveWeight, detail).toBeGreaterThanOrEqual(500);
     expect(look.roundsText, detail).toBe("第 0 轮");
-    // 空态不渲染成功条件与步骤的空壳。
+    expect(look.objectiveText, detail).toBe("用three.js做一个房子");
+    // 空态不渲染成功条件与步骤的空壳；说明仍在展开区。
     expect(look.criteriaCount, detail).toBe(0);
     expect(look.steps, detail).toBeNull();
-    expect(look.actionsVisible, detail).toBe(true);
-    expect(look.noteRightInset, detail).toBeLessThan(2);
+    expect(look.note, detail).not.toBeNull();
+    expect(look.lineHeight, detail).toBeLessThanOrEqual(48);
     expect(look.overflowX, detail).toBeLessThanOrEqual(0);
 
-    await page.getByTestId("goal-card").screenshot({ path: "results/goal-card-layout-empty.png" });
+    await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-empty.png" });
   });
 });

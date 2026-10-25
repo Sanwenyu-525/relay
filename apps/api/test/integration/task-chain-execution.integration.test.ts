@@ -29,7 +29,7 @@ async function fixture(decision:'AUTO'|'DENY'='AUTO',editing=false){
  await createGatewayPolicy(app.db,{workspaceId,projectId,capability:'FILE_QUERY',actionType:'LIST_DIRECTORY',targetPrefix:resource.canonicalRoot,decision,maxPayloadBytes:4096});
  if(editing)for(const [capability,actionType] of [['FILE_WRITE','APPLY_CHANGESET'],['CLI_RUN','CLI_RUN']] as const)await createGatewayPolicy(app.db,{workspaceId,projectId,capability,actionType,targetPrefix:resource.canonicalRoot,decision,maxPayloadBytes:65536});
  const knowledge=await createKnowledge(app.db,{workspaceId,projectId,commandId:randomUUID(),title:'已确认要求',source:{sourceKind:'NOTE',text:'固定确切来源版本，不应自动换成新资料。'}});
- const tasks=[];for(const title of ['核对来源','继续核对'])tasks.push(await post('/tasks',{project_id:projectId,title,objective:'读取已登记资料并交付核对报告',criteria:[{criterion_id:'human',statement:'人工核对原资料和实际读取',method:'HUMAN'}]},201));
+ const tasks=[];for(const title of ['核对来源','继续核对'])tasks.push(await post('/tasks',{project_id:projectId,title,objective:'读取已登记资料并交付核对报告',expected_outputs:{artifacts:['MARKDOWN_DOCUMENT']},criteria:[{criterion_id:'human',statement:'人工核对原资料和实际读取',method:'HUMAN'}]},201));
  const selected=tasks.map(t=>({task_id:t.task_id,expected_revision:t.revision,expected_acceptance_revision:t.acceptance_revision}));
  const loop={resource_id:resource.resourceId,connections:{FILE_QUERY:connectionId,FILE_READ:connectionId},allowed_tools:['list_directory','read_file'],max_rounds:6,max_tool_calls:6};
  const fixed={connection_id:connectionId,resource_id:resource.resourceId,relative_target:'notes.md'};

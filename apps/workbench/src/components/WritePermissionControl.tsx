@@ -202,6 +202,19 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
     return () => { scope.current += 1; };
   }, [load, loadDefault]);
 
+  /**
+   * 首次读取失败后的只读重试入口（禅道 #128）：绑定档位与工作区默认档位两条作用域共用。
+   * 只调用当前作用域的 load/loadDefault——不发写命令、不建 command_id、不查回执；
+   * 读到投影才清掉旧读取错误，再失败由 load 的 catch 重新给出具体原因（404／403 与 503 各有说明），
+   * 可继续重试；请求中由 checking 挡住重复点击，不自动轮询。作用域切换后迟到回包由
+   * scope token 丢弃，不会写进新作用域。
+   */
+  async function recheckRead() {
+    if (checking) return;
+    const next = scopeMissing ? await loadDefault() : await load();
+    if (next !== null) setActionError(null);
+  }
+
   // 能改档位的只有「连接已绑定 + 目录可用」这一类状态；其余一律说明缺什么，不给点了没反应的键。
   const prereqOk = readiness !== null && ["READY", "READ_ONLY", "NEEDS_PERMISSION", "NEEDS_CONNECTION"]
     .includes(readiness.status);
@@ -493,6 +506,11 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
       </div>}
       {actionError !== null && <p className="agent-chat-permission-error" role="alert"
         data-testid="write-permission-error">{actionError}</p>}
+      {/* 读取失败（含首次读取）的页内恢复出口：写命令在途／结果未核对的错误走上面
+          那块待核对流程（有它自己的「重新核对」），这里只服务没有在途命令的失败。 */}
+      {actionError !== null && pending === null && pendingDefault === null &&
+        <button className="secondary-button" type="button" data-testid="write-permission-recheck-tier"
+          disabled={checking} onClick={() => void recheckRead()}>{checking ? "正在核对" : "重新核对"}</button>}
       {/* 菜单底部只留「结果和点的那一行不一致」这一种说明（2026-10-22 用户指令）：
           设置成功时不再回显一句文字，芯片上重读回来的档位名就是那次确认。 */}
       {confirmed !== null && <p className="helper-text" data-testid="write-permission-confirmed">{confirmed}</p>}

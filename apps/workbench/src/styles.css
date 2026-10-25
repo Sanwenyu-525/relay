@@ -2131,13 +2131,15 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 .page-lede {
   margin-top: var(--relay-space-2);
   color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-body);
+  /* 2026-10-25 视觉对齐：页头说明句与 page-head-lede 同档（meta）。 */
+  font-size: var(--relay-font-size-meta);
 }
 
 .page-primary h1,
 .skill-page h1 {
   margin: 0 0 var(--relay-space-3);
-  font-size: var(--relay-font-size-page);
+  /* 2026-10-25 视觉对齐：skill 页与 page-primary 主标题与全局页头同档（compactPage）。 */
+  font-size: var(--relay-font-size-compactPage);
 }
 
 .metadata-row {
@@ -2320,14 +2322,17 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 }
 .page-head-title > :is(h1, h2) { margin: 0; }
 /* 共享页头自带页面标题层级：此前没有声明字号，h1 落回浏览器默认 2em，
-   同一原语在不同页面看起来不一样。紧凑页头（聊天、项目列表）各自覆写。 */
-.page-head-title > h1 { font-size: var(--relay-font-size-page); }
+   同一原语在不同页面看起来不一样。紧凑页头（聊天、项目列表）各自覆写。
+   2026-10-25 视觉对齐：普通页面主标题统一到 compactPage（1.75rem），与 /agent 页空态
+   标题同档（此前仅项目列表页试点覆写，现已推广为全局默认），页头不再压首屏内容；
+   font.size.page(2.5rem) 保留给未来确需更强层级的场合，当前无调用方。 */
+.page-head-title > h1 { font-size: var(--relay-font-size-compactPage); }
 .page-head-title > h2 { font-size: var(--relay-font-size-section); }
 /* 标题即对象入口：颜色与正文一致，不额外引入一个「链接蓝」，焦点线仍用全局 focus 规则。 */
 .page-head-title-link { color: inherit; text-decoration: none; }
 .page-head-title-link:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .page-head-meta { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.page-head-lede { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-body); }
+.page-head-lede { margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .page-head-actions {
   display: flex;
   align-items: center;
@@ -2354,10 +2359,9 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   box-shadow: var(--relay-shadow-floating);
 }
 
-/* 项目列表页是 §17.8 列表页型的首个生产试点：标题走 compactPage 层级，
-   目标句降为 meta 尺寸，主操作不再随宽屏放大。数值仍归 tokens。 */
-.projects-page .page-head-title > h1 { font-size: var(--relay-font-size-compactPage); }
-.projects-page .page-head-lede { font-size: var(--relay-font-size-meta); }
+/* 项目列表页曾是 §17.8 列表页型 compactPage 层级的首个生产试点（标题 compactPage、
+   目标句 meta、主操作不随宽屏放大）；2026-10-25 视觉对齐已将该组规则推广为全局
+   页头默认（见上方 .page-head-title/.page-head-lede），此处不再单独覆写。 */
 
 /* 事实条：格宽由 token 下限决定，不足整条换行，不压缩文字 */
 .fact-bar {

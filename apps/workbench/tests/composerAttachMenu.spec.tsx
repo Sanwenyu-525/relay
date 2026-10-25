@@ -360,6 +360,45 @@ describe("「+」两级菜单", () => {
     } finally { truncated.unmount(); }
   });
 
+  it("文件二级渐进展示：首批 30 行，滚到近底或点「显示更多」追加下一批", async () => {
+    /* 2026-10-25 用户指认「上传工作区文件的菜单无限滚动」：一层最多 200 条（HTTP §10.112），
+       一次全画既拖长滚动也白画视口外的行。这里锁三件事：首批只画 30 行、滚动到行区近底
+       自动追加（远离底部不追加）、尾部「显示更多」行兜底并把最后一批补齐。 */
+    const many = Array.from({ length: 65 }, (_, index) =>
+      ({ path: `file-${index}.ts`, kind: "file" as const, size: index }));
+    const client = stubClient(undefined, undefined,
+      vi.fn(async () => fileConnections), vi.fn(async () => listingResponse(many)));
+    const view = await mountReact(<Harness client={client} workspace={workspaceFixture} />);
+    try {
+      await openSub("assist-attach-files");
+      await flush();
+      expect(row("assist-attach-file-0")).not.toBeNull();
+      expect(row("assist-attach-file-29")).not.toBeNull();
+      expect(row("assist-attach-file-30")).toBeNull();
+      expect(row("assist-attach-files-more")?.textContent).toContain("剩余 35 项");
+      // jsdom 不量几何：滚动位置用属性覆盖模拟，近底的阈值行为与真实滚动一致。
+      const body = submenu()?.querySelector<HTMLElement>(".agent-chat-attach-subbody");
+      const scrollBody = (top: number, height: number, full: number) => {
+        if (body === null || body === undefined) throw new Error("行区不存在");
+        Object.defineProperty(body, "scrollTop", { configurable: true, value: top });
+        Object.defineProperty(body, "clientHeight", { configurable: true, value: height });
+        Object.defineProperty(body, "scrollHeight", { configurable: true, value: full });
+        body.dispatchEvent(new Event("scroll", { bubbles: true }));
+      };
+      await act(async () => { scrollBody(100, 300, 1300); });
+      await flush(0);
+      expect(row("assist-attach-file-30")).toBeNull();
+      await act(async () => { scrollBody(1000, 300, 1300); });
+      await flush(0);
+      expect(row("assist-attach-file-30")).not.toBeNull();
+      expect(row("assist-attach-file-59")).not.toBeNull();
+      expect(row("assist-attach-file-60")).toBeNull();
+      await click(row("assist-attach-files-more"));
+      expect(row("assist-attach-file-64")).not.toBeNull();
+      expect(row("assist-attach-files-more")).toBeNull();
+    } finally { view.unmount(); }
+  });
+
   it("我的产物：列当前任务产物，点一项把标题与版本插入草稿；无任务时说明去向", async () => {
     const noTask = await mountReact(<Harness />);
     try {
@@ -557,7 +596,7 @@ describe("「+」两级菜单", () => {
       expect(row("assist-attach-skill-0")?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("需任务");
       expect(row("assist-attach-skill-1")?.querySelector(".agent-chat-attach-item-hint")?.textContent).toBe("需项目");
       expect(submenu()?.querySelector(".agent-chat-attach-empty")?.textContent)
-        .toContain("先在工具行指定目标");
+        .toContain("先在工具行指定任务或项目");
       await click(row("assist-attach-skill-0"));
       expect(onPickSkill).toHaveBeenCalledWith("task-to-execution-contract@2");
     } finally { resolvable.unmount(); }
@@ -694,6 +733,32 @@ describe("「+」两级菜单", () => {
       expect(hintOf("assist-attach-plugin-github")).toBe("已连接");
       expect(hintOf("assist-attach-plugin-browser")).toBe("已连接");
       expect(hintOf("assist-attach-plugin-computer")).toBe("已停用");
+    } finally { view.unmount(); }
+  });
+
+  it("连接器二级：三个内置插件各显示对应插件图标，不串图、不破图", async () => {
+    /* 2026-10-25：Monitor/Globe/GitBranch 换成用户提供的薄荷绿插件图
+       （assets/plugin-icons）。行结构不变：图标在左、名称居中、状态在右。 */
+    const view = await mountReact(<Harness projectId="p-1" />);
+    try {
+      await openSub("assist-attach-connectors");
+      for (const [testId, key, label] of [
+        ["assist-attach-plugin-computer", "computer", "电脑操控"],
+        ["assist-attach-plugin-browser", "browser", "浏览器操控"],
+        ["assist-attach-plugin-github", "github", "GitHub"]
+      ] as const) {
+        const icon = row(testId)?.querySelector<HTMLImageElement>(`img[data-plugin-icon="${key}"]`);
+        expect(icon, `${testId} 的 ${key} 图标`).not.toBeNull();
+        expect(icon!.getAttribute("src")).toMatch(new RegExp(`${key}\\.png$`));
+        // 装饰性图标：可访问名称仍由整行按钮承担，图标自身不进可访问树。
+        expect(icon!.getAttribute("aria-hidden")).toBe("true");
+        // 图标不挤占名称与状态位：三者同时在场。
+        expect(row(testId)?.querySelector(".agent-chat-attach-item-label")?.textContent).toBe(label);
+        expect(row(testId)?.querySelector(".agent-chat-attach-item-icon")?.contains(icon!)).toBe(true);
+      }
+      // 其他通用操作仍用 Lucide，不换图。
+      await openMenu();
+      expect(row("assist-attach-files")?.querySelector("svg")).not.toBeNull();
     } finally { view.unmount(); }
   });
 

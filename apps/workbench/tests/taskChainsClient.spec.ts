@@ -13,3 +13,11 @@ it('任务链客户端明确传授权累计上限与期限，保留暂停中和�
  await api.stopTaskChain({commandId:'stop',chainId:'c1',expectedRevision:'2',action:'PAUSE',reason:'用户暂停'});const c=await api.getTaskChain('c1');expect(c.status).toBe('PAUSING');expect(c.items[0]?.run_id).toBe('run1');expect(c.callsStarted).toBe(1);
  expect((await api.getProjectTaskChains('p1')).items).toHaveLength(1);expect(posts[1]).toMatchObject({confirmed:true,max_tasks:2,max_model_calls:4,expires_at:'2026-10-14T01:00:00Z'});
 });
+it('创建回执 command_id 不匹配时拒绝结果',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>{
+  return new Response(JSON.stringify({command_id:'other-command',committed_at:'2026-10-14T00:00:00Z',
+   result:{chain_id:'c1',project_id:'p1',status:'DRAFT',revision:'1'}}),{status:201});}));
+ const api=new RelayApiClient({baseUrl:'http://127.0.0.1:8787',workspaceId:'w1',bearerToken:'test'});
+ await expect(api.createTaskChain({commandId:'create',projectId:'p1',title:'本段',confirmed:true,
+  tasks:[{taskId:'t1',expectedRevision:'0',expectedAcceptanceRevision:'1'}]})).rejects.toThrow('任务链回执与原命令/身份不匹配。');
+});

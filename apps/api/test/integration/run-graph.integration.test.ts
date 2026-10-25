@@ -32,6 +32,7 @@ import { graphCheckpointsReady, installGraphCheckpoints } from '../../src/infras
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { canonicalizeJson } from '../../src/receipt/payload-hash.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
+import { hasChecker } from '../../src/workflow/checkers.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
 import { extractWebText } from '../../src/web/web-fetch.js';
 import { runOneCommand } from '../../src/worker/run-command.js';
@@ -284,7 +285,9 @@ async function decideAction(f: Fixture, operationId: string,
   return { decisionId: decided.decision_id as string, commandId };
 }
 
-test('API pool size one leaves the separate Worker semantic accounting path runnable', async () => {
+test('API pool size one keeps SEMANTIC criteria on human review without an evaluator', {
+  skip: hasChecker('semantic-model-v1', '1'),
+}, async () => {
   const f = await fixture(true, 1);
   try {
     const runId = await delegatedRun(f, 'SEMANTIC');
@@ -298,8 +301,17 @@ test('API pool size one leaves the separate Worker semantic accounting path runn
     `.execute(f.app.db)).rows;
     assert.deepEqual(calls, [
       { kind: 'DRAFT', status: 'COMPLETED' },
-      { kind: 'SEMANTIC_CHECK', status: 'COMPLETED' },
     ]);
+    const sessions = await sql<{ status: string; check_plan: {
+      entries: readonly { checker_id: string }[] } }>`
+      select status, check_plan from verification_sessions where run_id = ${runId}
+      order by created_at desc limit 1
+    `.execute(f.app.db);
+    assert.equal(sessions.rows[0]?.status, 'HUMAN');
+    assert.equal(sessions.rows[0]?.check_plan.entries[0]?.checker_id, 'human-evidence-v1');
+    assert.equal(await sql<{ count: bigint }>`select count(*) as count from completion_records
+      where task_id = (select task_id from runs where id = ${runId})`.execute(f.app.db)
+      .then((result) => result.rows[0]?.count), 0n);
   } finally { await f.close(); }
 });
 
@@ -1367,6 +1379,71 @@ test('two independent Workers racing one approved RESUME create one Gateway invo
       where o.id = ${action.operationId} group by b.status
     `.execute(f.app.db);
     assert.deepEqual(facts.rows[0], { invocation_count: 1n, outbox_status: 'DONE' });
+  } finally { await f.close(); }
+});
+
+test('run ACTION_APPROVAL projection rejects an Operation that left WAITING_APPROVAL', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    const review = await actionReview(f, action.operationId);
+    await sql`update logical_operations set status = 'FAILED' where id = ${action.operationId}`.execute(f.app.db);
+    const detail = await f.api.get(workspacePath(f.workspaceId, `/reviews/${review.id}`));
+    const projected = detail.body as { status: string; allowed_decisions: readonly string[];
+      revision: string; target_hash: string };
+    const decision = await f.api.post(workspacePath(f.workspaceId,
+      `/reviews/${review.id}/decisions`), {
+      command_id: randomUUID(), expected_revision: projected.revision,
+      target_hash: projected.target_hash, decision: 'APPROVE',
+    });
+    assert.deepEqual({ status: projected.status, allowed: projected.allowed_decisions,
+      decisionStatus: decision.status }, { status: 'EXPIRED', allowed: [], decisionStatus: 409 });
+  } finally { await f.close(); }
+});
+
+test('run ACTION_APPROVAL projection and decision reject changed Operation target binding', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    const review = await actionReview(f, action.operationId);
+    await sql`update logical_operations set normalized_target = normalized_target || '.tampered'
+      where id = ${action.operationId}`.execute(f.app.db);
+    const detail = await f.api.get(workspacePath(f.workspaceId, `/reviews/${review.id}`));
+    const projected = detail.body as { status: string; allowed_decisions: readonly string[];
+      revision: string; target_hash: string };
+    const decision = await f.api.post(workspacePath(f.workspaceId,
+      `/reviews/${review.id}/decisions`), {
+      command_id: randomUUID(), expected_revision: projected.revision,
+      target_hash: projected.target_hash, decision: 'APPROVE',
+    });
+    assert.deepEqual({ status: projected.status, allowed: projected.allowed_decisions,
+      decisionStatus: decision.status }, { status: 'EXPIRED', allowed: [], decisionStatus: 409 });
+  } finally { await f.close(); }
+});
+
+test('run ACTION_APPROVAL projection expires a target whose stored hash no longer matches', async () => {
+  const f = await fixture(true);
+  try {
+    const action = await delegatedGatewayRun(f);
+    assert.equal((await workerOnce(f)).code, 0);
+    const review = await actionReview(f, action.operationId);
+    const target = await sql<{ target: JsonObject }>`select target from review_requests where id = ${review.id}`
+      .execute(f.app.db);
+    await sql`update review_requests set target = ${JSON.stringify({
+      ...target.rows[0]!.target, normalized_target: `${target.rows[0]!.target.normalized_target as string}.tampered`,
+    })}::jsonb where id = ${review.id}`.execute(f.app.db);
+    const detail = await f.api.get(workspacePath(f.workspaceId, `/reviews/${review.id}`));
+    const projected = detail.body as { status: string; allowed_decisions: readonly string[];
+      revision: string; target_hash: string };
+    const decision = await f.api.post(workspacePath(f.workspaceId,
+      `/reviews/${review.id}/decisions`), {
+      command_id: randomUUID(), expected_revision: projected.revision,
+      target_hash: projected.target_hash, decision: 'APPROVE',
+    });
+    assert.deepEqual({ status: projected.status, allowed: projected.allowed_decisions,
+      decisionStatus: decision.status }, { status: 'EXPIRED', allowed: [], decisionStatus: 409 });
   } finally { await f.close(); }
 });
 

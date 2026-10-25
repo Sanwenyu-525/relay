@@ -1,6 +1,7 @@
 import type { DecimalRevision } from "../../types";
 import type { InteractionMode } from "../../types";
 import { RelayHttp } from "../core/http";
+import { RelayTransportError } from "../core/errors";
 import { array, nullableString, object } from "../core/primitives";
 import { commandEnvelopeFrom } from "../parse/projects";
 import { acceptanceFrom, completionEvidenceFrom, completionFrom, dependencyFrom, reopenFrom, taskAcceptanceRevisionFrom, taskCheckPlanPreviewFrom, taskCreationFrom, taskFrom, taskMutationFrom, todayFrom } from "../parse/tasks";
@@ -8,14 +9,16 @@ import { informationCommand } from "./information";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 import type { RelayCompletion, RelayCompletionEvidence, RelayReopen, RelayTaskAcceptanceRevision, RelayTaskAcceptanceRevisionInput, RelayTaskCheckPlanPreview, RelayTaskCreation, RelayTaskDetail, RelayTaskMutation, RelayTaskPage, RelayTaskSummary, RelayToday, RelayTodayPriority } from "../dtos/tasks";
 
-/** 逻辑上的“项目任务读取”映射为当前契约的 GET /tasks?project_id=。 */
+/** 仅返回首分页；需要完整项目任务集时应跟随 getProjectTasksPage 的 nextCursor。 */
 export async function getProjectTasks(http: RelayHttp, projectId: string): Promise<readonly RelayTaskSummary[]> {
   return (await getProjectTasksPage(http, projectId)).items;
 }
 
-export async function getProjectTasksPage(http: RelayHttp, projectId: string, cursor: string | null = null): Promise<RelayTaskPage> {
+export async function getProjectTasksPage(http: RelayHttp, projectId: string, cursor: string | null = null,
+  limit?: number): Promise<RelayTaskPage> {
   const query = new URLSearchParams({ project_id: projectId });
   if (cursor !== null) query.set("cursor", cursor);
+  if (limit !== undefined) query.set("limit", String(limit));
   const body = await http.request(`${http.workspacePath("/tasks")}?${query.toString()}`);
   const record = object(body, "task list");
   return {
@@ -189,5 +192,9 @@ export async function reopenTask(http: RelayHttp, input: { readonly taskId: stri
       reason: input.reason
     })
   });
-  return reopenFrom(commandEnvelopeFrom(body).result);
+  const envelope = commandEnvelopeFrom(body);
+  if (envelope.commandId !== input.commandId) {
+    throw new RelayTransportError("重开响应与原 command_id 不匹配；请查询原命令回执。");
+  }
+  return reopenFrom(envelope.result);
 }

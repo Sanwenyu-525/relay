@@ -678,7 +678,7 @@ export async function requestAssistMessage(
         requiresTools: hasRuntimeTools,
         requiresJsonOutput: intent !== 'DISCUSS' || skill !== null ||
           session.conversation_mode === 'LEARNING',
-      });
+      }, session.workspace_id);
 
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();

@@ -132,11 +132,10 @@ export async function readToday(db: DbExecutor, input: {
       const selectionActions = [choice?.pin === true ? 'UNPIN' : 'PIN', 'SET_LATER',
         ...(choice?.later_local_date === null || choice?.later_local_date === undefined ? [] : ['CLEAR_LATER']),
         'SET_FOCUS'];
-      const taskActions = task.executor_kind === 'HUMAN'
-        ? taskAllowedActions({ status: task.status,
-          satisfiable: ready || (facts.requiredCriterionCount > 0 &&
-            facts.blockingTaskIds.length === 0 && facts.unresolvedBlockerIds.length === 0) })
-        : [];
+      const taskActions = taskAllowedActions({ status: task.status,
+        executorKind: task.executor_kind,
+        satisfiable: facts.requiredCriterionCount > 0 &&
+          facts.blockingTaskIds.length === 0 && facts.unresolvedBlockerIds.length === 0 });
       const dto: TodayItemDto = { task_id: task.id, task_revision: toDecimalString(task.revision),
         project_id: task.project_id, title: task.title, status: task.status,
         priority: task.priority, due_local_date: task.due_local_date, timezone: task.due_timezone,

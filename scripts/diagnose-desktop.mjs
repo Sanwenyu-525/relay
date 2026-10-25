@@ -6,14 +6,22 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Only fixed messages are returned: driver errors may contain connection secrets.
+// 键集合必须与桌面宿主白名单（apps/desktop/src-tauri/src/lib.rs 的
+// validate_desktop_config_keys）一致：少一个键，运维按 desktop.env.example 配上也会被
+// 误判 CONFIG_INVALID；多一个键则放行宿主会拒绝的注入。改动任一侧都要同步另一侧，
+// scripts/diagnose-desktop.test.mjs 的契约用例会比对两边。
 const RUNTIME_KEYS = ['RELAY_DB_URL', 'RELAY_DB_POOL_MAX', 'RELAY_DB_CONNECT_TIMEOUT_MS', 'RELAY_DESKTOP_WORKSPACE_ID'];
 const MODEL_KEYS = ['RELAY_MODEL_PROVIDER', 'RELAY_MODEL_NAME', 'RELAY_MODEL_API_KEY', 'RELAY_MODEL_BASE_URL',
   'RELAY_MODEL_TIMEOUT_MS', 'RELAY_MODEL_MAX_OUTPUT_TOKENS', 'RELAY_MODEL_MAX_CALL_TOKENS',
   'RELAY_MODEL_MAX_SCOPE_CALLS', 'RELAY_MODEL_MAX_SCOPE_TOKENS'];
+// 可选键：缺省时各有既定默认值（随包运行时在 node.exe 同目录；目录未登记模型时靠
+// RELAY_MODEL_IMAGE_INPUT 显式声明图片输入），因此不参与必填校验。
+const OPTIONAL_KEYS = ['RELAY_COMPUTER_RUNTIME', 'RELAY_MODEL_IMAGE_INPUT'];
+export const DESKTOP_CONFIG_KEYS = [...RUNTIME_KEYS, ...MODEL_KEYS, ...OPTIONAL_KEYS];
 export function readDesktopConfig(file) {
   if (!path.isAbsolute(file) || statSync(file).size > 65536) throw new Error('CONFIG_INVALID');
   const text = readFileSync(file, 'utf8');
-  const keys = [...RUNTIME_KEYS, ...MODEL_KEYS];
+  const keys = DESKTOP_CONFIG_KEYS;
   const seen = new Set();
   for (const line of text.split(/\r?\n/).map(value => value.trim())) {
     if (!line || line.startsWith('#')) continue;

@@ -245,7 +245,7 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await expect(action(page)).toBeVisible();
   });
 
-  test("从已打开目录的空白讨论进入新对话：目录作用域与任务都不继承", async ({ page }) => {
+  test("从已打开目录的空白讨论进入新对话：目录沿用最近一次打开，任务上下文不继承", async ({ page }) => {
     const ctx: Ctx = { posts: [], withSession: false };
     await installRoutes(page, ctx);
     await page.setViewportSize(viewports[0]!);
@@ -260,17 +260,19 @@ test.describe("窄窗与短窗的新对话入口", () => {
 
     await expect(page).toHaveURL(/\/agent\?new=(?!seed$)/u);
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    // 目录作用域不继承：范围条回到那颗「选择工作目录」键，写准入说明一并消失。
-    await expect(page.getByTestId("folder-scope-change")).toContainText("选择工作目录");
-    await expect(page.getByTestId("folder-write-readiness")).toHaveCount(0);
+    // 2026-10-25 用户指令「新对话要记住最后打开的会话所在的工作目录」：目录按本机最近
+    // 打开的目录续记，仍走同一条 openFolder 由服务端核对，细条回到同一个目录名。
+    // 重挂载与续记回执各差一拍：先用 poll 等第二次 open 落账，再核对重挂载后的细条。
+    await expect.poll(() => ctx.posts.filter((post) => post.path === `${prefix}/working-directories/open`),
+      { timeout: 20_000 }).toHaveLength(2);
+    await expect(page.getByTestId("folder-scope-change")).toContainText("NarrowWindowProject");
     // 任务上下文不继承。
     await expect(page.getByTestId("collab-goal")).toHaveCount(0);
     // 仍是空白输入主区，没有选中会话。
     await expect(page.getByTestId("assist-first-draft")).toBeVisible();
     await expect(page.getByTestId("assist-session")).toHaveCount(0);
-    // 进入新讨论本身不新建会话，也不重复写目录。
+    // 进入新讨论本身不新建会话。
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
-    expect(ctx.posts.filter((post) => post.path === `${prefix}/working-directories/open`)).toHaveLength(1);
   });
 
   test("从既有会话进入新讨论：旧会话与任务上下文都不继承", async ({ page }) => {
@@ -316,9 +318,10 @@ test.describe("窄窗与短窗的新对话入口", () => {
     await expect(page).toHaveURL(/\/agent\?new=(?!seed$)/u);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByTestId("assist-first-draft")).toBeVisible();
-    await expect(page.getByTestId("folder-scope-change")).toContainText("选择工作目录");
+    // 目录按本机最近打开的目录续记（2026-10-25），正文草稿不跟着带进新讨论。
+    await expect(page.getByTestId("folder-scope-change")).toContainText("NarrowWindowProject");
     await expect(page.getByTestId("assist-session")).toHaveCount(0);
-    // 切换本身不产生任何写命令。
+    // 切换本身不新建会话、不发消息。
     expect(ctx.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     expect(ctx.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(0);
   });

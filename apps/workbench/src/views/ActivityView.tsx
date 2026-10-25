@@ -150,6 +150,10 @@ export default function ActivityView() {
   useEffect(() => {
     const request = ++requestVersion.current;
     setItems([]); setNextCursor(null); setLoading(client !== null); setError(null); setMoreError(null); setSelectedId(null);
+    // 续页状态与当前查询同代（#132）：刷新开始新一轮首页查询时，旧续页的在途 Loading
+    // 必须就地收口。旧 loadMore 的 finally 只认它出发时的 request 版本，刷新把版本递增后
+    // 它不再负责清理，若这里也不重置，按钮会永远停在「正在读取后续页」。
+    setLoadingMore(false);
     if (client === null) return;
     void client.getActivities(active).then((page) => {
       if (request === requestVersion.current && keyRef.current === filterKey) {
@@ -158,7 +162,7 @@ export default function ActivityView() {
     }).catch((caught: unknown) => {
       if (request === requestVersion.current && keyRef.current === filterKey) {
         setError(caught instanceof RelayApiError && [403, 404].includes(caught.problem.status)
-          ? "筛选目标当前不可见或无权读取；已清除旧列表，请核对作用域。" : describeLiveError(caught).message);
+          ? "筛选对象当前不可见或无权读取；已清除旧列表，请核对作用域。" : describeLiveError(caught).message);
       }
     }).finally(() => { if (request === requestVersion.current && keyRef.current === filterKey) setLoading(false); });
     return () => { requestVersion.current++; };

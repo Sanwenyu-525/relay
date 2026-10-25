@@ -41,25 +41,57 @@ export const MEMORY_AUTO_CAPTURE_MAX_ITEMS = 3;
 /**
  * 写入一条自动记忆。
  *
- * 调用方必须已经在事务里（提取链用 `withRepositories`）。顺序与理由：
- * 先取会话级 advisory 锁 → 再查重 → 再写 Memory → 最后写捕获行。
+ * 调用方必须已经在事务里（提取链用 `withTransaction`）。顺序与理由：
+ * 先按**当前**事实复核范围 → 再取会话级 advisory 锁 → 查重 → 写 Memory → 最后写捕获行。
  * 锁挡的是「同一消息两个 Worker 同时提取」，不是业务互斥；冲突键相同只会串行，
  * 不会阻塞别的会话。
+ *
+ * 2026-10-25 的两处修正：
+ *   1. **写入前复核**：提取要花一次模型调用，期间用户可能已经关掉自动记忆、关掉会话记忆、
+ *      归档会话或把会话挪到别的项目。模型结果是「旧时间点」的产物，不能绕过已经生效的关闭。
+ *      复核与写入在同一事务里，中间没有新的窗口。
+ *   2. **来源分列**：`triggerMessageId` 是触发本轮提取的助手消息（轮次身份），
+ *      `evidenceMessageId` 是逐字引文实际所在的消息（用户原话或助手回复）。此前两者
+ *      混用同一个助手消息 id，导致引自用户原话的条目指不回它真正的那句话。
  */
 export async function recordAutoCapture(r: Repositories, input: {
-  workspaceId: string; projectId: string | null; sessionId: string; messageId: string;
-  messageText: string; title: string; text: string; reason: string | null;
+  workspaceId: string; projectId: string | null; sessionId: string;
+  /** 触发本轮提取的助手消息（去重指纹的轮次身份）。 */
+  triggerMessageId: string;
+  /** 逐字引文实际所在的消息：USER_STATEMENT 绑用户消息，MODEL_OBSERVATION 绑助手回复。 */
+  evidenceMessageId: string;
+  /** 证据消息的原文：`source_sha256` 由它计算，并与库里那一行复核。 */
+  evidenceText: string;
+  title: string; text: string; reason: string | null;
   /** DEV-0042：来源类别（USER_STATEMENT / MODEL_OBSERVATION）与它对应的原消息逐字片段。 */
   sourceKind: MemorySourceKind; sourceQuote: string;
 }): Promise<{ memoryId: string; captureId: string } | null> {
   const title = input.title.trim();
   const text = input.text.trim();
   if (title === '' || text === '') return null;
-  const sourceSha256 = sourceContentHash(input.messageText);
+
+  // ---- 范围复核（P0-D）：任何一项不再成立就整条放弃，不写半条 ----
+  const session = await r.assist.readSession(input.sessionId, true);
+  if (session === undefined || session.workspace_id !== input.workspaceId ||
+      session.status !== 'ACTIVE' || !session.remember ||
+      session.project_id !== input.projectId) return null;
+  const settings = await r.information.readMemorySettings(input.workspaceId);
+  if (settings?.auto_capture === false) return null;
+  const trigger = await r.assist.readMessage(input.triggerMessageId, 'share');
+  if (trigger === undefined || trigger.status !== 'COMPLETED' || trigger.withdrawn_at !== null) return null;
+  const evidence = await r.assist.readMessage(input.evidenceMessageId, 'share');
+  if (evidence === undefined || evidence.session_id !== input.sessionId ||
+      evidence.status !== 'COMPLETED' || evidence.withdrawn_at !== null ||
+      evidence.content === null) return null;
+  // 证据正文必须就是库里那条消息的正文：哈希是「这条记忆引自哪一段原文」的唯一凭据，
+  // 不能用调用方手里的副本冒充。
+  const sourceSha256 = sourceContentHash(input.evidenceText);
+  if (sourceContentHash(evidence.content) !== sourceSha256) return null;
+
   const normalizedSha256 = captureFingerprint(title, text);
 
-  await r.memoryCaptures.lockSource(`${input.sessionId}:${input.messageId}:${normalizedSha256}`);
-  if (await r.memoryCaptures.hasCaptured(input.sessionId, input.messageId, normalizedSha256)) return null;
+  await r.memoryCaptures.lockSource(`${input.sessionId}:${input.triggerMessageId}:${normalizedSha256}`);
+  if (await r.memoryCaptures.hasCaptured(input.sessionId, input.triggerMessageId, normalizedSha256)) return null;
   if (await r.memoryCaptures.hasMemoryWithText(input.workspaceId, input.projectId, title, text)) return null;
   if (await r.memoryCaptures.countToday(input.sessionId) >= MEMORY_AUTO_CAPTURE_DAILY_LIMIT) return null;
 
@@ -70,9 +102,9 @@ export async function recordAutoCapture(r: Repositories, input: {
   await r.information.insertMemoryVersion({ id: randomUUID(), memoryId, version: 1n,
     title, text, confirmedBy: 'auto-capture', expiresAt: null });
   await r.information.insertMemoryMessageSource({ memoryId, sessionId: input.sessionId,
-    messageId: input.messageId, contentSha256: sourceSha256 });
+    messageId: input.evidenceMessageId, contentSha256: sourceSha256 });
   const capture = await r.memoryCaptures.insert({ id: captureId, workspaceId: input.workspaceId,
-    projectId: input.projectId, sessionId: input.sessionId, messageId: input.messageId,
+    projectId: input.projectId, sessionId: input.sessionId, messageId: input.triggerMessageId,
     sourceSha256, normalizedSha256, memoryId, sourceQuote: input.sourceQuote });
   // 唯一键冲突说明并发方已经写过：它写的那条才是事实，本事务不能留下第二份 Memory。
   if (capture === undefined) throw new Error('AUTO_CAPTURE_CONFLICT');
@@ -81,7 +113,9 @@ export async function recordAutoCapture(r: Repositories, input: {
     actorKind: 'AI', actorRef: 'auto-capture', commandId: null,
     projectId: input.projectId, taskId: null, eventType: 'MEMORY_AUTO_CAPTURED',
     factRefs: { memory_id: memoryId, capture_id: captureId, session_id: input.sessionId,
-      message_id: input.messageId, version: '1', ...(input.reason === null ? {} : { reason: input.reason }) } });
+      message_id: input.triggerMessageId, evidence_message_id: input.evidenceMessageId,
+      source_kind: input.sourceKind, version: '1',
+      ...(input.reason === null ? {} : { reason: input.reason }) } });
   return { memoryId, captureId };
 }
 

@@ -81,6 +81,12 @@ export class InformationRepository {
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
         and (m.project_id is null or m.project_id = ${projectId})
         and (v.expires_at is null or v.expires_at > now())
+        -- 来源失效（0132 撤回）：自动记忆绑定的那条原消息已撤回时，这条记忆不再有可核对的
+        -- 依据，不能继续进入模型上下文。人工记忆没有消息绑定，不受影响。
+        and not exists (
+          select 1 from memory_message_sources s
+          join assist_messages am on am.id = s.message_id
+          where s.memory_id = m.id and am.withdrawn_at is not null)
       order by literal_match desc,
         case when m.origin = 'HUMAN_CONFIRMED' then 0 else 1 end,
         case m.source_kind when 'USER_STATEMENT' then 0 when 'UNKNOWN' then 1 else 2 end,
@@ -284,6 +290,10 @@ export class InformationRepository {
           where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
             and (m.project_id is null or m.project_id = ${projectId})
             and (v.expires_at is null or v.expires_at > now())
+            and not exists (
+              select 1 from memory_message_sources s
+              join assist_messages am on am.id = s.message_id
+              where s.memory_id = m.id and am.withdrawn_at is not null)
         union all
         select 'DECISION', id, updated_at from decisions
           where workspace_id = ${workspaceId} and status = 'ACTIVE'

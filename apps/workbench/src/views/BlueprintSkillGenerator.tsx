@@ -165,7 +165,7 @@ export default function BlueprintSkillGenerator({ client, projectId, goals, pack
       const found = items.find((item) => item.id === skillId && item.version === skillVersion &&
         item.target === "PROJECT" && item.outputKind === "PROJECT_BLUEPRINT_SUGGESTION") ?? null;
       setDefinition(found);
-      setDefinitionError(found ? null : "当前服务端未提供目标版本的项目蓝图 Skill。");
+      setDefinitionError(found ? null : "当前服务端未提供产物目标版本的项目蓝图 Skill。");
     }).catch((caught) => {
       if (live && request === scope.current) setDefinitionError(describeLiveError(caught).message);
     });

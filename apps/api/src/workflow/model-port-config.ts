@@ -95,12 +95,15 @@ export function readDeclaredImageInput(env: NodeJS.ProcessEnv): boolean {
 /**
  * Resolve the independently configured OpenRouter chat credential for one exact directory model.
  * This deliberately never consults RELAY_MODEL_API_KEY or the catalog-list credential.
+ * RELAY_OPENROUTER_API_KEY 仍是显式覆盖；它缺省或空白时回退生态标准名
+ * OPENROUTER_API_KEY（本机机器级环境变量），两者都空白才报缺失。
  */export function readOpenRouterModelPortConfig(env: NodeJS.ProcessEnv,
   model: string): ModelPortConfig {
-  const apiKey = env.RELAY_OPENROUTER_API_KEY;
+  const relayApiKey = env.RELAY_OPENROUTER_API_KEY?.trim() ?? '';
+  const apiKey = relayApiKey !== '' ? relayApiKey : env.OPENROUTER_API_KEY?.trim() ?? '';
   const issues: string[] = [];
-  if (apiKey === undefined || apiKey.trim() === '') {
-    issues.push('RELAY_OPENROUTER_API_KEY is required');
+  if (apiKey === '') {
+    issues.push('RELAY_OPENROUTER_API_KEY (or OPENROUTER_API_KEY) is required');
   }
   if (model.trim() === '' || model.length > 200) {
     issues.push('OpenRouter model id must contain 1 to 200 characters');

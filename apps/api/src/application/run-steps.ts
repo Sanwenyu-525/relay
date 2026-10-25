@@ -42,9 +42,9 @@ import { attachReadEvidenceWithinBudget, draftInputHash, loadRunReadEvidence,
 import { buildRunContext, type BuiltContext } from './context-builder.js';
 import { contextManifestMatchesCurrent, matchesTaskContext } from './context-fence.js';
 import { FakeModelPort, type ModelPort } from '../workflow/fake-model-port.js';
-import { readModelPortConfig } from '../workflow/model-port-config.js';
-import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelSourcePolicyError }
+import { ModelCallBudgetError, ModelSourcePolicyError }
   from '../workflow/openai-compatible-model-port.js';
+import { resolveRunModelPort, type RunSemanticModel } from './run-model-port.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError } from '../assist/live-preview.js';
 import { publishRunDraftPreview, recordRunDraftFirstTextDelta } from './run-draft-preview.js';
@@ -71,6 +71,7 @@ import { MAX_PREVIEW_FILE_BYTES, ToolCallPreviewPublisher }
   from '../conversation-diff/tool-call-preview.js';
 import type { RunToolCallRow } from '../infrastructure/database-schema.js';
 import type { FakeToolScript, ModelToolTurn } from '../workflow/fake-model-port.js';
+import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 
 /**
  * 内部应用端口 AdvanceStep（docs/api/http-command-contract.md 第 5 节）。
@@ -121,12 +122,21 @@ export interface AdvanceRunStepInput {
   readonly attemptKey?: string | undefined;
   /** 仅测试注入：决定 FakeModelPort 行为。 */
   readonly fakeScenario?: FakeScenario | undefined;
+  /** 仅测试夹具可打开：允许显式冻结的 FakeSemanticChecker 运行。 */
+  readonly testOnlyAllowFakeSemanticChecker?: boolean | undefined;
   /** 仅测试注入：使独立 Worker 的 Mock 模型保持在途。 */
   readonly fakeModelDelayMs?: number | undefined;
   /** 仅测试注入：FakeModelPort 逐轮发出的工具请求脚本；生产路径不包含它。 */
   readonly fakeToolScript?: FakeToolScript | undefined;
   /** 仅测试注入：Context token 上限。 */
   readonly contextBudgetTokens?: number | undefined;
+  /**
+   * 模型端口的环境来源；缺省 process.env。生产 Worker 不传，测试用它隔离真实进程环境。
+   * 它只提供凭据/端点/预算的解析输入，模型身份仍由 Run 冻结契约决定。
+   */
+  readonly modelEnv?: NodeJS.ProcessEnv | undefined;
+  /** 仅测试注入：受控 Provider fetch/lookup 接缝（与 Assist 同一形态）。 */
+  readonly modelTransport?: ModelFetchDependencies | undefined;
   readonly signal?: AbortSignal | undefined;
   /** 受控故障点，只用于真实 PG 恢复/并发测试。 */
   readonly hooks?: {
@@ -590,7 +600,11 @@ export async function advanceRunStep(
       ...(prepared.context === undefined ? {} : { context: prepared.context }),
       ...(prepared.semanticChecks === undefined ? {} :
         { precomputedChecks: prepared.semanticChecks }),
+      ...(prepared.semanticModel === undefined ? {} :
+        { semanticModel: prepared.semanticModel }),
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
+      ...(input.testOnlyAllowFakeSemanticChecker === true
+        ? { testOnlyAllowFakeSemanticChecker: true } : {}),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
 
@@ -780,6 +794,8 @@ type PreparedExternalWork =
       readonly modelPort: ModelPort; readonly persist?: PreparedPersist;
       readonly context?: BuiltContext;
       readonly semanticChecks?: ReadonlyMap<string, PreparedSemanticCheck>;
+      /** 冻结计划解析出的语义模型；缺省表示旧 Run 用 registry 的进程默认检查器。 */
+      readonly semanticModel?: RunSemanticModel;
       readonly preflightFailure?: Extract<StepExecution, { readonly outcome: 'FAILED' }>;
       readonly toolLoopStop?: ToolLoopStop };
 
@@ -807,10 +823,15 @@ class PreloadedContentStore extends ManagedContentStore {
 async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   claim: ClaimedStep): Promise<PreparedExternalWork> {
   const repositories = createRepositories(db);
-  const modelConfig = readModelPortConfig(process.env);
-  let modelPort: ModelPort = modelConfig === undefined
-    ? new FakeModelPort(input.fakeModelDelayMs)
-    : new OpenAiCompatibleModelPort(modelConfig);
+  // P0-1：执行端模型身份只来自 Run 冻结的执行契约，不读进程默认模型。
+  const admission = await resolveRunModelPort(db, {
+    run: claim.run,
+    contract: await repositories.runs.readContract(claim.run.id),
+    env: input.modelEnv ?? process.env,
+    ...(input.modelTransport === undefined ? {} : { transport: input.modelTransport }),
+  });
+  let modelPort: ModelPort = admission.kind === 'READY'
+    ? admission.port : new FakeModelPort(input.fakeModelDelayMs);
   let persist: PreparedPersist | undefined;
   let context: BuiltContext | undefined;
   let semanticChecks: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
@@ -822,7 +843,9 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   if (claim.step.step_kind === 'BUILD_CONTEXT') {
     const correction = await loadCorrectionInput(repositories, claim.run.id);
     context = await buildRunContext(db, { run: claim.run, task: claim.task, storage: input.storage,
-      externalModel: modelConfig !== undefined,
+      // 冻结计划指向真实模型时，取材口径按真实模型执行；停止态仍按冻结意图取材，
+      // 不因为此刻配置不可用就把上下文改成 Mock 口径。
+      externalModel: admission.kind === 'READY' ? admission.external : true,
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       ...(input.fakeToolScript === undefined ? {} : { fakeToolScript: input.fakeToolScript }),
       ...(input.contextBudgetTokens === undefined ? {} : { budgetTokens: input.contextBudgetTokens }),
@@ -830,6 +853,11 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
   }
 
   if (claim.step.step_kind === 'DRAFT') {
+    if (admission.kind === 'STOPPED') {
+      // 冻结模型不可执行就明确停止：不回退默认模型、不回退 Fake、不发起替代外呼。
+      preflightFailure = { outcome: 'FAILED', reason: admission.reason,
+        evidence: admission.evidence };
+    }
     let manifest: Awaited<ReturnType<typeof loadManifestForDraft>> | undefined;
     try { manifest = await loadManifestForDraft(repositories, claim.run.id, claim.task.id); }
     catch (error) {
@@ -837,7 +865,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
       preflightFailure = { outcome: 'FAILED', reason: 'CONTEXT_REQUIRED_OVER_BUDGET',
         evidence: { reason: 'CONTEXT_REQUIRED_OVER_BUDGET', source: 'GATEWAY_READ' } };
     }
-    if (manifest !== undefined) {
+    if (manifest !== undefined && preflightFailure === undefined) {
       const currentPort = modelPort;
       const readEvidence = await loadRunReadEvidence(repositories, claim.run.id);
       const toolRepository = new RunToolCallRepository(db);
@@ -1055,12 +1083,22 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     if (versionId !== undefined) await preloadVersion(repositories, input.storage, versionId, reads);
     // 模型型语义检查在结果事务之外调用与记账（携带 budget 的 begin() 会对 runs 行
     // for update，留在事务内会与结果事务的行锁自死锁）；对齐 DRAFT 的 prepare 阶段。
-    semanticChecks = await prepareSemanticChecks(db, {
+    const preparedChecks = await prepareSemanticChecks(db, {
       run: claim.run, task: claim.task, storage: input.storage,
       stepAttemptId: claim.attempt.id,
+      ...(admission.kind === 'READY' && admission.semantic !== undefined
+        ? { semanticModel: admission.semantic } : {}),
+      ...(admission.kind === 'STOPPED'
+        ? { modelStop: { reason: admission.reason, evidence: admission.evidence } } : {}),
       ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
+    semanticChecks = preparedChecks.checks;
+    if (preparedChecks.stop !== undefined && preflightFailure === undefined) {
+      // 冻结模型不可执行而本 Run 的验收需要语义模型：明确停止，不换模型、不降级为人工证据。
+      preflightFailure = { outcome: 'FAILED', reason: preparedChecks.stop.reason,
+        evidence: preparedChecks.stop.evidence };
+    }
   }
 
   if (claim.step.step_kind === 'COMPLETE') {
@@ -1080,6 +1118,8 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     ...(persist === undefined ? {} : { persist }),
     ...(context === undefined ? {} : { context }),
     ...(semanticChecks === undefined ? {} : { semanticChecks }),
+    ...(admission.kind === 'READY' && admission.semantic !== undefined
+      ? { semanticModel: admission.semantic } : {}),
     ...(preflightFailure === undefined ? {} : { preflightFailure }),
     ...(toolLoopStop === undefined ? {} : { toolLoopStop }) };
 }
@@ -1325,7 +1365,9 @@ interface ExecuteStepInput {
   readonly persist?: PreparedPersist | undefined;
   readonly context?: BuiltContext | undefined;
   readonly precomputedChecks?: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
+  readonly semanticModel?: RunSemanticModel | undefined;
   readonly fakeScenario?: FakeScenario | undefined;
+  readonly testOnlyAllowFakeSemanticChecker?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -1349,7 +1391,10 @@ async function executeStep(
         stepAttemptId: input.stepAttemptId,
         ...(input.precomputedChecks === undefined ? {} :
           { precomputedChecks: input.precomputedChecks }),
+        ...(input.semanticModel === undefined ? {} : { semanticModel: input.semanticModel }),
         ...(input.fakeScenario === undefined ? {} : { fakeScenario: input.fakeScenario }),
+        ...(input.testOnlyAllowFakeSemanticChecker === true
+          ? { testOnlyAllowFakeSemanticChecker: true } : {}),
       });
     case 'COMPLETE': {
       const outcome = await completeRun(repositories, {

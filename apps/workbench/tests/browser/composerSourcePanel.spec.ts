@@ -6,11 +6,16 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 // 本轮改的是资料面板自己（components/AssistSourcePicker.tsx + migrated-scoped.css）：
 // 标题降到面板字号档，内容区限高并在内部滚动，检索行／引用范围／关闭入口留在滚动区之外；
 // 生成方式与意图仍属发送选项设置区，不进了资料面板的 DOM。
-// 2026-10-24（用户截图「浮层宽度跟输入框一样而且样式不好看」）：两枚浮层从「按输入卡
-// 拉满整卡宽」改为锚定芯片（AssistView.css 的 .agent-chat-options：details 建立包含块，
-// 面板 left:0 / width:max-content / 封顶 20rem）；资料芯片是工具行最右一枚，翻面为
-// 右缘贴芯片右缘；翻面由 usePopupFlip 现算（窄窗资料芯片换行到左缘时不翻）。本节 3b 与
-// 第 4 条的断言按新几何更新（草稿被浮层短暂盖住属芯片菜单既有模式，见该处注释）。
+// 2026-10-24（用户截图「浮层宽度跟输入框一样而且样式不好看」）：浮层从「按输入卡拉满整卡
+// 宽」改为锚定芯片（AssistView.css 的 .agent-chat-options：details 建立包含块，面板 left:0 /
+// width:max-content / 封顶 20rem）。同日用户指令「这两个合成一个芯片就好了」把「普通讨论说明」
+// 与「资料」合成一枚芯片一片浮层（会话输入器 details.agent-chat-options.agent-chat-send-options，
+// 上节发送选项、下节 .agent-chat-options-section 里的资料选择器），旧类名
+// .agent-chat-source-options 与旧 testid 已从 src 移除，本节的采样与序比较一律锚到这唯一一枚；
+// 资料入口的 data-testid 与 aria-expanded 仍留在合并后的 summary 上（AssistView.tsx:4999），
+// 因此开面板的点击不换 Owner。浮层是工具行最右一枚，翻面为右缘贴芯片右缘；翻面由 usePopupFlip
+// 现算（窄窗芯片换行到左缘时不翻）。本节 3b 与第 4 条的断言按新几何更新（草稿被浮层短暂盖住
+// 属芯片菜单既有模式，见该处注释）。
 // 只连页面内夹具：不连数据库、不调 Provider、不写任何真实业务事实；全程核对零 POST。
 
 const apiBase = "http://127.0.0.1:8787";
@@ -126,9 +131,10 @@ async function measure(page: Page) {
     const style = (target: Element | null) => target === null ? null : getComputedStyle(target);
     const body = node(".assist-source-body");
     const panel = node(".agent-chat-options");
-    // 展开的那片面板与它的入口芯片：2026-10-19 起浮层只包住内容，summary 留在工具行里。
-    const openPanel = node(".agent-chat-source-options > .agent-chat-options-panel");
-    const openSummary = node(".agent-chat-source-options > summary");
+    // 展开的那片面板与它的入口芯片：2026-10-19 起浮层只包住内容，summary 留在工具行里；
+    // 2026-10-24 发送选项与资料合成一枚芯片后，输入器里展开的就是 .agent-chat-send-options 这一枚。
+    const openPanel = node(".agent-chat-send-options > .agent-chat-options-panel");
+    const openSummary = node(".agent-chat-send-options > summary");
     const options = node('[data-testid="assist-skill"]');
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -148,6 +154,16 @@ async function measure(page: Page) {
         .map((element) => element.className),
       openPanelBox: box(openPanel),
       openSummaryBox: box(openSummary),
+      // 合并后同一时刻只允许一枚浮层开着（旧的两枚互斥现场按结构已不可能多开）；
+      // 一片浮层里发送选项节与资料节必须同时在场。
+      openOptions: Array.from(root.querySelectorAll("details.agent-chat-options"))
+        .filter((element) => element.hasAttribute("open")).length,
+      totalOptions: root.querySelectorAll("details.agent-chat-options").length,
+      panelSections: openPanel === null ? null : {
+        skill: openPanel.querySelector('[data-testid="assist-skill"]') !== null,
+        picker: openPanel.querySelector('[data-testid="assist-source-picker"]') !== null,
+        query: openPanel.querySelector("#assist-source-query") !== null,
+        sections: openPanel.querySelectorAll(":scope > .agent-chat-options-section").length },
       panelStyle: style(panel) ? { maxHeight: style(panel)!.maxHeight, overflowY: style(panel)!.overflowY } : null,
       title: { box: box(node(".assist-source-title")), fontSize: style(node(".assist-source-title"))?.fontSize ?? null },
       headBox: box(node(".assist-source-head")),
@@ -162,7 +178,8 @@ async function measure(page: Page) {
       sendBox: box(node('[data-testid="assist-send"]')),
       overlaps: {
         panelDraft: overlap(box(panel), box(node('[data-testid="assist-draft"]'))),
-        panelSend: overlap(box(panel), box(node('[data-testid="assist-send"]'))),
+        // 压发送键的判据按真正展开的那片浮层量（合并后它是输入器里唯一一枚浮层）。
+        panelSend: overlap(box(openPanel), box(node('[data-testid="assist-send"]'))),
         panelQuery: overlap(box(panel), box(node("#assist-source-query")))
       },
       hitTests: { query: hitTest(node("#assist-source-query")), summary: hitTest(node(".agent-chat-options > summary")),
@@ -212,6 +229,7 @@ async function openSourcePanel(page: Page, viewport: { width: number; height: nu
   await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+  // 合并后这唯一一枚芯片就是资料入口：testid 仍挂在它的 summary 上（AssistView.tsx:4999）。
   await page.getByTestId("assist-open-sources").click();
   await composer(page).locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
   await composer(page).locator("#assist-source-query").fill("基线");
@@ -262,11 +280,17 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       const floating = require(where, "展开中的面板", snapshot.openPanelBox);
       expect(chip.top, `${where} · 入口芯片上沿跳出工具行`).toBeGreaterThanOrEqual(tools.top - 0.5);
       expect(chip.bottom, `${where} · 入口芯片下沿跳出工具行`).toBeLessThanOrEqual(tools.bottom + 0.5);
-      expect(floating.bottom, `${where} · 面板没有浮在工具行之上`).toBeLessThanOrEqual(tools.top + 0.5);
+      // 面板必须浮在自己的入口芯片之上。参照物取芯片所在的这一行，而不是整块工具行的外框：
+      // 窄窗（860×800 实测）工具行会换行成两行、合并芯片落在第二行（行框 706–774，芯片 742），
+      // 面板按 bottom: calc(100% + gap) 锚在芯片上（实测 bottom 734 = 芯片上沿 − 8），
+      // 与换行后第一行的其他芯片重叠——那与「浮层短暂盖住草稿」是同一既有芯片菜单模式（见第 4 条），
+      // 而「不压自己的入口、不铺回行里」这条不变量仍按芯片上沿逐像素锁住；发送键是否被压在第 4 条单测。
+      expect(floating.bottom, `${where} · 面板没有浮在自己的入口芯片之上`).toBeLessThanOrEqual(chip.top - 0.5);
+      expect(floating.bottom, `${where} · 面板下沿压进入口芯片所在的行`).toBeLessThanOrEqual(tools.bottom - 0.5);
       expect(floating.width, `${where} · 面板宽度没有铺过输入卡`).toBeGreaterThan(chip.width);
       expect(floating.width, `${where} · 面板宽度超过 20rem 封顶`).toBeLessThanOrEqual(snapshot.rootFontSize * 20 + 0.5);
       // 贴芯片与不越界二选一断言：芯片靠近卡片右缘时翻面（右缘贴芯片），否则左缘贴芯片；
-      // 翻面由 usePopupFlip 现算——资料芯片在窄窗会随工具行换行跑到卡片左缘，静态翻面
+      // 翻面由 usePopupFlip 现算——合并芯片在窄窗会随工具行换行跑到卡片左缘，静态翻面
       // 那时会把面板裁出卡片左缘（860px 视口实测）。两种形态都必须待在输入卡内。
       const leftAligned = Math.abs(floating.left - chip.left) <= 1;
       const rightAligned = Math.abs(floating.right - chip.right) <= 1;
@@ -276,17 +300,34 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(floating.right, `${where} · 资料浮层右缘越出输入卡（会被中栏裁掉）`).toBeLessThanOrEqual(card.right + 0.5);
       expect(floating.left, `${where} · 资料浮层左缘越出视口`).toBeGreaterThanOrEqual(-0.5);
       expect(floating.right, `${where} · 资料浮层右缘越出视口`).toBeLessThanOrEqual(snapshot.viewport.width + 0.5);
+      expect(floating.top, `${where} · 资料浮层上缘越出视口`).toBeGreaterThanOrEqual(-0.5);
+      // 2026-10-24 合并后输入器只有一枚浮层芯片：展开时同一时刻开着的也必须只有一枚，
+      // 且这一片浮层里发送选项节（生成方式）与资料节（选择器 + 检索行）同时在场。
+      expect(snapshot.totalOptions, `${where} · 输入器里的浮层芯片不止一枚`).toBe(1);
+      expect(snapshot.openOptions, `${where} · 展开的浮层不止一枚`).toBe(1);
+      if (snapshot.panelSections === null) throw new Error(`${where} · 缺少面板分节采样`);
+      expect(snapshot.panelSections.skill, `${where} · 发送选项节不在合并浮层里`).toBe(true);
+      expect(snapshot.panelSections.picker, `${where} · 资料节不在合并浮层里`).toBe(true);
+      expect(snapshot.panelSections.query, `${where} · 检索行不在合并浮层里`).toBe(true);
+      expect(snapshot.panelSections.sections, `${where} · 资料节不是面板的直接子节`).toBe(1);
       // 3c. 行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
-      //     计量环与模型下拉收在发送键左边，工具行左端改由「+」起头；「普通讨论」与「资料」的
-      //     相对顺序保持 2026-10-18 那一半。
+      //     计量环与模型下拉收在发送键左边，工具行左端改由「+」起头。
+      //     2026-10-24 合并后「普通讨论在左、资料在右」的两端比较失去对象（只剩一枚芯片），
+      //     改锁当前真实文档序：合并芯片是工具行最右一枚，且仍在模式芯片右侧——原断言要锁的
+      //     相对顺序（资料入口排在模式/说明之后、行尾之前）由这两条等值断言继续锁住。
       expect(snapshot.toolOrder[0], `${where} · 工具行左端不是「+」`).toBe("agent-chat-attach");
       expect(snapshot.actionsOrder, `${where} · 底栏不是「工具行 → 右端一组 → 发送键」`).toEqual([
         "agent-chat-composer-tools", "agent-chat-composer-tail", "primary-button agent-chat-send"]);
       expect(snapshot.tailOrder, `${where} · 右端一组不是「计量环 → 模型」`).toEqual(
         ["agent-chat-usage", "model-selector"]);
+      // 工具行的完整文档序（合并后一枚芯片在行尾，模式芯片仍在它左侧）。
+      expect(snapshot.toolOrder, `${where} · 工具行文档序变了`).toEqual([
+        "agent-chat-attach", "agent-chat-permission", "agent-chat-mode",
+        "agent-chat-tool composer-draft-polish", "agent-chat-options agent-chat-send-options"]);
       expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),
-        `${where} · 资料入口应在「普通讨论」右侧`).toBeLessThan(
-        snapshot.toolOrder.indexOf("agent-chat-options agent-chat-source-options"));
+        `${where} · 合并芯片不是工具行最右一枚`).toBe(snapshot.toolOrder.length - 1);
+      expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),
+        `${where} · 合并芯片应在模式芯片右侧`).toBeGreaterThan(snapshot.toolOrder.indexOf("agent-chat-mode"));
       // 3d. 模式芯片里的当前档文字必须与芯片同中线（2026-10-20 用户截图「竖直重心没有在一个高度」）：
       //     那一轮的成因是 Chromium 把原生 select 的内部文字按内容盒贴顶排，height 撑满 chip 时
       //     文字整体上浮 7-8px（像素实测）。2026-10-22 DEV-0116 起这一档改成自绘浮层，
@@ -299,8 +340,8 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       // 检索行本来就在弹层内，这里只核对它没被挤出滚动区（可命中即说明留在视野里）。
       // 4. 输入器不被面板压走：面板是浮层不进文档流，草稿与发送键的几何不随开合变化；
       //    发送键不被压住。草稿在浮层开着时被短暂盖住属芯片菜单既有模式——DEV-0116 的
-      //    档位菜单（普通 Agent）同样盖草稿，2026-10-24 资料/发送选项两枚浮层锚定芯片后
-      //    与它一致；页面不横向溢出。
+      //    档位菜单（普通 Agent）同样盖草稿，2026-10-24 发送选项与资料合并成一枚锚定芯片的
+      //    浮层后与它一致；页面不横向溢出。
       insideViewport(snapshot, where, "发送键", require(where, "发送键", snapshot.sendBox));
       expect(snapshot.overlaps.panelSend, `${where} · 弹层压住发送键`).toBeLessThanOrEqual(0.5);
       expect(snapshot.hitTests.send, `${where} · 发送键被面板遮挡`).toBe("self");

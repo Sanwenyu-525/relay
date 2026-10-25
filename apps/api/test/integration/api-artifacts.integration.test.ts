@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test, { after, before } from 'node:test';
 
 import { Client } from 'pg';
@@ -16,6 +17,7 @@ import {
   APP_DATABASE_URL,
   MIGRATIONS_DIRECTORY,
   MIGRATION_DATABASE_URL,
+  expectSqlState,
   openDatabase,
 } from './integration-support.js';
 import {
@@ -114,11 +116,12 @@ async function createProject(title = 'p03-project'): Promise<string> {
 
 async function createTask(input: {
   readonly projectId: string | null;
+  readonly workspaceId?: string;
   readonly criteria?: readonly { readonly statement: string; readonly criterion_id: string }[];
   readonly expectedOutputs?: unknown;
 }): Promise<TaskFixture> {
   const commandId = randomUUID();
-  const response = await api.post(workspacePath(workspaceId, '/tasks'), {
+  const response = await api.post(workspacePath(input.workspaceId ?? workspaceId, '/tasks'), {
     command_id: commandId,
     project_id: input.projectId,
     title: 'p03-task',
@@ -591,6 +594,72 @@ test('creates a managed markdown version that is complete on disk and readable t
   assert.equal(serialized.includes('staging'), false);
 });
 
+test('the application role cannot attach an Artifact to a Task from another Workspace when project_id is null', async () => {
+  const role = await sql<{ readonly current_user: string }>`select current_user`.execute(appDatabase.db);
+  assert.equal(role.rows[0]?.current_user, 'relay_app');
+
+  const task = await createTask({ projectId: null });
+  const otherWorkspaceId = await createWorkspace(appDatabase.db);
+
+  await sql`
+    insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+    values (${randomUUID()}, ${workspaceId}, null, ${task.task_id}, 'MARKDOWN_DOCUMENT', 'same-workspace-inbox')
+  `.execute(appDatabase.db);
+
+  await expectSqlState('23503', 'Artifact and Task must belong to the same Workspace', () => sql`
+    insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+    values (${randomUUID()}, ${otherWorkspaceId}, null, ${task.task_id}, 'MARKDOWN_DOCUMENT', 'cross-workspace')
+  `.execute(appDatabase.db));
+
+  const projectId = await createProject('same-workspace-artifact-scope');
+  const projectTask = await createTask({ projectId });
+  await sql`
+    insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+    values (${randomUUID()}, ${workspaceId}, ${projectId}, ${projectTask.task_id}, 'MARKDOWN_DOCUMENT', 'same-workspace')
+  `.execute(appDatabase.db);
+
+  const otherProjectCommandId = randomUUID();
+  const otherProjectResponse = await api.post(workspacePath(otherWorkspaceId, '/projects'), {
+    command_id: otherProjectCommandId,
+    title: 'other-workspace-project',
+    project_type: 'GENERAL',
+  });
+  const otherProjectId = expectCommandAccepted(otherProjectResponse, 201, otherProjectCommandId).project_id as string;
+  const otherTask = await createTask({ projectId: otherProjectId, workspaceId: otherWorkspaceId });
+
+  await expectSqlState('23503', 'non-null project scope cannot accept a different Workspace Task', () => sql`
+    insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+    values (${randomUUID()}, ${otherWorkspaceId}, ${otherProjectId}, ${task.task_id}, 'MARKDOWN_DOCUMENT', 'cross-workspace-project')
+  `.execute(appDatabase.db));
+
+  await sql`
+    insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+    values (${randomUUID()}, ${otherWorkspaceId}, ${otherProjectId}, ${otherTask.task_id}, 'MARKDOWN_DOCUMENT', 'same-other-workspace')
+  `.execute(appDatabase.db);
+});
+
+test('refuses to read matching content through a version-directory junction outside data_root', { skip: process.platform !== 'win32' }, async () => {
+  const task = await startedTask();
+  const content = '# 受管正文\n';
+  const artifact = await saveFirstVersion(task, content);
+  const versionDirectory = dirname(storedContentPath(artifact.artifact_id, artifact.version_id));
+  const outsideRoot = await mkdtemp(join(tmpdir(), 'relay-artifact-junction-'));
+  const outsideVersionDirectory = join(outsideRoot, 'version');
+  await mkdir(outsideVersionDirectory);
+  await writeFile(join(outsideVersionDirectory, 'content.md'), content, 'utf8');
+
+  try {
+    await rm(versionDirectory, { recursive: true, force: true });
+    await symlink(outsideVersionDirectory, versionDirectory, 'junction');
+    const unavailable = await readContent(artifact.version_id);
+    assert.equal(unavailable.status, 503, unavailable.text);
+    expectProblem(unavailable, 503, 'EVIDENCE_UNAVAILABLE');
+  } finally {
+    await unlink(versionDirectory).catch(() => undefined);
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
 test('rejects an unsupported media type with 415 and oversized content with 413', async () => {
   const task = await startedTask();
 
@@ -836,6 +905,59 @@ test('completes a task against a fixed version and never marks the newer version
 
   expectProblem(reused, 409, 'COMMAND_ID_REUSED');
   assert.equal(await countCompletionRecords(task.task_id), 1);
+});
+
+test('accepts multiple exact versions across artifacts and preserves the set as historical evidence', async () => {
+  const task = await startedTask();
+  const firstArtifactV1 = await saveFirstVersion(task, '# supported result v1\n', '结果 A');
+  const firstArtifactV2 = await saveNextVersion({ task, artifact: firstArtifactV1,
+    content: '# supported result v2\n' });
+  const secondArtifactCommand = randomUUID();
+  const secondArtifactResponse = await api.post(workspacePath(workspaceId,
+    `/tasks/${task.task_id}/artifacts`), { command_id: secondArtifactCommand,
+    expected_task_revision: firstArtifactV2.task_revision, title: '结果 B',
+    media_type: 'text/markdown', content: '# independent support\n' });
+  const secondArtifactV1 = expectCommandAccepted(secondArtifactResponse, 201, secondArtifactCommand);
+  const acceptedIds = [firstArtifactV1.version_id, firstArtifactV2.version_id,
+    secondArtifactV1.version_id as string];
+  const completeCommand = randomUUID();
+  const completed = expectCommandAccepted(await api.post(workspacePath(workspaceId,
+    `/tasks/${task.task_id}/complete`), {
+    command_id: completeCommand, expected_revision: secondArtifactV1.task_revision as string,
+    acceptance_revision: task.acceptance_revision, artifact_version_ids: acceptedIds,
+    acceptance: { statement: 'Both histories and the supporting artifact were reviewed',
+      accepted_criterion_ids: ['c1'] },
+  }), 200, completeCommand);
+  assert.equal(completed.status, 'DONE');
+
+  const acceptance = await sql<{ accepted_version_refs: readonly string[] }>`
+    select accepted_version_refs from human_acceptances where id = ${completed.human_acceptance_id as string}
+  `.execute(appDatabase.db);
+  assert.deepEqual([...acceptance.rows[0]!.accepted_version_refs].sort(), [...acceptedIds].sort());
+  const acceptedLineage = await sql<{ child_version_id: string }>`
+    select child_version_id from artifact_lineage_edges
+    where relation = 'ACCEPTED_BY' and parent_kind = 'COMPLETION_RECORD'
+      and parent_id = ${completed.completion_id as string}
+  `.execute(appDatabase.db);
+  assert.deepEqual(acceptedLineage.rows.map((row) => row.child_version_id).sort(),
+    [...acceptedIds].sort());
+
+  const evidencePath = workspacePath(workspaceId,
+    `/completion-records/${String(completed.completion_id)}`);
+  const evidence = (await api.get(evidencePath)).body as {
+    is_current: boolean; artifact_versions: { artifact_version_id: string | null }[] };
+  assert.equal(evidence.is_current, true);
+  assert.deepEqual(evidence.artifact_versions.map((item) => item.artifact_version_id).sort(),
+    [...acceptedIds].sort());
+
+  const reopenCommand = randomUUID();
+  expectCommandAccepted(await api.post(workspacePath(workspaceId,
+    `/tasks/${task.task_id}/reopen`), { command_id: reopenCommand,
+    expected_revision: completed.revision, reason: 'Open the next acceptance cycle' }), 200, reopenCommand);
+  const historical = (await api.get(evidencePath)).body as typeof evidence;
+  assert.equal(historical.is_current, false);
+  assert.deepEqual(historical.artifact_versions.map((item) => item.artifact_version_id).sort(),
+    [...acceptedIds].sort());
 });
 
 test('completes a task that requires no artifacts with an empty version set', async () => {

@@ -1,5 +1,6 @@
 .connections-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.connections-page > h1 { font-size: var(--relay-font-size-page); }
+/* 2026-10-25 视觉对齐：与全局页头同档（compactPage）；该选择器历史上从未命中真实节点，仅保持一致。 */
+.connections-page > h1 { font-size: var(--relay-font-size-compactPage); }
 .connections-view-configuration > summary { padding: var(--relay-space-2) 0; color: var(--relay-color-text-secondary); cursor: pointer; }
 .connections-view-configuration > summary::marker { color: var(--relay-color-action-primary); }
 /* 原 60rem 档只有一条标题降级，且 `.connections-page > h1` 选择器从未命中真实节点

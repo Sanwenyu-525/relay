@@ -45,6 +45,8 @@ export interface ScheduledTaskOccurrenceRow {
   ready_command_id: string;
   delegate_command_id: string;
   frozen_execution: JsonObject;
+  frozen_template: JsonObject;
+  frozen_execution_input: JsonObject;
   reason: string | null;
   revision: bigint;
   created_at: Date;
@@ -63,6 +65,8 @@ export interface OccurrenceInsert {
   readonly create_command_id: string;
   readonly ready_command_id: string;
   readonly delegate_command_id: string;
+  readonly frozen_template: JsonObject;
+  readonly frozen_execution_input: JsonObject;
 }
 
 /**
@@ -157,10 +161,11 @@ export class ScheduledTaskRepository {
   async insertOccurrence(row: OccurrenceInsert, status: 'DISPATCHING' | 'BLOCKED' | 'SKIPPED', reason: string | null = null): Promise<ScheduledTaskOccurrenceRow | undefined> {
     return (await sql<ScheduledTaskOccurrenceRow>`insert into scheduled_task_occurrences
       (id, scheduled_task_id, workspace_id, project_id, schedule_generation, sequence, due_at, timezone, missed,
-       status, create_command_id, ready_command_id, delegate_command_id, reason)
+       status, create_command_id, ready_command_id, delegate_command_id, frozen_template, frozen_execution_input, reason)
       values (${row.id}, ${row.scheduled_task_id}, ${row.workspace_id}, ${row.project_id}, ${row.schedule_generation},
         ${row.sequence}, ${row.due_at}, ${row.timezone}, ${row.missed}, ${status},
-        ${row.create_command_id}, ${row.ready_command_id}, ${row.delegate_command_id}, ${reason})
+        ${row.create_command_id}, ${row.ready_command_id}, ${row.delegate_command_id},
+        ${JSON.stringify(row.frozen_template)}::jsonb, ${JSON.stringify(row.frozen_execution_input)}::jsonb, ${reason})
       on conflict (scheduled_task_id, schedule_generation, sequence) do nothing
       returning *`.execute(this.db)).rows[0];
   }
@@ -218,17 +223,24 @@ export class ScheduledTaskRepository {
   /** 触发时冻结的执行范围：连接/资料/资源依据在这一刻确定，事后漂移不回写历史。 */
   async freezeExecution(id: string, spec: JsonObject): Promise<void> {
     await sql`update scheduled_task_occurrences set frozen_execution = ${JSON.stringify(spec)}::jsonb,
-      revision = revision + 1 where id = ${id}`.execute(this.db);
+      revision = revision + 1 where id = ${id} and status = 'DISPATCHING'`.execute(this.db);
   }
 
-  async markDispatched(id: string, taskId: string, runId: string): Promise<void> {
-    await sql`update scheduled_task_occurrences set status = 'DISPATCHED', task_id = ${taskId}, run_id = ${runId},
-      reason = null, revision = revision + 1 where id = ${id}`.execute(this.db);
+  /**
+   * 完成 DISPATCHING → DISPATCHED：只在仍是 DISPATCHING 时生效并返回行。
+   * 条件更新兼作幂等与并发兜底——已由另一路径完成时返回 undefined，
+   * 调用方据此跳过 `markStarted`，同一发生不会重复累计 `runs_started`。
+   */
+  async markDispatched(id: string, taskId: string, runId: string): Promise<ScheduledTaskOccurrenceRow | undefined> {
+    return (await sql<ScheduledTaskOccurrenceRow>`update scheduled_task_occurrences
+      set status = 'DISPATCHED', task_id = ${taskId}, run_id = ${runId}, reason = null, revision = revision + 1
+      where id = ${id} and status = 'DISPATCHING' returning *`.execute(this.db)).rows[0];
   }
 
+  /** 失败落 BLOCKED：只允许覆盖 DISPATCHING，迟到的失败写入不得污染已确认的 DISPATCHED。 */
   async markSettled(id: string, status: 'BLOCKED' | 'SKIPPED', reason: string): Promise<void> {
     await sql`update scheduled_task_occurrences set status = ${status}, reason = ${reason}, revision = revision + 1
-      where id = ${id}`.execute(this.db);
+      where id = ${id} and status = 'DISPATCHING'`.execute(this.db);
   }
 
   async resolve(id: string, status: 'RESOLVED', reason: string): Promise<ScheduledTaskOccurrenceRow> {

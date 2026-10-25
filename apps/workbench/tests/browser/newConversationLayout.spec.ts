@@ -102,7 +102,7 @@ for(const scenario of ["topbar","directory","project-late","switch-directory","s
     } else if(scenario==="failure") {await expect(page.getByTestId("folder-error")).toBeVisible();await page.waitForTimeout(300);}
     else await page.waitForTimeout(scenario==="project-late"?2200:1200);
     if(scenario==="project-late") expect(calls.lateProjectReads()).toBeGreaterThan(0);
-    await expect(page.getByText("正在核对对话目标与会话",{exact:false})).toHaveCount(0);
+    await expect(page.getByText("正在核对对话工作对象与会话",{exact:false})).toHaveCount(0);
     await checkFrames(page);
   });
 }

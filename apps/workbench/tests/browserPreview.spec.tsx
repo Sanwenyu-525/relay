@@ -258,3 +258,82 @@ describe("内置网页预览面板", () => {
     expect(bridge.external).toEqual(["https://a.example/x"]);
   });
 });
+
+/**
+ * P0-1 恢复描述一致性反例。
+ *
+ * 已发现的问题：面板初始化会读取已有恢复来源，但持久化 Effect 用**初始空白标签状态**
+ * 写盘——`store.write` 收到空 entries 会删掉该作用域的描述。表现为：第一次挂载时
+ * 恢复提示还在（state 已读），刷新/重挂后消失；切作用域时还会把旧会话的来源
+ * 瞬写进新作用域。正确口径：初始化空态与作用域切换都不写盘，只有用户真的打开过
+ * 页面或关掉带页面的标签才持久化（后者覆盖「关闭全部后的显式清空」）。
+ */
+describe("内置网页预览的恢复描述一致性", () => {
+  it("连续挂载、卸载、重载后恢复来源仍然正确，初始化不删恢复描述", async () => {
+    const store = localPreviewRestoreStore(window.localStorage);
+    store.write(scope, { entries: [{ origin: "https://restored.example" }], selected: 0 });
+    const bridge = new FakeBridge();
+
+    const first = await mount(bridge);
+    // 第一次挂载就可能触发缺陷：持久化 Effect 拿空白初始态写盘，把描述删掉。
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://restored.example"]);
+    first.unmount();
+
+    const second = await mount(bridge);
+    expect(second.wrapper.get('[data-testid="preview-restore"]').text()).toContain("1 个网站");
+    // 点恢复芯片只填地址栏：不发起加载，也不该把恢复描述删掉。
+    await second.wrapper.get('[data-testid="preview-restore-https://restored.example"]').trigger("click");
+    await flush();
+    expect(bridge.opened.length).toBe(0);
+    second.unmount();
+
+    const third = await mount(bridge);
+    expect(third.wrapper.get('[data-testid="preview-restore"]').text()).toContain("1 个网站");
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://restored.example"]);
+  });
+
+  it("切换作用域不串页：旧会话来源不写进新作用域，新作用域已有描述不被删除", async () => {
+    const otherScope = "workspace-1:conversation-2";
+    const store = localPreviewRestoreStore(window.localStorage);
+    store.write(otherScope, { entries: [{ origin: "https://other-restore.example" }], selected: 0 });
+    const bridge = new FakeBridge();
+    const { wrapper, rerender } = await mount(bridge);
+    await typeAddress(wrapper, "https://a.example/");
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://a.example"]);
+
+    await rerender(<BrowserPreviewPanel bridge={bridge} scope={otherScope} restoreStore={store} />);
+    await flush();
+    // 新作用域从空白标签开始，不继承上一段会话的页面。
+    expect(wrapper.get('[data-testid="preview-status-line"]').text()).toContain("尚未打开网页");
+    // 新作用域自己的恢复描述仍在，且没有被旧会话的来源污染。
+    expect(store.read(otherScope).entries.map((entry) => entry.origin)).toEqual(["https://other-restore.example"]);
+    expect(wrapper.get('[data-testid="preview-restore"]').text()).toContain("1 个网站");
+    // 旧作用域的描述不因切换丢失，切回来仍可恢复。
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://a.example"]);
+    await rerender(<BrowserPreviewPanel bridge={bridge} scope={scope} restoreStore={store} />);
+    await flush();
+    expect(wrapper.get('[data-testid="preview-restore"]').text()).toContain("1 个网站");
+  });
+
+  it("用户关闭全部标签后恢复描述被显式清空（与初始化空态区分）", async () => {
+    const store = localPreviewRestoreStore(window.localStorage);
+    const bridge = new FakeBridge();
+    const { wrapper } = await mount(bridge);
+    await typeAddress(wrapper, "https://a.example/");
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://a.example"]);
+    await wrapper.get('[data-testid="preview-tab-close-0"]').trigger("click");
+    await flush();
+    expect(store.read(scope).entries).toEqual([]);
+  });
+
+  it("多标签来源按顺序恢复，且只存来源不存 path/query/fragment", async () => {
+    const store = localPreviewRestoreStore(window.localStorage);
+    const bridge = new FakeBridge();
+    const { wrapper } = await mount(bridge);
+    await typeAddress(wrapper, "https://a.example/first?token=secret");
+    await wrapper.get('[data-testid="preview-tab-new"]').trigger("click");
+    await flush();
+    await typeAddress(wrapper, "https://b.example/second#frag");
+    expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://a.example", "https://b.example"]);
+  });
+});

@@ -81,9 +81,9 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-async function measure(page: Page, width: number, withCache: boolean): Promise<{
+async function measure(page: Page, width: number, height: number, withCache: boolean): Promise<{
   composer: number; actions: number; hitVisible: boolean }> {
-  await page.setViewportSize({ width, height: 800 });
+  await page.setViewportSize({ width, height });
   await installRoutes(page, withCache);
   await page.goto(`/agent?session=${sessionId}`);
   await connect(page);
@@ -99,11 +99,12 @@ async function measure(page: Page, width: number, withCache: boolean): Promise<{
   return { composer: box.composer, actions: box.actions, hitVisible };
 }
 
-for (const width of [1280, 1600]) {
-  test(`命中率出现不改变输入卡与底栏高度（${width}px，DEV-0110）`, async ({ page }) => {
-    const without = await measure(page, width, false);
+// 1162×782 是 DEV-0110 报障时的真实桌面窗口尺寸（禅道那轮的现场），必须与 1280/1600 同判据跑。
+for (const [width, height] of [[1162, 782], [1280, 800], [1600, 800]] as const) {
+  test(`命中率出现不改变输入卡与底栏高度（${width}×${height}，DEV-0110）`, async ({ page }) => {
+    const without = await measure(page, width, height, false);
     expect(without.hitVisible).toBe(false);
-    const withHit = await measure(page, width, true);
+    const withHit = await measure(page, width, height, true);
     expect(withHit.hitVisible).toBe(true);
     // 高度逐帧一致：命中率文本出现前后，输入卡与底栏都不换行、不增高。
     expect(Math.abs(withHit.composer - without.composer)).toBeLessThan(0.5);

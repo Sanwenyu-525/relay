@@ -85,3 +85,18 @@ test('OpenRouter chat credential is independent from default and catalog credent
     RELAY_MODEL_CATALOG_API_KEY: 'also-not-chat',
   }, 'vendor/model:free'), ConfigError);
 });
+
+test('OpenRouter chat credential falls back to the standard OPENROUTER_API_KEY', () => {
+  const fallback = readOpenRouterModelPortConfig(
+    { OPENROUTER_API_KEY: ' std-key ' }, 'vendor/model:free');
+  assert.equal(fallback.apiKey, 'std-key');
+  const blankRelayFallsBack = readOpenRouterModelPortConfig(
+    { RELAY_OPENROUTER_API_KEY: '   ', OPENROUTER_API_KEY: 'std-key' }, 'vendor/model:free');
+  assert.equal(blankRelayFallsBack.apiKey, 'std-key');
+  const explicitOverrideWins = readOpenRouterModelPortConfig(
+    { RELAY_OPENROUTER_API_KEY: 'relay-key', OPENROUTER_API_KEY: 'std-key' }, 'vendor/model:free');
+  assert.equal(explicitOverrideWins.apiKey, 'relay-key');
+  assert.throws(() => readOpenRouterModelPortConfig({}, 'vendor/model:free'), ConfigError);
+  assert.throws(() => readOpenRouterModelPortConfig(
+    { OPENROUTER_API_KEY: '   ' }, 'vendor/model:free'), ConfigError);
+});

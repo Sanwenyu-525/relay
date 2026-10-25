@@ -24,7 +24,7 @@ export default function CompletionRecordView() {
     setLoaded(null); setFailure(null);
     if (client === null) return;
     void client.getCompletionEvidence(id).then((value) => {
-      if (value.completionId !== id) throw new Error("完成凭据与当前目标不匹配。");
+      if (value.completionId !== id) throw new Error("完成凭据与当前工作对象不匹配。");
       if (request === requestVersion.current) setLoaded({ key, value });
     }).catch((caught: unknown) => {
       if (request === requestVersion.current) setFailure({ key, message:

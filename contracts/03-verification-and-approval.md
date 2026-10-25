@@ -26,6 +26,8 @@ V1 对实质验收契约变更采用保守策略：记录变更并暂停/安全�
 
 Hard / Rule / Semantic 是职责分类，不强制每个任务都执行三个昂贵步骤。能确定性判定的用程序；重要过程约束在动作前阻止，并用执行证据审计；语义质量使用独立上下文判断，必要时交给人。
 
+普通 `SEMANTIC` criterion 只使用冻结的真实语义模型检查器；未配置时转为待人工提供证据，不能静默选用 Fake。HARD SEMANTIC Rule 没有真实检查器时必须阻止 Delegate。`fake-semantic-v1` 仅用于显式测试夹具，其 PASS 不构成生产 Verification 证据。
+
 | 必需检查情况 | Verification 总决策 | 后续 |
 |---|---|---|
 | 全部满足，无未决必需人工项 | PASS | 尝试业务提交 |
@@ -75,7 +77,7 @@ Review 因失效停止可执行，不抹去用户曾批准的历史事实。最�
 
 ## 6. Approval 的精确授权对象
 
-工具审批请求绑定：review_id、run_id、step_id、logical_operation_id、action_type、规范化目标、参数摘要、内容版本/摘要、作用域、请求版本与失效条件。有效期可由动作策略设置，不采用无依据的永久批准。
+工具审批请求绑定：review_id、run_id、step_id、logical_operation_id、action_type、规范化目标、参数摘要、内容版本/摘要、作用域、请求版本与失效条件。有效期可由动作策略设置，不采用无依据的永久批准。 Gateway Operation 已存在时，Review 读时投影与决策入口都必须匹配 WAITING_APPROVAL 及完整冻结绑定；状态、目标或摘要漂移后不再投影为可决策，旧决策被拒绝。预留 operation_id 尚无 Gateway 行时保留既有预留流程。
 
 用户看到操作、目标、影响、原因、内容摘要/可检查差异。Approve/Deny 只针对该请求。拒绝后模型不能通过改工具名称或换 Adapter 绕过同一动作的拒绝。
 

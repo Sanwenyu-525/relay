@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import type {
   CheckResultRow,
+  LogicalOperationRow,
   ReviewDecision,
   ReviewKind,
+  ReviewRequestRow,
   RunRow,
   TaskRow,
   VerificationSessionRow,
@@ -17,6 +19,26 @@ import type { Verdict } from '../workflow/verdict.js';
 /** Review 的 target_hash 只覆盖规范化的精确授权对象，展示文案不进入授权身份。 */
 export function reviewTargetHash(target: JsonObject): Buffer {
   return createHash('sha256').update(canonicalizeJson(target), 'utf8').digest();
+}
+
+/** A Review can authorize only the exact persisted Gateway operation it names. */
+export function reviewMatchesGatewayOperation(
+  review: ReviewRequestRow,
+  operation: LogicalOperationRow,
+): boolean {
+  const target = review.target;
+  return review.kind === 'ACTION_APPROVAL' && review.operation_id === operation.id &&
+    review.workspace_id === operation.workspace_id && review.project_id === operation.project_id &&
+    review.task_id === operation.task_id && review.run_id === operation.run_id &&
+    review.import_job_id === operation.import_job_id &&
+    review.target_hash.equals(reviewTargetHash(target)) && target.operation_id === operation.id &&
+    target.origin === operation.origin && target.run_id === operation.run_id &&
+    target.step_id === operation.step_id && target.import_job_id === operation.import_job_id &&
+    target.action_type === operation.action_type && target.normalized_target === operation.normalized_target &&
+    target.params_hash === operation.params_hash.toString('hex') &&
+    target.connection_id === operation.connection_id &&
+    target.connection_version === operation.connection_version.toString() &&
+    target.policy_id === operation.policy_id && target.policy_version === operation.policy_version.toString();
 }
 
 interface RequestSpec {

@@ -445,6 +445,7 @@ test('已被完成凭据绑定的终态 Task 不能直接改验收契约：先�
 
   const stillDone = await readTask(task.taskId);
   assert.equal(stillDone.status, 'DONE');
+  assert.deepEqual(stillDone.allowed_actions, ['REOPEN']);
   assert.equal(stillDone.acceptance_revision, task.acceptanceRevision,
     '终态 Task 的验收版本指针不被这个入口改动');
   assert.ok(stillDone.current_completion_id);

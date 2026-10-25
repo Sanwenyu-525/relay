@@ -5,7 +5,7 @@ import { sql } from 'kysely';
 import { createRepositories } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from './integration-support.js';
-import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath, type TestApi } from './api-harness.js';
+import { createWorkspace, expectCommandAccepted, expectProblem, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 
 const app = openDatabase(APP_DATABASE_URL, 'relay-personal-planning-test');
 let api: TestApi; let workspaceId: string;
@@ -96,6 +96,41 @@ test('用户改估时后保留旧候选并拒绝按旧依据应用，重新发�
   assert.equal(((await read(`/tasks/${id}/time-estimates`)).items as unknown[]).length, 2);
   const runs = await sql<{ count: string }>`select count(*)::text as count from runs where workspace_id = ${workspaceId}`.execute(app.db);
   assert.equal(runs.rows[0]?.count, '0');
+});
+
+test('验收版本变化后旧用户估时留在历史但明确标为不适用', async () => {
+  const f = await fixture(['验收版本变化任务']); const id = f.taskIds[0]!;
+  const saved = await estimate(id, minutes(25));
+  const before = await read(`/tasks/${id}/time-estimates`);
+  const estimateId = (before.current as { id: string }).id;
+  assert.equal((before.current as { source_kind: string; applicable: boolean }).source_kind, 'USER_DECLARED');
+  assert.equal((before.current as { applicable: boolean }).applicable, true);
+  const task = (await createRepositories(app.db).tasks.readTask(id))!;
+  await post(`/tasks/${id}/acceptance`, { expected_revision: task.revision.toString(),
+    expected_acceptance_revision: task.acceptance_revision.toString(), criteria: [
+      { criterion_id: 'c1', statement: '人工核对', required: true, method: 'HUMAN' },
+      { criterion_id: 'c2', statement: '复核新验收版本', required: true, method: 'HUMAN' },
+    ] });
+  const after = await read(`/tasks/${id}/time-estimates`);
+  assert.equal((after.current as { id: string }).id, estimateId);
+  assert.equal((after.current as { applicable: boolean }).applicable, false);
+  assert.equal((after.current as { acceptance_revision: string }).acceptance_revision, '1');
+  assert.equal((after.items as { id: string }[]).length, 1);
+  assert.ok(saved.estimate_id);
+});
+
+test('用户估时使用 Task 与估时双重 CAS 拒绝旧修订', async () => {
+  const f = await fixture(['估时修订冲突任务']); const id = f.taskIds[0]!;
+  await estimate(id, minutes(20));
+  const staleEstimate = await api.post(path(`/tasks/${id}/time-estimates`), { command_id: randomUUID(), confirmed: true,
+    expected_task_revision: '0', expected_estimate_revision: '0', elapsed_ms: minutes(30), execution_ms: null,
+    waiting_ms: null, review_ms: null, human_ms: null, source_note: '旧估时修订' });
+  assert.equal(expectProblem(staleEstimate, 409, 'REVISION_CONFLICT').conflict?.entity_type, 'TIME_ESTIMATE');
+  await post(`/tasks/${id}/planning-metadata`, { expected_revision: '0', priority: 'HIGH', due_local_date: null, timezone: null });
+  const staleTask = await api.post(path(`/tasks/${id}/time-estimates`), { command_id: randomUUID(), confirmed: true,
+    expected_task_revision: '0', expected_estimate_revision: '1', elapsed_ms: minutes(30), execution_ms: null,
+    waiting_ms: null, review_ms: null, human_ms: null, source_note: '旧 Task 修订' });
+  assert.equal(expectProblem(staleTask, 409, 'REVISION_CONFLICT').conflict?.entity_type, 'TASK');
 });
 
 test('已关联活动目标提供主线依据，缺总估时只生成诊断而不从分项推算', async () => {

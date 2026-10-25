@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { RelayApiClient, RelayProject } from "../api/relayClient";
 import { createCommandId, projectRenameResultFrom, RelayApiError,
   RelayTransportError } from "../api/relayClient";
+import { RelayContractError } from "../api/core/errors";
 import { describeLiveError } from "../lib/liveErrors";
 
 /**
@@ -10,6 +11,8 @@ import { describeLiveError } from "../lib/liveErrors";
  */
 type PendingRename = { readonly commandId: string; readonly projectId: string;
   readonly expectedRevision: string; readonly title: string };
+
+class RenameResponseMismatch extends Error {}
 
 function storageKey(client: RelayApiClient, projectId: string): string {
   return `relay:project-rename:${client.baseUrl}:${client.workspaceId}:${projectId}`;
@@ -36,13 +39,15 @@ function savePending(key: string, pending: PendingRename | null): void {
 
 function verifyRename(record: PendingRename,
   envelope: { readonly commandId: string; readonly result: Readonly<Record<string, unknown>> }): string {
-  if (envelope.commandId !== record.commandId) throw new Error("回执 command_id 与原命令不一致。");
+  if (envelope.commandId !== record.commandId) throw new RenameResponseMismatch("回执 command_id 与原命令不一致。");
   const result = projectRenameResultFrom(envelope.result);
-  if (result.projectId !== record.projectId) throw new Error("回执 Project 与原项目不一致。");
+  if (result.projectId !== record.projectId) throw new RenameResponseMismatch("回执 Project 与原项目不一致。");
   let next: bigint;
-  try { next = BigInt(record.expectedRevision) + 1n; } catch { throw new Error("原 Project revision 无效。"); }
+  try { next = BigInt(record.expectedRevision) + 1n; } catch {
+    throw new RenameResponseMismatch("原 Project revision 无效。");
+  }
   if (BigInt(result.revision) !== next) {
-    throw new Error(`回执修订 v${result.revision} 不是原修订 v${record.expectedRevision} 推进后的下一版。`);
+    throw new RenameResponseMismatch(`回执修订 v${result.revision} 不是原修订 v${record.expectedRevision} 推进后的下一版。`);
   }
   return `项目标题已更新为「${result.title}」· Project v${result.revision}`;
 }
@@ -71,7 +76,7 @@ export default function ProjectTitleEditor({ client, project, archived, onChange
     try {
       const response = await client.getCommandReceipt(record.commandId);
       if (response.commandType !== "EditProjectPresentation") {
-        throw new Error("原回执不是本次 EditProjectPresentation。");
+        throw new RenameResponseMismatch("原回执不是本次 EditProjectPresentation。");
       }
       const message = verifyRename(record, response);
       holdPending(null); setReceipt(message); setEditing(false); onChanged();
@@ -79,6 +84,8 @@ export default function ProjectTitleEditor({ client, project, archived, onChange
       if (caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND") {
         setMayRetry(true);
         setError("服务端明确未找到原命令；只能用原 ID 与原标题重试。");
+      } else if (caught instanceof RenameResponseMismatch) {
+        setError(`回执与冻结命令不匹配：${caught.message}已保留原 command_id。`);
       } else setError(`回执仍不可核对；请保留原 command_id。${describeLiveError(caught).message}`);
     } finally { setBusy(false); }
   }, [client, holdPending, onChanged]);
@@ -92,7 +99,8 @@ export default function ProjectTitleEditor({ client, project, archived, onChange
       const message = verifyRename(record, envelope);
       holdPending(null); setReceipt(message); setEditing(false); onChanged();
     } catch (caught) {
-      if (caught instanceof RelayTransportError ||
+      if (caught instanceof RenameResponseMismatch || caught instanceof RelayContractError ||
+        caught instanceof RelayTransportError ||
         caught instanceof RelayApiError && (caught.problem.status >= 500 ||
           caught.problem.code === "COMMAND_ID_REUSED")) {
         setError("改名结果尚不能确认；已保留原 command_id，先查询回执。");

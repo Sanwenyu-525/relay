@@ -153,7 +153,9 @@
 .task-detail-page--artifact .artifact-workspace { gap: 0; }
 .task-detail-page--artifact .artifact-document,
 .task-detail-page--artifact .artifact-action-rail { padding: var(--relay-layout-main-padding); }
-.task-detail-page--artifact .artifact-document-heading h1 { font-size: var(--relay-font-size-page); margin: var(--relay-space-2) 0 var(--relay-space-3); }
+/* 2026-10-25 视觉对齐：任务详情页不再把文档标题放大到 page 档，回落到与
+   agent 页成果区同一档（上方 .artifact-document-heading 通用规则 compactPage）；本条只保留任务详情页的间距特化。 */
+.task-detail-page--artifact .artifact-document-heading h1 { margin: var(--relay-space-2) 0 var(--relay-space-3); }
 .task-detail-page--artifact .artifact-action-rail { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
 
 @media (min-width: 80rem) {

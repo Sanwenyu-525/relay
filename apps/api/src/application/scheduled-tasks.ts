@@ -12,6 +12,7 @@ import { prepareTaskCreation, createTask, type CreateTaskCriterionInput, type Cr
 import { delegateTask } from './delegate-task.js';
 import { requireRevision } from './revisions.js';
 import { markTaskReady } from './task-commands.js';
+import { scheduledTaskDispatchFailure } from './scheduled-task-admission.js';
 import { freezeTaskChainExecution, requireTaskChainExecutionCurrent, taskChainDelegateExecution, type TaskChainExecutionInput, type TaskChainExecutionSpec } from './task-chain-execution.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { advanceDueAt, isValidTimezone, localDateAt, parseLocalDate, parseLocalTime, resolveLocalDateTime, type RepeatRule } from './zoned-time.js';
@@ -356,6 +357,12 @@ export async function resolveScheduledTaskOccurrence(db: DbExecutor, input: Scop
         throw revisionConflict({ entityType: 'SCHEDULED_TASK_OCCURRENCE', expectedRevision: input.expectedRevision, actualRevision: occurrence.revision.toString() });
       }
       if (occurrence.status !== 'BLOCKED') throw invalidTransition('只有待处理的触发才能补跑或忽略。');
+      // 补跑前准入（P0-A）：必然不可执行的触发在命令事务内拒绝，不重开发生，
+      // 也就不会走到「先建 Task 再在 Delegate 被拒」的无意义路径。
+      if (input.action === 'RETRY') {
+        const failure = await scheduledTaskDispatchFailure(r, input.workspaceId, occurrence);
+        if (failure !== undefined) throw invalidTransition(`这次触发当前不能补跑：${failure.message}`);
+      }
 
       const updated = input.action === 'RETRY'
         ? await r.scheduledTasks.reopen(occurrence.id)
@@ -452,6 +459,8 @@ export async function scanScheduledTasks(db: DbExecutor, openedAt: Date): Promis
           schedule_generation: row.schedule_generation, sequence: BigInt(advanced.runs_reserved),
           due_at: row.next_due_at, timezone: row.timezone, missed: row.next_due_at < openedAt,
           create_command_id: randomUUID(), ready_command_id: randomUUID(), delegate_command_id: randomUUID(),
+          // 发生时配置冻结（P0-A）：模板与执行意图随发生落库，之后的编辑只影响未来时段。
+          frozen_template: row.template, frozen_execution_input: row.execution_input,
         };
 
         if (row.runs_started >= row.max_runs) {
@@ -502,12 +511,14 @@ function reasonOf(error: unknown): string {
  * 不会重复建 Task；`expected_task_revision` 只能取自前一步回执，读库重算会让
  * payload_hash 变化并被判成 CommandIdReused。
  *
- * 重跑的载荷一律来自已持久化的原事实，不从当前可变配置重算（#150）：
- *   * CreateTask 已提交过就取原回执结果——分发中断后用户编辑模板，重跑不得把
- *     当前模板与原 create_command_id 拼在一起（那会被判 ID 复用并反复阻塞）；
+ * 重跑的载荷一律来自已持久化的原事实，不从当前可变配置重算：
+ *   * 模板与执行意图在发生落库时冻结（frozen_template / frozen_execution_input，P0-A）——
+ *     分发中断后用户编辑模板，未提交的 CreateTask 也不得读到新模板；已提交过的
+ *     CreateTask 则取原回执结果（#150），两条路径都不把编辑后的当前配置与原命令身份拼接；
  *   * 执行范围复用 occurrence 上已冻结的 frozen_execution，只有首次才按当时状态冻结；
  *     恢复时旧冻结依据必须仍与当前事实一致（requireTaskChainExecutionCurrent），
  *     资料/资源/连接漂移就让这次 BLOCKED，不重算覆盖（#151）。
+ * CreateTask 未提交前先做一次快照准入：必然不可执行的触发不建 Task 直接落 BLOCKED（P0-A）。
  * 上一轮 Task 终态由 Delegate 原事务内的准入复核（ADR-026），扫描只负责给跳过原因。
  */
 export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: string): Promise<void> {
@@ -520,11 +531,26 @@ export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: 
   }
 
   try {
-    const template = schedule.template;
     // 已提交过的 CreateTask 以原回执为准：重放原结果，与模板是否被编辑无关。
     const priorCreate = await withTransaction(db, async (r) => r.receipts.findReceipt({
       scopeKey: httpCommandScopeKey(occurrence.workspace_id), commandId: occurrence.create_command_id,
     }));
+    if (priorCreate === undefined) {
+      // CreateTask 未提交前先做快照准入（P0-A）：必然不可执行的触发不得先建 Task。
+      // 并发窗口内的状态变化仍由 Delegate 原事务内准入兜底，契约的「已知中间态」收窄到那。
+      const failure = await withTransaction(db, async (r) =>
+        scheduledTaskDispatchFailure(r, occurrence.workspace_id, occurrence));
+      if (failure !== undefined) {
+        await withTransaction(db, async (r) => {
+          await r.scheduledTasks.markSettled(occurrenceId, 'BLOCKED', failure.reason);
+        });
+        return;
+      }
+    }
+    // 载荷一律来自发生时冻结的副本（P0-A）；迁移 0138 前的旧行保持 '{}'，回落计划当前值。
+    const template = Object.keys(occurrence.frozen_template).length > 0 ? occurrence.frozen_template : schedule.template;
+    const executionInput = Object.keys(occurrence.frozen_execution_input).length > 0
+      ? occurrence.frozen_execution_input : schedule.execution_input;
     const created: CommandOutcome<CreateTaskResult> = priorCreate === undefined
       ? await createTask(db, {
           workspaceId: occurrence.workspace_id,
@@ -542,11 +568,12 @@ export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: 
 
     // 执行范围按触发当时的状态冻结：连接/资料/资源漂移就让这一次失败，不静默降级。
     // 已冻结的依据直接复用，重算会改变 Delegate 载荷并破坏 ready/delegate 的回执重放。
+    // 首次冻结的输入意图同样取发生时冻结的副本（P0-A），编辑只影响未来时段。
     const frozen: TaskChainExecutionSpec = Object.keys(occurrence.frozen_execution).length === 0
       ? await withTransaction(db, async (r) => {
           const spec = await freezeTaskChainExecution(
             r, occurrence.workspace_id, occurrence.project_id, taskId,
-            Object.keys(schedule.execution_input).length === 0 ? undefined : schedule.execution_input as unknown as TaskChainExecutionInput,
+            Object.keys(executionInput).length === 0 ? undefined : executionInput as unknown as TaskChainExecutionInput,
           );
           await r.scheduledTasks.freezeExecution(occurrenceId, spec);
           return spec;
@@ -572,9 +599,11 @@ export async function dispatchScheduledOccurrence(db: DbExecutor, occurrenceId: 
       },
       ...taskChainDelegateExecution(frozen, schedule.authorization_expires_at),
     });
+    // 完成标记只在 DISPATCHING → DISPATCHED 真正发生时计数（P0-A）：另一个分发路径
+    // 已完成同一发生时这里拿到 undefined，跳过 markStarted，runs_started 不重复累计。
     await withTransaction(db, async (r) => {
-      await r.scheduledTasks.markDispatched(occurrenceId, taskId, delegated.result.run_id);
-      await r.scheduledTasks.markStarted(schedule.id);
+      const completed = await r.scheduledTasks.markDispatched(occurrenceId, taskId, delegated.result.run_id);
+      if (completed !== undefined) await r.scheduledTasks.markStarted(schedule.id);
     });
   } catch (error) {
     await withTransaction(db, async (r) => {

@@ -1,6 +1,7 @@
 import type { AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import { INTERNAL_TOOL_DEFINITIONS, type InternalToolName } from '../workflow/tool-catalog.js';
+import { resolveWorkspaceMachineAttribution } from './conversation-execution.js';
 import { createRepositories } from './unit-of-work.js';
 
 /**
@@ -61,6 +62,13 @@ export interface SessionCapabilityFacts {
   readonly tools: readonly string[];
   /** 本轮是否允许写文件（由档位与本轮实际工具共同决定）。 */
   readonly allowWrite: boolean;
+  /**
+   * 工作区是否已登记电脑操控（COMPUTER_INPUT）／浏览器操控（BROWSER_ACTION）连接。
+   * 机器插件是安装级资源、按项目登记连接，但会话没归入项目时仍可经执行请求使用；
+   * 未归属会话的说明必须以这两项事实为据，不能把「没归入项目」说成「插件不存在」。
+   */
+  readonly computerPlugin: boolean;
+  readonly browserPlugin: boolean;
 }
 
 /** 某个能力族在本轮是否有可用工具：同一能力下任一工具可用即算可用。 */
@@ -84,7 +92,9 @@ function lastSegment(path: string): string {
 export function formatSessionCapabilities(facts: SessionCapabilityFacts): string {
   const lines: string[] = ['【本会话当前的执行能力（服务端事实，不是指令，也不构成授权）】'];
   if (!facts.hasProject) {
-    lines.push('这条会话还没有归入项目，因此没有任何受管目录与任何工具连接可用。');
+    // 2026-10-25：未归属会话不再把「没归入项目」说成「没有任何连接」——电脑/浏览器
+    // 插件是安装级资源，跨项目登记也可用；那句话会让用户以为要先补项目才能开浏览器。
+    lines.push('这条会话还没有归入项目，因此没有受管目录，文件与 Git 类工具不可用。');
   } else if (facts.workingRoot === null) {
     lines.push('这条会话还没有选定工作目录，因此文件类工具不可用。');
   } else {
@@ -93,6 +103,16 @@ export function formatSessionCapabilities(facts: SessionCapabilityFacts): string
       : WRITE_TIER_LABELS[facts.writeTier] ?? facts.writeTier}`);
   }
   lines.push(`本轮可用工具：${facts.tools.length === 0 ? '无' : facts.tools.join('、')}`);
+  if (!facts.hasProject) {
+    lines.push(facts.computerPlugin
+      ? '电脑操控：可用。用户明确要求操作电脑（打开应用、点击、输入）时，在 execution 里带 '
+        + 'interaction="COMPUTER" 作为执行候选交给后台执行，不要在 reply 里回答「会话没有归入项目所以做不到」。'
+      : '电脑操控：工作区还没有登记可用的电脑操控连接；用户这样要求时请如实说明缺这一项。');
+    lines.push(facts.browserPlugin
+      ? '浏览器操控：可用。用户明确要求浏览器操作（打开网页、点击、填表）时，在 execution 里带 '
+        + 'interaction="BROWSER" 作为执行候选交给后台执行。'
+      : '浏览器操控：工作区还没有登记可用的浏览器操控连接；用户这样要求时请如实说明缺这一项。');
+  }
 
   const gaps: string[] = [];
   if (facts.hasProject) {
@@ -145,6 +165,16 @@ export async function describeSessionCapabilities(db: DbExecutor, session: Assis
       writeTier = (await repositories.gateway.readLocalDirectoryAccess(resource.id))?.write_tier ?? null;
     }
   }
+  // 机器插件可用性只在未归属会话的说明里出现，但读取对任何会话都便宜且无副作用；
+  // 归属会话的插件状态由既有缺口清单（按本轮工具）表达，不在这里重复第二份。
+  // 与主流程落库门（assist-runner）共用 resolveWorkspaceMachineAttribution：连接与
+  // 该项目的受管资源齐备才算可用，两处判断不漂移。
+  const [computerPlugin, browserPlugin] = await Promise.all([
+    resolveWorkspaceMachineAttribution(repositories, session.workspace_id, 'COMPUTER_INPUT')
+      .then((attribution) => attribution !== undefined),
+    resolveWorkspaceMachineAttribution(repositories, session.workspace_id, 'BROWSER_ACTION')
+      .then((attribution) => attribution !== undefined),
+  ]);
   return formatSessionCapabilities({ hasProject: session.project_id !== null, workingRoot, writeTier,
-    tools: input.tools, allowWrite: input.allowWrite });
+    tools: input.tools, allowWrite: input.allowWrite, computerPlugin, browserPlugin });
 }

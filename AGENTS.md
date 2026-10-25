@@ -8,6 +8,8 @@
 - **先查事实。** 从当前进度和本次相关主文档入手，确认已有实现、约束及未提交改动，再修改。历史提示词不是当前指令；已实现部分不重做，其他项目的材料不能当作本项目事实。
 - **最小实现。** 只解决当前问题，优先复用已有入口和成熟机制；不顺手重构、扩展功能或创建没有当前调用方的抽象。新依赖先核对必要性、维护状态和兼容性。
 - **保护并行工作。** 修改前检查 `git status` 与目标文件 diff，不覆盖或回退他人改动。共享文件按目标段落定点编辑；只有无法安全合并的冲突才需要协调，不因工作树不干净一律停工。
+- **大文件改完留锚点。** 多会话共用的大文件（如 `AssistView.tsx`）改完后，在改动处保留可 grep 的标记，构建或测试前先确认标记仍在。产物缺新代码但样式有新类时，优先怀疑源码被整体保存覆盖，而不是构建缓存；恢复按原编辑逐段重放，不用 `git stash`、不整文件覆写。
+- **隔离工作树锚定当前基线。** 需要独立工作区时用 `git worktree add --detach <dir> HEAD`，不在旧 commit 上开工；合并或拷回前先比对基线与当前 HEAD 的差异，不用旧副本整体覆盖近期改动。工作树内含 `node_modules`、`.research` 等 Junction 时，删除前先摘除链接（`[IO.Directory]::Delete($p,$false)`），不直接 `git worktree remove`，以免穿透链接清空主树目录。
 - **按授权推进。** 已获授权的可逆工作直接完成，不为例行读取、修改、测试或文档维护反复求确认。缺失信息会影响范围、业务语义、执行权限或不可逆结果时，说明差异、推荐方案和影响并澄清；可独立推进的部分继续执行。仅要求方案、文档或提示词时，不自动启动代码开发。
 - **结果可验证。** 修 Bug 先复现，改行为明确预期，重构检查前后行为；按影响运行必要检查。不得删除失败检查来取得通过，也不得把未运行、未确认或推测写成事实。
 - **保护信息。** 不自动向外部聊天、邮件或协作系统发送项目材料；只读引用不等于授权外发。不写入或输出密钥、令牌、会话凭据，日志与 Context 避免保留不必要的敏感内容。
@@ -22,7 +24,7 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 
 工作区为 `D:/Develop/Relay-Agent`。`D:/Develop/毕业论文项目` 是历史路径；AI Manga Drama Studio 是独立项目，不得混用其技术栈、代码、验收结果或覆盖其文件。
 
-默认先读 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，涉及实现或验收时再读[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)的相关行，然后按下表定位本次所需材料。不默认通读全部文档、历史日志或上游源码。
+默认先读简短的 [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，涉及实现或验收时先搜索[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表)的相关行，详细依据仅按该行链接读取，然后按下表定位本次所需材料；经专题 README → 原章节路由 → 正文分册读取适用规则。大型文档先检索标题或关键词，再读取相关小节与必要上下文；历史快照和验收详情不是默认必读，不通读全部文档、历史日志或上游源码。
 
 当用户提到“台账”时，自动查找台账入口并读取与当前任务相关的记录，优先检查独立开发台账目录 `D:/Develop/relay-dev-ledger` 的 AGENTS、README 和已有访问入口（背景见[台账任务书](prompts/relay-dev-ledger.md)，任务书不等于实际台账）；若用户指定其他台账，则按指定对象查找。入口失效时先搜索现有文件与引用，不直接要求用户提供路径；找到多个候选时结合当前话题判断，仍有歧义再澄清。
 
@@ -31,7 +33,7 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 | 当前阶段、阻塞与下一步 | [CODEX_NEXT_STEP](CODEX_NEXT_STEP.md)，唯一进度主文档 |
 | 完整文档地图、事实源与历史角色 | [docs/README](docs/README.md) |
 | 业务不变量与状态契约 | [契约包](contracts/README.md)，按任务读取 01–04 |
-| 架构、依赖与技术决策 | [领域模型](docs/architecture/domain-model.md)、[技术选型](docs/architecture/技术选型.md)、[ADR-010](docs/decisions/ADR-010-agent-stack-react-desktop.md) |
+| 架构、依赖与技术决策 | [架构路由](docs/architecture/README.md)、[决策路由](docs/decisions/README.md) |
 | 开工前的复用原则 | [复用策略](docs/architecture/复用策略.md)、[ADR-005](docs/decisions/ADR-005-reuse-first.md) |
 | 上游 Agent 源码参考 | [研究记录 §1.1 本地源码对照清单](docs/research/p00-source-study.md#11-本地源码对照清单2026-09-20-核验)，缓存位于 `.research/upstream/<repo>` 与 `.research/vercel-ai` |
 | 实施工作包与验收出口 | [大模块工作包](prompts/stack-migration.md)、[测试计划](docs/testing/verification-plan.md)、[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表) |
@@ -82,7 +84,7 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 
 ## 6. 文档与交付
 
-文档维护属于任务范围。优先更新已有主文档，同一事实只维护一处；AGENTS 只保留稳定约束与导航，不追加阶段日志。完整维护规则见 [docs/README](docs/README.md)。
+文档维护属于任务范围。优先更新已有主文档，同一事实只维护一处；AGENTS 只保留稳定约束与导航，不追加阶段日志。阅读导航见 [docs/README](docs/README.md)，完整维护规则见[文档维护规范](docs/documentation-maintenance.md)。
 
 - 按用户当前指定的交付粒度，在后端功能或大模块完成后交付对应的可直接执行的前端开发提示词，说明已实现接口、文件范围、交互与异常处理、验证要求及未验边界；用户要求大模块完成再给时，不按内部小切片提前交付。优先更新已有任务书，并在最终回复给出入口。交付提示词不等于授权当前 Agent 自动实施前端。
 

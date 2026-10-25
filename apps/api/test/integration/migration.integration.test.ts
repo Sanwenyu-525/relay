@@ -184,6 +184,17 @@ const ALL_MIGRATIONS = [
   '0128_bounded_subagent_delegation',
   '0129_run_worker_fences',
   '0130_memory_source_kind',
+  // 0131–0137（2026-10-25 补齐）：清单此前停在 0130，`assert.deepEqual(applied, ALL_MIGRATIONS)`
+  // 因此在真实库上一直红着。顺序按**完整文件名**排序——两个 0135 靠后缀区分
+  // （assist… 在 workspace… 之前），迁移加载器也以完整文件名作账本主键。
+  '0131_workspace_default_write_tier',
+  '0132_assist_message_recall',
+  '0133_assist_session_delete_ledger_grants',
+  '0134_user_action_file_read',
+  '0135_assist_session_last_message_backfill',
+  '0135_workspace_context_budget',
+  '0136_artifact_task_workspace_scope',
+  '0137_session_delete_memory_capture_grants',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

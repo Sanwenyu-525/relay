@@ -1,6 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type Ref, type TextareaHTMLAttributes } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
 import type { RelayApiClient, RelayConversationMode } from "../api/relayClient";
 import type { RelayChatCommand } from "../api/resources/chatControls";
+import PluginIcon from "./PluginIcon";
+import { PLUGIN_MENTIONS, findPluginMentions } from "../lib/pluginMentions";
 import "./ChatCommandInput.css";
 
 /**
@@ -26,7 +28,7 @@ export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean):
 
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
 export default function ChatCommandInput({ client, mode, hasSession, value, onValueChange, onSelectCommand, ref,
-  onKeyDown, onFocus, onBlur, onCompositionChange, onAttachFiles, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
+  onKeyDown, onFocus, onBlur, onCompositionChange, onAttachFiles, pluginChips = false, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
     "value" | "onChange"> & {
     client: RelayApiClient | null;
     mode: RelayConversationMode;
@@ -44,15 +46,27 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
      * 传了也只是把文件交出去——类型、上限与「要不要暂存」都由调用方的附件 Owner 裁决。
      */
     onAttachFiles?: (files: readonly File[]) => void;
+    /**
+     * 输入内联插件芯片（2026-10-25）：草稿里的已知插件 mention 在正文原位显示
+     * 「小图标 + 短名」芯片（参考 Codex 输入器工具标识）。textarea 仍是唯一文本
+     * Owner——芯片只是镜像层上的视觉件，光标/选区/IME/撤销/粘贴/发送载荷全不走它。
+     */
+    pluginChips?: boolean;
     ref?: Ref<HTMLTextAreaElement>;
   }) {
   const menuId = useId();
+  const mentionMenuId = useId();
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [active, setActive] = useState(0);
+  const [mentionActive, setMentionActive] = useState(0);
+  /** 光标/选区变化计数：`@` 菜单的开合取决于光标位置，纯方向键移动也要重算。 */
+  const [caretTick, setCaretTick] = useState(0);
   const [retry, setRetry] = useState(0);
+  /** `@` 菜单插入后的光标落点：React 写回 value 会把选区冲到末尾，提交后按这里恢复。 */
+  const pendingCaret = useRef<number | null>(null);
   /* 拖拽高亮只认「真的拖了文件」：dragover 阶段拿不到文件内容，只能看 types，
      因此收起时同样按 types 判断，避免拖一段文字过来也点亮整块区域。 */
   const [dragging, setDragging] = useState(false);
@@ -68,6 +82,50 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     if (next > 0) el.style.height = `${next}px`;
   };
   useLayoutEffect(autoGrow, [value]);
+  /* —— 输入内联插件芯片（2026-10-25）——
+     textarea 保持唯一文本 Owner：原生光标/选区/IME/撤销/粘贴/发送载荷一律不动。
+     镜像层用与 textarea 同源继承的字体和逐项相同的盒模型排版同一段草稿，
+     mention 文字在镜像层里透明（占位保证折行与光标对齐），芯片叠在它的矩形上。
+     草稿里没有已知 mention 时镜像层整体不渲染，输入器与此前逐像素一致。 */
+  const mentions = pluginChips ? findPluginMentions(value) : [];
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const chipRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const placeChips = useCallback(() => {
+    const mirror = mirrorRef.current;
+    const textarea = inputRef.current;
+    if (mirror === null || textarea === null || mentions.length === 0) return;
+    /* textarea 弹出纵向滚动条时内容区变窄：镜像层右侧让出同宽 gutter，
+       两侧折行点才一致（镜像层 overflow:hidden，gutter 只影响排版不影响显示）。 */
+    const gutter = textarea.offsetWidth - textarea.clientWidth;
+    if (gutter > 0) {
+      const base = getComputedStyle(mirror).paddingRight;
+      mirror.style.paddingRight = `calc(${base} + ${gutter}px)`;
+    } else if (mirror.style.paddingRight !== "") {
+      mirror.style.paddingRight = "";
+    }
+    const box = mirror.getBoundingClientRect();
+    mentions.forEach((mention, index) => {
+      const chip = chipRefs.current[index];
+      const span = mirror.querySelector(`[data-mention-start="${mention.start}"]`);
+      if (chip === null || span === null) return;
+      // 取第一个片段矩形：mention 跨行时芯片盖在首行，剩余透明文字不可见。
+      const rect = span.getBoundingClientRect();
+      chip.style.left = `${rect.left - box.left + mirror.scrollLeft}px`;
+      chip.style.top = `${rect.top - box.top + mirror.scrollTop}px`;
+      chip.style.height = `${rect.height}px`;
+    });
+  }, [mentions]);
+  useLayoutEffect(placeChips, [placeChips, value]);
+  /* `@` 菜单插入后把光标放回插入内容之后：React 写回受控 value 会把选区冲到末尾，
+     不恢复的话继续打字会插到错位置（mention 插入协议要求落在原光标处）。 */
+  useLayoutEffect(() => {
+    const position = pendingCaret.current;
+    const element = inputRef.current;
+    pendingCaret.current = null;
+    if (position === null || element === null) return;
+    element.setSelectionRange(position, position);
+  }, [value]);
   useEffect(() => {
     const el = inputRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -76,14 +134,37 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     const observer = new ResizeObserver(([entry]) => {
       const width = entry.contentRect.width;
       if (width === lastWidth) return;
-      lastWidth = width; autoGrow();
+      lastWidth = width; autoGrow(); placeChips();
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [placeChips]);
   // 只在行首命令 token 中展开，参数、文件路径与正文里的 / 都不抢输入。
   const token = /^\s*\/([^\s/]*)$/u.exec(value)?.[1]?.toLowerCase() ?? null;
-  const open = focused && !disabled && !composing && token !== null && dismissed !== value;
+  /* —— `@` 插件菜单（2026-10-25）——
+     光标前恰好有一个「边界合法的 @query」时展开三个内置插件，选中即把
+     `@query` 换成 `@标签 `（与「+ → 连接器与插件」同一条插入语义，只编辑草稿）。
+     边界与 mention 识别同源：`@` 在开头或前字符不是单词/路径字符——输入邮箱
+     `user@` 不弹菜单，中文前导无空格（`先用@`）照弹。斜杠菜单已展开时让位给它。
+     查询依赖光标位置，因此监听选区变化（方向键/点击移光标也要重算开合）。 */
+  const mentionQuery = useMemo((): { query: string; start: number; end: number } | null => {
+    if (!pluginChips || !focused || disabled || composing) return null;
+    const caret = inputRef.current?.selectionStart ?? value.length;
+    const before = value.slice(0, caret);
+    const match = /@([^\s@]{0,12})$/u.exec(before);
+    if (match === null) return null;
+    const at = caret - match[0].length;
+    const preceding = at === 0 ? "" : before[at - 1]!;
+    if (preceding !== "" && /[A-Za-z0-9_./\\-]/u.test(preceding)) return null;
+    return { query: match[1]!.toLowerCase(), start: at, end: caret };
+  }, [value, caretTick, focused, composing, disabled, pluginChips]);
+  const mentionOpen = mentionQuery !== null && dismissed !== value;
+  const mentionEntries = PLUGIN_MENTIONS.filter((item) =>
+    mentionQuery === null || mentionQuery.query === ""
+    || item.label.toLowerCase().includes(mentionQuery.query) || item.key.includes(mentionQuery.query));
+  const mentionSelected = mentionEntries[Math.min(mentionActive, Math.max(0, mentionEntries.length - 1))];
+  const open = focused && !disabled && !composing && token !== null && dismissed !== value
+    && mentionQuery === null;
   const current = catalog?.client === client ? catalog : null;
   useEffect(() => {
     if (!open || !client || catalog?.client === client && catalog.items !== null) return;
@@ -104,9 +185,26 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   useEffect(() => {
     if (open && selected) document.getElementById(`${menuId}-${selected.name}`)?.scrollIntoView?.({ block: "nearest" });
   }, [open, menuId, selected]);
+  useEffect(() => {
+    if (mentionOpen && mentionSelected) {
+      document.getElementById(`${mentionMenuId}-${mentionSelected.key}`)?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [mentionOpen, mentionMenuId, mentionSelected]);
   function insert(entry: RelayChatCommand) {
     const next = `${value.match(/^\s*/u)?.[0] ?? ""}/${entry.name} `;
     setDismissed(next); onValueChange(next); onSelectCommand?.(entry);
+    inputRef.current?.focus();
+  }
+  /** `@` 菜单选中：把光标前的 `@query` 换成 `@标签 `，光标落在插入内容之后。 */
+  function insertPluginMentionLabel(label: string): void {
+    if (mentionQuery === null) return;
+    /* query 后紧跟的空格一并吃掉：句子里改 mention 时不留下两个空格。 */
+    const end = value[mentionQuery.end] === " " ? mentionQuery.end + 1 : mentionQuery.end;
+    const next = `${value.slice(0, mentionQuery.start)}@${label} ${value.slice(end)}`;
+    pendingCaret.current = mentionQuery.start + label.length + 2;
+    setMentionActive(0);
+    setDismissed(next);
+    onValueChange(next);
     inputRef.current?.focus();
   }
   function scope(entry: RelayChatCommand): string { return chatCommandScope(entry); }
@@ -124,6 +222,19 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   const acceptsDrop = onAttachFiles !== undefined && !disabled;
   function hasFilePayload(data: DataTransfer | null): boolean {
     return data !== null && Array.from(data.types).includes("Files");
+  }
+  /* 镜像层分段：普通原样渲染，mention 包一层透明 span（占位 + 测量锚点）。
+     文本节点用 span 包裹只是给 React 稳定 key，不改变任何排版。 */
+  const mirrorSegments: ReactNode[] = [];
+  if (mentions.length > 0) {
+    let cursor = 0;
+    for (const mention of mentions) {
+      if (mention.start > cursor) mirrorSegments.push(<span key={`t-${cursor}`}>{value.slice(cursor, mention.start)}</span>);
+      mirrorSegments.push(<span key={`m-${mention.start}`} className="chat-command-mention"
+        data-mention-start={mention.start}>{value.slice(mention.start, mention.end)}</span>);
+      cursor = mention.end;
+    }
+    if (cursor < value.length) mirrorSegments.push(<span key={`t-${cursor}`}>{value.slice(cursor)}</span>);
   }
   return <div className="chat-command-input" data-drop={dragging}
     onBlur={(event) => {
@@ -172,15 +283,57 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
           {entries.length === 0 && <li role="presentation">没有匹配的登记命令，请修改输入。</li>}
         </ul>}
     </div>}
+    {mentionOpen && <div className="chat-command-menu chat-mention-menu" data-testid="chat-mention-menu">
+      <p className="chat-command-hint">选择插入插件提示（只改草稿，不发送）· ↑↓ 选择 · Enter 插入 · Esc 关闭</p>
+      {mentionEntries.length === 0
+        ? <p role="status">没有匹配的内置插件，请修改输入。</p>
+        : <ul id={mentionMenuId} role="listbox" aria-label="内置插件">
+          {mentionEntries.map((entry) => <li key={entry.key} role="none">
+            <button type="button" role="option" id={`${mentionMenuId}-${entry.key}`}
+              aria-selected={mentionSelected === entry} tabIndex={-1}
+              data-testid={`chat-mention-${entry.key}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertPluginMentionLabel(entry.label)}>
+              <span className="chat-mention-option">
+                <PluginIcon plugin={entry.key} className="chat-mention-option-icon" />
+                <strong>{entry.label}</strong>
+              </span>
+            </button></li>)}
+        </ul>}
+    </div>}
+    <div className="chat-command-surface" ref={surfaceRef}
+      data-chips={mentions.length > 0 ? "on" : undefined}>
+      {mentions.length > 0 && <div className="chat-command-mirror" ref={mirrorRef} aria-hidden="true">
+        {mirrorSegments}
+        {mentions.map((mention, index) => <span key={`chip-${mention.start}`} className="chat-command-chip"
+          data-plugin-chip={mention.key}
+          ref={(element) => { chipRefs.current[index] = element; }}>
+          <PluginIcon plugin={mention.key} className="chat-command-chip-icon" />
+          <span className="chat-command-chip-label">{mention.label}</span>
+        </span>)}
+      </div>}
     <textarea {...props} aria-label={props["aria-label"] ?? "本次消息"} disabled={disabled} value={value}
+      onScroll={(event) => {
+        // 镜像层跟随 textarea 滚动：芯片与正文才会一起待在可视区里。
+        const mirror = mirrorRef.current;
+        if (mirror !== null) {
+          mirror.scrollTop = event.currentTarget.scrollTop;
+          mirror.scrollLeft = event.currentTarget.scrollLeft;
+        }
+        placeChips();
+      }}
       ref={(element) => {
         inputRef.current = element;
         if (typeof ref === "function") ref(element);
         else if (ref) ref.current = element;
       }}
-      aria-autocomplete="list" aria-controls={open && entries.length > 0 ? menuId : undefined}
-      aria-activedescendant={open && selected ? `${menuId}-${selected.name}` : undefined}
-      onChange={(event) => { setActive(0); setDismissed(null); onValueChange(event.target.value); }}
+      aria-autocomplete="list"
+      aria-controls={mentionOpen && mentionEntries.length > 0 ? mentionMenuId
+        : open && entries.length > 0 ? menuId : undefined}
+      aria-activedescendant={mentionOpen && mentionSelected !== undefined
+        ? `${mentionMenuId}-${mentionSelected.key}`
+        : open && selected ? `${menuId}-${selected.name}` : undefined}
+      onChange={(event) => { setActive(0); setMentionActive(0); setDismissed(null); onValueChange(event.target.value); }}
       onPaste={(event) => {
         // 只有「剪贴板里真有文件项」才接管：截图/复制的图片进附件暂存，
         // 其余粘贴（文字、表格、代码）保持原生行为，一个字符都不改。
@@ -191,6 +344,7 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
         onAttachFiles(files);
       }}
       onFocus={(event) => { setFocused(true); onFocus?.(event); }}
+      onSelect={() => setCaretTick((tick) => tick + 1)}
       onBlur={(event) => {
         if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) setFocused(false);
         onBlur?.(event);
@@ -199,6 +353,25 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
       onCompositionEnd={() => { setComposing(false); onCompositionChange?.(false); }}
       onKeyDown={(event) => {
         if (composing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+        const plain = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+        /* `@` 插件菜单与斜杠菜单同构：Esc 关、方向键选、Enter 插入。
+           两者互斥展开（斜杠菜单要求 mentionQuery 为空），分支顺序只是防御。 */
+        if (mentionOpen && plain) {
+          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(value); return; }
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setMentionActive(mentionEntries.length === 0 ? 0
+              : (mentionEntries.indexOf(mentionSelected!) + (event.key === "ArrowDown" ? 1 : -1) + mentionEntries.length) % mentionEntries.length);
+            return;
+          }
+          if (event.key === "Enter") {
+            // 没有匹配项时不拦截：Enter 仍归发送/换行的原语义。
+            if (mentionSelected === undefined) return;
+            event.preventDefault();
+            insertPluginMentionLabel(mentionSelected.label);
+            return;
+          }
+        }
         if (open && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
           if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(value); return; }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -212,7 +385,26 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
             return;
           }
         }
+        /* —— 芯片整体删除（2026-10-25 用户指认「作为一个整体」；同日第二轮按
+           「为什么有这个状态、要按两次」改为一次删除）——
+           mention 在草稿里是纯文本，原生退格会把 `@标签` 逐字拆碎——第一个字没了
+           芯片就退化成裸 `@`。做法是把选区预置到整段 mention 再放行按键：删除仍由
+           原生执行（一次按键、Ctrl+Z 可撤销、光标自然落位），只是作用范围从
+           「一个字/半段」扩成整枚芯片。修饰键不排除：Ctrl+Backspace 删词同样不许
+           拆碎芯片；选区本就完整覆盖时预置到恰好整段，行为等价。 */
+        if ((event.key === "Backspace" || event.key === "Delete") && mentions.length > 0) {
+          const element = inputRef.current;
+          if (element !== null) {
+            const from = element.selectionStart ?? value.length;
+            const to = element.selectionEnd ?? from;
+            // 无选区时原生会吃掉的区间：Backspace 吃 [c-1,c)、Delete 吃 [c,c+1)。
+            const rangeFrom = from === to ? (event.key === "Backspace" ? from - 1 : from) : from;
+            const rangeTo = from === to ? (event.key === "Backspace" ? from : from + 1) : to;
+            const hit = mentions.find((m) => rangeFrom < m.end && rangeTo > m.start);
+            if (hit !== undefined) element.setSelectionRange(hit.start, hit.end);
+          }
+        }
         onKeyDown?.(event);
-      }} />
+      }} /></div>
   </div>;
 }

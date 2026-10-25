@@ -14,6 +14,11 @@ const otherTaskId = "99999999-9999-4999-8999-999999999999";
 function response(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body } as Response;
 }
+/** 协作页不产面包屑，也不在对话视图重复标题；深链作用域改按页面真实读过的对象核对，判据不降级。 */
+function requested(target: string): boolean {
+  const stub = globalThis.fetch as unknown as { mock?: { calls?: unknown[][] } };
+  return (stub.mock?.calls ?? []).some(([input]) => String(input).includes(target));
+}
 function session() {
   return { id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: null,
     title: "关于测试项目", status: "ACTIVE", revision: "1",
@@ -57,7 +62,12 @@ describe("M04 Assist 真实路由与命令", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
     const guides = view.wrapper.findAll("[data-testid='assist-provider-error']");
-    expect(view.wrapper.get(".breadcrumbs").text()).toContain("Assist");
+    // 2026-10-16 项目子页的 Assist 页签归一为协作页深链（?skill=assist → /agent?project=…），
+    // 协作页按既有约定不产面包屑。原判据「深链落在本项目的作用域里」改由落地路由
+    // 与实际读取的项目事实核对，作用域证据不降级。
+    expect(view.router.currentRoute.value).toEqual({ path: "/agent", query: { project: projectId } });
+    expect(view.wrapper.get('[data-testid="assist-target"]').exists()).toBe(true);
+    expect(requested(`${prefix}/projects/${projectId}`)).toBe(true);
     expect(guides).toHaveLength(6);
     ["认证失败", "限流", "超时", "流中断", "响应结构异常", "网络不可达"].forEach((label, index) => {
       expect(guides[index]!.text()).toContain(label);
@@ -112,8 +122,12 @@ describe("M04 Assist 真实路由与命令", () => {
       throw new Error(`unexpected request ${path}`);
     }); vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/tasks/${otherTaskId}?skill=assist`);
-    expect(view.wrapper.get(".breadcrumbs").text()).toContain("Assist");
-    expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("历史任务");
+    expect(view.router.currentRoute.value).toEqual({ path: "/agent", query: { work: otherTaskId } });
+    expect(requested(`${prefix}/tasks/${otherTaskId}`)).toBe(true);
+    // 入口归一后 Assist 区只承载讨论本身：任务标题由协作页页头这一任 Owner 呈现，
+    // 项目归属与归档原因留在 Assist 区内。三条分别核对，任务事实不降级。
+    expect(view.wrapper.get('[data-testid="collab-page-head-title-link"]').text()).toContain("历史任务");
+    expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("已归入项目：历史项目");
     expect(view.wrapper.get('[data-testid="assist-archive-reason"]').text()).toContain("已归档");
     // 顶栏右翼已没有「新建会话」（2026-10-18 用户指令）：归档任务连入口带写保护一起收起。
     expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(false);
@@ -169,10 +183,22 @@ describe("M04 Assist 真实路由与命令", () => {
       throw new Error(`unexpected request ${path}`);
     }));
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
-    expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("测试项目");
-    await view.wrapper.get('[data-testid="assist-new-session"]').trigger("click");
-    await flush();
+    expect(view.router.currentRoute.value).toEqual({ path: "/agent", query: { project: projectId } });
+    expect(requested(`${prefix}/projects/${projectId}`)).toBe(true);
+    expect(requested(`${prefix}/assist-sessions`)).toBe(true);
+    // 2026-10-16 入口归一 + 2026-10-18 移除顶栏「新建会话」后，项目深链落在首条消息输入器：
+    // 会话随首条消息按 command_id 建立，冻结来源与 PROPOSE_TASK 走同一会话的第二条消息，
+    // 建会话、冻结三元组、回执刷新、提案接受四项判据一条不少。
+    expect(view.wrapper.find('[data-testid="assist-new-session"]').exists()).toBe(false);
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("先讨论一下");
+    await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+    await flush(); await flush();
+    expect(created).toBe(true);
     expect(view.wrapper.get('[data-testid="assist-session"]').text()).toContain(sessionId);
+    messages = [message("66666666-6666-4666-8666-666666666666", "1", "USER", "COMPLETED", "先讨论一下"),
+      message("55555555-5555-4555-8555-555555555555", "2", "ASSISTANT", "COMPLETED", "好的")];
+    await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
+    await flush();
     await view.wrapper.get("#assist-source-query").setValue("资料");
     await view.wrapper.get('[data-testid="assist-source-picker"] form').trigger("submit");
     await flush();
@@ -193,7 +219,8 @@ describe("M04 Assist 真实路由与命令", () => {
     await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
     await flush();
     expect(view.wrapper.text()).toContain("已生成计划");
-    expect(view.wrapper.text()).toContain("输入 未知、输出 未知");
+    // 用量标签现由消息脚注写成「上下文 / 输出」，判据仍是「读不到就显示未知，不编数字」。
+    expect(view.wrapper.text()).toContain("上下文 未知、输出 未知");
     expect(view.wrapper.text()).toContain("计划任务");
     await view.wrapper.get(".assist-proposal .primary-button").trigger("click");
     await flush();
@@ -252,7 +279,11 @@ describe("M04 Assist 真实路由与命令", () => {
     expect(releaseOld).not.toBeNull();
     await view.router.push(`/tasks/${otherTaskId}?skill=assist`);
     await flush();
-    expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain("新任务");
+    // 切换目标后作用域跟着换：落地路由与新任务会话身份都来自服务端的新 taskId，
+    // 旧任务的标题与消息不得再出现在页面上（下一段断言按密文核对泄漏）。
+    expect(view.router.currentRoute.value).toEqual({ path: "/agent", query: { work: otherTaskId } });
+    expect(requested(`${prefix}/assist-sessions?task_id=${otherTaskId}`)).toBe(true);
+    expect(view.wrapper.get('[data-testid="assist-target"]').text()).toContain(newSessionId);
     releaseOld!(response({ items: [{ ...message("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "1",
       "USER", "COMPLETED", "旧任务密文"), session_id: oldSessionId }] }));
     await flush();

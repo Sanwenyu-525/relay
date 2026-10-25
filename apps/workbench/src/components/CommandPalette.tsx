@@ -169,7 +169,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const review = context?.reviews[0] ?? null;
   return <AppDialog open={open} title="命令面板" initialFocusSelector="[data-testid='command-search']" onClose={onClose}>
     <div className="command-palette" data-testid="command-palette">
-      <p className="helper-text">Ctrl+K / ⌘K 打开；↑↓ 选择、Enter 打开、Esc 返回。搜索资料是按关键词的字面匹配（Knowledge、Memory、Decision、Rule 四类），不是语义检索。导航不提交业务命令，委托与审批仍在目标页确认。</p>
+      <p className="helper-text">Ctrl+K / ⌘K 打开；↑↓ 选择、Enter 打开、Esc 返回。搜索资料是按关键词的字面匹配（Knowledge、Memory、Decision、Rule 四类），不是语义检索。导航不提交业务命令，委托与审批仍在对应项目或任务页确认。</p>
       <label className="field"><span className="field-label">搜索资料</span><input ref={searchInputRef} type="search" value={query}
         onChange={(event) => setQuery(event.target.value)} onKeyDown={handleSearchKeyDown} maxLength={200}
         placeholder="搜索 Knowledge、Memory、Decision、Rule" data-testid="command-search"

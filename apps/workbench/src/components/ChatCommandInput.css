@@ -1,5 +1,66 @@
 .chat-command-input { position: relative; min-width: 0; }
 .chat-command-input textarea { width: 100%; }
+/* —— 输入内联插件芯片（2026-10-25）——
+   surface 把 textarea 与镜像层放进同一盒模型：两者同宽同高，字体同源继承，
+   镜像层排版因此与 textarea 逐像素一致。 */
+.chat-command-surface { position: relative; min-width: 0; }
+.chat-command-surface > textarea { position: relative; z-index: 1; }
+/* 有已知 mention 时正文视觉移交镜像层：textarea 文字透明、光标保留原色；
+   选区/禁用/只读态都不变（透明只发生在 data-chips="on"）。 */
+.chat-command-surface[data-chips="on"] > textarea {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--relay-color-text-primary);
+}
+/* 选中跨过 mention 时，textarea 的默认选区是不透明系统蓝，会把镜像层里的芯片
+   整个盖住（用户实测「选中后图标变成蓝色 @」）。半透明选区 + 选中文字保持透明：
+   芯片与正文从选区底下透出来，选区仍是可读的浅色底，选中语义不变。 */
+.chat-command-surface[data-chips="on"] > textarea::selection {
+  background: color-mix(in srgb, var(--relay-color-selection-bg) 55%, transparent);
+  color: transparent;
+}
+.chat-command-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 与 textarea（UA 默认 pre-wrap + break-word）同一套折行规则。 */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-primary);
+}
+/* mention 原文透明：位置由它占着（折行与光标对齐），视觉由芯片承担。 */
+.chat-command-mention { color: transparent; }
+/* 芯片：小图标 + 短名，无底色、不占文本流（绝对定位），宽度贴近所替代的原文。 */
+.chat-command-chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  white-space: nowrap;
+  color: var(--relay-color-action-text);
+  font-size: var(--relay-font-size-meta);
+  line-height: 1;
+}
+.chat-command-chip .plugin-icon { --plugin-icon-size: var(--relay-font-size-body); }
+/* `@` 插件菜单：沿用命令菜单外壳，行内是插件图标 + 名称（图标与输入器芯片同档）。
+   选择器要压过 `.chat-command-menu [role="option"] > span:first-child` 的
+   space-between（(0,3,1)）——否则图标与名称会被顶到行的两端。 */
+.chat-command-menu.chat-mention-menu [role="option"] > .chat-mention-option { justify-content: flex-start; }
+.chat-mention-option { display: inline-flex; align-items: center; gap: var(--relay-space-2); min-width: 0; }
+.chat-mention-option .plugin-icon { --plugin-icon-size: var(--relay-font-size-body); }
+/* 嵌入态（.create-form）textarea 的盒模型来自全局 .field textarea，镜像层逐项照抄，
+   改动那一边时这里必须同步（Chromium 量测断言守着两侧计算值一致）。 */
+.create-form .field .chat-command-mirror {
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+}
 .chat-command-menu {
   position: absolute; bottom: 100%; inset-inline: 0; z-index: var(--relay-zIndex-popover);
   margin-bottom: var(--relay-space-2);

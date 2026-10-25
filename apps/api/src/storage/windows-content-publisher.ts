@@ -5,8 +5,10 @@ import { TextDecoder } from 'node:util';
 
 export const CONTENT_PROTOCOL = 'relay-managed-content-v1';
 export const CONTENT_FRAME_BYTES = 16 * 1024;
+export const CONTENT_READ_REPLY_BYTES = 256 * 1024 * 2 + CONTENT_FRAME_BYTES;
 export const CONTENT_IDENTITY = /^[0-9a-f]{16}:[0-9a-f]{32}$/u;
 const ERROR_CODES = new Set(['CONTENT_FROZEN', 'CONTENT_FREEZE_BUSY', 'CONFLICT', 'STAGING_OCCUPIED',
+  'CONTENT_MISSING', 'CONTENT_TAMPERED',
   'INVALID_INPUT', 'INVALID_VERSION', 'INVALID_CONTENT', 'UNSUPPORTED_PLATFORM', 'INVALID_ROOT',
   'ROOT_UNAVAILABLE', 'ROOT_PATH_UNAVAILABLE', 'ROOT_CHANGED', 'LOCK_UNAVAILABLE', 'UNSAFE_ENTRY',
   'HARD_LINK', 'PARENT_CHANGED', 'IDENTITY_UNAVAILABLE', 'CREATE_FAILED', 'READ_FAILED',
@@ -33,9 +35,9 @@ export function spawnContentHelper(executableOverride?: string) {
   return spawn(executable, ['--managed-content'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env });
 }
 
-export function parseContentReply(bytes: Buffer): Record<string, unknown> {
+export function parseContentReply(bytes: Buffer, maxBytes = CONTENT_FRAME_BYTES): Record<string, unknown> {
   let value: unknown;
-  if (bytes.length > CONTENT_FRAME_BYTES) throw new WindowsContentError('CONTENT_PROTOCOL_INVALID');
+  if (bytes.length > maxBytes) throw new WindowsContentError('CONTENT_PROTOCOL_INVALID');
   try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
   catch { throw new WindowsContentError('CONTENT_PROTOCOL_INVALID'); }
   if (typeof value !== 'object' || value === null || Array.isArray(value) ||
@@ -90,5 +92,53 @@ export async function publishWindowsContent(input: { readonly dataRoot: string;
     child.stdin.end(`${JSON.stringify({ version: CONTENT_PROTOCOL, op: 'publish-content',
       root_path: input.dataRoot, artifact_id: input.artifactId, version_id: input.versionId,
       content_hex: input.content.toString('hex') })}\n`);
+  });
+}
+
+export async function readWindowsContent(input: { readonly dataRoot: string;
+  readonly artifactId: string; readonly versionId: string; readonly storageRef: string;
+  readonly contentHash: Buffer; readonly size: bigint }): Promise<Buffer> {
+  if (input.contentHash.byteLength !== 32 || input.size < 0n || input.size > 256n * 1024n) {
+    throw new WindowsContentError('CONTENT_TAMPERED');
+  }
+  const expectedSha256 = input.contentHash.toString('hex');
+  const expectedSize = input.size.toString();
+  const child = spawnContentHelper();
+  return new Promise<Buffer>((resolve, reject) => {
+    let bytes = Buffer.alloc(0);
+    let failure: WindowsContentError | undefined;
+    const fail = (code: string) => { failure ??= new WindowsContentError(code); child.kill(); };
+    const timeout = setTimeout(() => fail('CONTENT_IO_FAILED'), 30_000);
+    child.once('error', () => fail('CONTENT_IO_FAILED'));
+    child.stdin.on('error', () => fail('CONTENT_IO_FAILED'));
+    child.stderr.resume();
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (bytes.length + chunk.length > CONTENT_READ_REPLY_BYTES) return fail('CONTENT_PROTOCOL_INVALID');
+      bytes = Buffer.concat([bytes, chunk]);
+    });
+    child.once('close', (code, signal) => {
+      clearTimeout(timeout);
+      if (failure !== undefined) return reject(failure);
+      try {
+        const reply = parseContentReply(bytes, CONTENT_READ_REPLY_BYTES);
+        if (code !== 0 || signal !== null || !exactContentObject(reply,
+          ['version', 'ok', 'op', 'root_id', 'sentinel_id', 'storage_ref', 'sha256', 'size', 'content_hex']) ||
+            reply.op !== 'read-content' || typeof reply.root_id !== 'string' || !CONTENT_IDENTITY.test(reply.root_id) ||
+            typeof reply.sentinel_id !== 'string' || !CONTENT_IDENTITY.test(reply.sentinel_id) ||
+            reply.storage_ref !== input.storageRef || reply.sha256 !== expectedSha256 || reply.size !== expectedSize ||
+            typeof reply.content_hex !== 'string' || !/^(?:[0-9a-f]{2})*$/u.test(reply.content_hex)) {
+          throw new WindowsContentError('CONTENT_PROTOCOL_INVALID');
+        }
+        const content = Buffer.from(reply.content_hex, 'hex');
+        if (BigInt(content.byteLength) !== input.size ||
+            createHash('sha256').update(content).digest('hex') !== expectedSha256) {
+          throw new WindowsContentError('CONTENT_TAMPERED');
+        }
+        resolve(content);
+      } catch (error) { reject(error); }
+    });
+    child.stdin.end(`${JSON.stringify({ version: CONTENT_PROTOCOL, op: 'read-content',
+      root_path: input.dataRoot, artifact_id: input.artifactId, version_id: input.versionId,
+      expected_sha256: expectedSha256, expected_size: expectedSize })}\n`);
   });
 }

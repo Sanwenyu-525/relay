@@ -254,6 +254,29 @@ describe("正式 Goal 详情", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("编辑 2xx 回执格式无效时保留冻结命令等待核对", async () => {
+    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", baseRouter({
+      linkPosts: (body) => {
+        posts.push({ body });
+        return response(200, { command_id: body.command_id,
+          committed_at: "2026-10-04T00:00:00Z", result: null });
+      }
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("改写标题");
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="goal-detail-receipt"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("已保留原 command_id");
+    expect(posts).toHaveLength(1);
+  });
+
   it("归档需显式确认，成功后保留历史并停止编辑与新增关联", async () => {
     connect();
     const posts: { path: string; body: Record<string, unknown> }[] = [];

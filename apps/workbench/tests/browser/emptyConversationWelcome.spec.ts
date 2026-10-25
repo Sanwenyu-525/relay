@@ -228,7 +228,7 @@ test.describe("新建会话空态一致", () => {
     await expect(welcome.locator("h1")).toHaveText("有什么想一起完成的？");
     await expect(welcome.locator(".agent-chat-suggestion")).toHaveCount(11);
     await expect(welcome.locator(".agent-chat-empty-lede"))
-      .toHaveText("围绕当前任务直接讨论，或描述新的目标与要求。");
+      .toHaveText("围绕当前任务直接讨论，或描述新的要求。");
     await expect(page.getByTestId("assist-transcript")).not.toContainText("还没有消息");
     await expectCenteredInTranscript(page, welcome);
     // 快捷卡把完整提示词预填进面板输入框，两个入口只差一个已存在的会话身份。

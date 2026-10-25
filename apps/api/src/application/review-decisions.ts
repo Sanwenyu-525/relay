@@ -11,7 +11,7 @@ import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
-import { reviewTargetHash } from './review-requests.js';
+import { reviewMatchesGatewayOperation, reviewTargetHash } from './review-requests.js';
 import { verifyApprovalCheckMaterial } from './approval-check-material.js';
 import { releaseComputerDesktopLeaseAtSafeBoundary } from './computer-desktop-lease.js';
 import { normalizeStateAction, type NormalizedStateAction } from './state-action.js';
@@ -173,6 +173,7 @@ async function resolveImportActionReview(repositories: Repositories, review: Rev
   const op = await repositories.gateway.lockOperation(target.operation.id);
   if (op?.origin !== 'USER_IMPORT' || op.status !== 'WAITING_APPROVAL' ||
       op.import_job_id !== target.job.id || review.operation_id !== op.id ||
+      !reviewMatchesGatewayOperation(review, op) || review.target.acceptance_revision !== null ||
       review.target.operation_id !== op.id || review.target.import_job_id !== target.job.id ||
       review.target.normalized_target !== op.normalized_target ||
       review.target.params_hash !== op.params_hash.toString('hex') ||
@@ -204,6 +205,7 @@ async function resolveUserActionReview(repositories: Repositories, review: Revie
   const op = await repositories.gateway.lockOperation(operation.id);
   if (op?.origin !== 'USER_ACTION' || op.status !== 'WAITING_APPROVAL' ||
       op.resource_id === null || review.operation_id !== op.id ||
+      !reviewMatchesGatewayOperation(review, op) || review.target.acceptance_revision !== null ||
       review.target.operation_id !== op.id || review.target.import_job_id !== op.import_job_id ||
       review.target.normalized_target !== op.normalized_target ||
       review.target.params_hash !== op.params_hash.toString('hex') ||
@@ -252,9 +254,8 @@ async function resolveRunReview(repositories: Repositories, input: {
     // created a row. Only a required frozen action has terminal DENY semantics.
     const operation = review.operation_id === null ? undefined :
       await repositories.gateway.lockOperation(review.operation_id);
-    if (frozenActionOperationIds.length > 0 && operation !== undefined &&
-        (operation.run_id !== run.id ||
-        operation.status !== 'WAITING_APPROVAL' || operation.id !== target.operation_id)) {
+    if (operation !== undefined && (operation.status !== 'WAITING_APPROVAL' ||
+        !reviewMatchesGatewayOperation(review, operation))) {
       throw invalidTransition('操作审批的原动作已失效。');
     }
     if (decision === 'DENY' && operation !== undefined) {

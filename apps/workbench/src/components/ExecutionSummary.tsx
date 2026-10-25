@@ -52,7 +52,7 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
       {STATUS_LABELS[request.status] ?? request.status}
     </p>
     {request.decision === "PREPARE" && <>
-      <p className="execution-summary-title" data-testid="execution-summary-title">{request.title ?? "原执行目标已保存"}</p>
+      <p className="execution-summary-title" data-testid="execution-summary-title">{request.title ?? "原执行请求已保存"}</p>
       {request.objective != null && <p className="helper-text">{request.objective}</p>}
       <p className="helper-text" data-testid="execution-summary-root">当前目录：{request.rootPath}</p>
       {fileChanges.length > 0 && <>

@@ -1,5 +1,6 @@
 .knowledge-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.knowledge-page h1 { margin: var(--relay-space-2) 0 var(--relay-space-3); font-size: var(--relay-font-size-page); }
+/* 2026-10-25 视觉对齐：主标题与全局页头同档（compactPage）。 */
+.knowledge-page h1 { margin: var(--relay-space-2) 0 var(--relay-space-3); font-size: var(--relay-font-size-compactPage); }
 .knowledge-tabs { display: flex; gap: var(--relay-space-1); margin: 0 0 var(--relay-space-4); }
 .knowledge-tabs .subnav-item { min-width: var(--relay-control-height); padding-inline: var(--relay-space-1); white-space: nowrap; }
 .knowledge-tabs button { cursor: pointer; }

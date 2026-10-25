@@ -4,6 +4,7 @@ import type { RelayApiClient, RelayProjectState,
   RelayStateCommandInput, RelayTaskSummary } from "../api/relayClient";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
 import { createCommandId, RelayApiError, RelayTransportError, stateMutationFrom } from "../api/relayClient";
+import { RelayContractError } from "../api/core/errors";
 import { phaseLabel, phaseOptionsByProjectType, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 
@@ -46,7 +47,7 @@ function savePending(key: string, pending: PendingState | null): void {
 }
 
 function isUncertain(caught: unknown): boolean {
-  return caught instanceof RelayTransportError ||
+  return caught instanceof RelayContractError || caught instanceof RelayTransportError ||
     caught instanceof RelayApiError && (caught.problem.status >= 500 ||
       caught.problem.code === "COMMAND_ID_REUSED");
 }

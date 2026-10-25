@@ -357,13 +357,13 @@
     },
     "font.size.section": {
       "$type": "dimension",
-      "$value": "1.75rem",
-      "$description": "区域标题与右栏标题；2026-10-01 由 1.5rem 上调，对齐工作主线图里右栏标题与正文、导航的层级差。正文仍用 body/reading，不随本值放大"
+      "$value": "1.5rem",
+      "$description": "区域标题与右栏标题；2026-10-01 由 1.5rem 上调到 1.75rem，2026-10-25 视觉对齐降回 1.5rem：页头主标题统一 compactPage(1.75rem) 后与区域标题同档、层级消失，恢复 28→24→20（page/section/rowTitle）层级链。正文仍用 body/reading，不随本值变化"
     },
     "font.size.page": {
       "$type": "dimension",
       "$value": "2.5rem",
-      "$description": "普通页面主标题；2026-10-01 由 compactPage(1.75rem) 放开，理由是 1.75rem 让首屏标题不起眼、与工作主线图的层级不符。窄窗统一降到 compactPage，规则见 design-system 第 4 节，不逐页硬编码"
+      "$description": "2026-10-01 曾由 compactPage 放大到 2.5rem 作为普通页面主标题；2026-10-25 视觉对齐起普通页面主标题统一 compactPage（与 /agent 页空态标题同档），本值在全站样式无调用方，保留给未来确需更强层级的场合"
     },
     "font.size.display": {
       "$type": "dimension",
@@ -473,19 +473,21 @@
     },
     "layout.main.padding": {
       "$type": "dimension",
-      "$value": "{space.6}"
+      "$value": "{space.8}",
+      "$description": "普通页面主区四周留白；2026-10-25 视觉对齐由 space.6(24px) 放大到 space.8(32px)，对齐 /agent 页与项目重设计原型（34-58px）的呼吸节奏。"
     },
     "layout.main.compactPadding": {
       "$type": "dimension",
-      "$value": "{space.6}"
+      "$value": "{space.8}"
     },
     "layout.main.smallPadding": {
       "$type": "dimension",
-      "$value": "{space.4}"
+      "$value": "{space.6}"
     },
     "layout.section.gap": {
       "$type": "dimension",
-      "$value": "{space.6}"
+      "$value": "{space.8}",
+      "$description": "区块纵向间距；2026-10-25 视觉对齐由 space.6 提到 space.8（32px），对齐项目重设计原型 36-38px 的区块节奏。"
     },
     "layout.reading.maxWidth": {
       "$type": "dimension",
@@ -594,8 +596,8 @@
     },
     "control.meter.size": {
       "$type": "dimension",
-      "$value": "1.125rem",
-      "$description": "输入区上下文占用圆环直径。数值必须旁标可读文字，圆环本身不单独承载信息。"
+      "$value": "2rem",
+      "$description": "输入区上下文占用圆环直径。数值必须旁标可读文字，圆环本身不单独承载信息。2026-10-25 由 1.125rem 提到 2rem：与同排模型 chip（control.height.compact）同高对齐，用户指认 18px 圆环与 32px 控件并排高度不齐。"
     },
     "control.meter.stroke": {
       "$type": "dimension",
@@ -619,8 +621,8 @@
     },
     "radius.panel": {
       "$type": "dimension",
-      "$value": "0.75rem",
-      "$description": "面板与卡片圆角；2026-10-14 由 0.5rem 提到 0.75rem，对齐 V4.2 原型卡片的 12px 圆角。"
+      "$value": "1rem",
+      "$description": "面板与卡片圆角；2026-10-14 由 0.5rem 提到 0.75rem（V4.2 原型 12px），2026-10-25 视觉对齐再提到 1rem(16px)：与 /agent 页输入卡 radius.composer 同档、对齐项目重设计原型卡片 14-17px 的上限。"
     },
     "radius.badge": {
       "$type": "dimension",

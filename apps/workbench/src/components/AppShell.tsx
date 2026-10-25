@@ -100,10 +100,11 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const currentWorkId = path === "/agent" ? query.get("work") : null;
   /**
    * 全局「新对话」只有一个 URL 入口意图：每次不同的 `/agent?new=…`。
-   * 协作页按这个键打开空白输入，不恢复最近会话、不沿用当前目录或任务；
+   * 协作页按这个键打开空白输入，不恢复最近会话、不继承任务上下文；目录沿用本机最近一次
+   * 打开的工作目录（2026-10-25 用户指令，由协作页按同一条 openFolder 打开并核对）；
    * 会话草稿、目录作用域与首条发送仍然只有协作页一个 Owner（工作台 §17.12.1）。
    * 两个宿主共用这一条 href：宽窗在近期工作栏头部，窄窗（该栏 display:none）在导航抽屉里。
-   * 这不是第二套会话状态，也不复用会话列表里的「新建会话」——那会保留当前目标与目录。
+   * 这不是第二套会话状态，也不复用会话列表里的「新建会话」——那会保留当前工作对象与目录。
    */
   const newConversationHref = `/agent?new=${encodeURIComponent(location.key)}`;
   const secondaryNavigation = [

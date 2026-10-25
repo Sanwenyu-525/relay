@@ -9,17 +9,52 @@ import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
 const MAX_FREE_MODEL_ATTEMPTS = 3;
 const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
 
+/**
+ * 单次调用预算的三个数（P1-A）。
+ *
+ * 0135 的三档（256K / 512K / 1M）讲的是**单次调用预算**，也就是这里的
+ * `call_reservation_tokens`；未选择时回落到进程默认（`RELAY_MODEL_MAX_CALL_TOKENS`）。
+ *
+ * 三个量必须分开，不能用一个数兼任：
+ *   · `callReservationTokens`：这一次调用申请多少预算（写进 model_calls 的预留列）；
+ *   · Provider 实际窗口：候选模型自己声明的 `context_window`。档位高于它时**按窗口截断**，
+ *     不能声称要用一个 Provider 根本装不下的预算；
+ *   · 输出预留：`maxOutputTokens` 由模型端口配置决定，不随档位变化；
+ *   · 作用域上限：`scopeTokenLimit` 至少要盖住单次预留，否则 1M 档会把自己卡死在第一次调用。
+ *
+ * `minimum_context_window`（候选资格门槛）**不**随档位走：它是「这个进程至少要什么样的
+ * 模型」，让工作区档位去改它会把换档变成静默的模型淘汰。
+ */
+function budgetPlan(config: { readonly maxCallTokens: number; readonly maxScopeCalls: number;
+  readonly maxScopeTokens: number }, workspaceTokens: number | null, providerWindow: number | null) {
+  const requested = workspaceTokens ?? config.maxCallTokens;
+  const reservation = providerWindow === null ? requested : Math.min(requested, providerWindow);
+  return { callReservationTokens: reservation, scopeCallLimit: config.maxScopeCalls,
+    scopeTokenLimit: Math.max(config.maxScopeTokens, reservation),
+    workspaceContextBudgetTokens: workspaceTokens };
+}
+
+/** 工作区档位只在**建立调用**时读一次：之后的换档不追改在途调用，与模型选择同一冻结语义。 */
+async function readWorkspaceContextBudget(repositories: Repositories,
+  workspaceId: string | undefined): Promise<number | null> {
+  if (workspaceId === undefined) return null;
+  const configured = await repositories.workspaces.readDefaultDirectory(workspaceId);
+  return configured?.context_budget_tokens ?? null;
+}
+
 /** Immutable non-secret model identity frozen in the RequestAssistMessage transaction. */
 export async function freezeAssistModelSnapshot(repositories: Repositories,
   selection: SessionModelSelectionRow | undefined, env: NodeJS.ProcessEnv,
-  requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean }):
+  requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
+  workspaceId?: string):
   Promise<{ readonly snapshot: JsonObject; readonly attemptState: JsonObject } | undefined> {
+  const workspaceBudget = await readWorkspaceContextBudget(repositories, workspaceId);
   if (selection === undefined) {
     const config = readModelPortConfig(env);
     if (config === undefined) return undefined;
     return frozen([candidateSnapshot({ provider: 'openai-compatible', model: config.model,
       configFingerprint: computeModelConfigFingerprint(config) }, false, null)], config, 1,
-    requirements);
+    requirements, budgetPlan(config, workspaceBudget, null));
   }
   if (selection.connection === 'default') {
     const config = readModelPortConfig(env);
@@ -29,7 +64,7 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
     }
     const candidate = candidateSnapshot({ provider: 'openai-compatible', model: config.model,
       configFingerprint: selection.config_fingerprint }, false, null);
-    return frozen([candidate], config, 1, requirements);
+    return frozen([candidate], config, 1, requirements, budgetPlan(config, workspaceBudget, null));
   }
 
   const sync = await repositories.modelCatalog.readSyncState();
@@ -62,8 +97,10 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
       source: 'openrouter', snapshotSeq: sync.snapshot_seq.toString(),
       sourceModelId: entry.source_model_id });
   });
+  // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。档位高于它时按
+  // 窗口截断——不是把模型淘汰掉（资格门槛仍是进程默认），而是不申请它装不下的预算。
   return frozen(candidates, selectedConfig, Math.min(MAX_FREE_MODEL_ATTEMPTS, candidates.length),
-    requirements);
+    requirements, budgetPlan(selectedConfig, workspaceBudget, selected.context_window));
 }
 
 export interface AssistModelCandidateSnapshot {
@@ -81,7 +118,9 @@ export interface ParsedAssistModelSnapshot {
     readonly requiresJsonOutput: boolean; readonly minimumContextWindow: number };
   readonly candidates: readonly AssistModelCandidateSnapshot[];
   readonly budget: { readonly callReservationTokens: number;
-    readonly scopeCallLimit: number; readonly scopeTokenLimit: number };
+    readonly scopeCallLimit: number; readonly scopeTokenLimit: number;
+    /** 0135：冻结时用的是哪个工作区档位；null = 未选择，按进程默认。 */
+    readonly workspaceContextBudgetTokens: number | null };
   readonly maxAttempts: number;
 }
 
@@ -169,6 +208,12 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
           normalized[0]!.catalogBasis?.snapshotSeq)) {
     throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
   }
+  // 0135：档位是可选字段——0135 之前冻结的快照没有它，读成 null（按进程默认），
+  // 不因为缺一个解释性字段就让在途消息无法继续。
+  const workspaceBudget = budgetObject.workspace_context_budget_tokens;
+  if (workspaceBudget !== undefined && workspaceBudget !== null && !positiveSafeInteger(workspaceBudget)) {
+    throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  }
   return { version: 1, policyVersion,
     requirements: { requiresTools: requirementObject.tools as boolean,
       requiresJsonOutput: requirementObject.response_format as boolean,
@@ -176,7 +221,9 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
     candidates: normalized as readonly AssistModelCandidateSnapshot[],
     budget: { callReservationTokens: budgetObject.call_reservation_tokens as number,
       scopeCallLimit: budgetObject.scope_call_limit as number,
-      scopeTokenLimit: budgetObject.scope_token_limit as number }, maxAttempts };
+      scopeTokenLimit: budgetObject.scope_token_limit as number,
+      workspaceContextBudgetTokens: typeof workspaceBudget === 'number' ? workspaceBudget : null },
+    maxAttempts };
 }
 
 function positiveSafeInteger(value: unknown): value is number {
@@ -186,7 +233,9 @@ function positiveSafeInteger(value: unknown): value is number {
 function frozen(candidates: readonly AssistModelCandidateSnapshot[],
   config: { readonly maxCallTokens: number; readonly maxScopeCalls: number;
     readonly maxScopeTokens: number }, maxAttempts: number,
-  requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean }) {
+  requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
+  plan: { readonly callReservationTokens: number; readonly scopeCallLimit: number;
+    readonly scopeTokenLimit: number; readonly workspaceContextBudgetTokens: number | null }) {
   const snapshot: JsonObject = {
     version: 1, policy_version: FREE_MODEL_POLICY_VERSION,
     requirements: { tools: requirements.requiresTools,
@@ -200,8 +249,11 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
         source: candidate.catalogBasis.source, snapshot_seq: candidate.catalogBasis.snapshotSeq,
         source_model_id: candidate.catalogBasis.sourceModelId },
     })),
-    budget: { call_reservation_tokens: config.maxCallTokens,
-      scope_call_limit: config.maxScopeCalls, scope_token_limit: config.maxScopeTokens },
+    budget: { call_reservation_tokens: plan.callReservationTokens,
+      scope_call_limit: plan.scopeCallLimit, scope_token_limit: plan.scopeTokenLimit,
+      // 0135：这次调用用的是哪个档位。null = 没选过，按进程默认。
+      // 它只解释「这个预留数从哪来」，不是新的闸门，也不改任何权限。
+      workspace_context_budget_tokens: plan.workspaceContextBudgetTokens },
     max_attempts: maxAttempts,
   };
   return { snapshot, attemptState: { revision: '1', current_candidate_index: 0,

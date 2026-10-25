@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { rememberWorkingDirectory } from "../src/lib/recentWorkingDirectories";
 import { clickPortal, dialogText, feedbackText, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openUnresolvedDialog, openWorkingDirectory, pressEscape, switchToolbarSession } from "./mountApp";
 
 /**
@@ -436,7 +437,7 @@ describe("文件夹入口与对话直接执行", () => {
       // 目录回执已到、项目详情与目标核对还没回来：首条输入器保持原样，不换整页核对态。
       expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
       expect(folderStripName()).toBe("MyProject");
-      expect(document.body.textContent).not.toContain("正在核对对话目标与会话");
+      expect(document.body.textContent).not.toContain("正在核对对话工作对象与会话");
       expect(document.body.textContent).not.toContain("正在刷新目标与会话");
       expect(document.body.textContent).not.toContain("正在打开目录…");
       // 目录回执里的项目事实足够建会话：不因项目详情在途按住发送键，也不丢草稿。
@@ -445,7 +446,7 @@ describe("文件夹入口与对话直接执行", () => {
       expect(view.wrapper.get('[data-testid="assist-first-send"]').attributes("disabled")).toBeUndefined();
       releaseProject();
       await flush(); await flush();
-      expect(document.body.textContent).not.toContain("正在核对对话目标与会话");
+      expect(document.body.textContent).not.toContain("正在核对对话工作对象与会话");
       expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
         .toBe("项目事实稍后读回");
     } finally { releaseProject(); view.unmount(); }
@@ -478,7 +479,64 @@ describe("文件夹入口与对话直接执行", () => {
       expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
       expect(openCalls).toBe(1);
     } finally { releaseOpen(); view.unmount(); }
+    // 产品侧慢阈值是 4000ms（CollaborationView 的 directorySlow 计时器），本例必须真的等过它，
+    // 单例预算因此高于 vitest 默认的 5000ms；沿用 reviews.spec.ts 的同路由显式超时写法。
+  }, 20_000);
+
+  /*
+   * 2026-10-25 用户指令「新对话要记住最后打开的会话所在的工作目录」：工作区级新对话
+   * （`?new=` 且没有显式 `?dir=`）沿用本机最近一次成功打开的目录，仍走同一条 openFolder——
+   * 就绪、归属与首条发送时的目录绑定全部按既有路径由服务端核对，本机记录只是初始值；
+   * 不预建会话，任务与项目入口（?work=/?project=）不参与续记。
+   */
+  it("全局新对话沿用本机最近打开的工作目录，仍按同一条 openFolder 核对", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    rememberWorkingDirectory(root, "MyProject", "2026-10-25T00:00:00Z");
+    vi.stubGlobal("fetch", router({}, posts));
+    const view = await mountWorkbench("/agent?new=carry");
+    try {
+      await flush(); await flush();
+      expect(folderStripName()).toBe("MyProject");
+      expect(folderStripAssociation()).toContain("已归入项目");
+      // 续记不是只改显示：打开命令真的按原路径发出；也不因此预建会话。
+      expect(posts.filter((post) => post.path === `${prefix}/working-directories/open`)).toHaveLength(1);
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
+    } finally { view.unmount(); }
   });
+
+  it("新对话目录续记被慢路径取消后，本条不再自动打开目录", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const base = router({}, posts);
+    let releaseOpen!: () => void;
+    let openCalls = 0;
+    const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === "POST" && path.endsWith("/working-directories/open")) { openCalls += 1; await openGate; }
+      return base(input, init);
+    }));
+    rememberWorkingDirectory(root, "MyProject", "2026-10-25T00:00:00Z");
+    const view = await mountWorkbench("/agent?new=carry");
+    try {
+      await flush(4200);
+      expect(view.wrapper.find('[data-testid="collab-directory-slow"]').exists()).toBe(true);
+      await view.wrapper.get('[data-testid="collab-directory-slow-cancel"]').trigger("click");
+      await flush(); await flush();
+      // 续记种子没有 URL 可摘：仍在同一条新对话上，出口消失，不重发 open 命令。
+      expect(view.router.currentRoute.value.query.new).toBe("carry");
+      expect(view.wrapper.find('[data-testid="collab-directory-slow"]').exists()).toBe(false);
+      expect(openCalls).toBe(1);
+    } finally { releaseOpen(); view.unmount(); }
+    // 标记按 `?new=` 键记在本标签会话内：同一条新对话重挂载（刷新）不再自动打开。
+    const again = await mountWorkbench("/agent?new=carry");
+    try {
+      await flush(); await flush();
+      expect(openCalls).toBe(1);
+      expect(folderStripName()).toBe("选择工作目录");
+    } finally { again.unmount(); }
+  }, 20_000);
 
   it("首条目录绑定响应丢失时不发送消息，重试沿原绑定命令和原消息载荷", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });

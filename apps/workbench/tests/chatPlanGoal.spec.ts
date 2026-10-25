@@ -15,7 +15,7 @@ import { feedbackText, flush, mountReact, mountWorkbench } from "./mountApp";
  *   * `/plan 内容`、`/goal 内容` 解析成「模式 + 正文」，只认行首；正文中间的 /plan 不是命令；
  *   * 模式以只读徽标表达当前事实（普通模式不占位），「退出」才是提交入口；
  *     回执后重读会话投影，徽标不在本地抢跑；
- *   * 目标卡只渲染服务端给的行动入口（actions），空闲态整卡不渲染；
+ *   * 目标状态条只渲染服务端给的行动入口（actions），空闲态整条不渲染；细节默认折叠；
  *   * 计划卡显示确切版本号；SUPERSEDED 也要能被看见，不能被当成最新版。
  */
 
@@ -56,7 +56,9 @@ describe("聊天模式状态徽标", () => {
       mode: "GOAL", disabled: false, busy: false, lockedReason: null, onChange }));
     try {
       const badge = view.wrapper.get('[data-testid="chat-mode-badge"]');
-      expect(badge.text()).toContain("目标模式");
+      // 2026-10-25 用户指令：档名不带「模式」二字，识别交给图标与字色。
+      expect(badge.text()).toContain("目标");
+      expect(badge.text()).not.toContain("模式");
       expect(view.wrapper.find("select").exists()).toBe(false);
       // 徽标本身不是选择器：点它不发命令。
       await badge.trigger("click");
@@ -120,12 +122,30 @@ function goalView(status: string, overrides: Record<string, unknown> = {}): Rela
     ...overrides }, rounds: [] } as unknown as RelayGoalView;
 }
 
-describe("目标卡", () => {
-  it("没有目标时整卡不渲染，不给空壳", async () => {
+describe("目标单行状态条", () => {
+  it("没有目标时整条不渲染，不给空壳", async () => {
     const view = await mountReact(createElement(GoalCard, { view: null, busy: false,
       error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(), onConfirm: vi.fn() }));
     try {
       expect(view.wrapper.find('[data-testid="goal-card"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("默认单行：状态与轮次可见，成功条件在展开区，再点收起", async () => {
+    const view = await mountReact(createElement(GoalCard, { view: goalView("ACTIVE"),
+      busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
+      onConfirm: vi.fn() }));
+    try {
+      // 单行常驻事实：状态徽标、目标正文、轮次计数都在行上。
+      expect(view.wrapper.get('[data-testid="goal-card-status"]').text()).toBe("正在推进");
+      expect(view.wrapper.get('[data-testid="goal-card-objective"]').text()).toBe("把 README 改到能跑");
+      expect(view.wrapper.get('[data-testid="goal-card-rounds"]').text()).toContain("第 2 轮");
+      // 细节默认折叠：成功条件不占消息流。
+      expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(false);
+      await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
+      expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(true);
+      await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
+      expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
 
@@ -149,6 +169,7 @@ describe("目标卡", () => {
       busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
       onConfirm: vi.fn() }));
     try {
+      await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
       const criterion = view.wrapper.get('[data-testid="goal-criterion-c1"]');
       expect(criterion.attributes("data-status")).toBe("MET");
       expect(criterion.text()).toContain("README 含启动步骤");
@@ -246,7 +267,7 @@ describe("退出聊天模式（AssistView 接线）", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
     try {
-      expect(view.wrapper.get('[data-testid="chat-mode-badge"]').text()).toContain("目标模式");
+      expect(view.wrapper.get('[data-testid="chat-mode-badge"]').text()).toContain("目标");
       expect(view.wrapper.find('[data-testid="chat-mode-select"]').exists()).toBe(false);
       await view.wrapper.get('[data-testid="chat-mode-exit"]').trigger("click");
       await flush(80);

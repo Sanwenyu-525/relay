@@ -6,7 +6,8 @@
   padding: var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-control);
+  /* 2026-10-25 视觉对齐：卡片圆角统一到 panel 档（此前是 8px 控件档）。 */
+  border-radius: var(--relay-radius-panel);
 }
 
 .daily-continuation--attention {

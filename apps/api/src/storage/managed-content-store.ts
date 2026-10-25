@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-import { publishWindowsContent, WindowsContentError } from './windows-content-publisher.js';
+import {
+  publishWindowsContent,
+  readWindowsContent,
+  WindowsContentError,
+} from './windows-content-publisher.js';
 
 /**
  * 受管内容存储（docs/database/physical-design-postgresql.md 第 7 节、
@@ -27,6 +31,7 @@ export const MAX_MARKDOWN_BYTES = 256 * 1024;
 export const SUPPORTED_MEDIA_TYPES: readonly string[] = ['text/markdown'];
 
 const STORAGE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const MANAGED_CONTENT_REF_PATTERN = /^artifacts\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/content\.md$/iu;
 
 /** 存储路径不合法（绝对路径、盘符、上级目录、非法 ID）：一律拒绝，不尝试“修正”。 */
 export class UnsafeStorageRefError extends Error {
@@ -189,7 +194,30 @@ export class ManagedContentStore {
 
     try {
       const path = resolveStoredContentPath(this.dataRoot, storageRef);
-      content = await readFile(path);
+      if (process.platform === 'win32') {
+        const reference = MANAGED_CONTENT_REF_PATTERN.exec(storageRef);
+        if (!reference?.[1] || !reference[2]) return { status: 'UNREADABLE' };
+        try {
+          content = await readWindowsContent({
+            dataRoot: this.dataRoot,
+            artifactId: reference[1],
+            versionId: reference[2],
+            storageRef,
+            contentHash: expected.contentHash,
+            size: expected.size,
+          });
+        } catch (error) {
+          if (error instanceof WindowsContentError && error.code === 'CONTENT_MISSING') {
+            return { status: 'MISSING' };
+          }
+          if (error instanceof WindowsContentError && error.code === 'CONTENT_TAMPERED') {
+            return { status: 'TAMPERED' };
+          }
+          return { status: 'UNREADABLE' };
+        }
+      } else {
+        content = await readFile(path);
+      }
     } catch (error) {
       if (error instanceof UnsafeStorageRefError) {
         return { status: 'UNREADABLE' };

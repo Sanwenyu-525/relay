@@ -185,7 +185,9 @@ export async function createArtifactWithVersion(http: RelayHttp, input: { readon
       content: input.content
     })
   });
-  return artifactVersionResultFrom(commandEnvelopeFrom(body).result);
+  const envelope = commandEnvelopeFrom(body);
+  if (envelope.commandId !== input.commandId) throw new RelayTransportError("创建产物回包与原 command_id 不匹配；请查询原命令回执。");
+  return artifactVersionResultFrom(envelope.result);
 }
 
 export async function submitArtifactVersion(http: RelayHttp, input: { readonly artifactId: string; readonly commandId: string; readonly expectedArtifactRevision: DecimalRevision; readonly expectedTaskRevision: DecimalRevision; readonly mediaType: string; readonly content: string; }): Promise<RelayArtifactVersionResult> {
@@ -202,7 +204,9 @@ export async function submitArtifactVersion(http: RelayHttp, input: { readonly a
       })
     }
   );
-  return artifactVersionResultFrom(commandEnvelopeFrom(body).result);
+  const envelope = commandEnvelopeFrom(body);
+  if (envelope.commandId !== input.commandId) throw new RelayTransportError("保存版本回包与原 command_id 不匹配；请查询原命令回执。");
+  return artifactVersionResultFrom(envelope.result);
 }
 
 export async function getArtifact(http: RelayHttp, artifactId: string): Promise<RelayArtifact> {

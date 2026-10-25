@@ -4,18 +4,23 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test, { after, before } from 'node:test';
+import { Client } from 'pg';
 
 import { sql } from 'kysely';
 
 import { readUserGitState, runUserGitReadCommand,
   type UserGitReadCommandOutcome } from '../../src/application/git-user-action.js';
 import { createGatewayConnectionCommand, createGatewayPolicyCommand,
-  createManagedResourceCommand } from '../../src/application/gateway-commands.js';
+  createManagedResourceCommand, revokeGatewayPolicyCommand } from '../../src/application/gateway-commands.js';
+import { prepareGatewayAction, type GatewayOrigin } from '../../src/application/gateway-actions.js';
+import { createFakeConnection, createGatewayPolicy, createImportJob } from '../../src/application/gateway-configuration.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
+import { reviewTargetHash } from '../../src/application/review-requests.js';
 import { withTransaction, createRepositories } from '../../src/application/unit-of-work.js';
+import type { JsonObject } from '../../src/infrastructure/json.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import {
-  createDataRoot, startTestApi, workspacePath, type TestApi,
+  createDataRoot, expectCommandAccepted, startTestApi, workspacePath, type TestApi,
 } from './api-harness.js';
 import {
   APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase,
@@ -67,6 +72,8 @@ interface UserGitFixture {
   readonly root: string;
   readonly resourceId: string;
   readonly connectionId: string;
+  readonly gitStatusPolicyId: string;
+  readonly gitStatusPolicyRevision: string;
   readonly outsideDir: string;
 }
 
@@ -116,13 +123,20 @@ async function userGitFixture(input: {
   const resourceId = resource.result.resource_id!;
   // 读 status 与读 diff 是**两条不同的权限事实**，因此各建一条策略；只放行其中一条时，
   // 另一条必须按 GATEWAY_PERMISSION_DENIED 拒绝，而不是被另一条的授权顶替。
+  let gitStatusPolicyId = '';
+  let gitStatusPolicyRevision = '';
   for (const actionType of ['GIT_STATUS', 'GIT_DIFF'] as const) {
     const policy = await createGatewayPolicyCommand(app.db, { workspaceId, projectId,
       commandId: randomUUID(), capability: 'GIT_READ', actionType,
       resourceId, decision: input.decision ?? 'AUTO', maxPayloadBytes: 65536 });
     assert.ok(policy.result.policy_id);
+    if (actionType === 'GIT_STATUS') {
+      gitStatusPolicyId = policy.result.policy_id!;
+      gitStatusPolicyRevision = policy.result.revision!;
+    }
   }
-  return { workspaceId, projectId, root, resourceId, connectionId, outsideDir };
+  return { workspaceId, projectId, root, resourceId, connectionId, gitStatusPolicyId,
+    gitStatusPolicyRevision, outsideDir };
 }
 
 function gitReadPath(fixture: UserGitFixture, resourceId?: string): string {
@@ -385,16 +399,29 @@ test('权限策略 ASK 创建绑定确切参数的 ACTION_APPROVAL，确认后�
   assert.equal(replayed.result.state, 'WAITING_APPROVAL');
 
   // 人工确认：只落判断，不执行读取。
-  const review = await withTransaction(app.db, (repositories) =>
-    repositories.reviews.readRequest(pending.review_id));
-  assert.ok(review);
-  assert.equal(review.kind, 'ACTION_APPROVAL');
-  assert.equal(review.operation_id, pending.operation_id);
-  const decided = await resolveReview(app.db, { workspaceId: f.workspaceId,
-    reviewId: pending.review_id, commandId: randomUUID(),
-    expectedRevision: review.revision.toString(),
-    targetHash: review.target_hash.toString('hex'), decision: 'APPROVE' });
-  assert.equal(decided.result.effect.external_effect_executed, false);
+  const inbox = await api.get(workspacePath(f.workspaceId, '/reviews'));
+  assert.equal(inbox.status, 200, inbox.text);
+  const listed = (inbox.body as { items: Array<{ id: string; kind: string; status: string;
+    operation_id: string | null; allowed_decisions: readonly string[] }> }).items
+    .find((item) => item.id === pending.review_id);
+  assert.ok(listed, 'the no-Run user action should remain visible in the inbox');
+  assert.equal(listed.kind, 'ACTION_APPROVAL');
+  assert.equal(listed.status, 'OPEN');
+  assert.equal(listed.operation_id, pending.operation_id);
+  assert.deepEqual(listed.allowed_decisions, ['APPROVE', 'DENY']);
+
+  const detailResponse = await api.get(workspacePath(f.workspaceId, `/reviews/${pending.review_id}`));
+  assert.equal(detailResponse.status, 200, detailResponse.text);
+  const detail = detailResponse.body as { revision: string; target_hash: string; status: string;
+    effect: { external_effect_executed: boolean } };
+  assert.equal(detail.status, 'OPEN');
+  assert.equal(detail.effect.external_effect_executed, false);
+  const decisionCommandId = randomUUID();
+  const decided = expectCommandAccepted(await api.post(workspacePath(f.workspaceId,
+    `/reviews/${pending.review_id}/decisions`), { command_id: decisionCommandId,
+    expected_revision: detail.revision, target_hash: detail.target_hash, decision: 'APPROVE' }),
+  200, decisionCommandId);
+  assert.equal((decided.effect as { external_effect_executed: boolean }).external_effect_executed, false);
 
   // 确认后的再次投递才真正读取，且只读一次。
   const approved = await runUserGitReadCommand(app.db, { workspaceId: f.workspaceId,
@@ -404,6 +431,121 @@ test('权限策略 ASK 创建绑定确切参数的 ACTION_APPROVAL，确认后�
   const status = approved.result as unknown as { result: { untracked: string[] } };
   assert.deepEqual(status.result.untracked, ['ask.txt']);
   assert.equal((await invokeRows(pending.operation_id)).length, 1);
+});
+
+test('USER_ACTION Review 的查询已失效时，目标动作被改写后仍拒绝 direct approval', async () => {
+  const f = await userGitFixture({ decision: 'ASK' });
+  const first = await runUserGitReadCommand(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, resourceId: f.resourceId, connectionId: f.connectionId,
+    actionType: 'GIT_STATUS', actorRef: 'user:local', commandId: randomUUID() });
+  assert.equal(first.result.state, 'WAITING_APPROVAL');
+  const pending = first.result as { operation_id: string; review_id: string };
+  const detailResponse = await api.get(workspacePath(f.workspaceId, `/reviews/${pending.review_id}`));
+  assert.equal(detailResponse.status, 200, detailResponse.text);
+  const detail = detailResponse.body as { revision: string; target: Record<string, unknown> };
+
+  // Simulate a persisted target drift while keeping its hash internally consistent.
+  // The query projection must expire it, and a direct decision must enforce the same binding.
+  const changedTarget = { ...detail.target, action_type: 'GIT_DIFF' } as JsonObject;
+  const changedHash = reviewTargetHash(changedTarget);
+  const client = new Client({ connectionString: MIGRATION_DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query('update review_requests set target = $2::jsonb, target_hash = $3 where id = $1::uuid',
+      [pending.review_id, JSON.stringify(changedTarget), changedHash]);
+  } finally {
+    await client.end();
+  }
+
+  const expiredInbox = await api.get(workspacePath(f.workspaceId, '/reviews?status=EXPIRED'));
+  assert.equal(expiredInbox.status, 200, expiredInbox.text);
+  const expired = (expiredInbox.body as { items: Array<{ id: string; status: string }> }).items
+    .find((item) => item.id === pending.review_id);
+  assert.equal(expired?.status, 'EXPIRED');
+
+  const decisionCommandId = randomUUID();
+  const decision = await api.post(workspacePath(f.workspaceId,
+    `/reviews/${pending.review_id}/decisions`), { command_id: decisionCommandId,
+    expected_revision: detail.revision, target_hash: changedHash.toString('hex'), decision: 'APPROVE' });
+  assert.equal(decision.status, 409, decision.text);
+  const stored = await sql<{ count: string }>`select count(*)::text as count from review_decisions
+    where review_id = ${pending.review_id}`.execute(app.db);
+  assert.equal(stored.rows[0]?.count, '0');
+  assert.equal((await invokeRows(pending.operation_id)).length, 0);
+});
+
+test('USER_IMPORT Review 的目标绑定失效后仍拒绝 direct approval', async () => {
+  const f = await userGitFixture({ decision: 'ASK' });
+  const sourceUri = 'https://public.example/review-binding';
+  const job = await createImportJob(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    actorRef: 'user:local', configVersion: 'fixture-v1', sourceUri, commandId: randomUUID() });
+  const connection = await createFakeConnection(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, capabilities: ['FAKE_PUBLIC_READ'] });
+  await createGatewayPolicy(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    capability: 'FAKE_PUBLIC_READ', actionType: 'READ_PUBLIC', targetPrefix: 'https://public.example/',
+    decision: 'ASK', maxPayloadBytes: 16 });
+  const origin: GatewayOrigin = { kind: 'USER_IMPORT', importJobId: job.importJobId,
+    actorRef: 'user:local', configVersion: 'fixture-v1' };
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId: randomUUID(), intentKey: `review-binding-${randomUUID()}`,
+    connectionId: connection.connectionId, origin, actionType: 'READ_PUBLIC', target: sourceUri, params: {} });
+  assert.equal(prepared.status, 'WAITING_APPROVAL');
+  assert.ok(prepared.review_id);
+
+  const detailResponse = await api.get(workspacePath(f.workspaceId, `/reviews/${prepared.review_id}`));
+  assert.equal(detailResponse.status, 200, detailResponse.text);
+  const detail = detailResponse.body as { revision: string; target: Record<string, unknown> };
+  const changedTarget = { ...detail.target, action_type: 'READ_PRIVATE' } as JsonObject;
+  const changedHash = reviewTargetHash(changedTarget);
+  const client = new Client({ connectionString: MIGRATION_DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query('update review_requests set target = $2::jsonb, target_hash = $3 where id = $1::uuid',
+      [prepared.review_id, JSON.stringify(changedTarget), changedHash]);
+  } finally {
+    await client.end();
+  }
+
+  const expiredInbox = await api.get(workspacePath(f.workspaceId, '/reviews?status=EXPIRED'));
+  assert.equal(expiredInbox.status, 200, expiredInbox.text);
+  assert.ok((expiredInbox.body as { items: Array<{ id: string }> }).items.some((item) =>
+    item.id === prepared.review_id));
+  const decision = await api.post(workspacePath(f.workspaceId,
+    `/reviews/${prepared.review_id}/decisions`), { command_id: randomUUID(),
+    expected_revision: detail.revision, target_hash: changedHash.toString('hex'), decision: 'APPROVE' });
+  assert.equal(decision.status, 409, decision.text);
+  const stored = await sql<{ count: string }>`select count(*)::text as count from review_decisions
+    where review_id = ${prepared.review_id}`.execute(app.db);
+  assert.equal(stored.rows[0]?.count, '0');
+});
+
+test('USER_ACTION Review stays non-executing after approval when its permission is revoked', async () => {
+  const f = await userGitFixture({ decision: 'ASK' });
+  await writeFile(join(f.root, 'revoked.txt'), 'still blocked\n', 'utf8');
+  const commandId = randomUUID();
+  const first = await runUserGitReadCommand(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, resourceId: f.resourceId, connectionId: f.connectionId,
+    actionType: 'GIT_STATUS', actorRef: 'user:local', commandId });
+  assert.equal(first.result.state, 'WAITING_APPROVAL');
+  const pending = first.result as { operation_id: string; review_id: string };
+  await revokeGatewayPolicyCommand(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    policyId: f.gitStatusPolicyId, commandId: randomUUID(), expectedRevision: f.gitStatusPolicyRevision });
+
+  const review = await withTransaction(app.db, (repositories) =>
+    repositories.reviews.readRequest(pending.review_id));
+  assert.ok(review);
+  const decided = await resolveReview(app.db, { workspaceId: f.workspaceId,
+    reviewId: pending.review_id, commandId: randomUUID(),
+    expectedRevision: review.revision.toString(), targetHash: review.target_hash.toString('hex'),
+    decision: 'APPROVE' });
+  assert.equal(decided.result.effect.external_effect_executed, false);
+  await assert.rejects(runUserGitReadCommand(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, resourceId: f.resourceId, connectionId: f.connectionId,
+    actionType: 'GIT_STATUS', actorRef: 'user:local', commandId }),
+  (error: unknown) => code(error) === 'GATEWAY_PERMISSION_DENIED' ||
+    code(error) === 'GATEWAY_PERMISSION_STALE');
+  assert.equal((await invokeRows(pending.operation_id)).length, 0,
+    'an approval decision cannot revive a revoked permission or create an Invocation');
 });
 
 test('策略 DENY 时拒绝执行，不产生 Operation', async () => {

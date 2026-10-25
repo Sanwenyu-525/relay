@@ -81,6 +81,36 @@ export class MemoryCaptureRepository {
   }
 
   /**
+   * 按 Memory 根停用它的全部捕获记账（P1-B）。
+   *
+   * 普通 `RetireMemory` 只改 `memory_items.status`，捕获账本会停在 ACTIVE：界面「最近自动
+   * 记住」仍把它当有效条目展示，而按自动记忆撤销又会因为「对应记忆已非有效状态」被拒——
+   * 同一条记忆在两处入口里状态互相矛盾。停用是同一个业务动作，两处状态必须一起走。
+   *
+   * 返回受影响条数；调用方据此决定要不要写审计。
+   */
+  async retireByMemory(memoryId: string, actor: string): Promise<number> {
+    const result = await sql`update memory_auto_captures
+      set status = 'RETIRED', decided_at = now(), decided_by = ${actor}, revision = revision + 1
+      where memory_id = ${memoryId} and status = 'ACTIVE'`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n);
+  }
+
+  /**
+   * 按 Memory 根恢复它的捕获记账（P1-B）。
+   *
+   * 恢复是停用的正向补偿：`ck_memory_capture_decision` 要求 ACTIVE 行不带撤销时刻，
+   * 因此这里把决定人一并清空，只留 revision 前进的痕迹。
+   * 撤销过的内容仍不会被再次提取——那由 `hasCaptured`（含已撤销）保证，与状态无关。
+   */
+  async reactivateByMemory(memoryId: string): Promise<number> {
+    const result = await sql`update memory_auto_captures
+      set status = 'ACTIVE', decided_at = null, decided_by = null, revision = revision + 1
+      where memory_id = ${memoryId} and status = 'RETIRED'`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n);
+  }
+
+  /**
    * 同一内容是否已经提取过（含已撤销）。
    *
    * 撤销后不能再提议同一内容——否则「撤销」只是把界面清干净，下一轮又写回来。

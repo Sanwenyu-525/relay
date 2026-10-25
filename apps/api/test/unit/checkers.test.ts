@@ -18,10 +18,12 @@ import {
  * 存在性检查不等于论断被支持；检查器故障既不是 FAIL 也不是 PASS。
  */
 
-function entryOf(criterionId: string, method: FrozenCriterionInput['method']): CheckPlanEntry {
+function entryOf(criterionId: string, method: FrozenCriterionInput['method'],
+  checkerId?: FrozenCriterionInput['checkerId']): CheckPlanEntry {
   const plan = buildCheckPlan({
     criteria: [
-      { criterionId, statement: `${criterionId} 的判定陈述`, required: true, method, targetSpec: {} },
+      { criterionId, statement: `${criterionId} 的判定陈述`, required: true, method, targetSpec: {},
+        ...(checkerId === undefined ? {} : { checkerId }) },
     ],
     workflowKey: 'markdown-deliverable-v1',
     workflowVersion: '1',
@@ -98,7 +100,7 @@ test('citation-exists-v1 reports existence only and never claims support', () =>
 });
 
 test('fake-semantic-v1 distinguishes unsupported claims from uncertainty', () => {
-  const entry = entryOf('c3', 'SEMANTIC');
+  const entry = entryOf('c3', 'SEMANTIC', 'fake-semantic-v1');
 
   assert.equal(check(entry, LEGAL_CONTENT).result, 'PASS');
   assert.equal(
@@ -122,7 +124,7 @@ test('human-evidence-v1 stays NOT_RUN so the worker cannot self-accept', () => {
 test('CHECKER_ERROR replaces the deterministic checkers with an ERROR result', () => {
   const structure = entryOf('c1', 'MARKDOWN_STRUCTURE');
   const citation = entryOf('c2', 'CITATION_EXISTS');
-  const semantic = entryOf('c3', 'SEMANTIC');
+  const semantic = entryOf('c3', 'SEMANTIC', 'fake-semantic-v1');
 
   const structureOutcome = check(structure, LEGAL_CONTENT, 'CHECKER_ERROR');
 

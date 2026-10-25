@@ -30,7 +30,7 @@ import { readAdmission, requireNormalAdmission } from './maintenance-admission.j
 import type { FrozenCheck } from './run-scope-grant.js';
 import { targetMatches } from './gateway-actions.js';
 import { canonicalResourceIdentity } from './gateway-configuration.js';
-import { createRepositories, withTransaction } from './unit-of-work.js';
+import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 
 /**
  * 对话里的明确执行请求（工作台 §18.2 / 领域模型 §12.2）。
@@ -336,15 +336,53 @@ export interface InterpretConversationMessageInput {
   readonly workspaceId: string;
   readonly sessionId: string;
   readonly sourceMessageId: string;
-  readonly resourceId: string;
+  /** 借用机器插件通道（未归属会话）时可为 null：归属由 machineCapability 解析。 */
+  readonly resourceId: string | null;
   readonly commandId: string;
   readonly signal?: AbortSignal | undefined;
   readonly modelPort?: AssistModelPort | undefined;
+  /**
+   * 未归属会话进入执行时必须指明的机器族能力（电脑/浏览器操作）。机器插件是安装级
+   * 资源，连接按项目登记；会话没有归入项目时，执行请求借用「声明该能力的 ACTIVE
+   * 连接」所属项目作为账本归属，不走这条通道的请求保持「必须绑定 Project」的旧规则。
+   */
+  readonly machineCapability?: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | undefined;
 }
 
 function defaultModelPort(): AssistModelPort {
   const config = readModelPortConfig(process.env);
   return config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+}
+
+/**
+ * 未归属会话借用机器插件连接的归属解析（2026-10-25）。
+ *
+ * 电脑/浏览器插件是本机安装级资源，连接登记在哪个项目下只决定账本归属。这里跨项目
+ * 找声明该能力的 ACTIVE 连接，取其项目与该项目最早登记的 ACTIVE 受管资源——机器动作
+ * 在账本上必须绑定一个受管资源（0126 矩阵），借用时它只是归属凭据，不是本次任务的
+ * 工作范围（工具词表在 `planToolLoop` 里按借用执行收敛为机器族）。文件族能力不进
+ * 这条通道：目录边界就是项目边界，跨项目借用文件连接等于越权。
+ *
+ * 导出给两处共享同一份事实：能力事实块（`assist-capability-notice`）据它说明
+ * 「插件可不可用」，主流程（`assist-runner`）据它决定未归属会话的纯操作候选是否
+ * 落成执行请求——两处判断漂移会让模型照着事实块给出候选、却在落库时被拒。
+ */
+export async function resolveWorkspaceMachineAttribution(repositories: Repositories,
+  workspaceId: string, capability: 'COMPUTER_INPUT' | 'BROWSER_ACTION',
+): Promise<{ readonly projectId: string; readonly resourceId: string } | undefined> {
+  const connections = await repositories.gateway
+    .listActiveConnectionsByCapability(workspaceId, capability);
+  const resources = (await repositories.gateway.listResources())
+    .filter((resource) => resource.workspace_id === workspaceId && resource.status === 'ACTIVE')
+    .sort((left, right) => left.created_at.getTime() - right.created_at.getTime()
+      || (left.id < right.id ? -1 : 1));
+  for (const connection of connections) {
+    const resource = resources.find((candidate) => candidate.project_id === connection.project_id);
+    if (resource !== undefined) {
+      return { projectId: connection.project_id, resourceId: resource.id };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -365,23 +403,41 @@ async function claimExecutionRequest(db: DbExecutor, input: InterpretConversatio
     if (session.conversation_mode !== 'AGENT') {
       throw invalidTransition('只有普通 Agent 会话可以进入执行；请明确转入普通会话。');
     }
-    if (session.project_id === null) {
-      throw invalidTransition('从对话直接进入执行要求会话绑定明确的 Project。');
+    // 归属先于资源判定：未归属会话只有机器族操作可借用插件连接归属项目，其余请求
+    // 维持「必须绑定明确的 Project」。
+    let projectId = session.project_id;
+    let resourceId = input.resourceId;
+    if (projectId === null) {
+      if (input.machineCapability === undefined) {
+        throw invalidTransition('从对话直接进入执行要求会话绑定明确的 Project。');
+      }
+      const attribution = await resolveWorkspaceMachineAttribution(repositories,
+        input.workspaceId, input.machineCapability);
+      if (attribution === undefined) {
+        throw invalidTransition('工作区还没有登记可用的'
+          + (input.machineCapability === 'COMPUTER_INPUT' ? '电脑操控' : '浏览器操控')
+          + '连接；请先在任一项目的「连接与权限」页登记插件连接后再发起操作。');
+      }
+      projectId = attribution.projectId;
+      resourceId = attribution.resourceId;
     }
     if (session.status !== 'ACTIVE') throw invalidTransition('会话已归档。');
-    await lockWritableProjectInWorkspace(repositories, input.workspaceId, session.project_id);
+    // 走到这里的 resourceId 一定非空：归属会话由调用方传受管资源，未归属会话刚由
+    // 借用解析赋值。空值只剩「调用方漏传」一种来源，按资源不存在处理。
+    if (resourceId === null) throw resourceNotFound('Managed resource');
+    await lockWritableProjectInWorkspace(repositories, input.workspaceId, projectId);
     const message = await repositories.assist.readMessage(input.sourceMessageId);
     if (message === undefined || message.session_id !== session.id || message.role !== 'USER' ||
         message.status !== 'COMPLETED' || message.content === null) {
       throw invalidTransition('执行请求只能来自该会话中一条已完成的用户消息。');
     }
-    const resource = await repositories.gateway.readResource(input.resourceId);
+    const resource = await repositories.gateway.readResource(resourceId);
     if (resource?.workspace_id !== input.workspaceId ||
-        resource.project_id !== session.project_id || resource.status !== 'ACTIVE') {
+        resource.project_id !== projectId || resource.status !== 'ACTIVE') {
       throw resourceNotFound('Managed resource');
     }
     const row = await repositories.conversationExecutions.insertRequest({
-      id: randomUUID(), workspaceId: input.workspaceId, projectId: session.project_id,
+      id: randomUUID(), workspaceId: input.workspaceId, projectId,
       sessionId: session.id, sourceMessageId: message.id, resourceId: resource.id,
       commandId: input.commandId, rootPath: resource.canonical_root,
       baseContentSha256: createHash('sha256').update(message.content, 'utf8').digest(),
@@ -389,7 +445,7 @@ async function claimExecutionRequest(db: DbExecutor, input: InterpretConversatio
     });
     await repositories.activities.insertActivityRecord({ id: randomUUID(),
       workspaceId: input.workspaceId, actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF,
-      commandId: input.commandId, projectId: session.project_id, taskId: null,
+      commandId: input.commandId, projectId, taskId: null,
       eventType: 'CONVERSATION_EXECUTION_REQUESTED',
       factRefs: { request_id: row.id, session_id: session.id, source_message_id: message.id,
         resource_id: resource.id } });
@@ -708,13 +764,20 @@ export interface RecordConversationExecutionCandidateInput {
   readonly workspaceId: string;
   readonly sessionId: string;
   readonly sourceMessageId: string;
-  readonly resourceId: string;
+  /** 会话绑定目录的资源；未归属会话的机器族执行为 null（归属由 machineCapability 解析）。 */
+  readonly resourceId: string | null;
   readonly commandId: string;
   /**
    * 冻结的方法身份；主流程在消息写入时就已固定，候选落库时必须原样带上。
    * 缺失表示这不是方法轮；非法形状在进入此入口前已由 `readRunMethodBinding` 拒绝。
    */
   readonly method?: RunMethodBinding;
+  /**
+   * 未归属会话借用的机器族能力。有它时 resourceId 允许为 null；调用方（主流程）
+   * 必须已按「纯操作候选（无文件改动、无检查）」筛选过，这里不重复第二遍业务
+   * 判定——准入与幂等只在原入口有一份。
+   */
+  readonly machineCapability?: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | undefined;
   readonly outcome: Extract<MainLoopOutcome, { kind: 'PREPARE' | 'CLARIFY' }>;
 }
 
@@ -722,8 +785,9 @@ export interface RecordConversationExecutionCandidateInput {
  * 把主流程给出的判定落进**原**执行请求行（阶段 C 的唯一写入口）。
  *
  * 刻意复用 `claimExecutionRequest()` 与 `saveInterpretation()`：会话必须是 AGENT、
- * 必须绑定项目、会话未归档、原消息必须是该会话一条已完成的 USER 消息、资源必须属于
- * 该项目且 ACTIVE——这些准入与幂等规则只在原入口有一份，这里不复制第二遍。
+ * 会话未归档、原消息必须是该会话一条已完成的 USER 消息、资源必须属于该项目且
+ * ACTIVE——这些准入与幂等规则只在原入口有一份，这里不复制第二遍。
+ * 未归属会话在 `machineCapability` 指明机器族能力时同样经原入口解析借用归属。
  * 重放仍按 `command_id` 命中回执，或按 `source_message_id` 读回已保存的判定，
  * 因此同一原消息**不可能**产生第二个请求行。
  */
@@ -732,12 +796,14 @@ export async function recordConversationExecutionCandidate(db: DbExecutor,
   const scopeKey = httpCommandScopeKey(input.workspaceId);
   const claimed = await claimExecutionRequest(db, { workspaceId: input.workspaceId,
     sessionId: input.sessionId, sourceMessageId: input.sourceMessageId,
-    resourceId: input.resourceId, commandId: input.commandId });
+    resourceId: input.resourceId, commandId: input.commandId,
+    ...(input.machineCapability === undefined ? {} : { machineCapability: input.machineCapability }) });
   const receipt = await runIdempotentCommand(db, {
     scopeKey, commandId: input.commandId, commandType: 'InterpretConversationMessage',
     target: { workspace_id: input.workspaceId },
     body: { session_id: input.sessionId, source_message_id: input.sourceMessageId,
-      resource_id: input.resourceId, origin: 'AGENT_MAIN_LOOP' },
+      resource_id: input.resourceId, ...(input.machineCapability === undefined
+        ? {} : { machine_capability: input.machineCapability }), origin: 'AGENT_MAIN_LOOP' },
     execute: async () => ({ request_id: claimed.row.id }) });
   if (claimed.row.candidate_status !== 'PENDING') return projection(claimed.row);
   const outcome = input.outcome;
@@ -948,6 +1014,10 @@ interface PlannedToolLoop {
  * 意图，Git 只读按连接是否存在。少给一个工具就是少一条能力边界，因此不预先塞满词表。
  * 连接按实际授予的能力逐项解析——只读请求不该被一条用不上的写能力挡住，报错也才能
  * 指向真正缺的那一项。
+ *
+ * 借用机器插件通道的执行（会话未归属，请求行上的项目是插件连接归属）是唯一例外：
+ * 读集、写、检查与 Git 一律不进词表，只给本次 interaction 的机器族工具——借来的
+ * 受管根只是账本归属，不是用户授权的工作范围。
  */
 async function planToolLoop(db: DbExecutor, input: {
   readonly row: ConversationExecutionRequestRow;
@@ -955,13 +1025,25 @@ async function planToolLoop(db: DbExecutor, input: {
   readonly canonicalRoot: string;
 }): Promise<PlannedToolLoop> {
   const { row, candidate } = input;
-  const connections: Record<string, string> = {
-    FILE_QUERY: await requireConnection(db, row, 'FILE_QUERY'),
-    FILE_READ: await requireConnection(db, row, 'FILE_READ'),
-  };
-  const allowedTools: string[] = [...TOOL_LOOP_READ_TOOLS];
+  // 借用机器插件通道的执行（2026-10-25）：会话本身没有归入项目，请求行上的项目与
+  // 资源只是账本归属。工具词表因此收敛为本次 interaction 的机器族——借用的受管根
+  // 不是用户的工作范围，不给文件、Git 与检查工具。
+  const borrowedMachineExecution =
+    (await createRepositories(db).assist.readSession(row.session_id))?.project_id === null;
+  if (borrowedMachineExecution && (candidate.writes_files || candidate.file_changes.length > 0 ||
+      candidate.check !== undefined || candidate.interaction === undefined)) {
+    throw invalidTransition('未归属会话的执行请求只承载浏览器或电脑操作（不带文件修改与检查）；' +
+      '文件类执行请先把会话归入项目并绑定目录。');
+  }
+  const connections: Record<string, string> = {};
+  const allowedTools: string[] = [];
   const allowedActions: string[] = [];
   const checks: FrozenCheck[] = [];
+  if (!borrowedMachineExecution) {
+    connections.FILE_QUERY = await requireConnection(db, row, 'FILE_QUERY');
+    connections.FILE_READ = await requireConnection(db, row, 'FILE_READ');
+    allowedTools.push(...TOOL_LOOP_READ_TOOLS);
+  }
 
   // 会话意图传到现有 Run 工具循环；不因暴露工具就授予操作范围或免除审批。
   if (candidate.interaction !== undefined) {
@@ -982,27 +1064,29 @@ async function planToolLoop(db: DbExecutor, input: {
     }
   }
 
-  // 写能力由「本次是否明确要改文件」决定，不取决于解释模型是否猜得出文件名。
-  const wantsWrite = wantsConversationFileWrite(candidate);
-  if (wantsWrite) {
-    // 写与读账本共用 FILE_WRITE 连接；只解析一次，避免同一能力解析两次。
-    connections.FILE_WRITE = await requireConnection(db, row, 'FILE_WRITE');
-    allowedTools.push('apply_changeset', 'read_change_set');
-    // 删除不在授权动作里：用户没有因为「允许改这个目录」就允许删文件。
-    allowedActions.push('APPLY_CHANGESET');
-  }
-  if (candidate.check !== undefined) {
-    const cliRun = await requireConnectionWithConfig(db, row, 'CLI_RUN');
-    connections.CLI_RUN = cliRun.connectionId;
-    allowedTools.push('run_check');
-    allowedActions.push('CLI_RUN');
-    checks.push(await freezeConversationCheck(input.canonicalRoot, candidate.check,
-      cliRun.allowedExecutables));
-  }
-  const gitRead = await findConnection(db, row, 'GIT_READ', { exactRoot: true });
-  if (gitRead !== undefined) {
-    connections.GIT_READ = gitRead.connectionId;
-    allowedTools.push('git_status', 'git_diff', 'git_log');
+  if (!borrowedMachineExecution) {
+    // 写能力由「本次是否明确要改文件」决定，不取决于解释模型是否猜得出文件名。
+    const wantsWrite = wantsConversationFileWrite(candidate);
+    if (wantsWrite) {
+      // 写与读账本共用 FILE_WRITE 连接；只解析一次，避免同一能力解析两次。
+      connections.FILE_WRITE = await requireConnection(db, row, 'FILE_WRITE');
+      allowedTools.push('apply_changeset', 'read_change_set');
+      // 删除不在授权动作里：用户没有因为「允许改这个目录」就允许删文件。
+      allowedActions.push('APPLY_CHANGESET');
+    }
+    if (candidate.check !== undefined) {
+      const cliRun = await requireConnectionWithConfig(db, row, 'CLI_RUN');
+      connections.CLI_RUN = cliRun.connectionId;
+      allowedTools.push('run_check');
+      allowedActions.push('CLI_RUN');
+      checks.push(await freezeConversationCheck(input.canonicalRoot, candidate.check,
+        cliRun.allowedExecutables));
+    }
+    const gitRead = await findConnection(db, row, 'GIT_READ', { exactRoot: true });
+    if (gitRead !== undefined) {
+      connections.GIT_READ = gitRead.connectionId;
+      allowedTools.push('git_status', 'git_diff', 'git_log');
+    }
   }
   return {
     toolLoopAction: { resource_id: row.resource_id, connections,

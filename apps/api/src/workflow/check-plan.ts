@@ -67,7 +67,10 @@ const METHOD_CHECKER: Readonly<
   HUMAN: { id: 'human-evidence-v1', version: '1' },
   MARKDOWN_STRUCTURE: { id: 'markdown-structure-v1', version: '1' },
   CITATION_EXISTS: { id: 'citation-exists-v1', version: '1' },
-  SEMANTIC: { id: 'fake-semantic-v1', version: '1' },
+  // A semantic requirement cannot be satisfied by a deterministic test double.
+  // Delegate freezes the configured model checker explicitly when available;
+  // otherwise the criterion remains pending human evidence.
+  SEMANTIC: { id: 'human-evidence-v1', version: '1' },
 };
 
 /**
@@ -84,8 +87,8 @@ export function buildCheckPlan(input: BuildCheckPlanInput): CheckPlan {
       throw new Error(`unregistered criterion method: ${criterion.method}`);
     }
 
-    // Only an explicit override (e.g. a HARD SEMANTIC rule whose delegate path
-    // verified the real checker is configured) may replace the method mapping.
+    // Delegate freezes the actual model checker when configured; the default
+    // method mapping remains human evidence and never silently selects a Fake.
     const checkerId: PlannedCheckerId = criterion.checkerId !== undefined &&
       isPlannedCheckerId(criterion.checkerId) ? criterion.checkerId : checker.id;
 

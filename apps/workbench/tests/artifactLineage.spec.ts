@@ -182,4 +182,63 @@ describe("P15 Artifact Lineage", () => {
     expect(mounted.wrapper.text()).not.toContain("迟到内容");
     expect(mounted.wrapper.get('[data-testid="artifact-version-compare"]').text()).not.toContain("正在读取");
   });
+
+  it("正文字符相同但末尾换行数量不同时给出明确比较结果", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path === "/attention/interventions") return response({ items: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444/text-locks")
+        return response({ artifact_id: "44444444-4444-4444-8444-444444444444", locks: [] });
+      if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
+      if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(), artifact_version_id: parentId,
+        version_number: "1", sha256: "b".repeat(64), content_availability: "AVAILABLE", direct_parents: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444") return response({
+        id: "44444444-4444-4444-8444-444444444444", task_id: "task-one", title: "结果", revision: "1",
+        latest_version_id: versionId, version_count: 2, versions: [parentId, versionId].map((id, index) => ({
+          artifact_version_id: id, version_number: String(index + 1), media_type: "text/markdown",
+          sha256: index === 0 ? "b".repeat(64) : "a".repeat(64), size: "5", source_kind: "HUMAN",
+          created_at: "2026-09-26T00:00:00Z" }))
+      });
+      if (path === `/artifact-versions/${versionId}/content`) return contentResponse("正文");
+      if (path === `/artifact-versions/${parentId}/content`) return contentResponse("正文\n");
+      throw new Error(`Unexpected ${path}`);
+    }));
+    const mounted = await mountWorkbench(`/artifact-versions/${versionId}/lineage`); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(parentId);
+    await mounted.wrapper.get('[data-testid="artifact-compare-submit"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="artifact-compare-result"]').text()).toContain("仅末尾换行数量不同");
+  });
+
+  it("正文同时改变内部换行格式与末尾换行时不误报为仅末尾变化", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input).slice(root.length);
+      if (path === `/artifact-versions/${versionId}/lineage`) return response({ ...lineage(), content_availability: "AVAILABLE" });
+      if (path === `/artifact-versions/${parentId}/lineage`) return response({ ...lineage(),
+        artifact_version_id: parentId, version_number: "1", sha256: "b".repeat(64),
+        content_availability: "AVAILABLE", direct_parents: [] });
+      if (path === "/artifacts/44444444-4444-4444-8444-444444444444") return response({
+        id: "44444444-4444-4444-8444-444444444444", task_id: "task-one", title: "结果", revision: "1",
+        latest_version_id: versionId, version_count: 2, versions: [parentId, versionId].map((id, index) => ({
+          artifact_version_id: id, version_number: String(index + 1), media_type: "text/markdown",
+          sha256: index === 0 ? "b".repeat(64) : "a".repeat(64), size: "5", source_kind: "HUMAN",
+          created_at: "2026-09-26T00:00:00Z" }))
+      });
+      if (path === `/artifact-versions/${versionId}/content`) return contentResponse("甲\n乙");
+      if (path === `/artifact-versions/${parentId}/content`) return contentResponse("甲\r\n乙\r\n");
+      return response({ detail: "not found" }, 404);
+    }));
+    const mounted = await mountWorkbench(`/artifact-versions/${versionId}/lineage`);
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="artifact-version-compare"] button').trigger("click"); await flush();
+    await mounted.wrapper.get('[data-testid="artifact-compare-select"]').setValue(parentId);
+    await mounted.wrapper.get('[data-testid="artifact-compare-submit"]').trigger("click"); await flush();
+    const result = mounted.wrapper.get('[data-testid="artifact-compare-result"]').text();
+    expect(result).toContain("内部 CRLF/LF 换行字节与末尾换行数量均不同");
+    expect(result).not.toContain("仅末尾换行数量不同");
+  });
 });

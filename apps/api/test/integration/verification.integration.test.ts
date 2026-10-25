@@ -17,6 +17,7 @@ import type { CriterionMethod, ModelCallRow } from '../../src/infrastructure/dat
 import type { JsonObject } from '../../src/infrastructure/json.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { canonicalizeJson } from '../../src/receipt/payload-hash.js';
+import { hasChecker } from '../../src/workflow/checkers.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { buildCheckPlan, checkPlanHash, planFromFrozenSnapshot } from '../../src/workflow/check-plan.js';
 import type { FakeScenario } from '../../src/workflow/context-fixture.js';
@@ -69,6 +70,7 @@ interface RunFixture {
   readonly runId: string;
   readonly storage: ManagedContentStore;
   readonly workerId: string;
+  readonly testOnlyAllowFakeSemanticChecker: boolean;
 }
 
 let fixtureCounter = 0;
@@ -76,6 +78,7 @@ let fixtureCounter = 0;
 async function setupDelegatedRun(
   criteria: readonly CriterionSpec[],
   expectedOutputs: JsonObject = {},
+  options: { readonly testOnlyAllowFakeSemanticChecker?: boolean } = {},
 ): Promise<RunFixture> {
   fixtureCounter += 1;
 
@@ -133,6 +136,12 @@ async function setupDelegatedRun(
     expectedTaskRevision: '0',
   });
 
+  if (options.testOnlyAllowFakeSemanticChecker === true) {
+    await replaceFrozenSemanticChecker(outcome.result.run_id,
+      criteria.filter((criterion) => criterion.method === 'SEMANTIC').map((criterion) => criterion.criterionId),
+      'fake-semantic-v1');
+  }
+
   return {
     workspaceId,
     projectId,
@@ -140,6 +149,7 @@ async function setupDelegatedRun(
     runId: outcome.result.run_id,
     storage: new ManagedContentStore(storageRoot),
     workerId: `worker-${fixtureCounter}`,
+    testOnlyAllowFakeSemanticChecker: options.testOnlyAllowFakeSemanticChecker === true,
   };
 }
 
@@ -151,6 +161,8 @@ async function advance(
     runId: fixture.runId,
     workerId: fixture.workerId,
     storage: fixture.storage,
+    ...(fixture.testOnlyAllowFakeSemanticChecker
+      ? { testOnlyAllowFakeSemanticChecker: true } : {}),
     ...(fakeScenario === undefined ? {} : { fakeScenario }),
   });
 }
@@ -279,17 +291,43 @@ async function replaceFrozenExpectedOutputs(runId: string, expectedOutputs: Json
   });
 }
 
+async function replaceFrozenSemanticChecker(runId: string, criterionIds: readonly string[], checkerId: string): Promise<void> {
+  const contract = await sql<{ frozen_snapshot: JsonObject }>`
+    select frozen_snapshot from execution_contracts where run_id = ${runId}
+  `.execute(app.db);
+  const frozenSnapshot = contract.rows[0]?.frozen_snapshot;
+  const criteria = frozenSnapshot?.criteria;
+  if (!Array.isArray(criteria)) throw new Error('execution contract criteria not found');
+  const criterionIdSet = new Set(criterionIds);
+  const updatedCriteria = criteria.map((criterion) => {
+    if (typeof criterion !== 'object' || criterion === null || Array.isArray(criterion)) return criterion;
+    const value = criterion as JsonObject;
+    return typeof value.criterion_id === 'string' && criterionIdSet.has(value.criterion_id)
+      ? { ...value, checker_id: checkerId } : value;
+  });
+  const updatedSnapshot: JsonObject = { ...frozenSnapshot, criteria: updatedCriteria };
+  const contractHash = createHash('sha256').update(canonicalizeJson(updatedSnapshot), 'utf8').digest();
+  await withMigrationClient(async (client) => {
+    await client.query(
+      `update execution_contracts set frozen_snapshot = $2::jsonb, contract_hash = $3 where run_id = $1::uuid`,
+      [runId, JSON.stringify(updatedSnapshot), contractHash],
+    );
+  });
+}
+
 async function listCheckResults(
   sessionId: string,
-): Promise<readonly { readonly criterion_id: string; readonly check_attempt: number; readonly result: string; readonly required: boolean; readonly severity: string }[]> {
+): Promise<readonly { readonly criterion_id: string; readonly check_attempt: number; readonly checker_id: string; readonly result: string; readonly required: boolean; readonly severity: string; readonly evidence_refs: JsonObject }[]> {
   const result = await sql<{
     criterion_id: string;
     check_attempt: number;
+    checker_id: string;
     result: string;
     required: boolean;
     severity: string;
+    evidence_refs: JsonObject;
   }>`
-    select criterion_id, check_attempt, result, required, severity
+    select criterion_id, check_attempt, checker_id, result, required, severity, evidence_refs
     from check_results where session_id = ${sessionId}
     order by criterion_id, check_attempt
   `.execute(app.db);
@@ -746,7 +784,7 @@ test('C05: an existing citation cannot cover an unsupported claim', async () => 
   const fixture = await setupDelegatedRun([
     { criterionId: 'c-cite', statement: '引用标识存在', required: true, method: 'CITATION_EXISTS' },
     { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
-  ]);
+  ], {}, { testOnlyAllowFakeSemanticChecker: true });
 
   await advanceToVerifying(fixture, 'SEMANTIC_UNSUPPORTED');
 
@@ -785,6 +823,72 @@ test('C05: an existing citation cannot cover an unsupported claim', async () => 
       and criterion_id = 'c-semantic'`.execute(app.db)).rows[0]!.evidence_refs;
   assert.equal(semanticEvidence.model_call_id, calls[1]!.id);
   assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+});
+
+test('SEMANTIC without a configured evaluator waits for human evidence and cannot PASS', {
+  skip: hasChecker('semantic-model-v1', '1'),
+}, async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
+  ]);
+  await advanceToVerifying(fixture);
+
+  const verified = await expectStepSucceeded(await advance(fixture), 'VERIFY');
+  assert.equal(verified.run_status, 'WAITING_APPROVAL');
+  const session = await latestSession(fixture.runId);
+  assert.equal(session.status, 'HUMAN');
+  const plan = await sql<{ check_plan: { entries: readonly { checker_id: string }[] } }>`
+    select check_plan from verification_sessions where id = ${session.id}
+  `.execute(app.db);
+  assert.equal(plan.rows[0]?.check_plan.entries[0]?.checker_id, 'human-evidence-v1');
+  assert.deepEqual((await listCheckResults(session.id)).map((row) => row.result), ['NOT_RUN']);
+  const modelChecks = await sql<{ count: bigint }>`
+    select count(*) as count from model_calls where workspace_id = ${fixture.workspaceId}
+      and kind = 'SEMANTIC_CHECK'
+  `.execute(app.db);
+  assert.equal(modelChecks.rows[0]?.count, 0n);
+  assert.equal((await listInboxReviews(app.db, fixture.workspaceId)).items[0]?.kind, 'CRITERION');
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+});
+
+test('a frozen Fake semantic checker is rejected outside explicit test fixtures', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
+  ]);
+  await advanceToVerifying(fixture);
+  await replaceFrozenSemanticChecker(fixture.runId, ['c-semantic'], 'fake-semantic-v1');
+
+  const result = await advance(fixture);
+  assert.equal(result.status, 'RUN_FAILED');
+  if (result.status !== 'RUN_FAILED') return;
+  assert.equal(result.reason, 'TEST_CHECKER_NOT_ALLOWED');
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+  assert.equal((await listSessions(fixture.runId)).length, 0);
+});
+
+test('a persisted Fake semantic PASS is rejected by the production COMPLETE path', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
+  ], {}, { testOnlyAllowFakeSemanticChecker: true });
+  await advanceToVerifying(fixture);
+
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+  const session = await latestSession(fixture.runId);
+  assert.equal(session.status, 'PASS');
+  const fakeResults = await listCheckResults(session.id);
+  assert.deepEqual(fakeResults.map((row) => [row.checker_id, row.result, row.evidence_refs.fake]), [
+    ['fake-semantic-v1', 'PASS', true],
+  ]);
+
+  const completeStepId = await stepId(fixture.runId, 'COMPLETE');
+  const blocked = await advance({ ...fixture, testOnlyAllowFakeSemanticChecker: false });
+  assert.equal(blocked.status, 'COMPLETION_BLOCKED', JSON.stringify(blocked));
+  if (blocked.status !== 'COMPLETION_BLOCKED') return;
+  assert.equal(await countAttempts(completeStepId), 0n);
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+  assert.equal((await readTask(fixture.taskId)).status, 'IN_PROGRESS');
+  assert.deepEqual(await listCheckResults(session.id), fakeResults,
+    'the disqualified Fake PASS remains immutable historical evidence');
 });
 
 /* -------------------------------------------------------------------------- */
@@ -846,7 +950,7 @@ test('C07: a required PREFERENCE failure does not block PASS', async () => {
       method: 'SEMANTIC',
       targetSpec: { severity: 'PREFERENCE' },
     },
-  ]);
+  ], {}, { testOnlyAllowFakeSemanticChecker: true });
 
   await advanceToVerifying(fixture, 'SEMANTIC_UNSUPPORTED');
 
@@ -870,7 +974,7 @@ test('C07: a required HARD failure is not covered by a passing semantic check', 
   const fixture = await setupDelegatedRun([
     { criterionId: 'c-hard', statement: '引用标识存在', required: true, method: 'CITATION_EXISTS' },
     { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
-  ]);
+  ], {}, { testOnlyAllowFakeSemanticChecker: true });
 
   await advanceToVerifying(fixture, 'NO_CITATION');
 
@@ -991,7 +1095,7 @@ test('schedules a correction round that adds a new version of the same artifact'
 test('exhausting the correction budget stops at HUMAN and blocks completion', async () => {
   const fixture = await setupDelegatedRun([
     { criterionId: 'c-semantic', statement: '论断被来源支持', required: true, method: 'SEMANTIC' },
-  ]);
+  ], {}, { testOnlyAllowFakeSemanticChecker: true });
 
   await advanceToVerifying(fixture, 'SEMANTIC_UNSUPPORTED');
 
@@ -1212,6 +1316,30 @@ test('D04: completing after PASS adds no new version, session or draft attempt',
   assert.equal(await countCompletionRecords(fixture.taskId), 1n);
 });
 
+test('completion rejects a PASS target whose hash no longer matches its ArtifactVersion', async () => {
+  const fixture = await setupDelegatedRun([
+    { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
+  ]);
+  await advanceToVerifying(fixture);
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+  const session = await latestSession(fixture.runId);
+  const target = (await withTransaction(app.db, (repositories) =>
+    repositories.verifications.listTargets(session.id)))[0];
+  assert.ok(target);
+
+  // 制造数据库中的版本摘要与实际已发布文件/Verification target 不一致，验证 COMPLETE 自身的绑定核对。
+  await withMigrationClient(async (client) => {
+    await client.query('update artifact_versions set content_hash = $2 where id = $1::uuid',
+      [target.artifact_version_id, Buffer.alloc(32, 0x7f)]);
+  });
+
+  await assert.rejects(advance(fixture), (error: unknown) =>
+    (error as { code?: string }).code === 'EVIDENCE_UNAVAILABLE');
+  assert.equal(await countCompletionRecords(fixture.taskId), 0n);
+  assert.equal((await readTask(fixture.taskId)).status, 'IN_PROGRESS');
+  assert.equal((await readRun(fixture.runId)).status, 'VERIFYING');
+});
+
 test('D05: a failing completion transaction rolls back as a whole and converges on retry', async () => {
   const fixture = await setupDelegatedRun([
     { criterionId: 'c1', statement: '必需节与结构完整', required: true, method: 'MARKDOWN_STRUCTURE' },
@@ -1356,7 +1484,8 @@ test('P07: REQUEST_CHANGES consumes one correction round and does not alter the 
 });
 
 test('P07: a bounded budget decision persists and VERIFY reads the new cap', async () => {
-  const fixture = await setupDelegatedRun([{ criterionId: 'semantic', statement: '来源支持论断', required: true, method: 'SEMANTIC' }]);
+  const fixture = await setupDelegatedRun([{ criterionId: 'semantic', statement: '来源支持论断', required: true, method: 'SEMANTIC' }],
+    {}, { testOnlyAllowFakeSemanticChecker: true });
   await withTransaction(app.db, async (repositories) => { await repositories.reviews.setCorrectionBudget(fixture.runId, 1n); });
   await advanceToVerifying(fixture, 'SEMANTIC_UNSUPPORTED');
   assert.equal((await advance(fixture, 'SEMANTIC_UNSUPPORTED')).status, 'CORRECTION_SCHEDULED');

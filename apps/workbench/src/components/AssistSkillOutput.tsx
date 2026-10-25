@@ -24,7 +24,7 @@ export default function AssistSkillOutput({ client, output, currentTarget }: { c
 }) {
   if (output.targetKind !== currentTarget.kind || output.targetId !== currentTarget.id) {
     return <section className="assist-proposal" data-testid="assist-skill-output" role="alert">
-      消息目标与当前会话不一致，不能展示此建议。</section>;
+      消息所属工作对象与当前会话不一致，不能展示此建议。</section>;
   }
   if (output.kind === "TASK_DEFINITION_SUGGESTION") {
     return <section className="assist-skill-summary">
@@ -79,7 +79,7 @@ export default function AssistSkillOutput({ client, output, currentTarget }: { c
       <p className="helper-text">当前准入预览与建议及历史 Run Trace 分属不同事实；建议本身不是有效计划或验证结果。</p>
     </>}
       <details className="tech-details"><summary>生成依据与内容摘要</summary>
-        <p className="helper-text">目标 {output.targetKind} · {targetPath
+        <p className="helper-text">工作对象 {output.targetKind} · {targetPath
           ? <Link className="inline-link" to={targetPath}>{output.targetId}</Link> : output.targetId} · 生成依据时间 {output.asOf}</p>
         <p className="helper-text">基线 {JSON.stringify(output.baseline)} · 事实摘要 {output.basisSha256} · 输出摘要 {output.payloadSha256}</p>
       </details>

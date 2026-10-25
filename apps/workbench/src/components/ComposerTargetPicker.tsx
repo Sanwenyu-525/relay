@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, FolderKanban, ListChecks } from "lucide-react";
 import type { RelayApiClient } from "../api/relayClient";
 import type { RelayProjectListItem } from "../api/dtos/projects";
-import type { RelayTaskSummary } from "../api/dtos/tasks";
 import { describeLiveError } from "../lib/liveErrors";
 import { taskStatusLabels } from "../lib/labels";
 import { useDetailsMenu } from "../lib/popoverMenu";
+import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import "./ComposerTargetPicker.css";
 
 /**
@@ -16,8 +16,8 @@ import "./ComposerTargetPicker.css";
  * 某个项目」；因此这里把「缺上下文」做成可在原地补齐的一步：选中需要上下文的 Skill 后，
  * 用户在这里指定任务或项目，而不是让那一行点了没反应。
  *
- * 边界：本芯片**不创建会话、不改归属**——它只把用户选中的目标交给调用方（AssistView →
- * 宿主），由宿主把这条对话带到该目标的真实作用域里。归属仍在建会话时确定并冻结。
+ * 边界：本芯片**不创建会话、不改归属**——它只把用户选中的工作对象交给调用方（AssistView →
+ * 宿主），由宿主把这条对话带到该工作对象的真实作用域里。归属仍在建会话时确定并冻结。
  */
 export type ComposerTargetKind = "PROJECT" | "TASK";
 
@@ -40,45 +40,50 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
   useDetailsMenu(detailsRef);
   const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<readonly RelayProjectListItem[] | null>(null);
+  const [projectsClient, setProjectsClient] = useState<RelayApiClient | null>(client);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string>("");
-  const [tasks, setTasks] = useState<readonly RelayTaskSummary[] | null>(null);
-  const [tasksError, setTasksError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const visibleProjects = projectsClient === client ? projects : null;
+  const taskPages = useProjectTaskPages(client, projectId,
+    open && need === "TASK" && projectId !== "");
+
+  useEffect(() => {
+    setProjects(null); setProjectsClient(client); setProjectsError(null); setProjectId("");
+  }, [client]);
 
   // 项目清单按需读取：只有弹层真的打开过才发请求，与命令清单/连接器同一口径。
   useEffect(() => {
-    if (!open || client === null || projects !== null || projectsError !== null) return;
+    if (!open || client === null || visibleProjects !== null || projectsError !== null) return;
     const version = ++requestVersion.current;
     void client.getProjectsPage("active").then((page) => {
       if (version !== requestVersion.current) return;
       setProjects(page.items);
+      setProjectsClient(client);
       // 只有一个项目时直接选中，少一次选择；多于一个时留给用户明确指定。
       if (need === "TASK" && page.items.length === 1) setProjectId(page.items[0]!.id);
     }).catch((caught) => {
       if (version === requestVersion.current) setProjectsError(describeLiveError(caught).message);
     });
     return () => { requestVersion.current++; };
-  }, [open, client, projects, projectsError, need]);
+  }, [open, client, visibleProjects, projectsError, need]);
 
-  useEffect(() => {
-    if (need !== "TASK" || client === null || projectId === "") { setTasks(null); setTasksError(null); return; }
-    const version = ++requestVersion.current;
-    setTasks(null); setTasksError(null);
-    void client.getProjectTasks(projectId).then((items) => {
-      if (version !== requestVersion.current) return;
-      setTasks(items);
-    }).catch((caught) => {
-      if (version === requestVersion.current) setTasksError(describeLiveError(caught).message);
-    });
-    return () => { requestVersion.current++; };
-  }, [need, client, projectId]);
+  /**
+   * 清单读取失败不缓存成永久不可用（禅道 #103）：这里的重试是显式入口，只清掉旧错误，
+   * 让上面的 effect 按当前 client／need 重新发起同一次只读读取——失败会再次落回错误态，
+   * 可继续重试；不在 effect 里自动清错误，避免把错误重置写进依赖后形成请求风暴。
+   * 重试不建会话、不改归属，迟到回包由请求版本守卫丢弃。
+   */
+  function retryProjects() {
+    if (visibleProjects !== null || projectsError === null) return;
+    setProjectsError(null);
+  }
 
   const needLabel = need === "TASK" ? "任务" : "项目";
   const label = `选择${needLabel}`;
-  const selectedProject = projects?.find((item) => item.id === projectId) ?? null;
+  const selectedProject = visibleProjects?.find((item) => item.id === projectId) ?? null;
 
-  const projectRows = (projects ?? []).map((project) => <button key={project.id} type="button"
+  const projectRows = (visibleProjects ?? []).map((project) => <button key={project.id} type="button"
     className="composer-target-row" data-testid={`composer-target-project-${project.id}`}
     data-current={project.id === projectId ? "true" : "false"}
     onClick={() => {
@@ -90,7 +95,7 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
     {need === "TASK" && <span className="composer-target-row-body">选择后列出该项目的任务</span>}
   </button>);
 
-  const taskRows = (tasks ?? []).map((task) => <button key={task.id} type="button"
+  const taskRows = taskPages.items.map((task) => <button key={task.id} type="button"
     className="composer-target-row" data-testid={`composer-target-task-${task.id}`}
     onClick={() => {
       detailsRef.current && (detailsRef.current.open = false);
@@ -112,21 +117,34 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
     <div className="composer-target-menu" role="group" aria-label={label}>
       <p className="composer-target-head">这个 Skill 要读{needLabel}的事实，先指定一条：</p>
       {client === null ? <p className="composer-target-line">连接本机 API 后才能列出{needLabel}。</p>
-        : projectsError !== null ? <p className="composer-target-line composer-target-line--error" role="alert">
-          {needLabel}清单读取失败：{projectsError}</p>
-        : projects === null ? <p className="composer-target-line">正在读取{needLabel}…</p>
-        : projects.length === 0 ? <p className="composer-target-line">
+        : projectsError !== null ? <div className="composer-target-line composer-target-line--error" role="alert">
+          <span>{needLabel}清单读取失败：{projectsError}</span>
+          <button type="button" className="text-button" data-testid="composer-target-retry"
+            onClick={retryProjects}>重试</button>
+        </div>
+        : visibleProjects === null ? <p className="composer-target-line">正在读取{needLabel}…</p>
+        : visibleProjects.length === 0 ? <p className="composer-target-line">
           还没有{need === "TASK" ? "可用的项目；任务挂在项目下" : "项目"}，先创建一个。</p>
         : projectRows}
       {need === "TASK" && projectId !== "" && <>
         <p className="composer-target-head">任务{selectedProject === null ? "" : ` · ${selectedProject.title}`}</p>
-        {tasksError !== null ? <p className="composer-target-line composer-target-line--error" role="alert">
-          任务清单读取失败：{tasksError}</p>
-          : tasks === null ? <p className="composer-target-line">正在读取任务…</p>
-          : tasks.length === 0 ? <p className="composer-target-line">这个项目还没有任务。</p>
-          : taskRows}
+        {taskPages.error !== null && <div className="composer-target-line composer-target-line--error" role="alert">
+          <span>任务清单读取失败：{taskPages.error}</span>
+          <button type="button" className="text-button" onClick={taskPages.retry}>重试</button>
+        </div>}
+        {taskPages.items.length > 0 && <>
+          {taskRows}
+          {taskPages.nextCursor !== null && <p className="composer-target-line">
+            已读取 {taskPages.items.length} 项，可能还有后续任务。
+            <button type="button" className="text-button" disabled={taskPages.loadingMore}
+              onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取…" : "加载更多任务"}</button>
+          </p>}
+        </>}
+        {taskPages.loading && taskPages.items.length === 0 && <p className="composer-target-line" role="status">正在读取任务…</p>}
+        {!taskPages.loading && taskPages.items.length === 0 && taskPages.error === null
+          && <p className="composer-target-line">这个项目还没有任务。</p>}
       </>}
-      {/* 2026-10-24 用户指令：菜单底部脚注与头句重复（头句已说明先指定目标），删除。 */}
+      {/* 2026-10-24 用户指令：菜单底部脚注与头句重复（头句已说明先指定工作对象），删除。 */}
     </div>
   </details>;
 }

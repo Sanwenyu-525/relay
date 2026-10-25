@@ -127,7 +127,7 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   if (authority === undefined) throw resourceNotFound('Workspace authority');
   const selection = await r.modelSelection.readForSession(session.id);
   const frozen = modelSnapshot === undefined ? await freezeAssistModelSnapshot(r, selection, env,
-    { requiresTools: false, requiresJsonOutput: true }) : undefined;
+    { requiresTools: false, requiresJsonOutput: true }, session.workspace_id) : undefined;
   const id = randomUUID();
   await r.assistMemory.insertRequest({ id, workspaceId: session.workspace_id, sessionId: session.id,
     sessionRevision: session.revision, memoryRevision: state?.revision ?? 0n,

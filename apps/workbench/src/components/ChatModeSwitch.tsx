@@ -1,4 +1,4 @@
-import { Compass, Target } from "lucide-react";
+import { Compass } from "lucide-react";
 
 import type { RelayChatMode, RelayGoalStatus } from "../api/relayClient";
 
@@ -16,9 +16,26 @@ import type { RelayChatMode, RelayGoalStatus } from "../api/relayClient";
  *   * 计划/目标模式显示一枚只读徽标，右侧「退出」回到普通模式；
  *   * 进入模式走「+ → 命令」或直接输入 `/plan 内容`、`/goal 内容`。
  *
+ * 2026-10-25 用户指令收紧徽标本体：文字只显示档名（「目标」「计划」，不再缀「模式」二字，
+ * 图标已经说明这是模式档）；目标档图标换成「箭插在靶心上」的靶子（lucide 没有对应字形，
+ * 自绘一枚，构图与 lucide 同一格：24 viewBox、stroke 2、round 端点），计划档沿用 Compass；
+ * 常态不再铺浅绿胶囊底（与同排工具 chip 同一读法：无底落在卡面上），悬停才起 `selection.hover` 底。
+ *
  * 退出仍是命令：值只来自服务端读回的 `chat_mode`，回执到达后才重读投影，
  * 本地不在请求前抢先改显示。在途（生成或命令未结算）时退出键禁用，原因放 `title`。
  */
+
+/** 目标档图标：靶子（两圈）+ 一支从右上射入、箭头停在靶心的箭，尾端带一片尾羽。 */
+function GoalTargetIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <circle cx="10" cy="14" r="8" />
+    <circle cx="10" cy="14" r="4" />
+    <path d="M10 14 L22 2" />
+    <path d="M13.5 14 L10 14 L10 10.5" />
+    <path d="M21 5 L19 3" />
+  </svg>;
+}
 const LABELS: Record<RelayChatMode, string> = {
   CHAT: "讨论",
   PLAN: "计划",
@@ -44,9 +61,9 @@ export default function ChatModeSwitch({ mode, disabled, busy, lockedReason, onC
     data-mode={mode} title={hint}>
     <span className="agent-chat-mode-state">
       {mode === "GOAL"
-        ? <Target aria-hidden="true" />
+        ? <GoalTargetIcon />
         : <Compass aria-hidden="true" />}
-      {label}模式
+      {label}
     </span>
     <button className="agent-chat-mode-exit" type="button" data-testid="chat-mode-exit"
       disabled={blocked} title={blocked ? hint : `退出${label}模式，回到讨论`}

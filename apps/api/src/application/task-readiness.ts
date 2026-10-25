@@ -42,20 +42,23 @@ export function readinessReasons(facts: TaskReadinessFacts): readonly TaskReadin
 /** 查询投影的 allowed_actions：当前事实下的 UI 提示，不是授权凭证（契约第 6 节）。 */
 export function taskAllowedActions(facts: {
   readonly status: TaskRow['status'];
+  readonly executorKind: TaskRow['executor_kind'];
   readonly satisfiable: boolean;
 }): readonly string[] {
   switch (facts.status) {
     case 'INBOX':
-      return facts.satisfiable
+      return facts.executorKind === 'HUMAN' && facts.satisfiable
         ? ['EDIT_PRESENTATION', 'MARK_READY', 'CANCEL']
         : ['EDIT_PRESENTATION', 'CANCEL'];
     case 'READY':
-      return facts.satisfiable
+      return facts.executorKind === 'HUMAN' && facts.satisfiable
         ? ['EDIT_PRESENTATION', 'START', 'CANCEL']
         : ['EDIT_PRESENTATION', 'CANCEL'];
     case 'IN_PROGRESS':
       // P03 起人工任务在 IN_PROGRESS 上可以保存受管产物版本并完成本轮工作。
-      return ['EDIT_PRESENTATION', 'SAVE_ARTIFACT_VERSION', 'COMPLETE', 'CANCEL'];
+      return facts.executorKind === 'HUMAN'
+        ? ['EDIT_PRESENTATION', 'SAVE_ARTIFACT_VERSION', 'COMPLETE', 'CANCEL']
+        : ['EDIT_PRESENTATION', 'CANCEL'];
     case 'WAITING':
     case 'BLOCKED':
       return ['CANCEL'];

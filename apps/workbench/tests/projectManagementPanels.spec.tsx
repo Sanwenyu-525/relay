@@ -140,6 +140,31 @@ describe("Project State 写入口", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("2xx State 响应契约无效时保留冻结命令等待核对", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "POST" && url.pathname.endsWith("/state-commands")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        return response(200, { command_id: body.command_id,
+          committed_at: "2026-10-24T00:00:00Z", result: null });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    const view = await mountPanel();
+
+    await view.wrapper.get('[data-testid="state-phase"]').setValue("EXECUTING");
+    await view.wrapper.get('[data-testid="state-phase-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.get('[data-testid="project-state-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="project-state-error"]').text()).toContain("结果尚不能确认");
+    expect(view.wrapper.find('[data-testid="project-state-receipt"]').exists()).toBe(false);
+    expect(view.changed).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(1);
+  });
+
   it("revision 冲突是明确拒绝：清 pending 并重读，不伪造成功", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -200,6 +225,66 @@ describe("Project 标题编辑", () => {
     expect(Object.keys(posts[0]!.body).sort()).toEqual(["command_id", "expected_revision", "title"]);
     expect(changed).toHaveBeenCalledTimes(1);
     expect(view.wrapper.get('[data-testid="project-rename-receipt"]').text()).toContain("新标题");
+  });
+
+  it("改名 2xx command_id 错配时保留冻结命令", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "PATCH" && url.pathname === `${root}/projects/${projectId}`) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        return response(200, { command_id: "99999999-9999-4999-8999-999999999999",
+          committed_at: "2026-10-24T00:00:00Z",
+          result: { project_id: projectId, title: body.title, revision: "3" } });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    const changed = vi.fn();
+    const view = await mountReact(createElement(ProjectTitleEditor, { client: client(),
+      project, archived: false, onChanged: changed }));
+    cleanup = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("新标题");
+    await view.wrapper.get('[data-testid="project-rename-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="project-rename-receipt"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="project-rename-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="project-rename-error"]').text()).toContain("已保留原 command_id");
+    expect(changed).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(1);
+  });
+
+  it("改名 2xx 回执格式无效时保留冻结命令", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "PATCH" && url.pathname === `${root}/projects/${projectId}`) {
+        posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return response(200, { command_id: posts[0]?.command_id,
+          committed_at: "2026-10-24T00:00:00Z", result: null });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    const changed = vi.fn();
+    const view = await mountReact(createElement(ProjectTitleEditor, { client: client(),
+      project, archived: false, onChanged: changed }));
+    cleanup = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("新标题");
+    await view.wrapper.get('[data-testid="project-rename-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="project-rename-receipt"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="project-rename-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="project-rename-error"]').text()).toContain("已保留原 command_id");
+    expect(changed).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(1);
   });
 
   it("归档项目不提供改名入口", async () => {

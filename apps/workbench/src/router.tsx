@@ -10,6 +10,8 @@ import ConnectionsView, { ProjectConnectionsView } from "./views/ConnectionsView
 import ProjectSkillView from "./views/ProjectSkillView";
 import ProjectTasksView from "./views/ProjectTasksView";
 import ProjectWorkbenchView from "./views/ProjectWorkbenchView";
+import ProjectPlanningView from "./views/ProjectPlanningView";
+import ProjectTaskChainsView from "./views/ProjectTaskChainsView";
 import ProjectWorkbenchEntry from "./views/ProjectWorkbenchEntry";
 import ProjectsView from "./views/ProjectsView";
 import GoalListView from "./views/GoalListView";
@@ -47,6 +49,8 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "goals/:id", element: <GoalDetailView /> },
     { path: "working-directories/:id", element: <DirectoryWorkContextView /> },
     { path: "projects/:id/tasks", element: <ProjectTasksView /> },
+    { path: "projects/:id/planning", element: <ProjectPlanningView /> },
+    { path: "projects/:id/task-chains", element: <ProjectTaskChainsView /> },
     { path: "projects/:id/knowledge", element: <KnowledgeView /> },
     { path: "projects/:id/connections", element: <ProjectConnectionsView /> },
     { path: "projects/:id/workbench", element: <ProjectWorkbenchEntry /> },
@@ -56,6 +60,7 @@ export const workbenchRoutes: RouteObject[] = [{
     // 新建定时任务走同一个路由的 query 子页，与 /tasks?view=create 的既有约定一致。
     { path: "scheduled-tasks", element: <ScheduledTasksRoute /> },
     { path: "scheduled-tasks/:id", element: <ScheduledTaskDetailView /> },
+    { path: "scheduled-tasks/:id/edit", element: <CreateScheduledTaskView /> },
     { path: "reviews", element: <ReviewsView /> },
     { path: "knowledge", element: <KnowledgeView /> },
     { path: "connections", element: <ConnectionsView /> },

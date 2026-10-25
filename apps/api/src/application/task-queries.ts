@@ -217,6 +217,7 @@ function summarize(
     unresolved_blocker_ids: [...unresolvedBlockerIds],
     allowed_actions: archived ? [] : taskAllowedActions({
       status: task.status,
+      executorKind: task.executor_kind,
       satisfiable: requiredCriterionCount > 0
         && blockingTaskIds.length === 0
         && unresolvedBlockerIds.length === 0,

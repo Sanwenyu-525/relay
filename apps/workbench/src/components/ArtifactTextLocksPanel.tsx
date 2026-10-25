@@ -53,7 +53,7 @@ export default function ArtifactTextLocksPanel({ client, lineage }:
     ]);
     if (nextArtifact.id !== lineage.artifactId ||
         nextLocks.some((lock) => lock.artifactId !== lineage.artifactId))
-      throw new Error("锁定事实与产物目标不匹配。");
+      throw new Error("锁定事实与产物目标版本不匹配。");
     setArtifact(nextArtifact); setLocks(nextLocks); setContent(nextContent);
   }
   useEffect(() => { let active = true; void refresh().catch((caught) => {

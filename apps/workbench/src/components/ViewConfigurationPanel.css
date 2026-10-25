@@ -1,4 +1,5 @@
-.view-configuration-panel { margin-top: var(--relay-space-4); padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); }
+/* 2026-10-25 视觉对齐：补白卡底，与全站卡片语言一致。 */
+.view-configuration-panel { margin-top: var(--relay-space-4); padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
 .view-configuration-panel h2 { margin-top: 0; }
 .view-configuration-panel code { overflow-wrap: anywhere; }
 .view-configuration-panel .field { max-width: 20rem; }

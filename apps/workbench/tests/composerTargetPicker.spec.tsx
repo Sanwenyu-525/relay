@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import ComposerTargetPicker from "../src/components/ComposerTargetPicker";
-import type { RelayApiClient } from "../src/api/relayClient";
+import { RelayApiError } from "../src/api/relayClient";
+import type { RelayApiClient, RelayProjectListItem } from "../src/api/relayClient";
 import { flush, mountReact } from "./mountApp";
 
 /**
@@ -52,7 +53,7 @@ async function click(element: HTMLElement | null): Promise<void> {
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
-describe("输入器的目标芯片", () => {
+describe("输入器的工作对象芯片", () => {
   it("项目清单来自接口，选项目即回传目标", async () => {
     const onPick = vi.fn();
     const view = await mountReact(<ComposerTargetPicker client={stubClient()} need="PROJECT" onPick={onPick} />);
@@ -112,6 +113,136 @@ describe("输入器的目标芯片", () => {
       expect(chip()?.getAttribute("aria-disabled")).toBe("true");
       await click(chip());
       expect(document.querySelector<HTMLDetailsElement>(".composer-target")?.open).toBe(false);
+    } finally { view.unmount(); }
+  });
+});
+
+/**
+ * 目标清单读取失败后的恢复（禅道 #103）。
+ *
+ * 首次读取失败不能被缓存成永久不可用：失败与空清单是两个事实，服务恢复后要能在
+ * 原组件里重试回来——不重挂整页、不切走当前讨论、不建会话不改归属。重试是显式入口，
+ * 不把错误重置写进 effect 依赖引发自动请求风暴；迟到回包由请求版本守卫丢弃。
+ */
+
+function project(id: string, title: string): RelayProjectListItem {
+  return { id, title, projectType: "PROJECT", revision: "1", stateRevision: "1",
+    archivedAt: null, archiveStatus: "ACTIVE", phaseKey: "EXECUTION",
+    nextActionTaskId: null, createdAt: "2026-10-16T00:00:00Z", updatedAt: "2026-10-16T00:00:00Z" };
+}
+
+function unavailable(): RelayApiError {
+  return new RelayApiError({ status: 503, code: "DATABASE_UNAVAILABLE", detail: "project list temporarily unavailable",
+    retryable: true, retryAction: "RETRY", fieldErrors: [], expectedRevision: null, actualRevision: null });
+}
+
+const retryButton = () => document.querySelector<HTMLButtonElement>('[data-testid="composer-target-retry"]');
+
+describe("目标清单读取失败后的恢复（禅道 #103）", () => {
+  it("项目清单首次失败后可显式重试恢复；重开弹层不自动重读也不丢错误", async () => {
+    const recovered = { items: [project("p-recovered", "恢复后可选项目")], nextCursor: null };
+    let calls = 0;
+    const client = { getProjectsPage: vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw unavailable();
+      return recovered;
+    }) } as unknown as RelayApiClient;
+    const onPick = vi.fn();
+    const view = await mountReact(<ComposerTargetPicker client={client} need="PROJECT" onPick={onPick} />);
+    try {
+      await click(chip());
+      expect(document.querySelector(".composer-target-line--error")?.textContent).toContain("清单读取失败");
+      expect(document.querySelector(".composer-target-line")?.textContent).not.toContain("还没有");
+      // 收起再展开：错误保留、不自动重读——恢复要走显式重试，不靠开合制造请求风暴。
+      await click(chip());
+      await click(chip());
+      expect(document.querySelector(".composer-target-line--error")).not.toBeNull();
+      expect(client.getProjectsPage).toHaveBeenCalledTimes(1);
+      // 显式重试：按当前 client/need 重读同一次只读请求，成功后显示真实项目。
+      await click(retryButton());
+      expect(document.querySelector('[data-testid="composer-target-project-p-recovered"]')?.textContent)
+        .toContain("恢复后可选项目");
+      expect(document.querySelector(".composer-target-line--error")).toBeNull();
+      expect(client.getProjectsPage).toHaveBeenCalledTimes(2);
+      // 重试只读：未创建任何会话、未改变归属（onPick 未被重试触碰）。
+      expect(onPick).not.toHaveBeenCalled();
+    } finally { view.unmount(); }
+  });
+
+  it("连续失败可再次重试，成功前错误一直在", async () => {
+    let calls = 0;
+    const client = { getProjectsPage: vi.fn(async () => {
+      calls += 1;
+      if (calls <= 2) throw unavailable();
+      return { items: [project("p-ok", "第三次读取到的项目")], nextCursor: null };
+    }) } as unknown as RelayApiClient;
+    const view = await mountReact(<ComposerTargetPicker client={client} need="PROJECT" onPick={vi.fn()} />);
+    try {
+      await click(chip());
+      expect(document.querySelector(".composer-target-line--error")).not.toBeNull();
+      await click(retryButton());
+      expect(document.querySelector(".composer-target-line--error")?.textContent).toContain("清单读取失败");
+      await click(retryButton());
+      expect(document.querySelector('[data-testid="composer-target-project-p-ok"]')).not.toBeNull();
+      expect(client.getProjectsPage).toHaveBeenCalledTimes(3);
+    } finally { view.unmount(); }
+  });
+
+  it("任务清单读取失败后原页重试可恢复，重试仍是只读", async () => {
+    const single = { items: [project("p-1", "毕业论文")], nextCursor: null };
+    let taskCalls = 0;
+    const client = {
+      getProjectsPage: vi.fn(async () => single),
+      getProjectTasksPage: vi.fn(async () => {
+        taskCalls += 1;
+        if (taskCalls === 1) throw unavailable();
+        return { items: tasks, nextCursor: null };
+      })
+    } as unknown as RelayApiClient;
+    const onPick = vi.fn();
+    const view = await mountReact(<ComposerTargetPicker client={client} need="TASK" onPick={onPick} />);
+    try {
+      await click(chip());
+      // 只有一个项目时自动选中，任务清单读取失败要就地可见。
+      await flush(0);
+      expect(document.querySelector(".composer-target-line--error")?.textContent).toContain("任务清单读取失败");
+      // 失败不冒充「还没有任务」。
+      expect(document.body.textContent).not.toContain("这个项目还没有任务");
+      const taskRetry = [...document.querySelectorAll<HTMLButtonElement>(".composer-target-line--error button")]
+        .find((element) => (element.textContent ?? "").includes("重试")) ?? null;
+      await click(taskRetry);
+      expect(document.querySelector('[data-testid="composer-target-task-t-1"]')?.textContent).toContain("写第 4 章");
+      expect(client.getProjectTasksPage).toHaveBeenCalledTimes(2);
+      // 恢复后选择任务仍照常回传目标。
+      await click(row("composer-target-task-t-2"));
+      expect(onPick).toHaveBeenCalledWith({ kind: "TASK", id: "t-2", projectId: "p-1", title: "整理参考文献" });
+    } finally { view.unmount(); }
+  });
+
+  it("收起弹层后迟到的旧回包不串进新清单", async () => {
+    let releaseFirst!: (value: { items: RelayProjectListItem[]; nextCursor: null }) => void;
+    const gated = new Promise<{ items: RelayProjectListItem[]; nextCursor: null }>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    const client = { getProjectsPage: vi.fn(async () => {
+      calls += 1;
+      return calls === 1 ? gated : { items: [project("p-late", "后来请求的项目")], nextCursor: null };
+    }) } as unknown as RelayApiClient;
+    const view = await mountReact(<ComposerTargetPicker client={client} need="PROJECT" onPick={vi.fn()} />);
+    try {
+      await click(chip());
+      await click(chip());
+      await click(chip());
+      await flush(0);
+      expect(document.querySelector('[data-testid="composer-target-project-p-late"]')).not.toBeNull();
+      // 第一次（已收起那轮）的回包迟到，带着另一个候选回来：不得覆盖当前清单。
+      await act(async () => {
+        releaseFirst({ items: [project("p-stale", "迟到旧候选")], nextCursor: null });
+      });
+      await flush(0);
+      expect(document.querySelector('[data-testid="composer-target-project-p-late"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="composer-target-project-p-stale"]')).toBeNull();
     } finally { view.unmount(); }
   });
 });

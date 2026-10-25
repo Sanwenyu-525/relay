@@ -431,7 +431,30 @@ test('P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identit
     origin, actionType: 'READ_PUBLIC', target: sourceUri, params: {} });
   assert.equal(prepared.status, 'WAITING_APPROVAL');
   assert.ok(prepared.review_id);
-  await approve(f.workspaceId, prepared.review_id);
+  const httpApi = await startTestApi();
+  try {
+    const inbox = await httpApi.get(workspacePath(f.workspaceId, '/reviews'));
+    assert.equal(inbox.status, 200, inbox.text);
+    const listed = (inbox.body as { items: Array<{ id: string; status: string;
+      operation_id: string | null; allowed_decisions: readonly string[] }> }).items
+      .find((item) => item.id === prepared.review_id);
+    assert.ok(listed, 'the no-Run USER_IMPORT approval should remain visible in the inbox');
+    assert.equal(listed.status, 'OPEN');
+    assert.equal(listed.operation_id, opId);
+    assert.deepEqual(listed.allowed_decisions, ['APPROVE', 'DENY']);
+    const detail = await httpApi.get(workspacePath(f.workspaceId, `/reviews/${prepared.review_id}`));
+    assert.equal(detail.status, 200, detail.text);
+    const review = detail.body as { status: string; revision: string; target_hash: string };
+    assert.equal(review.status, 'OPEN');
+    const commandId = randomUUID();
+    const decided = expectCommandAccepted(await httpApi.post(workspacePath(f.workspaceId,
+      `/reviews/${prepared.review_id}/decisions`), { command_id: commandId,
+      expected_revision: review.revision, target_hash: review.target_hash, decision: 'APPROVE' }),
+    200, commandId);
+    assert.equal((decided.effect as { external_effect_executed: boolean }).external_effect_executed, false);
+  } finally {
+    await httpApi.stop();
+  }
   const result = await dispatchGatewayAction(app.db, { workspaceId: f.workspaceId,
     operationId: opId, origin });
   assert.equal(result.status, 'SUCCEEDED');
@@ -446,6 +469,51 @@ test('P09 USER_IMPORT has a real job source, ASK Review and no Run/claim identit
   // 结算为 WEB_TEXT_UNAVAILABLE 并计入 failed，污染其计数断言。断言后清理。
   await withTransaction(app.db, (repositories) =>
     repositories.gateway.settleImportJob(job.importJobId, 'FAILED', 'gateway-fixture-cleanup'));
+});
+
+test('P09 a cancelled USER_IMPORT job is projected EXPIRED and cannot be approved', async () => {
+  const f = await runFixture();
+  const job = await createImportJob(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    actorRef: 'user:local', configVersion: 'fixture-v1',
+    sourceUri: 'https://public.example/cancelled', commandId: randomUUID() });
+  const connection = await createFakeConnection(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, capabilities: ['FAKE_PUBLIC_READ'] });
+  await createGatewayPolicy(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    capability: 'FAKE_PUBLIC_READ', actionType: 'READ_PUBLIC', targetPrefix: 'https://public.example/',
+    decision: 'ASK', maxPayloadBytes: 16 });
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: f.workspaceId,
+    operationId: randomUUID(), intentKey: 'public-read-cancelled', connectionId: connection.connectionId,
+    origin: { kind: 'USER_IMPORT', importJobId: job.importJobId,
+      actorRef: 'user:local', configVersion: 'fixture-v1' },
+    actionType: 'READ_PUBLIC', target: 'https://public.example/cancelled', params: {} });
+  assert.equal(prepared.status, 'WAITING_APPROVAL');
+  assert.ok(prepared.review_id);
+  await withTransaction(app.db, (repositories) =>
+    repositories.gateway.setImportJobStatus(job.importJobId, 'FAILED', 'USER_CANCELLED'));
+
+  const httpApi = await startTestApi();
+  try {
+    const detail = await httpApi.get(workspacePath(f.workspaceId, `/reviews/${prepared.review_id}`));
+    assert.equal(detail.status, 200, detail.text);
+    const projected = detail.body as { status: string; revision: string; target_hash: string;
+      allowed_decisions: readonly string[] };
+    assert.equal(projected.status, 'EXPIRED');
+    assert.deepEqual(projected.allowed_decisions, []);
+    const open = await httpApi.get(workspacePath(f.workspaceId, '/reviews?status=OPEN'));
+    assert.equal(open.status, 200, open.text);
+    assert.equal((open.body as { items: Array<{ id: string }> }).items.some((item) =>
+      item.id === prepared.review_id), false);
+    const expired = await httpApi.get(workspacePath(f.workspaceId, '/reviews?status=EXPIRED'));
+    assert.equal(expired.status, 200, expired.text);
+    assert.ok((expired.body as { items: Array<{ id: string }> }).items.some((item) =>
+      item.id === prepared.review_id));
+    expectProblem(await httpApi.post(workspacePath(f.workspaceId,
+      `/reviews/${prepared.review_id}/decisions`), { command_id: randomUUID(),
+      expected_revision: projected.revision, target_hash: projected.target_hash, decision: 'APPROVE' }),
+    409, 'INVALID_TRANSITION');
+  } finally {
+    await httpApi.stop();
+  }
 });
 
 test('P09 revocation before Admit rejects, while Admit before revocation completes the already admitted effect', async () => {

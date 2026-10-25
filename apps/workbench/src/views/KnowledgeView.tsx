@@ -21,6 +21,7 @@ import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
+import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import "./KnowledgeView.css";
 
 type InformationRow = RelayKnowledge | RelayMemory | RelayDecision | RelayRule;
@@ -338,6 +339,12 @@ export default function KnowledgeView() {
       readonly versionNumber: string; readonly createdAt: string; readonly taskTitle: string }[];
     readonly error: string | null;
   }>({ status: "IDLE", items: [], error: null });
+  const artifactSourceActive = formOpen && kind === "KNOWLEDGE" && sourceKind === "ARTIFACT_VERSION";
+  const artifactTaskPages = useProjectTaskPages(client, projectId ?? "", artifactSourceActive,
+    connection.epoch, 12);
+  const attemptedArtifactTasks = useRef(new Set<string>());
+  const pendingArtifactTasks = useRef(new Set<string>());
+  const failedArtifactTasks = useRef(new Set<string>());
   const [captureConfirmed, setCaptureConfirmed] = useState(false);
   const [mediaType, setMediaType] = useState("text/plain");
   const [confirmed, setConfirmed] = useState(false);
@@ -461,6 +468,7 @@ export default function KnowledgeView() {
     setTitle(""); setText(""); setSourceKind("NOTE"); setArtifactVersionId("");
     setArtifactPreview(null); setArtifactPreviewError(null); setCaptureConfirmed(false);
     setArtifactCandidates({ status: "IDLE", items: [], error: null });
+    attemptedArtifactTasks.current.clear(); pendingArtifactTasks.current.clear(); failedArtifactTasks.current.clear();
     setMediaType("text/plain"); setConfirmed(false); setExpiresAt(""); setMemoryExpiryOriginal(null);
     setChoice(""); setRationale(""); setAlternatives(""); setCosts("");
     setReplacementId(""); setScope(projectId === null ? "WORKSPACE" : "PROJECT");
@@ -720,41 +728,82 @@ export default function KnowledgeView() {
    * 读取是分层的（项目 → 本项目任务 → 任务产物 → 版本），失败就如实说明并保留「按版本 ID 指定」，
    * 不把空结果写成「没有产物」。
    */
-  async function loadArtifactCandidates() {
-    if (client === null) return;
-    if (projectId === null) {
-      setArtifactCandidates({ status: "ERROR", items: [],
-        error: "产物版本只在项目资料范围内可收录；当前是工作空间资料，请到所属项目的资料页收录，或改用笔记/受管文本。" });
+  async function loadArtifactsForTasks(tasks: readonly { readonly id: string; readonly title: string }[]) {
+    if (client === null || tasks.length === 0) return;
+    const context = contextVersion.current;
+    const pending = tasks.filter((task) => !attemptedArtifactTasks.current.has(task.id));
+    if (pending.length === 0) return;
+    for (const task of pending) {
+      attemptedArtifactTasks.current.add(task.id); pendingArtifactTasks.current.add(task.id);
+    }
+    setArtifactCandidates((current) => ({ ...current, status: "LOADING", error: null }));
+    const results = await Promise.all(pending.map(async (task) => {
+      try {
+        return { task, artifacts: (await client.getTaskArtifacts(task.id)).items, error: null };
+      } catch (caught) { return { task, artifacts: [], error: describeLiveError(caught).message }; }
+    }));
+    for (const task of pending) pendingArtifactTasks.current.delete(task.id);
+    if (context !== contextVersion.current || liveContext.current.client !== client ||
+      liveContext.current.projectId !== projectId) return;
+    const additions = results.flatMap(({ task, artifacts, error: taskError }) => {
+      if (taskError !== null) { failedArtifactTasks.current.add(task.id); return []; }
+      return artifacts.filter((artifact) => artifact.latestVersionId !== null).flatMap((artifact) =>
+        artifact.versions.filter((version) => version.mediaType === "text/markdown").map((version) => ({
+          versionId: version.artifactVersionId, title: artifact.title,
+          versionNumber: version.versionNumber, createdAt: version.createdAt, taskTitle: task.title
+        })));
+    });
+    setArtifactCandidates((current) => {
+      const byId = new Map(current.items.map((item) => [item.versionId, item]));
+      for (const item of additions) byId.set(item.versionId, item);
+      const items = [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      return { status: "READY", items,
+        error: failedArtifactTasks.current.size > 0 ? "部分任务的产物暂时无法读取。" : null };
+    });
+  }
+
+  useEffect(() => {
+    if (!artifactSourceActive || artifactCandidates.status !== "IDLE") return;
+    if (projectId === null) setArtifactCandidates({ status: "ERROR", items: [],
+      error: "产物版本只在项目资料范围内可收录；当前是工作空间资料，请到所属项目的资料页收录，或改用笔记/受管文本。" });
+    else setArtifactCandidates({ status: "LOADING", items: [], error: null });
+  }, [artifactSourceActive, artifactCandidates.status, projectId]);
+
+  useEffect(() => {
+    if (!artifactSourceActive || artifactCandidates.status === "IDLE") return;
+    if (artifactTaskPages.scopeLost) {
+      attemptedArtifactTasks.current.clear(); pendingArtifactTasks.current.clear(); failedArtifactTasks.current.clear();
+      if (artifactCandidates.status !== "ERROR" || artifactCandidates.items.length > 0) {
+        setArtifactCandidates({ status: "ERROR", items: [], error: "项目任务读取权限已失效；已清除受限产物候选。" });
+      }
       return;
     }
-    const context = contextVersion.current;
-    setArtifactCandidates({ status: "LOADING", items: [], error: null });
-    try {
-      const tasks = await client.getProjectTasks(projectId);
-      const picked = tasks.slice(0, 12);
-      const collected = await Promise.all(picked.map(async (task) => {
-        try { return { taskTitle: task.title, artifacts: (await client.getTaskArtifacts(task.id)).items }; }
-        catch { return null; }
-      }));
-      if (context !== contextVersion.current) return;
-      const items = collected.filter((entry) => entry !== null).flatMap((entry) =>
-        entry.artifacts.filter((artifact) => artifact.latestVersionId !== null).flatMap((artifact) =>
-          artifact.versions.filter((version) => version.mediaType === "text/markdown").map((version) => ({
-            versionId: version.artifactVersionId, title: artifact.title,
-            versionNumber: version.versionNumber, createdAt: version.createdAt, taskTitle: entry.taskTitle
-          }))));
-      items.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      setArtifactCandidates({ status: "READY", items: items.slice(0, 30), error: null });
-    } catch (caught) {
-      if (context !== contextVersion.current) return;
-      setArtifactCandidates({ status: "ERROR", items: [], error: describeLiveError(caught).message });
+    if (artifactTaskPages.error !== null && artifactTaskPages.items.length === 0) {
+      if (artifactCandidates.status !== "ERROR" || artifactCandidates.error !== artifactTaskPages.error) {
+        setArtifactCandidates({ status: "ERROR", items: [], error: artifactTaskPages.error });
+      }
+      return;
     }
+    const pending = artifactTaskPages.items.filter((task) => !attemptedArtifactTasks.current.has(task.id));
+    if (pending.length > 0) void loadArtifactsForTasks(pending);
+    else if (pendingArtifactTasks.current.size === 0 &&
+      artifactCandidates.status === "LOADING" && artifactTaskPages.loading === false) {
+      setArtifactCandidates((current) => ({ ...current, status: "READY" }));
+    }
+  }, [artifactSourceActive, artifactCandidates.status, artifactTaskPages.items,
+    artifactTaskPages.error, artifactTaskPages.scopeLost, artifactTaskPages.loading, client]);
+
+  function retryArtifactReads() {
+    for (const taskId of failedArtifactTasks.current) attemptedArtifactTasks.current.delete(taskId);
+    failedArtifactTasks.current.clear();
+    setArtifactCandidates((current) => ({ ...current, status: "LOADING", error: null }));
+    void loadArtifactsForTasks(artifactTaskPages.items.filter((task) => !attemptedArtifactTasks.current.has(task.id)));
   }
-  useEffect(() => {
-    const artifactSourceActive = formOpen && kind === "KNOWLEDGE" && sourceKind === "ARTIFACT_VERSION";
-    if (!artifactSourceActive || artifactCandidates.status !== "IDLE") return;
-    void loadArtifactCandidates();
-  }, [formOpen, kind, sourceKind, artifactCandidates.status, client, projectId]);
+
+  function retryArtifactTaskPage() {
+    setArtifactCandidates((current) => ({ ...current, status: "LOADING", error: null }));
+    artifactTaskPages.retry();
+  }
 
   /**
    * 从产物入口直接带进来的确切版本（`?artifact_version=`）只预填来源并读一次正文，
@@ -1115,23 +1164,48 @@ export default function KnowledgeView() {
    * 来源控件只有一份：普通表单把它收进「来源与收录设置」，产物收录把它摊在「对照来源」里。
    * 两处共用同一批状态与 testid，避免出现两套来源语义。
    */
-  const artifactCandidatesBlock = artifactCandidates.status === "LOADING"
-    ? <p className="helper-text" role="status" data-testid="knowledge-artifact-loading">正在读取本项目可收录的产物版本…</p>
-    : artifactCandidates.status === "ERROR"
-      ? <p className="helper-text" data-testid="knowledge-artifact-candidates-error">{artifactCandidates.error}仍可在下面按版本 ID 指定。</p>
-      : artifactCandidates.items.length === 0
-        ? <p className="helper-text" data-testid="knowledge-artifact-candidates-empty">本项目暂时没有可收录的 Markdown 产物版本；下面的正文会按所选版本读取，也可以改用笔记。</p>
-        : <ul className="knowledge-artifact-candidates" data-testid="knowledge-artifact-candidates" aria-label="本项目可收录的产物版本">
-          {artifactCandidates.items.map((candidate) => <li key={candidate.versionId}>
-            <button type="button" className={`knowledge-artifact-candidate${candidate.versionId === artifactVersionId.trim() ? " knowledge-artifact-candidate--selected" : ""}`}
-              aria-pressed={candidate.versionId === artifactVersionId.trim()} disabled={pendingCommand !== null}
-              data-testid={`knowledge-artifact-candidate-${candidate.versionId}`}
-              onClick={() => chooseArtifactVersion(candidate.versionId)}>
-              <strong>{candidate.title}</strong>
-              <small>v{candidate.versionNumber} · {candidate.taskTitle}</small>
-              <small>{candidate.createdAt}</small>
-            </button></li>)}
-        </ul>;
+  const artifactCandidatesBlock = <>
+    {artifactCandidates.status === "LOADING" && artifactCandidates.items.length === 0 &&
+      <p className="helper-text" role="status" data-testid="knowledge-artifact-loading">正在读取已加载任务的 Markdown 产物版本…</p>}
+    {artifactCandidates.status === "ERROR" && <div className="helper-text" data-testid="knowledge-artifact-candidates-error" role="alert">
+      {artifactCandidates.error}仍可在下面按版本 ID 指定。
+      {artifactTaskPages.error !== null && <button type="button" className="text-button"
+        onClick={retryArtifactTaskPage}>重试读取任务</button>}
+    </div>}
+    {artifactCandidates.items.length === 0 && artifactCandidates.status === "READY" &&
+      <p className="helper-text" data-testid="knowledge-artifact-candidates-empty">
+        {artifactTaskPages.nextCursor !== null ? `已读取 ${artifactTaskPages.items.length} 项任务，当前页没有可收录的 Markdown 产物；后续任务尚未读取。`
+          : "已读取的项目任务中暂时没有可收录的 Markdown 产物版本。"}下面仍可按确切版本 ID 核对，也可以改用笔记。
+      </p>}
+    {artifactCandidates.items.length > 0 && <ul className="knowledge-artifact-candidates" data-testid="knowledge-artifact-candidates" aria-label="已加载任务的可收录产物版本">
+      {artifactCandidates.items.map((candidate) => <li key={candidate.versionId}>
+        <button type="button" className={`knowledge-artifact-candidate${candidate.versionId === artifactVersionId.trim() ? " knowledge-artifact-candidate--selected" : ""}`}
+          aria-pressed={candidate.versionId === artifactVersionId.trim()} disabled={pendingCommand !== null}
+          data-testid={`knowledge-artifact-candidate-${candidate.versionId}`}
+          onClick={() => chooseArtifactVersion(candidate.versionId)}>
+          <strong>{candidate.title}</strong>
+          <small>v{candidate.versionNumber} · {candidate.taskTitle}</small>
+          <small>{candidate.createdAt}</small>
+        </button></li>)}
+    </ul>}
+    {artifactCandidates.error !== null && artifactCandidates.status !== "ERROR" && <div className="action-error" role="alert">
+      {artifactCandidates.error}已保留已读取候选。
+      <button type="button" className="text-button" onClick={retryArtifactReads}>重试读取失败任务</button>
+    </div>}
+    {artifactTaskPages.error !== null && artifactCandidates.status !== "ERROR" && <div className="action-error" role="alert">
+      已保留已加载产物候选与原任务游标。{artifactTaskPages.error}
+      <button type="button" className="text-button" disabled={artifactTaskPages.loading || artifactTaskPages.loadingMore}
+        onClick={retryArtifactTaskPage}>重试读取任务页</button>
+    </div>}
+    {artifactTaskPages.loadingMore && <p className="helper-text" role="status">正在读取下一批项目任务及其产物…</p>}
+    {artifactTaskPages.nextCursor !== null && <p className="helper-text">
+      已读取 {artifactTaskPages.items.length} 项项目任务；当前候选只覆盖这些已加载任务。
+      <button type="button" className="text-button" disabled={artifactTaskPages.loadingMore}
+        onClick={artifactTaskPages.loadMore}>加载更多任务</button>
+    </p>}
+    {artifactCandidates.status === "LOADING" && artifactCandidates.items.length > 0 &&
+      <p className="helper-text" role="status">正在补充已加载任务的产物；已读候选仍可选。</p>}
+  </>;
   const sourceControls = <>
     <label className="field"><span className="field-label">来源类型</span><select value={sourceKind} data-testid="knowledge-source-kind" onChange={(event) => { previewReadVersion.current++; setSourceKind(event.target.value as Exclude<RelayKnowledgeSource, "WEB_PAGE">); setArtifactPreview(null); setCaptureConfirmed(false); if (event.target.value === "NOTE") setMediaType("text/plain"); }} disabled={pendingCommand !== null}>
       <option value="NOTE">笔记（NOTE）</option><option value="MANAGED_TEXT">受管文本（MANAGED_TEXT）</option><option value="ARTIFACT_VERSION">产物版本（ARTIFACT_VERSION）</option></select></label>

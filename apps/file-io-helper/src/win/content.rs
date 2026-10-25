@@ -96,6 +96,9 @@ pub(crate) fn run(
         Request::Publish {
             version, root_path, ..
         }
+        | Request::Read {
+            version, root_path, ..
+        }
         | Request::Freeze {
             version, root_path, ..
         } => (version, root_path),
@@ -168,6 +171,64 @@ pub(crate) fn run(
                 "sha256": sha(&content), "size": content.len().to_string() }),
             )
         }
+        Request::Read {
+            artifact_id,
+            version_id,
+            expected_sha256,
+            expected_size,
+            ..
+        } => {
+            if !content_protocol::uuid(&artifact_id) || !content_protocol::uuid(&version_id) {
+                return Err(Failure::new(
+                    "INVALID_CONTENT",
+                    "content IDs must be canonical UUIDs",
+                ));
+            }
+            if expected_sha256.len() != 64
+                || !expected_sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(Failure::new("INVALID_CONTENT", "invalid expected SHA-256"));
+            }
+            let expected_size = expected_size
+                .parse::<usize>()
+                .map_err(|_| Failure::new("INVALID_CONTENT", "invalid expected content size"))?;
+            if expected_size > MAX_CONTENT_BYTES {
+                return Err(Failure::new(
+                    "CONTENT_TAMPERED",
+                    "stored managed content size exceeds 256 KiB",
+                ));
+            }
+
+            let (_shared, sentinel_id) = admission(root, false)?;
+            let artifacts = open_directory(root, "artifacts")?
+                .ok_or_else(|| Failure::new("CONTENT_MISSING", "artifacts directory is missing"))?;
+            let artifact = open_directory(&artifacts, &artifact_id)?
+                .ok_or_else(|| Failure::new("CONTENT_MISSING", "artifact directory is missing"))?;
+            let version = open_directory(&artifact, &version_id)?.ok_or_else(|| {
+                Failure::new("CONTENT_MISSING", "artifact version directory is missing")
+            })?;
+            let content = open_file(&version, "content.md", false)?.ok_or_else(|| {
+                Failure::new("CONTENT_MISSING", "managed content file is missing")
+            })?;
+            let bytes = read_content_bytes(&content)?;
+            let actual_sha256 = sha(&bytes);
+            if bytes.len() != expected_size || actual_sha256 != expected_sha256 {
+                return Err(Failure::new(
+                    "CONTENT_TAMPERED",
+                    "managed content hash or size differs from its immutable record",
+                ));
+            }
+            let content_hex = hex(&bytes);
+            content_protocol::output_content(
+                stdout,
+                json!({ "version": content_protocol::VERSION, "ok": true,
+                    "op": "read-content", "root_id": root_id, "sentinel_id": sentinel_id,
+                    "storage_ref": format!("artifacts/{artifact_id}/{version_id}/content.md"),
+                    "sha256": actual_sha256, "size": bytes.len().to_string(), "content_hex": content_hex }),
+            )
+        }
         Request::Freeze { nonce, .. } => {
             if !content_protocol::uuid(&nonce) {
                 return Err(Failure::new("INVALID_INPUT", "invalid private nonce"));
@@ -198,4 +259,14 @@ pub(crate) fn run(
             )
         }
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        result.push(DIGITS[(byte >> 4) as usize] as char);
+        result.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    result
 }

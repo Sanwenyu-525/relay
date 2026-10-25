@@ -67,7 +67,8 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
           route.readScopeRoots));
     case 'AGENT_MAIN_LOOP':
       return systemSelection('AGENT_MAIN_LOOP',
-        conversationPrompts.agentMainLoopSystemPrompt(route.writeEnabled === true));
+        conversationPrompts.agentMainLoopSystemPrompt(route.writeEnabled === true,
+          route.readTools !== false));
     case 'AGENT_PLAN_MODE':
       return systemSelection('AGENT_PLAN_MODE', conversationPrompts.planModeSystemPrompt());
     case 'AGENT_GOAL_ROUND':

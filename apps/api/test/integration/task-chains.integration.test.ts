@@ -18,7 +18,7 @@ async function fixture(){const workspaceId=await createWorkspace(app.db);const p
  const post=async(s:string,body:Record<string,unknown>,status:200|201=200)=>{const id=typeof body.command_id==='string'?body.command_id:randomUUID();return expectCommandAccepted(await api.post(path(s),{command_id:id,...body}),status,id);};
  const read=async(s:string)=>{const r=await api.get(path(s));assert.equal(r.status,200,r.text);return r.body as Record<string,unknown>;};
  const projectId=(await post('/projects',{title:'有限任务链',project_type:'GENERAL'},201)).project_id as string;const ids=[];
- for(const title of ['第一项报告','第二项说明'])ids.push((await post('/tasks',{project_id:projectId,title,objective:`完成${title}`,criteria:[{criterion_id:'human',statement:'人工核对确切产物',method:'HUMAN'}]},201)).task_id as string);
+ for(const title of ['第一项报告','第二项说明'])ids.push((await post('/tasks',{project_id:projectId,title,objective:`完成${title}`,expected_outputs:{artifacts:['MARKDOWN_DOCUMENT']},criteria:[{criterion_id:'human',statement:'人工核对确切产物',method:'HUMAN'}]},201)).task_id as string);
  await post(`/tasks/${ids[1]}/dependency-links`,{expected_revision:'0',depends_on_task_id:ids[0],dependency_kind:'BLOCKS'});
  const r=createRepositories(app.db);const tasks=[];for(const id of ids){const t=(await r.tasks.readTask(id))!;tasks.push({task_id:id,expected_revision:t.revision.toString(),expected_acceptance_revision:t.acceptance_revision.toString()});}
  const created=await post(`/projects/${projectId}/task-chains`,{title:'顺序写两项',confirmed:true,tasks},201);const chainId=created.chain_id as string;
@@ -71,4 +71,18 @@ test('创建后任务依据改变不被旧授权静默覆盖，也不会创建 R
  const f=await fixture();await f.post(`/tasks/${f.ids[0]}/planning-metadata`,{expected_revision:'0',priority:'HIGH',due_local_date:null,timezone:null});await f.authorize();
  const blocked=await f.wait(v=>v.status==='BLOCKED');assert.ok((blocked.items as Item[]).every(i=>i.run_id===null));
  assert.equal((await createRepositories(app.db).tasks.readTask(f.ids[0]!))?.priority,'HIGH');
+});
+
+test('真实 API 拒绝缺少必需验收项、无有效产物、顺序错误和未解除 blocker 的任务链',async()=>{
+ const f=await fixture();
+ const rows=async(ids:readonly string[])=>{const result=[];for(const id of ids){const task=(await createRepositories(app.db).tasks.readTask(id))!;result.push({task_id:id,expected_revision:task.revision.toString(),expected_acceptance_revision:task.acceptance_revision.toString()});}return result;};
+ const reject=async(tasks:readonly Record<string,unknown>[])=>{const commandId=randomUUID();const response=await api.post(f.path(`/projects/${f.projectId}/task-chains`),{command_id:commandId,title:'无效链',confirmed:true,tasks});assert.equal(response.status,409,response.text);};
+ const noCriterion=(await f.post('/tasks',{project_id:f.projectId,title:'缺少验收项',objective:'无必需 criterion',expected_outputs:{artifacts:['MARKDOWN_DOCUMENT']},criteria:[]},201)).task_id as string;
+ await reject(await rows([noCriterion]));
+ const noOutput=(await f.post('/tasks',{project_id:f.projectId,title:'缺少产物',objective:'没有有效产物声明',criteria:[{criterion_id:'human',statement:'人工核对',method:'HUMAN'}]},201)).task_id as string;
+ await reject(await rows([noOutput]));
+ await reject(await rows([...f.ids].reverse()));
+ const state=await f.read(`/projects/${f.projectId}/state`);
+ await f.post(`/projects/${f.projectId}/state-commands`,{expected_revision:state.revision,action:'ADD_BLOCKER',target_kind:'TASK',target_id:f.ids[0],reason:'等待外部材料',source_ref:'human:test'});
+ await reject(await rows([f.ids[0]!]));
 });

@@ -33,6 +33,7 @@ import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS, MAX_
   TOOL_LOOP_MAX_TOOL_CALLS } from '../workflow/execution-contract.js';
 import { readInternalTool } from '../workflow/tool-catalog.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { hasChecker } from '../workflow/checkers.js';
 
 /** 首批工具循环只读三类能力；写入与检查在后续片按同一张表扩进来。 */
 // 写入与受控命令也在信封允许的能力之内：信封是模型自主调用的上界，不是授权。
@@ -451,7 +452,9 @@ export async function delegateTask(
       const modelPlan = await freezeAssistModelSnapshot(repositories, modelSelection, modelEnv, {
         requiresTools: input.toolLoopAction !== undefined,
         requiresJsonOutput: [...criteria, ...ruleCriteria].some((criterion) => criterion.method === 'SEMANTIC'),
-      });
+      }, input.workspaceId);
+      const semanticCheckerId = hasChecker('semantic-model-v1', '1')
+        ? 'semantic-model-v1' : 'human-evidence-v1';
       const frozen = freezeExecutionContract({
         taskId: task.id,
         ...(modelPlan === undefined ? {} : { modelSelectionSnapshot: modelPlan.snapshot }),
@@ -465,6 +468,7 @@ export async function delegateTask(
           required: criterion.required,
           method: criterion.method,
           targetSpec: criterion.target_spec,
+          ...(criterion.method === 'SEMANTIC' ? { checkerId: semanticCheckerId } : {}),
         })), ...ruleCriteria],
         ruleRevision: authority.rule_revision,
         ruleRefs: allApplicableRules.map((rule) => ({ rule_id: rule.id,

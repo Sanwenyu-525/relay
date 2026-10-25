@@ -405,7 +405,9 @@ describe("输入框图片附件（工作台 §33）", () => {
       throw new Error(`unexpected POST ${path}`);
     }));
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
-    await flush();
+    // 铺图前先过一次尺寸探测：jsdom 不回调 onload，实现按注释在 200ms 兜底后落图，
+    // 默认一档 flush 不足以等到 <img>，会误判成「历史图片没渲染」。
+    await flush(260);
     const gallery = view.wrapper.get('[data-testid="assist-message-attachments"]');
     expect(gallery.text()).toContain("截图.png");
     expect(view.wrapper.get(".message-attachment-image").attributes("src"))

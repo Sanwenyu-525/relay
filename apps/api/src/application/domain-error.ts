@@ -391,14 +391,16 @@ export function storageUnavailable(): DomainError {
  */
 export function evidenceUnavailable(input: {
   readonly artifactVersionId: string;
-  readonly reason: 'MISSING' | 'TAMPERED' | 'UNREADABLE';
+  readonly reason: 'MISSING' | 'TAMPERED' | 'UNREADABLE' | 'TARGET_HASH_MISMATCH';
 }): DomainError {
   const reasonText =
     input.reason === 'MISSING'
       ? '受管内容文件缺失'
       : input.reason === 'TAMPERED'
         ? '受管内容与登记的 hash/size 不一致'
-        : '受管内容无法读取';
+        : input.reason === 'TARGET_HASH_MISMATCH'
+          ? '验证时绑定的内容 hash 与 ArtifactVersion 登记不一致'
+          : '受管内容无法读取';
 
   return new DomainError({
     code: 'EVIDENCE_UNAVAILABLE',

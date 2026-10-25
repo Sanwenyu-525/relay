@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { createCommandId, RelayApiError, RelayTransportError,
   type RelayReview, type RelayReviewDecision } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { checkResultLabel, reviewReasonText } from "../lib/labels";
 import { liveClient } from "../lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
@@ -39,11 +39,15 @@ export function reviewSummary(review: RelayReview): string {
   const target = review.target.normalized_target;
   return typeof target === "string" ? target : reviewReasonText(review.reason);
 }
-export function isReviewExpired(review: RelayReview): boolean {
-  if (review.status !== "OPEN" || !review.expiresAt) return false;
-  const at = Date.parse(review.expiresAt);
+function expiryTimestampPassed(expiresAt: string | null): boolean {
+  if (!expiresAt) return false;
+  const at = Date.parse(expiresAt);
   return Number.isFinite(at) && at <= Date.now();
 }
+export function isReviewExpired(review: RelayReview): boolean {
+  return review.status === "OPEN" && expiryTimestampPassed(review.expiresAt);
+}
+const MAX_REVIEW_TIMER_DELAY_MS = 2_147_483_647;
 export function reviewStaleDecisionReason(code: string): string | null {
   if (code === "REVIEW_TARGET_CHANGED") return "动作内容或目标已经变化，这次批准对新的目标无效。已重新读取最新请求，请对新版本重新判断——刷新不会自动批准。";
   if (code === "REVIEW_EXPIRED") return "这项请求已超过有效期，批准已失效。已重新读取最新状态，请对仍然有效的请求重新判断。";
@@ -126,19 +130,21 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
    * isReviewExpired 在渲染时按当前时间判定。定时器按 Review 与到期时刻登记、随切换清理，
    * 旧请求的计时不会作用到新 Review；提交路径另有 submit 前复核兜底，不依赖渲染刷新。
    */
-  const [, setExpiryTick] = useState(0);
+  const [expiryTick, setExpiryTick] = useState(0);
   const expiresAtMs = review.status === "OPEN" && review.expiresAt !== null ? Date.parse(review.expiresAt) : null;
   useEffect(() => {
     if (expiresAtMs === null || !Number.isFinite(expiresAtMs)) return;
     const margin = expiresAtMs - Date.now();
-    const timer = margin > 0 ? window.setTimeout(() => setExpiryTick((value) => value + 1), margin + 25) : null;
+    const timer = margin > 0
+      ? window.setTimeout(() => setExpiryTick((value) => value + 1), Math.min(margin + 25, MAX_REVIEW_TIMER_DELAY_MS))
+      : null;
     const recheck = () => { if (document.visibilityState === "visible") setExpiryTick((value) => value + 1); };
     document.addEventListener("visibilitychange", recheck);
     return () => {
       if (timer !== null) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", recheck);
     };
-  }, [review.id, expiresAtMs]);
+  }, [review.id, expiresAtMs, expiryTick]);
 
   const expired = isReviewExpired(review);
   const expiredReason = expired ? "这项请求已超过有效期。为避免按列表缓存继续批准，决定按钮已停用；请刷新核对最新状态，再对仍然有效的请求重新判断。" : null;
@@ -168,7 +174,7 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
       setReceiptMessage("决定已保存。请查看最新状态；动作批准不表示动作已经执行。");
       await onRefresh();
     } catch (caught) {
-      if (caught instanceof RelayTransportError) setActionError("响应丢失或回执无法核对，提交结果待核对。请查询原命令回执，不要重新提交新命令。");
+      if (needsReceiptCheck(caught)) setActionError("响应丢失或回执无法核对，提交结果待核对。请查询原命令回执，不要重新提交新命令。");
       else {
         setPendingCommand(null);
         const stale = caught instanceof RelayApiError ? reviewStaleDecisionReason(caught.problem.code) : null;
@@ -225,7 +231,16 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
       ? ["验收条件", criterionStatement] : [key, value]));
 
   if (review.status !== "OPEN") return <div className="review-decision">
-    <p className="receipt-message" role="status">这条请求已有决定。历史判断保留；如需继续操作，请读取新的请求。</p>
+    <p className="receipt-message" role="status" data-testid="review-terminal-status">
+      {review.status === "DECIDED" ? "这条请求已有决定。历史判断保留；如需继续操作，请读取新的请求。"
+        : review.status === "EXPIRED" && expiryTimestampPassed(review.expiresAt)
+          ? "这条请求已超过有效期，未保存新的决定。请刷新核对最新状态。"
+          : review.status === "EXPIRED"
+            ? "这条请求的目标或当前准入状态已失效，未保存新的决定。请刷新核对最新状态。"
+            : `这条请求当前状态为 ${review.status}，不能提交新的决定；请刷新核对最新状态。`}
+    </p>
+    {review.status !== "DECIDED" && <button className="secondary-button" type="button" data-testid="review-terminal-refresh"
+      disabled={busy || submitting} onClick={() => void onRefresh()}>刷新核对最新状态</button>}
     {receiptMessage && <p className="receipt-message" role="status">{receiptMessage}</p>}
     {pendingCommand?.reviewId === review.id &&
       <button className="secondary-button" type="button" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>}

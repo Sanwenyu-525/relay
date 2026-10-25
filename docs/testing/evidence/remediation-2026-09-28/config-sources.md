@@ -18,7 +18,7 @@
 
 1. 现场浏览器显示真实 Provider 的来源是 `apps/api/.env`（含 `RELAY_MODEL_*` 六个键），不是桌面配置；**不能据此声称桌面已配置**。桌面当前为 Mock，属配置事实而非故障。
 2. 桌面 API 与 Worker 消费同一份 `desktop.env`（同一 `--env-file` + 进程继承），配置来源一致；改前 `lib.rs` 键白名单只允许 4 个运行时键，`RELAY_MODEL_*` 会被宿主以 `unsupported setting` 拒绝——这是 2026-09-27 曾确认的「桌面包固定 Mock」边界。
-3. 本次整改按 [A02 验收标准](../../overall-acceptance-2026-09-28.md#a02-p1测试版配置保存路径不完整)（「保存模型配置后 Start、Stop、重新 Build/Start 仍保留，API 与 Worker 指纹一致」）放开该边界：
+3. 本次整改按 [A02 验收标准](../../overall-acceptance-details-20261025.md#a02-p1测试版配置保存路径不完整)（「保存模型配置后 Start、Stop、重新 Build/Start 仍保留，API 与 Worker 指纹一致」）放开该边界：
    - `lib.rs` 白名单加入 9 个 `RELAY_MODEL_*` 键（其余键仍拒绝）；
    - `scripts/test-desktop.ps1` Start 由整文件重写改为合并：4 个运行时键归脚本，其余键归用户，Start/Stop/重打包不丢；
    - `scripts/diagnose-desktop.mjs` 白名单与提示同步；`desktop.env.example` 补充可选模型键说明。

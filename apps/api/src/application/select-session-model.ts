@@ -27,7 +27,7 @@ import { createRepositories } from './unit-of-work.js';
  *
  *   * 命中进程已配置的默认模型 → 解析出连接指纹并落库（free_only=false，沿用原默认行为）；
  *   * 命中目录里的严格免费 OpenRouter 型号 → 只从独立 RELAY_OPENROUTER_API_KEY
- *     解析凭据与固定官方端点，落库非密钥指纹；
+ *     （缺省回退 OPENROUTER_API_KEY）解析凭据与固定官方端点，落库非密钥指纹；
  *   * 目录外的型号 / 收费型号 → 类型化拒绝，绝不悄悄接成一次外呼或换型号（FM-05/FM-06）。
  *
  * env / now 可注入，供无凭据、可控时钟的隔离验证；生产缺省读 process。
@@ -163,7 +163,8 @@ function toSelectionResult(row: SessionModelSelectionRow): SessionModelSelection
   };
 }
 
-function selectionRejected(rejection: ModelSelectionRejection): DomainError {
+/** 模型选择解析失败的类型化问题（会话选择与 Agent 成员模型配置共用同一口径）。 */
+export function selectionRejected(rejection: ModelSelectionRejection): DomainError {
   if (rejection.code === 'MODEL_NOT_REGISTERED') {
     return new DomainError({
       code: 'MODEL_NOT_REGISTERED', status: 400,
@@ -178,12 +179,13 @@ function selectionRejected(rejection: ModelSelectionRejection): DomainError {
   });
 }
 
-function openRouterChatNotConfigured(): DomainError {
+/** OpenRouter 聊天凭据缺失的类型化问题（会话选择与 Agent 成员模型配置共用）。 */
+export function openRouterChatNotConfigured(): DomainError {
   return new DomainError({
     code: 'OPENROUTER_CHAT_NOT_CONFIGURED', status: 409,
     type: '/problems/openrouter-chat-not-configured', title: 'OpenRouter 聊天凭据未配置',
-    detail: '目录存在严格免费型号，但需要在服务端配置独立 RELAY_OPENROUTER_API_KEY；'
-      + '默认模型和目录读取凭据不会用作聊天凭据。',
+    detail: '目录存在严格免费型号，但需要在服务端配置独立凭据：RELAY_OPENROUTER_API_KEY'
+      + '（缺省时回退系统环境变量 OPENROUTER_API_KEY）；默认模型和目录读取凭据不会用作聊天凭据。',
     retryable: false, retryAction: 'NONE',
   });
 }

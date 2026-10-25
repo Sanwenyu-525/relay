@@ -139,13 +139,29 @@ test('Pin cannot override an unmet dependency; AI-held work stays in waiting ite
   expectCommandAccepted(await api.post(workspacePath(workspaceId,
     `/tasks/${delegated.id}/delegations`), { command_id: delegateId,
     expected_task_revision: delegated.revision }), 202, delegateId);
+  const taskDetail = await api.get(workspacePath(workspaceId, `/tasks/${delegated.id}`));
+  assert.equal(taskDetail.status, 200, taskDetail.text);
+  const aiDetail = taskDetail.body as { status: string; allowed_actions: readonly string[] };
+  assert.equal(aiDetail.status, 'IN_PROGRESS');
+  const taskActions = aiDetail.allowed_actions;
+  assert.deepEqual(taskActions, ['EDIT_PRESENTATION', 'CANCEL']);
+  const listed = await api.get(workspacePath(workspaceId, `/tasks?project_id=${p.id}&limit=50`));
+  assert.equal(listed.status, 200, listed.text);
+  const aiListItem = (listed.body as { items: readonly { id: string; allowed_actions: readonly string[] }[] }).items
+    .find((row) => row.id === delegated.id);
+  assert.deepEqual(aiListItem?.allowed_actions, taskActions);
   const view = await today(workspaceId, '2026-09-26', 'Asia/Shanghai');
   assert.equal(view.eligible_items.some((row) => row.task_id === blocked.id), false);
   assert.equal(view.blocked_pinned_items[0]?.task_id, blocked.id);
   assert.ok(view.blocked_pinned_items[0]?.reason_codes.includes('DEPENDENCY_UNSATISFIED'));
   assert.equal(view.blocked_pinned_items[0]?.allowed_actions.includes('START'), false);
-  assert.ok(view.waiting_items.find((row) => row.task_id === delegated.id)
-    ?.reason_codes.includes('AI_OCCUPIED'));
+  const waitingAi = view.waiting_items.find((row) => row.task_id === delegated.id);
+  assert.ok(waitingAi?.reason_codes.includes('AI_OCCUPIED'));
+  assert.ok(waitingAi?.allowed_actions.includes('EDIT_PRESENTATION'));
+  assert.ok(waitingAi?.allowed_actions.includes('CANCEL'));
+  assert.equal(waitingAi?.allowed_actions.includes('SAVE_ARTIFACT_VERSION'), false);
+  assert.equal(waitingAi?.allowed_actions.includes('COMPLETE'), false);
+  assert.deepEqual(waitingAi?.allowed_actions.slice(0, taskActions.length), taskActions);
 });
 
 test('Focus preserves its timezone, effective inherited Goals and explicit empty alignment', async () => {
@@ -224,13 +240,31 @@ test('all same-project READY tasks sort stably after qualification; stale revisi
     expected_revision: p.stateRevision, action: 'SET_NEXT_ACTION',
     next_action_task_id: next.id }), 200, nextId);
   const startId = randomUUID();
-  expectCommandAccepted(await api.post(workspacePath(workspaceId,
+  const started = expectCommandAccepted(await api.post(workspacePath(workspaceId,
     `/tasks/${inProgress.id}/start`), { command_id: startId,
     expected_revision: inProgress.revision }), 200, startId);
   const pinId = randomUUID();
   expectCommandAccepted(await selectTask(workspaceId, pinned.id, '0', true,
     null, null, pinId), 200, pinId);
   const view = await today(workspaceId, '2026-09-26', 'Asia/Shanghai');
+  const humanDetailResponse = await api.get(workspacePath(workspaceId, `/tasks/${inProgress.id}`));
+  assert.equal(humanDetailResponse.status, 200, humanDetailResponse.text);
+  const humanDetail = humanDetailResponse.body as { status: string; allowed_actions: readonly string[]; acceptance_revision: string };
+  const humanActions = ['EDIT_PRESENTATION', 'SAVE_ARTIFACT_VERSION', 'COMPLETE', 'CANCEL'];
+  assert.equal(humanDetail.status, 'IN_PROGRESS');
+  assert.deepEqual(humanDetail.allowed_actions, humanActions);
+  const taskListResponse = await api.get(workspacePath(workspaceId, `/tasks?project_id=${p.id}&limit=50`));
+  assert.equal(taskListResponse.status, 200, taskListResponse.text);
+  const listedHuman = (taskListResponse.body as { items: readonly { id: string; allowed_actions: readonly string[] }[] }).items
+    .find((row) => row.id === inProgress.id);
+  assert.deepEqual(listedHuman?.allowed_actions, humanActions);
+  const todayHuman = view.eligible_items.find((row) => row.task_id === inProgress.id);
+  assert.deepEqual(todayHuman?.allowed_actions.slice(0, humanActions.length), humanActions);
+  expectProblem(await api.post(workspacePath(workspaceId, `/tasks/${inProgress.id}/complete`), {
+    command_id: randomUUID(), expected_revision: started.revision,
+    acceptance_revision: humanDetail.acceptance_revision,
+    acceptance: { statement: '缺少必需条件确认', accepted_criterion_ids: [] },
+  }), 409, 'INVALID_TRANSITION');
   assert.deepEqual(view.eligible_items.map((row) => row.task_id),
     [pinned.id, due.id, high.id, next.id, inProgress.id, first.id, second.id]);
   assert.deepEqual((await today(workspaceId, '2026-09-26', 'Asia/Shanghai')).eligible_items,

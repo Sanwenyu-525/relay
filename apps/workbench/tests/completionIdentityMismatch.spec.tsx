@@ -19,7 +19,7 @@ const otherVersionId = "66666666-6666-4666-8666-666666666666";
 const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; resetRelayConnectionForTest(); vi.unstubAllGlobals(); sessionStorage.clear(); localStorage.clear(); });
 
 function connect() {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });

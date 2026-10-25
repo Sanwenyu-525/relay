@@ -43,7 +43,12 @@ try {
   if (!taskId) throw new Error('Task ID missing after creation');
 
   await page.getByRole('button', { name: '返回任务入口' }).click();
-  await page.locator('.app-sidebar').getByRole('link', { name: '项目' }).click();
+  // 2026-10-25：导航栏从 .app-sidebar 重构为 .app-navrail（navigation-item 链接）；
+  // 选择器跟随当前结构，「项目」入口的语义断言不变。
+  await page.locator('.app-navrail').getByRole('link', { name: '项目' }).click();
+  // 2026-10-25：「按 ID 打开」是深度链接备用入口，收在「高级」折叠（details）里，
+  // 先展开摘要再填写；表单提交即导航，业务断言不变。
+  await page.getByText('高级：粘贴项目 ID 打开任务').click();
   await page.locator('input[name="live-project-id"]').fill(projectId);
   await page.getByTestId('projects-live-open').click();
   await page.getByTestId('rail-trigger').click();

@@ -33,7 +33,7 @@ export default function ProjectSkillView() {
     query.delete("skill"); query.set("project", projectId);
     return <Navigate to={`/agent?${query}`} replace />;
   }
-  return <div className="skill-shell">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
+  return <div className="skill-shell">{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link><Link className="secondary-button" to={`/projects/${projectId}/planning`}>下一段工作</Link><Link className="secondary-button" to={`/projects/${projectId}/task-chains`}>有限任务链</Link></div>}<nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
 }
 
 /** UI-02 项目总览：只按真实 State revision / phase / Next Action 呈现，来源不可用不以摘要当真相。 */
@@ -304,7 +304,7 @@ function FixtureProjectOverview() {
       <p className="metadata-row">状态 v{summary.stateRevision}<span aria-hidden="true"> · </span>{typeLabel}<span aria-hidden="true"> · </span>阶段：{phaseText}</p>
       <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>
       <dl className="rail-definition-list"><div><dt>当前阶段</dt><dd>{phaseText}</dd></div>
-        <div><dt>当前目标</dt><dd>{summary.goal}</dd></div></dl>
+        <div><dt>项目目标</dt><dd>{summary.goal}</dd></div></dl>
     </section>
     <section className="resume-section"><h2>关键产物与摘要</h2>
       <p className="helper-text">来源可追溯；来源不可用时不以摘要当真相。</p>

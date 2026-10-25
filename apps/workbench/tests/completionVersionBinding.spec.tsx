@@ -22,7 +22,7 @@ const versionB = "66666666-6666-4666-8666-666666666666";
 const root = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; resetRelayConnectionForTest(); vi.unstubAllGlobals(); sessionStorage.clear(); localStorage.clear(); });
 
 function connect() {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
@@ -154,7 +154,7 @@ it("结果未知后接受版本切换清勾选，但冻结的原载荷原样重�
   expect(posted).toHaveLength(2);
 });
 
-it("真实 ArtifactPanel 下拉换版清勾选，阅读切换不清勾选", async () => {
+it("真实 ArtifactPanel 分开管理当前选用候选、阅读版本和本轮接受", async () => {
   connect();
   const artifactId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -175,7 +175,7 @@ it("真实 ArtifactPanel 下拉换版清勾选，阅读切换不清勾选", asyn
   }))); cleanup = view.unmount;
   await flush(30);
 
-  await view.wrapper.get('[data-testid="artifact-accept-version"]').setValue(versionA);
+  await view.wrapper.get(`[data-testid="completion-artifact-${versionA}"]`).setValue(true);
   await view.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
   expect(tickChecked(view.wrapper)).toBe(true);
 
@@ -185,10 +185,57 @@ it("真实 ArtifactPanel 下拉换版清勾选，阅读切换不清勾选", asyn
   expect(tickChecked(view.wrapper),
     "单纯阅读切换不能清掉人工判断").toBe(true);
 
-  // 下拉换接受版本 v1→v2：勾选清空、完成禁用，实际下拉已选中 v2。
-  await view.wrapper.get('[data-testid="artifact-accept-version"]').setValue(versionB);
+  // 本轮接受集合从 {v1} 变为 {v1, v2}：旧人工判断作废。
+  await view.wrapper.get(`[data-testid="completion-artifact-${versionB}"]`).setValue(true);
   await flush(10);
-  expect(tickChecked(view.wrapper), "实际下拉路径也必须重新确认").toBe(false);
+  expect(tickChecked(view.wrapper), "接受集合变化后必须重新确认").toBe(false);
   expect(canComplete(view.wrapper)).toBe(false);
-  expect((view.wrapper.get('[data-testid="artifact-accept-version"]').element as HTMLSelectElement).value).toBe(versionB);
+  expect((view.wrapper.get(`[data-testid="completion-artifact-${versionA}"]`).element as HTMLInputElement).checked).toBe(true);
+  expect((view.wrapper.get(`[data-testid="completion-artifact-${versionB}"]`).element as HTMLInputElement).checked).toBe(true);
+
+  // 当前选用候选是独立 Project State 输入，不会改写本轮接受集合。
+  await view.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
+  await view.wrapper.get('[data-testid="artifact-accept-version"]').setValue(versionA);
+  await flush(10);
+  expect(tickChecked(view.wrapper)).toBe(true);
+  expect(view.wrapper.get('[data-testid="completion-artifact-summary"]').text()).toContain(versionA);
+  expect(view.wrapper.get('[data-testid="completion-artifact-summary"]').text()).toContain(versionB);
+});
+
+it("可以接受多个 Artifact 与同一 Artifact 的多个历史版本，并冻结完整集合", async () => {
+  const artifactA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const artifactB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const versionC = "99999999-9999-4999-8999-999999999999";
+  const options: NonNullable<CompletionTarget["availableArtifactVersions"]> = [
+    { artifactId: artifactA, artifactTitle: "规格", artifactVersionId: versionA, versionNumber: "1", isLatest: false },
+    { artifactId: artifactA, artifactTitle: "规格", artifactVersionId: versionB, versionNumber: "2", isLatest: true },
+    { artifactId: artifactB, artifactTitle: "实现说明", artifactVersionId: versionC, versionNumber: "1", isLatest: true }
+  ];
+  const posted: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      posted.push(body);
+      return response({ command_id: body.command_id, command_type: "CompleteHumanTask",
+        committed_at: "2026-10-24T00:00:05.000Z",
+        result: completionResult(body.artifact_version_ids as string[]) });
+    }
+    throw new Error(`unexpected ${String(input)}`);
+  }));
+  const view = await mount(target({ availableArtifactVersions: options }));
+  for (const id of [versionA, versionB, versionC]) {
+    await view.wrapper.get(`[data-testid="completion-artifact-${id}"]`).setValue(true);
+  }
+  await view.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
+  expect(canComplete(view.wrapper)).toBe(true);
+  await view.wrapper.get('[data-testid="task-complete"]').trigger("click");
+  await flush(25);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.artifact_version_ids).toEqual([versionA, versionB, versionC]);
+  const receipt = view.wrapper.get('[data-testid="task-complete-receipt"]').text();
+  expect(receipt).toContain("规格 v1");
+  expect(receipt).toContain("规格 v2");
+  expect(receipt).toContain("实现说明 v1");
+  expect(receipt).toContain(artifactA);
+  expect(receipt).toContain(versionC);
 });

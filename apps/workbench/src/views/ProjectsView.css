@@ -214,6 +214,9 @@
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
+  /* 2026-10-25 视觉对齐：白卡浮起（与 .surface-panel、/agent 页输入卡同一卡片语言，
+     对齐项目重设计原型的柔投影卡片）。 */
+  box-shadow: var(--relay-shadow-card);
   color: inherit;
   text-align: left;
   cursor: pointer;

@@ -49,6 +49,24 @@ function recoveryKey(client: RelayApiClient): string {
   return `relay-agent-chat-pending:${client.baseUrl}:${client.workspaceId}`;
 }
 
+/**
+ * 新对话目录续记的取消标记（2026-10-25）：值是被用户取消续记的那条 `?new=` 键。
+ * 只活在本标签会话里（sessionStorage）——它是一次性入口的展示偏好，不是业务事实；
+ * 同一条新对话重挂载后仍不续记，另一条新对话不受影响。
+ */
+function carryDismissalStorageKey(client: RelayApiClient): string {
+  return `relay-agent-carry-directory-dismissed:${client.baseUrl}:${client.workspaceId}`;
+}
+
+function readCarryDismissal(client: RelayApiClient): string | null {
+  try { return window.sessionStorage.getItem(carryDismissalStorageKey(client)); } catch { return null; }
+}
+
+function writeCarryDismissal(client: RelayApiClient, conversationKey: string): void {
+  try { window.sessionStorage.setItem(carryDismissalStorageKey(client), conversationKey); }
+  catch { /* 标记写不进去只影响取消后的续记，不影响目录命令与服务端事实。 */ }
+}
+
 type RecoveryRecord = { readonly commandId: string; readonly commandType: string;
   readonly sessionId: string | null; readonly targetKind: "PROJECT" | "TASK"; readonly targetId: string };
 
@@ -122,7 +140,7 @@ export default function CollaborationView() {
   if (connection.mode !== "live" || !connection.client) {
     return <section className="page-state" data-testid="collab-fixture-gap">
       <p className="eyebrow">协作工作区</p><h1>示例模式没有真实工作</h1>
-      <p>连接本机 API 后，可以在这里恢复近期工作、讨论目标、显式委托 Agent、阅读产物并作出判断。示例模式不生成模型回复、执行记录或完成凭据。</p>
+      <p>连接本机 API 后，可以在这里恢复近期工作、讨论要推进的事、显式委托 Agent、阅读产物并作出判断。示例模式不生成模型回复、执行记录或完成凭据。</p>
       <Link className="text-link" to="/projects">返回项目列表</Link>
     </section>;
   }
@@ -147,8 +165,23 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
    * `?dir=` 也是挂载那一拍读一次的一次性种子（左栏目录行悬停「＋」→ 在这个目录新建会话）：
    * 值就是那条会话上下文里的目录绝对路径，由本页按同一条 `openFolder` 打开。
    * 目录事实仍只有协作页一个 Owner——左栏不登记第二份作用域，也不替服务端判定目录是否就绪。
+   *
+   * 全局新对话的目录续记（2026-10-25 用户指令「新对话要记住最后打开的会话所在的工作目录」）：
+   * 工作区级新对话（`?new=` 且没有 `?dir=`/`?work=`/`?project=`/`?session=`）不再从
+   * 「选择工作目录」起步，而是沿用本机最近一次成功打开的工作目录（recentWorkingDirectories
+   * 首项，与模型偏好同族的「本机偏好」；任务与项目入口的作用域由目标决定，不参与续记）。
+   * 种子仍走同一条 `openFolder`：就绪、归属与首条发送时的目录绑定全部按既有路径由服务端
+   * 核对，本机记录只是初始值，不冒充服务端事实；没有本机记录、或用户在慢路径取消过这一条
+   * 新对话（标记记在本标签会话内，重挂载后同样生效）时，回到「选择工作目录」的空白起步。
    */
-  const directorySeed = search.get("dir");
+  const [carryDismissedKey, setCarryDismissedKey] = useState<string | null>(() => readCarryDismissal(client));
+  const [carryDirectorySeed] = useState<string | null>(() => {
+    if (!search.has("new") || search.has("dir") || search.has("work")
+      || search.has("project") || search.has("session")) return null;
+    return readRecentWorkingDirectories()[0]?.canonicalRoot ?? null;
+  });
+  const directorySeed = search.get("dir") ??
+    (carryDismissedKey === newConversationKey ? null : carryDirectorySeed);
   const [sessionId, setSessionId] = useState<string | null | undefined>(() =>
     search.has("new") ? null : sessionSeed ?? undefined);
   /**
@@ -271,7 +304,7 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   const [reloadKey, setReloadKey] = useState(0);
   // 文件夹作用域：目录是当前工作目录，不是新 Workspace。空目录时保持未打开状态。
   /**
-   * 目标会话身份（工作台 §25、ADR-018）。住在这里而不是 URL：
+   * 工作对象会话身份（工作台 §25、ADR-018）。住在这里而不是 URL：
    * App 按 pathname+search 给路由出口重新挂载，工作目录又是本页的组件状态，
    * 把身份写进查询串会连工作目录一起丢。默认普通档，既有行为不变。
    */
@@ -710,7 +743,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    *
    * 目录「＋」与任务聊天在空白新对话上已经有宿主刚读到的目标事实（目录回执里的项目、
    * 任务列表里的任务）。把它交给 AssistView 先画首条输入器，再让视图照常向服务端核对
-   * 完整目标与会话——中间不再整页换成「正在核对对话目标与会话」。
+   * 完整工作对象与会话——中间不再整页换成「正在核对对话工作对象与会话」。
    * 只给 `sessionId === null` 的空白起步用：恢复既有会话或默认续写（`undefined`）时
    * 仍以服务端读回为准，不能用种子抢在会话列表前面渲染首条输入器。
    */
@@ -730,7 +763,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 左栏目录「＋」的 `?dir=` 在途（2026-10-22，DEV-0104 改）。
    *
    * 2026-10-20 的做法是「目录在途不挂会话面板」，用一张整页在途态挡住切换；用户复测
-   * 仍点名「正在核对目标与会话」闪一下。根因是「旧会话面板 → 整页在途 → 首条输入器」
+   * 仍点名「正在核对工作对象与会话」闪一下。根因是「旧会话面板 → 整页在途 → 首条输入器」
    * 至少两次整块替换，而目录回执与项目事实几乎总是几十毫秒到位，这些中间页只是噪声。
    * 现在目录在途也直接挂工作区级首条输入器：发送键按 `creationPending` 禁用，目录细条
    * 自己说「正在打开目录…」；目录回执一到就带着项目种子换成项目作用域，但两拍的正文
@@ -759,7 +792,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     requestTransition(() => { setFolder(null); setSearch({ work: taskId }); });
   }
   /**
-   * Skill 需要上下文时由 AssistView 交回目标（工作台 §32.11）：把这条讨论带到该目标的
+   * Skill 需要上下文时由 AssistView 交回工作对象（工作台 §32.11）：把这条讨论带到该工作对象的
    * 真实作用域再开始 —— 归属只在建会话时确定，不能在别处伪造。`?skill=` 把用户刚选的
    * Skill 带过去预选，`?new=` 保证落在一条新对话上而不是续写最近一条。
    */
@@ -858,7 +891,17 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       <p className="helper-text">目录打开比预期久。可以继续等待；也可以取消，回到这条新对话后再从目录细条重新打开。</p>
       <div className="form-actions"><button className="secondary-button" type="button"
         data-testid="collab-directory-slow-cancel"
-        onClick={() => { const next = new URLSearchParams(search); next.delete("dir"); setSearch(next); }}>取消并回到新对话</button></div>
+        onClick={() => {
+          // 取消对目录续记同样生效（2026-10-25）：这条新对话不再自动沿用最近目录。显式 `?dir=`
+          // 摘掉 URL 种子后按路由重挂载，重挂载那一拍靠 sessionStorage 标记不再续记；续记种子
+          // 没有 URL 可摘，直接在本实例清掉。两种取消都不重发命令、不换 command_id。
+          if (newConversationKey !== null) {
+            writeCarryDismissal(client, newConversationKey);
+            setCarryDismissedKey(newConversationKey);
+          }
+          const next = new URLSearchParams(search);
+          if (next.has("dir")) { next.delete("dir"); setSearch(next); }
+        }}>取消并回到新对话</button></div>
     </section>}
     {binding !== null && <section className="collab-binding" data-testid="collab-binding"
       data-status={binding.status} data-session={binding.sessionId}
@@ -1137,9 +1180,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   }
 
   /**
-   * 左栏目录行「＋」带进来的 `?dir=`：挂载那一拍按同一条 openFolder 打开这条路径。
+   * 左栏目录行「＋」带进来的 `?dir=` 与全局新对话的目录续记：挂载那一拍按同一条 openFolder 打开。
    *
-   * 与 `?new=` 同一类一次性种子：路径在 URL 里，刷新后会重新打开同一个目录；打开的结果
+   * 与 `?new=` 同一类一次性种子：路径在挂载那一拍定死，刷新后会重新打开同一个目录；打开的结果
    * （就绪、未就绪、需要再选作用域、被拒）仍由细条按原有回执如实呈现，不在这里替服务端猜。
    * 空对话与会话创建仍走既有路径（首条发送时建会话、按 executionScope 绑目录）。
    */
@@ -1186,6 +1229,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     className="secondary-button secondary-button--compact collab-toolbar-icon-button"
     data-testid="collab-open-task-view" title="任务视图" aria-label="任务视图"
     onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></button>}{
+    /* 普通会话也能打开工具面板：网页预览不需要项目或任务，文件/变更由面板按资格说明。
+       面板展开后收起入口只剩面板头部那颗键，收起时焦点回到本键。
+       2026-10-24 新增本键时排在「工作详情」之前：2026-10-17 指令要求详情键固定在最后。 */
+    task === null && !conversationToolsOpen && <button type="button"
+    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
+    data-testid="collab-conversation-tools-toggle" ref={conversationToolsToggleRef}
+    title="工具面板（文件、变更与网页）" aria-label="工具面板（文件、变更与网页）"
+    aria-expanded={conversationToolsOpen} aria-controls="collab-conversation-tools"
+    onClick={openConversationTools}><Wrench size={18} aria-hidden="true" /></button>}{
     /* 面板弹出后，收起入口只剩面板头部那颗同图标键（2026-10-23 用户截图指令「抽屉弹出的
        时候这里的按钮可以删除了」）：顶栏这颗与它重复，打开时整颗不渲染；收起后由
        close*Inspector 的 rAF 把焦点交还本键，键盘路径不变。 */
@@ -1196,15 +1248,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     aria-expanded={conversationInspectorVisible} aria-controls={task === null ? "collab-conversation-inspector" : `collab-inspector-${task.id}`}
     onClick={() => { if (task === null) setConversationInspectorOpen((open) => !open); else setInspectorOpen((open) => !open); }}>
     <PanelRightOpen size={18} aria-hidden="true" />
-  </button>}{
-    /* 普通会话也能打开工具面板：网页预览不需要项目或任务，文件/变更由面板按资格说明。
-       面板展开后收起入口只剩面板头部那颗键，收起时焦点回到本键。 */
-    task === null && !conversationToolsOpen && <button type="button"
-    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
-    data-testid="collab-conversation-tools-toggle" ref={conversationToolsToggleRef}
-    title="工具面板（文件、变更与网页）" aria-label="工具面板（文件、变更与网页）"
-    aria-expanded={conversationToolsOpen} aria-controls="collab-conversation-tools"
-    onClick={openConversationTools}><Wrench size={18} aria-hidden="true" /></button>}</>;
+  </button>}</>;
   /**
    * 「+」里的目录入口已撤出（2026-10-19 用户指认「选择目录之类的都是过度设计」）：
    * 目录的常驻 Owner 就是本页目录细条，滚入视野并触发细条自带的「更换目录」弹层

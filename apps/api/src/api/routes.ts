@@ -54,6 +54,8 @@ import { registerProjectReminderScheduler } from '../runtime/project-reminder-sc
 import { registerTaskChainScheduler } from '../runtime/task-chain-scheduler.js';
 import { registerTaskChainRoutes } from './task-chain-api.js';
 import { registerScheduledTaskRoutes } from './scheduled-task-api.js';
+import { registerAgentMemberRoutes } from './agent-member-api.js';
+import { registerMemberConversationRoutes } from './member-conversation-api.js';
 import { registerScheduledTaskScheduler } from '../runtime/scheduled-task-scheduler.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
@@ -179,6 +181,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
     registerProjectReminderRoutes(scope, apiDependencies);
     registerTaskChainRoutes(scope,apiDependencies,taskChainRuntimeId);
     registerScheduledTaskRoutes(scope, apiDependencies);
+    registerAgentMemberRoutes(scope, apiDependencies);
+    registerMemberConversationRoutes(scope, apiDependencies);
       registerTodayRoutes(scope, apiDependencies);
       registerActivityRoutes(scope, apiDependencies);
       registerTraceRoutes(scope, apiDependencies);

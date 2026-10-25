@@ -26,6 +26,7 @@ import { ModelScopeBudgetError, type ModelCallSettlement }
   from '../model/model-call-repository.js';
 import type { CheckOutcome } from '../workflow/checkers.js';
 import type { ModelUsage } from '../workflow/fake-model-port.js';
+import type { RunSemanticModel } from './run-model-port.js';
 
 /**
  * VERIFY 步骤（contracts/03-verification-and-approval.md 第 3–5 节、
@@ -46,8 +47,15 @@ export interface VerifyRunInput {
   readonly modelCallDb: DbExecutor;
   readonly stepAttemptId: string;
   readonly fakeScenario?: FakeScenario | undefined;
+  /** 仅测试夹具可打开：FakeSemanticChecker 不能成为真实 Run 的验证依据。 */
+  readonly testOnlyAllowFakeSemanticChecker?: boolean | undefined;
   /** prepare 阶段（结果事务之外）已完成的模型型检查调用，按 criterionId 索引。 */
   readonly precomputedChecks?: ReadonlyMap<string, PreparedSemanticCheck> | undefined;
+  /**
+   * Run 冻结计划解析出的语义模型（P0-1）：语义检查必须用这个身份，不能用进程默认端口。
+   * 缺省表示旧 Run 走 registry 注册的进程默认检查器。
+   */
+  readonly semanticModel?: RunSemanticModel | undefined;
 }
 
 /**
@@ -59,6 +67,17 @@ export interface VerifyRunInput {
 export type PreparedSemanticCheck =
   | { readonly kind: 'RECORDED'; readonly callId: string; readonly outcome: CheckOutcome }
   | { readonly kind: 'BUDGET_EXHAUSTED' };
+
+/**
+ * 检查器是否可用于本 Run：registry 注册的检查器，或由冻结计划解析出的语义模型。
+ * 后者只对 `semantic-model-v1@1` 生效——它仍然是真实模型检查器，不是替身，也不降级。
+ */
+function hasCheckerForPlan(entry: { readonly checkerId: string;
+  readonly checkerVersion: string }, semanticModel?: RunSemanticModel): boolean {
+  return hasChecker(entry.checkerId, entry.checkerVersion) ||
+    (semanticModel !== undefined && entry.checkerId === 'semantic-model-v1' &&
+      entry.checkerVersion === '1');
+}
 
 /** 结算映射：CANCEL（信号中止）> 检查器故障（ERROR → FAILED）> 正常完成。 */
 export function semanticCheckSettlement(result: CheckOutcome,
@@ -90,7 +109,15 @@ export async function verifyRun(
 
   // 规则 enforcement 与可用 checker 不匹配时不降级为建议：直接判为不可执行的步骤失败。
   for (const entry of plan.entries) {
-    if (!hasChecker(entry.checkerId, entry.checkerVersion)) {
+    if (entry.checkerId === 'fake-semantic-v1' &&
+        input.testOnlyAllowFakeSemanticChecker !== true) {
+      return {
+        outcome: 'FAILED',
+        reason: 'TEST_CHECKER_NOT_ALLOWED',
+        evidence: { criterion_id: entry.criterionId, checker_id: entry.checkerId },
+      };
+    }
+    if (!hasCheckerForPlan(entry, input.semanticModel)) {
       return {
         outcome: 'FAILED',
         reason: 'CHECKER_NOT_REGISTERED',
@@ -136,7 +163,7 @@ export async function verifyRun(
       .filter((row) => row.criterion_id === entry.criterionId)
       .map((row) => row.check_attempt);
     const checkAttempt = previousAttempts.length === 0 ? 1 : Math.max(...previousAttempts) + 1;
-    const checker = resolveCheckerForScenario(entry, input.fakeScenario);
+    const checker = resolveCheckerForScenario(entry, input.fakeScenario, input.semanticModel);
     const checkInput = {
       entry,
       content: target.content,
@@ -311,15 +338,26 @@ export async function prepareSemanticChecks(
     readonly stepAttemptId: string;
     readonly fakeScenario?: FakeScenario | undefined;
     readonly signal?: AbortSignal | undefined;
+    /** Run 冻结计划解析出的语义模型；缺省时按 registry 的进程默认检查器。 */
+    readonly semanticModel?: RunSemanticModel | undefined;
+    /** 冻结模型不可执行时的停止原因：语义检查需要模型就必须停下，不能换模型继续。 */
+    readonly modelStop?: { readonly reason: string; readonly evidence: JsonObject } | undefined;
   },
-): Promise<ReadonlyMap<string, PreparedSemanticCheck>> {
+): Promise<{
+  readonly checks: ReadonlyMap<string, PreparedSemanticCheck>;
+  readonly stop?: { readonly reason: string; readonly evidence: JsonObject } | undefined;
+}> {
   const precomputed = new Map<string, PreparedSemanticCheck>();
   const repositories = createRepositories(db);
   const contract = await repositories.runs.readContract(input.run.id);
-  if (contract === undefined) return precomputed;
+  if (contract === undefined) return { checks: precomputed };
   const plan = buildCheckPlan(planFromFrozenSnapshot(contract.frozen_snapshot));
-  if (plan.entries.some((entry) => !hasChecker(entry.checkerId, entry.checkerVersion))) {
-    return precomputed;
+  const semanticEntries = plan.entries.filter((entry) => entry.checkerId === 'semantic-model-v1');
+  if (semanticEntries.length > 0 && input.modelStop !== undefined) {
+    return { checks: precomputed, stop: input.modelStop };
+  }
+  if (plan.entries.some((entry) => !hasCheckerForPlan(entry, input.semanticModel))) {
+    return { checks: precomputed };
   }
 
   let target: VerifiedTarget;
@@ -327,7 +365,7 @@ export async function prepareSemanticChecks(
     target = await loadVerifiedTarget(repositories, input);
   } catch {
     // 证据核对失败按既有路径在结果事务内结算，不在这里提前消耗模型调用。
-    return precomputed;
+    return { checks: precomputed };
   }
 
   const sessions = await repositories.verifications.listSessionsByRun(input.run.id);
@@ -336,7 +374,7 @@ export async function prepareSemanticChecks(
     await repositories.verifications.listCheckResults(open.id);
 
   for (const entry of plan.entries) {
-    const checker = resolveCheckerForScenario(entry, input.fakeScenario);
+    const checker = resolveCheckerForScenario(entry, input.fakeScenario, input.semanticModel);
     // 只有携带 budget 的模型检查器才会对 runs 行加锁：无 budget 的替身路径保持原状，
     // 仍在 verifyRun 的事务内记账。
     if (checker.modelIdentity === undefined || checker.modelIdentity.budget === undefined) continue;
@@ -368,7 +406,8 @@ export async function prepareSemanticChecks(
       precomputed.set(entry.criterionId, { kind: 'BUDGET_EXHAUSTED' });
     }
   }
-  return precomputed;
+  return { checks: precomputed };
+
 }
 
 /**

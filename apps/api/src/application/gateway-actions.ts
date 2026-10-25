@@ -9,7 +9,7 @@ import type {
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
-import { reviewTargetHash } from './review-requests.js';
+import { reviewMatchesGatewayOperation, reviewTargetHash } from './review-requests.js';
 import { rootsOverlap } from './gateway-configuration.js';
 import { applySafeControl } from './control-requests.js';
 import { DomainError, invalidTransition, resourceNotFound, validationFailed } from './domain-error.js';
@@ -1570,18 +1570,6 @@ function originMatches(op: LogicalOperationRow, origin: GatewayOrigin): boolean 
     op.project_id === origin.projectId;
 }
 
-function reviewMatchesOperation(review: NonNullable<Awaited<ReturnType<Repositories['reviews']['readByOperationId']>>>,
-  op: LogicalOperationRow): boolean {
-  const target = review.target;
-  return review.kind === 'ACTION_APPROVAL' && review.operation_id === op.id &&
-    review.target_hash.equals(reviewTargetHash(target)) && target.operation_id === op.id &&
-    target.origin === op.origin && target.run_id === op.run_id && target.step_id === op.step_id &&
-    target.import_job_id === op.import_job_id && target.normalized_target === op.normalized_target &&
-    target.params_hash === op.params_hash.toString('hex') &&
-    target.connection_id === op.connection_id && target.connection_version === op.connection_version.toString() &&
-    target.policy_id === op.policy_id && target.policy_version === op.policy_version.toString();
-}
-
 async function requireCurrentGatewayGrant(repositories: Repositories, op: LogicalOperationRow,
   review: Awaited<ReturnType<Repositories['reviews']['readByOperationId']>>,
   scopeDecision?: ScopeGrantDecision): Promise<SelectedPolicy> {
@@ -1620,7 +1608,7 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
       selected.decision === 'AUTO' && scopeDecision?.covered !== true && !fullAccess
       ? 'ASK' : selected.decision;
   if (effectiveDecision === 'ASK') {
-    if (review === undefined || !reviewMatchesOperation(review, op) || review.status !== 'DECIDED' ||
+    if (review === undefined || !reviewMatchesGatewayOperation(review, op) || review.status !== 'DECIDED' ||
         (review.expires_at !== null && review.expires_at.getTime() <= Date.now()) ||
         (await repositories.reviews.readDecision(review.id))?.decision !== 'APPROVE') {
       throw gatewayDenied('GATEWAY_APPROVAL_REQUIRED', '最终目标的有效批准尚未保存。');

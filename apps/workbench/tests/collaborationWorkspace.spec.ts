@@ -209,7 +209,7 @@ describe("协作工作区主路径", () => {
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).not.toContain("还没有消息");
       // 说明句按归属收敛：任务作用域已有所属，不再宣称「不需要先创建项目、任务」。
       expect(view.wrapper.get('[data-testid="assist-empty-welcome"] .agent-chat-empty-lede').text())
-        .toBe("围绕当前任务直接讨论，或描述新的目标与要求。");
+        .toBe("围绕当前任务直接讨论，或描述新的要求。");
       await view.wrapper.get('[data-testid="assist-empty-suggest-requirement"]').trigger("click");
       expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
         .toContain("没有具体需求时先问我，不自行挑选。");
@@ -642,7 +642,7 @@ describe("协作工作区主路径", () => {
       expect(text).toContain("产物类型：Markdown 文档");
       expect(text).toContain("结果说明：评价方案文档");
       expect(text).not.toContain('"kind":"MARKDOWN_DOCUMENT"');
-      expect(text).toContain("目标 项目（PROJECT）");
+      expect(text).toContain("工作对象 项目（PROJECT）");
       const chips = detail.findAll(".assist-proposal-output-chip");
       expect(chips).toHaveLength(2);
       expect(chips[0]!.attributes("title")).toBe("kind: MARKDOWN_DOCUMENT");
@@ -827,9 +827,11 @@ describe("协作工作区主路径", () => {
       const draft = view.wrapper.get('[data-testid="assist-draft"]');
       await draft.setValue("保留未发送的消息");
       await view.wrapper.get('[data-testid="assist-open-sources"]').trigger("click"); await flush();
-      // 底栏现在有两枚同类抽屉（资料面板与发送选项），裸 `.agent-chat-options` 会先命中后者；
-      // 本用例操作的是资料面板，因此按它自己的限定类取节点，不改任何断言。
-      const options = view.wrapper.get(".agent-chat-options.agent-chat-source-options");
+      // 底栏只剩一枚同类抽屉：2026-10-24 用户指令「这两个合成一个芯片就好了」把发送选项与
+      // 资料并进同一颗芯片（上节发送选项、下节资料），独立的资料抽屉类名
+      // `agent-chat-source-options` 已随合并消失。本用例操作的就是这枚合并抽屉，因此按它
+      // 现在的限定类取节点；资料检索框 `#assist-source-query` 仍在其中，断言一条不减。
+      const options = view.wrapper.get(".agent-chat-options.agent-chat-send-options");
       const query = options.get("#assist-source-query");
       await query.setValue("保留检索词");
       const queryOwner = query.element as HTMLInputElement;
@@ -924,6 +926,57 @@ describe("协作工作区主路径", () => {
       } finally { view.unmount(); }
     });
   }
+
+  it("点击上下文圆环打开用量详情浮层，Esc 收起还焦点，点外即收", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
+      model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000 }) });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
+        return response({ items: [
+          { id: "user-usage", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+            intent: "DISCUSS", content: "帮我看看资料", error_code: null, sources: [],
+            usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null,
+              cache_creation_tokens: null }, cancel_requested: false },
+          { id: "assistant-usage", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED",
+            intent: "DISCUSS", content: "好的", error_code: null, sources: [],
+            usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600,
+              cache_creation_tokens: 100 }, cancel_requested: false }] });
+      }
+      return read(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
+      // 2026-10-25 用户指令「上下文圆圈点击打开展示会话窗口的菜单」：圆环从纯展示改为
+      // 可点开的详情浮层；读数仍是底栏同一份 props（悬停一句话不变），不新增用量来源。
+      expect(meter.attributes("aria-haspopup")).toBe("dialog");
+      await meter.trigger("click"); await flush();
+      expect(meter.attributes("aria-expanded")).toBe("true");
+      const panel = view.wrapper.get('[data-testid="assist-context-meter-panel"]');
+      const rows = panel.findAll(".agent-chat-context-meter-row").map((row) => row.text());
+      expect(rows).toHaveLength(3);
+      expect(rows[0]).toContain("800");
+      expect(rows[0]).toContain("（80%）");
+      expect(rows[1]).toContain("200 tokens");
+      expect(rows[2]).toContain("75%");
+      expect(panel.get(".agent-chat-context-meter-note").text()).toContain("最近一次模型调用");
+      // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      }); await flush();
+      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
+      expect(meter.attributes("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(meter.element);
+      // 再开一次后，点浮层外一次即收。
+      await meter.trigger("click"); await flush();
+      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(true);
+      await act(async () => {
+        document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      }); await flush();
+      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
 
   it("判断条是纸面之外的独立圆角卡", () => {
     // jsdom 不加载样式表，因此直接核对规则本身。
@@ -2379,6 +2432,54 @@ describe("不可恢复输入的离页保护", () => {
       await flush(80);
       expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(view.router.currentRoute.value.path).toBe("/projects");
+    } finally { view.unmount(); }
+  });
+
+  it("暂存附件在会话间切换前先确认：保留留在原讨论，丢弃后才换到另一条讨论", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const secondSessionId = "99999999-9999-4999-8999-999999999999";
+    const sessions = [sessionId, secondSessionId].map((id, index) => ({ id, workspace_id: workspaceId,
+      project_id: projectId, task_id: taskId, title: index === 0 ? "指标原讨论" : "评价方法第二讨论",
+      status: "ACTIVE", revision: "1", updated_at: "2026-10-01T02:00:00Z" }));
+    const read = router({ sessions: () => response({ items: sessions }) });
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      for (const id of [sessionId, secondSessionId]) {
+        if (path === `${prefix}/assist-sessions/${id}/messages`) return response({ items: [{
+          id: `message-${id}`, session_id: id, seq: "1", role: "USER", status: "COMPLETED", intent: "DISCUSS",
+          content: id === sessionId ? "原讨论的指标来源" : "第二讨论的方法对照", error_code: null,
+          sources: [], usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] });
+      }
+      return read(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      expect(await openSessionSwitcher()).toHaveLength(2);
+      await pasteFile(view.wrapper.get('[data-testid="assist-draft"]').element,
+        new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
+      await flush();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+
+      // 切讨论与切目录、跨页共用同一道守卫：正文草稿按会话留在本机不拦，暂存附件离开即丢要拦。
+      await switchToolbarSession(secondSessionId);
+      expect(dialogText()).toContain("无法恢复");
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
+      await clickPortal("collab-unsaved-keep");
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("原讨论的指标来源");
+
+      await switchToolbarSession(secondSessionId);
+      expect(dialogText()).toContain("无法恢复");
+      await clickPortal("collab-unsaved-discard");
+      await flush(120);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("第二讨论的方法对照");
+      expect(view.wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
+      // 未发送的附件没有被冒充成已提交：整条路径没有发出任何写命令。
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     } finally { view.unmount(); }
   });
 
