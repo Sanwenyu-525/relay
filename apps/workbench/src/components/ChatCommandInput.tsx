@@ -96,11 +96,15 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     const textarea = inputRef.current;
     if (mirror === null || textarea === null || mentions.length === 0) return;
     /* textarea 弹出纵向滚动条时内容区变窄：镜像层右侧让出同宽 gutter，
-       两侧折行点才一致（镜像层 overflow:hidden，gutter 只影响排版不影响显示）。 */
+       两侧折行点才一致（镜像层 overflow:hidden，gutter 只影响排版不影响显示）。
+       补偿是「基础值 + 当前 gutter」的**绝对值**：先把上一轮的行内补偿清掉再读
+       基础 padding——否则 calc(base + gutter) 里的 base 已含上次补偿，滚动、缩放、
+       ResizeObserver 反复触发会越叠越宽（2026-10-26 独立验收指认）。 */
     const gutter = textarea.offsetWidth - textarea.clientWidth;
     if (gutter > 0) {
-      const base = getComputedStyle(mirror).paddingRight;
-      mirror.style.paddingRight = `calc(${base} + ${gutter}px)`;
+      if (mirror.style.paddingRight !== "") mirror.style.paddingRight = "";
+      const base = Number.parseFloat(getComputedStyle(mirror).paddingRight);
+      mirror.style.paddingRight = `${(Number.isFinite(base) ? base : 0) + gutter}px`;
     } else if (mirror.style.paddingRight !== "") {
       mirror.style.paddingRight = "";
     }
@@ -391,7 +395,11 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
            芯片就退化成裸 `@`。做法是把选区预置到整段 mention 再放行按键：删除仍由
            原生执行（一次按键、Ctrl+Z 可撤销、光标自然落位），只是作用范围从
            「一个字/半段」扩成整枚芯片。修饰键不排除：Ctrl+Backspace 删词同样不许
-           拆碎芯片；选区本就完整覆盖时预置到恰好整段，行为等价。 */
+           拆碎芯片；选区本就完整覆盖时预置到恰好整段，行为等价。
+           选区并集（2026-10-26 独立验收指认）：触及的**每一枚** mention 都扩进预置
+           选区，且只在边界外扩展、绝不缩小用户已选的范围——全选「前文 @GitHub 后文」
+           删除应得到空串，而不是只删 mention 留下前后文；只碰普通文字时不预置，
+           删除完全走原生。 */
         if ((event.key === "Backspace" || event.key === "Delete") && mentions.length > 0) {
           const element = inputRef.current;
           if (element !== null) {
@@ -400,8 +408,12 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
             // 无选区时原生会吃掉的区间：Backspace 吃 [c-1,c)、Delete 吃 [c,c+1)。
             const rangeFrom = from === to ? (event.key === "Backspace" ? from - 1 : from) : from;
             const rangeTo = from === to ? (event.key === "Backspace" ? from : from + 1) : to;
-            const hit = mentions.find((m) => rangeFrom < m.end && rangeTo > m.start);
-            if (hit !== undefined) element.setSelectionRange(hit.start, hit.end);
+            const hits = mentions.filter((m) => rangeFrom < m.end && rangeTo > m.start);
+            if (hits.length > 0) {
+              element.setSelectionRange(
+                Math.min(rangeFrom, ...hits.map((m) => m.start)),
+                Math.max(rangeTo, ...hits.map((m) => m.end)));
+            }
           }
         }
         onKeyDown?.(event);

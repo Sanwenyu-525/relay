@@ -36,3 +36,28 @@ it("多个未决Owner按各自生命周期移除，清一项不会解除另一�
   expect(currentDraftGuard()).toBeNull();
   expect(hasUnsavedDraft()).toBe(false);
 });
+
+it("多个守卫保留所有原 command ID，明确丢弃草稿时不解除 pending", () => {
+  let draft = "保留中的本地草稿";
+  const discardDraft = vi.fn(() => { draft = ""; });
+  let firstPending: string | null = "first-command";
+  let secondPending: string | null = "second-command";
+  register({ hasUnsavedChanges: () => draft !== "", hasDraftChanges: () => draft !== "",
+    discard: discardDraft });
+  register({ hasUnsavedChanges: () => firstPending !== null, pendingCommandId: () => firstPending,
+    pendingRecoversAfterLeave: () => firstPending !== null, discard: vi.fn() });
+  register({ hasUnsavedChanges: () => secondPending !== null, pendingCommandId: () => secondPending,
+    pendingRecoversAfterLeave: () => secondPending !== null, discard: vi.fn() });
+
+  const guard = currentDraftGuard();
+  expect(guard?.pendingCommandIds?.()).toEqual(["first-command", "second-command"]);
+  guard?.discard();
+  expect(discardDraft).not.toHaveBeenCalled();
+  guard?.discardDrafts?.();
+  expect(discardDraft).toHaveBeenCalledOnce();
+  expect(guard?.pendingCommandIds?.()).toEqual(["first-command", "second-command"]);
+  expect(hasUnsavedDraft()).toBe(true);
+
+  firstPending = null; secondPending = null;
+  expect(hasUnsavedDraft()).toBe(false);
+});

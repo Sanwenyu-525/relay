@@ -18,7 +18,9 @@ type Ink = { left: number; right: number; ascent: number; descent: number };
 /** 默认度量给一组真实量级：数字墨迹宽于/窄于 advance 且上下不对称，逼出按墨迹而不是文本盒居中。 */
 function fakeContext(options: { ink?: Ink | "throw" } = {}) {
   const calls: string[] = [];
-  const ink: Ink = options.ink ?? { left: 1, right: 1, ascent: 12, descent: 0 };
+  // "throw" 只用于模拟取不到度量，这里先落到默认值上再做类型收窄。
+  const ink: Ink = options.ink === undefined || options.ink === "throw"
+    ? { left: 1, right: 1, ascent: 12, descent: 0 } : options.ink;
   const ctx = {
     fillStyle: "", font: "", textAlign: "", textBaseline: "",
     clearRect: () => calls.push("clearRect"),
@@ -69,8 +71,8 @@ describe("任务栏角标外形", () => {
     drawBadge(ctx, "7");
     expect(calls).toEqual([
       "clearRect",
-      "beginPath", "arc:18,18,12", "arc:18,18,12", "closePath", "fill:#B9452F",
-      `fillText:7|600 17.5px ${FONT}|18.000,24.000`,
+      "beginPath", "arc:18,18,12", "arc:18,18,12", "closePath", "fill:#BC4630",
+      `fillText:7|600 18.5px ${FONT}|18.000,24.000`,
     ]);
     expect(ctx.textBaseline).toBe("alphabetic");
     expect(ctx.textAlign).toBe("center");
@@ -83,9 +85,9 @@ describe("任务栏角标外形", () => {
     const two = fakeContext();
     drawBadge(two.ctx, "42");
     expect(two.calls.slice(1, 6)).toEqual([
-      "beginPath", "arc:11,19,11", "arc:19,19,11", "closePath", "fill:#B9452F",
+      "beginPath", "arc:11,19,11", "arc:19,19,11", "closePath", "fill:#BC4630",
     ]);
-    expect(two.calls.at(-1)).toContain(`600 13.5px ${FONT}`);
+    expect(two.calls.at(-1)).toContain(`600 14.5px ${FONT}`);
     // 长宽比 30/22 ≈ 1.36，落在「短胶囊」区间；右/下缘同样收在 30。
     expect(15 + 15).toBe(30);
     expect(19 + 11).toBe(30);
@@ -95,15 +97,15 @@ describe("任务栏角标外形", () => {
     const capped = fakeContext();
     drawBadge(capped.ctx, "99+");
     expect(capped.calls.slice(1, 6)).toEqual([
-      "beginPath", "arc:11,19,11", "arc:19,19,11", "closePath", "fill:#B9452F",
+      "beginPath", "arc:11,19,11", "arc:19,19,11", "closePath", "fill:#BC4630",
     ]);
-    expect(capped.calls.at(-1)).toContain(`600 11px ${FONT}`);
+    expect(capped.calls.at(-1)).toContain(`600 11.5px ${FONT}`);
   });
 
   it("只画一层底色：没有描边、没有白圈、没有渐变", () => {
     const single = fakeContext();
     drawBadge(single.ctx, "1");
-    expect(single.calls.filter((call) => call.startsWith("fill:"))).toEqual(["fill:#B9452F"]);
+    expect(single.calls.filter((call) => call.startsWith("fill:"))).toEqual(["fill:#BC4630"]);
     expect(single.calls.some((call) => call.startsWith("stroke"))).toBe(false);
     expect(single.calls.filter((call) => call === "closePath")).toHaveLength(1);
   });
@@ -115,14 +117,14 @@ describe("任务栏角标数字排布", () => {
     const { calls, ctx } = fakeContext({ ink: { left: 5.2, right: 2.8, ascent: 12, descent: 1 } });
     drawBadge(ctx, "7");
     // dx = −(2.8 − 5.2)/2 = +1.2 → 18 + 1.2；dy = (12 − 1)/2 = 5.5 → 18 + 5.5。
-    expect(calls.at(-1)).toBe(`fillText:7|600 17.5px ${FONT}|19.200,23.500`);
+    expect(calls.at(-1)).toBe(`fillText:7|600 18.5px ${FONT}|19.200,23.500`);
   });
 
   it("取不到墨迹包围盒时退回 cap-height 估值，仍然有确定落点", () => {
     const { calls, ctx } = fakeContext({ ink: "throw" });
     expect(() => drawBadge(ctx, "7")).not.toThrow();
-    // 17.5 × 0.7 / 2 = 6.125 → 18 + 6.125。
-    expect(calls.at(-1)).toBe(`fillText:7|600 17.5px ${FONT}|18.000,24.125`);
+    // 18.5 × 0.7 / 2 = 6.475 → 18 + 6.475。
+    expect(calls.at(-1)).toBe(`fillText:7|600 18.5px ${FONT}|18.000,24.475`);
   });
 });
 

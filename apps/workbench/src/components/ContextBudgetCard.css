@@ -1,0 +1,33 @@
+/* 上下文长度卡（0135）：四行单选 + 保存/冲突/未知结果三态。 */
+
+.context-budget-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-3) 0;
+}
+
+.context-budget-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-2);
+}
+
+.context-budget-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+}
+
+.context-budget-option strong {
+  color: var(--relay-color-text-primary);
+  font-weight: 600;
+}
+
+.context-budget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-2);
+}

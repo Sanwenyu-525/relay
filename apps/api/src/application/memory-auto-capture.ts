@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { MemorySourceKind } from '../infrastructure/database-schema.js';
-import type { AssistModelPort, AssistResult } from '../workflow/fake-model-port.js';
+import type { AssistMessageRow, MemorySourceKind } from '../infrastructure/database-schema.js';
+import type { AssistModelPort, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
+import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
+import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
+import { computeModelConfigFingerprint, readOpenRouterModelPortConfig } from
+  '../workflow/model-port-config.js';
+import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { withTransaction, createRepositories } from './unit-of-work.js';
 import { recordModelInvocation } from './model-call-recorder.js';
+import { parseAssistModelSnapshot, snapshotIdentityBudget } from './assist-model-snapshot.js';
 import { MEMORY_AUTO_CAPTURE_DAILY_LIMIT, MEMORY_AUTO_CAPTURE_MAX_ITEMS,
   recordAutoCapture } from './memory-captures.js';
 
@@ -148,7 +155,53 @@ function settleExtractionCall(result: AssistResult) {
     : result.kind === 'CONTENT'
       ? { status: 'COMPLETED' as const, providerRequestId: result.providerRequestId,
         usage: result.usage }
-      : { status: 'FAILED' as const, errorKind: `EXTRACTION_${result.kind}` };
+      : { status: 'FAILED' as const, errorKind: `EXTRACTION_${result.kind}`,
+        providerRequestId: result.providerRequestId, usage: result.usage };
+}
+
+/**
+ * 提取调用使用**消息冻结的模型路由**（P0-C）。
+ *
+ * 主回复结算后不能再走要求 `RUNNING` 的 OpenRouter 路由包装器；也不能因为快照是
+ * openrouter 就退回进程默认端口。这里按冻结候选重建一次外呼：openai-compatible
+ * 复用同身份默认端口并复核型号/配置/凭据，openrouter 用冻结配置与免费约束重建端口，
+ * 记账预算取冻结快照（与 `assist-free-model-routing` 同一口径）。
+ */
+async function resolveCaptureModel(message: AssistMessageRow, input: {
+  readonly modelPort: AssistModelPort;
+  readonly modelEnv?: NodeJS.ProcessEnv;
+  readonly modelFetchDependencies?: ModelFetchDependencies;
+}): Promise<{ port: AssistModelPort; identity: ModelIdentity }> {
+  if (message.model_selection_snapshot === null) {
+    return { port: input.modelPort, identity: input.modelPort.identity };
+  }
+  const snapshot = parseAssistModelSnapshot(message.model_selection_snapshot);
+  const candidate = snapshot.candidates[0];
+  if (candidate === undefined) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  if (candidate.connection.provider === 'openai-compatible') {
+    if (input.modelPort.identity.model !== candidate.connection.model ||
+        input.modelPort.identity.configFingerprint !== candidate.connection.configFingerprint) {
+      throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
+    }
+    if (compareCredentialIdentity(message.model_credential_fingerprint,
+      input.modelPort.identity.credentialFingerprint ?? '') === 'CHANGED') {
+      throw new Error('ASSIST_MODEL_CREDENTIAL_CHANGED');
+    }
+    // 0135：提取与主回复共用同一次冻结预算——工作区档位也要决定这一次外呼的实际上限。
+    const port = input.modelPort instanceof OpenAiCompatibleModelPort
+      ? input.modelPort.withBudget(snapshotIdentityBudget(snapshot.budget)) : input.modelPort;
+    return { port, identity: port.identity };
+  }
+  const config = readOpenRouterModelPortConfig(input.modelEnv ?? process.env,
+    candidate.connection.model);
+  if (computeModelConfigFingerprint(config) !== candidate.connection.configFingerprint) {
+    throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
+  }
+  const port = new OpenAiCompatibleModelPort(config, input.modelFetchDependencies ?? {},
+    buildFreePriceGuard({ connection: candidate.connection, freeOnly: candidate.freeOnly,
+      catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
+    snapshotIdentityBudget(snapshot.budget));
+  return { port, identity: port.identity };
 }
 
 /**
@@ -164,6 +217,8 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   /** 已结算的助手消息 id（轮次身份）。 */
   readonly assistantMessageId: string;
   readonly modelPort: AssistModelPort;
+  readonly modelEnv?: NodeJS.ProcessEnv;
+  readonly modelFetchDependencies?: ModelFetchDependencies;
   readonly signal?: AbortSignal | undefined;
 }): Promise<number> {
   const repositories = createRepositories(db);
@@ -191,11 +246,12 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   // 用量，预算与归档闸门在 `begin` 里生效。预算不足时这里直接收口，不产生无账本调用。
   let result: AssistResult;
   try {
+    const captureModel = await resolveCaptureModel(message, input);
     result = (await recordModelInvocation<AssistResult>(db, {
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
-      identity: input.modelPort.identity,
+      identity: captureModel.identity,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      invoke: async () => input.modelPort.assist({ intent: 'DISCUSS', system: EXTRACTION_SYSTEM,
+      invoke: async () => captureModel.port.assist({ intent: 'DISCUSS', system: EXTRACTION_SYSTEM,
         turns: [{ role: 'user', content: capturePrompt(userText, reply) }],
         ...(input.signal === undefined ? {} : { signal: input.signal }) }),
       settle: settleExtractionCall,

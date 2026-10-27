@@ -217,3 +217,41 @@ ADR-034 包 B 的服务端记录面：消息只是协作记录，投递不等于
 - **不绕过既有撤销**：能力只有 `DISABLED` 连接时只计数 `blocked_disabled_connections`，不新建第二条；策略目标此前在历史版本出现过的动作只计数 `blocked_revoked_policies`，不自动恢复。显式 `DENY` 的 ACTIVE 策略视作已存在，不覆盖。
 - **既有端点放宽（同日）**：`POST /connections` 与 permission-policies 端点的 `capability` 联合补入 `COMPUTER_READ`/`COMPUTER_INPUT`/`GITHUB_READ`/`BROWSER_READ`/`BROWSER_ACTION`/`BROWSER_COMMIT`；permission-policies 对浏览器能力新增可选 `host`（`host[:port]`，缺省 `browser://` 即全部站点）并**拒绝** `resource_id`（浏览器策略没有受管根）。
 - 无新增 migration；审计走既有 authority 版本（写事实时 bump）。验证：`enable-project-plugin.integration.test.ts`（真实 PG + 真实 HTTP）覆盖计数、幂等重放、停用/撤销阻断、无资源跳过、能力白名单与 422。
+
+### 10.116 模型连接登记（2026-10-27 源码实现，P2 阶段一）
+
+**Breaking Change: No。** 新增迁移 `0143_model_connections`（一张工作区作用域表）与五个端点，均沿用 `/api/v1/workspaces/{workspace_id}` 前缀与 Bearer/Workspace 边界；既有端点、表与状态机未改变。
+
+| 端点 | 语义 |
+|---|---|
+| `GET /model-connections` | 列出本工作区已登记连接（按创建时间） |
+| `GET /model-connections/{connection_id}` | 读取单条；跨工作区 404 |
+| `GET /model-connections/{connection_id}/credential` | 凭据是否还在系统凭据库里，**只回布尔** |
+| `POST /model-connections` | `CreateModelConnection`，201 |
+| `PATCH /model-connections/{connection_id}` | `UpdateModelConnection`，revision CAS |
+| `POST /model-connections/{connection_id}/credential` | `RotateModelConnectionCredential` |
+| `POST /model-connections/{connection_id}/status` | `SetModelConnectionStatus`（`ACTIVE`/`DISABLED`） |
+
+- **凭据永不入库**：请求体的 `api_key` 只出现一次，服务端落进操作系统凭据库（Windows DPAPI，当前用户作用域），业务表只保留不透明引用 `credential_ref`。响应、列表、错误详情、命令回执都**不含**密钥、密文、摘要或引用；`command_id` 的载荷摘要也不含 `api_key`。
+- **轮换覆盖同一引用**：`credential_version + 1`、`revision + 1` 与秘密覆盖在同一次调用完成。代数变化是「凭据已换」的权威信号（冻结在旧代上的调用据此停止），而不是靠「文件不存在」这种含糊信号；不换引用就没有孤儿 blob 要清理。
+- **CAS 不用最后写入覆盖**：所有更新带 `expected_revision`，不符即 409 `REVISION_CONFLICT`（`retry_action=REFRESH_AND_REDECIDE`）。`revision` 以字符串传输（bigint 不走 JSON number）。
+- **停用是状态不是删除**：没有 DELETE 端点、也没有 DELETE 权限。已冻结在旧连接上的历史需要原身份继续可读、可诊断。
+- **预算与进程配置同名同义**：`timeout_ms` / `max_output_tokens` / `max_call_tokens` / `max_scope_calls` / `max_scope_tokens`，上下界与 `ModelPortConfig` 一致，且要求「单次上限 ≥ 单次输出上限」「作用域上限 ≥ 单次上限」——能在 API 通过的值不会被执行端以「配置非法」拒绝。跨列约束按**合并后的整行**判断（只改一档也要与另两档自洽）。
+- **错误码**：422 `MODEL_CONNECTION_INVALID`（逐字段 `errors`）、409 `MODEL_CONNECTION_NAME_TAKEN`、409 `REVISION_CONFLICT`、404 `RESOURCE_NOT_FOUND`、503 `MODEL_CREDENTIAL_STORE_UNAVAILABLE`（凭据库读写失败；连接未创建、未修改，`retry_action=CHECK_RECEIPT_THEN_RETRY`）。
+- **阶段边界（必须如实理解）**：这些连接**尚不能用于执行**。执行端仍只按 Run 冻结计划或进程默认解析模型；「连接 → 会话选择 / Run 冻结」的接线是下一阶段，需要新的冻结列而不是改本表。本端点集合不声称任何连接「已验证」或「可执行」。
+- 验证：`model-connections.integration.test.ts`（真实 PG + 真实 HTTP + 真实 DPAPI）7 项——创建后响应/列表不含密钥与引用、重复名称 409 且不留孤儿凭据、CAS 冲突与生效、轮换后库里秘密确实被替换且无孤儿 blob、停用/启用、`command_id` 重放返回原结果、跨工作区 404。
+
+### 10.117 工作区默认模型连接与 Run 的连接身份（2026-10-27 源码实现，P2 阶段三）
+
+**Breaking Change: No。** 迁移 `0144_workspace_default_model_connection` 新增一张表与两个可空契约列；新增两个端点。旧契约两列为 NULL，走既有兼容路径。
+
+| 端点 | 语义 |
+|---|---|
+| `GET /model-connections/default` | 当前默认连接；未设置时 `connection_id=null`、`revision=null` |
+| `PUT /model-connections/default` | `SetDefaultModelConnection`，幂等（指向同一条时不推进 revision） |
+
+- **作用域**：默认连接只决定**新的 Run** 从哪条连接冻结模型身份。会话聊天仍按会话选择或进程默认——两者作用域不同，互不改写。不设默认时新 Run 走进程默认，并显式标注 `basis=LEGACY_ENV`。
+- **冻结即锁定**：`execution_contracts.connection_id` + `connection_credential_version` 与快照同事务写入。执行端只按这两列解析，**不重新读「当前默认连接」**——否则改默认会让在途 Run 换 Provider。
+- **执行端四道闸门**（任一不符即停，零外呼、零账本）：连接在本工作区可见 → 仍为 `ACTIVE` → 凭据代数等于冻结值 → 由连接行重算的配置指纹等于冻结值。随后才解析秘密。停止原因是类型化的：`MODEL_CONNECTION_UNAVAILABLE`、`MODEL_CONNECTION_DISABLED`、`MODEL_CREDENTIAL_CHANGED`（代数不符）、`MODEL_CONFIG_CHANGED`（端点/预算被改）、`MODEL_CONNECTION_CREDENTIAL_MISSING`（库里没有秘密）。
+- **委派期同样不回落**：默认连接被停用或凭据缺失时，`DelegateTask` 直接失败（409 `MODEL_CONNECTION_DISABLED` / `MODEL_CONNECTION_CREDENTIAL_MISSING` / `MODEL_CONNECTION_UNAVAILABLE`），**不**退回进程默认——默认连接是用户的显式选择，退回等于偷偷换模型。
+- 验证：`run-model-connection.integration.test.ts`（真实 PG + 受控 Provider 接缝）4 项——默认连接决定冻结与外呼身份（进程默认是另一个模型也不影响，账本 model 一致）、停用后委派失败、轮换后在途 Run 停止且零外呼、改设另一条为默认后已创建 Run 仍用原连接。

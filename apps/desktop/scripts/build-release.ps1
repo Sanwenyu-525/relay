@@ -371,6 +371,30 @@ if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
 }
 $manifestPath = Join-Path $releaseRoot 'desktop-build-manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+
+# Installer packaging (P0-4). The NSIS payload must carry the build-identity manifest,
+# otherwise the upgrade hook's maintenance session rejects the installed package (exit 4).
+# `tauri bundle` patches target/release/relay-desktop.exe with the bundle-type marker
+# while makensis runs and restores it afterwards, so the manifest hash above cannot match
+# the installed bytes; the installer's POSTINSTALL hook re-seals the manifest with the
+# actually installed EXE (maintenance.js seal-install). This step only renders and packs.
+$installerManifest = Join-Path $resourceRoot 'desktop-build-manifest.json'
+Copy-Item -LiteralPath $manifestPath -Destination $installerManifest -Force
+$installerConfig = Join-Path $tauriRoot 'tauri.installer.conf.json'
+Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'bundle', '--bundles', 'nsis', '--config', $installerConfig)
+if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.artifact_sha256) {
+  throw 'The bundled EXE does not match the published build-identity manifest'
+}
+$renderedInstaller = Join-Path $cargoReleaseRoot 'nsis\x64\installer.nsi'
+if (-not (Test-Path -LiteralPath $renderedInstaller -PathType Leaf)) { throw 'NSIS installer script was not rendered' }
+$renderedText = Get-Content -LiteralPath $renderedInstaller -Raw
+foreach ($expected in @('/oname=desktop-build-manifest.json', '/oname=node.exe', 'api\dist\src\main.js')) {
+  if (-not $renderedText.Contains($expected)) { throw "Installer payload is missing: $expected" }
+}
+$installer = Join-Path $cargoReleaseRoot 'bundle\nsis\Relay Agent_0.1.0_x64-setup.exe'
+if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'NSIS installer was not produced' }
+Write-Host "Installer: $installer"
+Write-Host "Installer SHA256: $((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant())"
 Write-Host "Release directory: $releaseRoot"
 Write-Host "Executable SHA256: $($manifest.artifact_sha256)"
 Write-Host "Resource files hashed: $($resourceHashes.Count); forbidden config files: $($releaseForbidden.Count)"

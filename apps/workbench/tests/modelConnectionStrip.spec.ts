@@ -79,7 +79,9 @@ describe("模型连接只读条", () => {
     const view = await render(client({
       status: { provider: "openai-compatible", configured: true, model: "fixture-model",
         baseUrl: "https://models.vendor.example/v1", maxCallTokens: null, imageInput: "UNKNOWN", imageInputSource: "NONE" },
-      verification: { currentConfigFingerprint: "fp-1", last: { ok: true, latencyMs: 700,
+      verification: { target: "default", connection: "default", model: "fixture-model",
+        targetLast: null, credentialIdentity: "UNKNOWN", state: null,
+        currentConfigFingerprint: "fp-1", last: { ok: true, latencyMs: 700,
         provider: "openai-compatible", model: "fixture-model", configFingerprint: "fp-1",
         errorCategory: null, verifiedAt: "2026-09-29T05:00:00Z" },
         matchesCurrentConfig: true, workerStartupValidation: "OK" }

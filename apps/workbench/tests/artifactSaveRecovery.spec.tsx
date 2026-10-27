@@ -28,7 +28,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 function result(content: string) {
-  return { task_id: taskId, artifact_id: artifactId, artifact_revision: "1", version_id: versionId,
+  return { task_id: taskId, artifact_id: artifactId, artifact_revision: "0", version_id: versionId,
     version_number: "1", media_type: "text/markdown", sha256: sha256Hex(content),
     size: String(new TextEncoder().encode(content).byteLength), task_revision: "3" };
 }

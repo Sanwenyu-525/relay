@@ -1,4 +1,4 @@
-# Runs the real PostgreSQL integration tests for apps/api.
+﻿# Runs the real PostgreSQL integration tests for apps/api.
 # The cluster is created only inside a one-off temporary directory (dynamic loopback port,
 # random relay_* database name). The script always stops it with pg_ctl and removes the directory.
 # It never connects to another project or a user production database and never relies on a
@@ -9,6 +9,9 @@
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1
 # On Windows hosts whose default locale is unavailable to initdb, add -UseCLocale.
 # Keep this file ASCII-only: Windows PowerShell reads BOM-less scripts as ANSI.
+# 2026-10-27: the file now carries a UTF-8 BOM because it still holds Chinese comments;
+# without the BOM, PS 5.1 decodes them as CP936 and the parser fails on quote bytes.
+# Keep the BOM when editing. New comments should still be ASCII.
 
 [CmdletBinding()]
 param(
@@ -80,6 +83,19 @@ try {
       throw "Native file I/O helper was not produced: $sourceHelper"
     }
     $env:RELAY_FILE_IO_HELPER = $sourceHelper
+
+    # Model connection credentials use Windows DPAPI through a separate helper
+    # (ADR-036). Same rule: an explicitly supplied helper is the artifact under test.
+    if ([string]::IsNullOrWhiteSpace($env:RELAY_CREDENTIAL_HELPER)) {
+      $credentialManifest = Join-Path $workspaceRoot 'apps\credential-helper\Cargo.toml'
+      & $cargo build --locked --target x86_64-pc-windows-msvc --manifest-path $credentialManifest
+      if ($LASTEXITCODE -ne 0) { throw "Credential helper build failed with exit code $LASTEXITCODE" }
+      $credentialHelper = Join-Path $workspaceRoot 'apps\credential-helper\target\x86_64-pc-windows-msvc\debug\relay-credential-helper.exe'
+      if (-not (Test-Path -LiteralPath $credentialHelper -PathType Leaf)) {
+        throw "Credential helper was not produced: $credentialHelper"
+      }
+      $env:RELAY_CREDENTIAL_HELPER = $credentialHelper
+    }
   }
 
   New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null

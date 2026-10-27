@@ -4,7 +4,9 @@ import ProjectStatePanel from "../src/components/ProjectStatePanel";
 import ProjectTitleEditor from "../src/components/ProjectTitleEditor";
 import { RelayApiClient } from "../src/api/relayClient";
 import type { RelayProjectState, RelayTaskSummary } from "../src/api/relayClient";
-import { flush, mountReact } from "./mountApp";
+import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { hasUnsavedDraft } from "../src/lib/draftGuard";
+import { clickPortal, dialogText, flush, mountReact, mountWorkbench } from "./mountApp";
 
 /** P1-A：Project State 的类型化写入口（CAS、冻结命令、错配与失权）。 */
 
@@ -33,7 +35,7 @@ function task(): RelayTaskSummary {
 }
 
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; sessionStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 async function mountPanel(overrides: {
   readonly state?: Partial<RelayProjectState>;
@@ -53,6 +55,35 @@ async function mountPanel(overrides: {
 }
 
 describe("Project State 写入口", () => {
+  it("窗口会话结束后恢复 State 原命令，待核对期间仍接入全局守卫", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>); throw new TypeError("response lost");
+    }));
+    const first = await mountPanel();
+    await first.wrapper.get('[data-testid="state-phase"]').setValue("EXECUTING");
+    await first.wrapper.get('[data-testid="state-phase-submit"]').trigger("click"); await flush();
+    const commandId = String(posts[0]?.command_id);
+    expect(first.wrapper.get('[data-testid="project-state-pending"]').text()).toContain(commandId);
+    expect(hasUnsavedDraft()).toBe(true);
+    first.unmount(); cleanup = undefined; sessionStorage.clear();
+    const reopened = await mountPanel();
+    expect(reopened.wrapper.get('[data-testid="project-state-pending"]').text()).toContain(commandId);
+    expect(posts).toHaveLength(1);
+  });
+  it("无法保存 State 命令时不发送请求", async () => {
+    const fetcher = vi.fn(async () => response(500, {})); vi.stubGlobal("fetch", fetcher);
+    const view = await mountPanel();
+    await view.wrapper.get('[data-testid="state-phase"]').setValue("EXECUTING");
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:project-state-pending:")) throw new DOMException("unavailable", "QuotaExceededError");
+      return original.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="state-phase-submit"]').trigger("click"); await flush();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(view.wrapper.text()).toContain("未发送");
+  });
   it("阶段选项按项目类型限制，命令携带原 revision 并核对回执", async () => {
     const posts: { path: string; body: Record<string, unknown> }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -197,6 +228,41 @@ describe("Project 标题编辑", () => {
   const project = { id: projectId, title: "旧标题", projectType: "GENERAL",
     revision: "2", stateRevision: "3", archivedAt: null };
 
+  it("窗口会话结束后恢复原改名命令，不重复发送", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>); throw new TypeError("response lost");
+    }));
+    const props = { client: client(), project, archived: false, onChanged: vi.fn() };
+    const first = await mountReact(createElement(ProjectTitleEditor, props)); cleanup = first.unmount; await flush();
+    await first.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await first.wrapper.get('[data-testid="project-title-input"]').setValue("等待核对的标题");
+    await first.wrapper.get('[data-testid="project-rename-submit"]').trigger("click"); await flush();
+    const commandId = String(posts[0]?.command_id);
+    expect(first.wrapper.get('[data-testid="project-rename-pending"]').text()).toContain(commandId);
+    first.unmount(); cleanup = undefined; sessionStorage.clear();
+    const reopened = await mountReact(createElement(ProjectTitleEditor, props)); cleanup = reopened.unmount; await flush();
+    expect(reopened.wrapper.get('[data-testid="project-rename-pending"]').text()).toContain(commandId);
+    expect(posts).toHaveLength(1);
+  });
+
+  it("无法保存改名命令时不发送请求并保留标题草稿", async () => {
+    const fetcher = vi.fn(async () => response(500, {})); vi.stubGlobal("fetch", fetcher);
+    const view = await mountReact(createElement(ProjectTitleEditor, { client: client(), project,
+      archived: false, onChanged: vi.fn() })); cleanup = view.unmount; await flush();
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("未发送的标题");
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:project-rename:")) throw new DOMException("unavailable", "QuotaExceededError");
+      return original.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="project-rename-submit"]').trigger("click"); await flush();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect((view.wrapper.get('[data-testid="project-title-input"]').element as HTMLInputElement).value).toBe("未发送的标题");
+    expect(view.wrapper.text()).toContain("未发送");
+  });
+
   it("只提交标题与 Project revision，成功后回执绑定原命令", async () => {
     const posts: { method: string; body: Record<string, unknown> }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -294,5 +360,97 @@ describe("Project 标题编辑", () => {
     cleanup = view.unmount;
     await flush();
     expect(view.wrapper.get('[data-testid="project-rename-open"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("改名 2xx 回执标题与冻结命令不一致时不宣布成功，pending 保留", async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "PATCH" && url.pathname === `${root}/projects/${projectId}`) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        // 身份、Project、修订都对，但回执标题不是冻结命令提交的那份。
+        return response(200, { command_id: body.command_id, committed_at: "2026-10-24T00:00:00Z",
+          result: { project_id: projectId, title: "他人写入的标题", revision: "3" } });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    const changed = vi.fn();
+    const view = await mountReact(createElement(ProjectTitleEditor, { client: client(),
+      project, archived: false, onChanged: changed }));
+    cleanup = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("冻结的新标题");
+    await view.wrapper.get('[data-testid="project-rename-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="project-rename-receipt"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="project-rename-pending"]').exists()).toBe(true);
+    // 该组件把内容错配与传输类错配同归「结果尚不能确认」：pending 保留、按原 ID 查回执。
+    expect(view.wrapper.get('[data-testid="project-rename-error"]').text()).toContain("已保留原 command_id");
+    expect(changed).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(1);
+  });
+
+  it("Project 标题草稿接入全局路由守卫，显式丢弃后正常离页", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === `${root}/projects/${projectId}`) return response(200, {
+        id: projectId, title: "旧标题", project_type: "GENERAL", revision: "2",
+        state_revision: "3", archived_at: null
+      });
+      if (url.pathname === `${root}/projects/${projectId}/state`) return response(200, {
+        project_id: projectId, phase_key: "PLANNING", next_action_task_id: null, revision: "3",
+        updated_at: "2026-10-24T00:00:00Z", in_progress: [], blockers: [], risks: [],
+        selected_artifact_version_refs: [], completed_highlight_refs: [], key_decision_refs: [],
+        dependency_versions: {}, allowed_actions: []
+      });
+      return response(404, { code: "NOT_FOUND", detail: "该读取不是本次导航测试所需的数据。" });
+    }));
+    const view = await mountWorkbench(`/projects/${projectId}`);
+    cleanup = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("尚未保存的标题");
+    await view.router.attempt(`/projects/${projectId}/planning`);
+    expect(dialogText()).toContain("未保存的修改");
+    await clickPortal("discard-draft-leave");
+    await flush();
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${projectId}/planning`);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("Project 刷新时保留标题草稿并显示新修订；归档后只读，可明确丢弃", async () => {
+    const onChanged = vi.fn();
+    const view = await mountReact(createElement(ProjectTitleEditor, { client: client(),
+      project, archived: false, onChanged }));
+    cleanup = view.unmount;
+    await flush();
+    await view.wrapper.get('[data-testid="project-rename-open"]').trigger("click");
+    await view.wrapper.get('[data-testid="project-title-input"]').setValue("我的标题草稿");
+
+    await view.rerender(createElement(ProjectTitleEditor, { client: client(),
+      project: { ...project, title: "他人更新的标题", revision: "3" }, archived: false, onChanged }));
+    await flush();
+    expect((view.wrapper.get('[data-testid="project-title-input"]').element as HTMLInputElement).value)
+      .toBe("我的标题草稿");
+    expect(view.wrapper.get('[data-testid="project-rename-conflict"]').text()).toContain("他人更新的标题");
+    expect(view.wrapper.get('[data-testid="project-rename-conflict"]').text()).toContain("v3");
+    expect(hasUnsavedDraft()).toBe(true);
+
+    await view.rerender(createElement(ProjectTitleEditor, { client: client(),
+      project: { ...project, title: "他人更新的标题", revision: "3", archivedAt: "2026-10-25T00:00:00Z" },
+      archived: true, onChanged }));
+    await flush();
+    expect((view.wrapper.get('[data-testid="project-title-input"]').element as HTMLInputElement).value)
+      .toBe("我的标题草稿");
+    expect(view.wrapper.get('[data-testid="project-title-input"]').attributes("disabled")).toBeDefined();
+    expect(view.wrapper.get('[data-testid="project-rename-archived-draft"]').exists()).toBe(true);
+    await view.wrapper.get('[data-testid="project-rename-cancel"]').trigger("click");
+    expect(hasUnsavedDraft()).toBe(false);
   });
 });

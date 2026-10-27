@@ -741,6 +741,8 @@ export async function requestAssistMessage(
         ...(modelSnapshot === undefined ? {} : {
           modelSelectionSnapshot: modelSnapshot.snapshot,
           modelAttemptState: modelSnapshot.attemptState,
+          // 0142：凭据身份与快照同事务写入，供执行端发现「换 Key 后不要静默转用新凭据」。
+          modelCredentialFingerprint: modelSnapshot.credentialFingerprint,
         }),
       });
       return { session_id: session.id, user_message_id: userMessageId,

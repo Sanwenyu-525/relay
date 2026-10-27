@@ -92,11 +92,27 @@ afterEach(() => {
   unmount?.(); unmount = null;
   // 待核对关联现在按作用域暂存会话存储（#20 整页重开恢复）：用例之间清掉，
   // 避免上一条未收口的命令被下一用例的恢复逻辑读到。
-  sessionStorage.clear();
+  sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks();
   resetRelayConnectionForTest(); vi.unstubAllGlobals();
 });
 
 describe("Goal↔Project 关联入口", () => {
+  it("无法保存关联命令时不发送请求", async () => {
+    connect();
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", router({}, posts));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await createGoalAndWait(view);
+    await view.wrapper.get('[data-testid="goal-link-project"]').setValue(otherProjectId);
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:link-goal:")) throw new DOMException("unavailable", "QuotaExceededError");
+      return original.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="goal-link-submit"]').trigger("click"); await flush();
+    expect(posts.filter((post) => post.path.endsWith("/goal-links"))).toHaveLength(0);
+    expect(view.wrapper.text()).toContain("未发送");
+  });
   it("创建 Goal 不隐式关联；未选项目时不发关联命令，选定后按当前修订关联", async () => {
     connect();
     const posts: { path: string; body: Record<string, unknown> }[] = [];

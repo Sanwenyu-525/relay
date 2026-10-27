@@ -379,7 +379,8 @@ async function enqueueRound(db: DbExecutor, repositories: Repositories, goal: As
         seq, role: 'ASSISTANT', status: 'PENDING', intent: 'DISCUSS', content: null,
         sources: [], chatMode: 'GOAL', goalId: goal.id,
         ...(snapshot === undefined ? {} : { modelSelectionSnapshot: snapshot.snapshot,
-          modelAttemptState: snapshot.attemptState }) });
+          modelAttemptState: snapshot.attemptState,
+          modelCredentialFingerprint: snapshot.credentialFingerprint }) });
       break;
     } catch (error) {
       // (session_id, seq) 竞争：用户恰好同时发了一条消息。重算序号再来一次。

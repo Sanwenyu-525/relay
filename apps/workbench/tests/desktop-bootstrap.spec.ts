@@ -180,3 +180,21 @@ it("窗口关闭请求遵守未保存保护：先拦住并弹确认，明确丢�
     clearDraftGuard(guard);
   }
 });
+
+it.each([true, false])("关窗提示按待核对命令能否跨重启恢复说明风险（可恢复=%s）", async (durable) => {
+  stubOfflineDesktop();
+  const mounted = await mountWorkbench("/today"); unmount = mounted.unmount; await flush();
+  const closeRequested = tauriWindow.closeHandler;
+  if (closeRequested === null) throw new Error("宿主关窗回调没有注册");
+  const guard: DraftGuard = { hasUnsavedChanges: () => true, discard: () => {},
+    pendingCommandId: () => "original-command", pendingRecoversAfterLeave: () => durable,
+    pendingRecoversAfterRestart: () => durable };
+  setDraftGuard(guard);
+  try {
+    await act(async () => { closeRequested({ preventDefault: () => {} }); }); await flush();
+    const dialog = document.querySelector('[role="dialog"][aria-label="命令结果待核对"]');
+    expect(dialog?.textContent).toContain("original-command");
+    expect(dialog?.textContent).toContain(durable ? "重新打开后返回原工作空间" : "核对入口可能无法恢复");
+    expect(tauriWindow.destroyed).toBe(0);
+  } finally { clearDraftGuard(guard); }
+});

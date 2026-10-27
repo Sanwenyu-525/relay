@@ -33,6 +33,8 @@ import { freezeExecutionContract, readContextSources, TOOL_LOOP_MAX_ROUNDS, MAX_
   TOOL_LOOP_MAX_TOOL_CALLS } from '../workflow/execution-contract.js';
 import { readInternalTool } from '../workflow/tool-catalog.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { freezeWorkspaceConnectionPlan } from './model-connection-runtime.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { hasChecker } from '../workflow/checkers.js';
 
 /** 首批工具循环只读三类能力；写入与检查在后续片按同一张表扩进来。 */
@@ -148,6 +150,8 @@ export async function delegateTask(
   db: DbExecutor,
   input: DelegateTaskInput,
   modelEnv: NodeJS.ProcessEnv = process.env,
+  /** 凭据存储（ADR-036 阶段三）。缺省用进程默认；测试可注入内存实现。 */
+  credentials?: CredentialStore | undefined,
 ): Promise<CommandOutcome<DelegateTaskResult>> {
   const expectedTaskRevision = requireRevision(
     input.expectedTaskRevision,
@@ -449,15 +453,29 @@ export async function delegateTask(
         if (session.status !== 'ACTIVE') throw invalidTransition('模型来源会话已归档，不能创建新的执行。');
         modelSelection = await repositories.modelSelection.readForSession(session.id);
       }
-      const modelPlan = await freezeAssistModelSnapshot(repositories, modelSelection, modelEnv, {
+      const requirements = {
         requiresTools: input.toolLoopAction !== undefined,
         requiresJsonOutput: [...criteria, ...ruleCriteria].some((criterion) => criterion.method === 'SEMANTIC'),
-      }, input.workspaceId);
+      };
+      // 0144：工作区默认连接优先于进程默认。默认连接是用户的显式选择，因此「连接不可用」
+      // 必须让委派失败（类型化错误），**不能**退回进程默认——那等于偷偷换模型。
+      // 会话选择（modelSelection）仍然只作用于聊天，不参与 Run 的冻结来源。
+      const connectionPlan = await freezeWorkspaceConnectionPlan(repositories, {
+        workspaceId: input.workspaceId,
+        ...(credentials === undefined ? {} : { credentials }),
+        requirements,
+      });
+      const modelPlan = connectionPlan?.plan ??
+        await freezeAssistModelSnapshot(repositories, modelSelection, modelEnv, requirements,
+          input.workspaceId);
       const semanticCheckerId = hasChecker('semantic-model-v1', '1')
         ? 'semantic-model-v1' : 'human-evidence-v1';
       const frozen = freezeExecutionContract({
         taskId: task.id,
-        ...(modelPlan === undefined ? {} : { modelSelectionSnapshot: modelPlan.snapshot }),
+        ...(modelPlan === undefined ? {} : { modelSelectionSnapshot: modelPlan.snapshot,
+          credentialFingerprint: modelPlan.credentialFingerprint }),
+        ...(connectionPlan === undefined ? {} : { connectionId: connectionPlan.connectionId,
+          connectionCredentialVersion: connectionPlan.credentialVersion }),
         ...(input.executionMethod === undefined ? {} : { executionMethod: input.executionMethod }),
         acceptanceRevision: task.acceptance_revision,
         objective: acceptance.objective,
@@ -556,6 +574,11 @@ export async function delegateTask(
           executionConfigVersion: frozen.executionConfigVersion,
           contractHash: frozen.contractHash,
           frozenSnapshot: frozen.snapshot,
+          credentialFingerprint: frozen.credentialFingerprint,
+          // 0144：连接身份必须真的落到契约列上——只算出来不写，执行端就会以为这是
+          // 「进程默认」的旧 Run，然后按另一套配置解析，正好复现本模块要消灭的缺陷。
+          connectionId: frozen.connectionId,
+          connectionCredentialVersion: frozen.connectionCredentialVersion,
         });
 
         await repositories.runs.insertRunSteps(

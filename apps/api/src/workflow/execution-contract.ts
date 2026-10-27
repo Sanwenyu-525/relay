@@ -55,6 +55,14 @@ export interface FreezeExecutionContractInput {
   readonly executionMethod?: RunMethodBinding | undefined;
   /** Non-secret model plan frozen by the application at Run admission. */
   readonly modelSelectionSnapshot?: JsonObject | undefined;
+  /**
+   * 0142：冻结时所用凭据的单向身份。它**不**写入 `frozen_snapshot`（那份快照会原样嵌入
+   * 上下文清单并可能出现在界面），而是由调用方写进 execution_contracts 的独立列。
+   */
+  readonly credentialFingerprint?: string | null | undefined;
+  /** 0144：冻结时的模型连接身份与凭据代数（ADR-036 阶段三）；两列同现同缺。 */
+  readonly connectionId?: string | null | undefined;
+  readonly connectionCredentialVersion?: number | null | undefined;
 }
 
 /**
@@ -379,6 +387,11 @@ export interface FrozenExecutionContract {
   /** 不可变快照，直接写入 execution_contracts.frozen_snapshot。 */
   readonly snapshot: JsonObject;
   readonly contractHash: Buffer;
+  /** 0142：随契约一起冻结的凭据身份；不属于快照，也不参与 contract_hash。 */
+  readonly credentialFingerprint: string | null;
+  /** 0144：随契约冻结的连接身份与凭据代数；不属于快照，也不参与 contract_hash。 */
+  readonly connectionId: string | null;
+  readonly connectionCredentialVersion: number | null;
 }
 
 /**
@@ -447,5 +460,8 @@ export function freezeExecutionContract(
     executionConfigVersion,
     snapshot,
     contractHash,
+    credentialFingerprint: input.credentialFingerprint ?? null,
+    connectionId: input.connectionId ?? null,
+    connectionCredentialVersion: input.connectionCredentialVersion ?? null,
   };
 }

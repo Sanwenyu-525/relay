@@ -45,6 +45,7 @@ import { FakeModelPort, type ModelPort } from '../workflow/fake-model-port.js';
 import { ModelCallBudgetError, ModelSourcePolicyError }
   from '../workflow/openai-compatible-model-port.js';
 import { resolveRunModelPort, type RunSemanticModel } from './run-model-port.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError } from '../assist/live-preview.js';
 import { publishRunDraftPreview, recordRunDraftFirstTextDelta } from './run-draft-preview.js';
@@ -137,6 +138,8 @@ export interface AdvanceRunStepInput {
   readonly modelEnv?: NodeJS.ProcessEnv | undefined;
   /** 仅测试注入：受控 Provider fetch/lookup 接缝（与 Assist 同一形态）。 */
   readonly modelTransport?: ModelFetchDependencies | undefined;
+  /** 凭据存储（0144）：契约冻结了连接身份时用它解析秘密；缺省用进程默认存储。 */
+  readonly credentials?: CredentialStore | undefined;
   readonly signal?: AbortSignal | undefined;
   /** 受控故障点，只用于真实 PG 恢复/并发测试。 */
   readonly hooks?: {
@@ -829,9 +832,12 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
     contract: await repositories.runs.readContract(claim.run.id),
     env: input.modelEnv ?? process.env,
     ...(input.modelTransport === undefined ? {} : { transport: input.modelTransport }),
+    ...(input.credentials === undefined ? {} : { credentials: input.credentials }),
   });
   let modelPort: ModelPort = admission.kind === 'READY'
-    ? admission.port : new FakeModelPort(input.fakeModelDelayMs);
+    ? (!admission.external && input.fakeModelDelayMs !== undefined
+      ? new FakeModelPort(input.fakeModelDelayMs) : admission.port)
+    : new FakeModelPort(input.fakeModelDelayMs);
   let persist: PreparedPersist | undefined;
   let context: BuiltContext | undefined;
   let semanticChecks: ReadonlyMap<string, PreparedSemanticCheck> | undefined;

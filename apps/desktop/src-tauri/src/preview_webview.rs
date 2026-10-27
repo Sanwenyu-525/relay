@@ -528,7 +528,10 @@ pub fn open_preview(
     ) {
         Ok(created) => {
             #[cfg(windows)]
-            install_crash_watch(app, &created, registry, &label, generation);
+            {
+                install_crash_watch(app, &created, registry, &label, generation);
+                install_permission_deny_watch(&created);
+            }
             Ok(handle)
         }
         Err(_) => {
@@ -577,6 +580,26 @@ fn install_crash_watch(
         }));
         let mut token = 0_i64;
         let _ = unsafe { core.add_ProcessFailed(&handler, &mut token) };
+    });
+}
+
+/// 子 WebView 不授予摄像头 / 麦克风 / 定位 / 通知 / 剪贴板等任何权限
+/// （[浏览器架构 §5]）。页面仍可发起请求，但宿主统一拒绝，不弹系统授权框。
+#[cfg(windows)]
+fn install_permission_deny_watch(webview: &Webview) {
+    use webview2_com::{Microsoft::Web::WebView2::Win32::COREWEBVIEW2_PERMISSION_STATE_DENY,
+        PermissionRequestedEventHandler};
+
+    let _ = webview.with_webview(|platform| {
+        let Ok(core) = (unsafe { platform.controller().CoreWebView2() }) else { return };
+        let handler = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args {
+                unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY)? };
+            }
+            Ok(())
+        }));
+        let mut token = 0_i64;
+        let _ = unsafe { core.add_PermissionRequested(&handler, &mut token) };
     });
 }
 

@@ -239,7 +239,7 @@ it("项目导读只读服务端编排，未保存时显示空态且不自行推�
           url === `${base}/decisions?project_id=${projectId}` ||
           url === `${base}/rules?project_id=${projectId}`) return response(200, []);
       if (url === `${base}/projects/${projectId}/goals`) return response(200, { items: [] });
-      if (url === `${base}/tasks?project_id=${projectId}`)
+      if (url.startsWith(`${base}/tasks?project_id=${projectId}`))
         return response(200, { items: [], next_cursor: null });
       if (url === `${base}/projects/${projectId}/knowledge-guide`) {
         guideReads += 1;
@@ -254,7 +254,7 @@ it("项目导读只读服务端编排，未保存时显示空态且不自行推�
     const guide = mounted.wrapper.get('[data-testid="project-knowledge-guide"]').text();
     expect(guide).toContain("尚未保存过编排");
     expect(guide).toContain("尚未编排任何条目");
-    expect(guide).toContain("全部加入");
+    expect(guide).toContain("加入已加载目标（0）");
     expect(mounted.wrapper.findAll(".knowledge-guide__entries li")).toHaveLength(0);
   });
 

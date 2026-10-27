@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
@@ -797,10 +798,19 @@ describe("P07 Review Inbox", () => {
 
   it("切换到无有效期的请求后旧计时器不再影响提交", async () => {
     activate();
-    const expiring = { ...review(), expires_at: new Date(Date.now() + 80).toISOString() };
+    const expiring = { ...review(), expires_at: new Date(Date.now() + 120_000).toISOString() };
     const valid = review();
     let refreshed = false;
     let posts = 0;
+    let staleExpiryTimer: (() => void) | null = null;
+    const originalSetTimeout = window.setTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (typeof handler === "function" && timeout !== undefined && timeout > 100_000) {
+        staleExpiryTimer = () => handler(...args);
+        return 120_025;
+      }
+      return originalSetTimeout(handler, timeout, ...args);
+    }) as typeof window.setTimeout);
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST") {
@@ -817,13 +827,14 @@ describe("P07 Review Inbox", () => {
       throw new Error(`unexpected request: ${url}`);
     }));
     const mounted = await mountWorkbench(`/reviews?id=${reviewId}`); unmount = mounted.unmount;
-    await flush(250);
-    // 原请求已过期停用；刷新换到同一 ID 的新版本（无有效期）后恢复可用，旧计时器到点
-    // 只是重渲染，不会把新请求误判成过期。
-    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
+    expect(staleExpiryTimer).not.toBeNull();
+    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeUndefined();
     refreshed = true;
-    await mounted.wrapper.get('[data-testid="review-expired-refresh"]').trigger("click");
-    await flush(250);
+    await mounted.wrapper.get('[data-testid="review-refresh"]').trigger("click");
+    await flush(100);
+    expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeUndefined();
+    // 即使旧到期回调已经进入事件队列、在刷新后才运行，也不能按旧版本禁用新请求。
+    await act(async () => { staleExpiryTimer?.(); });
     expect(mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeUndefined();
     await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
     await flush();

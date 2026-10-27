@@ -6,14 +6,16 @@ import { DomainError } from '../application/domain-error.js';
 import { CommandIdReusedError } from '../application/command.js';
 import { changeAdmission, readAdmissionStatus } from '../application/runtime-maintenance.js';
 import { RelayDatabase } from '../infrastructure/database.js';
-import { DesktopMaintenanceSessionError, openDesktopMaintenanceSession } from
-  '../runtime/desktop-maintenance-session.js';
+import { DesktopMaintenanceSessionError, openDesktopMaintenanceSession,
+  sealDesktopBuildManifest } from '../runtime/desktop-maintenance-session.js';
 import { MaintenanceReleaseInputError, readMaintenanceReleaseInput } from '../runtime/maintenance-release-input.js';
 import { CliConfigError, readRequiredDatabaseUrl, FAILURE_EXIT_CODE,
   CONFIG_FAILURE_EXIT_CODE } from './cli-support.js';
 
 type MaintenanceArguments = { readonly action: 'status' } | {
   readonly action: 'hold-desktop-stop'; readonly packageRoot: string; readonly dataRoot: string;
+} | {
+  readonly action: 'seal-install'; readonly packageRoot: string;
 } | {
   readonly action: 'begin-drain' | 'resume-admission';
   readonly commandId: string; readonly expectedRevision: string;
@@ -22,6 +24,14 @@ type MaintenanceArguments = { readonly action: 'status' } | {
 export function parseMaintenanceArguments(argv: readonly string[]): MaintenanceArguments {
   const action = argv[0];
   if (action === 'status' && argv.length === 1) return { action };
+  if (action === 'seal-install') {
+    const packageRoot = argv[2];
+    if (argv.length !== 3 || argv[1] !== '--package-root' ||
+        packageRoot === undefined || !isAbsolute(packageRoot)) {
+      throw new CliConfigError('require an absolute --package-root');
+    }
+    return { action, packageRoot };
+  }
   if (action === 'hold-desktop-stop') {
     const flags = new Map<string, string>();
     for (let index = 1; index < argv.length; index += 2) {
@@ -37,7 +47,7 @@ export function parseMaintenanceArguments(argv: readonly string[]): MaintenanceA
     return { action, packageRoot, dataRoot };
   }
   if (action !== 'begin-drain' && action !== 'resume-admission') {
-    throw new CliConfigError('usage: maintenance status | begin-drain | resume-admission');
+    throw new CliConfigError('usage: maintenance status | begin-drain | resume-admission | seal-install');
   }
   const values = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
@@ -87,6 +97,12 @@ async function main(): Promise<void> {
   try {
     const args = parseMaintenanceArguments(process.argv.slice(2));
     if (args.action === 'hold-desktop-stop') return await holdDesktopStop(args);
+    if (args.action === 'seal-install') {
+      const artifact = await sealDesktopBuildManifest(args.packageRoot);
+      process.stdout.write(`${JSON.stringify({ type: 'install_manifest_sealed',
+        artifact_sha256: artifact })}\n`);
+      return;
+    }
     const databaseUrl = readRequiredDatabaseUrl(process.env, 'RELAY_DB_URL');
     database = new RelayDatabase({ databaseUrl, databasePoolMax: 1,
       databaseConnectTimeoutMs: 5000 }, () => {

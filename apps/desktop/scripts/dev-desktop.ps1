@@ -7,7 +7,7 @@
 #   ... -Action status   查看后台实例状态（runner / 窗口 / Vite / 日志路径）。
 #   ... -Action stop     停止后台实例：结束 runner 进程树并兜底清理 dev 版窗口与 Vite 残留。
 #   ... -Action restart  先关闭旧的 dev 窗口（后台或前台实例），再以前台方式重新启动。
-#                        仓库根的 dev-desktop.bat 双击即执行这一动作。
+#                        （仓库根的 dev-desktop.bat 已删除，请直接调用本脚本。）
 # 可选参数：
 #   -ConfigPath <绝对路径>   桌面 desktop.env（默认优先 .relay-test\desktop.env，其次 %APPDATA%\dev.relay.agent\desktop.env）
 #   -FrontendPort 5173       Vite 端口（需与 src-tauri DEV_ORIGIN/tauri.conf devUrl 一致，改动需同步 Rust 常量）

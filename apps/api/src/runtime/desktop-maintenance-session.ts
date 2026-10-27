@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { TextDecoder } from 'node:util';
 
@@ -74,30 +74,62 @@ export function parseDesktopMaintenanceEvent(bytes: Buffer, nonce: string): Nati
 /** Reject old packages before execution: an old EXE may ignore the new flag and open a window. */
 export async function verifiedDesktopMaintenanceExecutable(packageRoot: string): Promise<string> {
   try {
-    if (!isAbsolute(packageRoot)) throw new Error();
-    const rootStat = await lstat(packageRoot);
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error();
-    const root = await realpath(packageRoot);
-    const manifestFile = join(root, 'desktop-build-manifest.json');
-    const manifestStat = await lstat(manifestFile);
-    if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 8 * 1024 * 1024) {
-      throw new Error();
-    }
-    const manifest = JSON.parse((await readFile(manifestFile, 'utf8')).replace(/^\uFEFF/u, '')) as {
-      schema_version?: unknown; maintenance_session_protocol?: unknown; artifact_sha256?: unknown;
-    };
-    if (manifest.schema_version !== 1 || manifest.maintenance_session_protocol !== DESKTOP_MAINTENANCE_PROTOCOL ||
-        typeof manifest.artifact_sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(manifest.artifact_sha256)) {
-      throw new Error();
-    }
-    const executable = join(root, 'relay-desktop.exe');
-    const executableStat = await lstat(executable);
-    if (!executableStat.isFile() || executableStat.isSymbolicLink() ||
-        executableStat.size > 256 * 1024 * 1024 || await realpath(executable) !== executable) throw new Error();
-    const actualHash = createHash('sha256').update(await readFile(executable)).digest('hex');
-    if (actualHash !== manifest.artifact_sha256) throw new Error();
-    return executable;
+    const root = await verifiedPackageRoot(packageRoot);
+    const manifest = await readBuildManifest(root);
+    if (await installedExecutableHash(root) !== manifest.artifact_sha256) throw new Error();
+    return join(root, 'relay-desktop.exe');
   } catch { throw new DesktopMaintenanceSessionError('MAINTENANCE_PACKAGE_UNSUPPORTED'); }
+}
+
+async function verifiedPackageRoot(packageRoot: string): Promise<string> {
+  if (!isAbsolute(packageRoot)) throw new Error();
+  const rootStat = await lstat(packageRoot);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error();
+  return await realpath(packageRoot);
+}
+
+async function readBuildManifest(root: string): Promise<Record<string, unknown> & { artifact_sha256: string }> {
+  const manifestFile = join(root, 'desktop-build-manifest.json');
+  const manifestStat = await lstat(manifestFile);
+  if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 8 * 1024 * 1024) {
+    throw new Error();
+  }
+  const manifest = JSON.parse((await readFile(manifestFile, 'utf8')).replace(/^\uFEFF/u, '')) as
+    Record<string, unknown> & { artifact_sha256?: unknown };
+  if (manifest.schema_version !== 1 || manifest.maintenance_session_protocol !== DESKTOP_MAINTENANCE_PROTOCOL ||
+      typeof manifest.artifact_sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(manifest.artifact_sha256)) {
+    throw new Error();
+  }
+  return manifest as Record<string, unknown> & { artifact_sha256: string };
+}
+
+async function installedExecutableHash(root: string): Promise<string> {
+  const executable = join(root, 'relay-desktop.exe');
+  const executableStat = await lstat(executable);
+  if (!executableStat.isFile() || executableStat.isSymbolicLink() ||
+      executableStat.size > 256 * 1024 * 1024 || await realpath(executable) !== executable) throw new Error();
+  return createHash('sha256').update(await readFile(executable)).digest('hex');
+}
+
+/**
+ * 安装器在打包期会改写桌面 EXE（bundle type 标记），构建清单无法预先绑定安装后的
+ * 确切字节。安装完成后由安装器调用本入口，以实际写入的 EXE 重新封签清单；失败即
+ * 让安装器中止，保证下一次升级的维护核对不会拿错字节放行。
+ */
+export async function sealDesktopBuildManifest(packageRoot: string): Promise<string> {
+  let temp: string | undefined;
+  try {
+    const root = await verifiedPackageRoot(packageRoot);
+    const manifest = await readBuildManifest(root);
+    const artifact = await installedExecutableHash(root);
+    temp = join(root, `.desktop-build-manifest.${randomUUID()}.tmp`);
+    await writeFile(temp, `${JSON.stringify({ ...manifest, artifact_sha256: artifact }, null, 2)}\n`, 'utf8');
+    await rename(temp, join(root, 'desktop-build-manifest.json'));
+    return artifact;
+  } catch {
+    if (temp !== undefined) await rm(temp, { force: true }).catch(() => {});
+    throw new DesktopMaintenanceSessionError('INSTALL_MANIFEST_UNSUPPORTED');
+  }
 }
 
 export interface DesktopMaintenanceSession {

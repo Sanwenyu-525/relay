@@ -10,7 +10,8 @@ import type { AssistContentPart, AssistIntent, AssistModelPort, AssistTurn,
   ModelUsage, AssistRequest, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { invokeAssistWithFreeModelRouting } from './assist-free-model-routing.js';
-import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { applySnapshotBudget, parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
@@ -528,6 +529,9 @@ export async function runAssistGenerationTick(db: DbExecutor,
         try {
           await captureMemoriesForTurn(db, { sessionId: session.id,
             assistantMessageId: message.id, modelPort: modelRoute.modelPort,
+            ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
+            ...(options.modelFetchDependencies === undefined ? {}
+              : { modelFetchDependencies: options.modelFetchDependencies }),
             ...(options.signal === undefined ? {} : { signal: options.signal }) });
         } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
       }
@@ -624,7 +628,14 @@ function resolveAssistModelRoute(db: DbExecutor, message: AssistMessageRow,
         selected.connection.configFingerprint !== options.modelPort.identity.configFingerprint) {
       throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
     }
-    return { modelPort: options.modelPort };
+    // 0142：换 Key 后旧消息不能悄悄转用新凭据（配额与限流归属都会变）。
+    if (compareCredentialIdentity(message.model_credential_fingerprint,
+      options.modelPort.identity.credentialFingerprint ?? '') === 'CHANGED') {
+      throw new Error('ASSIST_MODEL_CREDENTIAL_CHANGED');
+    }
+    // 0135：默认 Provider 同样按冻结快照的预算外呼——工作区选了 256K/512K/1M 时，
+    // 端口的实际输入闸门与记账预留都必须改成这一档，不能只把数字写进快照。
+    return { modelPort: applySnapshotBudget(options.modelPort, snapshot.budget) };
   }
   const env = options.modelEnv ?? process.env;
   const context = { db, message, session, workerId, env,
@@ -1043,6 +1054,9 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       try {
         await captureMemoriesForTurn(db, { sessionId: session.id,
           assistantMessageId: message.id, modelPort: options.modelPort,
+          ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
+          ...(options.modelFetchDependencies === undefined ? {}
+            : { modelFetchDependencies: options.modelFetchDependencies }),
           ...(options.signal === undefined ? {} : { signal: options.signal }) });
       } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
     }

@@ -10,6 +10,8 @@ import type { RelayApiClient, RelayCommandEnvelope, RelayGoalProject,
 import { createCommandId, goalArchiveResultFrom, goalEditResultFrom,
   projectGoalUnlinkResultFrom, RelayApiError, RelayTransportError } from "../api/relayClient";
 import { RelayContractError } from "../api/core/errors";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
 import { goalStatusLabels, phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -53,13 +55,11 @@ function pendingKey(client: RelayApiClient, goalId: string): string {
   return `relay:goal-detail-pending:${client.baseUrl}:${client.workspaceId}:${goalId}`;
 }
 
-function readPending(key: string): GoalCommand | null {
-  try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+function parsePending(value: unknown, goalId: string): GoalCommand | null {
     if (!value || typeof value !== "object") return null;
     const row = value as Record<string, unknown>;
     if (typeof row.kind !== "string" || typeof row.commandId !== "string" ||
-      typeof row.goalId !== "string" || typeof row.expectedRevision !== "string") return null;
+      typeof row.goalId !== "string" || row.goalId !== goalId || typeof row.expectedRevision !== "string") return null;
     if (row.kind === "edit" && typeof row.title === "string" && typeof row.description === "string") {
       return { kind: "edit", commandId: row.commandId, goalId: row.goalId,
         expectedRevision: row.expectedRevision, title: row.title, description: row.description };
@@ -76,14 +76,6 @@ function readPending(key: string): GoalCommand | null {
         expectedImpactedTaskIds: row.expectedImpactedTaskIds as string[] };
     }
     return null;
-  } catch { return null; }
-}
-
-function savePending(key: string, pending: GoalCommand | null): void {
-  try {
-    if (pending) sessionStorage.setItem(key, JSON.stringify(pending));
-    else sessionStorage.removeItem(key);
-  } catch { /* 存储不可用只影响整页重开恢复，页内待核对仍在内存中。 */ }
 }
 
 function isUncertain(caught: unknown): boolean {
@@ -115,6 +107,13 @@ function verifyCommand(record: GoalCommand,
       const result = goalEditResultFrom(envelope.result);
       if (result.goalId !== record.goalId || result.status !== "ACTIVE") {
         throw new Error("编辑回执不是原 Goal 的 ACTIVE 修订。");
+      }
+      // 内容与身份同等重要：响应可能对准了实体和修订，却带着别的编辑内容。
+      if (result.title !== record.title) {
+        throw new Error(`编辑回执标题「${result.title}」与冻结命令的「${record.title}」不一致。`);
+      }
+      if (result.description !== record.description) {
+        throw new Error(`编辑回执说明与冻结命令不一致（冻结「${record.description}」，回执「${result.description}」）。`);
       }
       return `目标已更新为「${result.title}」· v${result.revision}`;
     }
@@ -209,9 +208,16 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
   const [reload, setReload] = useState(0);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [actionError, setActionError] = useState<string | null>(null);
+  /** 服务端最新事实与未保存草稿并存时的差异展示；放弃（还原）或收口后清除。 */
+  const [conflictFacts, setConflictFacts] = useState<{ readonly title: string;
+    readonly description: string } | null>(null);
+  const storageKey = pendingKey(client, id);
+  const parseCommand = useCallback((value: unknown) => parsePending(value, id), [id]);
+  const [initialPending] = useState(() => readPendingCommand(storageKey, parseCommand));
+  const [actionError, setActionError] = useState<string | null>(initialPending.available ? null
+    : "本机 Goal 恢复记录不可用或存在冲突；请恢复存储后重新打开，未发送新命令。");
   const [receipt, setReceipt] = useState<string | null>(null);
-  const [pending, setPending] = useState<GoalCommand | null>(() => readPending(pendingKey(client, id)));
+  const [pending, setPending] = useState<GoalCommand | null>(initialPending.pending);
   const [busy, setBusy] = useState(false);
   const [mayRetry, setMayRetry] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -222,11 +228,55 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
   const busyRef = useRef(false);
   const version = useRef(0);
   const disposed = useRef(false);
-  const storageKey = pendingKey(client, id);
+  /** 草稿已被用户改过、尚未被命令收口或还原：事实重读不得覆盖输入框。 */
+  const draftDirtyRef = useRef(false);
+  /** 当前草稿所基于的服务端标题/说明：重读时与它比较才知道服务端是否又变了。 */
+  const draftBaselineRef = useRef({ title: "", description: "" });
+  const draftValueRef = useRef({ title: "", description: "" });
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const focusedFieldRef = useRef<"title" | "description">("title");
 
-  const holdPending = useCallback((next: GoalCommand | null) => {
-    pendingRef.current = next; setPending(next); savePending(storageKey, next);
-  }, [storageKey]);
+  const setDraft = useCallback((next: { readonly title: string; readonly description: string }) => {
+    draftValueRef.current = next;
+    setTitle(next.title); setDescription(next.description);
+    draftDirtyRef.current = next.title.trim() !== draftBaselineRef.current.title.trim() ||
+      next.description.trim() !== draftBaselineRef.current.description.trim();
+    if (!draftDirtyRef.current) setConflictFacts(null);
+  }, []);
+
+  const consumeDraft = useCallback((next: { readonly title: string; readonly description: string }) => {
+    draftBaselineRef.current = next;
+    setDraft(next);
+    setConflictFacts(null);
+  }, [setDraft]);
+
+  const holdPending = useCallback((next: GoalCommand | null): boolean => {
+    const saved = next === null ? clearPendingCommand(storageKey, pendingRef.current, parseCommand)
+      : reservePendingCommand(storageKey, next, parseCommand);
+    if (!saved) return false;
+    pendingRef.current = next; setPending(next); return true;
+  }, [storageKey, parseCommand]);
+
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => draftDirtyRef.current || pendingRef.current !== null,
+    hasDraftChanges: () => draftDirtyRef.current && pendingRef.current?.kind !== "edit",
+    discard: () => consumeDraft(draftBaselineRef.current),
+    pendingCommandId: () => pendingRef.current?.commandId ?? null,
+    pendingRecoversAfterLeave: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(storageKey, pendingRef.current, parseCommand),
+    pendingRecoversAfterRestart: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(storageKey, pendingRef.current, parseCommand),
+    restoreFocus: () => {
+      const field = focusedFieldRef.current === "description" ? descriptionInputRef.current : titleInputRef.current;
+      if (field && !field.disabled) field.focus();
+    }
+  });
+
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
 
   useEffect(() => () => { disposed.current = true; version.current++; }, []);
 
@@ -236,16 +286,39 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
     void readFacts(client, id)
       .then((next) => {
         if (disposed.current || request !== version.current) return;
-        setFacts(next); setTitle(next.goal.title); setDescription(next.goal.description);
+        setFacts(next);
+        const draft = draftValueRef.current;
+        const dirty = draftDirtyRef.current && (draft.title.trim() !== next.goal.title.trim() ||
+          draft.description.trim() !== next.goal.description.trim());
+        draftBaselineRef.current = { title: next.goal.title, description: next.goal.description };
+        if (dirty) {
+          draftDirtyRef.current = true;
+          // 草稿未收口：服务端新事实只作差异呈现，绝不静默覆盖输入框。
+          setConflictFacts({ title: next.goal.title, description: next.goal.description });
+        } else {
+          draftDirtyRef.current = false;
+          setDraft({ title: next.goal.title, description: next.goal.description });
+          setConflictFacts(null);
+        }
+        // 待确认的解除必须跟随重读到的 Project 修订：GOAL_LINK_IN_USE 之后沿旧修订
+        // 重发只会再次被 CAS 拒绝（修订已变时陷入冲突循环）。
+        setUnlinkTarget((target) => {
+          if (target === null) return null;
+          const fresh = next.projects.find((item) => item.projectId === target.project.projectId);
+          return fresh ? { project: fresh, impactedTaskIds: target.impactedTaskIds } : target;
+        });
       })
       .catch((caught: unknown) => {
-        if (!disposed.current && request === version.current) setError(describeLiveError(caught).message);
+        if (!disposed.current && request === version.current) {
+          setFacts(null);
+          setError(describeLiveError(caught).message);
+        }
       })
       .finally(() => {
         if (!disposed.current && request === version.current) setLoading(false);
       });
     return () => { version.current++; };
-  }, [client, id, reload]);
+  }, [client, id, reload, setDraft]);
 
   const reloadFacts = useCallback(() => setReload((value) => value + 1), []);
 
@@ -258,7 +331,10 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         throw new Error("原回执不是本次命令。");
       }
       const message = verifyCommand(record, response);
-      holdPending(null); setReceipt(message);
+      if (!holdPending(null)) { setActionError("命令已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setReceipt(message);
+      // 只有编辑命令本身收口才消费草稿；归档/解除的刷新与草稿无关，不得覆盖未保存内容。
+      if (record.kind === "edit") consumeDraft({ title: record.title, description: record.description });
       reloadFacts();
     } catch (caught) {
       if (disposed.current) return;
@@ -269,16 +345,21 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         setActionError("服务端明确未找到原命令；只能用原 command ID 与原载荷重试。");
       } else setActionError(`回执仍不可核对；请保留原 command_id。${describeLiveError(caught).message}`);
     } finally { if (!disposed.current) setBusy(false); }
-  }, [client, holdPending, reloadFacts]);
+  }, [client, consumeDraft, holdPending, reloadFacts]);
 
   const send = useCallback(async (record: GoalCommand) => {
+    if (!reservePendingCommand(storageKey, record, parseCommand)) {
+      setBusy(false); setActionError("无法保存或核对原命令，本次请求未发送；请恢复存储后核对回执。"); return;
+    }
     setBusy(true); setActionError(null); setReceipt(null); setMayRetry(false);
     try {
       const envelope = await sendCommand(client, record);
       if (disposed.current) return;
       const message = verifyCommand(record, envelope);
-      holdPending(null); setReceipt(message); setConfirmArchive(false);
+      if (!holdPending(null)) { setActionError("命令已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setReceipt(message); setConfirmArchive(false);
       setUnlinkTarget(null);
+      if (record.kind === "edit") consumeDraft({ title: record.title, description: record.description });
       reloadFacts();
     } catch (caught) {
       if (disposed.current) return;
@@ -287,7 +368,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
       } else if (isUncertain(caught)) {
         setActionError("命令结果尚不能确认。已保留原 command_id；先查询回执，明确未找到后才可原样重试。");
       } else {
-        holdPending(null);
+        if (!holdPending(null)) { setActionError("命令已被拒绝，但本机恢复记录未能清理；请恢复存储并核对原命令。"); return; }
         if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
           setActionError(`修订已变化${caught.problem.actualRevision ? `（当前 v${caught.problem.actualRevision}）` : ""}；已重新读取，请按新事实再次确认。草稿未被覆盖。`);
           reloadFacts();
@@ -304,7 +385,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         } else setActionError(describeLiveError(caught).message);
       }
     } finally { if (!disposed.current) setBusy(false); }
-  }, [client, holdPending, reloadFacts]);
+  }, [client, consumeDraft, holdPending, parseCommand, reloadFacts, storageKey]);
 
   const startCommand = useCallback((record: GoalCommand) => {
     if (pendingRef.current !== null) {
@@ -313,7 +394,11 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
     }
     if (busyRef.current) return;
     busyRef.current = true;
-    holdPending(record);
+    if (!holdPending(record)) {
+      busyRef.current = false;
+      setActionError("无法保存或核对本机 Goal 恢复记录，未发送命令；请恢复存储后重试。");
+      return;
+    }
     void send(record).finally(() => { busyRef.current = false; });
   }, [holdPending, send]);
 
@@ -346,7 +431,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
   }
 
   function submitEdit() {
-    if (facts === null || pendingRef.current !== null) return;
+    if (facts === null || facts.goal.status !== "ACTIVE" || pendingRef.current !== null) return;
     const nextTitle = title.trim();
     if (nextTitle === "") { setActionError("目标标题不能为空。"); return; }
     if (nextTitle === facts.goal.title && description.trim() === facts.goal.description) {
@@ -369,6 +454,30 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
   if (error || facts === null) return <section className="page-state page-state--error pv-page" role="alert">
     <p className="eyebrow">Goal Detail</p><h1>暂时无法读取目标</h1>
     <p>{error ?? "目标事实不可用。"}</p>
+    {receipt && <p className="receipt-message" role="status" data-testid="goal-detail-receipt">{receipt}</p>}
+    {actionError && <p className="action-error" role="alert" data-testid="goal-detail-error">{actionError}</p>}
+    {pending && <div className="warning-callout" data-testid="goal-detail-pending">
+      <strong>Goal 命令待核对</strong>
+      <p>原 command ID：{pending.commandId} · 类型 {commandTypeOf(pending)} · 基于 v{pending.expectedRevision}。核对前不会发出第二条命令。</p>
+      <div className="form-actions">
+        <button className="secondary-button" type="button" data-testid="goal-detail-check-receipt"
+          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
+        {mayRetry && <button className="secondary-button" type="button" data-testid="goal-detail-retry"
+          disabled={busy} onClick={() => { setBusy(true); void send(pending); }}>用原 ID 与原载荷重试</button>}
+      </div>
+    </div>}
+    {draftDirtyRef.current && <section className="resume-section" data-testid="goal-edit-local-draft">
+      <h2>本地草稿（只读）</h2>
+      <p className="warning-callout">当前 Goal 事实不可读，已撤下先前事实；下面只保留本页未提交文本，不代表服务端当前状态，也不能提交。</p>
+      <label className="field"><span className="field-label">标题草稿</span>
+        <input value={title} disabled readOnly data-testid="goal-edit-local-title" /></label>
+      <label className="field"><span className="field-label">说明草稿</span>
+        <textarea value={description} disabled readOnly data-testid="goal-edit-local-description" /></label>
+      <button className="secondary-button" type="button" onClick={() => {
+        draftBaselineRef.current = { title: "", description: "" };
+        setDraft({ title: "", description: "" }); setConflictFacts(null);
+      }}>丢弃本地草稿</button>
+    </section>}
     <button className="secondary-button" type="button" onClick={reloadFacts}>
       <RotateCcw aria-hidden="true" />重新读取</button>
   </section>;
@@ -413,25 +522,36 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         </div>
       </div>}
 
-      {!archived && <section className="resume-section" data-testid="goal-edit-section">
+      {(!archived || draftDirtyRef.current) && <section className="resume-section" data-testid="goal-edit-section">
         <h2>编辑目标</h2>
         <p className="helper-text">只修改 Goal 自身的标题与说明；新建关联、Task 对齐和项目状态都不在这里改变。
           清空说明会提交空字符串，不是省略字段。</p>
+        {archived && <p className="warning-callout" role="status">目标已归档；本地草稿保留为只读文本，不能提交。</p>}
         <form className="stack" onSubmit={(event) => { event.preventDefault(); submitEdit(); }}>
           <label className="field"><span className="field-label">标题</span>
-            <input name="goal-detail-title" data-testid="goal-edit-title" maxLength={200}
-              value={title} disabled={busy || goalPending}
-              onChange={(event) => setTitle(event.target.value)} /></label>
+            <input ref={titleInputRef} name="goal-detail-title" data-testid="goal-edit-title" maxLength={200}
+              value={title} disabled={busy || goalPending || archived}
+              onFocus={() => { focusedFieldRef.current = "title"; }}
+              onChange={(event) => setDraft({ ...draftValueRef.current, title: event.target.value })} /></label>
           <label className="field"><span className="field-label">说明</span>
-            <textarea name="goal-detail-description" data-testid="goal-edit-description"
-              rows={4} maxLength={2000} value={description} disabled={busy || goalPending}
-              onChange={(event) => setDescription(event.target.value)} /></label>
+            <textarea ref={descriptionInputRef} name="goal-detail-description" data-testid="goal-edit-description"
+              rows={4} maxLength={2000} value={description} disabled={busy || goalPending || archived}
+              onFocus={() => { focusedFieldRef.current = "description"; }}
+              onChange={(event) => setDraft({ ...draftValueRef.current, description: event.target.value })} /></label>
+          {conflictFacts !== null && <div className="warning-callout" role="status"
+            data-testid="goal-edit-conflict-facts">
+            <strong>服务端最新事实与本地草稿不同</strong>
+            <p>服务端当前标题「{conflictFacts.title}」· 说明「{conflictFacts.description || "（空）"}」。
+              你的草稿已完整保留；核对差异后可再次保存（将按当前修订 v{goal.revision} 提交），
+              或用「还原为当前事实」放弃草稿。</p>
+          </div>}
           <div className="form-actions">
             <button className="primary-button" type="submit" data-testid="goal-edit-submit"
-              disabled={busy || goalPending}>{busy ? "正在保存" : "保存目标修订"}</button>
+              disabled={busy || goalPending || archived}>{busy ? "正在保存" : "保存目标修订"}</button>
             <button className="secondary-button" type="button" data-testid="goal-edit-reset"
               disabled={busy || goalPending}
-              onClick={() => { setTitle(goal.title); setDescription(goal.description); setActionError(null); }}>还原为当前事实</button>
+              onClick={() => { consumeDraft({ title: goal.title, description: goal.description }); setActionError(null); }}>
+              {archived ? "丢弃本地草稿" : "还原为当前事实"}</button>
           </div>
         </form>
       </section>}

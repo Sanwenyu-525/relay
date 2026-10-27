@@ -44,6 +44,23 @@
   ${EndIf}
 !macroend
 
+!macro NSIS_HOOK_POSTINSTALL
+  ; 打包期 tauri 会改写 relay-desktop.exe（写入 bundle type 标记），构建清单里的
+  ; artifact_sha256 只能绑定编译产物，不能预先绑定安装后的字节。文件写入完成后立即
+  ; 用实际安装的 EXE 重新封签清单；失败即中止，避免留下「下一次升级必然 exit 4」的安装。
+  nsExec::ExecToStack 'cmd /c ""$INSTDIR\node.exe" "$INSTDIR\api\dist\src\cli\maintenance.js" seal-install --package-root "$INSTDIR" < nul"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    ${If} ${Silent}
+      SetErrorLevel 5
+    ${Else}
+      MessageBox MB_ICONSTOP "安装后封签失败（退出码 $0），升级维护核对将拒绝该安装。$\r$\n$\r$\n$1"
+    ${EndIf}
+    Abort
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
   ; 数据删除的显式选择由模板卸载页的「删除应用数据」复选框承担（默认不勾＝保留，
   ; 静默卸载不执行该页＝保留，更新模式 $UpdateMode=1 也不会删）。这里只加一道安全网：

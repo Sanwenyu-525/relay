@@ -23,9 +23,11 @@ Junction 让内部相对路径随 Skill 根目录完整解析，不需要每个�
 
 新增的 Anthropic `frontend-design`、Vercel `web-design-guidelines`、Impeccable `impeccable` 及选中的 Emil Skills 均来自作者仓库，按配置中的 commit 固定；完整复制 Skill 子目录，不运行远程安装脚本。Impeccable 使用仓库已编译的 `.agents/skills/impeccable`，不能拿 `skill/SKILL.src.md` 当可安装成品。它包含 Windows launcher；引擎首次运行下载固定版本二进制并验证 `.sha256`，不要求每次安装 Node 包。
 
-`vercel-react-best-practices` 从完整的既有 Codex 安装复制到公共来源，保留原版本；已与上游固定提交比较文件集合。文件内容不同不等于缺失或允许升级，不能把比较提交写成既有安装的原始 commit。`ui-ux-pro-max` 与 Taste 有本地修改，没有可追溯安装提交时必须标为 unknown；当前文件哈希只能证明后续是否漂移，不能证明官方来源或历史版本。
+`vercel-react-best-practices` 的 76 个文件已与 Vercel 官方 `skills/react-best-practices` 在提交 `063bee94c3f4df8453406c830b0a7df0f2860278` 的内容逐项核对一致；frontmatter 中的实际 Skill ID 是 `vercel-react-best-practices`。`design-taste-frontend` 原单文件与 Taste 官方提交 `3c7017d636c3a4aad378433ea6d0cfa6c921da4a` 一致，但当时漏掉其余 38 个文件；已备份旧文件并安装官方 v2.1.5（提交 `12af471f627f866411b4bd785b19646d3672784c`），完整 39 文件。此版本有 dashboard/app-screen 专用流程和 `references/app-screens.md`。旧文件备份在 `%USERPROFILE%/.agents/skill-audit/backups/20261026-taste-v215/SKILL.md`。WorkBuddy 与 Qoder CN 的旧 `design-taste-frontend` 单文件也已核对为同一官方旧提交，分别移至 `%USERPROFILE%/.agents/skill-audit/backups/20261026-taste-v215/workbuddy-legacy` 与 `qoder-cn-legacy`；原哈希保留，避免与新共享 Skill 重名。
 
-本轮原文件与目录备份放在 `%USERPROFILE%/.agents/skill-audit/backups/20261025-221601`；`operations.json` 记录七处同名冲突的来源与备份位置。Trae 原 `webapp-testing` 的真实 ID 为 `webapp-uat`，按真实 ID 保留；其他冲突目录完整移出发现入口保存，再映射公共版本。`ui-design-flow` 只修 Frontmatter 分隔符与缩进；`video-gen` 只移除原生 Codex 不接受的 UTF-8 BOM。另补回两份 nested `planning-with-files` 缺失资源到保留的原仓库，未覆盖现有文件。
+`ui-ux-pro-max` 本地版保留了额外本地文件，内容与官方 v2.15.0（比较提交 `d14efff8ed1faa4187f004f79926f428c8074ec7`）不同，原安装来源与提交无法确认。没有替换或合并，避免覆盖定制内容；要升级需先由用户确定保留本地版还是切换到官方版。`taste-skill-v1` 作为独立兼容版本保留，官方已将该旧版移至 `taste-skill-classics`，但本机这份的具体提交未核实。
+
+本轮冲突备份位于 `%USERPROFILE%/.agents/skill-audit/backups/20261025-221601`；`operations.json` 记录七处同名冲突的来源与备份位置。Taste v2.1.5 升级前的单文件备份位于 `backups/20261026-taste-v215`。Trae 原 `webapp-testing` 的真实 ID 为 `webapp-uat`，按真实 ID 保留；其他冲突目录完整移出发现入口保存，再映射公共版本。`ui-design-flow` 只修 Frontmatter 分隔符与缩进；`video-gen` 只移除原生 Codex 不接受的 UTF-8 BOM。另补回两份 nested `planning-with-files` 缺失资源到保留的原仓库，未覆盖现有文件。
 
 `design-engineer-3` 的规范 ID 是 `design-engineer`；其本地 `metadata.json` 指向作者 `trentferguson/homescreen-hero`，当前固定比较提交也缺少声明的三份 references。不要编造参考文件或从不相关的同名 Skill 拼接；在资源恢复前，默认路由使用完整的 `impeccable` / `ui-ux-pro-max`。自定义 `3d-animation-short-generator-dsh` 的缺失参考图从同机完整 `3d-animation-short-generator` 恢复，来源与图像 SHA-256 记录在统一配置。
 

@@ -1,6 +1,7 @@
 // Real packaged WebView2 + disposable PostgreSQL business path via CDP.
 // Playwright fill() is synthetic input and is never evidence of Windows IME behavior.
-import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -59,16 +60,131 @@ try {
   await rail.getByRole('link', { name: '打开任务详情' }).click();
   await expect(page.getByTestId('task-detail')).toContainText('M02 WebView 人工任务');
   await page.getByTestId('task-detail-tab-artifacts').click();
-  await page.locator('textarea[name="artifact-content"]').fill('# 真实自检\n\n产物包含自检结论。');
+  const firstContent = '# 真实自检\n\n产物包含自检结论。';
+  await page.locator('textarea[name="artifact-content"]').fill(firstContent);
+  const artifactSavePending = page.waitForResponse((response) => response.request().method() === 'POST' &&
+    new URL(response.url()).pathname.endsWith(`/tasks/${taskId}/artifacts`));
   await page.getByTestId('artifact-save').click();
+  const artifactSave = await artifactSavePending;
+  assert.equal(artifactSave.status(), 201);
+  const artifactSaveRequest = artifactSave.request().postDataJSON();
+  const artifactSaveEnvelope = await artifactSave.json();
+  assert.equal(artifactSaveEnvelope.command_id, artifactSaveRequest.command_id);
+  const firstVersion = artifactSaveEnvelope.result;
+  assert.equal(firstVersion.task_id, taskId);
+  assert.equal(firstVersion.version_number, '1');
+  assert.equal(firstVersion.sha256, createHash('sha256').update(firstContent).digest('hex'));
+  assert.match(firstVersion.artifact_id, /^[0-9a-f-]{36}$/iu);
+  assert.match(firstVersion.version_id, /^[0-9a-f-]{36}$/iu);
   await expect(page.getByTestId('artifact-save-receipt')).toContainText('v1');
-  await page.getByTestId('artifact-select-version').click();
-  await expect(page.getByText('项目 State 已选用', { exact: false })).toBeVisible();
+
+  const authorization = await artifactSave.request().headerValue('authorization');
+  assert.ok(authorization?.startsWith('Bearer '), 'the packaged WebView save request omitted its scoped bearer');
+  const apiBase = new URL(artifactSave.url()).origin;
+  const workspaceMatch = /^\/api\/v1\/workspaces\/([0-9a-f-]{36})\/tasks\/[0-9a-f-]{36}\/artifacts$/iu
+    .exec(new URL(artifactSave.url()).pathname);
+  if (!workspaceMatch) throw new Error('Artifact save request did not identify its Workspace scope');
+  const workspaceId = workspaceMatch[1];
+  const apiPath = `/api/v1/workspaces/${workspaceId}`;
+  const apiHeaders = { authorization, origin: 'http://tauri.localhost', 'content-type': 'application/json' };
+  async function apiGet(path) {
+    const response = await fetch(`${apiBase}${apiPath}${path}`, { headers: apiHeaders, signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200, `GET ${path} returned ${response.status}`);
+    return response.json();
+  }
+  async function apiPost(path, body, status) {
+    const response = await fetch(`${apiBase}${apiPath}${path}`, { method: 'POST', headers: apiHeaders,
+      body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, status, `POST ${path} returned ${response.status}`);
+    return response.json();
+  }
+  const taskBeforeSecondArtifact = await apiGet(`/tasks/${taskId}`);
+  const secondContent = '# 第二份成果\n\n由当前测试会话创建，用于验证跨 Artifact 的确切版本接受。';
+  const secondArtifactCommand = { command_id: randomUUID(), expected_task_revision: taskBeforeSecondArtifact.revision,
+    title: '第二份成果', media_type: 'text/markdown', content: secondContent };
+  const secondArtifactEnvelope = await apiPost(`/tasks/${taskId}/artifacts`, secondArtifactCommand, 201);
+  assert.equal(secondArtifactEnvelope.command_id, secondArtifactCommand.command_id);
+  const secondVersion = secondArtifactEnvelope.result;
+  assert.equal(secondVersion.task_id, taskId);
+  assert.notEqual(secondVersion.artifact_id, firstVersion.artifact_id);
+  assert.equal(secondVersion.version_number, '1');
+  assert.equal(secondVersion.sha256, createHash('sha256').update(secondContent).digest('hex'));
+  const secondArtifactReceipt = await apiGet(`/commands/${secondArtifactCommand.command_id}`);
+  assert.equal(secondArtifactReceipt.command_type, 'CreateArtifactWithVersion');
+  assert.deepEqual(secondArtifactReceipt.result, secondVersion);
+
+  await page.reload();
+  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  const acceptedVersionIds = [firstVersion.version_id, secondVersion.version_id].sort();
+  await page.getByTestId(`completion-artifact-${firstVersion.version_id}`).check();
+  await page.getByTestId(`completion-artifact-${secondVersion.version_id}`).check();
+  await page.getByTestId(`artifact-read-${firstVersion.version_id}`).click();
+  await expect(page.getByTestId(`completion-artifact-${firstVersion.version_id}`)).toBeChecked();
+  await expect(page.getByTestId(`completion-artifact-${secondVersion.version_id}`)).toBeChecked();
   await page.locator('[data-testid^="criterion-"]').first().check();
+  const completePath = `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/complete`;
+  const completePending = page.waitForResponse((response) => response.request().method() === 'POST' &&
+    new URL(response.url()).pathname === completePath);
   await page.getByTestId('task-complete').click();
+  const completeResponse = await completePending;
+  assert.equal(completeResponse.status(), 200);
+  const completeRequest = completeResponse.request().postDataJSON();
+  const completeEnvelope = await completeResponse.json();
+  assert.equal(completeEnvelope.command_id, completeRequest.command_id);
+  assert.deepEqual([...completeRequest.artifact_version_ids].sort(), acceptedVersionIds);
+  assert.deepEqual([...completeEnvelope.result.artifact_version_ids].sort(), acceptedVersionIds);
+  const completionId = completeEnvelope.result.completion_id;
+  assert.match(completionId, /^[0-9a-f-]{36}$/iu);
+  const completionReceipt = await apiGet(`/commands/${completeRequest.command_id}`);
+  assert.equal(completionReceipt.command_type, 'CompleteHumanTask');
+  assert.deepEqual(completionReceipt.result, completeEnvelope.result);
   await expect(page.getByTestId('task-complete-receipt')).toContainText('已完成本轮');
-  await page.locator('input[name="reopen-reason"]').fill('核对新一轮验收');
+  const completionEvidence = await apiGet(`/completion-records/${completionId}`);
+  assert.equal(completionEvidence.is_current, true);
+  assert.deepEqual(completionEvidence.artifact_versions.map((version) => version.artifact_version_id).sort(), acceptedVersionIds);
+  assert.deepEqual(completionEvidence.artifact_versions.map((version) => version.sha256).sort(),
+    [firstVersion.sha256, secondVersion.sha256].sort());
+
+  await page.reload();
+  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.getByTestId(`completion-artifact-${firstVersion.version_id}`)).toBeDisabled();
+  await expect(page.getByTestId(`completion-artifact-${secondVersion.version_id}`)).toBeDisabled();
+  await expect(page.getByTestId('task-complete')).toBeDisabled();
+  await expect(page.getByTestId('artifact-save')).toBeDisabled();
+  await expect(page.getByTestId('completion-artifact-summary')).toContainText('本轮实际接受');
+  await page.getByTestId('artifact-versions').locator('summary').click();
+  await expect(page.getByTestId(`artifact-version-${firstVersion.version_id}`).locator('xpath=ancestor::li'))
+    .toContainText('本轮接受');
+  await expect(page.getByTestId(`artifact-version-${secondVersion.version_id}`).locator('xpath=ancestor::li'))
+    .toContainText('本轮接受');
+
+  const reopenReason = '核对多成果接受后的历史保留';
+  await page.locator('input[name="reopen-reason"]').fill(reopenReason);
+  const reopenPath = `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/reopen`;
+  const reopenPending = page.waitForResponse((response) => response.request().method() === 'POST' &&
+    new URL(response.url()).pathname === reopenPath);
   await page.getByTestId('task-reopen-submit').click();
+  const reopenResponse = await reopenPending;
+  assert.equal(reopenResponse.status(), 200);
+  const reopenRequest = reopenResponse.request().postDataJSON();
+  const reopenEnvelope = await reopenResponse.json();
+  assert.equal(reopenEnvelope.command_id, reopenRequest.command_id);
+  assert.equal(reopenEnvelope.result.previous_completion_id, completionId);
+  assert.equal(reopenEnvelope.result.status, 'READY');
+  const reopenedEvidence = await apiGet(`/completion-records/${completionId}`);
+  assert.equal(reopenedEvidence.is_current, false);
+  assert.deepEqual(reopenedEvidence.artifact_versions.map((version) => version.artifact_version_id).sort(), acceptedVersionIds);
   await expect(page.getByTestId('task-reopen-receipt')).toContainText('已重开');
-  console.log(`release_sha256=${hash} project_id=${projectId} task_id=${taskId} webview_pg_business_chain=pass synthetic_input=true`);
+  await page.reload();
+  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.getByTestId(`completion-artifact-${firstVersion.version_id}`)).not.toBeChecked();
+  await expect(page.getByTestId(`completion-artifact-${secondVersion.version_id}`)).not.toBeChecked();
+  const reopenedArtifacts = await apiGet(`/tasks/${taskId}/artifacts`);
+  assert.deepEqual(reopenedArtifacts.current_accepted_version_ids, []);
+  assert.deepEqual((await apiGet(`/completion-records/${completionId}`)).artifact_versions
+    .map((version) => version.artifact_version_id).sort(), acceptedVersionIds);
+  console.log(`release_sha256=${hash} project_id=${projectId} task_id=${taskId} ` +
+    `artifacts=${firstVersion.artifact_id},${secondVersion.artifact_id} ` +
+    `accepted=${acceptedVersionIds.join(',')} completion_id=${completionId} ` +
+    'completion_read_only=true reopen_history_retained=true webview_pg_business_chain=pass synthetic_input=true');
 } finally { await browser.close(); }

@@ -3021,7 +3021,7 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
               <span>{formatUsagePercent(hitRate, 1)}%</span></p>}
           </>}
         <p className="agent-chat-context-meter-note">上下文按该次调用重发的完整历史计（含缓存）；
-          占用上限取应用配置的单次预算（max_call_tokens），不是模型物理窗口。</p>
+          占用上限取工作区上下文长度档位，未选择时取应用配置的单次预算（max_call_tokens），不是模型物理窗口。</p>
       </div>}
       {tooltipNode}
     </div>
@@ -3956,9 +3956,14 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   }, [client, session.id]);
   useEffect(() => {
     let active = true;
-    // 圆环分母只用于表达"这次调用占了多少预算"。读不到就留空，不拿别的数字顶替。
-    void client.getModelPortStatus().then((status) => {
-      if (active) setCallLimit(status.maxCallTokens);
+    // 圆环分母只用于表达"这次调用占了多少预算"。优先取工作区档位（0135），未选择时
+    // 回落到应用配置的单次预算；两者都读不到就留空，不拿别的数字顶替。
+    void client.getModelPortStatus().then(async (status) => {
+      let workspaceBudget: number | null = null;
+      try {
+        workspaceBudget = (await client.getWorkspaceDefaultDirectory()).contextBudgetTokens;
+      } catch { /* 档位读不到只影响分母；不把整块状态判成不可用。 */ }
+      if (active) setCallLimit(workspaceBudget ?? status.maxCallTokens);
     }).catch(() => { if (active) setCallLimit(null); });
     return () => { active = false; };
   }, [client]);

@@ -259,6 +259,8 @@ export async function createDelegation(db: DbExecutor, input: {
   readonly parentToolCallId: string | null;
   readonly request: DelegationRequest;
   readonly modelSelectionSnapshot: JsonObject | null;
+  /** 0142：与快照同源的凭据身份；子会话沿用父消息身份，不重新解析当前凭据。 */
+  readonly modelCredentialFingerprint?: string | null;
   readonly workerId: string;
   readonly maxAttempts?: number;
 }): Promise<CreatedDelegation> {
@@ -310,7 +312,8 @@ export async function createDelegation(db: DbExecutor, input: {
       status: 'PENDING', intent: 'DISCUSS', content: null, sources: [], chatMode: 'CHAT',
       ...(input.modelSelectionSnapshot === null ? {} : {
         modelSelectionSnapshot: input.modelSelectionSnapshot,
-        modelAttemptState: freshAssistModelAttemptState() }),
+        modelAttemptState: freshAssistModelAttemptState(),
+        modelCredentialFingerprint: input.modelCredentialFingerprint ?? null }),
     });
     const delegationId = randomUUID();
     const delegation = await repositories.subagents.insertDelegation({
@@ -537,6 +540,7 @@ export async function settleDelegationToolCall(db: DbExecutor, context: Delegati
       parentSession: context.parentSession, parentMessageId: context.parentMessage.id,
       parentToolCallId: row.id, request,
       modelSelectionSnapshot: context.parentMessage.model_selection_snapshot,
+      modelCredentialFingerprint: context.parentMessage.model_credential_fingerprint,
       workerId: context.workerId });
   } catch (error) {
     if (error instanceof DelegationRefusedError) {

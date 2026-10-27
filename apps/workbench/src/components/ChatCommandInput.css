@@ -12,6 +12,19 @@
   color: transparent;
   caret-color: var(--relay-color-text-primary);
 }
+/* 禁用/发送中不点亮 mention 原文（2026-10-26 独立验收指认的重影）：会话输入器的
+   禁用规则（`.agent-chat-composer .field textarea:disabled` 与 `.create-form` 同款，
+   (0,3,1)）把 color 和 -webkit-text-fill-color 重新刷回正文色，压过上面的 (0,2,1)
+   透明——草稿带着 mention 发送时底层原文与镜像层芯片两层可见文字。这里以 (0,4,1)
+   稳压（组件根类在场，与两个样式表的导入顺序无关）：芯片态无论是否禁用都只露
+   镜像层一层字；纯文本草稿（无 data-chips）不受影响，禁用灰与提交窗口不灰规则照旧。 */
+.chat-command-input .chat-command-surface[data-chips="on"] > textarea:disabled {
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--relay-color-text-primary);
+  opacity: 1;
+}
 /* 选中跨过 mention 时，textarea 的默认选区是不透明系统蓝，会把镜像层里的芯片
    整个盖住（用户实测「选中后图标变成蓝色 @」）。半透明选区 + 选中文字保持透明：
    芯片与正文从选区底下透出来，选区仍是可读的浅色底，选中语义不变。 */

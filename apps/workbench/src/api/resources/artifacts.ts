@@ -339,5 +339,24 @@ export async function selectArtifactVersion(http: RelayHttp, input: { readonly p
       })
     }
   );
-  return stateMutationFrom(commandEnvelopeFrom(body).result);
+  // 2xx 也可能与冻结命令错配：身份、Project、action、修订逐项对齐后才算数，
+  // 否则抛传输错，调用方保留原 command_id 可继续查回执。
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    const mutation = stateMutationFrom(envelope.result);
+    let expectedNext: bigint;
+    try { expectedNext = BigInt(input.expectedRevision) + 1n; } catch {
+      throw new Error("原 State revision 不是十进制整数。");
+    }
+    if (envelope.commandId !== input.commandId ||
+      mutation.projectId !== input.projectId ||
+      mutation.action !== "SELECT_ARTIFACT_VERSION" ||
+      BigInt(mutation.revision) !== expectedNext) {
+      throw new Error("选择响应与冻结命令不一致。");
+    }
+    return mutation;
+  } catch (caught) {
+    if (caught instanceof RelayTransportError) throw caught;
+    throw new RelayTransportError("选择命令响应无法核对，请查询原 command ID 回执。");
+  }
 }

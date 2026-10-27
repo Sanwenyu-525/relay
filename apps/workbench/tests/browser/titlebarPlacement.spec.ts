@@ -3,6 +3,30 @@ import { expect, test } from "@playwright/test";
 const today = "/today";
 const collaboration = "/agent";
 
+test("窄桌面标题栏的窗口控制和常用操作均留在视口内", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(today);
+  // 浏览器不提供 Tauri 窗口控制；用与桌面相同的结构检查真实标题栏 CSS 几何。
+  await page.locator(".desktop-titlebar").evaluate((bar) => {
+    const cluster = bar.querySelector(".desktop-titlebar__cluster")!;
+    const notice = document.createElement("button");
+    notice.className = "icon-button"; notice.setAttribute("aria-label", "通知与待处理");
+    cluster.append(notice);
+    const controls = document.createElement("div");
+    controls.className = "desktop-titlebar__controls";
+    for (const label of ["最小化", "最大化", "关闭窗口"]) {
+      const button = document.createElement("button");
+      button.className = "desktop-titlebar__button"; button.setAttribute("aria-label", label);
+      controls.append(button);
+    }
+    bar.append(controls);
+  });
+  for (const button of await page.locator('.desktop-titlebar button, .desktop-titlebar a').all()) {
+    const box = await button.boundingBox();
+    if (box) { expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(390); }
+  }
+});
+
 test.describe("常用操作位于标题栏左侧", () => {
   test.use({ viewport: { width: 1487, height: 1058 } });
 

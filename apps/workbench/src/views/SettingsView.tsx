@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FolderOpen, Info, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayModelPortStatus,
-  type RelayModelVerificationState, type RelayModelVerifyErrorCategory, type RelayViewKind,
+  type RelayModelVerificationState, type RelayModelVerifyErrorCategory,
+  type RelayVerifyTargetState, type RelayViewKind,
   type RelayWorkingDirectory, type RelayWriteTier, type RelayWorkspaceDefaultDirectory } from "../api/relayClient";
 import PackCatalogPanel from "../components/PackCatalogPanel";
 import MemorySettingsCard from "../components/MemorySettingsCard";
+import ContextBudgetCard from "../components/ContextBudgetCard";
+import { ModelConnectionsCard } from "../components/ModelConnectionsCard";
 import PageHeader from "../components/PageHeader";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
@@ -31,24 +34,56 @@ const providerLabels: Record<RelayModelPortStatus["provider"], string> = {
   invalid: "真实 Provider 配置残缺"
 };
 
-/** 模型验证六态：互斥，各自回答不同问题，绝不互相冒充。 */
+/**
+ * 模型验证态：互斥，各自回答不同问题，绝不互相冒充。
+ *
+ * P1-6：服务端给出目标级 13 态时以它为准（`verification.state`），前端不再用
+ * 「last + matches」猜——目录过期、资格失效、账户冷却期间上一行是 ok 也不显示「验证通过」。
+ * 旧服务端没有 `state` 时退回原推导，不谎报。
+ */
 export type ModelVerificationStateKind =
-  | "UNCONFIGURED"      // 未配置
-  | "UNVERIFIED"        // 已配置未验证
-  | "VERIFYING"         // 验证中
-  | "VERIFIED"          // 验证通过
-  | "VERIFY_FAILED"     // 验证失败
-  | "UNAVAILABLE";      // 当前不可用
+  | "UNCONFIGURED"       // 未配置
+  | "CONFIG_INCOMPLETE"  // 配置残缺
+  | "UNVERIFIED"         // 已配置未验证
+  | "VERIFYING"          // 验证中
+  | "VERIFIED"           // 验证通过
+  | "VERIFY_FAILED"      // 验证失败（未分类）
+  | "AUTH_FAILED"        // 认证/权限失败
+  | "MODEL_NOT_FOUND"    // 型号不存在
+  | "CREDENTIAL_CHANGED" // 换过 Key，旧结论失效
+  | "CATALOG_STALE"      // 目录过期，资格无法确认
+  | "NOT_ELIGIBLE"       // 不在免费目录 / 能力不足
+  | "ACCOUNT_COOLDOWN"   // 账户级限流冷却中
+  | "BUDGET_EXHAUSTED"   // 调用预算不足
+  | "UNAVAILABLE";       // 当前不可用
+
+const serverStateToKind: Record<RelayVerifyTargetState, ModelVerificationStateKind> = {
+  NOT_CONFIGURED: "UNCONFIGURED",
+  CONFIG_INCOMPLETE: "CONFIG_INCOMPLETE",
+  UNVERIFIED: "UNVERIFIED",
+  VERIFIED: "VERIFIED",
+  CREDENTIAL_CHANGED: "CREDENTIAL_CHANGED",
+  AUTH_FAILED: "AUTH_FAILED",
+  MODEL_NOT_FOUND: "MODEL_NOT_FOUND",
+  CATALOG_STALE: "CATALOG_STALE",
+  CAPABILITY_INSUFFICIENT: "NOT_ELIGIBLE",
+  FREE_INELIGIBLE: "NOT_ELIGIBLE",
+  ACCOUNT_COOLDOWN: "ACCOUNT_COOLDOWN",
+  BUDGET_EXHAUSTED: "BUDGET_EXHAUSTED",
+  UNKNOWN: "VERIFY_FAILED"
+};
 
 export function resolveVerificationState(input: {
   readonly status: RelayModelPortStatus | null;
   readonly verification: RelayModelVerificationState | null;
   readonly verifying: boolean;
 }): ModelVerificationStateKind {
+  if (input.verifying) return "VERIFYING";
+  const serverState = input.verification?.state ?? null;
+  if (serverState !== null) return serverStateToKind[serverState];
   if (input.status === null) return "UNAVAILABLE";
   if (input.status.provider === "invalid") return "UNAVAILABLE";
   if (input.status.provider === "fake" || !input.status.configured) return "UNCONFIGURED";
-  if (input.verifying) return "VERIFYING";
   const last = input.verification?.last ?? null;
   const matches = input.verification?.matchesCurrentConfig === true;
   if (last !== null && matches) return last.ok ? "VERIFIED" : "VERIFY_FAILED";
@@ -89,6 +124,48 @@ const verificationLabels: Record<ModelVerificationStateKind,
     chip: "当前不可用",
     tone: "danger",
     detail: "真实模型配置残缺或服务状态无法读取，连接验证不可用。生产进程会拒绝残缺配置，不会静默回退。"
+  },
+  CONFIG_INCOMPLETE: {
+    chip: "配置残缺",
+    tone: "danger",
+    detail: "服务端读到了 Provider 声明，但缺少必需字段（例如 API Key 或模型名）。生产进程会拒绝启动，"
+      + "不会静默回退 Mock；补齐配置后再验证。"
+  },
+  AUTH_FAILED: {
+    chip: "认证失败",
+    tone: "danger",
+    detail: "Provider 拒绝了这次调用的认证或权限（401/403）。请核对 API Key 是否有效、是否有该型号的权限；"
+      + "换 Key 后必须重新验证。"
+  },
+  MODEL_NOT_FOUND: {
+    chip: "型号不存在",
+    tone: "danger",
+    detail: "Provider 返回 404：这个确切型号在当前账户或端点下不存在。请核对型号 ID 与端点，不要改用别的型号冒充。"
+  },
+  CREDENTIAL_CHANGED: {
+    chip: "凭据已更换",
+    tone: "warning",
+    detail: "最近一次验证用的是另一份凭据（API Key 已更换）。旧结论不代表当前连接可执行，请重新验证。"
+  },
+  CATALOG_STALE: {
+    chip: "目录已过期",
+    tone: "warning",
+    detail: "免费目录快照已过期，无法确认这个型号此刻是否仍然免费可调用。请先刷新目录，再验证或选择。"
+  },
+  NOT_ELIGIBLE: {
+    chip: "型号不可调用",
+    tone: "warning",
+    detail: "这个型号不在当前免费目录里，或缺少文本输入/输出能力。目录存在不等于可执行，请选择目录内的免费文本型号。"
+  },
+  ACCOUNT_COOLDOWN: {
+    chip: "账户冷却中",
+    tone: "warning",
+    detail: "这个账户近期被平台或上游限流，冷却期内不发起调用。冷却按凭据身份隔离：换用另一个账户的 Key 互不影响。"
+  },
+  BUDGET_EXHAUSTED: {
+    chip: "预算不足",
+    tone: "warning",
+    detail: "这次调用超出已冻结的单次或作用域预算。请调整预算档位后重新验证；预算不会被切换模型重置。"
   }
 };
 
@@ -272,11 +349,22 @@ function ImageInputDeclaration({ client, model, onSaved }: {
 function VerificationDetailCard({ verification, verifying }: {
   verification: RelayModelVerificationState | null; verifying: boolean;
 }) {
-  const last = verification?.last ?? null;
+  // 本目标最近一次（另一个型号的成功不算）。旧服务端没有 target_last 时，解析层已经把它
+  // 归一到实例级 last，所以这里只认 targetLast，不再二次回退——否则「本目标没有验证行」
+  // 会被另一个型号的成功顶替。
+  const last = verification?.targetLast ?? null;
   const matches = verification?.matchesCurrentConfig === true;
+  const credentialChanged = verification?.credentialIdentity === "CHANGED";
+  const targetLabel = verification === null || verification === undefined ? null
+    : verification.connection === "default" ? "应用默认连接"
+      : `OpenRouter 免费型号 · ${verification.model ?? verification.target}`;
   const { timeZone } = useDisplayPreferences();
   return <section className="surface-panel settings-card" data-testid="verification-detail">
     <h2>最近一次验证</h2>
+    {targetLabel !== null && <p className="helper-text" data-testid="verification-target">
+      验证目标：{targetLabel}。目标按确切型号区分：另一个型号验证通过，不代表这个型号可执行。</p>}
+    {credentialChanged && <p className="helper-text" role="alert" data-testid="verification-credential">
+      凭据已更换：最近一次验证用的是另一份 API Key，旧结论不再代表当前连接可执行，请重新验证。</p>}
     {last === null
       ? <p className="helper-text">尚无验证记录。配置后可点击「验证连接」发起一次固定短文本调用。</p>
       : <dl className="settings-definition-list">
@@ -717,10 +805,16 @@ return <section className="settings-page pv-page" data-testid="settings-page">
       <ServiceStateCard loading={loading} error={error} status={status}
         verification={verification} verifying={verifying} onVerify={onVerify} />
       {status && <ModelPortCard status={status} client={client} onSaved={refresh} />}
+      {/* ADR-036：连接登记（懒加载，展开才发请求）。只在「AI 设置」页签激活时挂载，
+          避免隐藏页签仍挂载子组件时多发一条读取。 */}
+      {group === "model" && <ModelConnectionsCard client={client} />}
       {status?.configured === true && <VerificationDetailCard verification={verification}
         verifying={verifying} />}
       {/* 记忆设置与模型端口同为「AI 行为」配置，但两者独立：模型不可用不影响这两个开关的读写。 */}
       <MemorySettingsCard client={client} />
+      {/* 0135：上下文长度三档按工作空间生效。只在「AI 设置」页签激活时挂载：
+          隐藏页签仍会挂载子组件，不这样处理会在基本设置页多发一条默认目录读取。 */}
+      {group === "model" && <ContextBudgetCard client={client} />}
       <section className="surface-panel settings-card">
         <h2>相关入口</h2>
         <ul className="settings-links">

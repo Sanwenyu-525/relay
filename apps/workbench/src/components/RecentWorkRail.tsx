@@ -736,10 +736,11 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       {loadedCount === 0 && batchBar}
       {/* 首装与搜索无匹配是两件事：前者说明工作空间还没有任何未归档的任务或会话，后者只说明已加载范围内没有命中。
           这里用紧凑空态、不放主操作——侧栏只是定位入口，新建任务的主决策区在任务页。
-          措辞必须限定「未归档」：把唯一一条讨论归档后这一段也会出现，说「还没有任何会话」就是假话。 */}
+          措辞必须限定「未归档」：把唯一一条讨论归档后这一段也会出现，说「还没有任何会话」就是假话。
+          标题不带限定词，因此「已归档」那一句是这句标题成立的前提，删掉它标题就变成假话。 */}
       {!loading && !error && !sessionsError && loadedCount === 0 &&
-        <EmptyState size="compact" title="还没有任务"
-          description="当前工作空间还没有未归档的任务或会话。归档过的讨论收在下方「已归档」里。项目、任务与产物版本都只从本机服务端读取，不会从别处自动出现。"
+        <EmptyState size="compact" title="还没有任务或会话"
+          description="新建任务开始，或用上方「新对话」直接讨论。这里只显示本机内容，归档过的收在下方「已归档」里。"
           testId="recent-work-empty"
           actions={<button className="text-button" type="button"
             onClick={() => { void navigate("/tasks?view=create"); onOpen?.(); }}>新建任务</button>} />}

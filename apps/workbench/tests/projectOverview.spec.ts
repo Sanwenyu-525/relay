@@ -94,6 +94,7 @@ function stubOverview(options: { archived?: boolean; withNextAction?: boolean; b
     if (rel === `/projects/${projectId}/state`) return liveResponse({ project_id: projectId,
       phase_key: "EXPERIMENT", revision: "7", next_action_task_id: withNextAction ? nextTaskId : null,
       selected_artifact_version_refs: [], completed_highlight_refs: [] });
+    if (rel === `/projects/${projectId}/daily-continuation`) return liveResponse(dailyContinuation());
     if (rel === `/projects/${projectId}/goals`) return liveResponse({ items: [] });
     if (rel === "/reviews?status=OPEN") return liveResponse({ items: [], next_cursor: null });
     if (rel === `/decisions?project_id=${projectId}`) return liveResponse([]);
@@ -111,6 +112,43 @@ function stubOverview(options: { archived?: boolean; withNextAction?: boolean; b
 }
 
 describe("项目总览接续呈现（V43-04，live）", () => {
+  it("State 命令成功后重新读取接续摘要，不能把旧阶段当作当前事实", async () => {
+    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
+    const posts: { path: string }[] = [];
+    const fallback = stubOverview({ withNextAction: false }, posts);
+    let revision = "7";
+    const daily = () => ({ ...dailyContinuation(), current: { ...dailyContinuation().current,
+      state_revision: revision, phase_key: revision === "7" ? "PLANNING" : "EXECUTING", next_action_task_id: null } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const rel = String(input).slice(root.length);
+      if (init?.method === "POST" && rel.endsWith("/state-commands")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        revision = "8";
+        return liveResponse({ command_id: body.command_id, committed_at: "2026-10-27T00:00:00Z",
+          result: { project_id: projectId, action: body.action, revision } });
+      }
+      if (init?.method !== "POST" && rel === `/projects/${projectId}/state`) {
+        return liveResponse({ project_id: projectId, phase_key: revision === "7" ? "PLANNING" : "EXECUTING",
+          revision, next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+      }
+      if (init?.method !== "POST" && rel.endsWith("/daily-continuation")) return liveResponse(daily());
+      if (init?.method === "POST" && rel.endsWith("/daily-view-confirmations")) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return liveResponse({ command_id: body.command_id, committed_at: "2026-10-27T00:00:00Z", result: daily() });
+      }
+      return fallback(input, init);
+    }));
+    const mounted = await mountWorkbench(`/projects/${projectId}`);
+    unmount = mounted.unmount;
+    await flush(); await flush();
+    expect(mounted.wrapper.get('[data-testid="daily-continuation-facts"]').text()).toContain("阶段 规划");
+    await mounted.wrapper.get('[data-testid="state-phase"]').setValue("EXECUTING");
+    await mounted.wrapper.get('[data-testid="state-phase-submit"]').trigger("click");
+    await flush(); await flush(); await flush();
+    expect(mounted.wrapper.get('[data-testid="project-overview-facts"]').text()).toContain("State v8");
+    expect(mounted.wrapper.get('[data-testid="daily-continuation-facts"]').text()).toContain("阶段 执行");
+  });
+
   it("接续摘要卡提供继续工作与查看动态；查看动态带项目过滤，继续工作零新增业务写入", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
     const posts: { path: string }[] = [];

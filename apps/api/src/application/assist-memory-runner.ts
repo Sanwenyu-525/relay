@@ -8,7 +8,7 @@ import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-p
 import { computeModelConfigFingerprint, readOpenRouterModelPortConfig } from '../workflow/model-port-config.js';
 import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
-import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { applySnapshotBudget, parseAssistModelSnapshot, snapshotIdentityBudget } from './assist-model-snapshot.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { createRepositories, withTransaction } from './unit-of-work.js';
@@ -38,7 +38,8 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
         options.modelPort.identity.configFingerprint !== candidate.connection.configFingerprint) {
       throw new AssistMemoryUnavailable('MEMORY_MODEL_CONFIG_CHANGED');
     }
-    return options.modelPort;
+    // 0135：压缩是该会话的又一次真实外呼，预算沿用冻结快照（含工作区档位）。
+    return applySnapshotBudget(options.modelPort, snapshot.budget);
   }
   const config = readOpenRouterModelPortConfig(options.modelEnv ?? process.env, candidate.connection.model);
   const r = createRepositories(db);
@@ -55,7 +56,8 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
   }
   return new OpenAiCompatibleModelPort(config, options.modelFetchDependencies ?? {}, buildFreePriceGuard({
     connection: candidate.connection, freeOnly: candidate.freeOnly,
-    catalogBasis: candidate.catalogBasis, budget: snapshot.budget }));
+    catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
+    snapshotIdentityBudget(snapshot.budget));
 }
 
 /** Automatic requests are prepared while the claimed message's session is locked, then requeued. */

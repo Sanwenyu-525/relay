@@ -7,6 +7,8 @@ import { createCommandId, RelayApiError, RelayTransportError, stateMutationFrom 
 import { RelayContractError } from "../api/core/errors";
 import { phaseLabel, phaseOptionsByProjectType, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
 
 /**
  * Project State 的人工管理入口：阶段、下一步、风险、阻塞与解除。
@@ -26,24 +28,22 @@ function pendingKey(client: RelayApiClient, projectId: string): string {
   return `relay:project-state-pending:${client.baseUrl}:${client.workspaceId}:${projectId}`;
 }
 
-function readPending(key: string): PendingState | null {
-  try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+function parsePending(value: unknown, projectId: string): PendingState | null {
     if (!value || typeof value !== "object") return null;
     const row = value as Record<string, unknown>;
     const command = row.command as Record<string, unknown> | undefined;
-    if (!command || typeof command !== "object" || typeof command.projectId !== "string" ||
+    if (!command || typeof command !== "object" || command.projectId !== projectId ||
       typeof command.commandId !== "string" || typeof command.expectedRevision !== "string" ||
       typeof command.action !== "string") return null;
+    const valid = command.action === "SET_PHASE" ? typeof command.phaseKey === "string"
+      : command.action === "SET_NEXT_ACTION" ? command.nextActionTaskId === null || typeof command.nextActionTaskId === "string"
+      : command.action === "ADD_CONFIRMED_RISK" ? typeof command.statement === "string" &&
+        typeof command.sourceRef === "string" && typeof command.confirmationRef === "string"
+      : command.action === "ADD_BLOCKER" ? ["PROJECT", "TASK", "GOAL"].includes(String(command.targetKind)) &&
+        typeof command.targetId === "string" && typeof command.reason === "string" && typeof command.sourceRef === "string"
+      : command.action === "RESOLVE_BLOCKER" ? typeof command.blockerId === "string" : false;
+    if (!valid) return null;
     return { command: command as unknown as RelayStateCommandInput };
-  } catch { return null; }
-}
-
-function savePending(key: string, pending: PendingState | null): void {
-  try {
-    if (pending) sessionStorage.setItem(key, JSON.stringify(pending));
-    else sessionStorage.removeItem(key);
-  } catch { /* 存储不可用只影响整页重开恢复。 */ }
 }
 
 function isUncertain(caught: unknown): boolean {
@@ -82,11 +82,14 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
   readonly onChanged: () => void;
 }) {
   const storageKey = pendingKey(client, projectId);
-  const [pending, setPending] = useState<PendingState | null>(() => readPending(storageKey));
+  const parseCommand = useCallback((value: unknown) => parsePending(value, projectId), [projectId]);
+  const [initialPending] = useState(() => readPendingCommand(storageKey, parseCommand));
+  const [pending, setPending] = useState<PendingState | null>(initialPending.pending);
   const pendingRef = useRef<PendingState | null>(pending);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialPending.available ? null
+    : "本机 State 恢复记录不可用或存在冲突；请恢复存储后重新打开，未发送新命令。");
   const [receipt, setReceipt] = useState<string | null>(null);
   const [mayRetry, setMayRetry] = useState(false);
   const [phaseKey, setPhaseKey] = useState(state.phaseKey);
@@ -102,9 +105,23 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
   const [showBlockerForm, setShowBlockerForm] = useState(false);
   const stateRevisionRef = useRef(state.revision);
 
-  const holdPending = useCallback((next: PendingState | null) => {
-    pendingRef.current = next; setPending(next); savePending(storageKey, next);
-  }, [storageKey]);
+  const holdPending = useCallback((next: PendingState | null): boolean => {
+    const saved = next === null ? clearPendingCommand(storageKey, pendingRef.current, parseCommand)
+      : reservePendingCommand(storageKey, next, parseCommand);
+    if (!saved) return false;
+    pendingRef.current = next; setPending(next); return true;
+  }, [storageKey, parseCommand]);
+
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => pendingRef.current !== null,
+    discard: () => {},
+    pendingCommandId: () => pendingRef.current?.command.commandId ?? null,
+    pendingRecoversAfterLeave: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(storageKey, pendingRef.current, parseCommand),
+    pendingRecoversAfterRestart: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(storageKey, pendingRef.current, parseCommand)
+  });
+  useEffect(() => { setDraftGuard(guard.current); return () => clearDraftGuard(guard.current); }, []);
 
   useEffect(() => {
     if (stateRevisionRef.current === state.revision) return;
@@ -130,7 +147,8 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
         throw new StateCommandMismatch("原回执不是本次 SetProjectState。");
       }
       const message = verifyStateEnvelope(record.command, response);
-      holdPending(null); setReceipt(message); onChanged();
+      if (!holdPending(null)) { setError("State 命令已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setReceipt(message); onChanged();
     } catch (caught) {
       if (caught instanceof StateCommandMismatch) {
         setError(`回执与冻结命令不匹配：${caught.message}已保留原 command_id。`);
@@ -142,18 +160,22 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
   }, [client, holdPending, onChanged]);
 
   const send = useCallback(async (record: PendingState) => {
+    if (!reservePendingCommand(storageKey, record, parseCommand)) {
+      setBusy(false); setError("无法保存或核对原命令，本次请求未发送；请恢复存储后核对回执。"); return;
+    }
     setBusy(true); setError(null); setReceipt(null); setMayRetry(false);
     try {
       const envelope = await client.runProjectStateCommand(record.command);
       const message = verifyStateEnvelope(record.command, envelope);
-      holdPending(null); setReceipt(message); onChanged();
+      if (!holdPending(null)) { setError("State 命令已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setReceipt(message); onChanged();
     } catch (caught) {
       if (caught instanceof StateCommandMismatch) {
         setError(`响应与冻结命令不匹配：${caught.message}不宣布成功。`);
       } else if (isUncertain(caught)) {
         setError("State 命令结果尚不能确认；已保留原 command_id，先查询回执。");
       } else {
-        holdPending(null);
+        if (!holdPending(null)) { setError("命令已被拒绝，但本机恢复记录未能清理；请恢复存储并核对原命令。"); return; }
         if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
           setError(`State 修订已变化${caught.problem.actualRevision ? `（当前 v${caught.problem.actualRevision}）` : ""}；已重新读取，请按新事实再次确认。`);
           onChanged();
@@ -164,7 +186,7 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
         } else setError(describeLiveError(caught).message);
       }
     } finally { setBusy(false); }
-  }, [client, holdPending, onChanged]);
+  }, [client, holdPending, onChanged, parseCommand, storageKey]);
 
   function start(command: RelayStateCommandInput) {
     if (archived) { setError("项目已归档，不能提交新的 State 命令。"); return; }
@@ -175,7 +197,11 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
     if (busyRef.current) return;
     busyRef.current = true;
     const record = { command };
-    holdPending(record);
+    if (!holdPending(record)) {
+      busyRef.current = false;
+      setError("无法保存或核对本机 State 恢复记录，未发送命令；请恢复存储后重试。");
+      return;
+    }
     void send(record).finally(() => { busyRef.current = false; });
   }
 

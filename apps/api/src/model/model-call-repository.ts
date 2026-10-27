@@ -245,14 +245,15 @@ export class ModelCallRepository {
     identity: ModelIdentity): Promise<void> {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
       assist_message_id, member_message_id, manifest_id, criterion_id, check_attempt,
-      provider, model, config_fingerprint, input_sha256,
+      provider, model, config_fingerprint, credential_fingerprint, input_sha256,
       read_operation_id, read_invocation_id, budget_reserved_tokens)
       values (${id}, ${origin.workspaceId}, ${origin.kind},
         ${origin.stepAttemptId ?? null}, ${origin.assistMessageId ?? null},
         ${origin.memberMessageId ?? null}, ${origin.manifestId ?? null},
         ${origin.criterionId ?? null},
         ${origin.checkAttempt ?? null}, ${identity.provider}, ${identity.model},
-        ${identity.configFingerprint}, ${origin.inputHash ?? null},
+        ${identity.configFingerprint}, ${identity.credentialFingerprint ?? null},
+        ${origin.inputHash ?? null},
         ${origin.readOperationId ?? null}, ${origin.readInvocationId ?? null},
         ${identity.budget?.callReservationTokens ?? null})`.execute(db);
   }
@@ -307,6 +308,19 @@ export class ModelCallRepository {
   /** 最近一次模型端口验证（实例级：跨 Workspace 取最新一条 VERIFY）。 */
   async latestVerify(): Promise<ModelCallRow | undefined> {
     return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
+      order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
+  }
+
+  /**
+   * 指定验证目标（P1-4）的最近一行：按 provider + 确切型号过滤，**不**按配置指纹过滤。
+   *
+   * 这样「同一个型号、端点/预算变了」仍能读到上一行并显示为「指纹不符、需重新验证」；
+   * 而另一个型号的验证结果不会冒充这个目标的历史。
+   */
+  async latestVerifyForModel(provider: string,
+    model: string): Promise<ModelCallRow | undefined> {
+    return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
+      and provider = ${provider} and model = ${model}
       order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
   }
 }

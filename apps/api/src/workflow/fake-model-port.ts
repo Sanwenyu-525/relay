@@ -29,6 +29,11 @@ export interface ModelIdentity {
   readonly provider: string;
   readonly model: string;
   readonly configFingerprint: string;
+  /**
+   * 0142：本次调用所用凭据的单向身份（`credential-identity.ts`）。
+   * 只有服务端比较用；不进快照、不进响应、不进日志。
+   */
+  readonly credentialFingerprint?: string;
   readonly budget?: {
     readonly callReservationTokens: number;
     readonly scopeCallLimit: number;

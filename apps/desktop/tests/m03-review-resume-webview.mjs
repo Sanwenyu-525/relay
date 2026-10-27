@@ -29,7 +29,7 @@ const expectedMigrationSha = process.argv[3];
 const inflightCancel = process.argv.slice(4).includes('--inflight-cancel');
 const artifactLifecycle = process.argv.slice(4).includes('--artifact-lifecycle');
 assert.ok(!(inflightCancel && artifactLifecycle), 'select one optional WebView scenario');
-const migration = join(releaseRoot, 'api', 'migrations', '0013_m03_run_command_order.sql');
+const migration = join(releaseRoot, 'api', 'migrations', '0136_artifact_task_workspace_scope.sql');
 const manifestPath = join(releaseRoot, 'desktop-build-manifest.json');
 const packageInputs = [exe, node, manifestPath, migration,
   join(releaseRoot, 'api', 'dist', 'src', 'main.js'),
@@ -43,7 +43,7 @@ if (inflightCancel) packageInputs.push(
 
 assert.equal(process.version, 'v24.21.0', 'use the pinned portable Node 24.21.0');
 assert.match(expectedExeSha ?? '', /^[0-9a-f]{64}$/u,
-  'usage: node m03-review-resume-webview.mjs <frozen-EXE-SHA256> <frozen-0013-SHA256> [--inflight-cancel|--artifact-lifecycle]');
+  'usage: node m03-review-resume-webview.mjs <current-EXE-SHA256> <current-0136-SHA256> [--inflight-cancel|--artifact-lifecycle]');
 assert.match(expectedMigrationSha ?? '', /^[0-9a-f]{64}$/u);
 for (const path of [psql, ...packageInputs]) {
   assert.ok(existsSync(path), `missing packaged test input: ${path}`);
@@ -53,7 +53,7 @@ const frozenPackage = new Map(packageInputs.map((path) => [path, sha(path)]));
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/u, ''));
 assert.equal(sha(exe), expectedExeSha, 'release executable changed after freeze');
 assert.equal(manifest.artifact_sha256, expectedExeSha, 'package manifest does not describe this executable');
-assert.equal(sha(migration), expectedMigrationSha, 'release 0013 migration changed after freeze');
+assert.equal(sha(migration), expectedMigrationSha, 'release 0136 migration changed after freeze');
 
 const powerShellEnv = { ...process.env };
 for (const key of Object.keys(powerShellEnv)) {
@@ -750,7 +750,7 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   assert.deepEqual(firstHistory.current_accepted_version_ids, []);
   await page.reload();
   await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
-  await expect(page.getByTestId(`artifact-version-${v1.version_id}`)).toBeVisible();
+  await expect(page.getByTestId(`artifact-read-${v1.version_id}`)).toBeVisible();
   await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
   await expect(page.getByTestId('artifact-load-latest-draft')).toBeEnabled();
   await page.getByTestId('artifact-load-latest-draft').click();
@@ -772,14 +772,16 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   assert.equal(await content(v2.version_id), secondContent);
 
   await page.reload();
-  await expect(page.getByTestId(`artifact-version-${v2.version_id}`)).toBeVisible();
+  await expect(page.getByTestId(`artifact-read-${v2.version_id}`)).toBeVisible();
   await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
-  await page.getByTestId(`artifact-version-${v2.version_id}`).check();
+  await page.getByTestId('artifact-accept-version').selectOption(v2.version_id);
   await submitUi('artifact-select-version', `/projects/${projectId}/state-commands`, 200, 'SetProjectState');
   await expect(page.getByText('项目 State 已选用 v2', { exact: false })).toBeVisible();
   assert.deepEqual((await get(bootstrap, `/projects/${projectId}/state`)).selected_artifact_version_refs
     .map((ref) => ref.artifact_version_id), [v2.version_id]);
-  await page.getByTestId(`artifact-version-${v1.version_id}`).check();
+  await page.getByTestId(`completion-artifact-${v1.version_id}`).check();
+  await page.getByTestId(`artifact-read-${v2.version_id}`).click();
+  await expect(page.getByTestId(`completion-artifact-${v1.version_id}`)).toBeChecked();
   const criteria = page.locator('[data-testid^="criterion-"]');
   assert.equal(await criteria.count(), 1);
   await criteria.check();
@@ -789,12 +791,17 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   assert.deepEqual(writes.at(-1).body.artifact_version_ids, [v1.version_id]);
   await expect(page.getByTestId('task-complete-receipt')).toContainText('已完成本轮');
   await page.reload();
+  await page.getByTestId('artifact-versions').locator('summary').click();
   const row = (versionId) => page.getByTestId(`artifact-version-${versionId}`).locator('xpath=ancestor::li');
   await expect(row(v1.version_id)).toContainText('本轮接受');
   await expect(row(v2.version_id)).toContainText('最新');
   await expect(row(v2.version_id)).toContainText('当前选用');
   await expect(row(v2.version_id)).not.toContainText('本轮接受');
   await expect(page.getByTestId('artifact-save')).toBeDisabled();
+  await expect(page.getByTestId('task-complete')).toBeDisabled();
+  await expect(page.getByTestId(`completion-artifact-${v1.version_id}`)).toBeChecked();
+  await expect(page.getByTestId(`completion-artifact-${v1.version_id}`)).toBeDisabled();
+  await expect(page.getByTestId('completion-artifact-summary')).toContainText('v1');
   assert.equal((await get(bootstrap, `/tasks/${taskId}`)).current_completion_id, completed.completion_id);
   assert.deepEqual((await get(bootstrap, `/tasks/${taskId}/artifacts`)).current_accepted_version_ids, [v1.version_id]);
   const evidence = await get(bootstrap, `/completion-records/${completed.completion_id}`);
@@ -802,12 +809,38 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   assert.equal(evidence.is_current, true);
   assert.deepEqual(evidence.artifact_versions.map((version) => version.artifact_version_id), [v1.version_id]);
   assert.equal(evidence.artifact_versions[0].sha256, v1.sha256);
-  await page.locator('input[name="reopen-reason"]').fill('核对同包恢复后的新一轮验收');
-  const reopened = await submitUi('task-reopen-submit', `/tasks/${taskId}/reopen`, 200, 'ReopenTask');
+  const reopenReason = '核对同包恢复后的新一轮验收';
+  await page.locator('input[name="reopen-reason"]').fill(reopenReason);
+  let lostReopen = null;
+  const reopenPath = `/api/v1/workspaces/${bootstrap.workspaceId}/tasks/${taskId}/reopen`;
+  await page.route((url) => url.pathname === reopenPath, async (route) => {
+    const request = route.request().postDataJSON();
+    const response = await route.fetch();
+    lostReopen = { request, url: route.request().url(), status: response.status(), envelope: await response.json() };
+    await route.abort('connectionreset');
+  });
+  await expect(page.getByTestId('task-reopen-submit')).toBeEnabled();
+  await page.getByTestId('task-reopen-submit').click();
+  await waitFor(() => lostReopen !== null, 10_000, 'ReopenTask server commit before dropping the WebView response');
+  assert.equal(lostReopen.status, 200);
+  assert.equal(lostReopen.envelope.command_id, lostReopen.request.command_id);
+  const reopened = lostReopen.envelope.result;
   assert.equal(reopened.status, 'READY');
   assert.equal(reopened.previous_completion_id, completed.completion_id);
   assert.equal(reopened.acceptance_revision, (BigInt(completed.acceptance_revision) + 1n).toString());
-  await expect(page.getByTestId('task-reopen-receipt')).toContainText('已重开');
+  assert.equal(new URL(lostReopen.url).pathname, reopenPath);
+  assert.equal(lostReopen.request.acceptance_revision, completed.acceptance_revision);
+  assert.equal(lostReopen.request.reason, reopenReason);
+  await expect(page.getByTestId('task-reopen-pending')).toContainText(lostReopen.request.command_id);
+  await expect(page.getByTestId('task-reopen-receipt')).toHaveCount(0);
+  const persistedReopen = await page.evaluate((commandId) =>
+    Object.values(localStorage).find((value) => value.includes(commandId)) ?? null,
+  lostReopen.request.command_id);
+  assert.ok(persistedReopen, 'the original reopen ID was not durably stored before closing the WebView');
+  for (const value of [taskId, lostReopen.request.expected_revision, completed.acceptance_revision, reopenReason]) {
+    assert.ok(persistedReopen.includes(value), `the original reopen payload omitted ${value}`);
+  }
+  writes.push({ commandId: lostReopen.request.command_id, body: lostReopen.request });
   assert.equal(new Set(writes.map((write) => write.commandId)).size, 5);
   assert.equal(ledger.delegate, null);
   assert.equal(ledger.tokenInUrl, false);
@@ -816,13 +849,26 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   const restored = await startHost('artifact-restored');
   const restoredLedger = watchWebView(restored.page, restored.bootstrap);
   await restored.page.goto(`http://tauri.localhost/tasks/${taskId}?tab=artifacts`);
-  await expect(restored.page.getByTestId(`artifact-version-${v2.version_id}`)).toBeVisible();
+  await expect(restored.page.getByTestId(`artifact-read-${v2.version_id}`)).toBeVisible();
+  await expect(restored.page.getByTestId('task-reopen-pending')).toContainText(lostReopen.request.command_id);
+  const restoredPendingReopen = await restored.page.evaluate((commandId) =>
+    Object.values(localStorage).find((value) => value.includes(commandId)) ?? null,
+  lostReopen.request.command_id);
+  assert.ok(restoredPendingReopen, 'the original reopen payload did not survive the packaged host restart');
+  assert.ok(restoredPendingReopen.includes(reopenReason));
+  await restored.page.getByTestId('task-reopen-receipt-query').click();
+  await expect(restored.page.getByTestId('task-reopen-receipt')).toContainText('已重开');
+  const reopenReceipt = await get(restored.bootstrap, `/commands/${lostReopen.request.command_id}`);
+  assert.equal(reopenReceipt.command_type, 'ReopenTask');
+  assert.deepEqual(reopenReceipt.result, reopened);
+  await restored.page.getByTestId('artifact-versions').locator('summary').click();
   await expect(restored.page.getByTestId(`artifact-version-${v1.version_id}`).locator('xpath=ancestor::li'))
     .not.toContainText('本轮接受');
   await expect(restored.page.getByTestId(`artifact-version-${v2.version_id}`).locator('xpath=ancestor::li'))
     .toContainText('当前选用');
   await expect(restored.page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
   await expect(restored.page.locator('[data-testid^="criterion-"]:checked')).toHaveCount(0);
+  await expect(restored.page.getByTestId(`completion-artifact-${v1.version_id}`)).not.toBeChecked();
   const restoredTask = await get(restored.bootstrap, `/tasks/${taskId}`);
   assert.equal(restoredTask.status, 'READY');
   assert.equal(restoredTask.current_completion_id, null);
@@ -879,10 +925,14 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   state.browser = null;
   state.page = null;
   console.log('titlebar_ui_close=true host_natural_exit=0 recorded_process_tree_stopped=true unsaved_draft=false');
+  const migrationVersion = await sql('select max(name) from relay_schema_migrations');
+  assert.equal(await sql("select name from relay_schema_migrations where name='0136_artifact_task_workspace_scope'"),
+    '0136_artifact_task_workspace_scope');
   console.log(`artifact_id=${v1.artifact_id} versions=2 v1=${v1.version_id} v2=${v2.version_id} ` +
     `selected=v2 accepted=v1 completion_id=${completed.completion_id} task=READY ` +
     `acceptance_revision=${reopened.acceptance_revision} current_completion=null historical_completion_retained=true ` +
-    'packaged_restart=true ui_commands=5 synthetic_input=true');
+    `reopen_response_lost=true reopen_command_id=${lostReopen.request.command_id} frozen_payload_recovered=true ` +
+    `migration_version=${migrationVersion} packaged_restart=true ui_commands=5 synthetic_input=true`);
 }
 
 async function runChain() {

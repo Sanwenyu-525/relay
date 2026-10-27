@@ -39,5 +39,6 @@
 | ADR-033：外部 Agent 通过共享任务参与项目协作 | [正文](ADR-033-external-agent-shared-tasks.md) |
 | ADR-034：项目级长期 Agent 成员与跨会话协作 | [正文](ADR-034-persistent-project-agent-team.md) |
 | ADR-035：右侧内置网页预览使用 Tauri 原生子 WebView | [正文](ADR-035-in-app-webview-preview.md) |
+| ADR-036：多 Provider 模型连接管理的数据模型与凭据存储前提（Proposed，未实现） | [正文](ADR-036-multi-provider-model-connections.md) |
 
 修改重要取舍时保留旧 ADR，标明 Accepted / Proposed / Superseded 等实际状态及接续链接；索引只同步标题与路径。

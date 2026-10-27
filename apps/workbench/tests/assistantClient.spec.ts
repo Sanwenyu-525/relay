@@ -150,7 +150,8 @@ describe("Workspace 默认工作目录客户端", () => {
     vi.stubGlobal("fetch", fetcher);
     const value = await defaultApi().getWorkspaceDefaultDirectory();
     expect(value).toEqual({ resourceId: null, canonicalRoot: null, displayName: null,
-      writeTier: null, defaultWriteTier: null, status: "UNSET", reason: null, revision: "0" });
+      writeTier: null, defaultWriteTier: null, contextBudgetTokens: null,
+      status: "UNSET", reason: null, revision: "0" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(`http://127.0.0.1:8787${defaultPrefix}/default-working-directory`);

@@ -97,10 +97,105 @@ let unmount: (() => void) | null = null;
 afterEach(() => {
   unmount?.(); unmount = null;
   sessionStorage.clear();
+  localStorage.clear();
+  vi.restoreAllMocks();
   resetRelayConnectionForTest(); vi.unstubAllGlobals();
 });
 
 describe("Goal 创建与关联的未决命令准入", () => {
+  it("本机无法保存原创建命令时不发送请求，保留输入供用户处理", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:create-goal:")) throw new DOMException("storage unavailable", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    expect(state.posts).toHaveLength(0);
+    expect((view.wrapper.get('[data-testid="goal-intent"]').element as HTMLTextAreaElement).value).toBe(intent);
+    expect(view.wrapper.text()).toContain("未发送");
+  });
+
+  it("窗口会话丢失后仍能恢复原创建命令和冻结载荷", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const first = await mountWorkbench("/projects?view=goal");
+    await first.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await first.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = state.posts[0]?.body.command_id as string;
+    first.unmount();
+    sessionStorage.clear();
+    const reopened = await mountWorkbench("/projects?view=goal"); unmount = reopened.unmount; await flush();
+    expect(reopened.wrapper.get('[data-testid="goal-pending"]').text()).toContain(commandId);
+    await reopened.wrapper.get('[data-testid="goal-receipt"]').trigger("click"); await flush();
+    await reopened.wrapper.get('[data-testid="goal-retry"]').trigger("click"); await flush();
+    expect(state.posts).toHaveLength(2);
+    expect(state.posts[1]?.body).toEqual(state.posts[0]?.body);
+  });
+
+  it("已发送命令的持久记录丢失时不提供安全离开出口", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await view.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = String(state.posts[0]?.body.command_id);
+    localStorage.removeItem(`relay:create-goal:${baseUrl}:${workspaceId}`);
+    await view.router.attempt("/projects");
+    expect(dialogText()).toContain(commandId);
+    expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
+    expect(view.router.currentRoute.value.query).toEqual({ view: "goal" });
+  });
+
+  it("回执未找到后若本机无法再保存原命令，重试不会发出请求", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await view.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = String(state.posts[0]?.body.command_id);
+    localStorage.removeItem(`relay:create-goal:${baseUrl}:${workspaceId}`);
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:create-goal:")) throw new DOMException("unavailable", "QuotaExceededError");
+      return original.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="goal-retry"]').trigger("click"); await flush();
+    expect(state.posts).toHaveLength(1);
+    expect(view.wrapper.get('[data-testid="goal-pending"]').text()).toContain(commandId);
+    expect(view.wrapper.text()).toContain("未发送");
+  });
+
+  it("成功回执后清理本机记录失败时保留原命令，恢复存储后可核对收口", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({}, state));
+    const view = await mountWorkbench("/projects?view=goal"); unmount = view.unmount;
+    await view.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    const original = Storage.prototype.removeItem;
+    const failure = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (this: Storage, key) {
+      if (key.startsWith("relay:create-goal:")) throw new DOMException("unavailable", "SecurityError");
+      return original.call(this, key);
+    });
+    await view.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = String(state.posts[0]?.body.command_id);
+    expect(view.wrapper.get('[data-testid="goal-pending"]').text()).toContain(commandId);
+    expect(view.wrapper.text()).toContain("未能清理");
+    expect(view.wrapper.find('[data-testid="goal-created"]').exists()).toBe(false);
+    failure.mockRestore();
+    vi.stubGlobal("fetch", router({ receiptHit: true }, state));
+    await view.wrapper.get('[data-testid="goal-receipt"]').trigger("click"); await flush();
+    expect(view.wrapper.get('[data-testid="goal-created"]').exists()).toBe(true);
+    expect(state.posts).toHaveLength(1);
+  });
+
   it("创建待核对时重复提交与快速连点都被拒绝，原样重试按原 ID 原载荷收口", async () => {
     connect();
     const state: RouterState = { posts: [] };
@@ -281,6 +376,29 @@ describe("Goal 创建与关联的未决命令准入", () => {
     vi.stubGlobal("fetch", router({ loseWrite: true }, state));
     const back = await mountWorkbench("/projects?view=goal"); unmount = back.unmount; await flush();
     expect(back.wrapper.get('[data-testid="goal-pending"]').text()).toContain(originalCommandId);
+  });
+
+  it("原命令不跨 API 地址恢复，切回原连接后仍保留原身份", async () => {
+    connect();
+    const state: RouterState = { posts: [] };
+    vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const first = await mountWorkbench("/projects?view=goal");
+    await first.wrapper.get('[data-testid="goal-intent"]').setValue(intent);
+    await first.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    const commandId = String(state.posts[0]?.body.command_id);
+    first.unmount();
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:9999", workspaceId,
+      bearerToken: "test-bearer-token-0123456789abcdef" });
+    vi.stubGlobal("fetch", router({}, state));
+    const other = await mountWorkbench("/projects?view=goal"); unmount = other.unmount; await flush();
+    expect(other.wrapper.find('[data-testid="goal-pending"]').exists()).toBe(false);
+    await other.wrapper.get('[data-testid="goal-intent"]').setValue("另一 API 的目标");
+    await other.wrapper.get('[data-testid="goal-form"]').trigger("submit"); await flush();
+    expect(state.posts[1]?.body.command_id).not.toBe(commandId);
+    other.unmount(); unmount = null;
+    connect(); vi.stubGlobal("fetch", router({ loseWrite: true }, state));
+    const back = await mountWorkbench("/projects?view=goal"); unmount = back.unmount; await flush();
+    expect(back.wrapper.get('[data-testid="goal-pending"]').text()).toContain(commandId);
   });
 
   it("关联待核对不跨 Workspace 出现：另一工作区可正常收口新关联，切回原作用域仍可核对", async () => {

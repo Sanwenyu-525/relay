@@ -146,7 +146,7 @@
         "${HOME}/.codex/skills"
       ],
       "discovery": "native app-server skills/list forceReload; evidence at ~/.agents/skill-audit/codex-native-discovery.json (2026-10-25)",
-      "smoke": "原生发现已验；当前会话 Skill 读取已验；未执行 UI 开发调用"
+      "smoke": "2026-10-26: fresh app-server skills/list enabled Taste; read SKILL.md and references/app-screens.md; draw.mjs --app --list styles exit 0; no project writes"
     },
     {
       "name": "Trae",
@@ -272,9 +272,11 @@
     },
     "vercel-react-best-practices": {
       "repository": "https://github.com/vercel-labs/agent-skills",
-      "status": "preserved-local-version-compared-with-063bee9",
-      "commit": "unknown-local-install",
-      "comparisonCommit": "063bee94c3f4df8453406c830b0a7df0f2860278"
+      "path": "skills/react-best-practices",
+      "status": "pinned-official-copy",
+      "version": "1.0.0",
+      "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "installedHash": "f48146597a084bcda78400256bd7b7de2683f1fa5a1725ebf885ccedf925cad6"
     },
     "design-engineer-3": {
       "repository": "https://github.com/trentferguson/homescreen-hero",
@@ -289,18 +291,24 @@
       "repository": "unknown"
     },
     "ui-ux-pro-max": {
-      "status": "preserved-local-custom; installation source and commit unverified",
-      "repository": "unknown",
+      "status": "preserved-local-custom; differs from official 2.15.0, source/commit unknown; do not replace without approval",
+      "repository": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "comparisonVersion": "2.15.0",
+      "comparisonCommit": "d14efff8ed1faa4187f004f79926f428c8074ec7",
       "commit": "unknown"
     },
     "taste-skill": {
-      "status": "preserved-local-custom; installation source and commit unverified",
-      "repository": "unknown",
-      "commit": "unknown"
+      "repository": "https://github.com/Leonxlnx/taste-skill.git",
+      "path": "skills/taste-skill",
+      "status": "pinned-official-copy",
+      "version": "2.1.5",
+      "commit": "12af471f627f866411b4bd785b19646d3672784c",
+      "installedHash": "c068ea55598974ab3df4e339f69e9740df105acdd9f9eeeaad31abbfba88a97e",
+      "previousOfficialCommit": "3c7017d636c3a4aad378433ea6d0cfa6c921da4a"
     },
     "taste-skill-v1": {
-      "status": "preserved-local-custom; installation source and commit unverified",
-      "repository": "unknown",
+      "status": "preserved-legacy-variant; local source/commit unverified",
+      "repository": "https://github.com/Leonxlnx/taste-skill-classics.git",
       "commit": "unknown"
     }
   },
@@ -312,6 +320,15 @@
     ],
     "3d-animation-short-generator-dsh": [
       "assets/style-reference.png"
+    ],
+    "taste-skill": [
+      "references/app-screens.md",
+      "scripts/draw.mjs",
+      "scripts/inspect.mjs",
+      "scripts/lint.mjs",
+      "assets/app.css",
+      "assets/charts.js",
+      "library/app.json"
     ]
   }
 }

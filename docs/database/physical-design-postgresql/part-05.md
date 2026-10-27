@@ -280,3 +280,27 @@ Migration：`0141_member_wakeup_processing.sql`。**Breaking Change: No**（新�
 **权限。** 两张表的新列逐列补 `SELECT/INSERT/UPDATE`（新列不继承表级授权）。
 
 **回滚。** 回退需先删除 'MEMBER' 调用证据行并删除新列/约束；在途 CLAIMED 行应在回退前由应用收敛到终态。
+
+## 0143 `model_connections`：工作区作用域的模型连接登记（2026-10-27，P2 阶段一）
+
+**目的。** 让「登记一条模型连接」成为可持久化事实：名称、Provider 类型、HTTPS 端点、确切型号、调用预算、凭据引用、启用状态。它是 ADR-036 的第一阶段；连接**尚未**参与模型解析。
+
+**列。** `id uuid PK`、`workspace_id uuid NOT NULL → workspaces`、`name text`（btrim 后 1–60）、`provider_kind text`（当前只有 `openai-compatible`）、`base_url text NULL`（`^https://` 形状兜底；语义校验在应用层走 `parseModelBaseUrl`，空值＝内置默认端点）、`default_model text`（1–200，不存通配）、预算五列 `timeout_ms`/`max_output_tokens`/`max_call_tokens`/`max_scope_calls`/`max_scope_tokens`（上下界与 `ModelPortConfig` 一致）、`credential_ref text`（`^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$`，同时是凭据库里的文件名）、`credential_version integer ≥ 1`、`status text`（`ACTIVE`/`DISABLED`）、`revision bigint ≥ 1`、`created_at`/`updated_at`。
+
+**约束。** `UNIQUE (workspace_id, name)`——同名的两条连接会让「用的是哪条」无法回答；`CHECK (max_call_tokens >= max_output_tokens)`、`CHECK (max_scope_tokens >= max_call_tokens)`——预算自洽由表保证，应用层的整行校验与之一致，两处不会分叉。索引 `ix_model_connections_workspace_status (workspace_id, status, created_at)` 与列表查询同形。
+
+**凭据边界。** 本表**永不**保存密钥、密文、摘要或原始认证头。`credential_ref` 只是不透明句柄；秘密由 `apps/credential-helper`（Rust + Windows DPAPI，当前用户作用域 + 固定域分隔熵）保护，路径 `<RELAY_CREDENTIAL_ROOT 或 dataRoot/credentials>/<ref>.bin`。轮换覆盖**同一引用**下的秘密并把 `credential_version` 加一：代数变化是「凭据已换」的权威信号，换引用只会留下没人引用的旧 blob（旧秘密仍在磁盘上）。
+
+**权限。** 只授予 `SELECT, INSERT, UPDATE`。**没有 DELETE**：停用是状态，已冻结在旧连接上的历史需要原身份继续可读、可诊断。凭据库的 blob 与表行不同生命周期，清理走 `node dist/src/cli/model-credential.js delete <ref>`。
+
+**回滚。** `DROP TABLE model_connections`（无既有表引用它、无外键指向它）；凭据 blob 不受影响，需要时用上面的 CLI 清理。无数据修复。
+
+## 0144 `workspace_default_model_connection` 与契约的连接身份（2026-10-27，P2 阶段三）
+
+**`workspace_default_model_connection`**：`workspace_id uuid PK → workspaces`、`connection_id uuid NOT NULL → model_connections`、`revision bigint ≥ 1`、`created_at`/`updated_at`。一工作区至多一条。外键不设 `ON DELETE`：连接不允许删除（停用即失效），因此不存在悬空默认值的路径。只授 `SELECT, INSERT, UPDATE`——没有 DELETE，避免一次误删让工作区静默退回进程默认。
+
+**`execution_contracts` 两列**：`connection_id uuid`、`connection_credential_version integer`，同现同缺（CHECK `(connection_id IS NULL) = (connection_credential_version IS NULL)` 且版本 ≥ 1）。两列**不进** `frozen_snapshot`，也不参与 `contract_hash`——哈希仍只覆盖快照，语义不变。不设到 `model_connections` 的外键：契约是不可变历史，不该被后续表结构调整牵连。
+
+**为什么必须冻结代数**：轮换覆盖同一引用下的秘密并把 `credential_version` 加一；只冻结连接 ID 的话，旧 Run 会在轮换后悄悄用新 Key 外呼（配额与计费归属都变了）。执行端比对代数即停，是 P0-2 的延续。
+
+**回滚**：`DROP TABLE workspace_default_model_connection`；`DROP` 两个契约列。列可空且无既有读依赖，删除后旧 Run 自动回到「进程默认」兼容路径，无需数据修复。

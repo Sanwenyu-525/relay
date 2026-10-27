@@ -4,6 +4,7 @@ import { Info, Link2 } from "lucide-react";
 import { createCommandId, projectGoalLinkFrom, RelayApiError, type RelayApiClient,
   type RelayProjectGoalLink, type RelayProjectListItem } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
 import { describeLiveError } from "../lib/liveErrors";
 
 /**
@@ -33,25 +34,15 @@ function linkPendingKey(client: RelayApiClient, goalId: string): string {
   return `relay:link-goal:${client.baseUrl}:${client.workspaceId}:${goalId}`;
 }
 
-function readLinkPending(key: string): PendingLink | null {
-  try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
+function parseLinkPending(value: unknown, goalId: string): PendingLink | null {
     if (!value || typeof value !== "object") return null;
     const row = value as Record<string, unknown>;
     if (typeof row.commandId !== "string" || row.commandId === "" ||
       typeof row.projectId !== "string" || row.projectId === "" ||
       typeof row.expectedRevision !== "string" || row.expectedRevision === "" ||
-      typeof row.goalId !== "string" || row.goalId === "") return null;
+      typeof row.goalId !== "string" || row.goalId !== goalId) return null;
     return { commandId: row.commandId, projectId: row.projectId,
       expectedRevision: row.expectedRevision, goalId: row.goalId };
-  } catch { return null; }
-}
-
-function saveLinkPending(key: string, pending: PendingLink | null): void {
-  try {
-    if (pending) sessionStorage.setItem(key, JSON.stringify(pending));
-    else sessionStorage.removeItem(key);
-  } catch { /* 会话存储不可用只影响整页重开后的恢复；页内待核对状态不受影响。 */ }
 }
 
 /** 2xx 与回执都只说明服务端返回了一份响应；仍需和冻结的关联命令逐项对齐。 */
@@ -100,13 +91,20 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
   const [moreError, setMoreError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [link, setLink] = useState<RelayProjectGoalLink | null>(null);
-  const [pending, setPending] = useState<PendingLink | null>(null);
-  const pendingRef = useRef<PendingLink | null>(null);
-  const holdPending = useCallback((next: PendingLink | null) => {
+  const key = linkPendingKey(client, goalId);
+  const parsePending = useCallback((value: unknown) => parseLinkPending(value, goalId), [goalId]);
+  const [initialPending] = useState(() => readPendingCommand(key, parsePending));
+  const [pending, setPending] = useState<PendingLink | null>(initialPending.pending);
+  const pendingRef = useRef<PendingLink | null>(initialPending.pending);
+  const holdPending = useCallback((next: PendingLink | null): boolean => {
+    const saved = next === null ? clearPendingCommand(key, pendingRef.current, parsePending)
+      : reservePendingCommand(key, next, parsePending);
+    if (!saved) return false;
     pendingRef.current = next; setPending(next);
-    saveLinkPending(linkPendingKey(client, goalId), next);
-  }, [client, goalId]);
-  const [error, setError] = useState<string | null>(null);
+    return true;
+  }, [key, parsePending]);
+  const [error, setError] = useState<string | null>(initialPending.available ? null
+    : "本机关联恢复记录不可用或存在冲突；请恢复存储后重新打开，未发送新命令。");
   const [busy, setBusy] = useState(false);
   const [mayRetry, setMayRetry] = useState(false);
   const busyRef = useRef(false);
@@ -124,23 +122,15 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     hasUnsavedChanges: () => pendingRef.current !== null,
     discard: () => {},
     pendingCommandId: () => pendingRef.current?.commandId ?? null,
-    pendingRecoversAfterLeave: () => pendingRef.current !== null
+    pendingRecoversAfterLeave: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(key, pendingRef.current, parsePending),
+    pendingRecoversAfterRestart: () => pendingRef.current !== null &&
+      hasDurablePendingCommand(key, pendingRef.current, parsePending)
   });
   useEffect(() => {
     setDraftGuard(guard.current);
     return () => clearDraftGuard(guard.current);
   }, []);
-
-  // 整页重开或父页重新挂载后，按当前作用域恢复原待核对关联命令。
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    const stored = readLinkPending(linkPendingKey(client, goalId));
-    if (stored !== null && pendingRef.current === null) {
-      pendingRef.current = stored; setPending(stored);
-    }
-  }, [client, goalId]);
 
   /**
    * 重新读取项目列表（首分页）。刷新会清空已加载范围与剩余游标，重读第一页；
@@ -215,7 +205,8 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
         throw new LinkResponseMismatch("原回执不是本次 LinkProjectGoal。");
       }
       const next = verifiedLink(record, receipt);
-      holdPending(null); setMayRetry(false); setBusy(false); setError(null);
+      if (!holdPending(null)) { setError("关联已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setMayRetry(false); setBusy(false); setError(null);
       setLink(next); onLinked?.(next);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
@@ -237,12 +228,16 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
 
   const send = useCallback(async (record: PendingLink, request: number) => {
     if (disposed.current || request !== scope.current) return;
+    if (!reservePendingCommand(key, record, parsePending)) {
+      setBusy(false); setError("无法保存或核对原命令，本次请求未发送；请恢复存储后核对回执。"); return;
+    }
     setError(null); setMayRetry(false); setBusy(true);
     try {
       const envelope = await client.linkProjectGoal({ projectId: record.projectId,
         commandId: record.commandId, expectedRevision: record.expectedRevision, goalId: record.goalId });
       const result = verifiedLink(record, envelope);
-      holdPending(null); setBusy(false); setLink(result); onLinked?.(result);
+      if (!holdPending(null)) { setBusy(false); setError("关联已确认，但本机恢复记录未能清理；请恢复存储并查询原回执。"); return; }
+      setBusy(false); setLink(result); onLinked?.(result);
     } catch (caught) {
       if (disposed.current || request !== scope.current) return;
       if (caught instanceof LinkResponseMismatch) {
@@ -253,7 +248,8 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       }
       if (caught instanceof RelayApiError && caught.problem.code === "REVISION_CONFLICT") {
         // Project 修订变了：重新读取，让用户按新事实重新确认，不覆盖他人变更。
-        holdPending(null); setBusy(false);
+        if (!holdPending(null)) { setBusy(false); setError("命令已被拒绝，但本机恢复记录未能清理；请恢复存储并核对原命令。"); return; }
+        setBusy(false);
         setError(`Project 修订已变化${caught.problem.actualRevision ? `（当前 v${caught.problem.actualRevision}）` : ""}；已重新读取项目，请再次确认关联。`);
         await load(true);
         return;
@@ -261,20 +257,22 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       // 明确的业务拒绝可以直接再发起：INVALID_TRANSITION 与 REVISION_CONFLICT 都是 409，
       // 不能一并当成「结果不明」——那会让用户以为关联命令待核对，而实际上什么都没关联。
       if (caught instanceof RelayApiError && caught.problem.code === "INVALID_TRANSITION") {
-        holdPending(null); setBusy(false);
+        if (!holdPending(null)) { setBusy(false); setError("命令已被拒绝，但本机恢复记录未能清理；请恢复存储并核对原命令。"); return; }
+        setBusy(false);
         setError(describeLiveError(caught).message);
         return;
       }
       if (caught instanceof RelayApiError && caught.problem.status < 500 &&
           caught.problem.code !== "COMMAND_ID_REUSED") {
-        holdPending(null); setBusy(false);
+        if (!holdPending(null)) { setBusy(false); setError("命令已被拒绝，但本机恢复记录未能清理；请恢复存储并核对原命令。"); return; }
+        setBusy(false);
         setError(describeLiveError(caught).message);
       } else {
         setError("关联提交结果不明；正在查询原 command_id 回执，不能重复关联。");
         await checkReceipt(record, request);
       }
     }
-  }, [checkReceipt, client, holdPending, load, onLinked]);
+  }, [checkReceipt, client, holdPending, key, load, onLinked, parsePending]);
 
   async function submit() {
     // 原关联命令未收口前，普通确认不得开始新命令（#20）：拒绝发生在 handler，
@@ -291,7 +289,12 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     const request = ++scope.current;
     const record: PendingLink = { commandId: createCommandId(), projectId: project.id,
       expectedRevision: project.revision, goalId };
-    holdPending(record); setBusy(true); setLink(null);
+    if (!holdPending(record)) {
+      busyRef.current = false;
+      setError("无法保存或核对本机关联恢复记录，未发送关联命令；请恢复存储后重试。");
+      return;
+    }
+    setBusy(true); setLink(null);
     try { await send(record, request); } finally { busyRef.current = false; }
   }
 

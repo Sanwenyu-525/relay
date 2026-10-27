@@ -12,10 +12,18 @@ import "./ModelConnectionStrip.css";
 
 const stateLabels: Record<ModelVerificationStateKind, string> = {
   UNCONFIGURED: "未配置真实模型",
+  CONFIG_INCOMPLETE: "配置残缺",
   UNVERIFIED: "已配置，尚未验证连接",
   VERIFYING: "验证中",
   VERIFIED: "连接已验证",
   VERIFY_FAILED: "连接验证失败",
+  AUTH_FAILED: "认证失败",
+  MODEL_NOT_FOUND: "型号不存在",
+  CREDENTIAL_CHANGED: "凭据已更换，需重新验证",
+  CATALOG_STALE: "目录已过期",
+  NOT_ELIGIBLE: "型号不可调用",
+  ACCOUNT_COOLDOWN: "账户冷却中",
+  BUDGET_EXHAUSTED: "预算不足",
   UNAVAILABLE: "模型端口状态不可读"
 };
 

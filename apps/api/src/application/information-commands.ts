@@ -23,6 +23,14 @@ type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
   readonly decision_id?: string; readonly replacement_decision_id?: string;
   readonly rule_id?: string; readonly revision: string; readonly version?: string;
   readonly decision_review_count?: string; readonly decision_review_candidates_ref?: string;
+  /**
+   * P1-B：停用/恢复 Memory 时同步的自动捕获账本条数（为 0 时不下发）。
+   *
+   * 用十进制字符串而不是 number：回执走 `Type.Record(String, String)` 的响应 schema，
+   * 数字会被序列化成 `"1"`，应用层与 HTTP 层就会各说一套。与 `revision`、
+   * `decision_review_count` 同一口径。
+   */
+  readonly auto_capture_retired?: string; readonly auto_capture_restored?: string;
   readonly status: string };
 const MAX_TEXT_BYTES = 262144;
 
@@ -585,7 +593,7 @@ export async function retireInformation(db: DbExecutor, input: ScopeInput & {
       const reviewCount = input.kind === 'knowledge' ? await prepareDecisionReviews(r, {
         workspaceId: input.workspaceId, commandId: input.commandId, knowledgeId: item.id }) : undefined;
       return { [`${input.kind}_id`]: item.id, revision: toDecimalString(item.revision + 1n), status,
-        ...(capturesRetired === 0 ? {} : { auto_capture_retired: capturesRetired }),
+        ...(capturesRetired === 0 ? {} : { auto_capture_retired: String(capturesRetired) }),
         ...(reviewCount === undefined || reviewCount === '0' ? {} : { decision_review_count: reviewCount }),
         ...(reviewCount === undefined || reviewCount === '0' || item.project_id === null ? {} : { decision_review_candidates_ref: `projects/${item.project_id}/decision-reviews` }) };
     } });
@@ -628,10 +636,10 @@ export async function restoreInformation(db: DbExecutor, input: ScopeInput & {
           : input.kind === 'memory' ? 'MEMORY_REACTIVATED' : 'RULE_REACTIVATED',
         factRefs: { [`${input.kind}_id`]: item.id, previous_status: item.status, status: 'ACTIVE',
           previous_revision: toDecimalString(item.revision), revision,
-          ...(capturesRestored === 0 ? {} : { auto_capture_restored: capturesRestored }),
+          ...(capturesRestored === 0 ? {} : { auto_capture_restored: String(capturesRestored) }),
           current_version: toDecimalString(item.current_version) } });
       return { [`${input.kind}_id`]: item.id, revision, status: 'ACTIVE',
-        ...(capturesRestored === 0 ? {} : { auto_capture_restored: capturesRestored }) };
+        ...(capturesRestored === 0 ? {} : { auto_capture_restored: String(capturesRestored) }) };
     } });
 }
 

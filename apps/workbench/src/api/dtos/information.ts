@@ -118,11 +118,76 @@ export interface RelayModelVerifyResult {
   readonly verifiedAt: string;
 }
 
+/**
+ * 服务端给出的**目标级**互斥状态（P1-4，13 态）。
+ *
+ * 它替代前端「凭 last + matches 猜一个」的推导：目录过期、资格失效、账户冷却期间即使上一行
+ * 是 ok，也不应显示「验证通过」。缺省（旧服务端）时前端退回原推导，不谎报。
+ */
+export type RelayVerifyTargetState =
+  | "NOT_CONFIGURED" | "CONFIG_INCOMPLETE" | "UNVERIFIED" | "VERIFIED"
+  | "CREDENTIAL_CHANGED" | "AUTH_FAILED" | "MODEL_NOT_FOUND" | "CATALOG_STALE"
+  | "CAPABILITY_INSUFFICIENT" | "FREE_INELIGIBLE" | "ACCOUNT_COOLDOWN"
+  | "BUDGET_EXHAUSTED" | "UNKNOWN";
+
+/** 模型连接登记的调用预算（与进程配置同名同义，服务端已做跨列校验）。 */
+export interface RelayModelConnectionBudget {
+  readonly timeoutMs: number;
+  readonly maxOutputTokens: number;
+  readonly maxCallTokens: number;
+  readonly maxScopeCalls: number;
+  readonly maxScopeTokens: number;
+}
+
+/**
+ * 一条已登记的模型连接（ADR-036）。
+ *
+ * 服务端**不返回**凭据引用、密钥或摘要，因此这里也没有对应字段；「凭据是否还在」走单独的
+ * 只读端点，只回布尔。连接当前只影响**新 Run** 的冻结来源，不参与会话聊天选模。
+ */
+export interface RelayModelConnection {
+  readonly id: string;
+  readonly name: string;
+  readonly providerKind: "openai-compatible";
+  readonly baseUrl: string | null;
+  readonly defaultModel: string;
+  readonly budget: RelayModelConnectionBudget;
+  /** 凭据代数：轮换后 +1。只是代数，不是秘密。 */
+  readonly credentialVersion: number;
+  readonly status: "ACTIVE" | "DISABLED";
+  readonly revision: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** 工作区默认连接：未设置时两个字段都为 null（新 Run 走进程默认）。 */
+export interface RelayDefaultModelConnection {
+  readonly connectionId: string | null;
+  readonly revision: string | null;
+}
+
+/** 验证目标：默认连接或 OpenRouter 目录里的一个确切型号。 */
+export interface RelayVerifyTarget {
+  readonly connection: "default" | "openrouter";
+  readonly model?: string;
+}
+
 /** 最近一次验证 + 当前配置指纹匹配情况。 */
 export interface RelayModelVerificationState {
+  /** `default` 或 `openrouter:<型号>`；旧服务端缺省按 `default`。 */
+  readonly target: string;
+  readonly connection: "default" | "openrouter";
+  readonly model: string | null;
   readonly currentConfigFingerprint: string | null;
+  /** 本实例最近一次验证（任何目标），保持旧语义。 */
   readonly last: RelayModelVerifyResult | null;
+  /** **本目标**最近一次验证；另一个型号的成功不会出现在这里。 */
+  readonly targetLast: RelayModelVerifyResult | null;
   readonly matchesCurrentConfig: boolean;
+  /** 最近一次验证所用凭据与当前凭据的关系。 */
+  readonly credentialIdentity: "MATCH" | "CHANGED" | "UNKNOWN";
+  /** 服务端目标状态；旧服务端缺省为 null，前端退回本地推导。 */
+  readonly state: RelayVerifyTargetState | null;
   /** API 进程环境的启动校验；不代表 Worker 进程已被探测。 */
   readonly workerStartupValidation: "NOT_CONFIGURED" | "OK" | "FAILED";
 }

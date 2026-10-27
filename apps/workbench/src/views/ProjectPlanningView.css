@@ -40,7 +40,7 @@
 .planning-option h4 { margin-top: 0; }
 .planning-pending { display: grid; gap: var(--relay-space-2); border-left: 3px solid var(--relay-color-status-warning-text); }
 .planning-pending h2, .planning-pending p { margin: 0; }
-@media (max-width: 64rem) {
+@media (width <= 64rem) {
   .planning-fields, .planning-options { grid-template-columns: 1fr; }
   .planning-task-row { grid-template-columns: minmax(0, 1fr) auto; }
   .planning-estimate { grid-column: 1 / -1; }

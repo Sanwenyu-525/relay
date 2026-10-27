@@ -87,7 +87,7 @@ Workbench 与 Context Builder 分别面向用户和 Agent，消费同一事实�
 | 纯后端、数据库、API | 不强制使用前端 Skill |
 | 仅文档修改 | 按内容选择，不机械调用前端 Skill |
 
-- **适用范围与项目规范优先。** Taste v2 明确不适用于 dashboard、数据表、多步骤产品 UI；Relay 工作台优先 `impeccable` / `ui-ux-pro-max`，不因名称相近强行调用 Taste 或其旧版。`design-engineer` 等候选只有资源完整且适用时才可使用。Skill 不得覆盖本次用户要求、已确认业务契约、[交互规范](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json)、确认的参考图和已有交互约束，不得另造设计语言。UI 改动至少完成一次适用的设计规范检查；动态交互增加动效/状态检查，React 行为增加工程质量检查。视觉精修不得无故修改业务逻辑、状态语义、测试选择器或 API。
+- **适用范围与项目规范优先。** 当前完整 `design-taste-frontend` v2.1.5 有 dashboard、admin、analytics、settings 等 app-screen 专门流程；处理这些页面前读取 `references/app-screens.md`，不要沿用旧版“不要用于 dashboard”的规则。Taste v1 只在需要保持旧版行为时显式使用，不作 v2 的替代。Relay 工作台优先遵循已确认的[交互规范](docs/frontend/workbench-design.md)、[设计系统](docs/frontend/design-system.md)、[tokens](docs/frontend/design-tokens.json)与业务契约；Skill 不得推翻本次用户要求、确认的参考图或已有交互约束，不得另造设计语言。`design-engineer` 等候选只有资源完整且适用时才可使用。UI 改动至少完成一次适用的设计规范检查；动态交互增加动效/状态检查，React 行为增加工程质量检查。视觉精修不得无故修改业务逻辑、状态语义、测试选择器或 API。
 - **跨 Agent 共享。** Codex、Trae、WorkBuddy、Qoder、ZCode 的全局目录可能不同，不得假设沿用自己的目录。公共来源和各工具有效入口由上述统一配置管理；文件可读、自动发现、实际调用分开记录。需要重启/刷新时明确说明；不自动重启他人的活动会话。不能自动读取根 `AGENTS.md` 的工具，通过官方支持的规则入口引用本文件，不复制分叉规则。同步先 dry-run，遇同名异版先比较并备份，不静默覆盖；不递归删除 Junction 或穿透其目标。
 - **默认当前 Agent 完成。** 文件读取、小范围修改、常规测试、文档调整和单一问题定位不派子代理。仅在用户明确要求，或较大任务有边界清晰且确能受益的独立子任务时派发；相关工作优先复用已有子代理。
 - **派发须明确责任。** 派发前简述必要性、文件或模块所有权、验收条件；告知执行者共享工作区、不得回退他人改动。协调者负责集成和结果核对，不能把子代理自报完成直接当作独立验收。

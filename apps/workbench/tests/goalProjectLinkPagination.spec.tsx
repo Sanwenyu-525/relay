@@ -19,7 +19,7 @@ const goalId = "44444444-4444-4444-8444-444444444444";
 const root = `/api/v1/workspaces/${workspaceId}`;
 
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; vi.unstubAllGlobals(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; sessionStorage.clear(); localStorage.clear(); vi.unstubAllGlobals(); });
 
 function response(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
@@ -60,6 +60,28 @@ async function clickMore(wrapper: Awaited<ReturnType<typeof mountPanel>>) {
   await more!.trigger("click");
   await flush();
 }
+
+it("窗口会话结束后恢复原 Goal 关联命令与载荷", async () => {
+  const posts: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (init?.method === "POST" && path.endsWith("/goal-links")) {
+      posts.push(JSON.parse(String(init.body)) as Record<string, unknown>); throw new TypeError("response lost");
+    }
+    if (path === `${root}/projects`) return response(200, { items: [project(projectA.id, projectA.title)], next_cursor: null });
+    if (path.includes("/commands/")) return response(404, { code: "COMMAND_NOT_FOUND", detail: "not found" });
+    throw new Error(`unexpected ${path}`);
+  }));
+  const first = await mountPanel();
+  await first.wrapper.get('[data-testid="goal-link-project"]').setValue(projectA.id);
+  await first.wrapper.get('[data-testid="goal-link-submit"]').trigger("click"); await flush();
+  const commandId = String(posts[0]?.command_id);
+  expect(first.wrapper.get('[data-testid="goal-link-pending"]').text()).toContain(commandId);
+  first.unmount(); cleanup = undefined; sessionStorage.clear();
+  const reopened = await mountPanel();
+  expect(reopened.wrapper.get('[data-testid="goal-link-pending"]').text()).toContain(commandId);
+  expect(posts).toHaveLength(1);
+});
 
 it("有 next_cursor 可逐页读取：合并去重、末页收口，且只请求进行中项目", async () => {
   const reads: string[] = [];

@@ -518,3 +518,30 @@ test('cancel, timeout, broken stream and local call budget never return partial 
       content: 'do not send' }] } }), ModelSourcePolicyError);
   assert.equal(invoked, false);
 });
+
+test('withBudget swaps the per-call gate and identity without touching the config fingerprint',
+  async () => {
+    let invocations = 0;
+    const base = port(() => {
+      invocations += 1;
+      return response([event('ok', 'stop'),
+        event(null, null, { prompt_tokens: 5_100, completion_tokens: 4, total_tokens: 5_104 }),
+        'data: [DONE]\n\n']);
+    });
+    const large = { intent: 'DISCUSS' as const, system: 'x'.repeat(15_000),
+      turns: [{ role: 'user' as const, content: 'x' }] };
+
+    await assert.rejects(() => base.assist(large), ModelCallBudgetError);
+    assert.equal(invocations, 0, '输入闸门必须在真实外呼之前生效');
+
+    const largeBudget = base.withBudget({ callReservationTokens: 262_144,
+      scopeCallLimit: 32, scopeTokenLimit: 524_288 });
+    const result = await largeBudget.assist(large);
+    assert.equal(result.kind, 'CONTENT');
+    assert.equal(invocations, 1);
+    assert.deepEqual(largeBudget.identity.budget, { callReservationTokens: 262_144,
+      scopeCallLimit: 32, scopeTokenLimit: 524_288 });
+    assert.equal(largeBudget.identity.configFingerprint, base.identity.configFingerprint);
+    assert.deepEqual(base.identity.budget, { callReservationTokens: 4_096,
+      scopeCallLimit: 32, scopeTokenLimit: 262_144 });
+  });

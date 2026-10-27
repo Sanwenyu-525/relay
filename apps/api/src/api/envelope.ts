@@ -6,6 +6,7 @@ import { DomainError } from '../application/domain-error.js';
 import type { DbExecutor, RelayDatabase } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { ProblemError, internalError, problemBody, type ProblemDetails } from './problem.js';
 
 /**
@@ -23,6 +24,11 @@ export interface RouteDependencies {
   readonly database: RelayDatabase;
   /** 受管内容存储：Artifact 版本内容与证据核对使用它，路由不直接拼宿主路径。 */
   readonly storage: ManagedContentStore;
+  /**
+   * 模型连接凭据的系统存储（ADR-036）。只暴露 put/resolve/delete/status：
+   * 路由层用它写入用户提交的 Key 并只保留不透明引用，**没有**任何回读端点。
+   */
+  readonly credentials: CredentialStore;
 }
 
 export interface CommandBody {

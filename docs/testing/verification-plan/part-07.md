@@ -235,8 +235,10 @@ Fake/受控端口只证明输入、顺序、规则接线与执行边界。真实
 | GM-05 | Project State 阶段限词、下一步只引用本项目 Task、风险/阻塞/解除走单一 action 与 CAS；`ADD_BLOCKER` 可经 HTTP 提交 | `projectManagementPanels.spec.tsx`＋真实 PG `api-state`（schema 回归先红后绿） |
 | GM-06 | Goal 与目录工作上下文只读、会话保留原 ID、目录精确过滤、归档/停用按事实呈现 | `goalManagementLive.spec.tsx`＋真实 PG `work-contexts` |
 | GM-07 | Goal 关联需求与前端入口不被误当成聊天 `/goal`；不创建 Project/Task/Run/Session | 组件级请求断言与真实 PG 回执 |
+| GM-08 | 普通草稿与 pending 分别受守卫管理；多个守卫并存、返回原值、保存/放弃/卸载后不遗留拦截；409 保留草稿和最新服务端事实 | `draftGuardCoexistence.spec.ts`、`goalManagementLive.spec.tsx`、`projectManagementPanels.spec.tsx` |
+| GM-09 | 待核对命令按 API/Workspace/目标隔离并可跨窗口重启恢复；存储失败、损坏、身份冲突或清理失败时不发送/不清除；只有 `COMMAND_NOT_FOUND` 后才以原 ID 和冻结载荷重试 | `pendingCommandStorage.spec.ts`、`goalPendingGate.spec.ts`、浏览器故障注入；真实 WebView2 进程重启单独验 |
 
-未覆盖：真实 Windows/WebView2、390px 与多 DPI 人工走查、真实浏览器导航、独立验收；全量工作台套件未跑。
+本轮执行结果与交付边界只登记在[统一功能验收表](../overall-acceptance-2026-09-28.md#当前功能验收表)：自动化与 Chromium 不能替代当前源码包的 Windows/WebView2 重启、导航、DPI 和独立验收；全量工作台套件不在本条范围内。
 
 ## 47. 成果版本管理 P0–P2 验收规格（2026-10-25）
 
@@ -253,3 +255,18 @@ Fake/受控端口只证明输入、顺序、规则接线与执行边界。真实
 | 任意版本正文比较 | 完全相同、CRLF/LF、仅末尾换行、内部换行与尾换行同时改变均要明确分类；不能把不可见的字节差异归为「仅末尾」 | Workbench 组件回归；必要时以真实磁盘字节复核 |
 
 当前实跑的组件与 PG 套件仅覆盖表中明确记录的场景；真实 WebView2 重启、安装包、IME/DPI 与独立验收须分别记录，不由本节规范或分片通过推定。
+
+## 48. N04 到 N06 联合验收与 P2 稳定性门槛（2026-10-26）
+
+本节规定周期计划到有限连续委托的完整业务路径。阶段通过仍按统一功能验收表逐层记录；受控 Provider 不证明真实模型质量，Chromium 不代替 Windows/WebView2。
+
+| 编号 | 场景与必须满足的结果 | 必要证据 |
+|---|---|---|
+| N04-N06-01 | 同一 Project 创建有依赖关系的 Tasks，登记用户估时并生成 N04 周期计划；候选只写计划，不启动 Run | Workbench 定向组件测试＋真实 PG/HTTP |
+| N04-N06-02 | 从计划建立范围推演，选择方案并逐项接受必要前置与主线、明确拒绝排除项；项目计划记录与原 Task 事实一致 | 组件/真实 Chromium＋真实 PG/HTTP |
+| N04-N06-03 | 由已确认计划项建立 N06 Task Chain；未明确授权时无 Run。授权后先执行首项，等待人工 Review 与 Completion，前项完成后才能创建下一项 Run | 真实 PG/HTTP＋生产 Worker/Workflow；核对 Run、Review、Completion 与链项目录账本 |
+| N04-N06-04 | 对重复命令、响应丢失、合法并发推进、暂停/重开、过期授权及 UNKNOWN 消耗恢复原身份和事实；不得盲重试、绕过授权或按零预算续跑 | 故障注入、真实回执与重开恢复；列明未覆盖故障窗口 |
+| N04-N06-05 | 真实 Chromium 核对计划/范围/授权交互、窄窗和恢复行为；真实 Windows/WebView2 核对原生窗口与实际项目操作 | 浏览器和 Windows 两类证据分别记录 |
+| N04-N06-06 | P2 才扩大为 100–200 Tasks、多份计划/范围推演/任务链、长链及历史 Review/Completion，并反复切换项目、返回与刷新；检查顺序、游标、历史归属和恢复后状态 | P0/P1 必需场景闭合后运行；真实数据/持久层结合浏览器与 Windows 操作，不以合成样本代替实际闭环 |
+
+P0/P1 任一必需场景失败或真实桌面环境未可用时，P2 标记为 `NOT_RUN/BLOCKED` 并保留原因，不提前扩大为规模测试。真实 Provider 质量与受控 Worker 协议分开验收；没有真实 Provider 运行证据时不得宣称模型语义质量通过。

@@ -52,7 +52,47 @@ try {
     Add-Check "payload:$relative" (Test-Path -LiteralPath $file -PathType Leaf) $file
   }
 
-  # 3) Start menu shortcut and uninstall registration.
+  # 3) Build-identity manifest must be part of the payload and bind the installed EXE.
+  #    Without it the upgrade hook's maintenance session rejects the package (exit 4).
+  $manifestFile = Join-Path $InstallDir 'desktop-build-manifest.json'
+  $manifestPresent = Test-Path -LiteralPath $manifestFile -PathType Leaf
+  Add-Check 'payload:desktop-build-manifest.json' $manifestPresent $manifestFile
+  if ($manifestPresent) {
+    $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+    $installedHash = (Get-FileHash -LiteralPath (Join-Path $InstallDir 'relay-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-Check 'manifest-schema' ($manifest.schema_version -eq 1 -and
+      $manifest.maintenance_session_protocol -eq 'relay-desktop-maintenance-v1') 'schema/protocol'
+    Add-Check 'manifest-binds-installed-exe' ($manifest.artifact_sha256 -eq $installedHash) "manifest=$($manifest.artifact_sha256) installed=$installedHash"
+  }
+
+  # 4) The maintenance session must accept the installed package on its own.
+  #    This is the exact command the PREINSTALL hook runs before overwriting files.
+  $probeInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $probeInfo.FileName = Join-Path $InstallDir 'node.exe'
+  $probeInfo.Arguments = '"' + (Join-Path $InstallDir 'api\dist\src\cli\maintenance.js') +
+    '" hold-desktop-stop --package-root "' + $InstallDir + '" --data-root "' + (Join-Path $appData 'data') + '"'
+  $probeInfo.UseShellExecute = $false
+  $probeInfo.CreateNoWindow = $true
+  $probeInfo.RedirectStandardInput = $true
+  $probeInfo.RedirectStandardOutput = $true
+  $probeInfo.RedirectStandardError = $true
+  $probe = [System.Diagnostics.Process]::Start($probeInfo)
+  $probe.StandardInput.Close()
+  $probeOut = $probe.StandardOutput.ReadToEnd()
+  $probeErr = $probe.StandardError.ReadToEnd()
+  $probe.WaitForExit()
+  Add-Check 'maintenance-hold-desktop-stop' ($probe.ExitCode -eq 0 -and $probeOut.Contains('desktop_stop_held')) "exit=$($probe.ExitCode) stderr=$($probeErr.Trim())"
+
+  # 5) Upgrade over the existing install must pass the same hook and replace the payload.
+  $upgrade = Start-Process -FilePath $InstallerPath -ArgumentList @('/S', "/D=$InstallDir") -PassThru -Wait
+  Add-Check 'silent-upgrade-exit' ($upgrade.ExitCode -eq 0) "exit=$($upgrade.ExitCode)"
+  if ($manifestPresent) {
+    $upgradedHash = (Get-FileHash -LiteralPath (Join-Path $InstallDir 'relay-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-Check 'upgrade-keeps-manifest-binding' ($manifest.artifact_sha256 -eq $upgradedHash) "installed=$upgradedHash"
+    Add-Check 'upgrade-keeps-manifest-file' (Test-Path -LiteralPath (Join-Path $InstallDir 'desktop-build-manifest.json') -PathType Leaf) 'manifest'
+  }
+
+  # 6) Start menu shortcut and uninstall registration.
   $shortcuts = @(Get-ChildItem -LiteralPath $startMenu -Recurse -Filter '*.lnk' -Force -ErrorAction SilentlyContinue |
     Where-Object { $shortcutBefore -notcontains $_.FullName -and $_.Name -like '*Relay*' })
   Add-Check 'start-menu-shortcut' ($shortcuts.Count -ge 1) (($shortcuts | ForEach-Object { $_.FullName }) -join '; ')
@@ -65,7 +105,7 @@ try {
     })
   Add-Check 'uninstall-registry-entry' ($uninstallKeys.Count -ge 1) (($uninstallKeys | ForEach-Object { $_.PSChildName }) -join '; ')
 
-  # 4) Silent uninstall keeps user data.
+  # 7) Silent uninstall keeps user data.
   $uninstaller = Join-Path $InstallDir 'uninstall.exe'
   $removal = Start-Process -FilePath $uninstaller -ArgumentList @('/S') -PassThru -Wait
   Add-Check 'silent-uninstall-exit' ($removal.ExitCode -eq 0) "exit=$($removal.ExitCode)"
@@ -74,7 +114,7 @@ try {
     ForEach-Object { $_.FullName })
   Add-Check 'shortcut-removed' (@($shortcuts | Where-Object { $shortcutsAfter -contains $_.FullName }).Count -eq 0) 'start menu'
 
-  # 5) User data preserved byte-for-byte (same file list and sizes).
+  # 8) User data preserved byte-for-byte (same file list and sizes).
   if ($null -ne $dataBefore) {
     $dataAfter = @(Get-ChildItem -LiteralPath $appData -Recurse -Force -File -ErrorAction SilentlyContinue |
       Sort-Object FullName | ForEach-Object { "$($_.FullName)|$($_.Length)" })

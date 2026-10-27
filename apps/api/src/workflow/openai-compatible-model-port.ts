@@ -20,6 +20,7 @@ import { computeModelConfigFingerprint } from './model-port-config.js';
 import { DEFAULT_MODEL_BASE_URL, guardedModelFetch, parseModelBaseUrl,
   type ModelFetchDependencies } from './model-endpoint-policy.js';
 import { withProviderGuard, type ProviderRoutingGuard } from './free-call-guard.js';
+import { readCredentialFingerprint } from './credential-identity.js';
 
 /**
  * OpenAI 兼容真实模型端口（M04 第一实现）。
@@ -41,28 +42,51 @@ import { withProviderGuard, type ProviderRoutingGuard } from './free-call-guard.
  * 数据库、不判权限，也不因重构改变 `temperature` / `response_format` / 工具声明。
  */
 
+/** 一次调用的记账预算；冻结快照与进程默认都用这三个数（0135）。 */
+export interface ModelCallBudget {
+  readonly callReservationTokens: number;
+  readonly scopeCallLimit: number;
+  readonly scopeTokenLimit: number;
+}
+
 export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort, ComposerDraftPort {
   private readonly client: ChatOpenAI;
   private readonly modelFetch: typeof fetch;
   /** 外呼边界 fetch：非免费约束时等于 modelFetch，携带免费硬限制时在其外包一层 provider 路由注入。 */
   private readonly wireFetch: typeof fetch;
   private readonly baseUrl: string;
+  /** 单次输入+输出的实际闸门：进程默认，或被冻结快照的工作区档位替换。 */
+  private readonly callLimit: number;
   readonly identity: ModelIdentity;
 
   constructor(private readonly config: ModelPortConfig,
-    transport: ModelFetchDependencies = {}, freeGuard?: ProviderRoutingGuard) {
+    private readonly transport: ModelFetchDependencies = {},
+    private readonly freeGuard?: ProviderRoutingGuard,
+    budget?: ModelCallBudget) {
     const baseUrl = parseModelBaseUrl(config.baseUrl ?? DEFAULT_MODEL_BASE_URL);
     this.baseUrl = baseUrl;
     this.modelFetch = guardedModelFetch(baseUrl, transport);
     this.wireFetch = freeGuard === undefined
       ? this.modelFetch : withProviderGuard(this.modelFetch, freeGuard);
+    this.callLimit = budget?.callReservationTokens ?? config.maxCallTokens;
     this.identity = { provider: config.provider, model: config.model,
-      configFingerprint: computeModelConfigFingerprint(config), budget: {
-        callReservationTokens: config.maxCallTokens,
-        scopeCallLimit: config.maxScopeCalls,
-        scopeTokenLimit: config.maxScopeTokens,
+      configFingerprint: computeModelConfigFingerprint(config),
+      credentialFingerprint: readCredentialFingerprint(config), budget: {
+        callReservationTokens: this.callLimit,
+        scopeCallLimit: budget?.scopeCallLimit ?? config.maxScopeCalls,
+        scopeTokenLimit: budget?.scopeTokenLimit ?? config.maxScopeTokens,
       } };
     this.client = this.createClient(this.wireFetch);
+  }
+
+  /**
+   * 0135：同一配置与凭据，换用冻结快照的预算。
+   *
+   * 只替换**这一次调用**的预算闸门与记账身份：`configFingerprint` 保持原值（配置没变），
+   * 输出预留仍取 `maxOutputTokens`（它由模型配置决定，不随档位变化）。
+   */
+  withBudget(budget: ModelCallBudget): OpenAiCompatibleModelPort {
+    return new OpenAiCompatibleModelPort(this.config, this.transport, this.freeGuard, budget);
   }
 
   private createClient(modelFetch: typeof fetch): ChatOpenAI {
@@ -237,7 +261,7 @@ ${input.content}`),
         JSON.stringify(message.content)).join('\n') + messages.map((message) =>
           typeof message.additional_kwargs.reasoning_content === 'string'
             ? message.additional_kwargs.reasoning_content : '').join(''), 'utf8') / 3);
-    if (estimatedInputTokens + this.config.maxOutputTokens > this.config.maxCallTokens) {
+    if (estimatedInputTokens + this.config.maxOutputTokens > this.callLimit) {
       throw new ModelCallBudgetError();
     }
     const timeoutSignal = AbortSignal.timeout(this.config.timeoutMs);
@@ -327,7 +351,7 @@ ${input.content}`),
       }
       if (signal.aborted) throw new ModelTimeoutError();
       if ((usage.inputTokens !== null && usage.outputTokens !== null &&
-          usage.inputTokens + usage.outputTokens > this.config.maxCallTokens) ||
+          usage.inputTokens + usage.outputTokens > this.callLimit) ||
           (usage.outputTokens !== null &&
             usage.outputTokens > this.config.maxOutputTokens)) {
         throw new ModelCallBudgetError(providerRequestId, usage);

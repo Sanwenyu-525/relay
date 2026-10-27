@@ -331,14 +331,14 @@ export default function ArtifactPanel(props: Props) {
       result.mediaType !== attempt.mediaType || !/^[0-9a-f]{64}$/u.test(result.sha256) ||
       result.sha256 !== sha256Hex(attempt.content) || BigInt(result.size) !== BigInt(contentBytes) ||
       !isDecimalRevision(result.versionNumber) || BigInt(result.versionNumber) < 1n ||
-      !isDecimalRevision(result.artifactRevision) || BigInt(result.artifactRevision) < 1n ||
+      !isDecimalRevision(result.artifactRevision) ||
       !isDecimalRevision(result.taskRevision) ||
       BigInt(result.taskRevision) !== BigInt(attempt.expectedTaskRevision) + 1n) return false;
     if (attempt.kind === "append") return result.artifactId === attempt.artifactId &&
       BigInt(result.artifactRevision) > BigInt(attempt.expectedArtifactRevision) &&
       (attempt.expectedVersionNumber === undefined ||
         BigInt(result.versionNumber) === BigInt(attempt.expectedVersionNumber) + 1n);
-    return BigInt(result.versionNumber) === 1n && BigInt(result.artifactRevision) === 1n;
+    return BigInt(result.versionNumber) === 1n && BigInt(result.artifactRevision) === 0n;
   }
   function settleSave(result: RelayArtifactVersionResult, attempt: PendingSave, receipt: string, requestScope: string) {
     if (!saveResultMatches(result, attempt)) throw new RelayTransportError("保存结果与原请求的产物版本不符，请核对原 command_id。");
@@ -576,7 +576,7 @@ export default function ArtifactPanel(props: Props) {
         {writeBlockedReason && <p className="disabled-reason" data-testid="artifact-project-write-blocked">{writeBlockedReason}</p>}
         {done ? <p className="warning-callout" role="status" data-testid="artifact-editor-locked"><Info aria-hidden="true" />该任务本轮已完成：编辑入口已关闭，请先在下方重开任务再保存新版本。</p> : !allowedActions.includes("SAVE_ARTIFACT_VERSION") && <p className="disabled-reason" data-testid="artifact-editor-reason"><Info aria-hidden="true" />服务端未投影 SAVE_ARTIFACT_VERSION：当前状态是{taskStatusLabels[taskStatus]}，只有进行中的人工任务可以保存产物。</p>}
         {!humanArtifact && <label className="field"><span className="field-label">产物名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} name="artifact-title" disabled={done || activeSavePending !== null || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} /></label>}
-        <div className="form-actions"><button className="primary-button" type="button" data-testid="artifact-save" disabled={saving || !(canSave || (saveRecoveryReady && activeSavePending !== null))} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : activeSavePending ? "按原命令重试保存" : "保存新版本"}</button></div>
+        <div className="form-actions"><button className="primary-button" type="button" data-testid="artifact-save" disabled={saving || !(canSave || (saveRecoveryReady && activeSavePending !== null && !sourceUnavailable))} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : activeSavePending ? "按原命令重试保存" : "保存新版本"}</button></div>
         {draftBase && conflicting && <div className="form-actions"><button className="secondary-button" type="button" data-testid="artifact-confirm-new-base" disabled={rebasing || saving || activeSavePending !== null || !versionsReady || !latest || writeBlockedReason !== null || done} onClick={() => void confirmCurrentBase()}>{rebasing ? "正在核对" : `确认以当前 v${latest?.versionNumber ?? "?"} 为基线（保留草稿）`}</button>{latest && <Link className="inline-link" to={`/artifact-versions/${latest.versionId}/lineage`}>查看版本历史与差异</Link>}</div>}
         {rebaseFailure && <p className="action-error" role="alert">{rebaseFailure}</p>}
         {latest && <button className="secondary-button" type="button" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || activeSavePending !== null || !versionsReady || content !== savedContentSnapshot.current || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} onClick={() => void loadLatestHumanDraft()}>{draftLoading ? "正在读取" : `从最新人工版本 v${latest.versionNumber} 起草修订`}</button>}

@@ -52,6 +52,7 @@ import { BlueprintRepository } from '../blueprint/blueprint-repository.js';
 import { RuntimeAdmissionRepository } from '../runtime/runtime-admission-repository.js';
 import { RunScopeGrantRepository } from './run-scope-grant.js';
 import { ModelCatalogRepository } from '../model/model-catalog-repository.js';
+import { ModelConnectionRepository } from '../model/model-connection-repository.js';
 import { ModelCapabilityRepository } from '../model/model-capability-repository.js';
 import { ComputerControlStateRepository } from '../computer/control-state.js';
 import { ComputerDesktopLeaseRepository } from '../computer/desktop-lease-repository.js';
@@ -135,6 +136,8 @@ export interface Repositories {
   readonly modelCapabilities: ModelCapabilityRepository;
   /** 会话模型选择的独占写入口（迁移 0089，阶段 C）：会话作用域选择记录，从不写回进程默认。 */
   readonly modelSelection: SessionModelSelectionRepository;
+  /** 模型连接登记（迁移 0143，ADR-036）：工作区作用域；只存凭据引用，不存秘密。 */
+  readonly modelConnections: ModelConnectionRepository;
   /** 电脑操控展示状态（迁移 0096）：「Relay 是否正在操控电脑」的唯一持久事实。 */
   readonly computerControl: ComputerControlStateRepository;
   /** 全机前台输入会话的持久独占权（迁移 0114），与目录 resource_claims 分离。 */
@@ -204,6 +207,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     modelCatalog: new ModelCatalogRepository(db),
     modelCapabilities: new ModelCapabilityRepository(db),
     modelSelection: new SessionModelSelectionRepository(db),
+    modelConnections: new ModelConnectionRepository(db),
     computerControl: new ComputerControlStateRepository(db),
     computerDesktopLease: new ComputerDesktopLeaseRepository(db),
     conversationDiff: new KyselyConversationDiffRepository(db),

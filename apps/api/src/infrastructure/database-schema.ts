@@ -291,7 +291,25 @@ export interface ExecutionContractRow {
   readonly execution_config_version: string;
   readonly contract_hash: Buffer;
   readonly frozen_snapshot: JsonObject;
+  /** 0142：冻结时的凭据身份（单向摘要）；不进 frozen_snapshot，不参与 contract_hash。 */
+  readonly credential_fingerprint: string | null;
+  /**
+   * 0144：冻结时的模型连接身份（ADR-036 阶段三）。执行端按它解析模型，**不**重新读
+   * 「当前默认连接」——否则改默认会让在途 Run 换 Provider。两列同现同缺。
+   */
+  readonly connection_id: string | null;
+  /** 0144：冻结时的凭据代数；与连接当前代数不符即停止。 */
+  readonly connection_credential_version: number | null;
   readonly created_at: Date;
+}
+
+/** 工作区默认模型连接（迁移 0144）：决定新 Run 的冻结来源，不写回进程配置。 */
+export interface WorkspaceDefaultModelConnectionRow {
+  readonly workspace_id: string;
+  readonly connection_id: string;
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
 }
 
 export interface RunStepRow {
@@ -1495,6 +1513,8 @@ export interface AssistMessageRow {
   readonly method_argument: string | null;
   /** 0098: non-secret model/provider candidate plan captured when this message was accepted. */
   readonly model_selection_snapshot: JsonObject | null;
+  /** 0142：受理时所用凭据的单向身份；服务端比较用，不返回前端、不进上下文清单。 */
+  readonly model_credential_fingerprint: string | null;
   /** 0098: per-message candidate progress, CAS-updated independently of session selection. */
   readonly model_attempt_state: JsonObject | null;
   readonly provider_request_id: string | null;
@@ -1709,6 +1729,8 @@ export interface ModelCallRow {
   readonly provider: string;
   readonly model: string;
   readonly config_fingerprint: string;
+  /** 0142：本次外呼所用凭据的单向身份；本迁移之前的行是 NULL（未知，不冒充匹配）。 */
+  readonly credential_fingerprint: string | null;
   readonly input_sha256: string | null;
   readonly read_operation_id: string | null;
   readonly read_invocation_id: string | null;
@@ -1789,6 +1811,28 @@ export interface ModelCatalogSyncStateRow {
   readonly sync_lease_token: string | null;
   readonly sync_lease_expires_at: Date | null;
   readonly revision: bigint;
+}
+
+/** 工作区作用域的模型连接登记（迁移 0143，ADR-036）。凭据只存不透明引用。 */
+export interface ModelConnectionRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly name: string;
+  readonly provider_kind: 'openai-compatible';
+  readonly base_url: string | null;
+  readonly default_model: string;
+  readonly timeout_ms: number;
+  readonly max_output_tokens: number;
+  readonly max_call_tokens: number;
+  readonly max_scope_calls: number;
+  readonly max_scope_tokens: number;
+  /** 凭据库中的不透明句柄；不含密钥、密文或摘要。永不返回给前端。 */
+  readonly credential_ref: string;
+  readonly credential_version: number;
+  readonly status: 'ACTIVE' | 'DISABLED';
+  readonly revision: bigint;
+  readonly created_at: Date;
+  readonly updated_at: Date;
 }
 
 /** 当前快照的免费判定条目（迁移 0088）。随成功发布整体替换，只保留最新一份。 */

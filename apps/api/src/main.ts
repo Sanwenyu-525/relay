@@ -10,6 +10,7 @@ import { ensureBridgeRegistration, registerBridgeUpgrade, syncBridgePort }
 import { registerRoutes } from './api/routes.js';
 import { createServer } from './api/server.js';
 import { ConfigError, findRepositoryRoot, loadConfig, type ApiConfig } from './config/config.js';
+import { applyCredentialEnvFromStore, CredentialEnvError } from './credentials/credential-env.js';
 import { shutdownComputerRuntimeClient } from './computer/client-holder.js';
 import { RelayDatabase } from './infrastructure/database.js';
 import { SchemaReadinessChecker } from './infrastructure/schema-readiness.js';
@@ -107,6 +108,10 @@ async function main(): Promise<void> {
       desktopFrame = await readDesktopStartupFrame();
       workspaceId = desktopWorkspaceId(process.env.RELAY_DESKTOP_WORKSPACE_ID);
     }
+    // P2：模型凭据可以只以 `*_API_KEY_REF` 形式出现（存在系统凭据库里）。这里在**任何**
+    // 配置读取之前把引用物化成进程内环境，之后所有同步读取点的行为完全不变。
+    // 失败必须让进程起不来：静默回落明文或回落「未配置」都会悄悄改变模型身份。
+    await applyCredentialEnvFromStore(process.env);
     const env = desktopFrame === undefined ? process.env : desktopChildEnvironment({
       frame: desktopFrame,
       base: process.env,
@@ -130,14 +135,15 @@ async function main(): Promise<void> {
     if (desktopChild) {
       writeDesktopEvent({
         type: 'desktop_error', nonce: desktopFrame?.nonce ?? '',
-        code: error instanceof ConfigError ? 'CONFIG_INVALID' : 'DESKTOP_STARTUP_INVALID',
+        code: error instanceof ConfigError || error instanceof CredentialEnvError
+          ? 'CONFIG_INVALID' : 'DESKTOP_STARTUP_INVALID',
       });
       process.stderr.write('Desktop configuration is missing or invalid. Check the documented desktop.env fields.\n');
       process.exitCode = CONFIG_FAILURE_EXIT_CODE;
       return;
     }
-    if (error instanceof ConfigError) {
-      process.stderr.write(`${error.message}\n`);
+    if (error instanceof ConfigError || error instanceof CredentialEnvError) {
+      process.stderr.write(`${error instanceof ConfigError ? error.message : error.code}\n`);
       process.exitCode = CONFIG_FAILURE_EXIT_CODE;
       return;
     }

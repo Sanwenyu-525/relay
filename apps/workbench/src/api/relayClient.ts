@@ -4,6 +4,7 @@ import * as tasksApi from "./resources/tasks";
 import * as artifactsApi from "./resources/artifacts";
 import * as impactGroupSelectionsApi from "./resources/impactGroupSelections";
 import * as informationApi from "./resources/information";
+import * as modelConnectionsApi from "./resources/modelConnections";
 import * as memoryApi from "./resources/memory";
 export type { RelayCompactAccepted, RelayMemoryCompactionRequest, RelayMemoryCompactionStatus,
   RelayMemoryCreatedFromMessage, RelayMemoryProvenance, RelayMemoryProvenanceSource, RelayMemorySettings,
@@ -81,7 +82,8 @@ import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
   RelayUndoPlan } from "./dtos/stateMaintenance";
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
+import type { RelayDecision, RelayDefaultModelConnection, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelConnection, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
+import type { CreateModelConnectionInput, UpdateModelConnectionInput } from "./resources/modelConnections";
 import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 import type { RelayReadiness } from "./dtos/readiness";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -99,7 +101,7 @@ export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAtta
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayDirectoryEntry, RelayDirectoryListingResult, RelayFileBrowseAction, RelayFileContentResult, RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedFileReadInput, RelayManagedFileReadOutcome, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-export type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
+export type { RelayVerifyTarget, RelayVerifyTargetState, RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
 export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayDirectoryWorkContext, RelayGoalArchiveResult, RelayGoalCreation, RelayGoalEditResult, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectGoalLinkDetail, RelayProjectGoalUnlinkResult, RelayProjectListItem, RelayProjectPage, RelayProjectRenameResult, RelayProjectState, RelayStateArtifactRef, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind, RelayWorkContextDirectory, RelayWorkContextProject, RelayWorkContextSession } from "./dtos/projects";
 export type { RelayReadiness } from "./dtos/readiness";
 export type { RelayCommandOutput, RelayContextBuild, RelayContextManifestDetail, RelayContextManifestList, RelayContextManifestSummary, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayGatewayInvocationResult, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayReviewKind, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -1230,13 +1232,55 @@ export class RelayApiClient {
   }
 
   /** 最近一次模型验证与当前配置指纹匹配情况。 */
-  async getModelPortVerification(): Promise<RelayModelVerificationState> {
-    return informationApi.getModelPortVerification(this.#http);
+  /** 最近一次验证 + 目标状态；`target` 缺省为进程默认连接（P1-4）。 */
+  async getModelPortVerification(target?: RelayVerifyTarget): Promise<RelayModelVerificationState> {
+    return informationApi.getModelPortVerification(this.#http, target);
+  }
+
+  // ---- 模型连接登记（ADR-036）。响应不含凭据引用/密钥/摘要。 ----
+
+  async listModelConnections(): Promise<readonly RelayModelConnection[]> {
+    return modelConnectionsApi.listModelConnections(this.#http);
+  }
+
+  async getDefaultModelConnection(): Promise<RelayDefaultModelConnection> {
+    return modelConnectionsApi.getDefaultModelConnection(this.#http);
+  }
+
+  /** 凭据是否还在系统凭据库里。只回布尔。 */
+  async getModelConnectionCredentialPresence(connectionId: string): Promise<boolean> {
+    return modelConnectionsApi.getModelConnectionCredentialPresence(this.#http, connectionId);
+  }
+
+  async createModelConnection(input: CreateModelConnectionInput): Promise<RelayModelConnection> {
+    return modelConnectionsApi.createModelConnection(this.#http, input);
+  }
+
+  async updateModelConnection(connectionId: string,
+    input: UpdateModelConnectionInput): Promise<RelayModelConnection> {
+    return modelConnectionsApi.updateModelConnection(this.#http, connectionId, input);
+  }
+
+  async rotateModelConnectionCredential(connectionId: string,
+    input: { readonly commandId: string; readonly expectedRevision: string;
+      readonly apiKey: string }): Promise<RelayModelConnection> {
+    return modelConnectionsApi.rotateModelConnectionCredential(this.#http, connectionId, input);
+  }
+
+  async setModelConnectionStatus(connectionId: string,
+    input: { readonly commandId: string; readonly expectedRevision: string;
+      readonly status: "ACTIVE" | "DISABLED" }): Promise<RelayModelConnection> {
+    return modelConnectionsApi.setModelConnectionStatus(this.#http, connectionId, input);
+  }
+
+  async setDefaultModelConnection(connectionId: string,
+    commandId: string): Promise<RelayDefaultModelConnection> {
+    return modelConnectionsApi.setDefaultModelConnection(this.#http, connectionId, commandId);
   }
 
   /** 触发一次连接/模型验证；结果由服务端写入 model_calls，不含密钥。 */
-  async verifyModelPort(): Promise<RelayModelVerifyResult> {
-    return informationApi.verifyModelPort(this.#http);
+  async verifyModelPort(target?: RelayVerifyTarget): Promise<RelayModelVerifyResult> {
+    return informationApi.verifyModelPort(this.#http, target);
   }
 
   async claimInterventionNotifications(): Promise<readonly RelayInterventionItem[]> {

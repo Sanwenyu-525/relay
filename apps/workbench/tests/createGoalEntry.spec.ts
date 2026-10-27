@@ -64,7 +64,7 @@ afterEach(() => {
   unmount?.(); unmount = null;
   // 待核对命令现在按作用域暂存会话存储（#20 整页重开恢复）：用例之间清掉，避免上一条
   // 未收口的命令被下一用例的恢复逻辑读到——真实浏览器里每个标签页的会话是隔离的。
-  sessionStorage.clear();
+  sessionStorage.clear(); localStorage.clear();
   resetRelayConnectionForTest(); vi.unstubAllGlobals();
 });
 

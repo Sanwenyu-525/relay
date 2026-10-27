@@ -163,7 +163,7 @@ describe("项目内置工作台", () => {
     expect(mounted.wrapper.text()).toContain("WAITING_APPROVAL");
     expect(mounted.wrapper.text()).toContain("review-a");
     expect(mounted.wrapper.text()).not.toContain("review-other");
-    expect(mounted.wrapper.text()).toContain("真实 Git diff、受控测试和 Coding CLI 尚未接入");
+    expect(mounted.wrapper.text()).toContain("真实 Git diff、受控测试与 Coding CLI 尚未接入");
     expect(mounted.wrapper.text()).toContain("项目类型：论文 · 当前阶段：写作");
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });

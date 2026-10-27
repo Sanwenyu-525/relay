@@ -188,16 +188,23 @@ impl RuntimeState {
         self.stopping.store(true, Ordering::SeqCst);
         #[cfg(windows)]
         {
-            if let Some(mut supervisor) = self.supervisor.lock().expect("supervisor mutex poisoned").take() {
+            // 锁只护 take()：stop() 要等子进程树退出（预算 5s，EDR 环境下常常用满），
+            // 把 guard 跨在这个等待上，主线程里的同步命令（desktop_bootstrap 等）会整段阻塞，
+            // 表现就是窗口「未响应」。先摘出所有权、放锁，再去做慢操作。
+            let supervisor = self.supervisor.lock().expect("supervisor mutex poisoned").take();
+            if let Some(mut supervisor) = supervisor {
                 if let Err(error) = supervisor.stop(Duration::from_secs(5)) { eprintln!("Relay Agent supervisor stop: {error}"); }
             }
-            if let Some(mut api) = self.api.lock().expect("API mutex poisoned").take() {
+            let api = self.api.lock().expect("API mutex poisoned").take();
+            if let Some(mut api) = api {
                 if let Err(error) = api.stop(Duration::from_secs(5)) { eprintln!("Relay Agent API stop: {error}"); }
             }
         }
         #[cfg(not(windows))]
         {
-        if let Some(mut api) = self.api.lock().expect("API mutex poisoned").take() {
+        // 同 Windows 分支：锁只护 take()，不跨在等待子进程退出的循环上。
+        let api = self.api.lock().expect("API mutex poisoned").take();
+        if let Some(mut api) = api {
             // EOF is the only normal shutdown signal; no secret is written to the pipe.
             drop(api.stdin);
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -1013,6 +1020,58 @@ fn is_packaged_asset_request(uri: &tauri::http::Uri) -> bool {
     uri.scheme_str() == Some("tauri") && uri.authority().is_some_and(|authority| authority.as_str() == "localhost")
 }
 
+/// 把应用图标钉到窗口类和两个 WM_SETICON 槽位上，让任务栏图标不再依赖窗口线程的响应速度。
+///
+/// Explorer 取任务栏图标的第一步是给窗口发 WM_GETICON，需要窗口线程回消息。窗口线程只要被
+/// 长任务占住（API 冷启动、WebView2 初始化、同步命令抢锁），这一步就失败，Explorer 随即退回
+/// 系统通用「文档」图标——看着像图标资源坏了，其实是查询没等到回应。窗口类图标可以用
+/// GetClassLongPtr 直接读、不走消息循环，所以窗口再忙也还在。tao 的 set_window_icon 只写
+/// ICON_SMALL，任务栏按钮用的大图标槽一直是空的，这里一并补齐。
+#[cfg(windows)]
+fn pin_taskbar_icon(window: &WebviewWindow) {
+    use windows::Win32::{
+        Foundation::{HWND, LPARAM, WPARAM},
+        UI::{
+            Shell::ExtractIconExW,
+            WindowsAndMessaging::{GCLP_HICON, GCLP_HICONSM, HICON, ICON_BIG, ICON_SMALL,
+                SendMessageW, SetClassLongPtrW, WM_GETICON, WM_SETICON},
+        },
+    };
+    let Ok(handle) = window.hwnd() else { return };
+    let hwnd = HWND(handle.0);
+    // 取 exe 自带的图标组：ExtractIconEx 给的就是 Explorer 认的那两档（32/16），
+    // 比把 256px 的窗口图标硬缩下去清晰。句柄活到进程退出，不 DestroyIcon。
+    let (mut big, mut small) = (HICON(std::ptr::null_mut()), HICON(std::ptr::null_mut()));
+    let extracted = match std::env::current_exe() {
+        Ok(exe) => {
+            // PCWSTR 参数的惯用法是传 &HSTRING（同 show_error 里的 MessageBoxW）。
+            let path = HSTRING::from(exe.as_os_str().to_string_lossy().as_ref());
+            unsafe { ExtractIconExW(&path, 0,
+                Some(&mut big as *mut HICON), Some(&mut small as *mut HICON), 1) }
+        }
+        Err(_) => 0,
+    };
+    unsafe {
+        if extracted == 0 {
+            // 退化路径：拿 tao 已经装到窗口上的那份（codegen 的 256px RGBA 生成），
+            // 总比让 Explorer 落回通用图标强。本进程自己的窗口，同线程 SendMessage 立即返回。
+            let current = SendMessageW(hwnd, WM_GETICON, Some(WPARAM(ICON_SMALL as usize)), Some(LPARAM(0)));
+            let fallback = HICON(current.0 as *mut core::ffi::c_void);
+            if fallback.is_invalid() { return; }
+            big = fallback;
+            small = fallback;
+        }
+        if !big.is_invalid() {
+            SetClassLongPtrW(hwnd, GCLP_HICON, big.0 as isize);
+            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_BIG as usize)), Some(LPARAM(big.0 as isize)));
+        }
+        if !small.is_invalid() {
+            SetClassLongPtrW(hwnd, GCLP_HICONSM, small.0 as isize);
+            SendMessageW(hwnd, WM_SETICON, Some(WPARAM(ICON_SMALL as usize)), Some(LPARAM(small.0 as isize)));
+        }
+    }
+}
+
 fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), String> {
     let port: u16 = state.base_url.rsplit(':').next().unwrap_or_default().parse()
         .map_err(|_| "invalid API port".to_owned())?;
@@ -1038,6 +1097,9 @@ fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), Str
             }
         })
         .build().map_err(|_| "cannot create the Relay Agent window".to_owned())?;
+    // 先钉图标：此时窗口线程还空闲，图标查询必定成功，之后无论多忙任务栏都读得到。
+    #[cfg(windows)]
+    pin_taskbar_icon(&window);
     #[cfg(windows)]
     install_frame_guard(&window, Arc::clone(&state.frame_created))?;
     window.navigate(frontend_origin().parse().map_err(|_| "invalid frontend URL".to_owned())?)

@@ -4,7 +4,7 @@ import { RelayHttp } from "../core/http";
 import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string, stringArray } from "../core/primitives";
 import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryRevisionFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayVerifyTargetState, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getKnowledge(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayKnowledge[]> {
@@ -388,26 +388,68 @@ export async function deleteModelCapability(http: RelayHttp, input: {
   return body.removed === true;
 }
 
-/** 最近一次模型验证与当前配置指纹匹配情况。 */export async function getModelPortVerification(http: RelayHttp): Promise<RelayModelVerificationState> {
-  const row = object(await http.request(http.workspacePath("/model-port/verification")),
-    "model-port verification");
+const VERIFY_TARGET_STATES: readonly RelayVerifyTargetState[] = ["NOT_CONFIGURED",
+  "CONFIG_INCOMPLETE", "UNVERIFIED", "VERIFIED", "CREDENTIAL_CHANGED", "AUTH_FAILED",
+  "MODEL_NOT_FOUND", "CATALOG_STALE", "CAPABILITY_INSUFFICIENT", "FREE_INELIGIBLE",
+  "ACCOUNT_COOLDOWN", "BUDGET_EXHAUSTED", "UNKNOWN"];
+
+/** 目标查询串：缺省目标不带参数，旧服务端行为不变。 */
+function verifyTargetQuery(target: RelayVerifyTarget | undefined): string {
+  if (target === undefined || target.connection === "default") return "";
+  const model = target.model?.trim() ?? "";
+  if (model === "") throw new Error("验证目标缺少确切型号。");
+  return `?connection=openrouter&model=${encodeURIComponent(model)}`;
+}
+
+/** 最近一次模型验证与当前配置指纹匹配情况（可指定目标，P1-4）。 */
+export async function getModelPortVerification(http: RelayHttp,
+  target?: RelayVerifyTarget): Promise<RelayModelVerificationState> {
+  const row = object(await http.request(http.workspacePath(
+    `/model-port/verification${verifyTargetQuery(target)}`)), "model-port verification");
   const fingerprint = row.current_config_fingerprint === null
     ? null : string(row, "current_config_fingerprint", "model-port verification");
   const last = row.last === null ? null : modelVerifyResultFrom(
     object(row.last, "model-port verification.last"));
+  // 字段缺失（旧服务端）才退回实例级 last；显式 null 表示「本目标没有验证行」，
+  // 不能拿另一个型号的成功顶替它。
+  const targetLast = row.target_last === undefined ? last
+    : row.target_last === null ? null
+      : modelVerifyResultFrom(object(row.target_last, "model-port verification.target_last"));
   const worker = string(row, "worker_startup_validation", "model-port verification");
   if (worker !== "NOT_CONFIGURED" && worker !== "OK" && worker !== "FAILED") {
     throw new Error("服务端返回了无法识别的 Worker 启动校验状态。");
   }
-  return { currentConfigFingerprint: fingerprint, last,
+  // 新字段对旧服务端容错：缺失时退回旧语义，不谎报目标状态。
+  const rawState = row.state;
+  const state = typeof rawState === "string" &&
+    (VERIFY_TARGET_STATES as readonly string[]).includes(rawState)
+    ? rawState as RelayVerifyTargetState : null;
+  const credential = row.credential_identity;
+  const credentialIdentity = credential === "MATCH" || credential === "CHANGED" ||
+    credential === "UNKNOWN" ? credential : "UNKNOWN" as const;
+  const connection = row.connection === "openrouter" ? "openrouter" as const : "default" as const;
+  return {
+    target: typeof row.target === "string" ? row.target : "default",
+    connection,
+    model: row.model === undefined || row.model === null ? null
+      : string(row, "model", "model-port verification"),
+    currentConfigFingerprint: fingerprint, last, targetLast,
     matchesCurrentConfig: row.matches_current_config === true,
-    workerStartupValidation: worker };
+    credentialIdentity, state,
+    workerStartupValidation: worker,
+  };
 }
 
 /** 触发一次连接/模型验证；结果由服务端写入 model_calls，不含密钥。 */
-export async function verifyModelPort(http: RelayHttp): Promise<RelayModelVerifyResult> {
+export async function verifyModelPort(http: RelayHttp,
+  target?: RelayVerifyTarget): Promise<RelayModelVerifyResult> {
+  const body = target === undefined || target.connection === "default" ? undefined
+    : { connection: "openrouter", model: target.model };
   return modelVerifyResultFrom(object(await http.request(
-    http.workspacePath("/model-port/verify"), { method: "POST" }), "model-port verify"));
+    http.workspacePath("/model-port/verify"), {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }), "model-port verify"));
 }
 
 export async function claimInterventionNotifications(http: RelayHttp): Promise<readonly RelayInterventionItem[]> {

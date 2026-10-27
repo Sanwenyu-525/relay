@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { clickPortal, dialogText, flush, mountWorkbench } from "./mountApp";
 
 /**
  * 正式 Goal 管理链（P0-B / P1-B / P2）：
@@ -118,7 +118,7 @@ function baseRouter(routes: Routes) {
 let unmount: (() => void) | null = null;
 afterEach(() => {
   unmount?.(); unmount = null;
-  sessionStorage.clear(); resetRelayConnectionForTest(); vi.unstubAllGlobals();
+  sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks(); resetRelayConnectionForTest(); vi.unstubAllGlobals();
 });
 
 describe("正式 Goal 列表", () => {
@@ -178,6 +178,36 @@ describe("正式 Goal 列表", () => {
 });
 
 describe("正式 Goal 详情", () => {
+  it("窗口会话结束后恢复原 Goal 编辑命令，不发第二条", async () => {
+    connect();
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", baseRouter({ linkPosts: (body) => { posts.push(body); throw new TypeError("response lost"); } }));
+    const first = await mountWorkbench(`/goals/${goalId}`); await flush();
+    await first.wrapper.get('[data-testid="goal-edit-title"]').setValue("等待核对的标题");
+    await first.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click"); await flush();
+    const commandId = String(posts[0]?.command_id);
+    expect(first.wrapper.get('[data-testid="goal-detail-pending"]').text()).toContain(commandId);
+    first.unmount(); sessionStorage.clear();
+    const reopened = await mountWorkbench(`/goals/${goalId}`); unmount = reopened.unmount; await flush();
+    expect(reopened.wrapper.get('[data-testid="goal-detail-pending"]').text()).toContain(commandId);
+    expect(posts).toHaveLength(1);
+  });
+  it("无法保存 Goal 编辑命令时不发送请求并保留草稿", async () => {
+    connect();
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", baseRouter({ linkPosts: (body) => { posts.push(body); return response(500, {}); } }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount; await flush();
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("需要保留的草稿");
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("relay:goal-detail-pending:")) throw new DOMException("unavailable", "QuotaExceededError");
+      return original.call(this, key, value);
+    });
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click"); await flush();
+    expect(posts).toHaveLength(0);
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe("需要保留的草稿");
+    expect(view.wrapper.text()).toContain("未发送");
+  });
   it("展示 Goal、关联项目、进展覆盖与只读工作上下文，保留原 Session ID", async () => {
     connect();
     vi.stubGlobal("fetch", baseRouter({}));
@@ -228,6 +258,105 @@ describe("正式 Goal 详情", () => {
     expect(post?.body.description).toBe("完成实验并整理结论");
     expect(view.wrapper.get('[data-testid="goal-detail-receipt"]').text()).toContain("v3");
     expect(view.wrapper.get('[data-testid="goal-detail-head"]').text()).toContain("完成毕业论文（修订）");
+    await view.router.attempt(`/projects/${p1}`);
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${p1}`);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("Goal 标题草稿触发全局路由守卫，继续编辑恢复焦点，显式丢弃后离开且无残留守卫", async () => {
+    connect();
+    vi.stubGlobal("fetch", baseRouter({}));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("只改标题的草稿");
+    const title = view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement;
+    title.focus();
+    await view.router.attempt(`/projects/${p1}`);
+    expect(dialogText()).toContain("未保存的修改");
+    expect(view.router.currentRoute.value.path).toBe(`/goals/${goalId}`);
+
+    await clickPortal("keep-editing");
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value)
+      .toBe("只改标题的草稿");
+    expect(document.activeElement).toBe(title);
+
+    await view.router.attempt(`/projects/${p1}`);
+    await clickPortal("discard-draft-leave");
+    await flush();
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${p1}`);
+
+    await view.router.push(`/goals/${goalId}`);
+    expect(view.router.currentRoute.value.path).toBe(`/goals/${goalId}`);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("清空 Goal 说明同样受全局离页保护，改回基线后不再误拦", async () => {
+    connect();
+    vi.stubGlobal("fetch", baseRouter({}));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-description"]').setValue("");
+    await view.router.attempt(`/projects/${p1}`);
+    expect(dialogText()).toContain("未保存的修改");
+    await clickPortal("keep-editing");
+    await view.wrapper.get('[data-testid="goal-edit-description"]').setValue("完成实验并整理结论");
+    await view.router.attempt(`/projects/${p1}`);
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${p1}`);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("Goal 草稿与 Goal–Project pending 共存：明确丢弃草稿后可保留原命令离开并恢复", async () => {
+    connect();
+    const pendingPosts: Record<string, unknown>[] = [];
+    const fallback = baseRouter({});
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.pathname === `${root}/projects`) return response(200, { items: [{
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "待关联项目", project_type: "GENERAL",
+        revision: "2", state_revision: "3", archived_at: null, archive_status: "ACTIVE",
+        phase_key: "PLANNING", next_action_task_id: null,
+        created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-02T00:00:00Z"
+      }], next_cursor: null });
+      if (method === "GET" && url.pathname === `${root}/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/goals`)
+        return response(200, { items: [] });
+      if (method === "POST" && url.pathname.endsWith("/goal-links")) {
+        pendingPosts.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return response(500, { code: "INTERNAL_ERROR", detail: "结果尚未确认" });
+      }
+      return fallback(input, init);
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-link-project"]').setValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    await view.wrapper.get('[data-testid="goal-link-submit"]').trigger("click");
+    await flush(); await flush();
+    expect(view.wrapper.get('[data-testid="goal-link-pending"]').exists()).toBe(true);
+    expect(pendingPosts).toHaveLength(1);
+    const originalId = pendingPosts[0]?.command_id;
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("另外一份本地草稿");
+    await view.router.attempt(`/projects/${p1}`);
+    expect(dialogText()).toContain(String(originalId));
+    expect(dialogText()).toContain("未提交草稿");
+    await clickPortal("discard-draft-keep-pending-leave");
+    await flush();
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${p1}`);
+    expect(pendingPosts).toHaveLength(1);
+
+    await view.router.push(`/goals/${goalId}`);
+    await flush();
+    expect(view.wrapper.get('[data-testid="goal-link-pending"]').text()).toContain(String(originalId));
+    expect(pendingPosts).toHaveLength(1);
+    await view.router.attempt(`/projects/${p1}`);
+    expect(dialogText()).toContain(String(originalId));
+    await clickPortal("pending-keep-and-leave");
+    await flush();
+    expect(view.router.currentRoute.value.path).toBe(`/projects/${p1}`);
+    expect(pendingPosts).toHaveLength(1);
   });
 
   it("编辑响应修订与冻结命令错配时不宣布成功，pending 保留", async () => {
@@ -252,6 +381,282 @@ describe("正式 Goal 详情", () => {
     expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
     expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("不匹配");
     expect(posts).toHaveLength(1);
+  });
+
+  /** 内容错配：身份与修订都对、但 title/description 与冻结命令不一致的响应不能假成功。 */
+  const editContentMismatchCases: readonly { readonly name: string;
+    readonly patch: (body: Record<string, unknown>) => Record<string, unknown> }[] = [
+    { name: "标题与冻结命令不一致", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, title: "他人写入的标题", description: body.description,
+        status: "ACTIVE", revision: "3" } }) },
+    { name: "说明与冻结命令不一致", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, title: body.title, description: "他人写入的说明",
+        status: "ACTIVE", revision: "3" } }) },
+    { name: "标题与说明同时错配", patch: (body) => ({ command_id: body.command_id,
+      committed_at: "2026-10-04T00:00:00Z",
+      result: { goal_id: goalId, title: "他人写入的标题", description: "他人写入的说明",
+        status: "ACTIVE", revision: "3" } }) },
+  ];
+
+  for (const testCase of editContentMismatchCases) {
+    it(`编辑成功响应内容错配（${testCase.name}）时不宣布成功、不清 pending`, async () => {
+      connect();
+      const posts: { body: Record<string, unknown> }[] = [];
+      vi.stubGlobal("fetch", baseRouter({
+        linkPosts: (body) => {
+          posts.push({ body });
+          return response(200, testCase.patch(body));
+        }
+      }));
+      const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+      await flush();
+
+      await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("冻结的标题");
+      await view.wrapper.get('[data-testid="goal-edit-description"]').setValue("冻结的说明");
+      await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+      await flush(); await flush();
+
+      expect(view.wrapper.find('[data-testid="goal-detail-receipt"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("不匹配");
+      expect(posts).toHaveLength(1);
+    });
+  }
+
+  it("原回执内容错配（标题被改写）时同样不宣布成功，pending 原样保留", async () => {
+    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", baseRouter({
+      linkPosts: (body) => {
+        posts.push({ body });
+        throw new TypeError("response lost after commit");
+      }
+    }));
+    const fetchStub = vi.mocked(globalThis.fetch);
+    const original = fetchStub.getMockImplementation()!;
+    fetchStub.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (/\/commands\/[^/]+$/u.test(path)) {
+        const issued = posts[0]?.body.command_id;
+        return response(200, { command_id: issued, command_type: "EditGoal",
+          committed_at: "2026-10-04T00:00:05Z",
+          result: { goal_id: goalId, title: "回执里的他人标题", description: issued ? posts[0]!.body.description : "",
+            status: "ACTIVE", revision: "3" } });
+      }
+      return original(input, init);
+    });
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("冻结的标题");
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush();
+    expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
+
+    await view.wrapper.get('[data-testid="goal-detail-check-receipt"]').trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.find('[data-testid="goal-detail-receipt"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("不匹配");
+    expect(posts).toHaveLength(1);
+  });
+
+  it("响应丢失后按原 ID 原载荷幂等重放，同一命令收口", async () => {    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", baseRouter({
+      linkPosts: (body) => {
+        posts.push({ body });
+        if (posts.length === 1) throw new TypeError("response lost after commit");
+        return response(200, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+          result: { goal_id: goalId, title: body.title, description: body.description,
+            status: "ACTIVE", revision: "3" } });
+      }
+    }));
+    const fetchStub = vi.mocked(globalThis.fetch);
+    const original = fetchStub.getMockImplementation()!;
+    fetchStub.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (/\/commands\/[^/]+$/u.test(path)) {
+        return response(404, { code: "COMMAND_NOT_FOUND", detail: "命令回执不存在" });
+      }
+      return original(input, init);
+    });
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("幂等重放的标题");
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush(); await flush();
+    expect(view.wrapper.get('[data-testid="goal-detail-pending"]').exists()).toBe(true);
+
+    // 回执 404 后才开放原样重试：同 ID、同标题、同说明。
+    await view.wrapper.get('[data-testid="goal-detail-check-receipt"]').trigger("click");
+    await flush(); await flush();
+    await view.wrapper.get('[data-testid="goal-detail-retry"]').trigger("click");
+    await flush(); await flush();
+
+    expect(posts).toHaveLength(2);
+    expect(posts[1]?.body.command_id).toBe(posts[0]?.body.command_id);
+    expect(posts[1]?.body.title).toBe(posts[0]?.body.title);
+    expect(posts[1]?.body.description).toBe(posts[0]?.body.description);
+    expect(view.wrapper.get('[data-testid="goal-detail-receipt"]').text()).toContain("幂等重放的标题");
+  });
+
+  /** 409 冲突重读必须保留未保存草稿：服务端新事实以差异呈现，再提交由用户显式确认。 */
+  it("编辑 409 冲突重读后草稿保留、差异可见，再次确认按新修订提交", async () => {
+    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    let current = goal();
+    vi.stubGlobal("fetch", baseRouter({
+      goal: () => response(200, current),
+      linkPosts: (body) => {
+        posts.push({ body });
+        if (posts.length === 1) {
+          current = goal({ title: "他人修改的标题", description: "他人修改的说明", revision: "3" });
+          return response(409, { code: "REVISION_CONFLICT", detail: "修订已变化",
+            conflict: { expected_revision: "2", actual_revision: "3" } });
+        }
+        current = goal({ title: String(body.title), description: String(body.description), revision: "4" });
+        return response(200, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+          result: { goal_id: goalId, title: body.title, description: body.description,
+            status: "ACTIVE", revision: "4" } });
+      }
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("我的草稿标题");
+    await view.wrapper.get('[data-testid="goal-edit-description"]').setValue("我的草稿说明");
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush(); await flush();
+
+    // 提示「草稿未被覆盖」必须为真：输入框仍是我的草稿，而不是服务端新值。
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe("我的草稿标题");
+    expect((view.wrapper.get('[data-testid="goal-edit-description"]').element as HTMLTextAreaElement).value).toBe("我的草稿说明");
+    expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("修订已变化");
+    // 最新事实可见：差异以服务端当前值呈现，不静默替换草稿。
+    expect(view.wrapper.get('[data-testid="goal-edit-conflict-facts"]').text()).toContain("他人修改的标题");
+    expect(view.wrapper.get('[data-testid="goal-edit-conflict-facts"]').text()).toContain("他人修改的说明");
+
+    const draftTitle = view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement;
+    draftTitle.focus();
+    await view.router.attempt(`/projects/${p1}`);
+    expect(dialogText()).toContain("未保存的修改");
+    await clickPortal("keep-editing");
+    expect(document.activeElement).toBe(draftTitle);
+    expect(draftTitle.value).toBe("我的草稿标题");
+
+    // 显式再确认：用重读后的新修订提交同一条草稿。
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush(); await flush();
+
+    expect(posts).toHaveLength(2);
+    expect(posts[1]?.body.expected_revision).toBe("3");
+    expect(posts[1]?.body.title).toBe("我的草稿标题");
+    expect(posts[1]?.body.description).toBe("我的草稿说明");
+    expect(view.wrapper.get('[data-testid="goal-detail-receipt"]').text()).toContain("我的草稿标题");
+  });
+
+  it("409 冲突后选择放弃时，草稿恢复为最新服务端事实", async () => {
+    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    let current = goal();
+    vi.stubGlobal("fetch", baseRouter({
+      goal: () => response(200, current),
+      linkPosts: (body) => {
+        posts.push({ body });
+        current = goal({ title: "他人修改的标题", description: "他人修改的说明", revision: "3" });
+        return response(409, { code: "REVISION_CONFLICT", detail: "修订已变化",
+          conflict: { expected_revision: "2", actual_revision: "3" } });
+      }
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("我的草稿标题");
+    await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+    await flush(); await flush();
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe("我的草稿标题");
+
+    await view.wrapper.get('[data-testid="goal-edit-reset"]').trigger("click");
+    await flush();
+
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe("他人修改的标题");
+    expect((view.wrapper.get('[data-testid="goal-edit-description"]').element as HTMLTextAreaElement).value).toBe("他人修改的说明");
+    expect(view.wrapper.find('[data-testid="goal-edit-conflict-facts"]').exists()).toBe(false);
+  });
+
+  /** 三种草稿形态：只有标题变、只有说明变、说明被清空——409 后都必须保留并可按新修订显式重发。 */
+  const draftShapeCases: readonly { readonly name: string; readonly title: string;
+    readonly description: string }[] = [
+    { name: "仅标题修改", title: "只改标题的草稿", description: "完成实验并整理结论" },
+    { name: "仅说明修改", title: "完成毕业论文", description: "只改说明的草稿" },
+    { name: "说明被清空", title: "完成毕业论文", description: "" },
+  ];
+
+  for (const shape of draftShapeCases) {
+    it(`409 冲突后${shape.name}的草稿保留并按新修订显式重发`, async () => {
+      connect();
+      const posts: { body: Record<string, unknown> }[] = [];
+      let current = goal();
+      vi.stubGlobal("fetch", baseRouter({
+        goal: () => response(200, current),
+        linkPosts: (body) => {
+          posts.push({ body });
+          if (posts.length === 1) {
+            current = goal({ revision: "3" });
+            return response(409, { code: "REVISION_CONFLICT", detail: "修订已变化",
+              conflict: { expected_revision: "2", actual_revision: "3" } });
+          }
+          current = goal({ title: String(body.title), description: String(body.description), revision: "4" });
+          return response(200, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+            result: { goal_id: goalId, title: body.title, description: body.description,
+              status: "ACTIVE", revision: "4" } });
+        }
+      }));
+      const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+      await flush();
+
+      await view.wrapper.get('[data-testid="goal-edit-title"]').setValue(shape.title);
+      await view.wrapper.get('[data-testid="goal-edit-description"]').setValue(shape.description);
+      await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+      await flush(); await flush();
+
+      expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe(shape.title);
+      expect((view.wrapper.get('[data-testid="goal-edit-description"]').element as HTMLTextAreaElement).value).toBe(shape.description);
+
+      await view.wrapper.get('[data-testid="goal-edit-submit"]').trigger("click");
+      await flush(); await flush();
+
+      expect(posts).toHaveLength(2);
+      expect(posts[1]?.body.expected_revision).toBe("3");
+      expect(posts[1]?.body.title).toBe(shape.title);
+      expect(posts[1]?.body.description).toBe(shape.description);
+    });
+  }
+
+  it("解除关联成功触发事实刷新时，未保存草稿不被覆盖", async () => {
+    connect();
+    vi.stubGlobal("fetch", baseRouter({
+      linkPosts: (body) => response(200, { command_id: body.command_id,
+        committed_at: "2026-10-04T00:00:00Z",
+        result: { project_id: p1, revision: "3",
+          impacted_tasks: [{ task_id: "88888888-8888-4888-8888-888888888888", revision: "2" }] } })
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get('[data-testid="goal-edit-title"]').setValue("解除期间不打断的草稿");
+    await view.wrapper.get(`[data-testid="goal-unlink-open-${p1}"]`).trigger("click");
+    await flush();
+    await view.wrapper.get(`[data-testid="goal-unlink-submit-${p1}"]`).trigger("click");
+    await flush(); await flush();
+
+    expect(view.wrapper.get('[data-testid="goal-detail-receipt"]').text()).toContain("已解除");
+    expect((view.wrapper.get('[data-testid="goal-edit-title"]').element as HTMLInputElement).value).toBe("解除期间不打断的草稿");
   });
 
   it("编辑 2xx 回执格式无效时保留冻结命令等待核对", async () => {
@@ -334,6 +739,48 @@ describe("正式 Goal 详情", () => {
     // 明确拒绝不是结果不明：不得留下待核对命令，也不得自动重发。
     expect(view.wrapper.find('[data-testid="goal-detail-pending"]').exists()).toBe(false);
     expect(posts).toHaveLength(1);
+  });
+
+  it("GOAL_LINK_IN_USE 后基于重读事实再确认：新清单配新 Project 修订，不沿旧修订重发", async () => {
+    connect();
+    const posts: { body: Record<string, unknown> }[] = [];
+    let projectRevision = "2";
+    vi.stubGlobal("fetch", baseRouter({
+      goalProjects: () => response(200, { items: [
+        goalLink(p1, "论文实验", { project_revision: projectRevision }),
+        goalLink(p2, "旧论文分支",
+          { archive_status: "ARCHIVED", archived_at: "2026-10-01T00:00:00Z", project_revision: "4" }) ] }),
+      linkPosts: (body) => {
+        posts.push({ body });
+        if (posts.length === 1) {
+          // 冲突期间其他客户端推进了 Project 修订：重读必须读到 v3，再确认不得沿用 v2。
+          projectRevision = "3";
+          return response(409, { code: "GOAL_LINK_IN_USE", detail: "清单已变化",
+            conflict: { goal_id: goalId, impacted_task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] } });
+        }
+        return response(200, { command_id: body.command_id, committed_at: "2026-10-04T00:00:00Z",
+          result: { project_id: p1, revision: "4",
+            impacted_tasks: [{ task_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", revision: "5" }] } });
+      }
+    }));
+    const view = await mountWorkbench(`/goals/${goalId}`); unmount = view.unmount;
+    await flush();
+
+    await view.wrapper.get(`[data-testid="goal-unlink-open-${p1}"]`).trigger("click");
+    await flush();
+    await view.wrapper.get(`[data-testid="goal-unlink-submit-${p1}"]`).trigger("click");
+    await flush(); await flush();
+    expect(view.wrapper.get('[data-testid="goal-detail-error"]').text()).toContain("清单已变化");
+
+    // 重读后再次确认：新清单 + 重读到的 Project 修订。
+    await view.wrapper.get(`[data-testid="goal-unlink-submit-${p1}"]`).trigger("click");
+    await flush(); await flush();
+
+    expect(posts).toHaveLength(2);
+    expect(posts[1]?.body.expected_impacted_task_ids)
+      .toEqual(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+    expect(posts[1]?.body.expected_revision).toBe("3");
+    expect(view.wrapper.get('[data-testid="goal-detail-receipt"]').text()).toContain("v4");
   });
 });
 

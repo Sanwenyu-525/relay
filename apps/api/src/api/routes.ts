@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
+import { createDpapiCredentialStore } from '../credentials/dpapi-credential-store.js';
 import { registerArtifactRoutes } from './artifact-api.js';
 import { registerAttentionRoutes } from './attention-api.js';
 import { registerAssistRoutes } from './assist-api.js';
@@ -59,6 +61,7 @@ import { registerMemberConversationRoutes } from './member-conversation-api.js';
 import { registerScheduledTaskScheduler } from '../runtime/scheduled-task-scheduler.js';
 import { registerBlueprintRoutes } from './blueprint-api.js';
 import { registerModelRoutes } from './model-api.js';
+import { registerModelConnectionRoutes } from './model-connection-api.js';
 import { registerComposerRoutes } from './composer-api.js';
 import { registerComputerRoutes } from './computer-api.js';
 import { registerBrowserBridgeCommandRoutes, registerBrowserRoutes } from './browser-api.js';
@@ -107,6 +110,9 @@ export function registerRoutes(
   const apiDependencies: RouteDependencies = {
     database: dependencies.database,
     storage: new ManagedContentStore(dependencies.dataRoot),
+    // 模型连接凭据：`RELAY_CREDENTIAL_ROOT` 优先，缺省落在数据根下的 `credentials/`。
+    // 显式配置成相对路径是配置错误，不能悄悄退回数据根——凭据会「换个目录就消失」。
+    credentials: createDpapiCredentialStore({ root: resolveCredentialRootForApi(dependencies.dataRoot) }),
   };
 
   app.get(
@@ -193,6 +199,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerArtifactRoutes(scope, apiDependencies);
       registerAttentionRoutes(scope, apiDependencies);
       registerModelRoutes(scope, apiDependencies);
+      // P2 阶段一（ADR-036）：模型连接的登记与凭据管理。连接尚不参与模型解析。
+      registerModelConnectionRoutes(scope, apiDependencies);
       // 工作台 §30：发送前草稿辅助（分点边界 / 润色）。不写业务事实，只记模型调用证据。
       registerComposerRoutes(scope, apiDependencies);
       registerCompletionRoutes(scope, apiDependencies);
@@ -228,4 +236,19 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
     },
     { prefix: API_PREFIX },
   );
+}
+
+/**
+ * 模型连接凭据的存放根（ADR-036）：`RELAY_CREDENTIAL_ROOT` 优先，缺省 `<dataRoot>/credentials`。
+ *
+ * 显式配置成相对路径时直接抛错，而不是悄悄退回数据根——凭据落进「当前工作目录」这类
+ * 不确定位置，换个启动目录就会「消失」，而消失的表现是「未配置」而不是故障。
+ */
+function resolveCredentialRootForApi(dataRoot: string): string {
+  const configured = process.env.RELAY_CREDENTIAL_ROOT?.trim();
+  if (configured === undefined || configured === '') return join(resolve(dataRoot), 'credentials');
+  if (!isAbsolute(configured)) {
+    throw new Error('RELAY_CREDENTIAL_ROOT must be an absolute path');
+  }
+  return resolve(configured);
 }

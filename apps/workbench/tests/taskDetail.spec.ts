@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import ArtifactPanel from "../src/components/ArtifactPanel";
 import SafeMarkdown from "../src/components/SafeMarkdown";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resetSessionArtifactsForTest } from "../src/lib/sessionArtifacts";
+import { sha256Hex } from "../src/lib/sha256";
 import { flush, mountReact, mountWorkbench } from "./mountApp";
 
 const BASE_URL = "http://127.0.0.1:8787";
@@ -21,11 +22,18 @@ const TOKEN = "test-bearer-token-0123456789abcdef";
 
 let unmount: (() => void) | null = null;
 
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
+
 afterEach(() => {
   unmount?.();
   unmount = null;
   resetRelayConnectionForTest();
   resetSessionArtifactsForTest();
+  localStorage.clear();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -298,8 +306,8 @@ describe("产物与完成闭环（UI-11，live）", () => {
             version_id: VERSION_ID,
             version_number: "1",
             media_type: "text/markdown",
-            sha256: "a".repeat(64),
-            size: "12",
+            sha256: sha256Hex(String(body.content)),
+            size: String(new TextEncoder().encode(String(body.content)).byteLength),
             task_revision: "3"
           })
         );
@@ -316,8 +324,8 @@ describe("产物与完成闭环（UI-11，live）", () => {
             version_id: VERSION_TWO_ID,
             version_number: "2",
             media_type: "text/markdown",
-            sha256: "b".repeat(64),
-            size: "20",
+            sha256: sha256Hex(String(body.content)),
+            size: String(new TextEncoder().encode(String(body.content)).byteLength),
             task_revision: "4"
           })
         );
@@ -383,6 +391,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     // source_ref 是服务端必需输入：省略会被 REQUIRED_INPUT_MISSING 拒绝。
     expect(String(selectCall?.body.source_ref)).toContain(TASK_ID);
 
+    await mounted.wrapper.get(`[data-testid="completion-artifact-${VERSION_TWO_ID}"]`).setValue(true);
     await mounted.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
     await mounted.wrapper.get('[data-testid="criterion-c2"]').setValue(true);
     await mounted.wrapper.get('[data-testid="task-complete"]').trigger("click");
@@ -436,7 +445,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
             version_id: VERSION_ID,
             version_number: "1",
             media_type: "text/markdown",
-            sha256: "c".repeat(64),
+            sha256: sha256Hex("A"),
             size: "1",
             task_revision: "3"
           },
@@ -449,7 +458,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
         return jsonResponse(201, envelope(String(body.command_id), {
           task_id: TASK_ID, artifact_id: ARTIFACT_ID, artifact_revision: "1",
           version_id: VERSION_TWO_ID, version_number: "2", media_type: "text/markdown",
-          sha256: "d".repeat(64), size: "1", task_revision: "4"
+          sha256: sha256Hex(String(body.content)), size: String(new TextEncoder().encode(String(body.content)).byteLength), task_revision: "4"
         }));
       }
       throw new Error(`unexpected request: ${method} ${url}`);
@@ -468,13 +477,14 @@ describe("产物与完成闭环（UI-11，live）", () => {
     expect(commandId).not.toBe("");
     if (failure === "网络响应丢失") expect(mounted.wrapper.text()).toContain("尚未确定");
     await mounted.wrapper.get('textarea[name="artifact-content"]').setValue("B");
-    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeUndefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').text()).toContain("按原命令重试保存");
     expect(mounted.wrapper.get('[data-testid="artifact-save-pending"]').text()).toContain(commandId);
     expect(calls.filter((call) => call.method === "POST" && call.url === `${taskUrl}/artifacts`)).toHaveLength(1);
     await mounted.wrapper.get('[data-testid="artifact-save-receipt-query"]').trigger("click");
     await flush(80);
     expect(mounted.wrapper.get('[data-testid="artifact-save-pending"]').text()).toContain(commandId);
-    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeUndefined();
     expect(mounted.wrapper.find('[data-testid="artifact-save-receipt"]').exists()).toBe(false);
     wrongTargetReceipt = false;
     await mounted.wrapper.get('[data-testid="artifact-save-receipt-query"]').trigger("click");
@@ -541,7 +551,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     resolveSave!(jsonResponse(201, envelope(saveCommandId, {
       task_id: TASK_ID, artifact_id: ARTIFACT_ID, artifact_revision: "0",
       version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
-      sha256: "a".repeat(64), size: "1", task_revision: "3"
+      sha256: sha256Hex("A"), size: "1", task_revision: "3"
     })));
     await flush(80);
     expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "B");
@@ -564,7 +574,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
         return jsonResponse(201, envelope(String(body.command_id), {
           task_id: TASK_ID, artifact_id: ARTIFACT_ID, artifact_revision: "0",
           version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
-          sha256: "a".repeat(64), size: "10", task_revision: "3"
+          sha256: sha256Hex(String(body.content)), size: String(new TextEncoder().encode(String(body.content)).byteLength), task_revision: "3"
         }));
       }
       throw new Error(`unexpected request: ${method} ${url}`);
@@ -606,7 +616,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
         created = true; taskReadable = false;
         return jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
           artifact_revision: "0", version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
-          sha256: "a".repeat(64), size: "8", task_revision: "3" }));
+          sha256: sha256Hex(String(body.content)), size: String(new TextEncoder().encode(String(body.content)).byteLength), task_revision: "3" }));
       }
       throw new Error(`unexpected request: ${method} ${url}`);
     });
@@ -667,7 +677,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     created = true; taskReadStatus = 403;
     resolveSave!(jsonResponse(201, envelope(commandId, { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
       artifact_revision: "0", version_id: VERSION_ID, version_number: "1", media_type: "text/markdown",
-      sha256: "a".repeat(64), size: "1", task_revision: "3" })));
+      sha256: sha256Hex("A"), size: "1", task_revision: "3" })));
     await flush(80);
     expect(mounted.wrapper.get('[data-testid="artifact-source-unavailable"]').exists()).toBe(true);
     const artifactReads = calls.filter((call) => call.method === "GET" && call.url === `${taskUrl}/artifacts`).length;
@@ -848,6 +858,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     const editorElement = mounted.wrapper.get('[data-testid="artifact-editor"]').element;
     const versionChoice = () => mounted.wrapper.get(`[data-testid="artifact-version-${VERSION_ID}"]`);
     await versionChoice().setValue(true);
+    await mounted.wrapper.get(`[data-testid="completion-artifact-${VERSION_ID}"]`).setValue(true);
     await mounted.wrapper.get('[data-testid="criterion-c1"]').setValue(true);
     await mounted.wrapper.get('[data-testid="criterion-c2"]').setValue(true);
     await mounted.wrapper.get('[data-testid="task-complete"]').trigger("click");
@@ -1084,7 +1095,7 @@ describe("人工产物版本修订", () => {
           ? jsonResponse(409, { code: "REVISION_CONFLICT", detail: "Artifact revision 已变化" })
           : jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
             artifact_revision: "2", version_id: OTHER_VERSION_ID, version_number: "3", media_type: "text/markdown",
-            sha256: "c".repeat(64), size: "9", task_revision: "4" }));
+            sha256: sha256Hex(String(body.content)), size: String(new TextEncoder().encode(String(body.content)).byteLength), task_revision: "4" }));
       throw new Error(`unexpected request: ${method} ${url}`);
     });
     const props = { taskId: TASK_ID, projectId: PROJECT_ID, taskStatus: "IN_PROGRESS" as const,
@@ -1149,7 +1160,7 @@ describe("人工产物版本修订", () => {
         appended = true;
         return jsonResponse(201, envelope(String(body.command_id), { task_id: TASK_ID, artifact_id: ARTIFACT_ID,
           artifact_revision: "1", version_id: VERSION_TWO_ID, version_number: "2", media_type: "text/markdown",
-          sha256: "b".repeat(64), size: "9", task_revision: "3" }));
+          sha256: sha256Hex(String(body.content)), size: String(new TextEncoder().encode(String(body.content)).byteLength), task_revision: "3" }));
       }
       throw new Error(`unexpected request: ${method} ${url}`);
     });

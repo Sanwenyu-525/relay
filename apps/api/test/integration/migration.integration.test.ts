@@ -9,6 +9,7 @@ import { sql } from 'kysely';
 import { withTransaction } from '../../src/application/unit-of-work.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
+import type { DbExecutor } from '../../src/infrastructure/database.js';
 
 import {
   MIGRATION_LOCK_NAMESPACE,
@@ -201,6 +202,15 @@ const ALL_MIGRATIONS = [
   '0139_project_agent_members',
   '0140_project_member_conversations',
   '0141_member_wakeup_processing',
+  // 0142 为并行会话新增的凭据身份迁移；清单位于测试文件，新增迁移时必须同步，
+  // 否则 `assert.deepEqual(applied, ALL_MIGRATIONS)` 在真实库上会因多一条而失败。
+  '0142_model_credential_identity',
+  // 0143 为模型连接登记（ADR-036 阶段一）：只新增一张工作区作用域的连接表，
+  // 凭据只存不透明引用。清单必须同步，否则真实库上会因多一条而失败。
+  '0143_model_connections',
+  // 0144 为工作区默认连接与 Run 的连接身份（ADR-036 阶段三）：一张默认连接表 +
+  // 契约两列。清单必须同步，否则真实库上会因多一条而失败。
+  '0144_workspace_default_model_connection',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -208,6 +218,137 @@ function delay(milliseconds: number): Promise<void> {
     setTimeout(resolveDelay, milliseconds);
   });
 }
+
+async function seedLegacyArtifactScope(db: DbExecutor, includeConflict: boolean): Promise<{
+  workspaceId: string; otherWorkspaceId: string; projectId: string;
+  inboxTaskId: string; projectTaskId: string;
+}> {
+  const workspaceId = randomUUID();
+  const otherWorkspaceId = randomUUID();
+  const projectId = randomUUID();
+  const inboxTaskId = randomUUID();
+  const projectTaskId = randomUUID();
+  await sql`insert into workspaces (id, name) values
+    (${workspaceId}, 'Artifact scope'), (${otherWorkspaceId}, 'Other scope')`.execute(db);
+  await sql`insert into projects (id, workspace_id, title, project_type)
+    values (${projectId}, ${workspaceId}, 'Artifact scope project', 'GENERAL')`.execute(db);
+  await db.transaction().execute(async (trx) => {
+    await sql`insert into tasks (id, workspace_id, project_id, title, status, mode,
+      acceptance_revision, executor_kind) values
+      (${inboxTaskId}, ${workspaceId}, null, 'Inbox artifact', 'INBOX', 'ME', 1, 'HUMAN'),
+      (${projectTaskId}, ${workspaceId}, ${projectId}, 'Project artifact', 'READY', 'ME', 1, 'HUMAN')`
+      .execute(trx);
+    await sql`insert into task_acceptances (task_id, acceptance_revision, objective, required_output_spec, source)
+      values (${inboxTaskId}, 1, 'Inbox acceptance', '{}'::jsonb, 'CREATE'),
+        (${projectTaskId}, 1, 'Project acceptance', '{}'::jsonb, 'CREATE')`.execute(trx);
+    await sql`insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+      values (${randomUUID()}, ${workspaceId}, null, ${inboxTaskId}, 'MARKDOWN_DOCUMENT', 'Inbox history'),
+        (${randomUUID()}, ${workspaceId}, ${projectId}, ${projectTaskId}, 'MARKDOWN_DOCUMENT', 'Project history')`
+      .execute(trx);
+    if (includeConflict) {
+      // 0136 之前的单列 Task FK 与可空 Project FK 允许这条历史冲突；使用真实 relay_app 写入。
+      await sql`insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+        values (${randomUUID()}, ${otherWorkspaceId}, null, ${inboxTaskId},
+          'MARKDOWN_DOCUMENT', 'Legacy cross-workspace history')`.execute(trx);
+    }
+  });
+  return { workspaceId, otherWorkspaceId, projectId, inboxTaskId, projectTaskId };
+}
+
+async function readArtifactScopeRows(db: DbExecutor): Promise<unknown> {
+  return (await sql<{ artifacts: unknown; tasks: unknown; acceptances: unknown }>`select
+    (select jsonb_agg(to_jsonb(artifact) order by artifact.id) from artifacts artifact) as artifacts,
+    (select jsonb_agg(to_jsonb(task) order by task.id) from tasks task) as tasks,
+    (select jsonb_agg(to_jsonb(acceptance) order by acceptance.task_id, acceptance.acceptance_revision)
+      from task_acceptances acceptance) as acceptances`.execute(db)).rows[0];
+}
+
+test('0136 migrates legal Inbox and Project history, then relay_app rejects cross-Workspace rows with 23503', async () => {
+  const database = await createTemporaryDatabase('artifact_scope_valid');
+  const beforeDirectory = await createMigrationDirectoryFixture((files) => {
+    for (const name of files.keys()) if (name >= '0136_') files.delete(name);
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-artifact-scope-app');
+  const migration = openDatabase(database.migrationUrl, 'relay-api-test-artifact-scope-observer');
+  try {
+    const initial = await runMigrations({ connectionString: database.migrationUrl, directory: beforeDirectory });
+    assert.equal(initial.applied.at(-1), '0135_workspace_context_budget');
+    assert.equal((await sql<{ role: string }>`select current_user as role`.execute(app.db)).rows[0]?.role, 'relay_app');
+    const ids = await seedLegacyArtifactScope(app.db, false);
+    const beforeRows = await readArtifactScopeRows(app.db);
+    const result = await runMigrations({ connectionString: database.migrationUrl, directory: MIGRATIONS_DIRECTORY });
+    assert.equal(result.applied[0], '0136_artifact_task_workspace_scope');
+    assert.deepEqual(await readArtifactScopeRows(app.db), beforeRows, 'legal historical rows must not be rewritten');
+    const constraint = (await sql<{ convalidated: boolean; definition: string }>`select
+      convalidated, pg_get_constraintdef(oid) as definition from pg_constraint
+      where conrelid = 'public.artifacts'::regclass and conname = 'fk_artifacts_workspace_task'`
+      .execute(migration.db)).rows[0];
+    assert.equal(constraint?.convalidated, true);
+    assert.match(constraint?.definition ?? '', /FOREIGN KEY \(workspace_id, task_id\) REFERENCES tasks\(workspace_id, id\)/u);
+    await sql`insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+      values (${randomUUID()}, ${ids.workspaceId}, null, ${ids.inboxTaskId}, 'MARKDOWN_DOCUMENT', 'Legal Inbox after 0136'),
+        (${randomUUID()}, ${ids.workspaceId}, ${ids.projectId}, ${ids.projectTaskId}, 'MARKDOWN_DOCUMENT', 'Legal Project after 0136')`
+      .execute(app.db);
+    await assert.rejects(() => sql`insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind, title)
+      values (${randomUUID()}, ${ids.otherWorkspaceId}, null, ${ids.inboxTaskId},
+        'MARKDOWN_DOCUMENT', 'Rejected cross-workspace after 0136')`.execute(app.db), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, '23503');
+      assert.equal((error as { constraint?: string }).constraint, 'fk_artifacts_workspace_task');
+      return true;
+    });
+    assert.equal((await sql<{ count: bigint }>`select count(*)::bigint as count from artifacts`.execute(app.db)).rows[0]?.count, 4n);
+  } finally {
+    await app.close();
+    await migration.close();
+    await rm(beforeDirectory, { recursive: true, force: true });
+    await database.drop();
+  }
+});
+
+test('0136 fails fast with 23514 on legacy cross-Workspace history and rolls back data, ledger and constraints', async () => {
+  const database = await createTemporaryDatabase('artifact_scope_conflict');
+  const beforeDirectory = await createMigrationDirectoryFixture((files) => {
+    for (const name of files.keys()) if (name >= '0136_') files.delete(name);
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-artifact-scope-legacy');
+  const migration = openDatabase(database.migrationUrl, 'relay-api-test-artifact-scope-rollback');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory: beforeDirectory });
+    assert.equal((await sql<{ role: string }>`select current_user as role`.execute(app.db)).rows[0]?.role, 'relay_app');
+    await seedLegacyArtifactScope(app.db, true);
+    const beforeRows = await readArtifactScopeRows(app.db);
+    const readMigrationState = async () => (await sql<{ ledger: unknown; constraints: unknown }>`select
+      (select jsonb_agg(to_jsonb(entry) order by entry.name) from relay_schema_migrations entry) as ledger,
+      (select jsonb_agg(jsonb_build_object('name', conname, 'validated', convalidated,
+        'definition', pg_get_constraintdef(oid)) order by conname)
+        from pg_constraint where conrelid = 'public.artifacts'::regclass) as constraints`
+      .execute(migration.db)).rows[0];
+    const beforeMigrationState = await readMigrationState();
+    await assert.rejects(() => runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY }), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, '23514');
+      assert.match((error as Error).message,
+        /0136 cannot add Artifact\/Task Workspace scope: 1 existing row\(s\) conflict/u);
+      return true;
+    });
+    assert.deepEqual(await readArtifactScopeRows(app.db), beforeRows, 'failure must preserve every original Artifact and Task field');
+    assert.deepEqual(await readMigrationState(), beforeMigrationState,
+      'failure must preserve every ledger row, digest and Artifact constraint');
+    const state = (await sql<{ version: string; scope_constraint_count: bigint; migration_sessions: bigint }>`select
+      (select max(name) from relay_schema_migrations) as version,
+      (select count(*) from pg_constraint where conrelid = 'public.artifacts'::regclass
+        and conname = 'fk_artifacts_workspace_task')::bigint as scope_constraint_count,
+      (select count(*) from pg_stat_activity where datname = current_database()
+        and usename = current_user and application_name = 'relay-migrator')::bigint as migration_sessions`
+      .execute(migration.db)).rows[0];
+    assert.deepEqual(state, { version: '0135_workspace_context_budget', scope_constraint_count: 0n, migration_sessions: 0n });
+  } finally {
+    await app.close();
+    await migration.close();
+    await rm(beforeDirectory, { recursive: true, force: true });
+    await database.drop();
+  }
+});
 
 test('first-output migration leaves pre-existing settled calls NULL', async () => {
   const database = await createTemporaryDatabase('first_output_legacy');

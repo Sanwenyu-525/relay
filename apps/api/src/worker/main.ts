@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 
 import { validateDatabaseUrl } from '../config/config.js';
+import { applyCredentialEnvFromStore, CredentialEnvError } from '../credentials/credential-env.js';
 import { validateModelPortConfig } from '../workflow/model-port-config.js';
 import { FakeModelPort } from '../workflow/fake-model-port.js';
 import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
@@ -44,6 +45,10 @@ function readInteger(name: string, fallback: number, minimum: number, maximum: n
 }
 
 async function main(): Promise<void> {
+  // P2：Worker 与 API 各自是独立进程，必须各自物化凭据引用；否则会出现「API 认得这个连接、
+  // Worker 认为未配置」的分裂身份，而 Worker 才是真正发起模型调用的那一侧。
+  // 必须在 validateModelPortConfig 之前完成：否则只有引用没有明文时会被判成配置残缺。
+  await applyCredentialEnvFromStore(process.env);
   const databaseUrl = process.env.RELAY_DB_URL?.trim();
   const dataRoot = process.env.RELAY_DATA_ROOT?.trim();
   const validDataRoot = dataRoot !== undefined && isAbsolute(dataRoot) &&
@@ -229,11 +234,14 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const configFailure = error instanceof RestoreIsolationError || error instanceof Error &&
+  const configFailure = error instanceof RestoreIsolationError || error instanceof CredentialEnvError ||
+    error instanceof Error &&
     (error.message.includes('configuration') || error.message.includes('schema unavailable') ||
       error.message.endsWith(' invalid'));
   process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
   if (error instanceof RestoreIsolationError) {
+    process.stderr.write(`${error.code}\n`);
+  } else if (error instanceof CredentialEnvError) {
     process.stderr.write(`${error.code}\n`);
   } else if (error instanceof Error) {
     process.stderr.write(`${error.stack ?? `${error.name}: ${error.message}`}\n`);

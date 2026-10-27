@@ -521,6 +521,8 @@ export class AssistRepository {
     methodAction?: 'INSPECT' | 'MODIFY' | null; methodArgument?: string | null;
     modelSelectionSnapshot?: JsonObject | null;
     modelAttemptState?: JsonObject | null;
+    /** 0142：受理时所用凭据的单向身份；服务端比较用，不返回前端。 */
+    modelCredentialFingerprint?: string | null | undefined;
     /** 0072：本轮不记录学习状态。随命令体持久，不由模型提示决定。 */
     learningRecordDisabled?: boolean | undefined;
     /**
@@ -533,7 +535,7 @@ export class AssistRepository {
     await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
       content, sources, skill_snapshot, skill_input, method_snapshot, method_action,
       method_argument, learning_record_disabled, model_selection_snapshot, model_attempt_state,
-      chat_mode, goal_id)
+      model_credential_fingerprint, chat_mode, goal_id)
       values (${input.id}, ${input.sessionId},
       ${input.seq}, ${input.role},
       ${input.status}, ${input.intent}, ${input.content},
@@ -551,6 +553,7 @@ export class AssistRepository {
         JSON.stringify(input.modelSelectionSnapshot)}::jsonb,
       ${input.modelAttemptState === undefined || input.modelAttemptState === null ? null :
         JSON.stringify(input.modelAttemptState)}::jsonb,
+      ${input.modelCredentialFingerprint ?? null},
       ${input.chatMode ?? 'CHAT'}, ${input.goalId ?? null})`.execute(this.db);
     // 0111：消息落库即活动，用户消息与预插的 ASSISTANT 行都推进同一个排序键。
     await this.touchLastMessage(input.sessionId);

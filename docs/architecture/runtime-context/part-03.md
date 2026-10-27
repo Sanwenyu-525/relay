@@ -54,6 +54,12 @@
 
 2026-10-17 官方协议核对纠偏：当前 [OpenAPI `PublicPricing`](https://openrouter.ai/openapi.json) 只要求 `prompt`/`completion`，`request` 为可选字段。免费判定保留原始缺项，不把缺失请求费写成零，也不因该可选字段缺失而排除明确零输入/输出项；声明的请求费及其他适用收费项仍须合法零，未知或非法不放行。实际请求继续附请求费在内的零价格上限。该变化修正旧夹具对所有费用字段必需的假设，不能推广为缺少必需文本价格也默认免费。
 
+2026-10-26 执行端身份闭环（源码实现 + 受控验收，真实 Provider 未外呼）：Run 的模型身份此前只在 Delegate 冻结，执行端 `run-steps.prepareExternalWork` 仍按进程默认建端口，存在「冻结 A、实际调 B」的缺口。现由 `application/run-model-port.ts` 作为执行端**唯一**解析入口：有冻结计划时只解析候选队列第一项，型号 / 配置指纹 / 凭据身份 / 预算 / 免费资格任一不符即以类型化原因停止（`MODEL_SNAPSHOT_INVALID`、`MODEL_NOT_CONFIGURED`、`MODEL_CONFIG_CHANGED`、`MODEL_CREDENTIAL_CHANGED`、`MODEL_FREE_NOT_ELIGIBLE`、`MODEL_CATALOG_STALE`），**不回退默认模型、不回退 Fake、不切候选、不换凭据**；DRAFT 与 SEMANTIC_CHECK 共用同一冻结身份（语义检查器由冻结计划覆盖 registry 的进程默认，见 `checkers.resolveCheckerForScenario` 的第三参）。无冻结计划的旧 Run / Fake Run 保留原进程默认并标注 `basis=LEGACY_ENV`，不伪造旧模型身份。Run 内不换模型：候选队列是 Assist 的接续策略，Run 的身份必须唯一且稳定。凭据身份是 `sha256(域‖provider‖key)` 的单向摘要，落在 `model_calls` / `execution_contracts` / `assist_messages` 的服务端列，**不进 `frozen_snapshot`**（该快照会原样嵌入上下文清单并可能出现在界面）、不返回前端、不写日志；换 Key 后旧验证失效、旧 Run 停止、账户冷却按凭据身份隔离（同账户重启仍生效）。账本额度读取与连接验证响应改为流式有界读取（64 KiB，超限即取消），不再 `text()` 后判长度。
+
+2026-10-27 凭据引用（P2 前置，ADR-036）：模型凭据可以只以 `<VAR>_REF` 形式出现在环境里（`RELAY_MODEL_API_KEY_REF` / `RELAY_OPENROUTER_API_KEY_REF` / `OPENROUTER_API_KEY_REF`），值是不透明引用，秘密存在 Windows DPAPI（当前用户作用域）保护的凭据库里。API 与 Worker **各自**在启动最早期把引用物化成进程内环境（`credentials/credential-env.ts` 的 `applyCredentialEnvFromStore`），之后全部同步读取点（`readModelPortConfig` 等 20+ 处）行为完全不变。选择「启动时物化」而不是「把每个读取点改成异步」的理由是：只要有一处漏改，同一进程里就会出现两个模型身份，而这正是本模块要消灭的缺陷类别。
+
+失败一律让进程起不来（`CREDENTIAL_ENV_AMBIGUOUS`：明文与引用同时存在；`CREDENTIAL_REF_NOT_FOUND`：引用没有对应秘密；`CREDENTIAL_STORE_UNAVAILABLE`：helper 缺失/超时/DPAPI 失败），**不**回落明文、**不**回落默认模型、**不**回落「未配置」——三种回落都会悄悄改变模型身份。物化成功后该 `_REF` 被删除（引用已由本进程消费），因此二次物化是 no-op 而不是被判成歧义。存放根 `RELAY_CREDENTIAL_ROOT`，缺省 `<RELAY_DATA_ROOT>/credentials`；两者都没有或给相对路径直接报错（凭据落进不确定位置，换个启动目录就「消失」）。秘密只存在于进程内存与 DPAPI blob 中：不落盘明文、不进日志、不进响应、不进冻结快照。
+
 ## 9. 聊天目标与计划模式的运行边界
 
 2026-10-20，产品行为已确认；工作区已接入 `0127` 迁移、应用用例、Worker 推进和会话 UI。以下区分源码事实与仍需验证的恢复出口，不将基础接线视为整体交付。产品定义归[总纲 §0.15](../../requirements/product-spec/part-02.md#015-聊天目标与计划模式)，实际成绩及未闭合项只归统一功能验收表的「聊天 `/goal` 与 `/plan` 完整实施」行。

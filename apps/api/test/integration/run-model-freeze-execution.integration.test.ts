@@ -255,14 +255,18 @@ test('a frozen free model stops when the catalog no longer certifies it as free'
       '{"prompt":"0.000001","completion":"0.000002"}'::jsonb,
       '{"text_input":true,"text_output":true,"tools":true,"response_format":true}'::jsonb,
       false, 'NONZERO_PRICE', now())`.execute(app.db);
+    const env = { ...defaultEnvA,
+      RELAY_OPENROUTER_API_KEY: freeEnv.RELAY_OPENROUTER_API_KEY,
+      RELAY_MODEL_MAX_OUTPUT_TOKENS: freeEnv.RELAY_MODEL_MAX_OUTPUT_TOKENS,
+      RELAY_MODEL_MAX_CALL_TOKENS: freeEnv.RELAY_MODEL_MAX_CALL_TOKENS };
     const provider = controlledProvider();
     const storage = new ManagedContentStore(await createDataRoot());
     const workerId = `frozen-not-free-${randomUUID()}`;
     const built = await advanceRunStep(app.db, { runId, workerId, storage,
-      modelEnv: { ...defaultEnvA }, modelTransport: provider.dependencies });
+      modelEnv: env, modelTransport: provider.dependencies });
     assert.equal(built.status, 'STEP_SUCCEEDED');
     const draft = await advanceRunStep(app.db, { runId, workerId, storage,
-      modelEnv: { ...defaultEnvA }, modelTransport: provider.dependencies });
+      modelEnv: env, modelTransport: provider.dependencies });
     assert.equal(draft.status, 'RUN_FAILED');
     assert.equal(draft.reason, 'MODEL_FREE_NOT_ELIGIBLE');
     assert.equal(provider.requests.length, 0);

@@ -112,15 +112,16 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   const version = useRef(0);
   useEffect(() => {
     const request = ++version.current;
-    setFacts(null); setLoading(true); setError(null);
+    setLoading(true); setError(null);
     void readOverviewFacts(client, id).then((next) => { if (request === version.current) setFacts(next); })
       .catch((caught: unknown) => { if (request === version.current) setError(describeLiveError(caught).message); })
       .finally(() => { if (request === version.current) setLoading(false); });
     return () => { version.current++; };
   }, [client, id, reload]);
 
-  if (loading) return <section className="page-state pv-page" role="status"><p className="eyebrow">Projects</p><h1>正在读取项目当前状态</h1><p>只读查询 Project 与 State 事实，不会开始任务或恢复执行。</p></section>;
-  if (error || !facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
+  if (loading && !facts) return <section className="page-state pv-page" role="status"><p className="eyebrow">Projects</p><h1>正在读取项目当前状态</h1><p>只读查询 Project 与 State 事实，不会开始任务或恢复执行。</p></section>;
+  if (error && !facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
+  if (!facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>项目事实不可用。</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
 
   const { project, state, goals, nextAction, reviews, decisions, artifacts } = facts;
   const { tasks, tasksNextCursor, tasksReadFailed } = facts;
@@ -142,13 +143,17 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       status={<span className={`status-chip ${archived ? "status-chip--neutral" : "status-chip--success"}`}>{archived ? "已归档" : phaseLabel(state.phaseKey)}</span>}
       lede={activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}
       actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button>} />
+    {(loading || error !== null) && <p className="warning-callout" role="status" data-testid="project-overview-stale-facts">
+      {error ? `刷新失败：${error}。当前展示的是上次成功读取的事实，标题编辑已暂停。` : "正在重新读取项目事实；刷新完成前标题编辑暂不可用。"}
+    </p>}
     {archived && <p className="warning-callout" role="status">项目已归档，本页只读；不能再提交新的写命令。</p>}
     {/* V43-04 接续摘要主入口：真实接续卡（当前事实、相对基线变化、在途与阻塞）+ 两个动作。
         「继续工作」只做导航——有 State 下一步时去该任务详情，否则回项目工作台；
         不自动委托、不创建 Task/Run/会话、不写业务状态。「查看动态」带原项目过滤。 */}
     <section className="resume-section" data-testid="project-resume-card" aria-label="接续摘要">
       <h2>接续摘要</h2>
-      <DailyContinuationCard client={client} projectId={id} />
+      {/* PROJECT-OVERVIEW-CONTINUATION-REFRESH：总览重读时同步重新读取独立的接续投影。 */}
+      <DailyContinuationCard key={reload} client={client} projectId={id} />
       <div className="project-resume-actions">
         {archived ? <>
           <button className="primary-button" type="button" disabled data-testid="project-resume-continue">继续工作</button>
@@ -177,6 +182,7 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       {/* 2026-10-24 用户指令：服务端待接入字段收成开发注记；页面呈现原则归代码与文档，不再上屏。 */}
       <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：State 的确认人与确认时间、「已确认 / 仍需明确」清单字段服务端尚未提供（待接入）；本页只呈现 revision、阶段、下一步、任务、选用产物与 Decision。</p>
       <ProjectTitleEditor client={client} project={project} archived={archived}
+        readOnly={loading || error !== null}
         onChanged={() => setReload((value) => value + 1)} />
     </section>
     <ProjectStatePanel client={client} projectId={id} projectType={project.projectType}

@@ -3,8 +3,12 @@ import type { ModelCatalogEntryRow, SessionModelSelectionRow } from
   '../infrastructure/database-schema.js';
 import type { Repositories } from './unit-of-work.js';
 import { computeModelConfigFingerprint, readModelPortConfig,
-  readOpenRouterModelPortConfig } from '../workflow/model-port-config.js';
+  readOpenRouterModelPortConfig, type ModelPortConfig } from '../workflow/model-port-config.js';
+import { readCredentialFingerprint } from '../workflow/credential-identity.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
+import { OpenAiCompatibleModelPort, type ModelCallBudget } from
+  '../workflow/openai-compatible-model-port.js';
+import type { AssistModelPort } from '../workflow/fake-model-port.js';
 
 const MAX_FREE_MODEL_ATTEMPTS = 3;
 const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
@@ -24,13 +28,20 @@ const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
  *
  * `minimum_context_window`（候选资格门槛）**不**随档位走：它是「这个进程至少要什么样的
  * 模型」，让工作区档位去改它会把换档变成静默的模型淘汰。
+ *
+ * Run 准入也用同一函数重算「当前配置 + 冻结工作区档位」下的预期三个数，
+ * 而不是拿冻结预算直接和进程默认值比较（那样每次选了档位都会误判成配置变化）。
  */
-function budgetPlan(config: { readonly maxCallTokens: number; readonly maxScopeCalls: number;
-  readonly maxScopeTokens: number }, workspaceTokens: number | null, providerWindow: number | null) {
+export function planAssistModelBudget(config: { readonly maxCallTokens: number;
+  readonly maxScopeCalls: number; readonly maxScopeTokens: number },
+  workspaceTokens: number | null, providerWindow: number | null) {
   const requested = workspaceTokens ?? config.maxCallTokens;
   const reservation = providerWindow === null ? requested : Math.min(requested, providerWindow);
+  // 选中档位时作用域至少留两倍单次预留：作用域闸门对已结算调用按真实用量、对在途调用按
+  // 预留数计算，只留一份预留会让第一次调用之后的任何一次续轮或自动提取都被拒绝。
+  const scopeFloor = workspaceTokens === null ? reservation : reservation * 2;
   return { callReservationTokens: reservation, scopeCallLimit: config.maxScopeCalls,
-    scopeTokenLimit: Math.max(config.maxScopeTokens, reservation),
+    scopeTokenLimit: Math.max(config.maxScopeTokens, scopeFloor),
     workspaceContextBudgetTokens: workspaceTokens };
 }
 
@@ -47,14 +58,15 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
   selection: SessionModelSelectionRow | undefined, env: NodeJS.ProcessEnv,
   requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
   workspaceId?: string):
-  Promise<{ readonly snapshot: JsonObject; readonly attemptState: JsonObject } | undefined> {
+  Promise<FrozenAssistModelPlan | undefined> {
   const workspaceBudget = await readWorkspaceContextBudget(repositories, workspaceId);
   if (selection === undefined) {
     const config = readModelPortConfig(env);
     if (config === undefined) return undefined;
-    return frozen([candidateSnapshot({ provider: 'openai-compatible', model: config.model,
-      configFingerprint: computeModelConfigFingerprint(config) }, false, null)], config, 1,
-    requirements, budgetPlan(config, workspaceBudget, null));
+    return withCredential(frozen([candidateSnapshot({ provider: 'openai-compatible',
+      model: config.model, configFingerprint: computeModelConfigFingerprint(config) },
+    false, null)], config, 1, requirements,
+    planAssistModelBudget(config, workspaceBudget, null)), config);
   }
   if (selection.connection === 'default') {
     const config = readModelPortConfig(env);
@@ -64,7 +76,8 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
     }
     const candidate = candidateSnapshot({ provider: 'openai-compatible', model: config.model,
       configFingerprint: selection.config_fingerprint }, false, null);
-    return frozen([candidate], config, 1, requirements, budgetPlan(config, workspaceBudget, null));
+    return withCredential(frozen([candidate], config, 1, requirements,
+      planAssistModelBudget(config, workspaceBudget, null)), config);
   }
 
   const sync = await repositories.modelCatalog.readSyncState();
@@ -99,8 +112,45 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
   });
   // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。档位高于它时按
   // 窗口截断——不是把模型淘汰掉（资格门槛仍是进程默认），而是不申请它装不下的预算。
-  return frozen(candidates, selectedConfig, Math.min(MAX_FREE_MODEL_ATTEMPTS, candidates.length),
-    requirements, budgetPlan(selectedConfig, workspaceBudget, selected.context_window));
+  return withCredential(frozen(candidates, selectedConfig,
+    Math.min(MAX_FREE_MODEL_ATTEMPTS, candidates.length), requirements,
+    planAssistModelBudget(selectedConfig, workspaceBudget, selected.context_window)), selectedConfig);
+}
+
+/**
+ * P2（ADR-036 阶段三）：按**已解析的**配置冻结单候选计划。
+ *
+ * 与 `freezeAssistModelSnapshot` 的唯一区别是「配置从哪来」：那里读进程环境，这里由调用方
+ * 给出（工作区默认连接解析出的配置）。快照形状、预算口径与凭据身份必须完全一致——否则
+ * 执行端会按同一套校验把一次合法冻结误判成「配置已变」。
+ *
+ * 只冻结**一个**候选：连接是确切型号，不存在候选接续。Run 内不换模型。
+ */
+export function freezeSingleCandidatePlan(config: ModelPortConfig,
+  requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
+  workspaceTokens: number | null): FrozenAssistModelPlan {
+  const candidate = candidateSnapshot({ provider: 'openai-compatible', model: config.model,
+    configFingerprint: computeModelConfigFingerprint(config) }, false, null);
+  return withCredential(frozen([candidate], config, 1, requirements,
+    planAssistModelBudget(config, workspaceTokens, null)), config);
+}
+
+/**
+ * 0142：冻结计划里同时带出**服务端**凭据身份。
+ *
+ * 它不写进 `snapshot`：快照会随执行契约进入上下文清单、也可能出现在界面，凭据摘要不能
+ * 出现在这些位置。调用方把它写进 execution_contracts / assist_messages 的独立列。
+ */
+export interface FrozenAssistModelPlan {
+  readonly snapshot: JsonObject;
+  readonly attemptState: JsonObject;
+  readonly credentialFingerprint: string;
+}
+
+function withCredential(plan: { readonly snapshot: JsonObject;
+  readonly attemptState: JsonObject }, config: { readonly provider: string;
+  readonly apiKey: string }): FrozenAssistModelPlan {
+  return { ...plan, credentialFingerprint: readCredentialFingerprint(config) };
 }
 
 export interface AssistModelCandidateSnapshot {
@@ -228,6 +278,25 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
 
 function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === 'number' && value > 0;
+}
+
+/** 冻结快照里的预算换成端口/记账用的三个数。 */
+export function snapshotIdentityBudget(budget: ParsedAssistModelSnapshot['budget']): ModelCallBudget {
+  return { callReservationTokens: budget.callReservationTokens,
+    scopeCallLimit: budget.scopeCallLimit, scopeTokenLimit: budget.scopeTokenLimit };
+}
+
+/**
+ * 0135：把冻结快照的预算套到真实端口上。
+ *
+ * 只对 `OpenAiCompatibleModelPort` 生效：它既改记账身份，也改端口内部的实际调用闸门。
+ * 测试替身原样返回——它们不发起真实外呼，身份里的预算不影响任何真实准入；
+ * 生产路径的三个入口（Assist 默认/免费路由、自动提取、压缩、Run）拿到的都是真实端口。
+ */
+export function applySnapshotBudget(port: AssistModelPort,
+  budget: ParsedAssistModelSnapshot['budget']): AssistModelPort {
+  if (!(port instanceof OpenAiCompatibleModelPort)) return port;
+  return port.withBudget(snapshotIdentityBudget(budget));
 }
 
 function frozen(candidates: readonly AssistModelCandidateSnapshot[],

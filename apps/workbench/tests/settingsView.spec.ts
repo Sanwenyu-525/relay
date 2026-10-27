@@ -19,16 +19,32 @@ function response(body: unknown, status = 200): Response {
 
 const fingerprint = "a".repeat(64);
 type VerificationBody = {
+  target: string;
+  connection: string;
+  model: string | null;
   current_config_fingerprint: string | null;
   last: ReturnType<typeof lastBody> | null;
+  target_last: ReturnType<typeof lastBody> | null;
   matches_current_config: boolean;
+  credential_identity: string;
+  /** null＝旧服务端：前端退回本地推导（既有用例依赖这条兼容路径）。 */
+  state: string | null;
   worker_startup_validation: string;
 };
 function verificationBody(overrides: Partial<VerificationBody> = {}): VerificationBody {
   return {
+    target: "default",
+    connection: "default",
+    model: "gpt-test",
     current_config_fingerprint: fingerprint,
     last: null,
+    // 老夹具只有 last（单一目标世界）：默认把它当作本目标的最近一次；
+    // 需要表达「本目标没有验证行」时显式传 target_last: null。
+    target_last: overrides.target_last !== undefined ? overrides.target_last
+      : overrides.last ?? null,
     matches_current_config: false,
+    credential_identity: "UNKNOWN",
+    state: null,
     worker_startup_validation: "OK",
     ...overrides
   };
@@ -418,7 +434,9 @@ describe("验证六态解析", () => {
       { input: { status: configured, verification: null, verifying: true },
         expected: "VERIFYING" },
       { input: { status: configured,
-        verification: { currentConfigFingerprint: fingerprint,
+        verification: { target: "default", connection: "default", model: "gpt-test",
+          targetLast: null, credentialIdentity: "UNKNOWN", state: null,
+          currentConfigFingerprint: fingerprint,
           last: { ok: true, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
             configFingerprint: fingerprint, errorCategory: null,
             verifiedAt: "2026-09-28T10:00:00.000Z" },
@@ -426,7 +444,9 @@ describe("验证六态解析", () => {
         verifying: false },
         expected: "VERIFIED" },
       { input: { status: configured,
-        verification: { currentConfigFingerprint: fingerprint,
+        verification: { target: "default", connection: "default", model: "gpt-test",
+          targetLast: null, credentialIdentity: "UNKNOWN", state: null,
+          currentConfigFingerprint: fingerprint,
           last: { ok: false, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
             configFingerprint: fingerprint, errorCategory: "AUTH",
             verifiedAt: "2026-09-28T10:00:00.000Z" },
@@ -445,11 +465,83 @@ describe("验证六态解析", () => {
     }
     // 指纹不匹配：即使 last.ok 也不显示验证通过
     expect(resolveVerificationState({ status: configured,
-      verification: { currentConfigFingerprint: "b".repeat(64),
+      verification: { target: "default", connection: "default", model: "gpt-test",
+        targetLast: null, credentialIdentity: "UNKNOWN", state: null,
+        currentConfigFingerprint: "b".repeat(64),
         last: { ok: true, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
           configFingerprint: fingerprint, errorCategory: null,
           verifiedAt: "2026-09-28T10:00:00.000Z" },
         matchesCurrentConfig: false, workerStartupValidation: "OK" },
       verifying: false })).toBe("UNVERIFIED");
+  });
+
+  /**
+   * P1-6：服务端目标状态优先于前端推导。
+   * 目录过期 / 资格失效 / 账户冷却期间，上一行 last 是 ok 也不能显示「验证通过」。
+   */
+  it("服务端目标状态优先：凭据更换、目录过期、资格失效各有独立标记", async () => {
+    const cases: { state: string; chip: string; credential?: string }[] = [
+      { state: "CREDENTIAL_CHANGED", chip: "凭据已更换", credential: "CHANGED" },
+      { state: "CATALOG_STALE", chip: "目录已过期" },
+      { state: "FREE_INELIGIBLE", chip: "型号不可调用" },
+      { state: "ACCOUNT_COOLDOWN", chip: "账户冷却中" },
+      { state: "AUTH_FAILED", chip: "认证失败" },
+      { state: "MODEL_NOT_FOUND", chip: "型号不存在" }
+    ];
+    for (const entry of cases) {
+      connect();
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/attention/interventions")) return response({ items: [] });
+        if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
+          configured: true, model: "gpt-test", base_url: "https://api.example.com/v1" });
+        if (url === `${root}/model-port/verification`) return response(verificationBody({
+          last: lastBody(), target_last: lastBody(), matches_current_config: true,
+          state: entry.state, credential_identity: entry.credential ?? "MATCH" }));
+        if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+          revision: "0", recall_enabled: true, automatic_compaction: true });
+        throw new Error(`Unexpected ${url}`);
+      }));
+      const mounted = await mountModelSettings(); unmount = mounted.unmount;
+      const states = mounted.wrapper.get('[data-testid="service-state"]');
+      expect(states.text()).toContain(entry.chip);
+      // 关键：即使 last.ok=true 且指纹匹配，验证行也不得显示「验证通过」。
+      // 只看这一行：卡片导语本身包含「连接验证通过」这句话。
+      const verifiedRow = mounted.wrapper.get('[data-testid="service-state-verified"]');
+      expect(verifiedRow.text()).toContain(entry.chip);
+      expect(verifiedRow.text()).not.toContain("验证通过");
+      if (entry.state === "CREDENTIAL_CHANGED") {
+        expect(mounted.wrapper.get('[data-testid="verification-credential"]').text())
+          .toContain("API Key");
+      }
+      unmount?.(); unmount = null;
+      resetRelayConnectionForTest();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("验证详情按目标显示：OpenRouter 型号的成功不会被默认连接的成功顶替", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
+        configured: true, model: "gpt-test", base_url: "https://api.example.com/v1" });
+      if (url === `${root}/model-port/verification`) return response(verificationBody({
+        target: "openrouter:free/model-x", connection: "openrouter", model: "free/model-x",
+        // 实例级 last 是另一个型号的成功；本目标没有任何验证行。
+        last: lastBody({ model: "gpt-test" }), target_last: null,
+        matches_current_config: false, state: "UNVERIFIED" }));
+      if (url === `${root}/memory-settings`) return response({ workspace_id: workspaceId,
+        revision: "0", recall_enabled: true, automatic_compaction: true });
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const mounted = await mountModelSettings(); unmount = mounted.unmount;
+    const target = mounted.wrapper.get('[data-testid="verification-target"]');
+    expect(target.text()).toContain("free/model-x");
+    expect(target.text()).toContain("另一个型号验证通过，不代表这个型号可执行");
+    // 本目标没有验证行：详情不得把实例级 last 当成这个目标的结论。
+    expect(mounted.wrapper.get('[data-testid="verification-detail"]').text())
+      .toContain("尚无验证记录");
   });
 });

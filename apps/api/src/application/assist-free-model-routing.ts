@@ -6,6 +6,9 @@ import type { ModelPortConfig } from '../workflow/model-port-config.js';
 import { computeModelConfigFingerprint, readOpenRouterModelPortConfig } from
   '../workflow/model-port-config.js';
 import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
+import { accountCooldownKey, compareCredentialIdentity, readCredentialFingerprint } from
+  '../workflow/credential-identity.js';
+import { readBoundedJson } from '../workflow/bounded-response.js';
 import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
@@ -18,9 +21,12 @@ import { syncModelCatalog } from './model-catalog-sync.js';
 import { createOpenRouterCatalogSource } from '../workflow/openrouter-catalog-source.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { createRepositories } from './unit-of-work.js';
-import { parseAssistModelSnapshot, type AssistModelCandidateSnapshot,
+import { parseAssistModelSnapshot, snapshotIdentityBudget, type AssistModelCandidateSnapshot,
   type ParsedAssistModelSnapshot } from './assist-model-snapshot.js';
 import type { JsonValue } from '../infrastructure/json.js';
+
+/** 账户额度响应的字节上限：真实响应是几百字节的 JSON，64 KiB 足够且不给上游留放大空间。 */
+const ACCOUNT_QUOTA_MAX_BYTES = 64 * 1024;
 
 export interface AssistFreeModelRoutingContext {
   readonly db: DbExecutor;
@@ -216,9 +222,17 @@ async function resolveOpenRouterCandidate(context: AssistFreeModelRoutingContext
   if (computeModelConfigFingerprint(config) !== candidate.connection.configFingerprint) {
     throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
   }
+  // 0142：免费连接换 Key 后不能继续用旧冻结身份外呼——换账户会绕过账户级额度与冷却。
+  if (compareCredentialIdentity(context.message.model_credential_fingerprint,
+    readCredentialFingerprint(config)) === 'CHANGED') {
+    throw new Error('ASSIST_MODEL_CREDENTIAL_CHANGED');
+  }
   const cooldowns = new ModelProviderCooldownRepository(context.db);
+  // 0142：账户级冷却按**真实凭据身份**取键。固定指纹会让 A 账户的限流挡住独立的
+  // B 账户；按凭据取键后，同一账户重启仍命中同一行，不同账户互不影响。
   const accountCooldown = await cooldowns.readActive({ scope: 'ACCOUNT', modelId: '',
-    configFingerprint: accountCooldownFingerprint(), now: new Date() });
+    configFingerprint: accountCooldownKey(readCredentialFingerprint(config)),
+    now: new Date() });
   if (accountCooldown !== undefined) return { kind: 'COOLDOWN', cooldown: accountCooldown };
   const modelCooldown = await cooldowns.readActive({ scope: 'MODEL',
     modelId: candidate.connection.model,
@@ -242,7 +256,8 @@ async function resolveOpenRouterCandidate(context: AssistFreeModelRoutingContext
   if (!isCurrentlyEligible(entry, snapshot)) return { kind: 'INVALID' };
   const port = new OpenAiCompatibleModelPort(config, context.modelFetchDependencies,
     buildFreePriceGuard({ connection: candidate.connection, freeOnly: true,
-      catalogBasis: candidate.catalogBasis, budget: snapshot.budget }));
+      catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
+    snapshotIdentityBudget(snapshot.budget));
   return { kind: 'READY', value: { port, config } };
 }
 
@@ -407,11 +422,8 @@ async function readFreeDailyRemaining(apiKey: string, fetchImpl: typeof fetch): 
       redirect: 'error', signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return undefined;
-    const declared = Number(response.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > 64 * 1024) return undefined;
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > 64 * 1024) return undefined;
-    const root = asObject(JSON.parse(text));
+    // P1-2：流式读取过程中就执行字节上限，超限立即取消；不再先 text() 再判长度。
+    const root = asObject(await readBoundedJson(response, ACCOUNT_QUOTA_MAX_BYTES));
     const data = asObject(root?.data);
     const free = asObject(data?.free_model_daily_requests);
     const remaining = free?.remaining;
@@ -440,8 +452,9 @@ async function persistKnownCooldown(context: AssistFreeModelRoutingContext,
   } else if (scope === 'ACCOUNT' && (reason === 'PLATFORM_RATE_LIMIT' ||
       reason === 'ACCOUNT_FREE_DAILY_EXHAUSTED')) {
     await new ModelProviderCooldownRepository(context.db).record({ scope: 'ACCOUNT', modelId: '',
-      configFingerprint: accountCooldownFingerprint(), retryAfterAt, reason,
-      modelCallId: callId, observedAt: new Date(String(failure.state.observed_at)) });
+      configFingerprint: accountCooldownKey(readCredentialFingerprint(config)),
+      retryAfterAt, reason, modelCallId: callId,
+      observedAt: new Date(String(failure.state.observed_at)) });
   }
 }
 
@@ -454,9 +467,10 @@ function cooldownFailure(model: string,
     free_daily_remaining: null };
 }
 
-function accountCooldownFingerprint(): string {
-  return createHash('sha256').update('openrouter-account-cooldown-v1', 'utf8').digest('hex');
-}
+/**
+ * 0142：账户级冷却键由 `credential-identity.accountCooldownKey` 派生（按真实凭据身份），
+ * 不再使用「全实例同一个固定指纹」——那会让一个账户的限流挡住另一个独立账户。
+ */
 
 async function advanceCandidate(context: AssistFreeModelRoutingContext,
   snapshot: ParsedAssistModelSnapshot, reservedState: ParsedAttemptState, nextIndex: number,

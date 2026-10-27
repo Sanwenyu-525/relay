@@ -185,6 +185,19 @@ error_category 枚举与设置页指引一一对应：AUTH(401/403)、RATE_LIMIT
 
 验证：Fake 注入五分支（SUCCESS/AUTH/TIMEOUT/INVALID_MODEL/NETWORK）真实 PG 落账本可回读；API 单测 5 项；设置页组件 10 项。真实 Provider 外呼待放行，未执行。
 
+2026-10-26 增量（**Breaking Change: No，响应新增 `credential_identity`**）：`GET /model-port/verification` 增加 `credential_identity`，取值 `MATCH` / `CHANGED` / `UNKNOWN`，表示**最近一次验证所用凭据**与当前凭据的关系。`CHANGED` 时 `matches_current_config` 一并变为 `false`——换 API Key 之后旧验证结论不再代表当前连接可执行，必须重新验证；`UNKNOWN` 表示该验证行产生于 0142 之前、没有凭据身份可比，不冒充匹配。凭据身份是 `sha256(域 ‖ provider ‖ key)` 的单向摘要，只做服务端比较，**不出现在任何响应、日志或上下文清单里**（响应只给关系枚举，不给摘要）。`config_fingerprint` 的语义与算法不变（仍不含密钥），因此换 Key 不改配置指纹、只改凭据身份——两个维度分开表达，前端不需要也不应该推断 Key。
+
+2026-10-27 增量（**Breaking Change: No，新增可选目标与 `state`**）：验证不再只能针对进程默认模型。
+`POST /model-port/verify` 接受可选体 `{ "connection": "openrouter", "model": "<确切型号>" }`（缺省仍是默认连接，旧调用方无需改动）；`GET /model-port/verification` 接受同名查询参数。响应新增 `target`（`default` 或 `openrouter:<型号>`）、`connection`、`model`、`target_last`、`state`。
+
+`last` 保持既有语义不变（本实例最近一次验证，不按目标过滤）；`target_last` 是**本目标**（provider + 确切型号）最近一次验证，`state` 只由它推导。两者分开是刻意的：设置页的「最近一次验证」与「这个型号能不能用」是两个问题，另一个型号的成功不能冒充这个型号可执行。
+
+`state` 是**互斥**的 13 态：`NOT_CONFIGURED`（没凭据/没型号）、`CONFIG_INCOMPLETE`（有 Provider 但字段残缺）、`UNVERIFIED`（该目标没有可继承的验证行，含配置指纹已变）、`VERIFIED`（**这个确切目标**刚探测通过）、`CREDENTIAL_CHANGED`（换过 Key）、`AUTH_FAILED`、`MODEL_NOT_FOUND`（HTTP 404，账本 `error_kind=MODEL_NOT_FOUND`，对外 `error_category` 仍是 `PROTOCOL`）、`CATALOG_STALE`、`CAPABILITY_INSUFFICIENT`、`FREE_INELIGIBLE`、`ACCOUNT_COOLDOWN`、`BUDGET_EXHAUSTED`、`UNKNOWN`。优先级是「能不能验证」先于「上次验证结果」：目录过期、资格失效、账户冷却期间即使上一行是 ok 也不显示 `VERIFIED`——这正是「目录存在 / Key 已填 / 默认模型验证过」被误读成「所选模型可执行」的根源。
+
+OpenRouter 目录型号的探针：使用**独立**聊天凭据（`RELAY_OPENROUTER_API_KEY`，缺省回退 `OPENROUTER_API_KEY`）与**确切**型号，并在最终 HTTP 体附带 `provider.max_price` 全零与关闭 fallback 的硬限制（与真实免费外呼同一条防线）。探测前先确认该型号在当前目录快照里仍是免费文本型号：不是 → 409 `MODEL_VERIFY_TARGET_NOT_ELIGIBLE`；目录过期 → 409 `MODEL_VERIFY_CATALOG_STALE`（`retry_action=REFRESH_AND_REDECIDE`）。两种拒绝都**不发起外呼、不写 `model_calls`**。目标格式非法 → 400 `MODEL_VERIFY_TARGET_INVALID`。
+
+验证仍不等于执行：`VERIFIED` 只证明一次短探针通过，不代表真实任务可完成，也不代表其他型号可执行。
+
 ### 10.51 N01 项目接续点（2026-09-29，开发自检）
 
 **Breaking Change: No。** 迁移 `0044_project_continuation_points` 只新增 `project_continuation_points` 与 `project_continuation_point_refs` 两张表，不改动既有表、列或索引；`0045_continuation_point_ref_target_guard` 进一步把引用目标 CHECK 改为 NULL 安全并统一两类目标外键为即时检查。0044 的 CHECK 原写作 `task_id = ref_id`，在 `task_id` 为 NULL 时求值为 NULL 而非 FALSE，PostgreSQL 只在 FALSE 时拒绝，脏行因此可落库；已应用迁移不得改写，故由 0045 追加修正。以下四个端点均为新增路径，沿用 `/api/v1/workspaces/{workspace_id}` 前缀与 Bearer/Workspace 边界。Project State、Task、Artifact、Run 与 Review 的形状和状态机均未改变。

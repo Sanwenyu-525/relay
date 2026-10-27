@@ -62,6 +62,11 @@ export async function mountWorkbench(path: string) {
     wrapper: new DomWrapper(container),
     router: {
       push: async (target: string) => { await act(async () => { await router.navigate(target); }); },
+      /** 开始导航但不等待 Router promise：被 useBlocker 拦截的 Promise 会等用户作出选择。 */
+      attempt: async (target: string) => {
+        await act(() => { void router.navigate(target); });
+        await flush();
+      },
       back: async () => { await act(async () => { await router.navigate(-1); }); },
       currentRoute: { get value() { const location = router.state.location; return { path: location.pathname, query: Object.fromEntries(new URLSearchParams(location.search)) }; } }
     },

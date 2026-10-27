@@ -11,6 +11,9 @@ import {
   type VerifyCallPort,
 } from '../workflow/model-port-verify.js';
 import { runModelPortVerification } from '../application/model-port-verification.js';
+import { DEFAULT_VERIFY_TARGET, VERIFY_TARGET_STATES, type VerifyTarget } from
+  '../workflow/model-verify-target.js';
+import { ModelVerifyTargetError } from '../workflow/model-port-verify.js';
 import { UuidSchema } from './domain-schemas.js';
 import { ProblemError, type ProblemDetails } from './problem.js';
 import { sendReadError, sendProblem, type RouteDependencies } from './envelope.js';
@@ -106,10 +109,25 @@ const VerifyResultSchema = Type.Object({
   verified_at: Type.String(),
 }, { additionalProperties: false });
 
+const VerifyTargetStateSchema = Type.Union(VERIFY_TARGET_STATES.map((state) =>
+  Type.Literal(state)));
+
 const VerificationStateSchema = Type.Object({
+  /** P1-4：本次查询的验证目标（`default` 或 `openrouter:<确切型号>`）。 */
+  target: Type.String(),
+  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter')]),
+  model: Type.Union([Type.String(), Type.Null()]),
   current_config_fingerprint: Type.Union([Type.String(), Type.Null()]),
   last: Type.Union([VerifyResultSchema, Type.Null()]),
+  /** P1-4：**本目标**最近一次验证（另一个型号的成功不会出现在这里）。 */
+  target_last: Type.Union([VerifyResultSchema, Type.Null()]),
   matches_current_config: Type.Boolean(),
+  /** 0142：最近一次验证所用凭据与当前凭据的关系；CHANGED 表示换过 Key、需重新验证。 */
+  credential_identity: Type.Union([
+    Type.Literal('MATCH'), Type.Literal('CHANGED'), Type.Literal('UNKNOWN'),
+  ]),
+  /** P1-4：目标此刻的互斥状态（13 态）；VERIFIED 只代表这个确切目标探测通过。 */
+  state: VerifyTargetStateSchema,
   worker_startup_validation: Type.Union([
     Type.Literal('NOT_CONFIGURED'), Type.Literal('OK'), Type.Literal('FAILED'),
   ]),
@@ -227,6 +245,45 @@ function catalogConfigProblem(error: ConfigError): ProblemDetails {
     retryable: false,
     retryAction: 'NONE',
   };
+}
+
+/**
+ * 读取验证目标（P1-4）。缺省＝默认连接；`openrouter` 必须带确切型号。
+ * 不猜型号、不把「目录里有某个免费模型」当成用户选了它。
+ */
+function readVerifyTargetFrom(raw: unknown): VerifyTarget {
+  if (raw === undefined || raw === null) return DEFAULT_VERIFY_TARGET;
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw verifyTargetInvalid();
+  const value = raw as Record<string, unknown>;
+  const connection = value.connection;
+  if (connection === undefined || connection === null || connection === 'default') {
+    return DEFAULT_VERIFY_TARGET;
+  }
+  if (connection !== 'openrouter') throw verifyTargetInvalid();
+  const model = typeof value.model === 'string' ? value.model.trim() : '';
+  if (model === '' || model.length > 200) throw verifyTargetInvalid();
+  return { connection: 'openrouter', model };
+}
+
+function verifyTargetInvalid(): ProblemError {
+  return new ProblemError({
+    type: '/problems/model-verify-target-invalid', title: '验证目标无效', status: 400,
+    detail: '验证目标只接受 default，或 connection=openrouter 加 1–200 字符的确切型号。',
+    code: 'MODEL_VERIFY_TARGET_INVALID', retryable: false, retryAction: 'NONE',
+  });
+}
+
+function verifyTargetProblem(error: ModelVerifyTargetError): ProblemDetails {
+  if (error.code === 'MODEL_VERIFY_CATALOG_STALE') {
+    return { type: '/problems/model-verify-catalog-stale', title: '模型目录已过期', status: 409,
+      detail: '目录快照已过期，无法确认该型号的免费资格；请先刷新目录再验证。',
+      code: 'MODEL_VERIFY_CATALOG_STALE', retryable: true,
+      retryAction: 'REFRESH_AND_REDECIDE' };
+  }
+  return { type: '/problems/model-verify-target-not-eligible', title: '目标型号不可验证',
+    status: 409,
+    detail: '该型号不是当前目录快照里的免费文本模型，不能作为验证目标。',
+    code: 'MODEL_VERIFY_TARGET_NOT_ELIGIBLE', retryable: false, retryAction: 'NONE' };
 }
 
 function configProblem(error: ModelVerifyConfigError): ProblemDetails {
@@ -369,15 +426,27 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
   app.get('/model-port/verification', { schema: {
     params: ParamsSchema, response: { 200: VerificationStateSchema } } },  async (request, reply) => {
     try {
+      // P1-4：可选 `?connection=openrouter&model=<id>` 查询「所选型号」的状态；
+      // 缺省仍是进程默认连接，旧客户端行为不变。
+      const target = readVerifyTargetFrom(request.query);
       const state = await readModelVerificationState(
-        dependencies.database.executor, process.env);
+        dependencies.database.executor, process.env, target);
       return {
+        target: state.target,
+        connection: state.connection,
+        model: state.model,
         current_config_fingerprint: state.current_config_fingerprint,
         last: state.last === null ? null : toVerifyResultBody(state.last),
+        target_last: state.target_last === null ? null : toVerifyResultBody(state.target_last),
         matches_current_config: state.matches_current_config,
+        credential_identity: state.credential_identity,
+        state: state.state,
         worker_startup_validation: state.worker_startup_validation,
       };
-    } catch (error) { return sendReadError(reply, error, request.id); }
+    } catch (error) {
+      if (error instanceof ProblemError) return sendProblem(reply, error.problem, request.id);
+      return sendReadError(reply, error, request.id);
+    }
   });
 
   app.post('/model-port/verify', { schema: {
@@ -385,11 +454,13 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
   async (request, reply) => {
     try {
       const params = request.params as { workspace_id: string };
+      const target = readVerifyTargetFrom(request.body);
       const result = await gate.run(() => runModelPortVerification({
         db: dependencies.database.executor,
         workspaceId: params.workspace_id,
         env: process.env,
         call: verifyCall,
+        target,
       }));
       return toVerifyResultBody(result);
     } catch (error) {
@@ -398,6 +469,9 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
       }
       if (error instanceof ModelVerifyConfigError) {
         return sendProblem(reply, configProblem(error), request.id);
+      }
+      if (error instanceof ModelVerifyTargetError) {
+        return sendProblem(reply, verifyTargetProblem(error), request.id);
       }
       return sendReadError(reply, error, request.id);
     }

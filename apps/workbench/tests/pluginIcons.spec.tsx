@@ -364,15 +364,17 @@ describe("插件芯片整体删除（2026-10-25 用户指认；同日第二轮�
     } finally { view.unmount(); }
   });
 
-  it("选中芯片的一部分按删除：选区扩成整段；完整覆盖时预置到恰好整段（行为等价）", async () => {
+  it("选中芯片的一部分按删除：选区扩成整段；完整覆盖时不缩小已选范围（2026-10-26 并集规则）", async () => {
     const view = await mountReact(<MentionHarness />);
     try {
       let textarea = await chipDraft(view, "@电脑操控 帮我截图", 3, 7);
       await pressKey(textarea, "Backspace");
-      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 5]);
+      // 选区含 mention 后半 + 空格 + 「帮」：左界扩到整枚起点，用户已选的
+      // 空格与「帮」不被悄悄丢出删除范围（旧实现缩回 [0,5) 是本次修复的缺陷）。
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 7]);
       textarea = await chipDraft(view, "@电脑操控 帮我截图", 0, 7);
       await pressKey(textarea, "Backspace");
-      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 5]);
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 7]);
     } finally { view.unmount(); }
   });
 
@@ -431,6 +433,107 @@ describe("插件芯片整体删除（2026-10-25 用户指认；同日第二轮�
       expect(view.container.querySelector('[data-testid="chat-mention-menu"]')).toBeNull();
       await pressKey(bare, "Backspace");
       expect([bare.selectionStart, bare.selectionEnd]).toEqual([8, 8]);
+    } finally { view.unmount(); }
+  });
+
+  /* 选区并集（2026-10-26 独立验收指认）：选区触及 mention 时扩展到整枚边界，
+     但不得缩小用户已选的其他文字——全选整行删除应得到空串，而不是只删 mention。
+     jsdom 不执行原生删除，这里守住「预置选区」这个输入端；真实删除与撤销栈由
+     浏览器用例（composerPluginMention.spec.ts）覆盖。 */
+  it("全选整行（mention+前后文）按 Backspace：预置保持整个原选区，不缩成单枚", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      const textarea = await chipDraft(view, "前文 @GitHub 后文", 0, 13);
+      const event = await pressKey(textarea, "Backspace");
+      expect(event.defaultPrevented).toBe(false);
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 13]);
+    } finally { view.unmount(); }
+  });
+
+  it("选区含 mention 前缀：左界扩到整枚起点，用户已选的普通文字保留", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      let textarea = await chipDraft(view, "前文 @GitHub 后文", 0, 6);
+      await pressKey(textarea, "Backspace");
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 10]);
+      // 选中 mention 后半 + 后文：左界扩到整枚起点，右界不缩。
+      textarea = await chipDraft(view, "前文 @GitHub 后文", 8, 13);
+      await pressKey(textarea, "Delete");
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 13]);
+    } finally { view.unmount(); }
+  });
+
+  it("选区跨两枚 mention：并集覆盖两枚整段与中间文字", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      // @GitHub=[0,7)、@浏览器操控=[10,16)：选 [2,12) 触及两枚 → 并集 [0,16)。
+      const textarea = await chipDraft(view, "@GitHub 和 @浏览器操控 尾部", 2, 12);
+      const event = await pressKey(textarea, "Backspace");
+      expect(event.defaultPrevented).toBe(false);
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 16]);
+    } finally { view.unmount(); }
+  });
+
+  it("只选普通文字：不预置、不缩小，删除仍走原生", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      const textarea = await chipDraft(view, "前文 @GitHub 后文", 10, 13);
+      await pressKey(textarea, "Backspace");
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([10, 13]);
+    } finally { view.unmount(); }
+  });
+
+  it("Ctrl+Backspace 选区跨 mention 同样并集扩展", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      const textarea = await chipDraft(view, "先用 @电脑操控 截图", 4, 10);
+      await pressKey(textarea, "Backspace", { ctrlKey: true });
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([3, 10]);
+    } finally { view.unmount(); }
+  });
+});
+
+describe("镜像层 scrollbar gutter 补偿（2026-10-26 独立验收指认的累积缺陷）", () => {
+  /** jsdom 无布局：桩掉宽度属性制造 16px 纵向滚动条 gutter。 */
+  function stubWidths(textarea: HTMLTextAreaElement, offsetWidth: number, clientWidth: number) {
+    Object.defineProperty(textarea, "offsetWidth", { configurable: true, value: offsetWidth });
+    Object.defineProperty(textarea, "clientWidth", { configurable: true, value: clientWidth });
+  }
+  async function scroll(textarea: HTMLTextAreaElement) {
+    await act(async () => { textarea.dispatchEvent(new Event("scroll", { bubbles: true })); });
+  }
+
+  it("重复滚动触发补偿不叠加：padding 恒为基础值+当前 gutter 的绝对值", async () => {
+    const view = await mountReact(draftInput("@电脑操控 帮我截图，多写一些让框内出现滚动", { pluginChips: true }));
+    try {
+      const textarea = view.container.querySelector<HTMLTextAreaElement>("textarea")!;
+      const mirror = view.container.querySelector<HTMLElement>(".chat-command-mirror")!;
+      stubWidths(textarea, 300, 284);
+      await scroll(textarea);
+      // jsdom 无样式表：基础 padding 为 0，补偿即 gutter 本身。
+      expect(mirror.style.paddingRight).toBe("16px");
+      // 缺陷形态：第二轮把已含补偿的计算值当基础值再叠加。修复后必须是同一绝对值。
+      await scroll(textarea);
+      await scroll(textarea);
+      expect(mirror.style.paddingRight, "重复补偿不得累计").toBe("16px");
+    } finally { view.unmount(); }
+  });
+
+  it("gutter 归零后补偿正确恢复，无残留", async () => {
+    const view = await mountReact(draftInput("@电脑操控 帮我截图", { pluginChips: true }));
+    try {
+      const textarea = view.container.querySelector<HTMLTextAreaElement>("textarea")!;
+      const mirror = view.container.querySelector<HTMLElement>(".chat-command-mirror")!;
+      stubWidths(textarea, 300, 284);
+      await scroll(textarea);
+      expect(mirror.style.paddingRight).toBe("16px");
+      stubWidths(textarea, 300, 300);
+      await scroll(textarea);
+      expect(mirror.style.paddingRight).toBe("");
+      // 恢复滚动条后补偿回来（不是只在首次生效）。
+      stubWidths(textarea, 300, 284);
+      await scroll(textarea);
+      expect(mirror.style.paddingRight).toBe("16px");
     } finally { view.unmount(); }
   });
 });

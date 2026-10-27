@@ -56,6 +56,14 @@ export interface NewExecutionContract {
   readonly executionConfigVersion: string;
   readonly contractHash: Buffer;
   readonly frozenSnapshot: JsonObject;
+  /**
+   * 0142：冻结时的凭据身份（单向摘要）。它**不**进 frozen_snapshot：
+   * 快照会原样嵌入上下文清单并可能出现在界面，凭据摘要不能出现在那里。
+   */
+  readonly credentialFingerprint?: string | null;
+  /** 0144：冻结时的模型连接身份与凭据代数；两列同现同缺。 */
+  readonly connectionId?: string | null;
+  readonly connectionCredentialVersion?: number | null;
 }
 
 export interface NewRunStep {
@@ -104,15 +112,19 @@ export class RunRepository {
     const result = await sql<ExecutionContractRow>`
       insert into execution_contracts (
         run_id, task_id, acceptance_revision, workflow_key, workflow_version,
-        execution_config_version, contract_hash, frozen_snapshot
+        execution_config_version, contract_hash, frozen_snapshot, credential_fingerprint,
+        connection_id, connection_credential_version
       )
       values (
         ${contract.runId}, ${contract.taskId}, ${contract.acceptanceRevision},
         ${contract.workflowKey}, ${contract.workflowVersion}, ${contract.executionConfigVersion},
-        ${contract.contractHash}, ${JSON.stringify(contract.frozenSnapshot)}::jsonb
+        ${contract.contractHash}, ${JSON.stringify(contract.frozenSnapshot)}::jsonb,
+        ${contract.credentialFingerprint ?? null},
+        ${contract.connectionId ?? null}, ${contract.connectionCredentialVersion ?? null}
       )
       returning run_id, task_id, acceptance_revision, workflow_key, workflow_version,
-                execution_config_version, contract_hash, frozen_snapshot, created_at
+                execution_config_version, contract_hash, frozen_snapshot,
+                credential_fingerprint, connection_id, connection_credential_version, created_at
     `.execute(this.db);
 
     return requireRow(result.rows, 'insert into execution_contracts');
@@ -138,7 +150,8 @@ export class RunRepository {
   async readContract(runId: string): Promise<ExecutionContractRow | undefined> {
     const result = await sql<ExecutionContractRow>`
       select run_id, task_id, acceptance_revision, workflow_key, workflow_version,
-             execution_config_version, contract_hash, frozen_snapshot, created_at
+             execution_config_version, contract_hash, frozen_snapshot,
+             credential_fingerprint, connection_id, connection_credential_version, created_at
       from execution_contracts
       where run_id = ${runId}
     `.execute(this.db);

@@ -336,6 +336,23 @@ svg {
   height: var(--relay-font-size-meta);
 }
 
+/* DESKTOP-TITLEBAR-NARROW: 窄窗口保留全部操作与窗口控制，日期仍可供辅助技术读取。 */
+@media (max-width: 600px) {
+  .desktop-titlebar__date {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .desktop-titlebar .workbench-actions { gap: 0; padding-left: 4px; }
+  .desktop-titlebar__cluster { gap: 0; padding-right: 0; }
+  .desktop-titlebar .workbench-actions .icon-button,
+  .desktop-titlebar__cluster .icon-button,
+  .desktop-titlebar__cluster .data-source-button,
+  .desktop-titlebar__button { width: 36px; min-width: 36px; }
+}
+
 /* 桌面态：外壳铺满视口且自身不滚动，只有主内容区滚动，避免窗口右缘出现网页式根滚动条。 */
 .desktop-window {
   display: flex;
