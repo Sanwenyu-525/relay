@@ -95,3 +95,57 @@
   .project-workbench .workbench-step-list li { grid-template-columns: var(--relay-control-height-comfort) minmax(0, 1fr); }
   .project-workbench .workbench-step-status { grid-column: 2; }
 }
+
+/* V528-PROJECT-WORKBENCH：沿用 pv 页壳，避免主列再叠加旧页壳内边距。 */
+.project-workbench.pv-page .page-layout { gap: 20px; }
+.project-workbench.pv-page .page-primary { padding: 0; }
+.project-workbench.pv-page.project-workbench--rail { width: 100%; min-height: 0; margin: 0; padding: 0; }
+.project-workbench.pv-page .desktop-rail { align-self: start; padding: 18px; border: 1px solid var(--pv-line); border-radius: 14px; background: #fff; }
+.project-workbench.pv-page .workbench-context-bar { gap: 10px; margin-bottom: 18px; }
+.project-workbench.pv-page .workbench-context-bar .eyebrow { font-size: 12px; letter-spacing: 0; color: var(--pv-ink); overflow-wrap: anywhere; }
+.project-workbench.pv-page .workbench-context-bar .subnav-item { min-height: 34px; font-size: 12px; }
+.project-workbench.pv-page .workbench-refresh { width: 34px; min-height: 34px; border-color: var(--pv-btn-border); border-radius: 9px; color: var(--pv-btn-ink); }
+.project-workbench.pv-page .workbench-refresh:hover { background: var(--pv-btn-hover-bg); }
+.project-workbench.pv-page .workbench-refresh:focus-visible,
+.project-workbench.pv-page .workbench-source-choice:focus-visible,
+.project-workbench.pv-page .workbench-task-choice:focus-visible { outline: 3px solid var(--pv-focus-ring); outline-offset: 1px; }
+.project-workbench.pv-page .workbench-scope-note,
+.project-workbench.pv-page .workbench-next-context,
+.project-workbench.pv-page .workbench-reading-label,
+.project-workbench.pv-page .workbench-rail-context { font-size: 12px; color: var(--pv-btn-ink); }
+.project-workbench.pv-page .workbench-scope-note { margin: 10px 0 0; }
+.project-workbench.pv-page .workbench-next-context { margin: 14px 0; gap: 8px; }
+.project-workbench.pv-page .workbench-detail-section,
+.project-workbench.pv-page .workbench-view-configuration { margin-top: 14px; }
+.project-workbench.pv-page .workbench-detail-section > summary,
+.project-workbench.pv-page .workbench-view-configuration > summary { min-height: 34px; padding: 8px 0; font-size: 12px; color: var(--pv-btn-ink); }
+.project-workbench.pv-page .workbench-section { margin-top: 18px; padding-top: 16px; border-color: var(--pv-line); }
+.project-workbench.pv-page .workbench-section h2,
+.project-workbench.pv-page .workbench-directory-group > h2,
+.project-workbench.pv-page .view-configuration-panel > h2 { margin-bottom: 10px; font-size: 13px; font-weight: 700; color: var(--pv-ink); }
+.project-workbench.pv-page .workbench-section > p,
+.project-workbench.pv-page .workbench-directory-group > p,
+.project-workbench.pv-page .page-primary > p,
+.project-workbench.pv-page .workbench-assist-entry > p,
+.project-workbench.pv-page .workbench-paper-empty { font-size: 12px; }
+.project-workbench.pv-page .workbench-section small,
+.project-workbench.pv-page .workbench-list small,
+.project-workbench.pv-page .workbench-artifact-card small,
+.project-workbench.pv-page .workbench-source-choice small { font-size: 11px; color: var(--pv-btn-ink); }
+.project-workbench.pv-page .workbench-artifact-card { margin: 14px 0; padding: 14px 17px; border-color: var(--pv-line); border-radius: 14px; background: #fff; }
+.project-workbench.pv-page .workbench-artifact-card strong,
+.project-workbench.pv-page .workbench-source-choice strong { font-size: 13px; }
+.project-workbench.pv-page .workbench-task-choice { min-height: 34px; font-size: 12px; }
+.project-workbench.pv-page .workbench-reading-desk { border-color: var(--pv-line); border-radius: 14px; }
+.project-workbench.pv-page .workbench-reading-label { margin: 16px 0; padding-bottom: 10px; }
+.project-workbench.pv-page .workbench-paper { min-height: 20rem; padding: 18px; }
+.project-workbench.pv-page .workbench-document-title { font-size: 17px; }
+.project-workbench.pv-page .workbench-document-body { font-size: 14px; }
+.project-workbench.pv-page .workbench-paper:has(.workbench-paper-empty):not(:has(.workbench-document-body)) { min-height: 0; }
+.project-workbench.pv-page .workbench-assist-rail .rail-section { padding-top: 14px; margin-top: 0; }
+@media (width < 48rem) {
+  .project-workbench.pv-page .rail-trigger { margin: 0; }
+  .project-workbench.pv-page .workbench-context-bar .eyebrow { flex-basis: 100%; }
+  .project-workbench.pv-page .workbench-directory-group > .text-link { flex-basis: 100%; }
+  .project-workbench.pv-page .workbench-paper { padding: 14px; }
+}

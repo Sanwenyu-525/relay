@@ -20,6 +20,7 @@ import { sessionModelSelectionFrom } from "../api/resources/modelSelection";
 import ChatTimelineNav from "../components/ChatTimelineNav";
 import ChatCommandInput, { chatCommandScope, chatCommandStatus } from "../components/ChatCommandInput";
 import PluginIcon from "../components/PluginIcon";
+import PluginChip from "../components/PluginChip";
 import { findPluginMentions } from "../lib/pluginMentions";
 import ComposerAttachmentChips from "../components/ComposerAttachmentChips";
 import MessageAttachments from "../components/MessageAttachments";
@@ -1966,11 +1967,8 @@ export function UserMessageContent({ content }: { content: string }) {
   let cursor = 0;
   for (const mention of mentions) {
     if (mention.start > cursor) nodes.push(content.slice(cursor, mention.start));
-    nodes.push(<span key={`${mention.key}-${mention.start}`} className="assist-plugin-mention"
-      data-plugin-mention={mention.key}>
-      <PluginIcon plugin={mention.key} className="assist-plugin-mention-icon" />
-      <span className="assist-plugin-mention-label">{mention.label}</span>
-    </span>);
+    nodes.push(<PluginChip key={`${mention.key}-${mention.start}`} variant="static"
+      plugin={mention.key} label={mention.label} className="assist-plugin-mention" />);
     cursor = mention.end;
   }
   if (cursor < content.length) nodes.push(content.slice(cursor));
@@ -2944,11 +2942,21 @@ function formatUsagePercent(value: number, limit: number): string {
  * 「上下文圆圈点击打开展示会话窗口的菜单」）：浮层列出最近一次调用的上下文 / 输出 /
  * 缓存命中与口径说明，读数仍是同一份 props，不新增第二份用量来源。浮层与模型下拉
  * 同一套弹层语言：向上锚定、独占（useMenuExclusive）、点外即收、Esc 收起还焦点。
+ *
+ * 2026-10-28 两处改版：
+ * 1. **圆环旁加百分比**。3% 这类小比例在 32px 环上只剩一段两三个像素的弧，既读不出进度，
+ *    又像一枚「正在加载」的绿点；旁边给出 `3%` 之后，环仍是主标记，文字只承担读数。
+ *    数字用 tabular-nums，避免 3%→10% 时宽度跳动；输入器窄到放不下时由容器查询隐去，
+ *    环、完整可访问名称与点击详情都不受影响。
+ * 2. **详情浮层分三层**。顶部是这一次调用的关键数字（分子/分母 + 百分比 + 细进度线），
+ *    中间是输出与缓存命中的轻量信息行，底部只留一句口径摘要，「统计口径」按需展开。
+ *    原来的浮层把长段技术解释直接摊在数字下面，16rem 宽里挤成一团，读者先看到的是免责声明。
  */
 function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   hitRate: number | null; call: RelayAssistMessage | null; limit: number | null }) {
   const percent = ratio === null ? null : formatUsagePercent(ratio, 1);
   const high = ratio !== null && ratio >= 0.8;
+  const meterState = ratio === null ? "unknown" : high ? "high" : "normal";
   const meterText = call === null ? "尚无模型调用"
     : ratio === null ? `上下文 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
       : `上下文 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
@@ -2956,6 +2964,7 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   // 打开别的浮层（「+」菜单、模型下拉）时收起本浮层；自身的外部按下与 Esc 由下面 effect 负责。
   useMenuExclusive(open, () => setOpen(false));
@@ -2980,6 +2989,12 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+  // 浮层是 dialog：打开就把焦点移进去，键盘用户可以立刻 Tab 到「统计口径」、用方向键读长内容。
+  // preventScroll 保证移焦不会把输入卡顶出视野。
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [open]);
   // 原生 `title` 在 Chromium/WebView2 要等约一秒、样式不可控，圆环又只有 24px，扫过去时
   // 读不到东西。这里与目录细条共用 `usePathTooltip` 那一套（fixed + portal，不被输入卡与
   // 工具行裁掉），悬停即浮出；浮层打开时取 null——同一句话已在浮层里可见，提示再叠在
@@ -2987,41 +3002,79 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   const { tooltipHandlers, tooltipNode, dismissTooltip } = usePathTooltip(
     () => (open ? null : meterText), "context-meter-tooltip");
   const usage = call?.usage ?? null;
-  const contextValue = call === null || usage === null ? null
-    : ratio === null ? `${usage.inputTokens?.toLocaleString() ?? "未知"} tokens · 占用不可算`
-      : `${usage.inputTokens?.toLocaleString() ?? "未知"} / ${limit?.toLocaleString()} tokens（${percent}%）`;
-  const outputValue = usage === null || usage.outputTokens === null
-    ? "未知" : `${usage.outputTokens.toLocaleString()} tokens`;
+  const inputTokens = usage?.inputTokens ?? null;
+  const limitKnown = limit !== null && limit > 0;
+  const outputText = usage?.outputTokens === null || usage?.outputTokens === undefined
+    ? "未知" : usage.outputTokens.toLocaleString();
   return <div className="agent-chat-usage">
     {hitText !== null && <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>}
     <div className="agent-chat-context-meter-group" ref={rootRef}>
       <button type="button" ref={triggerRef} className="agent-chat-context-meter"
-        data-testid="assist-context-meter"
-        data-state={ratio === null ? "unknown" : high ? "high" : "normal"}
+        data-testid="assist-context-meter" data-state={meterState}
         aria-label={meterText} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId}
         onClick={() => { setOpen((wasOpen) => !wasOpen); dismissTooltip(); }} {...tooltipHandlers}>
         <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
           <circle className="agent-chat-context-meter-track" cx="18" cy="18" r="15" />
-          <circle className="agent-chat-context-meter-fill" cx="18" cy="18" r="15"
-            strokeDasharray={ratio === null ? undefined : `${(ratio * 94.25).toFixed(2)} 94.25`} />
+          {/* 0% 不画弧：round 线帽会把长度为 0 的弧画成一颗点，读起来像「有一点占用」。
+              未知态连弧都不渲染，轨道改为虚线，与「真的 0%」在视觉上分开。 */}
+          {ratio !== null && ratio > 0 && <circle className="agent-chat-context-meter-fill" cx="18" cy="18" r="15"
+            strokeDasharray={`${(ratio * 94.25).toFixed(2)} 94.25`} />}
         </svg>
-        <span className="visually-hidden">{meterText}</span>
+        {percent !== null && <span className="agent-chat-context-meter-value" aria-hidden="true">{percent}%</span>}
       </button>
-      {open && <div className="agent-chat-context-meter-menu" id={panelId}
-        data-testid="assist-context-meter-panel" role="dialog" aria-label="上下文用量详情">
-        {call === null
-          ? <p className="agent-chat-context-meter-note" data-testid="assist-context-meter-empty">
-            尚无模型调用。发送消息并收到回复后，这里显示该次调用的上下文占用。</p>
-          : <>
-            <p className="agent-chat-context-meter-note">最近一次模型调用</p>
-            <p className="agent-chat-context-meter-row"><span>上下文</span><span>{contextValue}</span></p>
-            <p className="agent-chat-context-meter-row"><span>输出</span><span>{outputValue}</span></p>
+      {open && <div className="agent-chat-context-meter-menu" id={panelId} ref={panelRef} tabIndex={-1}
+        data-testid="assist-context-meter-panel" role="dialog" aria-label="上下文用量详情"
+        data-state={meterState}>
+        {/* 第一层：这一次调用的关键数字——用了多少、上限多少、占几成，一眼读完。
+            没有调用时这一层退化成一句空态说明，但标题仍在：浮层永远先说清它是什么。 */}
+        <div className="agent-chat-context-meter-summary">
+          <p className="agent-chat-context-meter-heading">上下文用量</p>
+          {call === null
+            ? <p className="agent-chat-context-meter-note" data-testid="assist-context-meter-empty">
+              尚无模型调用。发送消息并收到回复后，这里显示该次调用的上下文占用。</p>
+            : <>
+              <p className="agent-chat-context-meter-scope">最近一次模型调用</p>
+              <p className="agent-chat-context-meter-figure">
+                <span className="agent-chat-context-meter-amount">
+                  {inputTokens === null ? "未知" : inputTokens.toLocaleString()}
+                  {limitKnown && <><span className="agent-chat-context-meter-sep"> / </span>{limit?.toLocaleString()}</>}
+                  <span className="agent-chat-context-meter-unit"> tokens</span>
+                </span>
+                {percent !== null && <span className="agent-chat-context-meter-percent">{percent}%</span>}
+              </p>
+              {/* 没有比例就不画进度线：空轨道会被读成 0%，把「算不出」画成「没占用」。
+                  上限不可用时如实说明，不拿别的数值凑一个分母。 */}
+              {ratio === null
+                ? <p className="agent-chat-context-meter-note" data-testid="assist-context-meter-unbounded">
+                  {inputTokens === null ? "该次调用没有上报上下文读数。" : "上限不可用，无法换算占用比例。"}</p>
+                : <span className="agent-chat-context-meter-bar" aria-hidden="true">
+                  <span style={{ width: `${ratio * 100}%` }} /></span>}
+            </>}
+        </div>
+        {call !== null && <>
+          {/* 第二层：其余统计。标签左对齐、数字右对齐，长数字千位分隔，不铺成多张统计卡。 */}
+          <dl className="agent-chat-context-meter-stats">
+            <div className="agent-chat-context-meter-row"><dt>输出 tokens</dt><dd>{outputText}</dd></div>
             {/* 命中率与底栏同一口径：Provider 未上报时整行不渲染，不写「未采集」也不画成 0%。 */}
-            {hitRate !== null && <p className="agent-chat-context-meter-row"><span>缓存命中</span>
-              <span>{formatUsagePercent(hitRate, 1)}%</span></p>}
-          </>}
-        <p className="agent-chat-context-meter-note">上下文按该次调用重发的完整历史计（含缓存）；
-          占用上限取工作区上下文长度档位，未选择时取应用配置的单次预算（max_call_tokens），不是模型物理窗口。</p>
+            {hitRate !== null && <div className="agent-chat-context-meter-row"><dt>缓存命中</dt>
+              <dd>{formatUsagePercent(hitRate, 1)}%</dd></div>}
+            <div className="agent-chat-context-meter-row"><dt>统计来源</dt><dd>最近一次模型调用</dd></div>
+          </dl>
+          {/* 第三层：默认只留一句口径摘要；完整说明收进「统计口径」，需要核对的人自己展开。 */}
+          <div className="agent-chat-context-meter-footnote">
+            <p className="agent-chat-context-meter-note">占用比例按本次调用的完整上下文与工作区预算计算。</p>
+            <details className="agent-chat-context-meter-scope-details">
+              <summary>统计口径</summary>
+              <ul>
+                <li>上下文包含该次调用重发的全部历史。</li>
+                <li>缓存命中的部分仍计入完整上下文。</li>
+                <li>分母取工作区上下文长度档位；未选择档位时取应用配置的单次预算。</li>
+                <li>该数值不等同模型物理上下文窗口。</li>
+                <li>也不代表触发上下文压缩的阈值。</li>
+              </ul>
+            </details>
+          </div>
+        </>}
       </div>}
       {tooltipNode}
     </div>

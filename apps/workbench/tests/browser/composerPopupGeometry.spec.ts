@@ -315,6 +315,42 @@ test("单枚浮层：合体芯片与模式/「+」互斥、点外面可收、开
   await expect.poll(async () => (await openState("session")).options, { timeout: 5_000 }).toBe(0);
 });
 
+test("极窄输入器（560×700）：读数收起但圆环仍在，浮层不越出输入卡", async ({ page }) => {
+  // 工具行窄到 34rem 以下时先收起百分比读数（容器查询 composer-actions），
+  // 圆环、完整可访问名称与点击详情都保留；浮层右缘仍贴圆环，左缘不越出输入卡。
+  await page.setViewportSize({ width: 560, height: 700 });
+  await installRoutes(page, false, { messages: [usageRow(2_011, 74)], maxCallTokens: 65_536 });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await connect(page);
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+  await meter.waitFor({ timeout: 20_000 });
+  await expect(meter.locator(".agent-chat-context-meter-value")).toHaveCount(0);
+  await expect(meter).toHaveAttribute("aria-label", "上下文 2011 / 65536 tokens（3%）");
+  await meter.click();
+  const panel = page.getByTestId("assist-context-meter-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("3%");
+  const geometry = await page.evaluate(() => {
+    const box = (selector: string) => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el === null) return null;
+      const rect = el.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    };
+    return { panel: box('[data-testid="assist-context-meter-panel"]'),
+      card: box('[data-testid="assist-composer"]'),
+      ring: box('[data-testid="assist-context-meter"]'),
+      viewport: { width: window.innerWidth, height: window.innerHeight } };
+  });
+  if (geometry.panel === null || geometry.card === null || geometry.ring === null) throw new Error("缺少几何采样");
+  expect(geometry.panel.right).toBeCloseTo(geometry.ring.right, 0);
+  expect(geometry.panel.left).toBeGreaterThanOrEqual(geometry.card.left - 0.5);
+  expect(geometry.panel.right).toBeLessThanOrEqual(geometry.card.right + 0.5);
+  expect(geometry.panel.left).toBeGreaterThanOrEqual(-0.5);
+  expect(geometry.panel.top).toBeGreaterThanOrEqual(-0.5);
+  expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
+});
+
 test("上下文圆环浮层（2026-10-25）：点击圆环打开用量详情，待在卡内，与模型下拉互斥，Esc 还焦点", async ({ page }) => {
   // 窄档视口（1000×800）是圆环浮层向左展开的最紧情形；夹具给一次真实读数
   // （input 4710 / max_call_tokens 65536 ≈ 7%，缓存命中 4200/4710 ≈ 89%），
@@ -383,3 +419,99 @@ test("上下文圆环浮层（2026-10-25）：点击圆环打开用量详情，�
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await expect(page.getByTestId("assist-context-meter-panel")).toBeHidden();
 });
+
+/**
+ * 圆环读数（2026-10-28 用户指令「圆环 + 简短百分比」）：
+ * 3% 这类小比例在 32px 环上只剩两三个像素的弧，既读不出进度又像一枚「正在加载」的绿点。
+ * 这里逐档核对环旁的读数、状态语义与弧的有无，而不是只看 DOM 里有没有元素：
+ *   * 0% 与「未知」必须分开——0% 有读数、轨道是实线；未知没有读数、轨道改虚线、不画弧；
+ *   * 上限不可用时同样不画弧，浮层里如实写「上限不可用」，不拿别的数凑分母；
+ *   * 高占用沿用 0.8 阈值换警示色，且**不**出现任何循环动画（它不是运行状态指示器）。
+ */
+const usageRow = (inputTokens: number | null, outputTokens: number | null) => ({
+  id: "x-reading", session_id: sessionId, role: "ASSISTANT", status: "COMPLETED", seq: "2",
+  intent: "DISCUSS", content: "读数如下", error_code: null, provider_error_kind: null,
+  created_at: "2026-10-28T00:00:00Z", updated_at: "2026-10-28T00:01:00Z", sources: [], skill: null,
+  cancel_requested: false, steer_requested: false,
+  usage: { input_tokens: inputTokens, output_tokens: outputTokens,
+    cache_read_tokens: null, cache_creation_tokens: null },
+  skill_input: null, skill_output: null, attachments: [], revision: "1" });
+
+for (const scenario of [
+  { name: "还没有调用：未知态不写读数、不画弧", input: null as number | null, max: 65_536 as number | null,
+    reading: null as string | null, state: "unknown", arc: false, unbounded: false },
+  { name: "真实 0%：有读数、无弧、轨道仍是实线", input: 0, max: 65_536,
+    reading: "0%", state: "normal", arc: false, unbounded: false },
+  { name: "小比例 3%：环旁读数一眼可读", input: 2_011, max: 65_536,
+    reading: "3%", state: "normal", arc: true, unbounded: false },
+  { name: "正常 50%", input: 32_768, max: 65_536,
+    reading: "50%", state: "normal", arc: true, unbounded: false },
+  { name: "高占用 80%：换警示色，不闪烁", input: 52_429, max: 65_536,
+    reading: "80%", state: "high", arc: true, unbounded: false },
+  { name: "满额 100%", input: 65_536, max: 65_536,
+    reading: "100%", state: "high", arc: true, unbounded: false },
+  { name: "上限不可用：不画弧，浮层说明不可算", input: 2_011, max: null,
+    reading: null, state: "unknown", arc: false, unbounded: true }
+]) {
+  test(`上下文圆环读数：${scenario.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1162, height: 782 });
+    await installRoutes(page, false, {
+      messages: scenario.input === null ? [] : [usageRow(scenario.input, 74)],
+      maxCallTokens: scenario.max });
+    await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+    await connect(page);
+    await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+    const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+    await expect(meter).toHaveAttribute("data-state", scenario.state);
+    const reading = meter.locator(".agent-chat-context-meter-value");
+    if (scenario.reading === null) await expect(reading).toHaveCount(0);
+    else await expect(reading).toHaveText(scenario.reading);
+    // 弧的有无是「能不能算出比例」的直接表达：算不出就不画，0% 也不画点。
+    await expect(meter.locator(".agent-chat-context-meter-fill")).toHaveCount(scenario.arc ? 1 : 0);
+    // 用量指示器不是运行状态指示器：没有任何循环动画。
+    expect(await meter.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
+    // 高占用换成警示色；正常态用主色。颜色只是叠加表达，读数与状态属性才是判据。
+    if (scenario.arc) {
+      const stroke = await meter.locator(".agent-chat-context-meter-fill")
+        .evaluate((node) => getComputedStyle(node).stroke);
+      expect(stroke).toBe(scenario.state === "high" ? "rgb(150, 98, 42)" : "rgb(32, 93, 71)");
+    }
+    // 完整可访问名称始终在：窄到收起读数时，屏幕阅读器与悬停提示仍读得到同一句话。
+    await expect(meter).toHaveAttribute("aria-label",
+      scenario.input === null ? "尚无模型调用" : /^上下文 /u);
+
+    await meter.click();
+    const panel = page.getByTestId("assist-context-meter-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("上下文用量");
+    if (scenario.input === null) {
+      await expect(panel).toContainText("尚无模型调用");
+    } else {
+      await expect(panel.locator(".agent-chat-context-meter-amount")).toContainText(
+        scenario.input.toLocaleString("en-US"));
+      if (scenario.reading !== null) {
+        await expect(panel.locator(".agent-chat-context-meter-percent")).toHaveText(scenario.reading);
+      }
+      if (scenario.unbounded) await expect(panel).toContainText("上限不可用，无法换算占用比例");
+    }
+    // 浮层不越出输入卡与视口：宽度比旧版宽了一档（20rem），边界判据必须同时成立。
+    const geometry = await page.evaluate(() => {
+      const box = (selector: string) => {
+        const el = document.querySelector<HTMLElement>(selector);
+        if (el === null) return null;
+        const rect = el.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      };
+      return { panel: box('[data-testid="assist-context-meter-panel"]'),
+        card: box('[data-testid="assist-composer"]'),
+        viewport: { width: window.innerWidth, height: window.innerHeight } };
+    });
+    if (geometry.panel === null || geometry.card === null) throw new Error("缺少浮层几何采样");
+    expect(geometry.panel.left).toBeGreaterThanOrEqual(geometry.card.left - 0.5);
+    expect(geometry.panel.right).toBeLessThanOrEqual(geometry.card.right + 0.5);
+    expect(geometry.panel.left).toBeGreaterThanOrEqual(-0.5);
+    expect(geometry.panel.top).toBeGreaterThanOrEqual(-0.5);
+    expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
+  });
+}

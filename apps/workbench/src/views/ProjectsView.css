@@ -23,7 +23,7 @@
 }
 
 .pv-page .projects-footnote { margin-top: 22px; border-top: none; padding-top: 0; }
-.pv-page .projects-footnote__note { font-size: 11px; color: #829588; }
+.pv-page .projects-footnote__note { font-size: 11px; color: #607568; }
 
 /* ── 推进摘要条 ─────────────────────────────────────────────────────────── */
 
@@ -229,7 +229,7 @@
 
 .pv-pcard:hover { border-color: #c6ddcc; }
 
-.pv-pcard--archived { opacity: .78; }
+.pv-pcard--archived { background: var(--pv-subtle); }
 
 .pv-pcard__top {
   display: flex;
@@ -243,7 +243,7 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #64836e;
+  color: #607568;
   margin-left: auto;
 }
 
@@ -296,7 +296,7 @@
 
 .pv-pcard__caption {
   margin: 0;
-  color: #84948a;
+  color: #607568;
   font-size: 11px;
   line-height: 1.65;
 }
@@ -306,11 +306,11 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   padding-top: 2px;
-  color: #7d9283;
+  color: #607568;
   font-size: 11px;
 }
 
-.pv-pcard__metrics .is-unset { color: #a07536; }
+.pv-pcard__metrics .is-unset { color: #88622c; }
 
 .pv-pcard__footer {
   display: flex;
@@ -428,8 +428,8 @@
 }
 
 .pv-page .projects-summary__main { font-size: 12.5px; color: #294635; }
-.pv-page .projects-summary__desc { font-size: 11px; color: #7f948a; }
-.pv-page .projects-summary__right { font-size: 11px; color: #7f948a; }
+.pv-page .projects-summary__desc { font-size: 11px; color: #607568; }
+.pv-page .projects-summary__right { font-size: 11px; color: #607568; }
 .pv-page .projects-summary__symbol {
   width: 32px;
   height: 32px;
@@ -450,7 +450,7 @@
 .pv-page .projects-view-toggle { background: #f1f6f1; border-radius: 9px; }
 .pv-page .projects-view-toggle__btn.is-active { background: #fff; color: #206846; }
 
-.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #829588; }
+.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #607568; }
 
 /* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
 @media (width < 48rem) {
@@ -643,3 +643,7 @@
   font-size: var(--relay-font-size-meta);
   overflow-wrap: anywhere;
 }
+
+/* pv 皮肤：「开启一个新项目」空位卡标题全局用 body(16px)/600，pv 语言没有 16px 档；
+   对齐项目卡标题 .pv-pcard__name 的 13.5px/700 档。 */
+.pv-page .project-card__new-title { font-size: 13.5px; font-weight: 700; }

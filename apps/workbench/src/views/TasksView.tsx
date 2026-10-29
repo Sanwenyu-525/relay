@@ -93,7 +93,7 @@ export default function TasksView() {
   if (scope === "inbox") return <InboxView key={connection.epoch} client={live ? connection.client : null} />;
   if (live && connection.client && scope === "attention") return <AttentionQueue key={connection.epoch} client={connection.client} />;
   if (live && connection.client) return <LiveTaskListView key={connection.epoch} client={connection.client} onCreate={openCreate} onCreateLightweight={openLightweight} />;
-  if (scope === "attention") return <section className="skill-page"><h1>人工待处理</h1><p>当前是示例预览，无法读取跨项目待处理事实。连接本机 API 后再查看。</p><Link to="/tasks">返回任务</Link></section>;
+  if (scope === "attention") return <section className="skill-page pv-page"><PageHeader title="人工待处理" lede="当前是示例预览，无法读取跨项目待处理事实。连接本机 API 后再查看。" /><Link className="text-link" to="/tasks">返回任务</Link></section>;
   if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Tasks</p><h1>正在读取任务列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
   if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Tasks</p><h1>暂时无法显示任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   return <section className="skill-page task-list-page pv-page"><div className="page-layout"><div className="page-primary">

@@ -265,9 +265,9 @@
 }
 
 .pv-page .inbox-head { align-items: flex-start; }
-.pv-page .inbox-kicker { font-size: 10px; color: #759282; font-weight: 700; }
+.pv-page .inbox-kicker { font-size: 10px; color: var(--pv-muted); font-weight: 700; }
 .pv-page .inbox-head h1 { margin: 5px 0 0; font-size: 22px; letter-spacing: -.035em; color: #1e3529; }
-.pv-page .inbox-lede { margin-top: 6px; font-size: 12px; line-height: 1.75; color: #819287; }
+.pv-page .inbox-lede { margin-top: 6px; font-size: 12px; line-height: 1.75; color: var(--pv-muted); }
 
 .pv-page .inbox-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin-top: 15px; }
 .pv-page .inbox-stat {
@@ -276,9 +276,9 @@
   border-radius: 12px;
   box-shadow: 0 3px 15px #22553506;
 }
-.pv-page .inbox-stat-label { font-size: 11px; color: #85998c; }
+.pv-page .inbox-stat-label { font-size: 11px; color: var(--pv-muted); }
 .pv-page .inbox-stat-value { font-size: 22px; color: #286849; letter-spacing: -.02em; }
-.pv-page .inbox-stat-hint { font-size: 10.5px; color: #7d9283; }
+.pv-page .inbox-stat-hint { font-size: 11px; color: var(--pv-muted); }
 
 .pv-page .inbox-card {
   margin-top: 0;
@@ -289,7 +289,7 @@
 .pv-page .inbox-card-head { padding: 14px 17px; border-bottom: 1px solid #edf1ec; }
 .pv-page .inbox-card-head strong { font-size: 13px; color: #294635; }
 .pv-page .inbox-card-head strong > svg { color: #36724e; width: 15px; height: 15px; }
-.pv-page .inbox-card-head small { font-size: 11px; color: #8b9c90; }
+.pv-page .inbox-card-head small { font-size: 11px; color: var(--pv-muted); }
 .pv-page .inbox-card-body { padding: 4px 17px; background: #fff; }
 
 .pv-page .inbox-row { padding: 13px 0; border-bottom: 1px solid #edf1ec; }
@@ -302,7 +302,7 @@
 .pv-page .inbox-row-icon--warning { background: #fdf3e3; color: #96622a; }
 .pv-page .inbox-row-icon--danger { background: #fdeeea; color: #a34f43; }
 .pv-page .inbox-row-title { font-size: 12.5px; font-weight: 650; color: #33533d; }
-.pv-page .inbox-row-facts { font-size: 11px; color: #8b9a90; }
+.pv-page .inbox-row-facts { font-size: 11px; color: var(--pv-muted); }
 .pv-page .inbox-row-reason { font-size: 11px; color: #5c7764; }
 .pv-page .inbox-row-arrow { width: 14px; height: 14px; }
 

@@ -123,3 +123,11 @@
 .pv-page .surface-panel.settings-card > h2 { font-size: 13px; color: #294635; }
 .pv-page .settings-definition-list dt { color: #899c8d; font-size: 11px; }
 .pv-page .settings-definition-list dd { color: #486452; font-size: 12px; }
+
+/* pv 皮肤：.settings-basic > h2（基本设置）不在 .settings-card 内，吃到全局 h2 的 section(24px) 档，
+   大于 pv 页头 h1(22px)；回与 .settings-card > h2 相同的 13px/700 卡片头档。
+   说明句两处（.settings-basic-intro、.settings-explanation p）全局用 reading(18px) 档，
+   pv 语言里说明句是 lede/meta(12px) 档，色对齐原型说明句 #819287。 */
+.pv-page .settings-basic > h2 { font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .settings-basic-intro { font-size: 12px; color: #819287; }
+.pv-page .settings-explanation p { font-size: 12px; color: #819287; }

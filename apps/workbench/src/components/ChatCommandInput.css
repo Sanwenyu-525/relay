@@ -32,6 +32,10 @@
   background: color-mix(in srgb, var(--relay-color-selection-bg) 55%, transparent);
   color: transparent;
 }
+/* 芯片态下镜像层是唯一可见的文字层，禁用/发送中的灰也必须跟着走：只把 textarea
+   刷灰、镜像层还按正文主色画，读起来就是「禁用了但字还是黑的」。 */
+.chat-command-surface:has(> textarea:disabled) .chat-command-mirror,
+.chat-command-surface:has(> textarea:disabled) .plugin-chip { color: var(--relay-color-disabled-text); }
 .chat-command-mirror {
   position: absolute;
   inset: 0;
@@ -50,18 +54,28 @@
 }
 /* mention 原文透明：位置由它占着（折行与光标对齐），视觉由芯片承担。 */
 .chat-command-mention { color: transparent; }
-/* 芯片：小图标 + 短名，无底色、不占文本流（绝对定位），宽度贴近所替代的原文。 */
-.chat-command-chip {
+/* 跨行降级（2026-10-29 用户指认「不可见的字符占位」）：原文被 textarea 原生折行拆成
+   几段，一枚芯片只盖得住首段，剩下的透明文字就是看不见的占位。这时整枚芯片收起、
+   原文 `@标签` 恢复可见——`color: inherit` 而不是写死正文色，禁用/发送中的灰度仍然
+   跟着镜像层这一层走。折行规则一个字都没改，所以光标与可见文字照旧对齐。 */
+.chat-command-mention[data-chip="off"] { color: inherit; }
+/* 芯片的几何：覆盖 PluginChip 默认的 in-flow 排布，压在 mention 原文的矩形上。
+   四个变量由 placeChips 从测量下发——原点 = 镜像层 padding 盒，宽/高 = 原文片段矩形。
+   用 `.plugin-chip.chat-command-chip`（0,2,0）而不是单类，是为了压过同名的
+   `.plugin-chip{position:relative}` 而不依赖两张样式表的导入顺序。
+   width 取原文字宽而不是芯片固有宽度，加上 overflow:hidden，是「绝不盖住后面正文、
+   光标绝不落进名称里」的硬保证；放不下时由 label 省略号收口（见 PluginChip.css）。
+   跨行时整枚不画（不留半枚图标悬在行尾）：display:none 的 (0,3,0) 压过
+   `.plugin-chip{display:inline-flex}`。 */
+.plugin-chip.chat-command-chip {
   position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--relay-space-1);
-  white-space: nowrap;
-  color: var(--relay-color-action-text);
-  font-size: var(--relay-font-size-meta);
-  line-height: 1;
+  left: var(--chip-left, 0px);
+  top: var(--chip-top, 0px);
+  width: var(--chip-width, auto);
+  height: var(--chip-height, auto);
+  overflow: hidden;
 }
-.chat-command-chip .plugin-icon { --plugin-icon-size: var(--relay-font-size-body); }
+.plugin-chip.chat-command-chip[data-split="true"] { display: none; }
 /* `@` 插件菜单：沿用命令菜单外壳，行内是插件图标 + 名称（图标与输入器芯片同档）。
    选择器要压过 `.chat-command-menu [role="option"] > span:first-child` 的
    space-between（(0,3,1)）——否则图标与名称会被顶到行的两端。 */

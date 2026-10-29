@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { FileText, GitBranch, Globe, ListTree, Play, SquareTerminal, Terminal, X } from "lucide-react";
+import { ChevronRight, ListTree, Play, SquareTerminal, X } from "lucide-react";
 import RunToolTrajectoryPanel from "./RunToolTrajectoryPanel";
 import GitReadPanel from "./GitReadPanel";
 import FileBrowsePanel from "./FileBrowsePanel";
@@ -13,10 +13,38 @@ import "./DevToolsPanel.css";
 
 type Tab = "FILES" | "GIT" | "WEB" | "TERMINAL" | "RUNS" | "TRACE";
 
-const TAB_ITEMS = [
-  ["FILES", "文件", FileText], ["GIT", "变更", GitBranch], ["WEB", "网页", Globe],
-  ["TERMINAL", "终端", SquareTerminal], ["RUNS", "运行记录", Play], ["TRACE", "轨迹", ListTree]
+/**
+ * 页签按「主入口 / 辅助入口」分两层（2026-10-28）：
+ * 文件、变更、网页是日常会反复用到的三个入口，只留文字页签，激活态靠字重与一条指示线表达，
+ * 不再给整排页签铺底色；终端、运行记录、轨迹是低频入口，用「图标 + 文字」的次级样式，
+ * 面板窄到放不下文字时由容器查询只留图标（可访问名称与 title 仍在），六项始终可达。
+ * 页签条整体不参与收缩竞争：`flex: 0 0 auto` + 末位溢出滚动，收起键因此永远不会被压住。
+ */
+const PRIMARY_TABS = [["FILES", "文件"], ["GIT", "变更"], ["WEB", "网页"]] as const;
+const SECONDARY_TABS = [
+  ["TERMINAL", "终端", SquareTerminal],
+  ["RUNS", "运行记录", Play],
+  ["TRACE", "轨迹", ListTree]
 ] as const;
+
+/**
+ * 轻量空态：标题 + 一句说明 + 可选辅助边界说明 + 可选操作。
+ * 靠上排列、不铺占满侧栏的大卡片——空态是「这里现在没什么」的说明，不是一块内容。
+ */
+function DevToolsEmpty({ testId, title, detail, note, action }: {
+  testId: string;
+  title: string;
+  detail: string;
+  note?: string;
+  action?: ReactNode;
+}) {
+  return <div className="devtools-empty" data-testid={testId}>
+    <h3 className="devtools-empty-title">{title}</h3>
+    <p className="devtools-empty-detail">{detail}</p>
+    {note === undefined ? null : <p className="devtools-empty-note">{note}</p>}
+    {action === undefined ? null : <div className="devtools-empty-actions">{action}</div>}
+  </div>;
+}
 
 /**
  * 右侧工具面板：只承载当前项目/任务的只读事实与人工网页预览，不拥有业务状态。
@@ -38,7 +66,10 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   previewScope: string;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("FILES");
+  const hasProject = projectId !== null;
+  // 没有关联项目时文件与变更都只有说明，落在这两个页签上等于开局看空态；
+  // 先给当前真的能用的「网页」。用户主动选过别的页签后不会被拉回——重置只在作用域变化时发生。
+  const [tab, setTab] = useState<Tab>(() => (hasProject ? "FILES" : "WEB"));
   const tabId = useId();
   const [drawerTab, setDrawerTab] = useState<"OUTPUT" | null>(null);
   const [resources, setResources] = useState<readonly RelayManagedResource[]>([]);
@@ -49,7 +80,6 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   const resourceRequest = useRef(0);
   const operationRequest = useRef(0);
   const scope = `${projectId ?? "no-project"}:${taskId ?? "no-task"}`;
-  const hasProject = projectId !== null;
 
   const loadResources = useCallback(async () => {
     if (projectId === null) { setResources([]); setResourceError(null); setLoading(false); return; }
@@ -82,25 +112,33 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   useEffect(() => {
     resourceRequest.current++; operationRequest.current++;
     setResources([]); setOperations([]); setResourceError(null); setOperationError(null);
-    setTab("FILES"); setDrawerTab(null);
+    setTab(hasProject ? "FILES" : "WEB"); setDrawerTab(null);
     return () => { resourceRequest.current++; operationRequest.current++; };
-  }, [scope]);
+  }, [scope, hasProject]);
 
   useEffect(() => { void loadResources(); }, [loadResources, scope]);
   useEffect(() => { if (drawerTab === "OUTPUT") void loadOperations(); }, [drawerTab, loadOperations]);
 
   const hasOutput = operations.some((operation) => operation.invocations.some((item) => item.commandOutput !== null));
+  const switchToPreview = <button type="button" className="secondary-button secondary-button--compact"
+    data-testid="devtools-empty-open-web" onClick={() => setTab("WEB")}>切换到网页预览</button>;
 
   return <section className="devtools" data-testid="devtools-panel" data-tab={tab} aria-label="文件、网页与运行工具">
     <div className="devtools-pane">
       <header className="devtools-header">
         <nav className="devtools-tabs" role="tablist" aria-label="工具面板" onKeyDown={handleTabListKeyDown}>
-          {TAB_ITEMS.map(([key, label, Icon]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
+          {PRIMARY_TABS.map(([key, label]) => <button key={key} type="button" data-testid={`devtools-tab-${key}`}
             className={`devtools-tab${tab === key ? " devtools-tab--active" : ""}`}
             role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
             tabIndex={tab === key ? 0 : -1}
             title={!hasProject && (key === "FILES" || key === "GIT") ? "需要先关联项目" : undefined}
-            onClick={() => setTab(key)}><Icon aria-hidden="true" />{label}</button>)}
+            onClick={() => setTab(key)}><span className="devtools-tab-label">{label}</span></button>)}
+          {SECONDARY_TABS.map(([key, label, Icon], index) => <button key={key} type="button"
+            data-testid={`devtools-tab-${key}`}
+            className={`devtools-tab devtools-tab--secondary${index === 0 ? " devtools-tab--group-start" : ""}${tab === key ? " devtools-tab--active" : ""}`}
+            role="tab" id={`${tabId}-tab-${key}`} aria-controls={`${tabId}-panel`} aria-selected={tab === key}
+            tabIndex={tab === key ? 0 : -1} aria-label={label} title={label}
+            onClick={() => setTab(key)}><Icon aria-hidden="true" /><span className="devtools-tab-label">{label}</span></button>)}
         </nav>
         {/* 收起入口只留这一颗，放在页签条右端：与底部「执行输出」抽屉无关，避免两颗同义键。 */}
         <button className="icon-button devtools-close" type="button" aria-label="收起工具面板"
@@ -111,14 +149,13 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
         tabIndex={0} data-tab={tab}>
         {tab === "FILES" && <section data-testid="devtools-files">
           {!hasProject
-            ? <div data-testid="devtools-files-unavailable">
-              <h3>文件与产物 · 需要项目</h3>
-              <p className="helper-text">这段会话还没有关联项目，因此没有可登记的受管目录，也不推断本机任意路径可读。
-                网页预览不受此限制，可以在「网页」页签直接使用。</p>
-            </div>
+            ? <DevToolsEmpty testId="devtools-files-unavailable" title="尚未关联项目"
+              detail="关联项目后，可查看其受管文件与 Git 变更。"
+              note="读取只限项目已登记的受管目录，不推断本机任意路径。"
+              action={switchToPreview} />
             : <>
               <h3>受管目录</h3>
-              <p className="helper-text">这里只列出该 Project 已登记的受管目录；目录浏览与文件读取走下方「目录浏览」的显式只读动作，不推断本机任意路径可读。</p>
+              <p className="helper-text">这里只列出该 Project 已登记的受管目录；目录浏览与文件读取走下方「目录浏览」的显式只读动作，不推断本机任意路径。</p>
               <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
                 都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
               {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
@@ -128,7 +165,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
                 <span><code className="hash-code">{resource.canonicalRoot}</code>
                   <small>状态 {resource.status} · 资源修订 v{resource.revision} · 写身份已绑定：{resource.fileWriteIdentityBound ? "是" : "否"}</small></span>
               </li>)}</ul>}
-              <button className="secondary-button" type="button" data-testid="devtools-reload-resources"
+              <button className="secondary-button secondary-button--compact" type="button" data-testid="devtools-reload-resources"
                 disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
               <FileBrowsePanel client={client} projectId={projectId} resources={resources}
                 resourceLoading={loading} resourceError={resourceError} />
@@ -144,11 +181,10 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
         <div hidden={tab !== "GIT"}>{hasProject
           ? <GitReadPanel key={`${scope}:${client.baseUrl}:${client.workspaceId}`} client={client}
             projectId={projectId} resources={resources} resourceLoading={loading} resourceError={resourceError} />
-          : <section data-testid="devtools-git-unavailable">
-            <h3>变更 · 需要项目</h3>
-            <p className="helper-text">变更读取绑定项目的受管目录；当前会话没有关联项目，因此没有可核对的目录基线。
-              这不是「工作目录干净」的结论。</p>
-          </section>}</div>
+          : <DevToolsEmpty testId="devtools-git-unavailable" title="尚未关联项目"
+            detail="变更读取绑定项目的受管目录，当前没有可核对的目录基线。"
+            note="这不是「工作目录干净」的结论。"
+            action={switchToPreview} />}</div>
 
         {/* 网页页签常驻挂载：切走再切回不重建标签，也不重新加载页面。 */}
         <div hidden={tab !== "WEB"}>
@@ -160,7 +196,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
           <p className="warning-callout" role="status" data-testid="devtools-terminal-gap">
             交互终端的受管工作目录、人工执行身份、进程生命周期、权限、审计、资源排他与断连恢复协议尚未确定，因此本页不提供可执行提示符。
           </p>
-          <p className="helper-text">人工打开终端不授予 Agent 权限，也不能绕过在途写入与接手保护；缺少协议前不提供可执行入口。<Terminal aria-hidden="true" /></p>
+          <p className="helper-text">人工打开终端不授予 Agent 权限，也不能绕过在途写入与接手保护；缺少协议前不提供可执行入口。</p>
         </section>}
 
         {tab === "TRACE" && <RunToolTrajectoryPanel client={client} run={run} />}
@@ -175,23 +211,24 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
       </div>
     </div>
 
-    <div className="devtools-drawer">
-      <header className="devtools-drawer-header">
-        <nav className="devtools-tabs devtools-tabs--drawer" aria-label="执行输出与交互终端">
-          <button type="button" data-testid="devtools-tab-OUTPUT" id={`${tabId}-output-toggle`}
-            className={`devtools-tab${drawerTab === "OUTPUT" ? " devtools-tab--active" : ""}`}
-            aria-expanded={drawerTab === "OUTPUT"} aria-controls={`${tabId}-output`}
-            onClick={() => setDrawerTab((current) => current === "OUTPUT" ? null : "OUTPUT")}><Terminal aria-hidden="true" />执行输出</button>
-          <span className="devtools-drawer-pending" aria-disabled="true"><SquareTerminal aria-hidden="true" />交互终端 · 待设计</span>
-        </nav>
-      </header>
+    {/* 底部抽屉：收起时只留一行 32px 的开关，展开后自己滚动，不遮挡上方页签与网页预览。
+        抽屉只读服务端保存的命令输出；交互终端仍是「待设计」声明，不做成可点入口。 */}
+    <div className="devtools-drawer" data-open={drawerTab === "OUTPUT" ? "true" : undefined}>
+      <div className="devtools-drawer-bar">
+        <button type="button" className="devtools-drawer-toggle" data-testid="devtools-tab-OUTPUT"
+          id={`${tabId}-output-toggle`} aria-expanded={drawerTab === "OUTPUT"} aria-controls={`${tabId}-output`}
+          onClick={() => setDrawerTab((current) => current === "OUTPUT" ? null : "OUTPUT")}>
+          <ChevronRight className="devtools-drawer-chevron" aria-hidden="true" />
+          <span>执行输出</span>
+        </button>
+        <span className="devtools-drawer-pending">交互终端 · 待设计</span>
+      </div>
 
       <div className="devtools-drawer-body" id={`${tabId}-output`} role="region" aria-labelledby={`${tabId}-output-toggle`} hidden={drawerTab !== "OUTPUT"}>
         {drawerTab === "OUTPUT" && <section data-testid="devtools-output">
-          <h3>执行输出</h3>
-          {!run && <p className="helper-text">当前任务没有 AI Run，因此没有可归属的命令输出。这里不展示 Trace 或其他记录冒充 stdout。</p>}
+          {!run && <p className="helper-text" data-testid="devtools-output-empty">当前任务没有 AI Run，因此没有可归属的命令输出；Trace 不冒充 stdout。</p>}
           {run && operationError && <p className="action-error" role="alert" data-testid="devtools-output-error">{operationError}</p>}
-          {run && !operationError && !hasOutput && <p className="helper-text" data-testid="devtools-output-empty">本次 Run 没有任何已保存的命令输出。打开面板不执行命令；缺少输出与输出为空都如实显示。</p>}
+          {run && !operationError && !hasOutput && <p className="helper-text" data-testid="devtools-output-empty">本次 Run 没有任何已保存的命令输出。打开面板不执行命令。</p>}
           {run && operations.map((operation) => <details key={operation.id} className="devtools-operation">
             <summary>{operation.actionType} · {operation.status} · {operation.normalizedTarget} · {operation.invocations.length} 次调用</summary>
             <p className="helper-text">原 operation_id：<code className="hash-code">{operation.id}</code> · 目标 {operation.normalizedTarget} · 来源 Run <code className="hash-code">{run.id}</code></p>

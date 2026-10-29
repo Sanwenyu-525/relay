@@ -1,0 +1,50 @@
+/* 插件内联标识的共享视觉（输入器编辑态与消息只读态同一套，见 components/PluginChip.tsx）。
+   数值只引用 design-tokens 变量：字号取 meta / body 两档，间距取 space.0.5，
+   容器底取 selection.bg（sage，白底上够轻又读得出），文字取 action.text（forest）。
+   编辑态的几何（position/left/top/width/height）不在这里，由 ChatCommandInput.css 的
+   `.plugin-chip.chat-command-chip` 以更高特异性接管，因此不依赖样式表导入顺序。 */
+.plugin-chip {
+  position: relative;
+  /* 容器底用 ::before + z-index:-1 画：它必须留在本组件的层叠上下文里，
+     否则会被压到镜像层甚至 textarea 之下（isolation 只开一个局部层叠上下文）。 */
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  /* 图标与名称之间不另设 gap：编辑态的可用宽度就是 `@标签` 的实测字宽，2px 缝在 125%
+     缩放时正好把 `@GitHub` 挤出省略号（2026-10-29 量测：固有 85 vs 预算 84.8）。
+     图标资源本身带内缩留白，容器另有 padding-inline，靠在一起仍读得出间距。 */
+  gap: 0;
+  padding-inline: var(--relay-space-0-5);
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-action-text);
+  white-space: nowrap;
+}
+/* 容器底比行盒略矮（snug 档），行与行之间留出可分辨的气口，不糊成一条色带；
+   它比内容宽/高都不改变本件的字盒与行高，因此不会把气泡或输入器的行撑高。 */
+.plugin-chip::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-inline: 0;
+  top: 50%;
+  height: calc(var(--relay-font-size-body) * var(--relay-font-lineHeight-snug));
+  transform: translateY(-50%);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-badge);
+}
+.plugin-chip .plugin-icon { --plugin-icon-size: var(--relay-font-size-body); }
+/* 名称可以省略号收口，不能把图标挤出去：图标 flex:none（PluginIcon.css），名称可缩。 */
+.plugin-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 只读态的名称与消息正文同档（2026-10-28 用户指认「名称显得过小」）；编辑态受原文字宽
+   约束留在 meta 档——两态只差名称一号，图标都是 body（16px，2026-10-25 用户指认 14px 太小，
+   也与 `@` 菜单行同档），实测三枚内置插件在 16px 图标下名称都不被裁（最紧的 GitHub 68/67.84）。 */
+.plugin-chip-static { font-size: var(--relay-font-size-body); vertical-align: top; }
+/* 只读态走正常内联排版（编辑态是绝对定位，不受这里影响）。inline-flex 的外部基线取
+   第一个 flex 项的基线，而图标是 `<img>`——替换元素的基线就是它的下缘，比正文基线低 1px，
+   整枚芯片被顶高 1px，消息气泡跟着从 42 变 43（2026-10-28 量测）。芯片盒高本来就等于
+   行盒高（body × line-height），改按行盒顶对齐后两者逐像素重合，行盒不再被撑高。 */
+/* 高对比模式：系统会接管背景色，容器只剩图标+名称。补一条系统描边，保证「这是
+   一枚整体标识」在 forced-colors 下仍然读得出（描边用系统色，不写死数值）。 */
+@media (forced-colors: active) {
+  .plugin-chip::before { background: Canvas; border: 1px solid CanvasText; }
+}

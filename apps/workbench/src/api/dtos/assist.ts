@@ -15,6 +15,18 @@ export type RelayConversationMode = "AGENT" | "ASSISTANT" | "LEARNING";
 export type RelayChatMode = "CHAT" | "PLAN" | "GOAL";
 
 /**
+ * 会话的运行态（2026-10-28，读时派生）。
+ *
+ * `RUNNING` = 这一轮已有 Worker 认领、正在生成；`PENDING` = 回复行已落库、还在排队。
+ * 终态与「没有在途的一轮」都不是第三种取值，而是 `null`——服务端不陈述「空闲」，
+ * 只说「没有在途的行」。
+ *
+ * 它只用于展示：决定左栏这一行的类型图标换成运行指示。它不是执行权、不是任务完成度，
+ * 也不能反过来当作发消息的准入判据（能不能发仍由服务端逐次裁决）。
+ */
+export type RelayAssistRunState = "RUNNING" | "PENDING";
+
+/**
  * 人设助手配置（ADR-018、命令契约 §10.60）。
  *
  * 这里只有配置文本：能力、连接与权限不出现在这个类型里，助手能读什么由当前连接与
@@ -68,6 +80,15 @@ export interface RelayAssistSession {
    * 缺字段只来自尚未提供该字段的旧服务端，此时按活动键回落一次，保持旧行为。
    */
   readonly hasMessages: boolean;
+  /**
+   * 读时派生的运行态（2026-10-28）：这段讨论此刻有没有在途的一轮。
+   *
+   * 左栏「正在生成」的环形指示只读这一枚事实，不拿本地发送按钮、`hasMessages`、
+   * 缓存的最后消息时刻或 `lastMessageAt` 推断——它们都可能比真实生成状态晚一拍或
+   * 长期停在旧值。缺字段只来自尚未提供该字段的旧服务端，读成 `null`（不知道就说不清，
+   * 不替服务端编一个「在跑」）。
+   */
+  readonly runState: RelayAssistRunState | null;
   readonly revision: DecimalRevision;
   readonly createdAt: string;
   readonly updatedAt: string;

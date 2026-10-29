@@ -6,6 +6,7 @@ import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProj
   rejectAssistProposal, requestAssistMessage, steerAssistMessage }
   from '../application/assist-commands.js';
 import { createRepositories } from '../application/unit-of-work.js';
+import type { AssistSessionRunState } from '../assist/assist-repository.js';
 import { establishConversationDiffBaseline, readConversationDiff, readConversationDiffFile }
   from '../conversation-diff/net-diff-service.js';
 import { MAX_ASSIST_ATTACHMENT_BODY_BYTES, uploadAssistMessageAttachment }
@@ -73,6 +74,14 @@ const AssistSessionDto = Type.Object({
    * 推断内容存在性；界面上的「未开始」与分叉入口只读这一枚事实。
    */
   has_messages: Type.Boolean(),
+  /**
+   * 读时派生：这段讨论此刻有没有在途的一轮（2026-10-28）。
+   *
+   * 取值只来自 `assist_messages.status`：`RUNNING`（已有 Worker 认领、正在生成）、
+   * `PENDING`（回复行已落库、还没人认领），没有在途行时为 `null`。它不是会话列，
+   * 也不是执行权或任务完成度：左栏只用它决定「这条会话的类型图标要不要换成运行指示」。
+   */
+  run_state: Type.Union([Type.Literal('RUNNING'), Type.Literal('PENDING'), Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   /**
@@ -390,6 +399,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   unread_at: Date | null;
   last_message_at: Date | null;
   has_messages: boolean;
+  run_state: AssistSessionRunState | null;
   conversation_mode: ConversationMode; chat_mode: 'CHAT' | 'PLAN' | 'GOAL';
   assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
@@ -407,6 +417,8 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     last_message_at: row.last_message_at === null ? null : row.last_message_at.toISOString(),
     // 读时派生的事实：有没有消息只看消息表，不从活动键的可空性推断。
     has_messages: row.has_messages,
+    // 2026-10-28：有没有在途的一轮同样只看消息表。逐字回显，不替服务端补一个「空闲」。
+    run_state: row.run_state,
     conversation_mode: row.conversation_mode,
     chat_mode: row.chat_mode,
     assistant_profile_id: row.assistant_profile_id,
@@ -650,13 +662,13 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     response: { 200: AssistSessionDto } } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      const { session, hasMessages } = await readAssistSessionWithActivity(dependencies.database.executor, {
+      const { session, hasMessages, runState } = await readAssistSessionWithActivity(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
       const q = request.query as { include_context?: 'true' | 'false' };
       const readContext = q.include_context === 'true' ? (await readAssistSessionContexts(dependencies.database.executor,
         { workspaceId: p.workspace_id, sessionIds: [session.id] }))[0] : undefined;
       const context = readContext?.session_revision === session.revision ? readContext : undefined;
-      return { ...sessionDto({ ...session, has_messages: hasMessages }), ...(context === undefined ? {} : { context: {
+      return { ...sessionDto({ ...session, has_messages: hasMessages, run_state: runState }), ...(context === undefined ? {} : { context: {
         project_goals: context.project_goals, working_directory: context.working_directory } }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });

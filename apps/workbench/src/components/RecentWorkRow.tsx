@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Folder, MessageSquare, Pin } from "lucide-react";
-import type { RelayApiClient, RelayAssistSession } from "../api/relayClient";
+import type { RelayApiClient, RelayAssistRunState, RelayAssistSession } from "../api/relayClient";
 import SessionRowMenu, { type SessionRowMenuHandle, type SessionRowPatch } from "./SessionRowMenu";
 
 /**
@@ -81,6 +81,36 @@ export interface RecentWorkRowProps {
   readonly selectionBusy: boolean;
 }
 
+/**
+ * 运行指示（2026-10-28）：把这一行的 12px 类型图标换成「运行中 / 排队中」。
+ *
+ * 三件事刻意如此：
+ *
+ * 1. **同一格、同一尺寸、同一 class 基座。** 复用 `.recent-work-kind`（12px、`flex: none`、
+ *    中性前景色）再加一个状态修饰类，所以标题可用宽、行高、行距、置顶徽标与未读圆点
+ *    的位置都不动——这一列的下限只有 160px，换一枚图形不能换来一次重排。
+ * 2. **只有两个形状，不靠颜色区分。** 运行中是**一段弧**（绕自身中心匀速旋转），
+ *    排队中是**一道点线环**（静止）。关动效时弧不转，但形状仍是「运行中」那段弧，
+ *    状态因此不依赖动效单独表达（设计系统 §9.18）；颜色沿用既有两档前景色，
+ *    不开新的强调色。
+ * 3. **不画整行。** 旋转的只有这枚 12px 图形：行、标题、边框、底色一律静止，
+ *    也不做发光、呼吸与闪烁。终态时这个节点整个不存在，回到 `MessageSquare`，
+ *    所以不存在「结束后动画还留在那儿」。
+ */
+function RunStateMark({ state }: { state: RelayAssistRunState }) {
+  const running = state === "RUNNING";
+  return <svg className={`recent-work-kind recent-work-kind--${running ? "running" : "pending"}`}
+    viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"
+    data-testid="recent-work-run-state" data-run-state={state}>
+    {/* 原生 tooltip：鼠标停在这枚 12px 图形上能读到状态。可访问名称走行按钮的 aria-label
+        （左栏把「正在生成 / 排队中」写进那一句），所以这里 aria-hidden，不重复念一遍。 */}
+    <title>{running ? "正在生成回复" : "排队中，等待生成"}</title>
+    {/* 半径 9 与 lucide 图标同刻度；描边 2 在 12px 盒里就是 1px，与相邻的轮廓图标同粗细。 */}
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeDasharray={running ? "38.45 18.1" : "1.8 5.2"} />
+  </svg>;
+}
+
 /** 悬停/聚焦摘要卡：标题 + 更新时刻 + 归属。纯展示，不接收指针。 */
 function RowSummary({ anchor, cardId, title, timeLabel, timeValue, timeTitle, scopeName, onClose }: {
   anchor: HTMLElement;
@@ -141,6 +171,12 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
    * 标记必须在这一行就看得见，而不是等点开才发现。
    */
   const notStarted = session !== undefined && !session.hasMessages;
+  /**
+   * 运行态只读服务端的读时派生事实（`run_state`）。本地一律不猜：不看发送按钮的忙态、
+   * 不看 `hasMessages`、不看缓存的最后消息时刻——任一都比真实生成状态晚一拍或停在旧值。
+   * 缺字段的旧服务端读成 `null`，这一行就照常显示类型图标。
+   */
+  const runState = session?.runState ?? null;
   const show = useCallback((element: HTMLElement) => setAnchor(element), []);
   const hide = useCallback(() => setAnchor(null), []);
   // 操作面板打开时不再压一张摘要卡：同一时刻这一行只出一个浮层。
@@ -169,8 +205,11 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
         onBlur={hide}
         onClick={onOpen}>
         <span className="recent-work-copy">
-          {/* 类型差异只用一枚图标：会话有、任务没有，不靠读文字区分。 */}
-          {kind === "session" && <MessageSquare className="recent-work-kind" aria-hidden="true" />}
+          {/* 类型差异只用一枚图标：会话有、任务没有，不靠读文字区分。
+              会话在生成或排队时，这一格换成运行指示（同一格、同一 12px，布局不动）。 */}
+          {kind === "session" && (runState === null
+            ? <MessageSquare className="recent-work-kind" aria-hidden="true" />
+            : <RunStateMark state={runState} />)}
           {unread && <span className="recent-work-unread" data-testid="recent-work-unread-dot" aria-hidden="true" />}
           <span className="recent-work-title">{title}</span>
           {/* 未开始：与置顶徽标同一形制（caption 文字 + 同一格间距），不占第二行。

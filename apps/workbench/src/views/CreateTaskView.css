@@ -12,6 +12,11 @@
   margin-top: var(--relay-space-3);
 }
 
+/* V5.28 创建页说明是辅助阅读，示例条目不沿用旧 reading(18px) 档。 */
+.pv-page.create-task-page .rail-section > p,
+.pv-page.create-task-page .summary-card p,
+.pv-page.create-task-page .suggestion-copy small { font-size: 12px; }
+
 /* 两列 label 布局与全局 .field--grid 同构（.field 标记已就位，只差 tsx 上的变体类）。
    CreateTaskView.tsx 不在本轮收编所有权内：组件侧给 .create-form > .field 加上
    field--grid 后，本媒体查询块即可整体删除，改由全局基座承担。 */
@@ -70,4 +75,29 @@
     display: block;
     margin-top: var(--relay-space-2);
   }
+}
+
+/* CSS 内容缩放与侧栏宽度变化时，按共享 pv-content 的真实可用宽度退为单列。 */
+@container pv-content (max-width: 52rem) {
+  .pv-page.create-task-page .create-form > .field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pv-page.create-task-page .create-form > .field > :is(.field-label, input, select, textarea, .field-hint, .field-error, .field-counter) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .pv-page.create-task-page .create-form > fieldset.field {
+    display: block;
+    padding-inline-start: 0;
+  }
+
+  .pv-page.create-task-page .create-form > fieldset.field > legend {
+    position: static;
+    width: auto;
+  }
+
+  .pv-page.create-task-page .choice-list { grid-template-columns: minmax(0, 1fr); }
 }

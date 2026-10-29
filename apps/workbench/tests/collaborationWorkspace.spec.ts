@@ -913,6 +913,11 @@ describe("协作工作区主路径", () => {
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);
         expect(meter.attributes("aria-label")).toContain(scenario.aria);
+        // 2026-10-28：环旁给出读数。3% 这类小比例在 32px 环上只剩一段小弧，
+        // 没有读数时既读不出进度又像「正在加载」；未知态不写读数，免得把「算不出」写成 0%。
+        const reading = meter.find(".agent-chat-context-meter-value");
+        if (scenario.state === "unknown") expect(reading.exists()).toBe(false);
+        else expect(reading.text()).toBe(scenario.aria);
         // 悬停效果（2026-10-22 用户指令「上下文圆圈的鼠标悬停效果优化一下」）：这句话改由
         // 应用内浮层承载，悬停即浮出。原生 title 一并去掉——Chromium/WebView2 要等约一秒，
         // 圆环只有 18px，两套提示叠着只会读成「没有反应」。
@@ -954,13 +959,27 @@ describe("协作工作区主路径", () => {
       await meter.trigger("click"); await flush();
       expect(meter.attributes("aria-expanded")).toBe("true");
       const panel = view.wrapper.get('[data-testid="assist-context-meter-panel"]');
+      // 第一层：关键用量。数字与百分比在同一段里读完，不再让人先看一屏技术口径。
+      expect(panel.get(".agent-chat-context-meter-heading").text()).toBe("上下文用量");
+      expect(panel.get(".agent-chat-context-meter-scope").text()).toBe("最近一次模型调用");
+      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("800");
+      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("1,000");
+      expect(panel.get(".agent-chat-context-meter-percent").text()).toBe("80%");
+      // 第二层：轻量信息行（标签左、数字右），命中率只有 Provider 上报时才占一行。
       const rows = panel.findAll(".agent-chat-context-meter-row").map((row) => row.text());
       expect(rows).toHaveLength(3);
-      expect(rows[0]).toContain("800");
-      expect(rows[0]).toContain("（80%）");
-      expect(rows[1]).toContain("200 tokens");
-      expect(rows[2]).toContain("75%");
-      expect(panel.get(".agent-chat-context-meter-note").text()).toContain("最近一次模型调用");
+      expect(rows[0]).toContain("输出 tokens");
+      expect(rows[0]).toContain("200");
+      expect(rows[1]).toContain("缓存命中");
+      expect(rows[1]).toContain("75%");
+      expect(rows[2]).toContain("统计来源");
+      // 第三层：默认只有一句口径摘要，完整说明收在「统计口径」里。
+      expect(panel.get(".agent-chat-context-meter-footnote .agent-chat-context-meter-note").text())
+        .toContain("占用比例按本次调用的完整上下文与工作区预算计算");
+      const scopeDetails = panel.get(".agent-chat-context-meter-scope-details");
+      expect(scopeDetails.attributes("open")).toBeUndefined();
+      expect(scopeDetails.text()).toContain("不等同模型物理上下文窗口");
+      expect(panel.text()).not.toContain("max_call_tokens");
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));

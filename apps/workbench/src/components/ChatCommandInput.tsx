@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import type { RelayApiClient, RelayConversationMode } from "../api/relayClient";
 import type { RelayChatCommand } from "../api/resources/chatControls";
 import PluginIcon from "./PluginIcon";
+import PluginChip from "./PluginChip";
 import { PLUGIN_MENTIONS, findPluginMentions } from "../lib/pluginMentions";
 import "./ChatCommandInput.css";
 
@@ -24,6 +25,12 @@ export function chatCommandStatus(entry: RelayChatCommand, hasSession: boolean):
   // 它和 `/clear`、`/new` 一样需要已有会话；不再有「待接入」的例外。
   if (entry.kind === "SYSTEM" && !hasSession) return "需已有会话";
   return null;
+}
+
+/** CSS 长度取值：jsdom 没有样式表时读回空串，按 0 处理而不是 NaN 污染补偿。 */
+function cssLength(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
@@ -87,7 +94,7 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
      镜像层用与 textarea 同源继承的字体和逐项相同的盒模型排版同一段草稿，
      mention 文字在镜像层里透明（占位保证折行与光标对齐），芯片叠在它的矩形上。
      草稿里没有已知 mention 时镜像层整体不渲染，输入器与此前逐像素一致。 */
-  const mentions = pluginChips ? findPluginMentions(value) : [];
+  const mentions = useMemo(() => (pluginChips ? findPluginMentions(value) : []), [pluginChips, value]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const chipRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -97,30 +104,63 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     if (mirror === null || textarea === null || mentions.length === 0) return;
     /* textarea 弹出纵向滚动条时内容区变窄：镜像层右侧让出同宽 gutter，
        两侧折行点才一致（镜像层 overflow:hidden，gutter 只影响排版不影响显示）。
+       gutter = 滚动条本身：offsetWidth - clientWidth 还含两侧边框，而边框在镜像层
+       上同源存在、已经扣过，嵌入态（有边框）不扣就会把折行宽度多补 2×边框。
        补偿是「基础值 + 当前 gutter」的**绝对值**：先把上一轮的行内补偿清掉再读
-       基础 padding——否则 calc(base + gutter) 里的 base 已含上次补偿，滚动、缩放、
-       ResizeObserver 反复触发会越叠越宽（2026-10-26 独立验收指认）。 */
-    const gutter = textarea.offsetWidth - textarea.clientWidth;
+       基础 padding——否则 base 已含上次补偿，滚动、缩放、ResizeObserver 反复触发
+       会越叠越宽（2026-10-26 独立验收指认）。 */
+    const textareaStyle = getComputedStyle(textarea);
+    const inlineBorder = cssLength(textareaStyle.borderLeftWidth) + cssLength(textareaStyle.borderRightWidth);
+    const gutter = Math.max(0, textarea.offsetWidth - textarea.clientWidth - inlineBorder);
     if (gutter > 0) {
       if (mirror.style.paddingRight !== "") mirror.style.paddingRight = "";
-      const base = Number.parseFloat(getComputedStyle(mirror).paddingRight);
-      mirror.style.paddingRight = `${(Number.isFinite(base) ? base : 0) + gutter}px`;
+      mirror.style.paddingRight = `${cssLength(getComputedStyle(mirror).paddingRight) + gutter}px`;
     } else if (mirror.style.paddingRight !== "") {
       mirror.style.paddingRight = "";
     }
+    /* 芯片是镜像层的绝对定位后代，包含块是它的 **padding 盒**（边框盒左缘 + 左边框），
+       不是文字起点：原点只加回左边框。过去直接减边框盒左上角，等于把左 padding 和
+       边框各多算一次——聊天输入器无边框无左 padding 所以看不出来，换进任何有边框或
+       左内边距的表面就整体右移（2026-10-28 量测）。 */
     const box = mirror.getBoundingClientRect();
+    const originLeft = box.left + cssLength(textareaStyle.borderLeftWidth);
+    const originTop = box.top + cssLength(textareaStyle.borderTopWidth);
     mentions.forEach((mention, index) => {
       const chip = chipRefs.current[index];
-      const span = mirror.querySelector(`[data-mention-start="${mention.start}"]`);
+      const span = mirror.querySelector<HTMLElement>(`[data-mention-start="${mention.start}"]`);
       if (chip === null || span === null) return;
-      // 取第一个片段矩形：mention 跨行时芯片盖在首行，剩余透明文字不可见。
-      const rect = span.getBoundingClientRect();
-      chip.style.left = `${rect.left - box.left + mirror.scrollLeft}px`;
-      chip.style.top = `${rect.top - box.top + mirror.scrollTop}px`;
-      chip.style.height = `${rect.height}px`;
+      /* 宽度取原文片段的字宽、不取芯片的固有宽度：容器右缘就是 `@标签` 的终点，也正是
+         光标落点——芯片盖不到后面的正文，光标也不会落进名称里；名称放不下时由 label
+         自己省略号收口，不靠 margin 或负定位找补（2026-10-28 用户指认「贴在文字表面」
+         的根因）。 */
+      const fragments = span.getClientRects();
+      /* 原文被 textarea 原生折行拆成两段以上时，一枚芯片只能盖住首片段，其余原文仍按
+         `color: transparent` 排版——那就是「看不见的字符占位」（2026-10-29 用户指认）。
+         安全的降级是整枚芯片收起、原文 `@标签` 恢复可见：折行规则与 textarea 保持同一
+         套，光标仍落在原位置。禁止靠镜像层 `white-space: nowrap` 强行不折行——那会让
+         两侧排版分叉，光标与可见文字错位，比不可见占位更糟。 */
+      const split = fragments.length > 1;
+      chip.dataset.split = split ? "true" : "false";
+      span.dataset.chip = split ? "off" : "on";
+      if (split) return;
+      const rect = fragments.length > 0 ? fragments[0] : span.getBoundingClientRect();
+      chip.style.setProperty("--chip-left", `${rect.left - originLeft}px`);
+      chip.style.setProperty("--chip-top", `${rect.top - originTop + mirror.scrollTop}px`);
+      chip.style.setProperty("--chip-width", `${rect.width}px`);
+      chip.style.setProperty("--chip-height", `${rect.height}px`);
     });
   }, [mentions]);
   useLayoutEffect(placeChips, [placeChips, value]);
+  /* 应用字体是 font-display:swap 的可变字体：先按系统字回退排版、加载完再换成真字体，
+     两次的字宽不一样。不在换字体后重量一次，芯片就停在回退字宽上——用户看到的是
+     「文字动了、图标没动」的偏移（首屏与字体缩放后的漂移）。 */
+  useEffect(() => {
+    const fonts = document.fonts;
+    if (fonts === undefined || fonts.ready === undefined) return;
+    let live = true;
+    void fonts.ready.then(() => { if (live) placeChips(); });
+    return () => { live = false; };
+  }, [placeChips]);
   /* `@` 菜单插入后把光标放回插入内容之后：React 写回受控 value 会把选区冲到末尾，
      不恢复的话继续打字会插到错位置（mention 插入协议要求落在原光标处）。 */
   useLayoutEffect(() => {
@@ -309,12 +349,9 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
       data-chips={mentions.length > 0 ? "on" : undefined}>
       {mentions.length > 0 && <div className="chat-command-mirror" ref={mirrorRef} aria-hidden="true">
         {mirrorSegments}
-        {mentions.map((mention, index) => <span key={`chip-${mention.start}`} className="chat-command-chip"
-          data-plugin-chip={mention.key}
-          ref={(element) => { chipRefs.current[index] = element; }}>
-          <PluginIcon plugin={mention.key} className="chat-command-chip-icon" />
-          <span className="chat-command-chip-label">{mention.label}</span>
-        </span>)}
+        {mentions.map((mention, index) => <PluginChip key={`chip-${mention.start}`} variant="editing"
+          plugin={mention.key} label={mention.label} className="chat-command-chip"
+          ref={(element) => { chipRefs.current[index] = element; }} />)}
       </div>}
     <textarea {...props} aria-label={props["aria-label"] ?? "本次消息"} disabled={disabled} value={value}
       onScroll={(event) => {

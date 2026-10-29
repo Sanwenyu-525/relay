@@ -7,3 +7,8 @@
   line-clamp: 2;
   overflow: hidden;
 }
+
+/* pv 皮肤：styles 基座 `.page-primary > .subnav .subnav-item`（0,3,0）把范围页签抬到
+   reading(18px) 档，压过 protoPage 的 `.pv-page .subnav-item` 12px 档；这里以更高特异性回 12px 页签档。 */
+.pv-page .page-primary > .subnav .subnav-item,
+.pv-page .subnav-row .subnav-item { font-size: 12px; }

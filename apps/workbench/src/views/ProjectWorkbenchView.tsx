@@ -270,7 +270,7 @@ export default function ProjectWorkbenchView() {
   if (kind === null) return <section className="page-state pv-page"><h1>没有这个工作台</h1><p>当前只提供通用、论文和开发三种内置视图。</p><Link className="text-link" to={`/projects/${id}/workbench/general`}>打开通用工作台</Link></section>;
   if (loading || (snapshot !== null && (snapshot.projectId !== id || snapshot.client !== client))) return <section className="page-state pv-page" aria-live="polite"><h1>正在读取项目工作台</h1><p>{client ? "正在读取本机 API 的项目事实。" : "正在读取示例数据。"}</p></section>;
   if (error) return <section className="page-state page-state--error pv-page" role="alert"><h1>暂时无法读取项目工作台</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />重新读取</button></section>;
-  if (!snapshot) return <section className="page-state"><h1>没有这个项目</h1><p>当前数据来源中没有该项目，页面不会自行创建项目或复制其他项目资料。</p><Link className="text-link" to="/projects">返回项目入口</Link></section>;
+  if (!snapshot) return <section className="page-state pv-page"><h1>没有这个项目</h1><p>当前数据来源中没有该项目，页面不会自行创建项目或复制其他项目资料。</p><Link className="text-link" to="/projects">返回项目入口</Link></section>;
 
   const focusedTaskId = selectedTaskId ?? snapshot.nextAction?.id ?? snapshot.tasks[0]?.id ?? null;
   const focusedTask = snapshot.tasks.find((task) => task.id === focusedTaskId) ?? null;
@@ -346,7 +346,8 @@ export default function ProjectWorkbenchView() {
     </>}
   </section>;
 
-  return <section className={`skill-page project-workbench project-workbench--${kind}`}><div className="page-layout"><div className="page-primary">
+  // V528-PROJECT-WORKBENCH: 项目只读工作台沿用页面皮肤，/agent 的会话工作台不受影响。
+  return <section className={`skill-page project-workbench pv-page project-workbench--${kind}`}><div className="page-layout"><div className="page-primary">
     <div className="workbench-context-bar"><p className="eyebrow">{snapshot.title}</p>
       <nav className="subnav" aria-label="工作台视图">{kinds.map((item) => <Link key={item.kind} className={`subnav-item${item.kind === kind ? " subnav-item--active" : ""}`} aria-current={item.kind === kind ? "page" : undefined} to={`/projects/${id}/workbench/${item.kind}${snapshot.source === "fixture" && query.toString() ? `?${query.toString()}` : ""}`}>{item.label}</Link>)}</nav>
       <button className="workbench-refresh" type="button" aria-label="刷新事实" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" /></button>
@@ -407,7 +408,7 @@ export default function ProjectWorkbenchView() {
       <p className="helper-text">上方切换仅供浏览。保存默认视图需明确提交；项目阶段仍由项目类型和服务端 State 决定，不会开始、暂停或改写任务与 Run。</p>
       <ViewConfigurationPanel client={client} projectId={id} browseKind={kind} projectArchivedAt={snapshot.archivedAt} />
     </details>
-  </div><ResponsiveRail label={kind === "development" ? "查看运行证据与待审" : "打开 AI 辅助与资料"} title={kind === "development" ? "等待你的判断" : "AI 辅助"}><div className="rail-content workbench-assist-rail">
+  </div><ResponsiveRail label={kind === "development" ? "查看运行证据与待审" : "打开 AI 辅助与资料"} title={kind === "development" ? "等待你的判断" : "AI 辅助"}><div className="pv-page project-workbench project-workbench--rail"><div className="rail-content workbench-assist-rail">
     <h2>{kind === "development" ? "等待你的判断" : "AI 辅助 · 只读建议"}</h2>
     <p className="rail-intro">{kind === "thesis" ? "基于明确选择的资料，讨论论证与草稿候选。" : kind === "development" ? "核对版本、检查和范围，再进入原业务入口。" : "围绕当前任务讨论、核对来源与整理下一步。"}</p>
     <div className="workbench-rail-context"><p>项目：{snapshot.title}</p>{assistTaskId && <p>任务：{assistTaskTitle}</p>}{kind !== "general" && reading?.target.kind === "artifact" && <small>Assist 目标为当前所读产物的归属任务。</small>}</div>
@@ -425,5 +426,5 @@ export default function ProjectWorkbenchView() {
     <details className="workbench-detail-section"><summary>项目事实与已有入口</summary><section className="rail-section"><h3>项目状态</h3><dl className="rail-definition-list"><div><dt>项目类型</dt><dd>{typeLabel(snapshot.projectType)}</dd></div><div><dt>阶段</dt><dd>{phaseLabel(snapshot.phaseKey)}</dd></div><div><dt>State 修订</dt><dd>v{snapshot.stateRevision}</dd></div></dl></section>
       <section className="rail-section"><h3>已有入口</h3><Link className="secondary-button secondary-button--wide" to={`/projects/${id}`}>返回原项目页</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/tasks`}>项目任务</Link><Link className="secondary-button secondary-button--wide" to={`/projects/${id}/knowledge`}>项目资料</Link></section>
     </details>
-  </div></ResponsiveRail></div></section>;
+  </div></div></ResponsiveRail></div></section>;
 }

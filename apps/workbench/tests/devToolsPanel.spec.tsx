@@ -45,7 +45,19 @@ describe("右侧工具面板的资格与页签", () => {
     const client = fakeClient();
     const { wrapper } = await mount(client, null, null);
     expect(client.getManagedResources).not.toHaveBeenCalled();
-    expect(wrapper.get('[data-testid="devtools-files-unavailable"]').text()).toContain("需要项目");
+    // 2026-10-28：没有关联项目时默认落在真的能用的「网页」，而不是开局就是两张不可用说明。
+    expect(wrapper.get('[data-testid="devtools-tab-WEB"]').attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="devtools-files-unavailable"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="devtools-tab-FILES"]').trigger("click");
+    const empty = wrapper.get('[data-testid="devtools-files-unavailable"]');
+    expect(empty.text()).toContain("尚未关联项目");
+    expect(empty.text()).toContain("关联项目后，可查看其受管文件与 Git 变更。");
+    // 安全边界收进辅助说明，不再反复解释同一个概念。
+    expect(empty.text()).toContain("不推断本机任意路径");
+    // 空态必须给出一条现在就能走的路，而不是让用户停在「不可用」上。
+    await empty.get('[data-testid="devtools-empty-open-web"]').trigger("click");
+    expect(wrapper.get('[data-testid="devtools-tab-WEB"]').attributes("aria-selected")).toBe("true");
 
     await wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
     expect(wrapper.get('[data-testid="devtools-git-unavailable"]').text()).toContain("没有可核对的目录基线");
@@ -83,7 +95,7 @@ describe("右侧工具面板的资格与页签", () => {
     // 底部「执行输出」抽屉不再自带同义键：全面板只留一颗，避免两个收起入口。
     expect(closes.length).toBe(1);
     expect(root.querySelector(".devtools-header")?.contains(closes[0]!)).toBe(true);
-    expect(root.querySelector(".devtools-drawer-header")?.contains(closes[0]!)).toBe(false);
+    expect(root.querySelector(".devtools-drawer-bar")?.contains(closes[0]!)).toBe(false);
   });
 
   it("网页页签切走再切回不重建面板，标签状态得以保留", async () => {

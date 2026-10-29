@@ -1,4 +1,9 @@
-/* 工具面板：右栏只读工具 + 底部命令输出抽屉；只承载只读事实，展开/收起不执行命令也不停止进程。 */
+/* 工具面板：右栏只读工具 + 底部命令输出抽屉；只承载只读事实，展开/收起不执行命令也不停止进程。
+ *
+ * 2026-10-28 版面重整：页签从「六等分网格」改为「主入口文字页签 + 辅助入口图标页签」，
+ * 页签条不再靠横向滚动兜底；空态从技术说明段落收成标题 + 一句话；底部抽屉收成一行开关。
+ * 所有数值只消费 styles.css 注入的 --relay-* 变量，不新增色值与尺寸常量。
+ */
 
 .devtools {
   flex: none;
@@ -8,64 +13,159 @@
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
   background: var(--relay-color-bg-canvas);
 }
-.devtools-pane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* 页签条按面板自身宽度决定要不要显示辅助页签的文字：容器查询只能挂在祖先上，
+   而 .devtools 在不同宿主里高度来源不同，因此把容器放在中间层 .devtools-pane。 */
+.devtools-pane {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  container-name: devtools;
+  container-type: inline-size;
+}
 .devtools-header {
   flex: none;
   display: flex;
   align-items: stretch;
+  gap: var(--relay-space-1);
+  padding-inline: var(--relay-space-1);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
-/* 6 个页签在窄面板里放不下时横向滚动，而不是让文字钻到收起键底下：
-   实测 288–340px 时页签内容比轨道宽 50px 以上，overflow 可见就会压住右侧的收起键。 */
+/* 页签条不参与收缩竞争：每一项 flex: 0 0 auto，末位才允许横向滚动。
+   这样收起键永远不会被页签压住，也不会出现「页签钻到关闭键底下」。 */
 .devtools-tabs {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
+  align-items: stretch;
+  gap: var(--relay-space-1);
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
 }
+.devtools-tabs::-webkit-scrollbar { display: none; }
 /* 收起键贴在页签条右端：不与底部「执行输出」抽屉绑定，全面板只有这一颗收起入口。 */
-.devtools-close { align-self: center; flex: none; margin: 0 var(--relay-space-2); }
+.devtools-close { align-self: center; flex: none; margin-inline: var(--relay-space-1); }
+
 .devtools-tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 页签从 5 个增到 6 个后，图标 + 12px 内边距会让「轨迹」在最窄档被挤出去；
-     收紧图标间距与左右内边距，让常见宽度（约 450–500px）能一屏放下全部页签。 */
   gap: var(--relay-space-1);
-  min-height: var(--relay-control-height-comfort);
-  padding: var(--relay-space-2);
+  flex: 0 0 auto;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
   background: transparent;
   border: 0;
+  /* 指示线画在页签底缘、紧贴页签条的 1px 分隔线之上，不额外撑高页签。 */
   border-bottom: calc(var(--relay-border-width) * 2) solid transparent;
   color: var(--relay-color-text-secondary);
   cursor: pointer;
-  font-family: var(--relay-font-family-ui);
+  font: inherit;
   font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
   white-space: nowrap;
+  transition: color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.devtools-tab > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.devtools-tab:hover { background: var(--relay-color-selection-hover); }
+/* 悬停只加一层淡底；激活态不用底色，靠字重 + 指示线表达层级。 */
+@media (hover: hover) and (pointer: fine) {
+  .devtools-tab:hover { background: var(--relay-color-selection-hover); }
+}
 .devtools-tab--active {
   color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
   border-bottom-color: var(--relay-color-action-primary);
-  transition: border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.devtools-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--relay-space-4); }
-.devtools-body h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
-.devtools-list { list-style: none; margin: 0 0 var(--relay-space-3); padding: 0; display: grid; gap: var(--relay-space-2); }
-.devtools-list li { padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-bg-subtle); border-radius: var(--relay-radius-control); }
-.devtools-list small { display: block; color: var(--relay-color-text-secondary); }
-.devtools-operation { margin-top: var(--relay-space-3); padding-top: var(--relay-space-2); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.devtools-tab:active { background: var(--relay-color-selection-bg); }
+
+/* 辅助入口：图标与文字同一条中轴；图标收到与正文同档的视觉重量，不用 20px 控件图标。 */
+.devtools-tab--secondary {
+  padding-inline: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+.devtools-tab--secondary > svg {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+  flex: none;
+}
+/* 辅助入口与主入口之间用一条竖线分组：两档页签字号不同，靠留白已经分不开。 */
+.devtools-tab--group-start {
+  margin-inline-start: var(--relay-space-1);
+  border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  padding-inline-start: var(--relay-space-2);
+}
+/* 面板窄（默认宽度就在这一档）时辅助入口只留图标：六项仍然全在，可访问名称与 title 不变。 */
+@container devtools (max-width: 28rem) {
+  .devtools-tab--secondary .devtools-tab-label { display: none; }
+}
+
+.devtools-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--relay-space-3);
+  scrollbar-width: thin;
+}
+.devtools-body h3 {
+  margin: 0 0 var(--relay-space-2);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+.devtools-body h3 + .helper-text { margin-top: 0; }
+.devtools-list { list-style: none; margin: 0 0 var(--relay-space-3); padding: 0; display: grid; gap: var(--relay-space-1); }
+.devtools-list li {
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.devtools-list small { display: block; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+
+/* 轻量空态：靠上排列、不铺卡片；说明与边界说明分两档字色，操作跟在同一列末尾。 */
+.devtools-empty {
+  display: grid;
+  gap: var(--relay-space-2);
+  justify-items: start;
+  padding-block: var(--relay-space-2);
+  max-width: 32rem;
+}
+.devtools-empty-title {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-primary);
+}
+.devtools-empty-detail {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-secondary);
+}
+.devtools-empty-note {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-muted);
+}
+.devtools-empty-actions { padding-top: var(--relay-space-1); }
+
+.devtools-operation {
+  margin-top: var(--relay-space-3);
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
 .devtools-operation h4 { margin: 0 0 var(--relay-space-1); font-size: var(--relay-font-size-body); }
 .devtools-invocation { margin-top: var(--relay-space-2); }
 .devtools-output pre {
   margin: var(--relay-space-2) 0 0;
-  padding: var(--relay-space-3);
-  max-height: 16rem;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  max-height: 12rem;
   overflow: auto;
   background: var(--relay-color-bg-subtle);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
@@ -85,35 +185,78 @@
 .git-read-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); margin: var(--relay-space-2) 0; }
 .git-read-status-result h4 { margin: var(--relay-space-2) 0; font-size: var(--relay-font-size-meta); }
 
-/* 底部抽屉：命令输出来自服务端保存的真实结果，交互终端仍是待设计声明。 */
-.devtools-drawer { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--relay-color-bg-canvas); }
-.devtools-drawer-header {
+/* 底部抽屉：命令输出来自服务端保存的真实结果，交互终端仍是待设计声明。
+   收起时只有一行（compact 控件高），与上方主体用一条 1px 线分层，不再叠两条边框。 */
+.devtools-drawer {
+  flex: none;
   display: flex;
-  align-items: stretch;
-  gap: var(--relay-space-2);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  flex-direction: column;
+  min-height: 0;
   background: var(--relay-color-bg-canvas);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
-.devtools-tabs--drawer { display: flex; flex: 1; min-width: 0; }
-.devtools-drawer-pending {
+.devtools-drawer-bar {
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
-  padding: var(--relay-space-2) var(--relay-space-3);
-  color: var(--relay-color-text-muted);
+  min-height: calc(var(--relay-control-height-compact) + var(--relay-space-1));
+  padding-inline: var(--relay-space-1);
+}
+.devtools-drawer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
+  height: var(--relay-control-height-compact);
+  padding-inline: var(--relay-space-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+  font: inherit;
   font-size: var(--relay-font-size-meta);
   white-space: nowrap;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.devtools-drawer-pending > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.devtools-drawer-body { max-height: 16rem; overflow-y: auto; padding: var(--relay-space-4); }
-.devtools-drawer-body h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
+@media (hover: hover) and (pointer: fine) {
+  .devtools-drawer-toggle:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+}
+.devtools-drawer-toggle[aria-expanded="true"] { color: var(--relay-color-selection-text); }
+/* 展开指示只用一次 90° 旋转（transform），不改变行高也不推挤相邻元素。 */
+.devtools-drawer-chevron {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+  flex: none;
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.devtools-drawer-toggle[aria-expanded="true"] .devtools-drawer-chevron { transform: rotate(90deg); }
+.devtools-drawer-pending {
+  margin-inline-start: auto;
+  padding-inline-end: var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 展开体自己滚动：上限同时看窗口高度与绝对高度，短窗口里不会把页签条挤出可视区。 */
+.devtools-drawer-body {
+  max-height: min(14rem, 38vh);
+  overflow-y: auto;
+  padding: 0 var(--relay-space-3) var(--relay-space-3);
+  scrollbar-width: thin;
+}
 
 /* 网页页签要占满可用高度：原生子窗口需要一块稳定矩形，不能跟着整页滚动。
-   其余页签保持原来的 40vh 上限与滚动行为。 */
+   其余页签保持原来的 40vh 上限与滚动行为。
+   注意 :not([hidden])：变更面板与网页面板都常驻挂载，靠 hidden 切换；这条 display:flex
+   一旦命中隐藏的兄弟，就会把「变更」的说明重新摊在网页预览旁边（实测过）。 */
 .devtools[data-tab="WEB"] { max-height: none; flex: 1 1 auto; min-height: 0; }
+.devtools-body > [hidden] { display: none; }
 .devtools[data-tab="WEB"] .devtools-body { overflow: hidden; display: flex; flex-direction: column; }
-.devtools[data-tab="WEB"] > .devtools-pane > .devtools-body > div { flex: 1 1 auto; min-height: 0; display: flex; }
+.devtools[data-tab="WEB"] > .devtools-pane > .devtools-body > div:not([hidden]) { flex: 1 1 auto; min-height: 0; display: flex; }
 
 /* 文件页签的目录浏览与文件预览（2026-10-24 接入 HTTP §10.112）。 */
 .file-browse { display: flex; flex-direction: column; gap: var(--relay-space-2); }

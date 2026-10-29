@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
@@ -176,6 +176,10 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     // 此时按活动键回落一次，保持旧行为（不把整条会话读失败）。
     hasMessages: row.has_messages === undefined
       ? lastMessageAt !== null : boolean(row, "has_messages", "assist session"),
+    // 2026-10-28：运行态。缺失只来自尚未提供该字段的旧服务端，读成 null——「不知道」
+    // 不等于「在跑」，也不等于「跑完了」；不拿 has_messages 或活动键补一个推论。
+    // 显式给了却不在词表内则整条读失败：猜一个运行态会让左栏画出不存在的过程。
+    runState: runStateOf(row.run_state),
     // created_at 只作「还没有消息」那一档的排序回落（服务端 coalesce 的同义读法）。
     // 它自 0015 起恒在会话投影里；这里容缺是因为缺字段不该让整条会话读不出来，
     // 退到 updated_at——同样是 0015 就有的时刻列，最多让位置略偏，不会把行丢掉。
@@ -200,6 +204,19 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
         canonicalRoot: nullableString(directory, "canonical_root", "assist session directory"),
         source: workingDirectorySourceOf(directory) } };
     })() }) };
+}
+
+/**
+ * 运行态只认两个词，缺失或显式 null 都读成「没有在途」（2026-10-28）。
+ *
+ * 与 `workingDirectorySourceOf` 同一条口径：缺字段＝旧服务端，读成 null 最保守；
+ * 读到没见过的词则失败，不猜——猜成 RUNNING 会让左栏画出一个不存在的运行指示，
+ * 猜成 null 又会把真的在跑的那一条显示成静止。
+ */
+function runStateOf(value: unknown): RelayAssistRunState | null {
+  if (value === undefined || value === null) return null;
+  if (value === "RUNNING" || value === "PENDING") return value;
+  throw new Error(SESSION_FORMAT_ERROR);
 }
 
 /**

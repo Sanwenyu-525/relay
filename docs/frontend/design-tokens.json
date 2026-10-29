@@ -457,6 +457,10 @@
       "$value": "clamp(18rem, 20%, 22rem)",
       "$description": "工作台右侧「工作详情」面板列宽。2026-10-14 新增为固定 20.125rem；2026-10-15 改为百分比 + 上下限：固定值下宽窗里面板占比被压缩、窄窗里又会把中栏吃光。下限 18rem（288px）保证正文与步骤流可读，上限 22rem（352px）防止过宽。窄容器下改为浮层，宽度仍取本值。"
     },
+    "layout.inspector.toolsWidth": {
+      "$type": "dimension",
+      "$value": "clamp(18rem, 19%, 20rem)",
+      "$description": "普通会话右侧「工具面板」（文件/变更/网页/终端/运行记录/轨迹）的默认列宽。2026-10-28 新增：它与工作详情面板共用同一套几何（贴右、可拖动、窄容器收抽屉），但内容以只读工具条与短空态为主，不需要工作详情那么宽——默认上限由 22rem 收到 20rem、百分比由 20% 收到 19%，把宽度先还给聊天阅读列。下限仍是 18rem（288px），与 InspectorResizeHandle 的拖拽下限一致，避免第一次拖动时宽度跳变；用户拖过之后的 --relay-inspector-user-width 仍然优先于本值。"},
     "layout.inspector.wideWidth": {
       "$type": "dimension",
       "$value": "clamp(30rem, 34%, 40rem)",
@@ -698,6 +702,11 @@
       "$type": "duration",
       "$value": "6s",
       "$description": "运行期局部光点沿边移动一周。Level 2 低干扰执行反馈，比一次性时长长一个数量级，因为它是循环而非过渡。"
+    },
+    "motion.loop.spin": {
+      "$type": "duration",
+      "$value": "1s",
+      "$description": "环形运行指示绕自身中心一周的时长（2026-10-28 新增）。与 motion.loop.calm(6s) 同为循环动效但语义不同：calm 是「沿边慢慢流过的光」，读作持续；spin 是一枚 12px 圆环的转速，快了像卡顿、慢了像停住，1s 是秒针档。现有四档（fast 120ms / panel 180ms / emphasis 1.2s / calm 6s）没有一档适合匀速旋转，借用任何一档都会让这枚环读成「没在转」或「在抽搐」，故单列一档。减少动态效果时由 CSS 停掉旋转（animation: none），形状不变。"
     },
     
     "shadow.surface": {

@@ -35,6 +35,19 @@ interface Row {
   readonly unread: boolean;
 }
 
+/**
+ * 运行态轮询的节拍（2026-10-28）。只在「有讨论真的在跑」期间生效，平时零请求。
+ *
+ * `BASE` 取 3s：比服务端预览流的变化检测（约 200ms）粗得多，但左栏要的是「哪条在生成」
+ * 这一档事实，秒级已经够；再密就是拿请求换一个看不出来的差别。
+ * 连续 `SLOW_AFTER` 拍后降到 `SLOW`：一次长生成（可能十几分钟）不会让请求量线性堆起来。
+ */
+const RUN_POLL_BASE_MS = 3000;
+const RUN_POLL_SLOW_MS = 10_000;
+const RUN_POLL_SLOW_AFTER = 40;
+/** 读失败时的退避上限：不无限翻倍，也不因为一次失败就把在跑的那条显示成静止。 */
+const RUN_POLL_MAX_BACKOFF_MS = 30_000;
+
 /** 拖拽期间的落位预览：横线画在 `listKey` 这一列的 `lineTop` 处，松手即落到 `targetKey` 的这侧。 */
 interface Drag {
   readonly rowKey: string;
@@ -380,6 +393,78 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     return () => { current = false; };
   }, [client, active.taskId, active.sessionId, active.contextEpoch, active.activityEpoch]);
 
+  /**
+   * 有没有一段讨论此刻真的有在途的一轮（服务端读时派生的 `run_state`）。
+   *
+   * 只有它为真时才轮询：这一列平时一个请求都不多打，一次读取失败也不会自动变成
+   * 「一直在轮询」。任务聊天走任务行，不在这一列，也不进这个判据。
+   */
+  const watchingRun = (loaded?.sessions ?? []).some((session) => session.runState !== null);
+
+  /**
+   * 运行态轮询（2026-10-28，用户要求「切到别的会话也能看出哪条在生成」）。
+   *
+   * 为什么必须轮询：`run_state` 只由服务端的消息状态派生，左栏除了整列重读没有第二条
+   * 获知途径。已有机制里最贴近的两条都不够——`activityEpoch` 只对**正在看**的那条会话
+   * 递计数（切走就不再递），归档区是显式读取。因此这里只补「在途期间按固定节拍重读一次
+   * 会话列表」这一件事，其余一律复用既有入口。
+   *
+   * 有五条边界：
+   * 1. **一次请求覆盖整列**：读的是 `GET /assist-sessions`（同一次读取里带上运行态），
+   *    不为每个条目单独发请求，也不新增端点。
+   * 2. **有界**：没有任何在跑的就根本不轮询；连续 40 拍（约 2 分钟）还在跑就降频到 10s，
+   *    长任务不会把请求量顶上去；读取失败按 3→6→12→24→30s 退避，上限 30s。
+   * 3. **不可见时不打请求**：页面在后台只保留计时，切回可见那一拍立刻补一次，
+   *    回来时不会先看到一段旧状态。
+   * 4. **失败不伪造任何状态**：读失败就保留上一次读到的运行态，既不把在跑的清成静止，
+   *    也不假装「已经跑完」——宁可旧一拍，不编一条没有依据的结论。
+   * 5. **不抢整列重读的结果**：整列重读（翻页、切连接）期间发起的那一拍按版本号丢弃，
+   *    避免旧响应盖掉新列表。
+   */
+  useEffect(() => {
+    if (!watchingRun) return;
+    let stopped = false;
+    let timer: number | null = null;
+    let ticks = 0;
+    let failures = 0;
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => { void poll(); }, delay);
+    };
+    const poll = async (): Promise<void> => {
+      timer = null;
+      if (stopped) return;
+      if (document.visibilityState === "hidden") { schedule(RUN_POLL_BASE_MS); return; }
+      ticks += 1;
+      const version = request.current;
+      try {
+        const items = await client.getAssistSessions({ includeContext: true });
+        if (stopped) return;
+        failures = 0;
+        if (version !== request.current) { schedule(RUN_POLL_BASE_MS); return; }
+        const next = items.filter((session) => session.taskId === null).sort(compareSessions);
+        setLoaded((previous) => previous === null ? previous : { ...previous, sessions: next });
+      } catch {
+        if (stopped) return;
+        failures += 1;
+      }
+      schedule(failures > 0
+        ? Math.min(RUN_POLL_MAX_BACKOFF_MS, RUN_POLL_BASE_MS * 2 ** Math.min(failures, 4))
+        : ticks >= RUN_POLL_SLOW_AFTER ? RUN_POLL_SLOW_MS : RUN_POLL_BASE_MS);
+    };
+    const onVisibility = () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      if (timer !== null) { window.clearTimeout(timer); timer = null; }
+      void poll();
+    };
+    schedule(RUN_POLL_BASE_MS);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [client, watchingRun]);
+
   const tasks = loaded?.tasks ?? [];
   const loadedSessions = loaded?.sessions ?? [];
   // 服务端读回来的次序保持原样（那是它的排序键），这一列显示成什么次序由本机偏好覆盖。
@@ -642,7 +727,10 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         // 「未开始」进可访问名称：标记是视觉上的，读屏与键盘用户同样要能分辨这条还没说过话。
         // 判据是服务端读时派生的 hasMessages（数消息表），不是活动键的可空性。
         const notStarted = session !== undefined && !session.hasMessages;
-        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${notStarted ? " · 未开始" : ""}${row.unread ? " · 未读" : ""}`;
+        // 运行态也进可访问名称：旋转的环是视觉信号，读屏与键盘用户要能读到同一件事。
+        const runNote = session?.runState === "RUNNING" ? " · 正在生成"
+          : session?.runState === "PENDING" ? " · 排队中" : "";
+        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${notStarted ? " · 未开始" : ""}${runNote}${row.unread ? " · 未读" : ""}`;
         // 同一组里出现同名行时，时刻要带上时分才分得清是哪一条；完整时间留在摘要卡的 time 上。
         const sameTitle = groupRows.some((other) => other.key !== row.key && other.title === row.title);
         return <RecentWorkRow key={row.key} kind={row.kind} title={row.title}

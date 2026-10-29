@@ -115,8 +115,8 @@
 .pv-page .review-list-item:hover { border-color: #c6ddcc; }
 .pv-page .review-list-item--selected { border-color: #9ccbab; background: #f7fcf8; }
 .pv-page .review-list-item strong { font-size: 12.5px; color: #33533d; }
-.pv-page .review-list-meta { font-size: 10.5px; color: #8b9a90; gap: 8px; }
-.pv-page .review-kind { text-transform: none; color: #759282; font-weight: 650; }
+.pv-page .review-list-meta { font-size: 10.5px; color: var(--pv-muted); gap: 8px; }
+.pv-page .review-kind { text-transform: none; color: var(--pv-muted); font-weight: 650; }
 
 .pv-page .review-detail,
 .pv-page .review-reading {
@@ -128,7 +128,7 @@
 .pv-page .review-detail-heading h2,
 .pv-page .review-reading h2 { font-size: 13px; font-weight: 700; color: #294635; }
 .pv-page .review-reason { font-size: 12px; color: #486452; }
-.pv-page .review-request-facts dt { font-size: 11px; color: #899c8d; }
+.pv-page .review-request-facts dt { font-size: 11px; color: var(--pv-muted); }
 .pv-page .review-request-facts dd { font-size: 12px; color: #486452; }
 
 @media (max-width: 760px) {
@@ -144,3 +144,18 @@
 .pv-page .review-list { margin-top: 13px; }
 .pv-page .review-filters { border-top: none; margin-bottom: 12px; padding-top: 0; }
 .pv-page .review-jump { border-top: none; }
+
+/* pv 皮肤：migrated-scoped 的 .review-fact-section h3 / .review-decision h3 用 section(24px) 档，
+   在 pv 卡片里大于页头 h1(22px)，层级倒置；回卡片分区头 13px/700 档（同 .resume-section > h2）。
+   决策面板的全部分区标题（判断对象与条件/依据/影响/绑定/作出决定）都在 .review-decision 内。 */
+.pv-page .review-decision h3 { font-size: 13px; font-weight: 700; color: #294635; }
+
+/* pv 皮肤：这些元素全局用 meta(14px) 档，在 pv 详情卡里比正文(13px)还大、且大于同卡
+   .review-request-facts 的 dt 11/dd 12 基线；按原型 review-center 的 meta 档回落。 */
+.pv-page .review-kind { font-size: 11px; }
+.pv-page .review-facts dt { font-size: 11px; color: var(--pv-muted); }
+.pv-page .review-facts dd { font-size: 12px; color: #486452; }
+.pv-page .review-bound-summary > p { font-size: 12px; color: #486452; }
+.pv-page .review-list-item time { font-size: 10.5px; }
+.pv-page .review-raw-data summary { font-size: 12px; }
+.pv-page .review-raw-json { font-size: 11.5px; }

@@ -34,14 +34,29 @@ export interface AssistSessionContext {
 }
 
 /**
- * 会话列表投影：`has_messages` 是**读时派生**的事实，不是 `assist_sessions` 的列。
+ * 会话的**运行态**：这段讨论此刻有没有在途的一轮。
  *
- * 它回答「这段讨论有没有消息」，与 `last_message_at` 分开：后者是导航排序键，
+ * 只有两个值，取自 `assist_messages.status`：`RUNNING` 表示已有 Worker 认领、正在生成；
+ * `PENDING` 表示回复行已落库但还没人认领（排队）。终态（COMPLETED/FAILED/CANCELLED）
+ * 与「一条在途消息都没有」都归 `null`，不另立一个 `IDLE` 词——那会让客户端以为
+ * 服务端在陈述一种状态，而它其实只是「没有在途」。
+ */
+export type AssistSessionRunState = 'RUNNING' | 'PENDING';
+
+/**
+ * 会话列表投影：`has_messages` 与 `run_state` 都是**读时派生**的事实，不是 `assist_sessions` 的列。
+ *
+ * `has_messages` 回答「这段讨论有没有消息」，与 `last_message_at` 分开：后者是导航排序键，
  * 由消息落库与生成结算推进；前者直接数 `assist_messages` 行，任何写入路径漏推进
  * 活动键都不会让空会话判断说谎（2026-10-24 用户确认的口径）。
+ *
+ * `run_state`（2026-10-28）同理只数消息表：左栏要在没点开某条会话时看出它正在生成回复，
+ * 唯一可信来源就是这一轮回复行自己的状态。不从界面的发送按钮、`has_messages`、
+ * 缓存的最后消息时刻或 `updated_at` 推断——那些在任何一条写入路径漏推进时都会说谎。
  */
 export interface AssistSessionListRow extends AssistSessionRow {
   readonly has_messages: boolean;
+  readonly run_state: AssistSessionRunState | null;
 }
 
 /**
@@ -108,6 +123,10 @@ export class AssistRepository {
    *
    * 每行附带 `has_messages`：直接按 `assist_messages` 派生「有没有消息」，供界面判断
    * 「未开始」与分叉入口。它与排序键分开，不因活动键漏写而说谎。
+   *
+   * 每行还附带 `run_state`（2026-10-28）：同一次读取里按 `assist_messages.status` 派生
+   * 「有没有在途的一轮」，`RUNNING` 压过 `PENDING`。两条都是相关子查询，
+   * 左栏无论有多少行都只有这一条语句——不需要为每个条目单独发请求。
    */
   async listSessions(workspaceId: string, projectId?: string, taskId?: string,
     status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionListRow[]> {
@@ -116,7 +135,14 @@ export class AssistRepository {
     const active = status === undefined || status === 'ALL' ? sql``
       : sql`and s.status = ${status}`;
     return (await sql<AssistSessionListRow>`select s.*, exists(
-        select 1 from assist_messages m where m.session_id = s.id) as has_messages
+        select 1 from assist_messages m where m.session_id = s.id) as has_messages,
+      case
+        when exists (select 1 from assist_messages m
+          where m.session_id = s.id and m.status = 'RUNNING') then 'RUNNING'
+        when exists (select 1 from assist_messages m
+          where m.session_id = s.id and m.status = 'PENDING') then 'PENDING'
+        else null
+      end as run_state
       from assist_sessions s
       where s.workspace_id = ${workspaceId} ${project} ${task} ${active}
       order by s.pinned_at desc nulls last,
@@ -146,6 +172,25 @@ export class AssistRepository {
     const rows = await sql<{ present: boolean }>`select exists(
       select 1 from assist_messages where session_id = ${sessionId}) as present`.execute(this.db);
     return rows.rows[0]?.present === true;
+  }
+
+  /**
+   * 读时派生「这段讨论此刻有没有在途的一轮」（2026-10-28）：与列表投影同一口径。
+   *
+   * 单条读取（左栏切会话后定向重读那一行）要显示同一枚运行态，不能因为走了另一条读法
+   * 就把刚亮的环清掉。`RUNNING` 压过 `PENDING`：有 Worker 认领的那一轮才是「真的在生成」。
+   * 只读消息状态，不看 `worker_id`、租约或心跳时间——那些是执行侧的恢复判据，
+   * 界面不需要也不该据此猜「大概还在跑」。
+   */
+  async sessionRunState(sessionId: string): Promise<AssistSessionRunState | null> {
+    const rows = await sql<{ run_state: AssistSessionRunState | null }>`select case
+        when exists (select 1 from assist_messages where session_id = ${sessionId}
+          and status = 'RUNNING') then 'RUNNING'
+        when exists (select 1 from assist_messages where session_id = ${sessionId}
+          and status = 'PENDING') then 'PENDING'
+        else null
+      end as run_state`.execute(this.db);
+    return rows.rows[0]?.run_state ?? null;
   }
 
   /**

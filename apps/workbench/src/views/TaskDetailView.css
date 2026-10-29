@@ -329,6 +329,31 @@
 
 .task-detail-tech code { overflow-wrap: anywhere; }
 
+/* V5.28 任务详情：页签与阅读区沿用 pv 层级，避免旧 reading/rowTitle 档漏入。 */
+.pv-page.task-detail-page .skill-tab { font-size: 12px; }
+.pv-page.task-detail-page .task-detail-section h2,
+.pv-page.task-detail-page .task-detail-section-heading h2 { font-size: 13px; }
+.pv-page.task-detail-page .task-detail-objective,
+.pv-page.task-detail-page .task-detail-criterion-statement,
+.pv-page.task-detail-page .task-detail-criterion-result,
+.pv-page.task-detail-page .task-detail-evidence-line { font-size: 13px; }
+.pv-page.task-detail-page .task-detail-criterion-index { font-size: 13px; }
+.pv-page.task-detail-page .task-detail-section-meta,
+.pv-page.task-detail-page .task-detail-criterion-meta,
+.pv-page.task-detail-page .task-detail-criterion-meta small,
+.pv-page.task-detail-page .task-detail-criterion-next,
+.pv-page.task-detail-page .task-detail-quick-link,
+.pv-page.task-detail-page .task-detail-head-identity > summary,
+.pv-page.task-detail-page .task-detail-tech > summary,
+.pv-page.task-detail-page .task-detail-tech p,
+.pv-page.task-detail-page .task-detail-rail-note,
+.pv-page.task-detail-page .task-detail-rail .task-detail-facts dd { font-size: 12px; }
+.pv-page.task-detail-page .task-detail-section-meta,
+.pv-page.task-detail-page .task-detail-criterion-meta,
+.pv-page.task-detail-page .task-detail-criterion-meta small,
+.pv-page.task-detail-page .task-detail-head-identity > summary,
+.pv-page.task-detail-page .task-detail-tech > summary { color: var(--pv-muted); }
+
 @media (width < 80rem) {
   .task-detail-page .task-detail-rail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 }

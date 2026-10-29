@@ -378,9 +378,17 @@
 
 .collab-columns:has(.task-inspector) {
   display: flex;
-  /* 用户拖过左边界后由 --relay-inspector-user-width 覆写；未拖过则仍是 layout.inspector.width。
+  /* 用户拖过左边界后由 --relay-inspector-user-width 覆写；未拖过则取该面板自己的默认宽度
+     （工作详情用 layout.inspector.width，普通会话的工具面板用 layout.inspector.toolsWidth）。
      网格轨道与抽屉宽度都读这一个派生值，避免面板与拖拽手柄位置不同源。 */
-  --relay-inspector-panel-width: var(--relay-inspector-user-width, var(--relay-layout-inspector-width));
+  --relay-inspector-default-width: var(--relay-layout-inspector-width);
+  --relay-inspector-panel-width: var(--relay-inspector-user-width, var(--relay-inspector-default-width));
+}
+
+/* 普通会话的工具面板内容以只读工具条与短空态为主，默认宽度比工作详情窄一档，
+   先把宽度还给聊天阅读列；用户拖过之后的偏好仍然优先，不因换面板被覆盖。 */
+.collab-columns:has(> .collab-conversation-tools) {
+  --relay-inspector-default-width: var(--relay-layout-inspector-toolsWidth);
 }
 
 .collab-columns:has(.task-inspector) > .collab-center {
@@ -472,7 +480,7 @@
      （实测白吃掉 288px，中栏只剩 281px）。这里把那一列撤掉。
      单区模式（对话 / 成果）只剩一栏，同样要收回 1fr，否则可见的那栏只拿到 52%。 */
   .collab-columns:has(.task-inspector) {
-    --relay-inspector-panel-width: min(var(--relay-inspector-user-width, var(--relay-layout-inspector-width)), calc(100% - var(--relay-space-6)));
+    --relay-inspector-panel-width: min(var(--relay-inspector-user-width, var(--relay-inspector-default-width)), calc(100% - var(--relay-space-6)));
     grid-template-columns:
       minmax(0, var(--relay-collab-chat-column))
       var(--relay-space-2)

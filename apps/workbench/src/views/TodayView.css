@@ -199,7 +199,7 @@
   margin-bottom: 10px;
 }
 .pv-page .today-task__title { font-size: 12.5px; font-weight: 650; color: #33533d; }
-.pv-page .today-task__meta { margin: 3px 0 0; font-size: 11px; color: #8b9a90; }
+.pv-page .today-task__meta { margin: 3px 0 0; font-size: 11px; color: var(--pv-muted); }
 .pv-page .today-task__actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pv-page .today-task__actions .text-button {
   min-height: 28px;
@@ -210,7 +210,7 @@
   background: #fff;
 }
 .pv-page .today-task__actions .text-button:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; text-decoration: none; }
-.pv-page .today-task__plans summary { font-size: 11px; color: #7a8d80; cursor: pointer; }
+.pv-page .today-task__plans summary { font-size: 11px; color: var(--pv-muted); cursor: pointer; }
 .pv-page .today-task__forms { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
 .pv-page .today-task__forms form {
   display: flex;
@@ -234,13 +234,16 @@
   font-weight: 400;
   color: #34523b;
 }
-.pv-page .today-task__trace summary { font-size: 11px; color: #7a8d80; cursor: pointer; }
-.pv-page .today-task__trace p { font-size: 11px; color: #829588; margin: 4px 0 0; overflow-wrap: anywhere; }
+.pv-page .today-task__trace summary { font-size: 11px; color: var(--pv-muted); cursor: pointer; }
+.pv-page .today-task__trace p { font-size: 11px; color: var(--pv-muted); margin: 4px 0 0; overflow-wrap: anywhere; }
 
 .pv-page .today-focus__header h2 { font-size: 13px; font-weight: 700; color: #294635; }
 .pv-page .today-focus { padding-bottom: 14px; border-bottom: 1px solid #edf1ec; }
 .pv-page .today-focus__title a { font-size: 15px; letter-spacing: -.01em; color: #244431; }
-.pv-page .today-focus__meta { font-size: 11px; color: #8b9a90; }
+.pv-page .today-focus__meta { font-size: 11px; color: var(--pv-muted); }
+
+.pv-page .today-rail__section > h2 { font-size: 13px; font-weight: 700; color: var(--pv-ink); }
+.pv-page .today-rail__number { font-size: 22px; }
 
 .pv-page .today-review-entry {
   margin-top: 14px;
@@ -254,7 +257,18 @@
   border-radius: 12px;
 }
 .pv-page .today-review-entry h2 { margin: 0; font-size: 12.5px; color: #294635; }
-.pv-page .today-review-entry p { margin: 2px 0 0; font-size: 11px; color: #7f948a; }
+.pv-page .today-review-entry p { margin: 2px 0 0; font-size: 11px; color: var(--pv-muted); }
+
+/* 右栏常驻时只保留右栏的判断入口；pv display 覆写不能重新展开窄窗横幅。 */
+@media (min-width: 80rem) {
+  .pv-page .today-review-entry { display: none; }
+}
+
+@container pv-content (max-width: 52rem) {
+  .pv-page .today-body { grid-template-columns: minmax(0, 1fr); }
+  .pv-page .today-rail { display: none; }
+  .pv-page .today-review-entry { display: flex; }
+}
 
 @media (max-width: 760px) {
   .pv-page.today-page { padding: 14px; }

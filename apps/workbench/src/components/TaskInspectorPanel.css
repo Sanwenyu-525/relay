@@ -9,8 +9,10 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  /* 用户拖过左边界后由协作页注入 --relay-inspector-user-width；未拖过仍是 layout.inspector.width。 */
-  width: var(--relay-inspector-user-width, var(--relay-layout-inspector-width));
+  /* 用户拖过左边界后由协作页注入 --relay-inspector-user-width；未拖过时取协作页给的
+     面板默认宽度（--relay-inspector-default-width：工作详情 / 普通会话工具面板各一档），
+     宿主没有注入时退回 layout.inspector.width。 */
+  width: var(--relay-inspector-user-width, var(--relay-inspector-default-width, var(--relay-layout-inspector-width)));
   min-height: 0;
   background: var(--relay-color-bg-surface);
   border-left: var(--relay-border-width) solid var(--relay-color-border-separator);

@@ -16,7 +16,7 @@
   --pv-green: #23684b;
   --pv-line: #dfe9df;
   --pv-subtle: #f6faf7;
-  --pv-muted: #819589;
+  --pv-muted: #5c7665;
   --pv-row-sub: #8b9a90;
   --pv-primary: #23704d;
   --pv-primary-hover: #165b3d;
@@ -28,7 +28,7 @@
   --pv-chip-ink: #4b7757;
   --pv-chip-border: #dae9dd;
   --pv-chip-bg: #f2f8f3;
-  --pv-warn-ink: #a07536;
+  --pv-warn-ink: #80602c;
   --pv-warn-border: #f0dfc1;
   --pv-warn-bg: #fff6e7;
   --pv-danger-ink: #aa5347;
@@ -62,7 +62,7 @@
   text-transform: uppercase;
   letter-spacing: .08em;
   font-size: 10px;
-  color: #759282;
+  color: var(--pv-muted);
   font-weight: 700;
 }
 .pv-page .page-head-title { margin: 0; }
@@ -105,10 +105,10 @@
   white-space: nowrap;
 }
 .pv-page [hidden] { display: none !important; }
-.pv-page .primary-button { background: var(--pv-primary); color: #fff; border-color: var(--pv-primary); }
+.pv-page .primary-button:not(.rail-trigger) { background: var(--pv-primary); color: #fff; border-color: var(--pv-primary); }
 .pv-page .primary-button:hover:not(:disabled) { background: var(--pv-primary-hover); border-color: var(--pv-primary-hover); }
 .pv-page .secondary-button:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); color: #206846; }
-.pv-page .danger-button { color: #a14f41; border-color: #efdbd6; background: #fff; }
+.pv-page .danger-button:not(.rail-trigger) { color: #a14f41; border-color: #efdbd6; background: #fff; }
 .pv-page .danger-button:hover:not(:disabled) { background: #fdf3f0; border-color: #e3bfb6; }
 .pv-page .danger-button:active:not(:disabled) { background: #f6e2dc; }
 .pv-page .primary-button:focus-visible,
@@ -354,6 +354,34 @@
 }
 .pv-weekdays input { accent-color: #267a52; margin: 0; }
 
+/* ── page-state（加载/错误/示例空态占位）在 pv 皮肤下回页头档位：
+   全局 .page-state h1 用 compactPage(28px)，大于 pv 页头 h1(22px)，形成层级倒置；
+   12px 说明句对齐 pv lede。颜色沿用全局（含 error 变体），只调字号与字距。
+   注意 compound 形态：多个页面的 pv 根就是 page-state 本身（class="page-state pv-page"），
+   后代选择器匹配不到同一元素，必须并列 .pv-page.page-state。 ── */
+.pv-page .page-state h1,
+.pv-page.page-state h1 { font-size: 22px; letter-spacing: -.035em; }
+.pv-page .page-state p,
+.pv-page.page-state p { font-size: 12px; }
+
+/* ── rail 内容区（任务/动态等页右栏）标题回卡片头档位：
+   全局 .rail-content > h2 用 section(24px)、rail-section h3 落 body(16px/500)，
+   都大于 pv 卡片头；对齐 .resume-section > h2 的 13px/700 档。 ── */
+.pv-page .rail-content > h2 { font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .rail-section h3 { font-size: 12.5px; font-weight: 650; color: #33533d; }
+/* rail 引言段与表单标签同样越档：全局 .rail-intro 用 reading(18px)、.field-label 用 body(16px)/500，
+   pv 语言里分别是 lede(12px) 与表单 label(11px/650) 档。choice-option 单选标签被基座抬到 body(16px)、
+   又从 .field 继承 650 字重，回原型单选行 12px/400 档。 */
+.pv-page .rail-intro { font-size: 12px; color: #819287; }
+.pv-page .field-label { font-size: 11px; font-weight: 650; color: #5c7764; }
+.pv-page .choice-option { font-size: 12px; font-weight: 400; }
+/* 全局 meta(14px) 档的辅助元素在 pv 上下文回小档：field-hint 跟随表单 label 档并
+   去掉从 .field 继承的 650 字重；text-link / disabled-reason / hash-code 回 12px 行内 meta。 */
+.pv-page .field-hint { font-size: 10.5px; font-weight: 400; }
+.pv-page .text-link { font-size: 12px; }
+.pv-page .disabled-reason { font-size: 12px; }
+.pv-page .hash-code { font-size: 12px; }
+
 /* ── 键值明细（v528-proof-grid 的 dl 形态） ── */
 .pv-dl { margin: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; font-size: 11px; }
 .pv-dl dt { color: #899c8d; }
@@ -410,7 +438,7 @@
 
 /* ── 作用域内的共享辅助类微调：helper/error 等与原型字号对齐 ── */
 .pv-page .helper-text { font-size: 11px; color: var(--pv-muted); }
-.pv-page .eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #759282; font-weight: 700; }
+.pv-page .eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); font-weight: 700; }
 .pv-page .warning-callout {
   border: 1px solid #ecd8b5;
   background: #fffbf2;
@@ -453,7 +481,7 @@
 .pv-page .subnav-item:hover { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
 .pv-page .subnav-item--active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
 .pv-page .subnav-count { color: inherit; opacity: .75; }
-.pv-page .page-explanation > summary { color: #7a8d80; font-size: 11px; cursor: pointer; }
+.pv-page .page-explanation > summary { color: var(--pv-muted); font-size: 11px; cursor: pointer; }
 .pv-page .page-explanation > summary::marker { color: #2c7a52; }
 
 /* ── 目标卡（V5.11 goals 页的两列卡形态） ── */
@@ -551,7 +579,7 @@
 .pv-page .data-row--head .data-cell {
   font-size: 11px;
   font-weight: 650;
-  color: #7a8d80;
+  color: var(--pv-muted);
 }
 .pv-page .data-row--interactive:hover { background: #f7fbf8; }
 .pv-page .data-cell strong {
@@ -559,10 +587,10 @@
   font-weight: 650;
   color: #33533d;
 }
-.pv-page .data-cell small { font-size: 10.5px; color: #8b9a90; }
-.pv-page .data-cell--meta { font-size: 11px; color: #7f948a; }
+.pv-page .data-cell small { font-size: 10.5px; color: var(--pv-muted); }
+.pv-page .data-cell--meta { font-size: 11px; color: var(--pv-muted); }
 .pv-page .list-count-note,
-.pv-page .list-footer-note { font-size: 11px; color: #829588; }
+.pv-page .list-footer-note { font-size: 11px; color: var(--pv-muted); }
 
 /* ── 筛选与搜索控件（pv 皮肤对齐原型 12px 控件） ── */
 .pv-page .filter-field { font-size: 11px; color: #5c7764; font-weight: 650; }
@@ -633,6 +661,18 @@
 .pv-page .status-chip--warning { background: var(--pv-warn-bg); color: var(--pv-warn-ink); border-color: var(--pv-warn-border); }
 .pv-page .status-chip--danger { background: var(--pv-danger-bg); color: var(--pv-danger-ink); border-color: var(--pv-danger-border); }
 .pv-page .status-chip--neutral { background: var(--pv-subtle); color: var(--pv-muted); }
+
+/* 内容缩放时视口媒体查询仍可能是宽屏，但页面实际可用宽度已不足以容纳侧栏。
+   只给包含 pv 页的内容区建立容器，/agent 不参与此布局规则。 */
+.app-content:has(.pv-page) { container: pv-content / inline-size; }
+@media (min-width: 80rem) {
+  @container pv-content (max-width: 52rem) {
+    .pv-page.page-layout,
+    .pv-page .page-layout { grid-template-columns: minmax(0, 1fr); }
+    .pv-page .desktop-rail { display: none; }
+    .pv-page .rail-trigger { display: inline-flex; position: static; order: 0; margin: 0; }
+  }
+}
 
 /* ── 响应式（原型 @1120 / @760 断点） ── */
 @media (max-width: 1120px) {

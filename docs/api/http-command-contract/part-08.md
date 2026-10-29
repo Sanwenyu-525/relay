@@ -255,3 +255,36 @@ ADR-034 包 B 的服务端记录面：消息只是协作记录，投递不等于
 - **执行端四道闸门**（任一不符即停，零外呼、零账本）：连接在本工作区可见 → 仍为 `ACTIVE` → 凭据代数等于冻结值 → 由连接行重算的配置指纹等于冻结值。随后才解析秘密。停止原因是类型化的：`MODEL_CONNECTION_UNAVAILABLE`、`MODEL_CONNECTION_DISABLED`、`MODEL_CREDENTIAL_CHANGED`（代数不符）、`MODEL_CONFIG_CHANGED`（端点/预算被改）、`MODEL_CONNECTION_CREDENTIAL_MISSING`（库里没有秘密）。
 - **委派期同样不回落**：默认连接被停用或凭据缺失时，`DelegateTask` 直接失败（409 `MODEL_CONNECTION_DISABLED` / `MODEL_CONNECTION_CREDENTIAL_MISSING` / `MODEL_CONNECTION_UNAVAILABLE`），**不**退回进程默认——默认连接是用户的显式选择，退回等于偷偷换模型。
 - 验证：`run-model-connection.integration.test.ts`（真实 PG + 受控 Provider 接缝）4 项——默认连接决定冻结与外呼身份（进程默认是另一个模型也不影响，账本 model 一致）、停用后委派失败、轮换后在途 Run 停止且零外呼、改设另一条为默认后已创建 Run 仍用原连接。
+
+### 10.118 会话运行态只读投影（2026-10-28 源码实现）
+
+**Breaking Change: No。** 没有新命令、没有新端点、没有迁移：只给既有会话投影加一个只读字段 `run_state`。
+
+| 端点 | 变化 | 说明 |
+|---|---|---|
+| `GET /assist-sessions` | 投影新增只读字段 `run_state` | 一次列表读取里逐行派生，取值为 `'RUNNING'`／`'PENDING'`／`null` |
+| `GET /assist-sessions/{session_id}` | 同上，**同一口径** | 左栏切会话后按身份重读那一行，两处不一致就会出现「切走亮、切回灭」 |
+| `POST .../title`、`/pin`、`/unread`、`/archive`、`/reopen`、`/fork`、`DELETE` | 无 | 回执字段一律不变，不带 `run_state` |
+
+**语义与派生 SQL。** `run_state` 是**读时派生**事实，不是 `assist_sessions` 的列，与 `has_messages`（§10.91）同一读法：直接看 `assist_messages` 里这条会话有没有在途行，`RUNNING` 压过 `PENDING`。
+
+```sql
+case
+  when exists (select 1 from assist_messages m
+    where m.session_id = s.id and m.status = 'RUNNING') then 'RUNNING'
+  when exists (select 1 from assist_messages m
+    where m.session_id = s.id and m.status = 'PENDING') then 'PENDING'
+  else null
+end as run_state
+```
+
+- `RUNNING` = 已有 Worker 认领（`worker_id`／租约已写）正在生成；`PENDING` = 回复行已随发送命令同事务落库、还没被认领（排队）。两者都由发送命令预插的 ASSISTANT 行推进，不经过任何界面本地状态。
+- **没有在途行就是 `null`**，不另立 `'IDLE'`：终态（`COMPLETED`／`FAILED`／`CANCELLED`）与「一条消息都没有」在这一点上是同一件事——「此刻没有在途的一轮」。造一个 `IDLE` 词会让客户端以为服务端在陈述一种需要跟进的业务状态。
+- **不比 `created_at`／`updated_at`、不看 `worker_id`、不看租约与心跳时刻**：那些是执行侧恢复判据（见[数据库 §100](../../database/physical-design-postgresql/part-05.md#100-0111-会话活动排序键2026-10-18-源码实现)的兄弟口径），界面不需要据此猜「大概还在跑」。消息行还在 `PENDING` 而 Worker 已崩溃时，投影如实说 `PENDING`——那是库里的事实，不是界面的推测。
+- 成本：列表是一句 SQL 里的两个相关子查询（`assist_messages(session_id)` 上有索引），行数多少都只有这一条语句；单条读取单独派生一次。**不改变排序键、`revision` 与 `updated_at`**，只读投影不写任何东西。
+
+**客户端读法（工作台 §28.1）。** 左栏只在**有任何一条会话处于运行态**期间按 3s 重读一次本列表（同一请求覆盖整列，不对每个条目单独发请求），连续 40 拍后降到 10s，读失败 3→6→12→24→30s 退避；没有在跑时零请求，页面不可见时不发请求。轮询读失败**保留**上一次读到的运行态：既不清成静止（那等于伪造完成），也不假装在跑。
+
+**兼容。** 旧客户端读不到新字段不受影响；新客户端读旧服务端时字段缺失按 `null`（不猜），读到词表之外的值则整条解析失败——猜一个运行态会让界面画出不存在的生成过程。
+
+**验证。** 真实 PG/HTTP：`test/integration/assist-run-state.integration.test.ts` 6/6（无消息与只有终态读成 `null`、`PENDING`→`RUNNING`→结算回 `null`、`FAILED`/`CANCELLED` 不留在 `RUNNING`、`RUNNING` 压过 `PENDING`、同一列表内逐行不串、只读不推进修订与活动键）。

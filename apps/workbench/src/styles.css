@@ -958,6 +958,38 @@ svg {
   height: var(--relay-font-size-caption);
   color: var(--relay-color-text-muted);
 }
+/* 运行指示（2026-10-28，用户要求「切到别的会话也能看出哪条在生成」）。
+   与类型图标**同一格同一尺寸**（基座仍是 .recent-work-kind）：只换图形，不换几何——
+   行高、行距、标题可用宽、置顶徽标与未读圆点的位置一像素不动
+   （recentWorkRailDensity.spec.ts 仍在守这一列的下限）。
+   两种状态用**形状**区分，不靠颜色，也不靠动效：
+   · 运行中＝一段弧，绕自身中心 1s 一周、linear infinite；
+   · 排队中＝一圈点线，静止。
+   因此关掉动效时两者仍然分得开，弧不会因为「不动了」被读成排队。
+   只旋转这枚 12px 图形本身：行、标题、边框、底色一律静止，不做整行流光、发光或闪烁。
+   前景色只用既有两档：运行中借 text.secondary（与未读行同档，不新开强调色），
+   排队中保持类型图标那一档 muted——「还没开始跑」不该比「正在跑」更亮。 */
+.recent-work-kind--running {
+  color: var(--relay-color-text-secondary);
+  transform-origin: 50% 50%;
+  /* 秒级匀速：不加减速、不呼吸，像秒表而不是像「加载中」的脉冲。 */
+  animation: recent-work-spin var(--relay-motion-loop-spin) linear infinite;
+}
+@keyframes recent-work-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+/* 关动效与系统「减少动态效果」都只停旋转，不换图形：状态本身不依赖动效表达。
+   `!important` 是为了压过全局 `* { animation-duration: 0ms !important }`——
+   只把时长压到 0 会让一圈无限动画在原地瞬间重放，读起来像坏掉的闪烁。 */
+html[data-motion="off"] .recent-work-kind--running { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .recent-work-kind--running { animation: none !important; }
+}
+/* 排队中：图形由 JSX 换成点线，这里不需要任何动画声明。显式写一条 none 是让
+   「这一档故意不动」在样式表里读得出来，也挡住将来别处给 .recent-work-kind
+   加动画时误伤这一格。 */
+.recent-work-kind--pending { animation: none; }
 /* 置顶标记：行只有一档高，只画一枚同尺寸图标 + 两字，不与标题抢横向空间。
    用 selection 前景色而不是新的强调色——置顶是导航状态，不该读成一条业务事实。 */
 .recent-work-pin {

@@ -95,7 +95,9 @@ test("真实 API 人工闭环：创建项目与任务、启动、版本、当前
   await page.getByTestId(`artifact-version-${secondVersionId}`).check();
   await page.getByTestId("artifact-select-version").click();
   await expect(page.getByText("项目 State 已选用", { exact: false })).toBeVisible();
-  await page.getByTestId(`artifact-version-${firstVersionId}`).check();
+  // 2026-10-28 修正：DEV-0133（禅道 #27）起完成面板要求显式勾选「本轮接受」的成果版本
+  // （completion-artifact-*），artifact-version-* 单选框只负责「当前选用」的选择候选。
+  await page.getByTestId(`completion-artifact-${firstVersionId}`).check();
   await page.locator('[data-testid^="criterion-"]').first().check();
   await page.getByTestId("task-complete").click();
   await expect(page.getByTestId("task-complete-receipt")).toContainText("已完成本轮");
