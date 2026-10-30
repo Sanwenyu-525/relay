@@ -585,8 +585,12 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
     async (request, reply) => {
       const params = request.params as { workspace_id: string; id: string };
       try {
-        const snapshot = await new SessionTodoRepository(dependencies.database.executor)
-          .read(params.id);
+        // 归属先过 readAssistSession：跨 Workspace 或不存在的会话与其它 Assist 读取同一口径
+        // （不可见即 404）。待办是独立投影，但不能绕开会话可见性把别人的清单读出来。
+        const executor = dependencies.database.executor;
+        await readAssistSession(executor, { workspaceId: params.workspace_id,
+          sessionId: params.id });
+        const snapshot = await new SessionTodoRepository(executor).read(params.id);
         return { snapshot: snapshot === undefined ? null : snapshot };
       } catch (error) { return sendReadError(reply, error, request.id); }
     });

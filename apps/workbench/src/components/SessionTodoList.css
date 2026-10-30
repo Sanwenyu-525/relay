@@ -95,3 +95,14 @@
   .session-todos-icon-active { animation: none; }
   .session-todos-chevron { transition: none; }
 }
+/* 生成已结束但最后一步仍标着 in_progress：静态呈现，不转圈，不冒充“正在运行”。 */
+.session-todos-icon-stalled {
+  color: var(--color-text-tertiary, rgb(148 150 158));
+  opacity: 0.9;
+}
+
+.session-todos-stalled {
+  color: var(--color-text-tertiary, rgb(148 150 158));
+  font-size: 12px;
+  white-space: nowrap;
+}

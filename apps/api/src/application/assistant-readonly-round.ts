@@ -523,8 +523,11 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       if (hasSteers && executionNotice === undefined && input.readExecutionNotice !== undefined) {
         executionNotice = await input.readExecutionNotice();
       }
+      // 按这一条助手消息所属的工作轮次读：压缩、恢复与后续轮次拿到的是同一份权威快照，
+      // 也不会把上一轮已经收尾的清单继续喂给新任务。
       const todoBlock = input.allowTodo === true
-          ? await new SessionTodoRepository(db).readContextBlock(message.session_id) : '';
+          ? await new SessionTodoRepository(db).readContextBlock(message.session_id, message.id)
+          : '';
       const request: AssistRequest = { intent: 'DISCUSS',
         system: (executionNotice === undefined || executionNotice === null
           ? (hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem)

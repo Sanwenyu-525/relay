@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import fs from "node:fs";
+import { resolve } from "node:path";
 
 /**
  * 会话待办清单的真实 Chromium 渲染证据（ADR-038，2026-10-30）。
@@ -15,7 +17,9 @@ const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 const origin = "http://127.0.0.1:4173";
-const shotDir = "D:/Develop/Relay-Agent/acceptance-2026-10-30/03-Agent-Todo-List实现";
+// 截图落在被忽略的 apps/workbench/results/ 下（仓库相对），不再写仓库根或已删除的验收归档目录。
+const shotDir = resolve(import.meta.dirname, "../../results/session-todo-list");
+fs.mkdirSync(shotDir, { recursive: true });
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -60,8 +64,8 @@ function snapshot(items: readonly { id: string; content: string; status: string 
     updatedAt: "2026-10-30T09:00:00.000Z", items } };
 }
 
-async function installRoutes(page: Page, state: { items: readonly { id: string; content: string; status: string }[] | null },
-  items: readonly { id: string; content: string; status: string }[]): Promise<void> {
+async function installRoutes(page: Page,
+  state: { items: readonly { id: string; content: string; status: string }[] | null }): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;

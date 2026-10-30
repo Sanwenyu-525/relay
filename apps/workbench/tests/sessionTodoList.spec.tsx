@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayApiClient } from "../src/api/relayClient";
-import SessionTodoList from "../src/components/SessionTodoList";
+import SessionTodoList, { shouldAccept } from "../src/components/SessionTodoList";
 import { flush, mountReact, type DomWrapper } from "./mountApp";
 
 /**
@@ -95,5 +95,31 @@ describe("SessionTodoList", () => {
     expect(wrapper.get('[data-testid="session-todo-list"]').attributes("data-session-todo-version"))
       .toBe("4");
     expect(wrapper.findAll('[data-testid="session-todo-item"]').length).toBe(3);
+  });
+});
+describe("SessionTodoList 停止态与迟到响应", () => {
+  it("生成已结束时进行中项不再转圈，并说明这一步未收尾", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(3, threeItems))));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active={false} />);
+    unmount = mounted.unmount;
+    await flush();
+    const wrapper = mounted.wrapper;
+    expect(wrapper.find(".session-todos-icon-active").exists()).toBe(false);
+    expect(wrapper.get('[data-testid="session-todo-stalled"]').text()).toContain("生成已结束");
+    wrapper.get('[data-testid="session-todo-list"]').element?.setAttribute("open", "");
+    const statuses = wrapper.findAll("[data-testid='session-todo-item']")
+      .map((item) => item.get(".session-todos-status").text());
+    expect(statuses).toContain("进行中·已停止");
+  });
+
+  it("迟到的旧版本不回退视图，换轮次时接受重置后的版本", () => {
+    const older = { sessionId, scopeKey: "turn:a", version: 2, items: [], inProgressLimit: 1,
+      updatedAt: "2026-10-30T09:00:00.000Z" };
+    const newer = { ...older, version: 4 };
+    expect(shouldAccept(newer, older)).toBe(false);
+    expect(shouldAccept(older, newer)).toBe(true);
+    expect(shouldAccept(older, { ...older, scopeKey: "turn:b", version: 1 })).toBe(true);
+    expect(shouldAccept(null, older)).toBe(true);
   });
 });

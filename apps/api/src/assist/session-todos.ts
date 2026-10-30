@@ -42,8 +42,24 @@ export interface TodoItem {
   readonly status: TodoStatus;
 }
 
+/**
+ * 清单归属键：一个工作轮次（一次用户消息开启的连续执行）一份清单。
+ *
+ * 同一 Session 里，任务 A 收尾后用户再提一件独立任务 B，B 属于新的工作轮次，
+ * 因此不会继承 A 的清单；恢复、上下文压缩和后续模型轮次都按同一把键读当前快照。
+ * 没有用户消息（自动化入口或测试通道）时回落到会话级，行为与旧版一致。
+ */
+export const TODO_SCOPE_FALLBACK = 'session';
+
+export function todoScopeKey(userMessageId: string | null | undefined): string {
+  return userMessageId === null || userMessageId === undefined || userMessageId === ''
+    ? TODO_SCOPE_FALLBACK : `turn:${userMessageId}`;
+}
+
 export interface TodoSnapshot {
   readonly sessionId: string;
+  /** 这份清单属于哪个工作轮次；读错轮次不等于「没有清单」以外的任何事实。 */
+  readonly scopeKey: string;
   readonly version: number;
   readonly items: readonly TodoItem[];
   readonly inProgressLimit: number;
@@ -85,13 +101,53 @@ export function todoParallelLimit(raw: string | number | null | undefined): numb
   return Math.min(Math.max(numeric, 1), TODO_PARALLEL_LIMIT_MAX);
 }
 
-export function todoParallelLimitFromEnv(env: NodeJS.ProcessEnv = process.env): number {
-  return todoParallelLimit(env.RELAY_AGENT_TODO_PARALLEL_LIMIT);
-}
+
 
 /** 重复项判定口径：忽略大小写与多余空白，不做更激进的同义归并。 */
 function duplicateKey(content: string): string {
   return content.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** 改名仍算同一项的相似度下限；低于它按新项处理，不猜。 */
+const TODO_RENAME_SIMILARITY_MIN = 0.75;
+
+function bigrams(value: string): ReadonlySet<string> {
+  const text = value.replace(/\s+/g, ' ').trim();
+  const grams = new Set<string>();
+  for (let index = 0; index + 1 < text.length; index += 1) grams.add(text.slice(index, index + 2));
+  if (grams.size === 0 && text !== '') grams.add(text);
+  return grams;
+}
+
+function similarity(left: string, right: string): number {
+  const a = bigrams(left);
+  const b = bigrams(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const gram of a) if (b.has(gram)) shared += 1;
+  return (2 * shared) / (a.size + b.size);
+}
+
+/**
+ * 改名后仍认作同一项：只在「唯一最佳匹配 + 相似度达标」时复用 id。
+ *
+ * 不做「按位置对齐」——列表重排时位置会变，用位置认身份就是伪造身份；
+ * 也不做模糊合并——两段文字差不多的不同任务必须保持两条独立进度。
+ */
+export function similarPreviousItem(input: { readonly key: string;
+  readonly previous: readonly TodoItem[]; readonly usedIds: ReadonlySet<string> }):
+  TodoItem | null {
+  let best: TodoItem | null = null;
+  let bestScore = 0;
+  let tied = false;
+  for (const candidate of input.previous) {
+    if (input.usedIds.has(candidate.id)) continue;
+    const score = similarity(input.key, duplicateKey(candidate.content));
+    if (score > bestScore) { best = candidate; bestScore = score; tied = false; continue; }
+    if (score === bestScore && score > 0) tied = true;
+  }
+  if (best === null || tied || bestScore < TODO_RENAME_SIMILARITY_MIN) return null;
+  return best;
 }
 
 export function todoCounts(items: readonly TodoItem[]): TodoCounts {
@@ -196,6 +252,11 @@ export function normalizeTodoItems(input: {
       const matched = previousByContent.get(key);
       if (matched !== undefined && !usedIds.has(matched.id)) id = matched.id;
     }
+    // 改名：内容对不上时再看相似度，仍然不按位置认身份。
+    if (id === null) {
+      const renamed = similarPreviousItem({ key, previous: input.previous, usedIds });
+      if (renamed !== null) id = renamed.id;
+    }
     if (id === null) id = nextId();
     usedIds.add(id);
     items.push({ id, content, status });
@@ -223,19 +284,64 @@ export function buildTodoContextBlock(snapshot: TodoSnapshot): string {
   if (snapshot.items.length === 0) return '';
   const counts = todoCounts(snapshot.items);
   const lines: string[] = [
-    `【本会话待办清单｜服务端权威快照 v${snapshot.version}】`,
+    `【本轮待办清单｜服务端权威快照 v${snapshot.version}】`,
     `已完成 ${counts.completed}/${counts.total}，进行中 ${counts.inProgress} 项，` +
       `待办 ${counts.pending} 项，已取消 ${counts.cancelled} 项。`,
   ];
-  const shown = snapshot.items.slice(0, TODO_PROMPT_ITEM_LIMIT);
-  for (const item of shown) lines.push(`- [${statusLabel(item.status)}] ${item.content}`);
-  if (snapshot.items.length > shown.length) {
-    lines.push(`- …另有 ${snapshot.items.length - shown.length} 项未逐条列出。`);
-  }
+  const selection = todoPromptSelection(snapshot.items);
+  for (const item of selection.shown) lines.push(`- [${statusLabel(item.status)}] ${item.content}`);
+  if (selection.omittedText !== '') lines.push(`- …另有 ${selection.omittedText}。`);
   lines.push('清单只记录进度，不授予执行权，也不改变任何 Task / Run / 验收结论。');
   lines.push(`仅在进度真实变化时调用 ${TODO_WRITE_TOOL_NAME} 全量复写（一次给出完整清单），` +
+    `并带上 expected_version: ${snapshot.version}；` +
     `同时进行中最多 ${snapshot.inProgressLimit} 项；不要用正文复述整份清单。`);
   return lines.join('\n');
+}
+
+export interface TodoPromptSelection {
+  readonly shown: readonly TodoItem[];
+  readonly omitted: { readonly pending: number; readonly completed: number;
+    readonly cancelled: number };
+  readonly omittedText: string;
+}
+
+/**
+ * 注入正文选哪些条目。
+ *
+ * 顺序优先级：进行中的项全部列（数量受并行上限约束）→ 未完成项按原顺序 → 一条最近的
+ * 已完成项当「做到哪了」的锚点。其余折叠成一句摘要：长清单每轮重复喂一遍，预算就花在
+ * 已经做完的事上了。未超上限时保持整份清单原样，不改用户看得到的顺序。
+ */
+export function todoPromptSelection(items: readonly TodoItem[]): TodoPromptSelection {
+  if (items.length <= TODO_PROMPT_ITEM_LIMIT) {
+    return { shown: items, omitted: { pending: 0, completed: 0, cancelled: 0 }, omittedText: '' };
+  }
+  const picked = new Set<string>();
+  const take = (item: TodoItem): void => {
+    if (picked.size < TODO_PROMPT_ITEM_LIMIT && !picked.has(item.id)) picked.add(item.id);
+  };
+  for (const item of items) if (item.status === 'in_progress') take(item);
+  // 完成锚点先占位：否则长清单里待办会把预算吃满，「做到哪了」反而看不到。
+  const completed = items.filter((item) => item.status === 'completed');
+  const anchor = completed[completed.length - 1];
+  if (anchor !== undefined) take(anchor);
+  for (const item of items) if (item.status === 'pending') take(item);
+  const shown = items.filter((item) => picked.has(item.id));
+  let pending = 0;
+  let completedOmitted = 0;
+  let cancelled = 0;
+  for (const item of items) {
+    if (picked.has(item.id)) continue;
+    if (item.status === 'pending') pending += 1;
+    else if (item.status === 'completed') completedOmitted += 1;
+    else if (item.status === 'cancelled') cancelled += 1;
+  }
+  const parts: string[] = [];
+  if (completedOmitted > 0) parts.push(`已完成 ${completedOmitted} 项（略）`);
+  if (cancelled > 0) parts.push(`已取消 ${cancelled} 项（略）`);
+  if (pending > 0) parts.push(`待办 ${pending} 项未逐条列出`);
+  return { shown, omitted: { pending, completed: completedOmitted, cancelled },
+    omittedText: parts.join('，') };
 }
 
 /** 工具结果：模型只需要看到它刚写下的这一版，以及版本号用于后续 CAS。 */
@@ -278,8 +384,9 @@ export function todoWriteToolSpec(): ModelToolSpec {
       },
       expected_version: {
         type: 'integer',
-        minimum: 1,
-        description: '可选：你读到的那一版版本号。与当前版本不一致时整次写入被拒，避免覆盖别人的新快照。',
+        minimum: 0,
+        description: '你读到的那一版版本号；清单还没写过时写 0。' +
+          '已有清单时必须提供，与当前版本不一致时整次写入被拒，避免用旧认知覆盖新快照。',
       },
     },
     required: ['items'],
@@ -296,6 +403,7 @@ export function todoWriteToolSpec(): ModelToolSpec {
 /** 读回行 → 对外投影。bigint 列由 pg 以字符串返回，这里显式转成 number。 */
 export function projectTodoSnapshot(row: {
   readonly session_id: string;
+  readonly scope_key: string;
   readonly version: string | number;
   readonly items: unknown;
   readonly in_progress_limit: number | string;
@@ -304,6 +412,7 @@ export function projectTodoSnapshot(row: {
   const updatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
   return {
     sessionId: row.session_id,
+    scopeKey: row.scope_key,
     version: Number(row.version),
     items: parseTodoItems(row.items),
     inProgressLimit: todoParallelLimit(row.in_progress_limit),

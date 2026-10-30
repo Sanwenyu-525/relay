@@ -44,9 +44,9 @@ export async function settleTodoWriteCall(db: DbExecutor, input: {
 
   const rawExpected = input.call.arguments.expected_version;
   if (rawExpected !== undefined && (typeof rawExpected !== 'number' ||
-      !Number.isInteger(rawExpected) || rawExpected < 1)) {
+      !Number.isInteger(rawExpected) || rawExpected < 0)) {
     return refuse('TODO_ARGUMENTS_INVALID',
-      'expected_version 必须是正整数（你读到的那一版版本号）；省略表示不比对版本。');
+      'expected_version 必须是非负整数：清单还没写过时写 0，否则写你读到的那一版版本号。');
   }
   try {
     const written = await new SessionTodoRepository(db).write({
@@ -61,7 +61,10 @@ export async function settleTodoWriteCall(db: DbExecutor, input: {
     const digest = createHash('sha256').update(canonicalizeJson(JSON.parse(content) as JsonObject),
       'utf8').digest('hex');
     // 写入已 durable：结算失败只影响账本状态，不影响清单本身，因此不抛错也不改写结果。
-    await repository.settleTodoWrite(input.row.id, digest);
+    // 留下的 REQUESTED 行由恢复路径重新结算，幂等判定在事件表上，不会重复写一版。
+    try {
+      await repository.settleTodoWrite(input.row.id, digest);
+    } catch { /* 账本结算失败不改写已提交的清单事实 */ }
     return { providerToolCallId: input.call.providerToolCallId, name: input.call.name,
       content, isError: false };
   } catch (error) {

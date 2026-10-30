@@ -391,3 +391,24 @@ Breaking Change: **Yes（语义）**——上下文档位从「工作区默认�
 `test/integration/context-budget-runtime.integration.test.ts` 5/5（压缩阈值、真实外呼预留、
 Run 准入重算）。界面：jsdom `tests/contextUsagePanel.spec.tsx` 9/9；真实 Chromium
 `tests/browser/contextUsagePanel.spec.ts` 5/5。
+
+### 10.126 会话待办清单 `todo_write`（2026-10-30 源码实现）
+
+Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就不受影响。
+
+- **读端点**：`GET /assist-sessions/:id/todos`。先按 `readAssistSession()` 判可见性，跨
+  Workspace 或不存在的会话返回 404，与其它 Assist 读取同一口径，不因为它是独立投影就绕开
+  会话可见性。
+- **响应**：`{ snapshot: null }` 是明确事实——当前工作轮次还没有写过清单；有清单时
+  `snapshot` 包含 `sessionId`、`scopeKey`、`version`、`items[{ id, content, status }]`、
+  `inProgressLimit`、`updatedAt`。`status` 只取 `pending` / `in_progress` / `completed` /
+  `cancelled`。`scopeKey` 为工作轮次键：`turn:<开启这一轮的用户消息 id>`，无用户消息时
+  为 `session`。旧服务端没有这个字段时客户端按空串处理，退化为按版本比较。
+- **没有写端点**：唯一写入口是模型侧的 `todo_write` 工具，界面只读。因此不存在“用户本地改
+  进度”与“服务端快照版本”打架的情况。
+- **写入语义**：首次写入的基线是 `expected_version: 0`（可省略）；已有快照时必须带当前
+  版本，缺失返 `TODO_VERSION_REQUIRED`，不一致返 `TODO_VERSION_CONFLICT` 并在说明里给出
+  当前版本号。同一个 `tool_call_id` 重放返回它当初写下的那一版（不递增、不新写事件），
+  换个载荷就是身份伪造，返 `TODO_TOOL_CALL_CONFLICT`。
+- **版本与轮次**：轮次切换后 `version` 从 1 重新开始，这不是回退；同一轮次内版本单调递增，
+  客户端只接受同轮次不降版本、换轮次接受重计版本。
