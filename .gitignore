@@ -101,3 +101,12 @@ apps/workbench/dev-*.png
 /scripts/patch-recovery.py
 /scripts/remap-scenarios.py
 /apps/api/DevelopRelay-Agent*.png
+
+# ── 2026-10-30 清理轮补充：误展开路径与重复临时产物拦截 ──
+# Windows 环境变量未展开形成的伪路径目录：输入法/浏览器缓存曾落到
+# apps/workbench/%SystemDrive%/ProgramData/...（2 个 bin，≈24MB，已清理并隔离）
+%SystemDrive%/
+# 根目录临时截图目录：历史 ui-screenshots-2026-10-11 已迁入 docs/testing/evidence/
+/ui-screenshots-*/
+# 数据库导出件不得进入版本库（正式备份在 .relay-test/，此处只拦误放的副本）
+/*.dump

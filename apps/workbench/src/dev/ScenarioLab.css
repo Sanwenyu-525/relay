@@ -1,0 +1,108 @@
+/* AI 回复场景实验室（仅开发构建）。
+   这里只写实验室外壳自己的样式：中间那一列的字体、间距、阅读宽度全部来自产品 CSS
+   （外壳借 `embedded-assist` + `agent-message-list`，不另定一档宽度）。 */
+
+.scenario-lab-page { display: flex; flex-direction: column; gap: var(--relay-space-4); }
+/* 「返回工作台」是实验室页头的一等入口：贴着标题上方一行，不塞进右上角的模式按钮组里。 */
+.scenario-lab-back { display: inline-flex; align-items: center; gap: var(--relay-space-1);
+  margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-meta); }
+.scenario-lab-back > svg { width: 1em; height: 1em; }
+.scenario-lab-head { display: flex; flex-wrap: wrap; gap: var(--relay-space-4); align-items: flex-end; justify-content: space-between; }
+.scenario-lab-head h1 { margin: 0; font-size: var(--relay-font-size-section); font-weight: var(--relay-font-weight-semibold); }
+.scenario-lab-head-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); align-items: center; }
+
+.scenario-lab-body { display: grid; grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr) minmax(18rem, 23rem); gap: var(--relay-space-4); align-items: start; }
+@media (max-width: 1100px) { .scenario-lab-body { grid-template-columns: 1fr; } }
+
+/* 目录：一条一行，验收状态落在最右端。失败原因走 title，不在列表里铺开。 */
+.scenario-lab-directory { max-height: calc(100vh - 9rem); overflow: auto; padding-right: var(--relay-space-1); }
+.scenario-lab-directory-summary { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-muted); }
+.scenario-lab-group { margin-bottom: var(--relay-space-4); }
+.scenario-lab-group h2 { display: flex; align-items: baseline; gap: var(--relay-space-2); margin: 0 0 var(--relay-space-1); font-size: var(--relay-font-size-body); font-weight: var(--relay-font-weight-semibold); }
+.scenario-lab-group-count { color: var(--relay-color-text-muted); font-weight: var(--relay-font-weight-regular); font-size: var(--relay-font-size-meta); }
+.scenario-lab-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.scenario-lab-item { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto; gap: var(--relay-space-2); align-items: center;
+  width: 100%; padding: 4px 6px; border: 0; border-radius: var(--relay-radius-sm); background: transparent;
+  color: var(--relay-color-text-primary); font: inherit; font-size: var(--relay-font-size-meta); text-align: left; cursor: pointer; }
+.scenario-lab-item:hover { background: var(--relay-color-selection-hover); }
+.scenario-lab-item--active { background: var(--relay-color-selection-bg); }
+.scenario-lab-item-id { color: var(--relay-color-text-muted); font-family: var(--relay-font-family-code); }
+.scenario-lab-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scenario-lab-item-kind { color: var(--relay-color-text-muted); }
+.scenario-lab-item-state { font-size: var(--relay-font-size-caption); }
+.scenario-lab-item-state[data-acceptance="pass"] { color: var(--relay-color-status-success-text); }
+.scenario-lab-item-state[data-acceptance="fail"] { color: var(--relay-color-status-danger-text); }
+.scenario-lab-item-state[data-acceptance="not-covered"] { color: var(--relay-color-status-warning-text); }
+.scenario-lab-item-state[data-acceptance="unchecked"] { color: var(--relay-color-text-muted); }
+
+/* 预览列：`.scenario-shell` 借产品的 `embedded-assist` 拿到同一档阅读宽度；
+   窗口宽度三档只在这一处改列宽，产品组件内部的排版不受实验室影响。 */
+.scenario-lab-stage { min-width: 0; }
+.scenario-shell { padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
+.scenario-shell[data-viewport="narrow"] { --chat-measure: min(30rem, 100%); }
+.scenario-shell[data-viewport="phone"] { --chat-measure: 100%; max-width: 24rem; }
+
+/* 暗色是实验室自己的临时反相：产品没有主题系统，因此这里只反相颜色变量，
+   不改任何排版规则。F20 用它验「暗底上结构一个不少」，不宣称产品支持深色主题。 */
+.scenario-shell[data-theme="dark"] {
+  --relay-color-bg-surface: #1b211d;
+  --relay-color-bg-subtle: #141a17;
+  --relay-color-text-primary: #edefea;
+  --relay-color-text-secondary: #c2c9c0;
+  --relay-color-text-muted: #97a196;
+  --relay-color-border-separator: #2c352f;
+  --relay-color-border-control: #3a453e;
+  --relay-color-action-primary: #4e9a78;
+  --relay-color-action-text: #dcefe4;
+  --relay-color-selection-bg: #27312b;
+  --relay-color-selection-hover: #2f3a33;
+  --relay-color-selection-text: #e8f2eb;
+  --relay-color-focus-ring: #6fb491;
+  --relay-color-status-success-text: #6fbf95;
+  --relay-color-status-warning-text: #d8a85f;
+  --relay-color-status-danger-text: #e08573;
+  --relay-color-status-neutral-text: #a8b3ab;
+  --relay-color-status-success-bg: #1e2a24;
+  --relay-color-status-warning-bg: #2a2418;
+  --relay-color-status-danger-bg: #2a1e1c;
+  --relay-color-status-neutral-bg: #222824;
+  background: var(--relay-color-bg-surface);
+}
+
+.scenario-lab-gallery { display: grid; gap: var(--relay-space-4); }
+.scenario-lab-card { display: grid; gap: var(--relay-space-2); }
+.scenario-lab-card > header { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: baseline; font-size: var(--relay-font-size-meta); }
+
+/* 控制器 */
+/* 控制器一列跟着视口站住：预览列可能很长，滚到下面还要能按单步与开关，
+   「上滚后位置稳不稳」这类测量也不必先把窗口滚回顶部去够按钮。 */
+.scenario-lab-controls { position: sticky; top: var(--relay-space-4); align-self: start;
+  display: grid; gap: var(--relay-space-3); max-height: calc(100vh - 9rem); overflow: auto; }
+.scenario-lab-controls-head strong { display: block; font-size: var(--relay-font-size-body); }
+.scenario-lab-transport { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); align-items: center; }
+.scenario-lab-transport .primary-button, .scenario-lab-transport .secondary-button { display: inline-flex; align-items: center; gap: 4px; }
+.scenario-lab-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+.scenario-lab-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
+.scenario-lab-field-label { min-width: 4.5rem; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-muted); }
+.scenario-lab-note { margin: 0; padding: var(--relay-space-2) var(--relay-space-3); border-left: 2px solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-subtle); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+.scenario-lab-panel { display: grid; gap: var(--relay-space-2); padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-card); background: var(--relay-color-bg-surface); }
+.scenario-lab-panel h2 { margin: 0; display: flex; align-items: center; gap: var(--relay-space-2); font-size: var(--relay-font-size-body); font-weight: var(--relay-font-weight-semibold); }
+.scenario-lab-panel summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+.scenario-lab-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.scenario-lab-steps button { display: flex; gap: var(--relay-space-2); width: 100%; padding: 3px 6px; border: 0; border-radius: var(--relay-radius-sm);
+  background: transparent; color: var(--relay-color-text-primary); font: inherit; font-size: var(--relay-font-size-meta); text-align: left; cursor: pointer; }
+.scenario-lab-steps button:hover { background: var(--relay-color-selection-hover); }
+.scenario-lab-steps--now { background: var(--relay-color-selection-bg); }
+.scenario-lab-steps button span { color: var(--relay-color-text-muted); font-family: var(--relay-font-family-code); flex: none; }
+.scenario-lab-data { max-height: 18rem; overflow: auto; margin: 0; padding: var(--relay-space-2); border-radius: var(--relay-radius-sm);
+  background: var(--relay-color-bg-subtle); color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-code); font-size: var(--relay-font-size-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
+.scenario-lab-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--relay-font-size-meta); }
+.scenario-lab-results li { display: grid; gap: 2px; padding-left: var(--relay-space-3); border-left: 2px solid var(--relay-color-border-separator); }
+.scenario-lab-results li[data-status="pass"] { border-left-color: var(--relay-color-status-success-text); }
+.scenario-lab-results li[data-status="fail"] { border-left-color: var(--relay-color-status-danger-text); }
+.scenario-lab-results li[data-status="browser-only"] { border-left-color: var(--relay-color-status-neutral-text); }
+.scenario-lab-results small { color: var(--relay-color-status-danger-text); overflow-wrap: anywhere; }

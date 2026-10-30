@@ -2,11 +2,13 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProject,
-  cancelAssistMessage, createAssistSession,
+  cancelAssistMessage, createAssistSession, setSessionContextBudget,
   rejectAssistProposal, requestAssistMessage, steerAssistMessage }
   from '../application/assist-commands.js';
+import { readSessionContextUsage } from '../application/assist-context-projection.js';
+import { listSessionDelegations } from '../application/subagent-delegation.js';
 import { createRepositories } from '../application/unit-of-work.js';
-import type { AssistSessionRunState } from '../assist/assist-repository.js';
+import type { AssistSessionListState, AssistSessionRunState } from '../assist/assist-repository.js';
 import { establishConversationDiffBaseline, readConversationDiff, readConversationDiffFile }
   from '../conversation-diff/net-diff-service.js';
 import { MAX_ASSIST_ATTACHMENT_BODY_BYTES, uploadAssistMessageAttachment }
@@ -60,6 +62,7 @@ const AssistSessionDto = Type.Object({
   id: uuid, workspace_id: uuid,
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
+  parent_session_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
   /** 0090：置顶时刻（导航排序键，不是业务事实）。未置顶为 null。 */
   pinned_at: Type.Union([Type.String(), Type.Null()]),
@@ -82,6 +85,22 @@ const AssistSessionDto = Type.Object({
    * 也不是执行权或任务完成度：左栏只用它决定「这条会话的类型图标要不要换成运行指示」。
    */
   run_state: Type.Union([Type.Literal('RUNNING'), Type.Literal('PENDING'), Type.Null()]),
+  /**
+   * 读时派生：左栏这一行该画哪一枚状态图标（2026-10-30）。
+   *
+   * 八态全部来自既有事实，没有新增写入 Owner：在途（`RUNNING`/`PENDING`）与最后一轮
+   * 终态（`COMPLETED`/`FAILED`/`CANCELLED`）取自 `assist_messages.status`；
+   * `WAITING_APPROVAL` 取自 `assist_proposals` 里待确认的提案（唯一会话级「等人决定」事实）；
+   * `NOT_STARTED`/`ARCHIVED` 取自会话自身有没有消息与 `status`。
+   *
+   * 与 `run_state` 的关系：`run_state` 是它的在途子集，继续保留——轮询与「此刻有没有在跑」
+   * 需要窄口径。两者不是两套判定：`list_state` 是唯一的派生结果，`run_state` 只是它的投影。
+   * 只有「有消息但读不出最后一轮回复行」时才为 `null`，客户端回退类型图标。
+   */
+  list_state: Type.Union([Type.Literal('RUNNING'), Type.Literal('PENDING'),
+    Type.Literal('WAITING_APPROVAL'), Type.Literal('COMPLETED'), Type.Literal('FAILED'),
+    Type.Literal('CANCELLED'), Type.Literal('NOT_STARTED'), Type.Literal('ARCHIVED'),
+    Type.Null()]),
   /** 冻结的会话身份：'AGENT' 普通会话，'ASSISTANT' 人设 助手会话，'LEARNING' 学习会话。 */
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   /**
@@ -259,6 +278,19 @@ const createSessionBody = Type.Object({
   chat_mode: Type.Optional(Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'),
     Type.Literal('GOAL')])),
   assistant_profile_id: Type.Optional(uuid),
+  /**
+   * 0145：上下文档位的继承来源（用户跳转前所在会话）。
+   *
+   * 不传即从 262144 起步；传了但读不到（跨工作区、已删除）同样退回 262144。
+   * 进命令体参与载荷 hash：同一 command_id 换来源重放按异载荷拒绝。
+   */
+  source_session_id: Type.Optional(uuid),
+  /**
+   * 0145：首条消息之前用户明确选的档位。缺省＝继承来源会话（再缺省 256K）。
+   * 写进创建事务，不做「先建后补」。
+   */
+  context_budget_tokens: Type.Optional(Type.Union([Type.Literal(262_144), Type.Literal(524_288),
+    Type.Literal(1_048_576)])),
 }, strict);
 const sessionsQuery = Type.Object({
   project_id: Type.Optional(uuid), task_id: Type.Optional(uuid),
@@ -296,6 +328,40 @@ const pinSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
 const unreadSessionBody = Type.Object({ command_id: uuid, expected_revision: rev,
   unread: Type.Boolean() }, strict);
 const sessionStateBody = Type.Object({ command_id: uuid, expected_revision: rev }, strict);
+/**
+ * 0145：会话上下文档位。三个合法值写进 schema——越界的档位在路由层就被拒，
+ * 不用等到用例层；`expected_revision` 打在该会话自己的档位修订上。
+ */
+const sessionBudgetBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  context_budget_tokens: Type.Union([Type.Literal(262_144), Type.Literal(524_288),
+    Type.Literal(1_048_576)]) }, strict);
+const SessionContextBudgetResult = Type.Object({
+  session_id: uuid, context_budget_tokens: Type.Number(), revision: rev }, strict);
+const SessionContextUsageResult = Type.Object({
+  session_id: uuid,
+  budget: Type.Object({ tokens: Type.Number(), revision: rev }, strict),
+  last_call: Type.Union([Type.Null(), Type.Object({
+    source: Type.Union([Type.Literal('MODEL_CALL'), Type.Literal('MESSAGE')]),
+    call_id: Type.Union([uuid, Type.Null()]),
+    message_id: Type.Union([uuid, Type.Null()]),
+    provider: Type.Union([Type.String(), Type.Null()]),
+    model: Type.Union([Type.String(), Type.Null()]),
+    status: Type.Union([Type.String(), Type.Null()]),
+    input_tokens: Type.Union([Type.Number(), Type.Null()]),
+    output_tokens: Type.Union([Type.Number(), Type.Null()]),
+    cache_read_tokens: Type.Union([Type.Number(), Type.Null()]),
+    cache_creation_tokens: Type.Union([Type.Number(), Type.Null()]),
+    reserved_tokens: Type.Union([Type.Number(), Type.Null()]),
+    settled_at: Type.Union([Type.String(), Type.Null()]),
+    breakdown: Type.Union([Type.Null(), Type.Object({
+      version: Type.Number(), method: Type.String(), precision: Type.String(),
+      categories: Type.Array(Type.Object({ key: Type.String(), bytes: Type.Number(),
+        tokens: Type.Number() }, strict)),
+      estimated_total_tokens: Type.Number(), covered_bytes: Type.Number(),
+      image_parts: Type.Number(),
+    }, strict)]),
+  }, strict)]),
+}, strict);
 const SessionTitleResult = Type.Object({
   session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),
 }, strict);
@@ -394,12 +460,14 @@ const proposalAcceptBody = Type.Object({ command_id: uuid,
 }, strict);
 
 function sessionDto(row: { id: string; workspace_id: string; project_id: string | null;
-  task_id: string | null; title: string; status: string; revision: bigint;
+  task_id: string | null; parent_session_id: string | null;
+  title: string; status: string; revision: bigint;
   pinned_at: Date | null;
   unread_at: Date | null;
   last_message_at: Date | null;
   has_messages: boolean;
   run_state: AssistSessionRunState | null;
+  list_state: AssistSessionListState | null;
   conversation_mode: ConversationMode; chat_mode: 'CHAT' | 'PLAN' | 'GOAL';
   assistant_profile_id: string | null;
   assistant_profile_revision: bigint | null; assistant_role_snapshot: JsonObject | null;
@@ -408,6 +476,7 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   return {
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
+    parent_session_id: row.parent_session_id,
     revision: toDecimalString(row.revision),
     // 置顶时刻逐字返回：客户端据此排序并显示「已置顶」，不自行推断。
     pinned_at: row.pinned_at === null ? null : row.pinned_at.toISOString(),
@@ -419,6 +488,9 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     has_messages: row.has_messages,
     // 2026-10-28：有没有在途的一轮同样只看消息表。逐字回显，不替服务端补一个「空闲」。
     run_state: row.run_state,
+    // 2026-10-30：同一行的展示态逐字回显。客户端不再自己判定「null 是不是完成」——
+    // 终态是另一条事实，由服务端在派生时一并读出。
+    list_state: row.list_state,
     conversation_mode: row.conversation_mode,
     chat_mode: row.chat_mode,
     assistant_profile_id: row.assistant_profile_id,
@@ -505,7 +577,19 @@ function proposalDto(row: { id: string; workspace_id: string; session_id: string
   };
 }
 
+import { SessionTodoRepository } from '../assist/session-todo-repository.js';
+
 export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  // ADR-038: session todo list is a read-only projection; the only writer is todo_write.
+  app.get('/assist-sessions/:id/todos', { schema: { params: sessionItem } },
+    async (request, reply) => {
+      const params = request.params as { workspace_id: string; id: string };
+      try {
+        const snapshot = await new SessionTodoRepository(dependencies.database.executor)
+          .read(params.id);
+        return { snapshot: snapshot === undefined ? null : snapshot };
+      } catch (error) { return sendReadError(reply, error, request.id); }
+    });
   app.post('/assist-sessions', { schema: { params: base, body: createSessionBody,
     response: { 201: commandEnvelopeSchema(AssistSessionResult) } } },
   createCommandHandler(dependencies, { commandType: 'CreateAssistSession',
@@ -518,6 +602,9 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
         title: body.title,
         ...(body.conversation_mode === undefined ? {} : { conversationMode: body.conversation_mode }),
         ...(body.assistant_profile_id === undefined ? {} : { assistantProfileId: body.assistant_profile_id }),
+        ...(body.source_session_id === undefined ? {} : { sourceSessionId: body.source_session_id }),
+        ...(body.context_budget_tokens === undefined ? {}
+          : { contextBudgetTokens: body.context_budget_tokens }),
       });
       return { outcome, result: outcome.result };
     } }));
@@ -583,6 +670,42 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         unread: body.unread });
       return { outcome, result: outcome.result };
     } }));
+
+  // 0145：会话级上下文档位。只改这一条会话自己的档位与档位修订，不碰工作区默认；
+  // 在途调用保留冻结预算，改动从下一次调用生效（由冻结快照的既有语义保证）。
+  app.post('/assist-sessions/:id/context-budget', { schema: { params: sessionItem,
+    body: sessionBudgetBody, response: { 200: commandEnvelopeSchema(SessionContextBudgetResult) } } },
+  createCommandHandler(dependencies, { commandType: 'SetSessionContextBudget',
+    bodySchema: sessionBudgetBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setSessionContextBudget(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision,
+        budgetTokens: body.context_budget_tokens });
+      return { outcome, result: outcome.result };
+    } }));
+
+  // 0145：用量面板的只读投影——当前档位 + 最近一次真实调用（含分项构成）。
+  // 一次请求给全，避免浮层打开时连发两次读；它不改变任何事实。
+  app.get('/assist-sessions/:id/context-usage', { schema: { params: sessionItem,
+    response: { 200: SessionContextUsageResult } } },
+  async (request, reply) => {
+    const params = request.params as { workspace_id: string; id: string };
+    try {
+      return await readSessionContextUsage(dependencies.database.executor, params.workspace_id,
+        params.id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  // Session-scoped collaboration reads the durable delegation ledger.
+  app.get('/assist-sessions/:id/delegations', { schema: { params: sessionItem } },
+  async (request, reply) => {
+    const params = request.params as { workspace_id: string; id: string };
+    try {
+      return { items: await listSessionDelegations(dependencies.database.executor, {
+        workspaceId: params.workspace_id, sessionId: params.id }) };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
 
   app.post('/assist-sessions/:id/archive', { schema: { params: sessionItem,
     body: sessionStateBody, response: { 200: commandEnvelopeSchema(SessionStateResult) } } },
@@ -662,13 +785,14 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     response: { 200: AssistSessionDto } } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      const { session, hasMessages, runState } = await readAssistSessionWithActivity(dependencies.database.executor, {
+      const { session, hasMessages, runState, listState } = await readAssistSessionWithActivity(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
       const q = request.query as { include_context?: 'true' | 'false' };
       const readContext = q.include_context === 'true' ? (await readAssistSessionContexts(dependencies.database.executor,
         { workspaceId: p.workspace_id, sessionIds: [session.id] }))[0] : undefined;
       const context = readContext?.session_revision === session.revision ? readContext : undefined;
-      return { ...sessionDto({ ...session, has_messages: hasMessages, run_state: runState }), ...(context === undefined ? {} : { context: {
+      return { ...sessionDto({ ...session, has_messages: hasMessages, run_state: runState,
+        list_state: listState }), ...(context === undefined ? {} : { context: {
         project_goals: context.project_goals, working_directory: context.working_directory } }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });

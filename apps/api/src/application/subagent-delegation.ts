@@ -303,6 +303,9 @@ export async function createDelegation(db: DbExecutor, input: {
       conversationMode: 'AGENT', chatMode: 'CHAT',
       workingResourceId: locked.working_resource_id,
       workingDirectorySource: locked.working_directory_source ?? 'USER_PICKED',
+      // 0145：子会话共用主会话的预算作用域，档位随之继承——否则一次 1024K 的委派会在
+      // 子轮次里按 256K 申请预算，工具续轮更早被拒。
+      contextBudgetTokens: locked.context_budget_tokens,
       ...childSessionScope(locked),
     });
     const childMessageId = randomUUID();
@@ -328,7 +331,8 @@ export async function createDelegation(db: DbExecutor, input: {
     });
     const attemptId = randomUUID();
     await repositories.subagents.insertAttempt({ id: attemptId, delegationId,
-      attemptIndex: 1, claimEpoch: 1n, workerId: input.workerId });
+      attemptIndex: 1, claimEpoch: 1n, workerId: input.workerId,
+      resultMessageId: childMessageId });
     return { delegationId, childSessionId, childMessageId, attemptId,
       system: selectRuntimeSystemPrompt({ kind: 'AGENT_SUBAGENT',
         state: subagentDelegationState(input.request) }).system };
@@ -399,12 +403,16 @@ export async function runDelegationAttemptFlow(db: DbExecutor, input: {
   if (childMessage === undefined) throw resourceNotFound('Assist subagent message');
   let attemptId = created.attemptId;
   let retried = false;
-  let outcome = await input.runChild({ childSession, childMessage,
-    system: created.system, signal: input.signal });
-  if (outcome.status === 'FAILED' && retryableChildFailure(outcome.errorCode) &&
+  let outcome: SubagentChildOutcome = input.signal.aborted
+    ? { status: 'CANCELLED', errorCode: 'SUBAGENT_CANCELLED', content: null }
+    : await input.runChild({ childSession, childMessage,
+      system: created.system, signal: input.signal });
+  if (!input.signal.aborted && outcome.status === 'FAILED' && retryableChildFailure(outcome.errorCode) &&
       delegation.attempt_count < delegation.max_attempts) {
     // 一次有界修正重试：新尝试关联原委派，不换委派身份、不清掉失败关系。
-    const retry = await createRetryAttempt(db, { delegation, workerId: input.workerId });
+    await settleAttemptFailure(db, attemptId, childMessage.id, outcome.errorCode);
+    const retry = await createRetryAttempt(db, { delegation, workerId: input.workerId,
+      previousMessage: childMessage });
     retried = true;
     attemptId = retry.attemptId;
     const retryMessage = await repositories.assist.readMessage(retry.childMessageId);
@@ -415,10 +423,11 @@ export async function runDelegationAttemptFlow(db: DbExecutor, input: {
   }
   const envelope = outcome.status === 'SUCCEEDED' && outcome.content !== null
     ? readSubagentEnvelope(outcome.content) : null;
-  await settleDelegationRecords(db, { delegationId: delegation.id, attemptId,
+  const applied = await settleDelegationRecords(db, { delegationId: delegation.id, attemptId,
     expectedEpoch: 1n, status: outcome.status, errorCode: outcome.errorCode,
     resultMessageId: childMessage.id, envelope, retried });
-  return { status: outcome.status, envelope, errorCode: outcome.errorCode, retried,
+  return { status: applied ? outcome.status : 'FAILED', envelope: applied ? envelope : null,
+    errorCode: applied ? outcome.errorCode : 'SUBAGENT_CLAIM_LOST', retried,
     delegationId: delegation.id, childSessionId: created.childSessionId };
 }
 
@@ -426,6 +435,7 @@ export async function runDelegationAttemptFlow(db: DbExecutor, input: {
 async function createRetryAttempt(db: DbExecutor, input: {
   readonly delegation: import('../infrastructure/database-schema.js').AssistDelegationRow;
   readonly workerId: string;
+  readonly previousMessage: AssistMessageRow;
 }): Promise<{ attemptId: string; childMessageId: string }> {
   const childSessionId = input.delegation.child_session_id;
   if (childSessionId === null) throw new Error('delegation retry without child session');
@@ -439,13 +449,29 @@ async function createRetryAttempt(db: DbExecutor, input: {
     const seq = await repositories.assist.nextMessageSeq(childSessionId);
     await repositories.assist.insertMessage({
       id: childMessageId, sessionId: childSessionId, seq, role: 'ASSISTANT',
-      status: 'PENDING', intent: 'DISCUSS', content: null, sources: [], chatMode: 'CHAT' });
+      status: 'PENDING', intent: 'DISCUSS', content: null, sources: [], chatMode: 'CHAT',
+      modelSelectionSnapshot: input.previousMessage.model_selection_snapshot,
+      modelCredentialFingerprint: input.previousMessage.model_credential_fingerprint,
+      ...(input.previousMessage.model_selection_snapshot === null ? {}
+        : { modelAttemptState: freshAssistModelAttemptState() }) });
     const attemptId = randomUUID();
     await repositories.subagents.insertAttempt({ id: attemptId, delegationId: locked.id,
-      attemptIndex: locked.attempt_count + 1, claimEpoch: 1n, workerId: input.workerId });
+      attemptIndex: locked.attempt_count + 1, claimEpoch: 1n, workerId: input.workerId,
+      resultMessageId: childMessageId });
     await repositories.subagents.updateDelegation(locked.id, locked.revision,
       { attemptCount: locked.attempt_count + 1 });
     return { attemptId, childMessageId };
+  });
+}
+
+async function settleAttemptFailure(db: DbExecutor, attemptId: string,
+  messageId: string, errorCode: string | null): Promise<void> {
+  await withTransaction(db, async (repositories) => {
+    const attempt = await repositories.subagents.readAttempt(attemptId, true);
+    if (attempt?.status === 'RUNNING') {
+      await repositories.subagents.updateAttempt(attempt.id, attempt.claim_epoch,
+        { status: 'FAILED', resultMessageId: messageId, errorCode });
+    }
   });
 }
 
@@ -459,13 +485,13 @@ async function settleDelegationRecords(db: DbExecutor, input: {
   readonly resultMessageId: string;
   readonly envelope: SubagentEnvelope | null;
   readonly retried: boolean;
-}): Promise<void> {
-  await withTransaction(db, async (repositories) => {
+}): Promise<boolean> {
+  return withTransaction(db, async (repositories) => {
     const attempt = await repositories.subagents.readAttempt(input.attemptId, true);
     if (attempt === undefined || attempt.status !== 'RUNNING' ||
         attempt.claim_epoch !== input.expectedEpoch) {
       // 迟到结果（旧 epoch 或已被恢复流程结算）：只记录已知事实，不推进委派。
-      return;
+      return false;
     }
     // 子执行结果已按委派词表给出，这里不再做一次转换：两套说法并存时，
     // 「COMPLETED 的尝试」与「SUCCEEDED 的委派」会在恢复核对里对不上。
@@ -473,13 +499,13 @@ async function settleDelegationRecords(db: DbExecutor, input: {
       status: input.status, resultMessageId: input.resultMessageId,
       errorCode: input.status === 'SUCCEEDED' ? null : input.errorCode });
     const delegation = await repositories.subagents.readDelegation(input.delegationId, true);
-    if (delegation === undefined) return;
+    if (delegation === undefined || delegation.status !== 'RUNNING') return false;
     if (input.status === 'SUCCEEDED' && input.envelope !== null) {
       await repositories.subagents.updateDelegation(delegation.id, delegation.revision, {
         status: 'SUCCEEDED',
         resultSummary: delegationSummaryText(input.envelope),
         stopReason: null });
-      return;
+      return true;
     }
     await repositories.subagents.updateDelegation(delegation.id, delegation.revision, {
       status: input.status === 'CANCELLED' ? 'CANCELLED' : 'FAILED',
@@ -491,6 +517,7 @@ async function settleDelegationRecords(db: DbExecutor, input: {
           : `这次子执行失败（${input.errorCode ?? 'UNKNOWN'}）。`,
         ...(input.retried ? { retried_once: true } : {}),
         resumable: false } });
+    return true;
   });
 }
 
@@ -639,7 +666,8 @@ function reconcileDecision(message: AssistMessageRow | undefined,
       detail: `这次子执行失败（${message.error_code ?? 'UNKNOWN'}）。` };
   }
   // PENDING/RUNNING：只有租约确实过期才补记；仍在租约内的交给在途执行自己结算。
-  const deadline = new Date(attemptUpdatedAt.getTime() + options.leaseMs * 2);
+  const deadline = new Date(Math.max(attemptUpdatedAt.getTime(), message.updated_at.getTime())
+    + options.leaseMs * 2);
   if (options.now < deadline) return undefined;
   return { attemptStatus: 'FAILED', delegationStatus: 'FAILED',
     errorCode: 'ATTEMPT_LEASE_LOST',
@@ -664,9 +692,15 @@ export interface DelegationProjection {
   readonly closed_at: string | null;
 }
 
-function scopeTexts(value: JsonObject): readonly string[] {
-  const raw = value.items;
-  return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string') : [];
+function scopeTexts(value: JsonValue): readonly string[] {
+  // 0128 stores [{text}], not {items}; keep the legacy wrapper readable.
+  const raw = Array.isArray(value) ? value
+    : typeof value === 'object' && value !== null ? (value as JsonObject).items : undefined;
+  return Array.isArray(raw) ? raw.flatMap((item) => {
+    if (typeof item === 'string') return [item];
+    return typeof item === 'object' && item !== null && !Array.isArray(item)
+      && typeof item.text === 'string' ? [item.text] : [];
+  }) : [];
 }
 
 function baselineText(value: JsonObject | null): string | null {

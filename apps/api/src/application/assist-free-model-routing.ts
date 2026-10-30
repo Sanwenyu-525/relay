@@ -19,6 +19,7 @@ import { ModelCallRepository } from '../model/model-call-repository.js';
 import { ModelProviderCooldownRepository } from '../model/model-provider-cooldown-repository.js';
 import { syncModelCatalog } from './model-catalog-sync.js';
 import { createOpenRouterCatalogSource } from '../workflow/openrouter-catalog-source.js';
+import { contextUsageToJson, describeAssistRequestContext } from './assist-context-usage.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { createRepositories } from './unit-of-work.js';
 import { parseAssistModelSnapshot, snapshotIdentityBudget, type AssistModelCandidateSnapshot,
@@ -163,6 +164,7 @@ export async function invokeAssistWithFreeModelRouting(context: AssistFreeModelR
       const recorded = await recordModelInvocation<AssistResult>(db, {
         callId,
         origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+        contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
         identity: resolved.port.identity,
         ...(request.signal === undefined ? {} : { signal: request.signal }),
         invoke: async (id) => {

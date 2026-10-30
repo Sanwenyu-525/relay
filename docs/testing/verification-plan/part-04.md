@@ -142,6 +142,8 @@ CT-12 的完整图反例单独成文件（`check-trust-refusal-lifecycle.integra
 
 ## 21. 有界多 Agent 与自动会话验收规格
 
+2026-10-30 最小会话链接续：`agent-conversation-main-loop.integration.test.ts` 的 `MA-session` 场景覆盖两子并行真实文件读取与主汇总、活动/已完成消息恢复、重试模型身份与尝试关闭、停止后不重试、主汇总预算预留、HTTP 主子关系及跨工作区隐藏；前端 `sessionDelegations.spec.tsx` 覆盖确切导航、晚到响应、失败重读、空投影、轮询清理与非法 DTO。浏览器定向检查另覆盖 Task→子会话→主会话导航及只读输入边界。这些不等于下方全部 MA 规格完成，实际结果仅归[条目 248](../acceptance-details/part-14.md#条目-248)。
+
 2026-10-05，**已确认产品规则 / 待核定工程设计 / 未运行规格**。本轮只补文档和实施提示词。范围归[总纲 §0.9](../../requirements/product-spec/part-01.md#09-有界多-agent-与自动会话)，Owner/恢复归[运行架构 §2.5](../../architecture/runtime-context/part-01.md#25-有界子-agent-的委派与会话关联)，交互归[工作台 §23](../../frontend/workbench-design/part-07.md#23-主子会话与有界协作)。本表不表示测试已写或已通过。
 
 | 编号 | 场景及必须成立的反例 | 必要证据 |

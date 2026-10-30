@@ -110,6 +110,15 @@ export class SessionToolCallRepository {
       returning id`.execute(this.db)).rows.length === 1;
   }
 
+  /** ADR-038: todo_write is an in-app tool without a Gateway Operation. */
+  async settleTodoWrite(id: string, resultDigest: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update session_tool_calls set status = 'SETTLED',
+      result_digest = ${resultDigest}, settled_at = now()
+      where id = ${id} and status = 'REQUESTED' and operation_id is null
+        and tool_name = 'todo_write'
+      returning id`.execute(this.db)).rows.length === 1;
+  }
+
   /**
    * 结果未知：行保留原 Operation 身份，等人工核对。
    * 不改成成功也不清空引用——UNKNOWN 先核对，不盲重试。

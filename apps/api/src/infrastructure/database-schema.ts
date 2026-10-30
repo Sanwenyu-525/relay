@@ -1473,6 +1473,21 @@ export interface AssistSessionRow {
    */
   readonly forked_from_session_id: string | null;
   /**
+   * 0145：本会话的上下文档位（单次调用预算）。
+   *
+   * 三档固定值（262144 / 524288 / 1048576），**每个会话独立**：会话 A 选 512K 不影响 B。
+   * 不可空——新会话在建立时就把档位写下来（没有可继承来源时为 262144），
+   * 因此不存在「跟随应用默认」这种中间状态，模型调用也不会再去猜一个进程默认值。
+   */
+  readonly context_budget_tokens: number;
+  /**
+   * 0145：档位自己的 CAS 版本，只在保存档位时 +1。
+   *
+   * 与 `revision` 分开：那份修订号被改名、置顶、归档、切模式共用，拿它做档位 CAS
+   * 会让一次无关的重命名把用户的保存打成 409。
+   */
+  readonly context_budget_revision: bigint;
+  /**
    * 0128：主子会话关联（ADR-017、运行架构 §2.5）。
    *
    * NULL = 根会话（主 Agent 所在）；非 NULL = 由某次委派创建的子会话。
@@ -1741,6 +1756,13 @@ export interface ModelCallRow {
   readonly usage_cache_read_tokens: number | null;
   readonly usage_cache_creation_tokens: number | null;
   readonly budget_reserved_tokens: number | null;
+  /**
+   * 0145：这次调用送进模型的上下文构成（分类 + 估算 token）。
+   *
+   * 只存数值与来源分类，不存提示词、文件正文、工具输出或路径。NULL = 该调用没有采集
+   * （0145 之前的行，以及记忆提取这类不是「对话上下文」的调用）。
+   */
+  readonly context_usage: JsonObject | null;
   readonly error_kind: string | null;
   readonly started_at: Date;
   readonly first_stream_event_at: Date | null;

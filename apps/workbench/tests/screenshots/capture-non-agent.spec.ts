@@ -1,7 +1,7 @@
 import { test, type Page } from "@playwright/test";
 import path from "node:path";
 
-const OUT = "D:/Develop/Relay-Agent/ui-screenshots-2026-10-11";
+const OUT = "D:/Develop/Relay-Agent/docs/testing/evidence/ui-screenshots-2026-10-11";
 
 test.use({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
 

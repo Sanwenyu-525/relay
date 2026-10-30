@@ -206,9 +206,15 @@
 
 普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配排序，零匹配时近期回退，消息 sources 附 `selection=AUTO_MEMORY`、`selection_basis=LITERAL_MATCH|RECENT_CONFIRMED`，不是语义向量召回。2026-10-30 修正：中英文混合查询按文字边界分词，显式来源在候选限制前排除，避免去重耗尽候选。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
 
-2026-10-30 压缩策略：有冻结有效调用预算 B 时，以与端口相同的 UTF-8 字节/3 估算，工作输入上限为 `floor(B × 0.75) × 3` 字节，为提示、工具及输出预留余量；旧摘要＋已结算增量达到该上限的 80% 时申请自动整理，不再仅因达到32条消息触发。保留最近8条原文，在完整轮次边界建立检查点；整理输入与普通生成最终组装均使用同一工作上限，真实端口仍单独检查完整请求及输出预算。B 取冻结调用预算（包含已知 Provider 容量限制），不直接把所选档位冒充模型窗口；无真实模型快照时使用工作区所选档位，未选择的旧 Mock 路径保留32条/48000字节触发及128000字节保护。参数属于工程估算，不能证明 Provider 物理窗口、精确 tokenizer 或缓存收益。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。请求/响应与档位整数不变，Breaking Change: No，无 migration。
+2026-10-30 压缩策略：有冻结有效调用预算 B 时，以与端口相同的 UTF-8 字节/3 估算，工作输入上限为 `floor(B × 0.75) × 3` 字节，为提示、工具及输出预留余量；旧摘要＋已结算增量达到该上限的 80% 时申请自动整理，不再仅因达到32条消息触发。保留最近8条原文，在完整轮次边界建立检查点；整理输入与普通生成最终组装均使用同一工作上限，真实端口仍单独检查完整请求及输出预算。B 取冻结调用预算（包含已知 Provider 容量限制），不直接把所选档位冒充模型窗口；无真实模型快照时优先使用会话档位，读不到会话才回退工作区默认；无任何预算的旧 Mock 路径保留32条/48000字节触发及128000字节保护。参数属于工程估算，不能证明 Provider 物理窗口、精确 tokenizer 或缓存收益。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。请求/响应与档位整数不变，Breaking Change: No，无 migration。
 
 整理请求冻结工作模型身份，使用既有 model_calls 与会话预算；call 以最后一条被覆盖的真实 assistant 消息作 ASSIST 计量锚点，整理请求的 model_call_id 区分用途，不修改原消息 usage。摘要严格 JSON `{summary}`，成功提交后才更换窗口；租约、取消、来源、权限/上下文/配置及窗口修订变化拒收迟到结果。未结算工具链不整理、不重放工具。真实 Provider 摘要质量、模型窗口与缓存效果须单独验证。
+
+2026-10-30 分批接续：准备整理从有效检查点之后读取至多1001条增量，以完整已完成助手轮次为边界，保留至少8条近期原文；按旧摘要＋本批 JSON 信封估算选择不超过工作输入容量95%的前缀，另留序列化/标记余量，Worker 仍检查最终信封。增量页满也会提前申请整理，防止行数不断累积。每个请求只完成一批；自动生成链把原消息保持为 PENDING，在后续 tick 逐批推进到压力回落；手动受理的 COMPLETED 只表示该请求冻结的覆盖范围完成，不表示 Task 完成或全部历史清空。单个完整轮次仍装不下时明确返回 MEMORY_COMPACTION_INPUT_TOO_LARGE，不静默截断。
+
+批次游标与父检查点身份放入现有请求的内部冻结 JSON，来源 hash 绑定本批确切增量，旧无游标请求按原规则执行。内部检查点以父链追溯先前前缀；`GET /assist-sessions/{id}/memory` 的 `source_message_ids` 继续返回累计覆盖身份，失效时仍隐藏正文和足迹。父检查点失效或窗口变化拒收旧增量请求，失败保留已提交窗口与原文。清除窗口仅查询最后历史序号，不再因累计正文超过10000条而无法清除。仍有过大的未整理活跃窗口保护，优先通过分批整理恢复，不把查询页截断冒充完整工作记忆。Breaking Change: No；无新端点、请求字段或 migration。
+
+最终资料注入后的文本压力同样可触发整理；普通 Agent 工具循环按现有上下文构成统计检查系统、词表、历史、插话及已结算工具结果。接近工作容量时关闭新工具声明并请求收尾，硬超限则在外呼前以 MEMORY_CONTEXT_TOO_LARGE 收口，保留已执行工具账本；不在活动协议中压缩、删除或重放工具。统计不覆盖图片的真实图像 token，真实端口与 Provider 校验仍有效。无冻结快照时容量优先读取会话档位，无法读取会话才回退工作区默认。
 
 有效预算过小、连保留段都超出工作容量时，会在创建 model_call 前以既有 MEMORY_CONTEXT_TOO_LARGE 收口；因此部分原先由端口返回 MODEL_BUDGET_EXHAUSTED 的输入现在更早被拒绝。客户端继续显示原记忆处理错误，不把它视为 Provider 故障或自动重试依据。
 

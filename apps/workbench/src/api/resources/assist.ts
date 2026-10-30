@@ -3,10 +3,19 @@ import type { RelayWriteTier } from "../dtos/gateway";
 import { RelayContractError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
+import { sessionContextBudgetFrom, sessionContextUsageFrom } from "../parse/assist";
 import { assistMessageFrom, assistMessageRecallFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayContextBudgetTokens, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "../dtos/assist";
+import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayContextBudgetTokens, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult, RelaySessionContextBudgetResult, RelaySessionContextUsage } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
+import type { RelaySessionDelegation } from "../dtos/assist";
+import { sessionDelegationFrom } from "../parse/assist";
+
+export async function getAssistSessionDelegations(http: RelayHttp, sessionId: string): Promise<readonly RelaySessionDelegation[]> {
+  const body = object(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(sessionId)}/delegations`)), "session delegations");
+  return array(body, "items", "session delegations").map(sessionDelegationFrom);
+}
 
 export async function getAssistSessions(http: RelayHttp, target: { projectId?: string; taskId?: string; includeContext?: boolean; status?: "ACTIVE" | "ARCHIVED" | "ALL" } = {}): Promise<readonly RelayAssistSession[]> {
   const query = new URLSearchParams();
@@ -17,6 +26,48 @@ export async function getAssistSessions(http: RelayHttp, target: { projectId?: s
   if (target.status && target.status !== "ACTIVE") query.set("status", target.status);
   const body = object(await http.request(`${http.workspacePath("/assist-sessions")}?${query}`), "assist sessions");
   return array(body, "items", "assist sessions").map(assistSessionFrom);
+}
+
+/**
+ * 会话上下文用量投影（0145）：当前档位 + 最近一次真实调用（含分项构成）。
+ *
+ * 一次读完两件事：浮层不需要先读档位再读用量，也不会出现「档位是新的、用量属于上一次
+ * 调用」这种半新半旧的组合。读数失败时整块呈现为不可用（圆环显示未知态），
+ * 不用界面上的旧值顶替。
+ */
+export async function getSessionContextUsage(http: RelayHttp, sessionId: string): Promise<RelaySessionContextUsage> {
+  return sessionContextUsageFrom(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(sessionId)}/context-usage`)));
+}
+
+/**
+ * 保存会话档位（0145）。
+ *
+ * 与工作区档位那条命令同一套回执纪律：`expected_revision` 打在该会话自己的档位修订上，
+ * 回执逐字核对（命令身份、会话身份、档位），对不上只报「无法核对」——
+ * 由调用方按原 command_id 查询，绝不换新 ID 重发。
+ */
+export async function setSessionContextBudget(http: RelayHttp, input: {
+  sessionId: string; commandId: string; expectedRevision: DecimalRevision;
+  budgetTokens: RelayContextBudgetTokens;
+}): Promise<RelaySessionContextBudgetResult> {
+  const body = await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(input.sessionId)}/context-budget`), { method: "POST",
+    body: JSON.stringify({ command_id: input.commandId,
+      expected_revision: input.expectedRevision,
+      context_budget_tokens: input.budgetTokens }) }, 200);
+  try {
+    const envelope = commandEnvelopeFrom(body);
+    if (envelope.commandId !== input.commandId) throw new Error("command mismatch");
+    const row = object(envelope.result, "session context budget result");
+    const sessionId = string(row, "session_id", "session context budget result");
+    const budgetTokens = sessionContextBudgetFrom(row.context_budget_tokens);
+    if (sessionId !== input.sessionId || budgetTokens !== input.budgetTokens) {
+      throw new Error("command mismatch");
+    }
+    return { sessionId, contextBudgetTokens: budgetTokens,
+      revision: decimal(row, "revision", "session context budget result") };
+  } catch { throw new RelayTransportError("会话上下文档位回执无法核对，请查询原 command_id。"); }
 }
 
 export async function getAssistSession(http: RelayHttp, sessionId: string, includeContext = false): Promise<RelayAssistSession> {
@@ -38,14 +89,20 @@ export async function getFirstPartyPacks(http: RelayHttp): Promise<readonly Rela
  * 建会话。身份在建立时冻结，因此模式与助手进**命令体**而不是查询参数：
  * 同一个 command_id 换模式重放会被服务端按异载荷拒绝，这正是我们要的行为。
  */
-export async function createAssistSession(http: RelayHttp, input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode; assistantProfileId?: string | null }): Promise<RelayAssistSession> {
+export async function createAssistSession(http: RelayHttp, input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode; assistantProfileId?: string | null; sourceSessionId?: string | null; contextBudgetTokens?: RelayContextBudgetTokens | null }): Promise<RelayAssistSession> {
   const body = await http.request(http.workspacePath("/assist-sessions"), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId, project_id: input.projectId,
       task_id: input.taskId, title: input.title,
       ...(input.conversationMode === undefined ? {} : { conversation_mode: input.conversationMode }),
       // 0127：空会话里直接发 `/plan 内容` 时，模式随建会话命令一起落库。
       ...(input.chatMode === undefined ? {} : { chat_mode: input.chatMode }),
-      ...(input.assistantProfileId === undefined || input.assistantProfileId === null ? {} : { assistant_profile_id: input.assistantProfileId }) }) }, 201);
+      ...(input.assistantProfileId === undefined || input.assistantProfileId === null ? {} : { assistant_profile_id: input.assistantProfileId }),
+      // 0145：新会话的档位继承跳转前所在会话；没有来源时不传，服务端从 256K 起。
+      ...(input.sourceSessionId === undefined || input.sourceSessionId === null ? {}
+        : { source_session_id: input.sourceSessionId }),
+      // 0145：首条消息之前用户明确选的档位，随建会话命令一起落库（不先建后补）。
+      ...(input.contextBudgetTokens === undefined || input.contextBudgetTokens === null ? {}
+        : { context_budget_tokens: input.contextBudgetTokens }) }) }, 201);
   try {
     const envelope = commandEnvelopeFrom(body);
     if (envelope.commandId !== input.commandId) throw new Error("command mismatch");

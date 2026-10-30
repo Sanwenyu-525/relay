@@ -532,6 +532,8 @@ export type ActivityPhase =
   | "REJECTED"
   /** 结果未知：既不能算成功也不能算失败。 */
   | "UNKNOWN"
+  /** 消息已结束但仍有未结算的调用（REQUESTED / PREPARED）：不能说全部结清。 */
+  | "UNSETTLED"
   /**
    * 全部结算且无例外。
    *
@@ -565,6 +567,7 @@ const PHASE_TONE: Readonly<Record<ActivityPhase, ActivityPhaseTone>> = {
   FAILED: "danger",
   REJECTED: "danger",
   UNKNOWN: "attention",
+  UNSETTLED: "attention",
   // 不是 success：结清 ≠ 成功。见 ActivityPhaseTone 的注释。
   SETTLED: "settled",
 };
@@ -593,6 +596,8 @@ export function activityHeaderState(input: {
   if (summary.failed > 0) return phase("FAILED");
   if (summary.rejected > 0) return phase("REJECTED");
   if (summary.unknown > 0) return phase("UNKNOWN");
+  // X03：消息终态不等于工具账本终态。仍有 REQUESTED / PREPARED 无结算结果时，“已结束”会被读成全部结清。
+  if (summary.active > 0) return phase("UNSETTLED");
   return phase("SETTLED");
 }
 
@@ -612,6 +617,7 @@ function metaOf(phase: ActivityPhase, summary: ActivitySummary, awaitingWorker: 
     case "FAILED": return `${size} · ${summary.failed} 项失败`;
     case "REJECTED": return `${size} · ${summary.rejected} 项未执行`;
     case "UNKNOWN": return `${size} · ${summary.unknown} 项待核对`;
+    case "UNSETTLED": return `${size} · 仍有 ${summary.active} 项未结算`;
     default: return `${size} · 已结束`;
   }
 }

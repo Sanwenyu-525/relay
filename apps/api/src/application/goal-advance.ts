@@ -371,7 +371,8 @@ async function enqueueRound(db: DbExecutor, repositories: Repositories, goal: As
   if (existing !== undefined) return existing.id;
   const selection = await repositories.modelSelection.readForSession(session.id);
   const snapshot = await freezeAssistModelSnapshot(repositories, selection, process.env,
-    { requiresTools: true, requiresJsonOutput: true }, session.workspace_id);
+    { requiresTools: true, requiresJsonOutput: true },
+    { workspaceId: session.workspace_id, sessionId: session.id });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const seq = await repositories.assist.nextMessageSeq(session.id);
     try {

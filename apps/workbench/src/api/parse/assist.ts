@@ -1,10 +1,32 @@
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelaySessionContextUsage } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
+import type { RelaySessionDelegation } from "../dtos/assist";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
 export function assistSourceBody(source: RelayAssistSourceRef) {
   return { kind: source.kind, root_id: source.rootId, version: source.version };
+}
+
+export function sessionDelegationFrom(value: unknown): RelaySessionDelegation {
+  const name = "session delegation";
+  const row = object(value, name);
+  const role = string(row, "role", name);
+  const status = string(row, "status", name);
+  const attemptCount = integer(row, "attempt_count", name);
+  const maxAttempts = integer(row, "max_attempts", name);
+  if ((role !== "INVESTIGATE" && role !== "REVIEW") ||
+    !["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"].includes(status) ||
+    attemptCount < 0 || maxAttempts < 1 || attemptCount > maxAttempts) {
+    throw new Error("会话协作响应格式无效。");
+  }
+  return { delegationId: string(row, "delegation_id", name),
+    childSessionId: nullableString(row, "child_session_id", name), role,
+    objective: string(row, "objective", name), scope: stringList(row, "scope", name),
+    baseline: nullableString(row, "baseline", name), required: boolean(row, "required", name),
+    status: status as RelaySessionDelegation["status"], attemptCount, maxAttempts,
+    resultSummary: nullableString(row, "result_summary", name),
+    createdAt: string(row, "created_at", name), closedAt: nullableString(row, "closed_at", name) };
 }
 
 export function skillDefinitionFrom(value: unknown): RelaySkillDefinition {
@@ -163,6 +185,7 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
   // 排序回落到 created_at——它与 updated_at 一样自 0015 就在响应里。
   const lastMessageAt = optionalNullable(row, "last_message_at", "assist session");
   return { id: string(row, "id", "assist session"),
+    parentSessionId: optionalNullable(row, "parent_session_id", "assist session"),
     projectId: nullableString(row, "project_id", "assist session"),
     taskId: nullableString(row, "task_id", "assist session"),
     title: string(row, "title", "assist session"), status: string(row, "status", "assist session"),
@@ -180,6 +203,9 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     // 不等于「在跑」，也不等于「跑完了」；不拿 has_messages 或活动键补一个推论。
     // 显式给了却不在词表内则整条读失败：猜一个运行态会让左栏画出不存在的过程。
     runState: runStateOf(row.run_state),
+    // 2026-10-30：列表状态（八态）。缺失时用 runState 兜底一次——旧服务端只有运行态，
+    // 那时「在跑 / 排队」仍能画对，其余一律回退类型图标，不把 null 当完成。
+    listState: listStateOf(row.list_state) ?? runStateOf(row.run_state),
     // created_at 只作「还没有消息」那一档的排序回落（服务端 coalesce 的同义读法）。
     // 它自 0015 起恒在会话投影里；这里容缺是因为缺字段不该让整条会话读不出来，
     // 退到 updated_at——同样是 0015 就有的时刻列，最多让位置略偏，不会把行丢掉。
@@ -217,6 +243,21 @@ function runStateOf(value: unknown): RelayAssistRunState | null {
   if (value === undefined || value === null) return null;
   if (value === "RUNNING" || value === "PENDING") return value;
   throw new Error(SESSION_FORMAT_ERROR);
+}
+
+/**
+ * 列表状态的八态词表（2026-10-30）。
+ *
+ * 与 `runStateOf` 有一处**有意不同**：读到没见过的词不抛错，而是读成 null。
+ * `runState` 决定要不要轮询，猜错会让左栏持续空转或画出不存在的运行；而这一枚是
+ * 导航列里的展示图标，任何一个新词都不该让整列读失败、把会话列表变成一片错误。
+ * 降级的代价只是这一行回到类型图标——与旧服务端的表现一致。
+ */
+function listStateOf(value: unknown): RelayAssistSessionListState | null {
+  if (value === "RUNNING" || value === "PENDING" || value === "WAITING_APPROVAL" ||
+    value === "COMPLETED" || value === "FAILED" || value === "CANCELLED" ||
+    value === "NOT_STARTED" || value === "ARCHIVED") return value;
+  return null;
 }
 
 /**
@@ -974,4 +1015,71 @@ export function runToolCallPreviewsFrom(value: unknown): RelayRunToolCallPreview
       };
     }),
   };
+}
+
+/** 三档之外的任何值都不是合法档位；出现就显式失败，不悄悄退回某档。 */
+export function sessionContextBudgetFrom(value: unknown): RelayContextBudgetTokens {
+  if (value === 262144 || value === 524288 || value === 1048576) return value;
+  throw new Error("会话上下文档位无法识别");
+}
+
+/**
+ * 上下文构成（0145）。
+ *
+ * 分类键白名单在客户端也过一遍：服务端将来新增分类时，旧客户端不认识的键直接跳过
+ * （不显示一个没有名字的行），而不是整块面板读不出来。数值必须是安全整数且非负。
+ */
+export function contextUsageBreakdownFrom(value: unknown): RelayContextUsageBreakdown {
+  const row = object(value, "context usage breakdown");
+  const precision = string(row, "precision", "context usage breakdown");
+  if (precision !== "ESTIMATED") throw new Error("context usage breakdown.precision 无法识别");
+  const categories: RelayContextUsageEntry[] = [];
+  for (const item of array(row, "categories", "context usage breakdown")) {
+    if (!isRecord(item)) continue;
+    const key = item.key;
+    if (key !== "HISTORY" && key !== "SYSTEM" && key !== "TOOLS" && key !== "FILE_READS"
+        && key !== "MEMORY" && key !== "OTHER") continue;
+    const tokens = item.tokens;
+    const bytes = item.bytes;
+    if (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 0) continue;
+    if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) continue;
+    categories.push({ key, tokens, bytes });
+  }
+  return { version: integer(row, "version", "context usage breakdown"),
+    method: string(row, "method", "context usage breakdown"), precision,
+    categories,
+    estimatedTotalTokens: categories.reduce((sum, entry) => sum + entry.tokens, 0),
+    coveredBytes: categories.reduce((sum, entry) => sum + entry.bytes, 0),
+    imageParts: nullableInteger(row, "image_parts", "context usage breakdown") ?? 0 };
+}
+
+export function sessionContextUsageFrom(value: unknown): RelaySessionContextUsage {
+  const row = object(value, "session context usage");
+  const budget = object(row.budget, "session context usage.budget");
+  const raw = row.last_call;
+  return { sessionId: string(row, "session_id", "session context usage"),
+    budget: { tokens: sessionContextBudgetFrom(budget.tokens),
+      revision: decimal(budget, "revision", "session context usage.budget") },
+    lastCall: raw === null || raw === undefined ? null : contextUsageCallFrom(raw) };
+}
+
+function contextUsageCallFrom(value: unknown): RelayContextUsageCall {
+  const row = object(value, "context usage call");
+  const source = string(row, "source", "context usage call");
+  if (source !== "MODEL_CALL" && source !== "MESSAGE") {
+    throw new Error("context usage call.source 无法识别");
+  }
+  return { source, callId: nullableString(row, "call_id", "context usage call"),
+    messageId: nullableString(row, "message_id", "context usage call"),
+    provider: nullableString(row, "provider", "context usage call"),
+    model: nullableString(row, "model", "context usage call"),
+    status: nullableString(row, "status", "context usage call"),
+    inputTokens: nullableInteger(row, "input_tokens", "context usage call"),
+    outputTokens: nullableInteger(row, "output_tokens", "context usage call"),
+    cacheReadTokens: nullableInteger(row, "cache_read_tokens", "context usage call"),
+    cacheCreationTokens: nullableInteger(row, "cache_creation_tokens", "context usage call"),
+    reservedTokens: nullableInteger(row, "reserved_tokens", "context usage call"),
+    settledAt: nullableString(row, "settled_at", "context usage call"),
+    breakdown: row.breakdown === null || row.breakdown === undefined ? null
+      : contextUsageBreakdownFrom(row.breakdown) };
 }

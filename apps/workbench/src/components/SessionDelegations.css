@@ -1,0 +1,48 @@
+.session-delegations {
+  flex: none;
+  min-width: 0;
+  margin: var(--relay-space-2) 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.session-delegations-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1) var(--relay-space-2);
+  min-height: var(--relay-control-compact);
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  list-style: none;
+  cursor: pointer;
+}
+
+.session-delegations-header::-webkit-details-marker { display: none; }
+.session-delegations-header:hover { background: var(--relay-color-selection-bg); }
+.session-delegations-header:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+.session-delegations-chevron { flex: none; width: 1rem; height: 1rem; }
+.session-delegations[open] > summary .session-delegations-chevron { transform: rotate(90deg); }
+.session-delegations-title,
+.session-delegations-role { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-medium); }
+.session-delegations-content { max-height: min(18rem, 32vh); padding: var(--relay-space-2); overflow-y: auto; }
+.session-delegations-list { margin: 0; padding: 0; list-style: none; }
+.session-delegations-item { min-width: 0; padding: var(--relay-space-3) 0; }
+.session-delegations-item + .session-delegations-item { border-top: var(--relay-border-width) solid var(--relay-color-border-subtle); }
+.session-delegations-item-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }
+.session-delegations-attempt { margin-left: auto; font-variant-numeric: tabular-nums; }
+.session-delegations-objective { margin: var(--relay-space-1) 0; color: var(--relay-color-text-primary); overflow-wrap: anywhere; }
+.session-delegations-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--relay-space-1) var(--relay-space-2); margin: var(--relay-space-1) 0; }
+.session-delegations-facts dt { color: var(--relay-color-text-muted); }
+.session-delegations-facts dd { margin: 0; overflow-wrap: anywhere; }
+.session-delegations-result { margin: var(--relay-space-2) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-delegations-error p { margin: 0 0 var(--relay-space-1); }
+.session-delegations-error,
+.session-delegations-error-label,
+.session-delegations-item[data-status="FAILED"] .session-delegations-status { color: var(--relay-color-status-danger-text); }
+.session-delegations-item[data-status="RUNNING"] .session-delegations-status { color: var(--relay-color-status-running-text); }

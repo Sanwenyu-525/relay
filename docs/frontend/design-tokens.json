@@ -725,6 +725,11 @@
       "$type": "cubicBezier",
       "$value": "cubic-bezier(0.2, 0, 0, 1)"
     },
+    "motion.easing.loop": {
+      "$type": "cubicBezier",
+      "$value": "cubic-bezier(0.45, 0, 0.55, 1)",
+      "$description": "循环动效的对称缓动（2026-10-30 新增，easeInOutSine）：三个圆点上下起伏用它。motion.easing.standard 是强 ease-out，起手快、收尾慢，单次进出场正确，放在循环里会让每次起伏读成一次「心跳」；循环要的是两端同样慢、中点最快，故单列一档。不用于一次性过渡。"
+    },
     "motion.loop.calm": {
       "$type": "duration",
       "$value": "6s",
@@ -734,6 +739,11 @@
       "$type": "duration",
       "$value": "1s",
       "$description": "环形运行指示绕自身中心一周的时长（2026-10-28 新增）。与 motion.loop.calm(6s) 同为循环动效但语义不同：calm 是「沿边慢慢流过的光」，读作持续；spin 是一枚 12px 圆环的转速，快了像卡顿、慢了像停住，1s 是秒针档。现有四档（fast 120ms / panel 180ms / emphasis 1.2s / calm 6s）没有一档适合匀速旋转，借用任何一档都会让这枚环读成「没在转」或「在抽搐」，故单列一档。减少动态效果时由 CSS 停掉旋转（animation: none），形状不变。"
+    },
+    "motion.loop.thinking": {
+      "$type": "duration",
+      "$value": "1100ms",
+      "$description": "会话行「三个圆点」状态图标的一轮起伏时长（2026-10-30 新增，用户指定约 1.1s）。与 motion.loop.spin(1s) 分开：spin 是匀速机械旋转，thinking 是一次起伏后短暂停住再来的呼吸节拍，两个值接近但曲线的用法不同（spin 用 linear，thinking 用 motion.easing.loop）。三个点各错峰 140ms，合计 280ms 铺开，落在一轮 1.1s 的前 660ms 内完成起伏、余下时间静止——这样一列里有多条在跑时，视线不会被持续运动抓住。关动效时由 CSS 停掉动画，圆点留在基线上，形状仍可辨认。"
     },
     
     "shadow.surface": {

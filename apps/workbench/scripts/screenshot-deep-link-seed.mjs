@@ -140,7 +140,7 @@ const out = { workspaceId, projectId, layoutTaskId, base };
   };
 }
 
-const outPath = join(repoRoot, "ui-screenshots-2026-10-11", "_deep-link-seed-ids.json");
+const outPath = join(repoRoot, "docs/testing/evidence/ui-screenshots-2026-10-11", "_deep-link-seed-ids.json");
 writeFileSync(outPath, JSON.stringify(out, null, 2), "utf8");
 console.log(JSON.stringify(out, null, 2));
 console.log(`wrote ${outPath}`);

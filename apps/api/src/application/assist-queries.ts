@@ -1,5 +1,6 @@
 import type { AssistMessageRow, AssistProposalRow, AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
-import type { AssistSessionListRow, AssistSessionRunState } from '../assist/assist-repository.js';
+import type { AssistSessionListRow, AssistSessionListState, AssistSessionRunState
+} from '../assist/assist-repository.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { resourceNotFound } from './domain-error.js';
@@ -36,21 +37,24 @@ export async function readAssistSession(db: DbExecutor, input: {
 }
 
 /**
- * 单条会话读取 + 读时派生的两枚事实：`has_messages` 与 `run_state`（与会话列表同一口径）。
+ * 单条会话读取 + 读时派生的三枚事实：`has_messages`、`run_state` 与 `list_state`
+ * （与会话列表同一口径）。
  *
  * 保留 `readAssistSession` 的窄返回：命令、锁与内部定位只关心会话行本身。
- * 只有面向界面的单条 GET 需要这两枚派生事实，所以单独成函数，不把派生查询
- * 塞进每条读写路径。`run_state` 2026-10-28 加入：左栏切会话后按身份重读这一行，
- * 若这里不返回运行态，刚亮的环会在切走那一拍被这次重读清掉。
+ * 只有面向界面的单条 GET 需要这些派生事实，所以单独成函数，不把派生查询
+ * 塞进每条读写路径。2026-10-28 加入运行态、2026-10-30 加入列表状态：左栏切会话后
+ * 按身份重读这一行，若这里不返回，刚亮的图标会在切走那一拍被这次重读清掉。
  */
 export async function readAssistSessionWithActivity(db: DbExecutor, input: {
   workspaceId: string; sessionId: string }): Promise<{ readonly session: AssistSessionRow;
-    readonly hasMessages: boolean; readonly runState: AssistSessionRunState | null }> {
+    readonly hasMessages: boolean; readonly runState: AssistSessionRunState | null;
+    readonly listState: AssistSessionListState | null }> {
   const session = await readAssistSession(db, input);
-  const repository = createRepositories(db).assist;
-  const hasMessages = await repository.sessionHasMessages(session.id);
-  const runState = await repository.sessionRunState(session.id);
-  return { session, hasMessages, runState };
+  const activity = await createRepositories(db).assist.sessionActivity(session.id);
+  // 会话刚刚读到、紧接着就消失只可能是并发删除：按「没有派生事实」返回，
+  // 不在这里抛 404——身份本身已经由上面那条读取核过。
+  return { session, hasMessages: activity?.hasMessages ?? false,
+    runState: activity?.runState ?? null, listState: activity?.listState ?? null };
 }
 
 export async function readAssistSessionContexts(db: DbExecutor, input: {

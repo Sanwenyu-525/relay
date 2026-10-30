@@ -167,7 +167,9 @@ export async function executeChatCommand(db: DbExecutor, input: {
         title: source.title, conversationMode: source.conversation_mode,
         assistantProfileId: source.assistant_profile_id,
         assistantProfileRevision: source.assistant_profile_revision,
-        assistantRoleSnapshot: source.assistant_role_snapshot });
+        assistantRoleSnapshot: source.assistant_role_snapshot,
+        // 0145：`/new` 建的是这条会话的续篇，档位沿用来源会话（改档互不影响，两条会话各存各的）。
+        contextBudgetTokens: source.context_budget_tokens });
       const created = await repositories.assist.readSession(sessionId);
       if (created === undefined) throw new Error('new chat session disappeared during creation');
       return { kind: 'NEW_SESSION', system, source_session_id: source.id,

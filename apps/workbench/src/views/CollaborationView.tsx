@@ -802,7 +802,12 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     return () => { window.clearTimeout(timer); };
   }, [directoryPending]);
   function startFolderConversation() {
-    requestTransition(() => { setSessionId(null); setSearch({ new: createCommandId() }); });
+    // 0145：新对话继承跳转前所在会话的上下文档位（来源写进 URL，协作页再建会话时交给服务端）。
+    requestTransition(() => {
+      setSessionId(null);
+      setSearch({ new: createCommandId(),
+        ...(sessionId === null || sessionId === undefined ? {} : { source_session: sessionId }) });
+    });
   }
   // 真实任务建立后把工作台切到那个 Task：执行摘要、Run 控制与判断入口仍是原来的 Owner。
   function openExecutionTask(taskId: string) {
@@ -1507,6 +1512,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onOpenRelatedSession={(id) => setSearch({ session: id })}
                   onSessionCreated={adoptCreatedSession}
                   onActiveSessionChange={reportActiveSession}
                   onSessionScopeResolved={adoptSessionScope}
@@ -1528,6 +1534,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onOpenRelatedSession={(id) => setSearch({ session: id })}
                   onSessionCreated={adoptCreatedSession}
                   onActiveSessionChange={reportActiveSession}
                   onExecutionPrepared={(taskId) => void openExecutionTask(taskId)}
@@ -1596,6 +1603,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   onNavigationStateChange={reportNavigation}
                   onRequestNewSession={requestTransition}
                   onRequestSessionChange={requestTransition} onSessionSelected={setSessionId}
+                  onOpenRelatedSession={(id) => setSearch({ session: id })}
                   onSessionCreated={adoptCreatedSession} />
               </div>
             </section>

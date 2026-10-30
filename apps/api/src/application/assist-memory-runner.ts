@@ -16,7 +16,7 @@ import { recordModelInvocation } from './model-call-recorder.js';
 import { readAdmission } from './maintenance-admission.js';
 import { recheckAssistSources } from './assist-source-content.js';
 import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, resolveMemoryContextLimits,
-  memoryHistoryFingerprint, prepareMemoryCompaction } from './assist-memory.js';
+  memoryHistoryFingerprint, memoryCompactionTurn, prepareMemoryCompaction, MEMORY_BATCH_MESSAGES } from './assist-memory.js';
 
 export interface AssistMemoryWorkerOptions {
   workerId: string; leaseMs: number; storage: ManagedContentStore;
@@ -45,7 +45,8 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
   const r = createRepositories(db);
   const selection = await r.modelSelection.readForSession(request.session_id);
   const current = await freezeAssistModelSnapshot(r, selection, options.modelEnv ?? process.env,
-    { requiresTools: false, requiresJsonOutput: true });
+    { requiresTools: false, requiresJsonOutput: true },
+    { workspaceId: request.workspace_id, sessionId: request.session_id });
   const currentCandidate = current === undefined ? undefined : parseAssistModelSnapshot(current.snapshot).candidates[0];
   if (currentCandidate?.connection.model !== candidate.connection.model ||
       currentCandidate.connection.configFingerprint !== candidate.connection.configFingerprint) {
@@ -62,7 +63,7 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
 
 /** Automatic requests are prepared while the claimed message's session is locked, then requeued. */
 export async function prepareAutomaticMemory(db: DbExecutor, sessionId: string, modelSnapshot: JsonObject | null,
-  options: AssistMemoryWorkerOptions): Promise<boolean> {
+  options: AssistMemoryWorkerOptions, projectedInputBytes = 0): Promise<boolean> {
   return withTransaction(db, async (r) => {
     if ((await readAdmission(r, 'share')).mode !== 'NORMAL') return false;
     const session = await r.assist.readSession(sessionId, true);
@@ -70,7 +71,8 @@ export async function prepareAutomaticMemory(db: DbExecutor, sessionId: string, 
     const state = await r.assistMemory.state(session.id);
     const checkpoint = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
     const invalid = checkpoint !== undefined && !await checkpointAvailable(r, options.storage, session, checkpoint);
-    const id = await prepareMemoryCompaction(r, session, 'AUTO', options.modelEnv ?? process.env, invalid, modelSnapshot);
+    const id = await prepareMemoryCompaction(r, session, 'AUTO', options.modelEnv ?? process.env, invalid,
+      modelSnapshot, projectedInputBytes);
     return id !== null;
   });
 }
@@ -117,7 +119,24 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     }
     const state = await r.assistMemory.state(session.id);
     if ((state?.revision ?? 0n) !== job.memory_revision) throw new AssistMemoryUnavailable('MEMORY_WINDOW_CHANGED');
-    const history = await r.assistMemory.history(session.id, state?.cleared_through_seq ?? 0n, job.through_seq);
+    const prior = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
+    const cursor = job.model_snapshot.memory_compaction;
+    const batch: JsonObject | null = typeof cursor === 'object' && cursor !== null && !Array.isArray(cursor)
+      ? cursor as JsonObject : null;
+    if (batch !== null && (typeof batch.after_seq !== 'string' || !/^(0|[1-9]\d{0,18})$/u.test(batch.after_seq) ||
+        batch.base_checkpoint_id !== null && typeof batch.base_checkpoint_id !== 'string')) {
+      throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
+    }
+    const previous = prior !== undefined && (batch === null || batch.base_checkpoint_id === prior.id) &&
+      await checkpointAvailable(r, options.storage, session, prior) ? prior : null;
+    const after = batch === null ? state?.cleared_through_seq ?? 0n : BigInt(batch.after_seq as string);
+    if (batch !== null && (batch.base_checkpoint_id !== null &&
+        (previous === null || after !== previous.through_seq) ||
+        batch.base_checkpoint_id === null && after !== (state?.cleared_through_seq ?? 0n))) {
+      throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
+    }
+    const history = await r.assistMemory.history(session.id, after, job.through_seq,
+      batch === null ? 10001 : MEMORY_BATCH_MESSAGES + 1);
     if (history.length > 10000 || memoryHistoryFingerprint(history) !== job.source_sha256 ||
         JSON.stringify(history.map((m) => m.id)) !== JSON.stringify(job.source_message_ids)) {
       throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
@@ -125,8 +144,6 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     if (await r.assistMemory.hasUnsettledTools(session.id, history.map((m) => m.id))) {
       throw new AssistMemoryUnavailable('MEMORY_UNRESOLVED_TOOL_STATE');
     }
-    const prior = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
-    const previous = prior !== undefined && await checkpointAvailable(r, options.storage, session, prior) ? prior : null;
     const sources = new Map<string, JsonObject>();
     for (const ref of previous?.sources ?? []) {
       if (typeof ref === 'object' && ref !== null && !Array.isArray(ref)) sources.set(JSON.stringify(ref), ref as JsonObject);
@@ -134,6 +151,7 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     const turns: JsonObject[] = [];
     for (const message of history) {
       if (previous !== null && message.seq <= previous.through_seq) continue;
+      if (message.withdrawn_at !== null) { turns.push(memoryCompactionTurn(message)); continue; }
       if (message.role === 'ASSISTANT' && message.status === 'COMPLETED') {
         const checked = await recheckAssistSources(r, options.storage, session, message.sources);
         const recallEnabled = (await r.information.readMemorySettings(session.workspace_id))?.recall_enabled !== false;
@@ -156,13 +174,14 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
           if (typeof ref === 'object' && ref !== null && !Array.isArray(ref)) sources.set(JSON.stringify(ref), ref);
         }
       }
-      turns.push({ id: message.id, seq: message.seq.toString(), role: message.role,
-        status: message.status, error_code: message.error_code,
-        content: message.content ?? '（该轮无可用文本，不能推断图片或执行成功。）' });
+      turns.push(memoryCompactionTurn(message));
     }
     if (sources.size > 512) throw new AssistMemoryUnavailable('MEMORY_SOURCE_BUDGET');
     const content = JSON.stringify({ previous_summary: previous?.summary ?? null, completed_turns: turns });
-    const limits = await resolveMemoryContextLimits(r, session.workspace_id, job.model_snapshot);
+    // 0145：压缩输入的容量按**会话档位**判定（没有冻结快照时尤其重要）——
+    // 用工作区默认会让「会话选了 512K、压缩仍按工作区没设置时的 128KB」提前失败。
+    const limits = await resolveMemoryContextLimits(r, session.workspace_id, job.model_snapshot,
+      session.id);
     if (Buffer.byteLength(content, 'utf8') > limits.inputBytes) throw new AssistMemoryUnavailable('MEMORY_COMPACTION_INPUT_TOO_LARGE');
     const port = await resolveCompactionPort(db, job, options);
     const recorded = await recordModelInvocation(db, {

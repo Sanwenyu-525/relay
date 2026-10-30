@@ -12,6 +12,10 @@ import { listAssistMessages } from '../../src/application/assist-queries.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { runSessionReadonlyRounds } from '../../src/application/assistant-readonly-round.js';
+import { createDelegation, listSessionDelegations, reconcileDelegationAttempts,
+  runDelegationAttemptFlow } from '../../src/application/subagent-delegation.js';
+import { ModelCallRepository, ModelScopeBudgetError } from '../../src/model/model-call-repository.js';
+import { freshAssistModelAttemptState } from '../../src/application/assist-model-snapshot.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
@@ -26,7 +30,7 @@ import { FakeModelPort, type AssistModelPort, type AssistResult } from
 import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
 import type { GatewayCapability } from '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
-import { createDataRoot } from './api-harness.js';
+import { createDataRoot, startTestApi, workspacePath } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from
   './integration-support.js';
 
@@ -257,6 +261,193 @@ async function countRunsOfProject(projectId: string): Promise<number> {
     where t.project_id = ${projectId}) as present`.execute(app.db);
   return rows.rows[0]?.present === true ? 1 : 0;
 }
+
+// ---------------------------------------------------------------- Session-scoped multi-agent collaboration
+
+test('MA-session: two real child reads overlap and return evidence to the parent', async () => {
+  const fx = await fixture();
+  let started = 0;
+  let release!: () => void;
+  const joined = new Promise<void>((resolve) => { release = resolve; });
+  const timer = setTimeout(release, 5_000);
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      const feedback = request.toolTurns?.flatMap((turn) => turn.results) ?? [];
+      if (request.system.includes('SUBAGENT_V1')) {
+        assert.ok(!request.tools?.some((tool) => tool.name === 'delegate_subagent'
+          || tool.name === 'write_file' || tool.name === 'apply_patch'));
+        if (feedback.length === 0) {
+          started += 1;
+          if (started === 2) release();
+          await joined;
+          assert.equal(started, 2, 'both child invocations must start before either finishes');
+          return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: `child-read-${started}`,
+            name: 'read_file', arguments: { relative_path: 'README.md' } }],
+            preamble: '', providerRequestId: 'child-read', usage: { inputTokens: 1, outputTokens: 1 } };
+        }
+        assert.ok(feedback.some((result) => result.content.includes(fx.marker)));
+        return { kind: 'CONTENT', content: JSON.stringify({ reply: fx.marker,
+          findings: [{ statement: fx.marker, evidence: 'README.md', confidence: 'CONFIRMED' }],
+          conclusion: '已读取真实文件' }), providerRequestId: 'child-finished',
+          usage: { inputTokens: 1, outputTokens: 1 } };
+      }
+      if (feedback.length === 0) {
+        return { kind: 'TOOL_CALLS', calls: ['INVESTIGATE', 'REVIEW'].map((role, index) => ({
+          providerToolCallId: `delegate-${index}`, name: 'delegate_subagent',
+          arguments: { role, objective: '核对 README 中的事实', scope: ['README.md'],
+            ...(role === 'REVIEW' ? { baseline: 'fixture-readonly-v1' } : {}) } })),
+          preamble: '', providerRequestId: 'parent-delegate', usage: { inputTokens: 1, outputTokens: 1 } };
+      }
+      assert.equal(feedback.length, 2);
+      for (const result of feedback) {
+        const body = JSON.parse(result.content) as { status: string; reply: string };
+        assert.equal(body.status, 'SUCCEEDED');
+        assert.equal(body.reply, fx.marker);
+      }
+      return { kind: 'CONTENT', content: `两个子任务均读到 ${fx.marker}`,
+        providerRequestId: 'parent-summary', usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+  try {
+    const result = await ask(fx, '并行调查与核对 README，然后汇总', port);
+    assert.equal(result.status, 'COMPLETED', JSON.stringify(result));
+    assert.ok(result.content?.includes(fx.marker));
+    const delegations = await listSessionDelegations(app.db, {
+      workspaceId: fx.workspaceId, sessionId: fx.sessionId });
+    assert.equal(delegations.length, 2);
+    for (const delegation of delegations) {
+      assert.equal(delegation.status, 'SUCCEEDED');
+      assert.deepEqual(delegation.scope, ['README.md']);
+      assert.ok(delegation.result_summary?.includes(fx.marker));
+      assert.ok(delegation.child_session_id);
+      await assert.rejects(requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+        sessionId: delegation.child_session_id, commandId: randomUUID(), content: '改写文件' }),
+      /子 Agent 会话仅用于查看/);
+    }
+    assert.equal(await countProjectRows('tasks', fx.projectId), 0);
+    assert.equal(await readFile(join(fx.root, 'README.md'), 'utf8'),
+      `# 目录说明\n本文件的随机标记：${fx.marker}\n`);
+  } finally { clearTimeout(timer); }
+});
+
+async function pendingDelegation(fx: AgentFixture) {
+  const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, commandId: randomUUID(), content: '只读调查' });
+  const parent = await createRepositories(app.db).assist.readSession(fx.sessionId);
+  assert.ok(parent);
+  const created = await createDelegation(app.db, { parentSession: parent,
+    parentMessageId: sent.result.assistant_message_id, parentToolCallId: null,
+    request: { role: 'INVESTIGATE', objective: '读取 README', scope: ['README.md'],
+      baseline: null, outputRequirements: '给出证据', required: false },
+    modelSelectionSnapshot: null, workerId: 'ma-protocol' });
+  await sql`update assist_messages set status = 'COMPLETED', content = 'protocol fixture'
+    where id = ${sent.result.assistant_message_id}`.execute(app.db);
+  return created;
+}
+
+test('MA-session: recovery retains a live child and reconciles its saved result once', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const r = createRepositories(app.db);
+  assert.equal((await r.subagents.readAttempt(created.attemptId))?.result_message_id,
+    created.childMessageId);
+  await reconcileDelegationAttempts(app.db, { now: new Date(), leaseMs: 60_000 });
+  assert.equal((await r.subagents.readDelegation(created.delegationId))?.status, 'RUNNING');
+  await sql`update assist_messages set status = 'COMPLETED', content = '已保存的真实结果'
+    where id = ${created.childMessageId}`.execute(app.db);
+  await reconcileDelegationAttempts(app.db, { now: new Date(), leaseMs: 60_000 });
+  const recovered = await r.subagents.readDelegation(created.delegationId);
+  assert.equal(recovered?.status, 'SUCCEEDED');
+  assert.equal(recovered?.result_summary, '已保存的真实结果');
+  await reconcileDelegationAttempts(app.db, { now: new Date(), leaseMs: 60_000 });
+  assert.equal((await r.subagents.readDelegation(created.delegationId))?.revision, recovered.revision);
+});
+
+test('MA-session: bounded retry closes the first attempt and preserves model identity', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const snapshot = { fixture: 'frozen-model-identity' };
+  await sql`update assist_messages set model_selection_snapshot = ${JSON.stringify(snapshot)}::jsonb,
+    model_attempt_state = ${JSON.stringify(freshAssistModelAttemptState())}::jsonb,
+    model_credential_fingerprint = ${'a'.repeat(64)}
+    where id = ${created.childMessageId}`.execute(app.db);
+  let calls = 0;
+  await runDelegationAttemptFlow(app.db, { created, workerId: 'ma-protocol',
+    signal: new AbortController().signal, runChild: async ({ childMessage }) => {
+      calls += 1;
+      assert.deepEqual(childMessage.model_selection_snapshot, snapshot);
+      assert.equal(childMessage.model_credential_fingerprint, 'a'.repeat(64));
+      return calls === 1 ? { status: 'FAILED', errorCode: 'MODEL_TOOL_OUTPUT_INVALID', content: null }
+        : { status: 'SUCCEEDED', errorCode: null, content: '{"reply":"已修正"}' };
+    } });
+  const attempts = await createRepositories(app.db).subagents.listAttempts(created.delegationId);
+  assert.deepEqual(attempts.map((attempt) => attempt.status), ['FAILED', 'SUCCEEDED']);
+  assert.ok(attempts.every((attempt) => attempt.result_message_id !== null));
+});
+
+test('MA-session: unclaimed child after a crash is swept without becoming a main generation', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const r = createRepositories(app.db);
+  const threshold = new Date(Date.now() - 60_000);
+  await sql`update assist_messages set updated_at = now() - interval '5 minutes'
+    where id = ${created.childMessageId}`.execute(app.db);
+  assert.equal(await r.assist.hasRunnableGeneration(threshold), true);
+  await r.assist.failExpiredLeases(threshold);
+  await reconcileDelegationAttempts(app.db, { now: new Date(), leaseMs: 60_000 });
+  assert.equal((await r.assist.readMessage(created.childMessageId))?.status, 'FAILED');
+  assert.equal((await r.subagents.readDelegation(created.delegationId))?.status, 'FAILED');
+});
+
+test('MA-session: cancelled child failure never creates a retry', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const controller = new AbortController();
+  await runDelegationAttemptFlow(app.db, { created, workerId: 'ma-protocol',
+    signal: controller.signal, runChild: async () => {
+      controller.abort();
+      return { status: 'FAILED', errorCode: 'MODEL_FAILED', content: null };
+    } });
+  assert.equal((await createRepositories(app.db).subagents.listAttempts(created.delegationId)).length, 1);
+});
+
+test('MA-session: child calls reserve the final shared call for the parent summary', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const calls = new ModelCallRepository(app.db);
+  const identity = { ...new FakeModelPort().identity,
+    budget: { callReservationTokens: 100, scopeCallLimit: 2, scopeTokenLimit: 1_000 } };
+  const origin = { workspaceId: fx.workspaceId, kind: 'ASSIST' as const,
+    assistMessageId: created.childMessageId };
+  const first = randomUUID();
+  await calls.begin(first, origin, identity);
+  await calls.settle(first, { status: 'COMPLETED', usage: { inputTokens: 1, outputTokens: 1 } });
+  await assert.rejects(calls.begin(randomUUID(), origin, identity), ModelScopeBudgetError);
+  const delegation = await createRepositories(app.db).subagents.readDelegation(created.delegationId);
+  assert.ok(delegation);
+  await calls.begin(randomUUID(), { ...origin, assistMessageId: delegation.parent_message_id }, identity);
+});
+
+test('MA-session: HTTP exposes durable child links and hides other workspaces', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const api = await startTestApi();
+  try {
+    const path = workspacePath(fx.workspaceId, `/assist-sessions/${fx.sessionId}`);
+    const response = await api.get(`${path}/delegations`);
+    assert.equal(response.status, 200, response.text);
+    const items = (response.body as { items: { delegation_id: string; scope: string[] }[] }).items;
+    assert.equal(items[0]?.delegation_id, created.delegationId);
+    assert.deepEqual(items[0]?.scope, ['README.md']);
+    const child = await api.get(workspacePath(fx.workspaceId,
+      `/assist-sessions/${created.childSessionId}`));
+    assert.equal(child.status, 200, child.text);
+    assert.equal((child.body as { parent_session_id: string }).parent_session_id, fx.sessionId);
+    const foreign = await api.get(workspacePath(randomUUID(),
+      `/assist-sessions/${fx.sessionId}/delegations`));
+    assert.equal(foreign.status, 404, foreign.text);
+    assert.ok(!foreign.text.includes(created.delegationId));
+  } finally { await api.stop(); }
+});
 
 // ---------------------------------------------------------------- AM-01 / AM-02
 
@@ -890,6 +1081,44 @@ test('消费插话后模型失败带 Provider 类别：MODEL_FAILED 不是唯一
   assert.equal(queuedRow?.status, 'CANCELLED');
   assert.equal(queuedRow?.error_code, 'STEERED', '有类别也不能把已消费的插话算成没消费');
 });
+
+for (const inputByteLimit of [22_000, 10_000]) {
+  test(`tool context pressure preserves the settled result and stops new actions at ${inputByteLimit} bytes`, async () => {
+    const fx = await fixture();
+    const body = 'A'.repeat(14_000);
+    await writeFile(join(fx.root, 'README.md'), body, 'utf8');
+    const r = createRepositories(app.db);
+    await requestAssistMessage(app.db, { workspaceId: fx.workspaceId, sessionId: fx.sessionId,
+      commandId: randomUUID(), content: 'read once' });
+    const message = (await r.assist.claimNextPendingMessage(randomUUID()))!;
+    const session = (await r.assist.readSession(fx.sessionId))!;
+    let calls = 0;
+    const modelPort: AssistModelPort = { identity: new FakeModelPort().identity, assist: async (request) => {
+      calls += 1;
+      if (calls === 1) return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'read-once', name: 'read_file',
+        arguments: { relative_path: 'README.md' } }], preamble: '', providerRequestId: 'tool-first',
+        usage: { inputTokens: 10, outputTokens: 2 } };
+      assert.deepEqual(request.tools, [], 'pressure must close the tool vocabulary before the round limit');
+      assert.ok(request.toolTurns?.[0]?.results[0]?.content.includes(body), 'retain the full settled result');
+      return { kind: 'CONTENT', content: 'finished safely', providerRequestId: 'tool-close',
+        usage: { inputTokens: 20, outputTokens: 3 } };
+    } };
+    const outcome = await runSessionReadonlyRounds(app.db, { session, message, inputByteLimit,
+      availableTools: ['read_file'], system: 'TEST', contextTurns: [{ role: 'user', content: 'h'.repeat(6000) }],
+      modelPort, signal: new AbortController().signal,
+      resolveOrigin: async () => ({ ok: true, canonicalRoot: fx.canonicalRoot,
+        origin: { kind: 'AGENT_SESSION_READ', projectId: fx.projectId, resourceId: session.working_resource_id!,
+          sessionId: session.id, messageId: message.id } }) });
+    if (inputByteLimit === 22_000) { assert.equal(outcome.kind, 'CONTENT'); assert.equal(calls, 2); }
+    else { assert.equal(outcome.kind, 'FAILED');
+      if (outcome.kind === 'FAILED') assert.equal(outcome.errorCode, 'MEMORY_CONTEXT_TOO_LARGE');
+      assert.equal(calls, 1, 'hard overflow must not make a second external request'); }
+    const tools = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]?.status, 'SETTLED');
+    assert.equal(await readFile(join(fx.root, 'README.md'), 'utf8'), body);
+  });
+}
 
 test('消费插话后取消：本轮按 CANCELLED 收口，已消费插话不复活且原文保留', async () => {
   const fx = await fixture();

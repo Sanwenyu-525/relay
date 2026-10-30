@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const OUT = "D:/Develop/Relay-Agent/ui-screenshots-2026-10-11";
+const OUT = "D:/Develop/Relay-Agent/docs/testing/evidence/ui-screenshots-2026-10-11";
 const ENV_PATH = "D:/Develop/Relay-Agent/apps/api/.env";
 const SESSION_PATH = "D:/Develop/Relay-Agent/.relay-test/session.json";
 

@@ -147,11 +147,11 @@ export class SubagentRepository {
   // ------------------------------------------------------------------ 子尝试
 
   async insertAttempt(input: { id: string; delegationId: string; attemptIndex: number;
-    claimEpoch: bigint; workerId: string }): Promise<AssistDelegationAttemptRow> {
+    claimEpoch: bigint; workerId: string; resultMessageId?: string }): Promise<AssistDelegationAttemptRow> {
     const rows = (await sql<AssistDelegationAttemptRow>`insert into assist_delegation_attempts
-      (id, delegation_id, attempt_index, claim_epoch, worker_id, status)
+      (id, delegation_id, attempt_index, claim_epoch, worker_id, result_message_id, status)
       values (${input.id}, ${input.delegationId}, ${input.attemptIndex}, ${input.claimEpoch},
-      ${input.workerId}, 'RUNNING') returning ${ATTEMPT_COLUMNS}`.execute(this.db)).rows;
+      ${input.workerId}, ${input.resultMessageId ?? null}, 'RUNNING') returning ${ATTEMPT_COLUMNS}`.execute(this.db)).rows;
     return rows[0]!;
   }
 
@@ -205,6 +205,13 @@ export class SubagentRepository {
       join assist_delegations d on d.id = a.delegation_id
       where a.status = 'RUNNING'
       order by a.created_at`.execute(this.db)).rows;
-    return rows;
+    // to_jsonb bypasses pg's timestamp/bigint parsers.
+    return rows.map(({ attempt, delegation }) => ({
+      attempt: { ...attempt, claim_epoch: BigInt(attempt.claim_epoch),
+        created_at: new Date(attempt.created_at), updated_at: new Date(attempt.updated_at) },
+      delegation: { ...delegation, revision: BigInt(delegation.revision),
+        created_at: new Date(delegation.created_at), updated_at: new Date(delegation.updated_at),
+        closed_at: delegation.closed_at === null ? null : new Date(delegation.closed_at) },
+    }));
   }
 }

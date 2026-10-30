@@ -35,3 +35,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* G05：零高度的滚动锚点，不占布局，仅用于测量元信息块之后的位置偏移。 */
+.trajectory-scroll-anchor { height: 0; }

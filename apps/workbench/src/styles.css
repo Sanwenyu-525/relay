@@ -958,38 +958,69 @@ svg {
   height: var(--relay-font-size-caption);
   color: var(--relay-color-text-muted);
 }
-/* 运行指示（2026-10-28，用户要求「切到别的会话也能看出哪条在生成」）。
-   与类型图标**同一格同一尺寸**（基座仍是 .recent-work-kind）：只换图形，不换几何——
-   行高、行距、标题可用宽、置顶徽标与未读圆点的位置一像素不动
+/* 会话行状态图标（2026-10-30，用户要求把「运行中」扩成一套完整状态）。
+   八种状态共用**这一格、这一尺寸**（基座仍是 .recent-work-kind，12px、flex: none）：
+   只换图形与状态类，行高、行距、标题可用宽、置顶徽标与未读圆点的位置一像素不动
    （recentWorkRailDensity.spec.ts 仍在守这一列的下限）。
-   两种状态用**形状**区分，不靠颜色，也不靠动效：
-   · 运行中＝一段弧，绕自身中心 1s 一周、linear infinite；
-   · 排队中＝一圈点线，静止。
-   因此关掉动效时两者仍然分得开，弧不会因为「不动了」被读成排队。
-   只旋转这枚 12px 图形本身：行、标题、边框、底色一律静止，不做整行流光、发光或闪烁。
-   前景色只用既有两档：运行中借 text.secondary（与未读行同档，不新开强调色），
-   排队中保持类型图标那一档 muted——「还没开始跑」不该比「正在跑」更亮。 */
-.recent-work-kind--running {
-  color: var(--relay-color-text-secondary);
+
+   三层信号，按可靠性排序：
+   1. **形状**——三点、钟、圆勾、方框叹号、圆叹号、斜线圆、消息框、归档盒，八个轮廓互不相同。
+      关动效、灰度打印、色觉差异下都还分得开，状态不靠动效或颜色单独表达。
+   2. **颜色**——只有两档离开中性色：失败借 danger（低饱和砖红），待确认借 warning（琥珀）。
+      其余六态留在 muted / secondary 两档既有前景色，不为「完成」新开绿色：左栏绝大多数行
+      都是完成态，一片绿会把这一列读成装饰而不是状态。
+   3. **动效**——只有运行中在动（三个圆点错峰起伏），完成态一次性收敛 120ms；
+      其余六态完全静止，不做发光、呼吸、闪烁或旋转。 */
+.recent-work-kind--running { color: var(--relay-color-text-secondary); }
+.recent-work-kind--pending,
+.recent-work-kind--completed,
+.recent-work-kind--cancelled,
+.recent-work-kind--not-started,
+.recent-work-kind--archived { color: var(--relay-color-text-muted); }
+/* 等待确认：琥珀是既有 warning 前景色（#96622A，在纸底上前提是正文级对比度）。
+   它是这一列唯一「需要人动手」的状态，所以允许比其余中性态亮一档。 */
+.recent-work-kind--waiting-approval { color: var(--relay-color-status-warning-text); }
+/* 失败：低饱和砖红（palette.red #A34F43），不是告警弹窗那种高饱和红——
+   一条失败的会话留在列表里是历史事实，不该持续尖叫。 */
+.recent-work-kind--failed { color: var(--relay-color-status-danger-text); }
+
+/* 运行中：三个圆点，0 / 140 / 280ms 错峰上下，一轮 1.1s（token motion.loop.thinking）。
+   只动圆点自身的 transform：SVG 子元素的位移不参与布局，这一格的盒子尺寸恒定，
+   行的外接矩形因此不随动画变化。起伏占一轮的前 60%，余下时间静止——
+   一列里同时有几条在跑时，也不会变成一排持续跳动的灯。 */
+.recent-work-state-dot {
+  /* 用 view-box 作 transform 参照：位移量按 24 单位的 viewBox 计，
+     12px 下正好是 1.6px 的一次轻抬，与 12px 盒子的笔画同量级。 */
+  transform-box: view-box;
+  animation: recent-work-dot var(--relay-motion-loop-thinking) var(--relay-motion-easing-loop) infinite;
+}
+.recent-work-kind--running .recent-work-state-dot:nth-of-type(2) { animation-delay: 140ms; }
+.recent-work-kind--running .recent-work-state-dot:nth-of-type(3) { animation-delay: 280ms; }
+@keyframes recent-work-dot {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-3.2px); }
+}
+/* 完成：只允许一次轻微收敛（120ms，motion.duration.fast + easing.standard）。
+   iteration-count 固定为 1：轮询每分钟重渲染这一列时不会再播一次，
+   只有「状态真的翻到完成」那一次换上新类才起播。 */
+.recent-work-kind--completed {
+  transform-box: view-box;
   transform-origin: 50% 50%;
-  /* 秒级匀速：不加减速、不呼吸，像秒表而不是像「加载中」的脉冲。 */
-  animation: recent-work-spin var(--relay-motion-loop-spin) linear infinite;
+  animation: recent-work-settle var(--relay-motion-duration-fast) var(--relay-motion-easing-standard) 1 both;
 }
-@keyframes recent-work-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@keyframes recent-work-settle {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
 }
-/* 关动效与系统「减少动态效果」都只停旋转，不换图形：状态本身不依赖动效表达。
+/* 关动效与系统「减少动态效果」都只停动画，不换图形：状态本身不依赖动效表达。
    `!important` 是为了压过全局 `* { animation-duration: 0ms !important }`——
    只把时长压到 0 会让一圈无限动画在原地瞬间重放，读起来像坏掉的闪烁。 */
-html[data-motion="off"] .recent-work-kind--running { animation: none !important; }
+html[data-motion="off"] .recent-work-kind,
+html[data-motion="off"] .recent-work-state-dot { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .recent-work-kind--running { animation: none !important; }
+  .recent-work-kind,
+  .recent-work-state-dot { animation: none !important; }
 }
-/* 排队中：图形由 JSX 换成点线，这里不需要任何动画声明。显式写一条 none 是让
-   「这一档故意不动」在样式表里读得出来，也挡住将来别处给 .recent-work-kind
-   加动画时误伤这一格。 */
-.recent-work-kind--pending { animation: none; }
 /* 置顶标记：行只有一档高，只画一枚同尺寸图标 + 两字，不与标题抢横向空间。
    用 selection 前景色而不是新的强调色——置顶是导航状态，不该读成一条业务事实。 */
 .recent-work-pin {
@@ -1016,7 +1047,10 @@ html[data-motion="off"] .recent-work-kind--running { animation: none !important;
 /* 未读行的标题加粗：读/未读的差别不靠底色（底色已被选中态占用），只靠字重与那枚圆点。
    当前行本来就是 medium，未读再加一层 semibold——同一行既选中又未读时仍然读得出未读。 */
 .recent-work-item--unread .recent-work-title { font-weight: var(--relay-font-weight-semibold); }
-.recent-work-item--unread .recent-work-kind { color: var(--relay-color-text-secondary); }
+/* 未读只提亮**类型图标**这一种：`data-state` 在场时那枚图形在陈述执行状态，
+   失败的红、待确认的琥珀不能被「未读」刷成 secondary —— 两个维度各自成立，
+   谁也不覆盖谁。未读本身的第二道信号（加粗标题 + 圆点）不受影响。 */
+.recent-work-item--unread .recent-work-kind:not([data-state]) { color: var(--relay-color-text-secondary); }
 
 /* 「未开始」标记（2026-10-24 用户截图指令）：还没有消息的会话在左栏与说过话的会话同形同标题，
    点进去只剩欢迎空态。与置顶徽标同一形制（caption 文字、同一格间距），不新开颜色、不加第二行——

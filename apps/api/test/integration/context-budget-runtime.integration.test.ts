@@ -4,7 +4,8 @@ import test, { after, before } from 'node:test';
 
 import { sql } from 'kysely';
 
-import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
+import { createAssistSession, requestAssistMessage, setSessionContextBudget }
+  from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { freezeAssistModelSnapshot } from '../../src/application/assist-model-snapshot.js';
 import { resolveRunModelPort } from '../../src/application/run-model-port.js';
@@ -96,6 +97,12 @@ async function fixture(): Promise<{ workspaceId: string; projectId: string; sess
   return { workspaceId, projectId, sessionId: session.result.session_id };
 }
 
+/** 0145：档位现在是会话级事实，测试按会话设置（工作区默认只影响没有会话的消费者）。 */
+async function setSessionBudget(workspaceId: string, sessionId: string, tokens: number) {
+  await setSessionContextBudget(app.db, { workspaceId, sessionId, commandId: randomUUID(),
+    expectedRevision: '0', budgetTokens: tokens });
+}
+
 async function tick(workspaceId: string, sessionId: string) {
   const sent = await requestAssistMessage(app.db, { workspaceId, sessionId,
     commandId: randomUUID(), content: BIG_MESSAGE }, env);
@@ -110,8 +117,7 @@ async function tick(workspaceId: string, sessionId: string) {
 test('selected tiers keep short turns uncompressed and permit history beyond the old 128KB limit', async () => {
   for (const budgetTokens of [262_144, 524_288, 1_048_576] as const) {
     const f = await fixture();
-    await setWorkspaceContextBudget(app.db, { workspaceId: f.workspaceId,
-      commandId: randomUUID(), expectedRevision: '0', budgetTokens });
+    await setSessionBudget(f.workspaceId, f.sessionId, budgetTokens);
     await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
       expectedRevision: '1', recallEnabled: true, automaticCompaction: true, autoCapture: false });
     const r = createRepositories(app.db);
@@ -131,8 +137,7 @@ test('selected tiers keep short turns uncompressed and permit history beyond the
 test('256K compacts at its pressure threshold while 512K and 1024K retain the same originals', async () => {
   for (const budgetTokens of [262_144, 524_288, 1_048_576] as const) {
     const f = await fixture();
-    await setWorkspaceContextBudget(app.db, { workspaceId: f.workspaceId,
-      commandId: randomUUID(), expectedRevision: '0', budgetTokens });
+    await setSessionBudget(f.workspaceId, f.sessionId, budgetTokens);
     await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
       expectedRevision: '1', recallEnabled: true, automaticCompaction: true, autoCapture: false });
     const r = createRepositories(app.db);
@@ -146,7 +151,8 @@ test('256K compacts at its pressure threshold while 512K and 1024K retain the sa
     const prepared = await prepareAutomaticMemory(app.db, f.sessionId, null, options);
     assert.equal(prepared, budgetTokens === 262_144);
     if (prepared) {
-      assert.equal((await runAssistMemoryTick(app.db, options))?.status, 'COMPLETED');
+      const compacted = await runAssistMemoryTick(app.db, options);
+      assert.equal(compacted?.status, 'COMPLETED', JSON.stringify(compacted));
       const state = await r.assistMemory.state(f.sessionId);
       assert.equal((await r.assistMemory.checkpoint(state!.checkpoint_id!))?.through_seq, 4n);
     }
@@ -195,60 +201,69 @@ test('CB-01: /context-budget 是带修订的幂等写；三档词表、重放与
   } finally { await api.stop(); }
 });
 
-test('CB-02: 选定 256K 后真实聊天入口按这一档外呼；账本预留与作用域上限同步放宽', async () => {
+test('CB-02: 真实聊天入口按**会话档位**外呼；改档不影响其它会话', async () => {
   const f = await fixture();
-  // 未选档位时同一入口按进程默认拒绝：先证明这条消息确实超过 4,096。
-  // 生成器把模型预算拒绝结算成失败的助手消息，不向调用方抛错。
-  const baseline = await tick(f.workspaceId, f.sessionId);
-  assert.equal(baseline.ticked?.status, 'FAILED', JSON.stringify(baseline.ticked));
-  assert.equal(baseline.ticked?.errorCode, 'MEMORY_CONTEXT_TOO_LARGE');
-  const rejectedCalls = await sql<{ count: bigint }>`select count(*) as count from model_calls
-    where assist_message_id = ${baseline.sent.result.assistant_message_id}`.execute(app.db);
-  assert.equal(rejectedCalls.rows[0]?.count, 0n, 'work-window admission rejects before an external call is created');
+  // 会话建立时就有确定档位（262144），不需要先去设置页选一次。
+  const first = await tick(f.workspaceId, f.sessionId);
+  assert.equal(first.ticked?.status, 'COMPLETED', JSON.stringify(first.ticked));
+  const firstMessage = (await sql<{ snapshot: { budget: { call_reservation_tokens: number;
+    scope_call_limit: number; scope_token_limit: number;
+    context_budget_tokens: number | null } } }>`
+      select model_selection_snapshot as snapshot from assist_messages
+      where id = ${first.sent.result.assistant_message_id}`.execute(app.db)).rows[0];
+  assert.deepEqual(firstMessage?.snapshot.budget, { call_reservation_tokens: 262_144,
+    scope_call_limit: 32, scope_token_limit: 524_288, context_budget_tokens: 262_144 });
 
-  const second = await fixture();
-  await setWorkspaceContextBudget(app.db, { workspaceId: second.workspaceId,
-    commandId: randomUUID(), expectedRevision: '0', budgetTokens: 262_144 });
-
-  const { sent, ticked } = await tick(second.workspaceId, second.sessionId);
-  assert.equal(ticked?.status, 'COMPLETED', JSON.stringify(ticked));
-  const message = (await sql<{ status: string; content: string | null;
-    snapshot: { budget: { call_reservation_tokens: number; scope_call_limit: number;
-      scope_token_limit: number; workspace_context_budget_tokens: number | null } } }>`
-      select status, content, model_selection_snapshot as snapshot from assist_messages
-      where id = ${sent.result.assistant_message_id}`.execute(app.db)).rows[0];
-  assert.equal(message?.status, 'COMPLETED');
-  assert.equal(message?.content, REPLY);
-  assert.deepEqual(message?.snapshot.budget, { call_reservation_tokens: 262_144,
-    scope_call_limit: 32, scope_token_limit: 524_288,
-    workspace_context_budget_tokens: 262_144 });
-
+  // 把这条会话改成 512K：下一次调用的预留、作用域上限与冻结档位一起换成新档。
+  await setSessionContextBudget(app.db, { workspaceId: f.workspaceId, sessionId: f.sessionId,
+    commandId: randomUUID(), expectedRevision: '0', budgetTokens: 524_288 });
+  const second = await tick(f.workspaceId, f.sessionId);
+  assert.equal(second.ticked?.status, 'COMPLETED', JSON.stringify(second.ticked));
+  const secondMessage = (await sql<{ snapshot: { budget: { call_reservation_tokens: number;
+    scope_call_limit: number; scope_token_limit: number;
+    context_budget_tokens: number | null } } }>`
+      select model_selection_snapshot as snapshot from assist_messages
+      where id = ${second.sent.result.assistant_message_id}`.execute(app.db)).rows[0];
+  assert.deepEqual(secondMessage?.snapshot.budget, { call_reservation_tokens: 524_288,
+    scope_call_limit: 32, scope_token_limit: 1_048_576, context_budget_tokens: 524_288 });
   const calls = (await sql<{ status: string; budget_reserved_tokens: number | null;
-    usage_input_tokens: number | null }>`select status, budget_reserved_tokens,
-      usage_input_tokens from model_calls
-      where assist_message_id = ${sent.result.assistant_message_id}`.execute(app.db)).rows;
+    usage_input_tokens: number | null; context_usage: { categories: { key: string }[] } | null }>`
+      select status, budget_reserved_tokens, usage_input_tokens, context_usage from model_calls
+      where assist_message_id = ${second.sent.result.assistant_message_id}`.execute(app.db)).rows;
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.status, 'COMPLETED');
-  assert.equal(calls[0]?.budget_reserved_tokens, 262_144,
-    '记账预留取工作区档位，不是进程默认 4,096');
+  assert.equal(calls[0]?.budget_reserved_tokens, 524_288,
+    '记账预留取会话档位，不是进程默认 4,096');
   assert.equal(calls[0]?.usage_input_tokens, 5_000, 'Provider 真实上报的用量照常落账');
+  assert.ok((calls[0]?.context_usage?.categories ?? []).some((entry) => entry.key === 'SYSTEM'),
+    '这次调用的上下文构成随 CALL 行一起落库');
+
+  // 另一条会话不受影响：它自己的档位仍是 262144。
+  const otherFixture = await fixture();
+  const other = await tick(otherFixture.workspaceId, otherFixture.sessionId);
+  assert.equal(other.ticked?.status, 'COMPLETED', JSON.stringify(other.ticked));
+  const otherMessage = (await sql<{ snapshot: { budget: { call_reservation_tokens: number } } }>`
+      select model_selection_snapshot as snapshot from assist_messages
+      where id = ${other.sent.result.assistant_message_id}`.execute(app.db)).rows[0];
+  assert.equal(otherMessage?.snapshot.budget.call_reservation_tokens, 262_144,
+    '改 A 的档位不会改到 B');
 
   // 同一会话的第二次调用：作用域上限必须留出第二份预留，否则第一次结算后无法再调用。
-  const again = await tick(second.workspaceId, second.sessionId);
+  const again = await tick(f.workspaceId, f.sessionId);
   assert.equal(again.ticked?.status, 'COMPLETED', JSON.stringify(again.ticked));
 });
 
 test('CB-03: Run 准入按「当前配置 + 冻结档位」重算预算，不把选中档位误判成配置变化', async () => {
   const f = await fixture();
-  await setWorkspaceContextBudget(app.db, { workspaceId: f.workspaceId,
-    commandId: randomUUID(), expectedRevision: '0', budgetTokens: 262_144 });
+  await setSessionBudget(f.workspaceId, f.sessionId, 262_144);
   const plan = await freezeAssistModelSnapshot(createRepositories(app.db), undefined, env,
-    { requiresTools: false, requiresJsonOutput: false }, f.workspaceId);
+    { requiresTools: false, requiresJsonOutput: false },
+    { workspaceId: f.workspaceId, sessionId: f.sessionId });
   assert.ok(plan);
   const budget = (plan.snapshot.budget as { call_reservation_tokens: number;
-    scope_token_limit: number; workspace_context_budget_tokens: number | null });
+    scope_token_limit: number; context_budget_tokens: number | null });
   assert.deepEqual(budget, { call_reservation_tokens: 262_144, scope_call_limit: 32,
-    scope_token_limit: 524_288, workspace_context_budget_tokens: 262_144 });
+    scope_token_limit: 524_288, context_budget_tokens: 262_144 });
 
   const admission = await resolveRunModelPort(app.db, {
     run: { id: randomUUID() } as unknown as RunRow,

@@ -1,0 +1,154 @@
+/* 上下文用量浮层的**新增**部分（0145 / 2026-10-30）。
+   摘要段沿用 `.agent-chat-context-meter-*`（定义在 AssistView.css，已是确认过的排版），
+   这里只补三段新内容：构成列表、三档横排、动作行与说明文字。不重复定义容器几何。
+
+   数值一律 tabular-nums：余量从 5 位变 4 位时不能把「tokens」带着左右跳。 */
+
+.context-usage { display: grid; gap: var(--relay-space-2); }
+.context-usage > * { min-width: 0; }
+
+/* —— 分区 —— */
+.context-usage-section {
+  display: grid;
+  gap: var(--relay-space-1);
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.context-usage-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+/* 「估算」是属性标签，不是标题的一部分：小、灰、不抢读。 */
+.context-usage-estimate {
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-regular);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.context-usage-note {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-body);
+  text-wrap: pretty;
+}
+
+/* —— 构成列表 ——
+   一行一项：图标 + 名字 + 右对齐数值。行间分隔线只画在相邻行之间，
+   第一行与最后一行不画，列表上下不留「半截线」。 */
+.context-usage-list {
+  display: grid;
+  gap: 0;
+  margin: var(--relay-space-0-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.context-usage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-1) 0;
+  min-width: 0;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.context-usage-row + .context-usage-row {
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.context-usage-row-icon { flex: none; color: var(--relay-color-text-muted); }
+.context-usage-row-label {
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-usage-row-value {
+  margin-inline-start: auto;
+  flex: none;
+  color: var(--relay-color-text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.context-usage-row-unit {
+  margin-inline-start: 2px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+/* —— 档位 ——
+   三个选项严格一行：radio 与文字同一个命中区（label），中间靠 gap 分开。
+   不做卡片、不做两行：这一段是「选一个数」，不是三段并列的介绍。 */
+.context-usage-tiers {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-0-5) 0;
+}
+.context-usage-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--relay-control-target-minimum);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.context-usage-tier input {
+  margin: 0;
+  flex: none;
+  accent-color: var(--relay-color-accent);
+  cursor: pointer;
+}
+.context-usage-tier input:disabled { cursor: not-allowed; }
+/* 选中态只改文字颜色与字重：不改字号、不加边框，避免一行三枚一起抖。 */
+.context-usage-tier:has(input:checked) {
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.context-usage-tier:has(input:disabled) { opacity: 0.7; cursor: not-allowed; }
+/* 三档之间的细分隔线（效果图口径）：让「一行三档」读成三个并列的选项，
+   而不是一串连在一起的数字。 */
+.context-usage-tier[data-divider="true"] {
+  padding-inline-start: var(--relay-space-3);
+  border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 「预算未知」：那次调用没有可靠的冻结预算时，占比无法计算——
+   宁可写明未知，也不拿当前档位冒充历史预算。 */
+.agent-chat-context-meter-unknown {
+  margin-inline-start: auto;
+  flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+/* 窄窗口：选项收紧间距与字号（仍是一行）。 */
+@container composer-actions (max-width: 34rem) {
+  .context-usage-tiers { gap: var(--relay-space-2); }
+  .context-usage-tier { font-size: var(--relay-font-size-caption); }
+}
+
+/* 2026-10-30 复审（P0-C）：选择与保存分开后，两枚动作键与三档同一节，不另起一段说明。
+   窄窗口只剩一行时允许换行成两排，但不改变三档本身的横排。 */
+.context-usage-tier-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-1);
+}

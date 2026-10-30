@@ -50,9 +50,11 @@
 
 ## 条目 248
 
+2026-10-30 文档检查：`node scripts/check-docs.mjs` exit1，25 项均位于既有历史材料的本地证据链接，本轮新增链接未被报告为错误；不越界清理历史材料。
+
 | 功能 | 结论 | 已验证范围与依据 | 剩余项 |
 |---|---|---|---|
-| 有界多 Agent 与自动主子会话 | 未接入；未验收 | 2026-10-05 仅接续已确认规则的文档与[实施提示词](../../../prompts/bounded-multi-agent.md)，取舍归[ADR-017](../../decisions/ADR-017-bounded-multi-agent-conversations.md)；`node scripts/check-docs.mjs` exit0，仅为文档检查，没有本增量代码或运行测试成绩。**同日用户决定先只闭合单 Agent 依赖门、不启动 A/B/C**，该门的三条控制/恢复复核已交付（见上一行） | 提示词第 32 行的依赖门还剩**用户在运行中的主会话里确认工具轨迹真实可见**一项（bearer token 只在宿主内存，无法从外部复验桌面实例）。A/B/C 三片另需：工程协议核定、`gpt-6.1-sol` 指定的独立验收（当前账号不可用，用户 2026-10-01 已选保持指定模型、等待恢复，不切换）、共享工作区里并行 Agent 正在写同一批文件。MA-01–MA-22 均为[未运行规格](../verification-plan/part-04.md#21-有界多-agent-与自动会话验收规格)，M/N 原出口保留 |
+| 有界多 Agent 与自动主子会话（2026-10-30 接续） | 会话内临时只读协作已接入，实施者自检部分通过；非整体交付 | 复用 0128，修复尝试未绑消息、JSON 日期/bigint 恢复、重试丢模型身份及旧尝试未关闭、普通 Worker 误领子消息、子会话写能力、旧 claim 回传成功等边界；同批纯委派最多两子并行，共享预算为主汇总预留一次调用；新增委派 GET 与主会话协作区，子历史只读。固定 Node 24.21.0，真实隔离 PG18.6/HTTP `agent-conversation-main-loop` 31/31（新增 7 项覆盖并行真实文件读取→子反馈→主汇总、恢复、模型身份重试、取消不重试、汇总预留、HTTP 跨工作区隐藏），`model-call-budget` 5/5，wrapper exit0 且临时集群删除；模型为受控端口，非真实 Provider。提示词/权限/路由单元 34/34；Workbench `sessionDelegations`、`collaborationWorkspace`、`assist-flow` 共 108/108；独立输出目录 Vite 生产构建 exit0（仍有大 chunk 与 Tauri 动静态导入警告）。真实 Chromium 页面夹具检查主结果、Task→子会话导航、子只读、返回主会话、560px 窄窗共 5 项通过，pageerror=0；脚本及截图在本机忽略目录 `apps/workbench/output/session-collaboration/`。浏览器实测发现并修复跨 Task 导航仍带旧作用域导致子记录不可读。 | 真实 Provider、Windows/WebView2、安装未验；用户要求不再启动开发子代理，已停止先前两个子代理，后续当前 Agent 单独完成，独立验收未完成。Workbench 全类型检查仍受并行 `tests/browser/scenarioLabEntry.spec.ts:179` 的 AnimationEffect.target 类型错误阻断，不能记整体全绿。角色配置编辑与版本管理、子会话直接补充及主同步、左栏嵌套、正式 Run 的必要独立审查完成 Gate、父消费/唤醒等完整恢复窗口与 MA-01–MA-22 全规格未闭合；当前子会话普通发送明确拒绝，回主会话补充。未实现 Bot/长期成员增量，未 commit/push，M/N 原出口不升级。 |
 
 ## 条目 249
 

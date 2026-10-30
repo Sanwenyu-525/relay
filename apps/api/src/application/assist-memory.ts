@@ -18,6 +18,14 @@ export const MEMORY_RECENT_MESSAGES = 8;
 export const MEMORY_AUTO_MESSAGES = 32;
 export const MEMORY_AUTO_BYTES = 48000;
 export const MEMORY_INPUT_BYTES = 128000;
+export const MEMORY_BATCH_MESSAGES = 1000;
+
+export function memoryCompactionTurn(message: AssistMessageRow): JsonObject {
+  return { id: message.id, seq: message.seq.toString(), role: message.role,
+    status: message.withdrawn_at === null ? message.status : 'WITHDRAWN', error_code: message.error_code,
+    content: message.withdrawn_at === null
+      ? message.content ?? '（该轮无可用文本，不能推断图片或执行成功。）' : null };
+}
 
 /** Same UTF-8 / 3 estimate as the model port; reserve 25% for prompts, tools and output. */
 export function memoryContextLimits(callTokens: number | null) {
@@ -28,11 +36,15 @@ export function memoryContextLimits(callTokens: number | null) {
 }
 
 export async function resolveMemoryContextLimits(r: Repositories, workspaceId: string,
-  snapshot?: JsonObject | null) {
+  snapshot?: JsonObject | null, sessionId?: string) {
   // MEMORY_CONTEXT_TIERS: real calls use the frozen effective budget, including provider caps.
+  // 0145：没有冻结快照时（Mock 轮次、老调用）按**会话自己的档位**估算，会话读不到才退回
+  // 工作区默认——否则「会话选了 1M，压缩阈值仍按工作区 256K」会让整理比实际需要更早发生。
   const tokens = snapshot != null && snapshot.mock !== true
     ? parseAssistModelSnapshot(snapshot).budget.callReservationTokens
-    : (await r.workspaces.readDefaultDirectory(workspaceId))?.context_budget_tokens ?? null;
+    : (sessionId === undefined ? undefined
+      : (await r.assist.readSession(sessionId))?.context_budget_tokens)
+      ?? (await r.workspaces.readDefaultDirectory(workspaceId))?.context_budget_tokens ?? null;
   return memoryContextLimits(tokens);
 }
 
@@ -101,7 +113,7 @@ export async function readWorkingMemory(r: Repositories, storage: ManagedContent
   if (!session.remember) history = history.filter((m) => m.role === 'USER').slice(-1);
   const bytes = history.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
     Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
-  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot);
+  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot, session.id);
   if (bytes > limits.inputBytes) throw new AssistMemoryUnavailable('MEMORY_CONTEXT_TOO_LARGE');
   return { history, checkpoint, revision: state?.revision ?? 0n, inputByteLimit: limits.inputBytes };
 }
@@ -121,28 +133,44 @@ async function requireWritableMemorySession(r: Repositories, session: AssistSess
 
 export async function prepareMemoryCompaction(r: Repositories, session: AssistSessionRow,
   reason: 'MANUAL' | 'AUTO', env: NodeJS.ProcessEnv, forceRebuild = false,
-  modelSnapshot?: JsonObject | null): Promise<string | null> {
+  modelSnapshot?: JsonObject | null, projectedInputBytes = 0): Promise<string | null> {
   const existing = await r.assistMemory.activeRequest(session.id);
   if (existing !== undefined) return existing.id;
   const settings = await r.information.readMemorySettings(session.workspace_id);
   if (!session.remember || reason === 'AUTO' && settings?.automatic_compaction === false) return null;
   const state = await r.assistMemory.state(session.id);
   const checkpoint = state?.checkpoint_id == null ? null : await r.assistMemory.checkpoint(state.checkpoint_id) ?? null;
-  const history = await r.assistMemory.history(session.id, state?.cleared_through_seq ?? 0n);
-  if (history.length > 10000) throw new AssistMemoryUnavailable('MEMORY_HISTORY_LIMIT');
-  const delta = history.filter((m) => m.seq > (forceRebuild ? 0n : checkpoint?.through_seq ?? 0n));
+  // MEMORY_BATCH_CURSOR: scan only the active prefix; completed batches are linked by checkpoint.
+  const after = forceRebuild ? state?.cleared_through_seq ?? 0n
+    : checkpoint?.through_seq ?? state?.cleared_through_seq ?? 0n;
+  const history = await r.assistMemory.history(session.id, after, undefined, MEMORY_BATCH_MESSAGES + 1);
+  const delta = history;
   const selection = await r.modelSelection.readForSession(session.id);
   const frozen = modelSnapshot === undefined ? await freezeAssistModelSnapshot(r, selection, env,
-    { requiresTools: false, requiresJsonOutput: true }, session.workspace_id) : undefined;
+    { requiresTools: false, requiresJsonOutput: true },
+    { workspaceId: session.workspace_id, sessionId: session.id }) : undefined;
   const snapshot = modelSnapshot ?? frozen?.snapshot ?? { mock: true };
-  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot);
+  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot, session.id);
   const bytes = delta.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
     forceRebuild ? 0 : Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
-  if (reason === 'AUTO' && bytes < limits.autoBytes &&
+  if (reason === 'AUTO' && history.length <= MEMORY_BATCH_MESSAGES &&
+      Math.max(bytes, projectedInputBytes) < limits.autoBytes &&
       (limits.autoMessages === null || delta.length < limits.autoMessages)) return null;
   const candidates = delta.slice(0, -MEMORY_RECENT_MESSAGES);
-  const anchor = [...candidates].reverse().find((m) => m.role === 'ASSISTANT' && m.status === 'COMPLETED');
-  if (anchor === undefined) return null;
+  const summary = forceRebuild ? null : checkpoint?.summary ?? null;
+  let inputBytes = Buffer.byteLength(JSON.stringify({ previous_summary: summary, completed_turns: [] }), 'utf8');
+  let anchor: AssistMessageRow | undefined;
+  for (const candidate of candidates) {
+    inputBytes += Buffer.byteLength(JSON.stringify(memoryCompactionTurn(candidate)), 'utf8') + 1;
+    if (inputBytes > Math.floor(limits.inputBytes * 0.95)) break;
+    if (candidate.role === 'ASSISTANT' && candidate.status === 'COMPLETED') anchor = candidate;
+  }
+  if (anchor === undefined) {
+    if (candidates.length > 0 && inputBytes > Math.floor(limits.inputBytes * 0.95)) {
+      throw new AssistMemoryUnavailable('MEMORY_COMPACTION_INPUT_TOO_LARGE');
+    }
+    return null;
+  }
   // A failed automatic request is retried only after history advances or explicit manual action.
   const latest = (await r.assistMemory.requests(session.id))[0];
   if (reason === 'AUTO' && latest?.reason === 'AUTO' && latest.through_seq >= anchor.seq &&
@@ -156,7 +184,8 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
     authorityRevision: authority.revision, contextRevision: authority.context_revision,
     settingsRevision: settings?.revision ?? 0n, throughSeq: anchor.seq, anchorMessageId: anchor.id,
     sourceMessageIds: covered.map((m) => m.id), sourceSha256: memoryHistoryFingerprint(covered),
-    modelSnapshot: snapshot, reason });
+    modelSnapshot: { ...snapshot, memory_compaction: { after_seq: after.toString(),
+      base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null } }, reason });
   return id;
 }
 
@@ -203,9 +232,7 @@ export async function resetSessionMemory(db: DbExecutor, input: { workspaceId: s
       if (await r.assist.hasInflightMessages(session.id) || await r.assistMemory.activeRequest(session.id) !== undefined) {
         throw invalidTransition('存在在途消息或记忆整理；先取消或等待安全结束，再清除工作窗口。');
       }
-      const history = await r.assistMemory.history(session.id, 0n);
-      if (history.length > 10000) throw new AssistMemoryUnavailable('MEMORY_HISTORY_LIMIT');
-      const saved = await r.assistMemory.reset(session.id, history.at(-1)?.seq ?? 0n);
+      const saved = await r.assistMemory.reset(session.id, await r.assistMemory.latestHistorySeq(session.id));
       if (input.remember !== undefined && input.remember !== session.remember) await r.assistMemory.setRemember(session.id, input.remember);
       return { session_id: session.id, revision: saved.revision.toString(),
         session_revision: (session.revision + (input.remember !== undefined && input.remember !== session.remember ? 1n : 0n)).toString(),
@@ -236,6 +263,21 @@ export async function readSessionMemory(db: DbExecutor, storage: ManagedContentS
   const state = await r.assistMemory.state(session.id);
   const checkpoint = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
   const available = checkpoint !== undefined && session.remember && await checkpointAvailable(r, storage, session, checkpoint);
+  // Keep the public provenance list cumulative while workers only read bounded delta batches.
+  const sourceBatches: AssistMemoryCheckpointRow[] = [];
+  if (available && checkpoint !== undefined) {
+    let cursor: AssistMemoryCheckpointRow | undefined = checkpoint;
+    while (cursor !== undefined) {
+      sourceBatches.push(cursor);
+      const parentId = await r.assistMemory.checkpointParent(cursor.id);
+      if (parentId === null) break;
+      const parent = await r.assistMemory.checkpoint(parentId);
+      if (parent?.session_id !== session.id || parent.through_seq >= cursor.through_seq) {
+        throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
+      }
+      cursor = parent;
+    }
+  }
   const requests = await r.assistMemory.requests(session.id);
   return { session_id: session.id, session_revision: session.revision.toString(),
     revision: (state?.revision ?? 0n).toString(), remember: session.remember,
@@ -243,7 +285,8 @@ export async function readSessionMemory(db: DbExecutor, storage: ManagedContentS
     checkpoint: checkpoint === undefined ? null : { id: checkpoint.id, available,
       through_seq: checkpoint.through_seq.toString(), summary: available ? checkpoint.summary : null,
       model_call_id: checkpoint.model_call_id, created_at: checkpoint.created_at.toISOString(),
-      source_message_ids: available ? checkpoint.source_message_ids : [], sources: available ? checkpoint.sources : [] },
+      source_message_ids: sourceBatches.reverse().flatMap((batch) => batch.source_message_ids),
+      sources: available ? checkpoint.sources : [] },
     requests: requests.map((job) => ({ id: job.id, reason: job.reason, status: job.status,
       cancel_requested: job.cancel_requested, error_code: job.error_code, checkpoint_id: job.checkpoint_id,
       model_call_id: job.model_call_id, through_seq: job.through_seq.toString(),

@@ -14,6 +14,8 @@ import { applySnapshotBudget, parseAssistModelSnapshot } from './assist-model-sn
 import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { recordModelInvocation } from './model-call-recorder.js';
+import { contextUsageToJson, describeAssistRequestContext, type ContextUsageCategory }
+  from './assist-context-usage.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
 import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.js';
 import { classifyProviderError, type ModelErrorCategory }
@@ -308,7 +310,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
     }
 
     const input = await buildGenerationInput(r, options.storage, session, message,
-      skill !== null);
+      skill !== null, skill !== null ? undefined
+        : (bytes) => requeueForContextPressure(db, session, message, options, bytes));
     if (skill !== null && input.sourceRecords.some((source) => source.status !== 'SENT')) {
       await settleInTransaction(db, message, options.workerId, { status: 'FAILED',
         errorCode: 'SKILL_SOURCE_UNAVAILABLE', content: null,
@@ -346,8 +349,14 @@ export async function runAssistGenerationTick(db: DbExecutor,
     }
     let previewOwnershipLost = false;
     let preview!: AssistLivePreviewPublisher | null;
+    const turnCategories: Record<number, ContextUsageCategory> = { ...input.turnCategories };
+    if (method !== null && message.method_argument !== null) {
+      turnCategories[input.turns.length] = 'OTHER';
+    }
+    if (basis !== null) turnCategories[methodTurns.length] = 'MEMORY';
     const baseRequest: AssistRequest = { intent: message.intent as AssistIntent,
       system: systemPrompt, turns: skillTurns,
+      contextUsage: { turnCategories },
       ...(basis === null ? {} : { skill: { id: skill!.id,
         version: skill!.version, facts: basis.facts, input: message.skill_input ?? {} } }),
       signal: controller.signal };
@@ -397,6 +406,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
     const result = modelRoute.invokeWithCallId === undefined
       ? (await recordModelInvocation(db, {
         origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+        // 0145：这次单次生成的上下文构成（系统 + 资料 + 历史），随 STARTED 行一起提交。
+        contextUsage: contextUsageToJson(describeAssistRequestContext(baseRequest)),
         identity: modelRoute.modelPort.identity, signal: controller.signal,
         invoke: async (callId) => invokeCandidate(modelRoute.modelPort, callId),
         settle: settleAssistModelCall,
@@ -580,6 +591,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
       status: settled ? cancelled ? 'CANCELLED' : 'COMPLETED' : 'DISCARDED',
       errorCode: null, proposalIds };
   } catch (error) {
+    if (error instanceof AssistMemoryRequeued) return { messageId: message.id, sessionId: message.session_id,
+      status: 'DISCARDED', errorCode: null, proposalIds: [] };
     const errorCode = error instanceof SkillBasisUnavailable ? error.code :
       error instanceof AssistMemoryUnavailable ? error.code :
       error instanceof AssistHistorySourceUnavailable ? 'ASSIST_HISTORY_SOURCE_UNAVAILABLE' :
@@ -788,11 +801,12 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
   const settleChild = async (input: { status: SubagentChildOutcome['status'];
     errorCode: string | null; content: string | null; providerRequestId: string | null;
     usage: ModelUsage }): Promise<SubagentChildOutcome> => {
-    await settleInTransaction(db, childMessage, options.workerId, {
+    const applied = await settleInTransaction(db, childMessage, options.workerId, {
       status: input.status === 'SUCCEEDED' ? 'COMPLETED' : input.status,
       errorCode: input.errorCode, content: input.content,
       providerRequestId: input.providerRequestId, usage: input.usage });
-    return { status: input.status, errorCode: input.errorCode, content: input.content };
+    return applied ? { status: input.status, errorCode: input.errorCode, content: input.content }
+      : { status: 'FAILED', errorCode: 'SUBAGENT_MESSAGE_CLAIM_LOST', content: null };
   };
   if (!await repositories.assist.claimPendingMessage(childMessage.id, options.workerId)) {
     // 已有人领取或状态已变：不重试执行，按失败收口（恢复核对会看到真实状态）。
@@ -803,11 +817,12 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
   const controller = new AbortController();
   const onOuterAbort = (): void => controller.abort(context.signal.reason);
   context.signal.addEventListener('abort', onOuterAbort, { once: true });
+  if (context.signal.aborted) onOuterAbort();
   const heartbeat = setInterval(() => {
     void (async () => {
       const alive = await repositories.assist.heartbeatGeneration(childMessage.id,
         options.workerId);
-      if (alive && await repositories.assist.isCancelRequested(childMessage.id)) {
+      if (!alive || await repositories.assist.isCancelRequested(childMessage.id)) {
         controller.abort();
       }
     })().catch(() => undefined);
@@ -817,7 +832,7 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
     try {
       route = resolveAssistModelRoute(db, childMessage, childSession, options, options.workerId);
     } catch (error) {
-      return settleChild({ status: 'FAILED',
+      return await settleChild({ status: 'FAILED',
         errorCode: error instanceof Error ? error.message : 'SUBAGENT_MODEL_ROUTE_FAILED',
         content: null, providerRequestId: null,
         usage: { inputTokens: null, outputTokens: null } });
@@ -828,6 +843,7 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
       route.invokeAssist ?? (async (request) => (await recordModelInvocation<AssistResult>(db, {
         origin: { workspaceId: childSession.workspace_id, kind: 'ASSIST',
           assistMessageId: childMessage.id },
+        contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
         identity: route.modelPort.identity, signal: controller.signal,
         invoke: async () => route.modelPort.assist(request),
         settle: settleAssistModelCall,
@@ -841,16 +857,17 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
       // 消息正文存可读结论（reply），回传委派层的是**原始输出**——结构化 findings
       // 由委派层解析成结果摘要，两边各自可核对，不互相覆盖。
       const envelope = readSubagentEnvelope(outcome.content);
-      await settleInTransaction(db, childMessage, options.workerId, {
+      const applied = await settleInTransaction(db, childMessage, options.workerId, {
         status: 'COMPLETED', errorCode: null, content: envelope.reply,
         providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });
-      return { status: 'SUCCEEDED', errorCode: null, content: outcome.content };
+      return applied ? { status: 'SUCCEEDED', errorCode: null, content: outcome.content }
+        : { status: 'FAILED', errorCode: 'SUBAGENT_MESSAGE_CLAIM_LOST', content: null };
     }
     if (outcome.kind === 'CANCELLED') {
-      return settleChild({ status: 'CANCELLED', errorCode: null, content: null,
+      return await settleChild({ status: 'CANCELLED', errorCode: null, content: null,
         providerRequestId: outcome.providerRequestId, usage: outcome.usage });
     }
-    return settleChild({ status: 'FAILED', errorCode: outcome.errorCode, content: null,
+    return await settleChild({ status: 'FAILED', errorCode: outcome.errorCode, content: null,
       providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });
   } finally {
     clearInterval(heartbeat);
@@ -914,7 +931,8 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   // 调用同时要回答、读文件和给出候选，等拿到信封再取基线，冻结到的就不是模型看到的那一版。
   const frozenBaseline = session.project_id === null ? null :
     await freezeStateInterpretationBaseline(db, session.workspace_id, session.project_id);
-  const memoryInput = await buildGenerationInput(createRepositories(db), options.storage, session, message);
+  const memoryInput = await buildGenerationInput(createRepositories(db), options.storage, session, message,
+    false, (bytes) => requeueForContextPressure(db, session, message, options, bytes));
   // 主流程的每一次真实模型请求都必须进既有账本与共享预算闸门（#140）：免费模型路由的
   // `invokeAssist` 已自带逐次计量，不再包第二层；默认兼容端口没有记录入口，这里与
   // `runSubagentChildGeneration` 同一形态补上——每次调用一行 model_calls（STARTED 先提交，
@@ -922,13 +940,18 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   const invokeAssist: (request: AssistRequest) => Promise<AssistResult> =
     context.invokeAssist ?? (async (request) => (await recordModelInvocation<AssistResult>(db, {
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+      // 0145：主流程每次模型请求各记一份构成——多轮工具调用各自一行，不合并成一份。
+      contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
       identity: options.modelPort.identity, signal: controller.signal,
       invoke: async () => options.modelPort.assist(request),
       settle: settleAssistModelCall,
     })).result);
   const outcome = await runAgentSessionReadonlyRounds(db, { session, message,
+    allowTodo: context.chatMode !== 'PLAN',
     availableTools, system, modelPort: options.modelPort, signal: controller.signal,
     contextTurns: memoryInput.turns,
+    inputByteLimit: memoryInput.inputByteLimit,
+    contextUsage: { turnCategories: memoryInput.turnCategories },
     allowWrite: context.allowWrite,
     // 0122：插话只在这条主流程里成立——它有「步」的概念，插话让本轮多跑一步；
     // 单次生成路径没有下一次请求，排队消息会照旧另起一轮。
@@ -1379,14 +1402,38 @@ function modelErrorEvidence(error: unknown): {
   };
 }
 
+class AssistMemoryRequeued extends Error {}
+
+async function requeueForContextPressure(db: DbExecutor, session: AssistSessionRow,
+  message: AssistMessageRow, options: AssistGenerationOptions, bytes: number): Promise<boolean> {
+  if (!await prepareAutomaticMemory(db, session.id, message.model_selection_snapshot, options, bytes)) return false;
+  const r = createRepositories(db);
+  if (!await r.assist.requeueForMemory(message.id, options.workerId)) {
+    const job = await r.assistMemory.activeRequest(session.id);
+    if (job?.reason === 'AUTO') await r.assistMemory.cancel(job.id);
+    await settleInTransaction(db, message, options.workerId, { status: 'CANCELLED', errorCode: null,
+      content: null, providerRequestId: null, usage: { inputTokens: null, outputTokens: null } });
+  }
+  return true;
+}
+
 interface GenerationInput {
+  readonly inputByteLimit: number;
   readonly turns: readonly AssistTurn[];
   readonly sourceRecords: readonly JsonObject[];
+  /**
+   * 0145：这些 turns 里哪些是**注入**而不是对话。
+   *
+   * 只有这里知道第 0 段是「会话上下文 + 资料正文」、第 1 段可能是压缩摘要；
+   * 用量统计在记账处按这份下标表分类，不去猜正文前缀——正文由用户控制，猜错就等于
+   * 把用户的话算成系统注入。
+   */
+  readonly turnCategories: Readonly<Record<number, ContextUsageCategory>>;
 }
 
 async function buildGenerationInput(r: Repositories, storage: ManagedContentStore,
   session: AssistSessionRow, message: AssistMessageRow,
-  skillMode = false): Promise<GenerationInput> {
+  skillMode = false, onPressure?: (bytes: number) => Promise<boolean>): Promise<GenerationInput> {
   const authority = await r.workspaces.readAuthority(session.workspace_id);
   const working = await readWorkingMemory(r, storage, session, message.seq, message.model_selection_snapshot);
   const history = working.history;
@@ -1504,7 +1551,11 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
       };
     }),
   ];
-  if (turns.reduce((bytes, turn) => bytes + Buffer.byteLength(turn.content, 'utf8'), 0) > working.inputByteLimit) {
+  const inputBytes = turns.reduce((bytes, turn) => bytes + Buffer.byteLength(turn.content, 'utf8'), 0);
+  // MEMORY_INJECTED_PRESSURE: include actual source sections before publishing input footprints.
+  if (onPressure !== undefined && inputBytes >= Math.floor(working.inputByteLimit * 0.8) &&
+      await onPressure(inputBytes)) throw new AssistMemoryRequeued();
+  if (inputBytes > working.inputByteLimit) {
     throw new AssistMemoryUnavailable('MEMORY_CONTEXT_TOO_LARGE');
   }
   if (message.worker_id !== null &&
@@ -1540,7 +1591,9 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
     memoryRevision: working.revision, checkpointId: skillMode ? null : working.checkpoint?.id ?? null,
     sources: [...footprints.values()], hasToolContext,
     sessionScope: { project_id: session.project_id, task_id: session.task_id, working_resource_id: session.working_resource_id } });
-  return { turns, sourceRecords };
+  const turnCategories: Record<number, ContextUsageCategory> = { 0: 'MEMORY' };
+  if (working.checkpoint !== null && !skillMode) turnCategories[1] = 'MEMORY';
+  return { turns, sourceRecords, turnCategories, inputByteLimit: working.inputByteLimit };
 }
 
 /**

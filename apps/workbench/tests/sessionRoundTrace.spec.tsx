@@ -170,6 +170,26 @@ describe("在途轮次", () => {
 });
 
 describe("终态与缺口", () => {
+  /**
+   * X03 反例：正文已经结束，但这一轮仍有一项停在 REQUESTED、没有结算结果。
+   * 消息终态不等于工具账本终态：标题行不许把这种情况概括成「已结束」。
+   * 同时钉住「未结算」与被拒／未知是两回事：前者只能说仍有 N 项未结算。
+   */
+  it("正文已结束但仍有未结算的调用：标题不报「已结束」，改报未结算数", async () => {
+    stub(() => json(trace([round(0, [call(), call({
+      id: "99999999-9999-4999-8999-999999999999", ordinal: 1, tool_name: "search_text",
+      arguments: { query: "claim" }, status: "REQUESTED", settled_at: null })])])));
+    const mounted = await mount(message(), 50);
+    await flush(150);
+    await mounted.rerender(<SessionRoundTrace client={client}
+      message={message({ status: "COMPLETED" })} pollIntervalMs={50} />);
+    await flush(150);
+    const text = mounted.wrapper.text();
+    expect(text, "消息终态不能把未结算的工具说成已结束").not.toContain("已结束");
+    expect(text).toContain("2 项操作");
+    expect(text).toContain("1 项未结算");
+  });
+
   it("刷新后的终态消息不预取，首次展开才读一次", async () => {
     const fetchMock = stub(() => json(trace([round(0, [call({ status: "REJECTED",
       settled_at: "2026-10-21T00:00:00.500Z", rejection_reason: "OUTSIDE_SCOPE",

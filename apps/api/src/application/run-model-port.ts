@@ -315,15 +315,15 @@ function credentialMismatch(contract: ExecutionContractRow | undefined,
 }
 
 /**
- * 冻结预算必须与「当前配置 + 冻结工作区档位 + Provider 窗口」重算出的预期一致。
+ * 冻结预算必须与「当前配置 + 冻结档位 + Provider 窗口」重算出的预期一致。
  *
- * 不能直接拿冻结值和进程默认值比较：工作区选了 256K/512K/1M 之后，冻结值本来就不再
+ * 不能直接拿冻结值和进程默认值比较：选了 256K/512K/1M 之后，冻结值本来就不再
  * 等于 `RELAY_MODEL_MAX_CALL_TOKENS`，那样会把一次合法的档位选择误判成配置变化。
  * 反过来，进程配置真的改了（限额、调用数）时重算值仍会对不上，照常停止。
  */
 function budgetDiffers(budget: ParsedAssistModelSnapshot['budget'],
   config: ModelPortConfig, providerWindow: number | null): RunModelAdmission | undefined {
-  const expected = planAssistModelBudget(config, budget.workspaceContextBudgetTokens, providerWindow);
+  const expected = planAssistModelBudget(config, budget.contextBudgetTokens, providerWindow);
   if (budget.callReservationTokens === expected.callReservationTokens &&
       budget.scopeCallLimit === expected.scopeCallLimit &&
       budget.scopeTokenLimit === expected.scopeTokenLimit) return undefined;

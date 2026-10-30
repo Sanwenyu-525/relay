@@ -14,7 +14,9 @@
 
 | 工作 | 已记录状态 | 接续与限制 |
 |---|---|---|
-| 长短期记忆与上下文压缩（2026-10-30） | 召回与压缩计量接缝已修复；工作容量与压缩压力绑定有效预算，设置和输入框上下文圆环均可选择256K/512K/1024K及跟随默认；首条前与已有会话两种圆环入口均已接线。API、相关记忆/Agent、组件和受控 Chromium 自检通过，依据归[条目 093](docs/testing/acceptance-details/part-05.md#条目-093) | 工作台全量类型检查需按条目093的最新记录核对并行开发文件阻塞；真实 Provider 摘要/提取质量与成本、Windows/安装及本轮独立验收未覆盖；保留原分层与版本/撤销机制；未 commit/push |
+| 会话内临时多 Agent 协作（2026-10-30） | 普通 Agent 的只读调查/审查委派、两子并行、结果回传和主汇总、共享预算预留、委派读取和子历史导航已接续；修复恢复关联、重试身份及跨 Task 导航。实际证据与缺口归[条目 248](docs/testing/acceptance-details/part-14.md#条目-248) | 暂不实施 Grok bot/长期成员增量。角色版本、子补充同步、正式完成 Gate 与完整恢复仍未闭合；Provider/Windows/安装未验。用户最新要求不启动开发子代理，后续由当前 Agent 单独完成；未 commit/push |
+| AI 回复场景实验室（2026-10-30 C2C「AI 回复全场景生成与可视化验收系统」＋同日「桌面入口与集成验收」，实施者自检，未 commit/push） | 开发期 UI 出口闭合：`/__dev/assist-scenarios`（仅开发构建）用产品自己的组件（`AssistView` 回复区、`SessionRoundTrace`、`ActivityRow`、`ExecutionTrajectorySummary`、`RunToolTrajectoryPanel`、`ChatLocalFileDiff`、`FileWriteFrozenDiffPanel`、`SafeMarkdown`）播放 145 条场景（A16／B22／C17／D16／E17／F20＋G6＋X31），左目录、中真实 UI 预览、右控制器（播放／单步／重置／速度／展开收起／简洁-标准-详细／开关动效／切宽）齐备；`ScenarioRunner` 虚拟时钟逐帧回放、`createScenarioClient` 只做内存投影，不触 HTTP、PG、Provider 与子进程，夹具 ID 统一 `mock-` 前缀并在界面标「模拟」。**桌面入口**：侧栏底部辅助导航新增仅开发构建存在的「开发工具」入口（提示写全名「AI 回复场景实验室」，排在这组第一位，默认窗口高下不必滚动就点得到），点它直接进实验室，不需手敲 URL；进入前的页面经 `location.state` 交给「返回工作台」，原路返回、组件卸载、存储只动两个视图偏好。证据：jsdom `scenarioLabMatrix` 148/148，真实 Chromium `assistScenarioLab` 18/18（十条 DOM 属性逐条测量＋批量 144 通过／0 失败／A03 声明未覆盖／154 条浏览器侧断言，控制台错误 0），截图 168 张与验收报告在 `apps/workbench/results/scenario-lab/`；`node apps/workbench/scripts/check-scenario-lab-isolation.mjs` 退出 0（开发产物命中实验室串 9 处、生产产物 0 处）；集成 `scenarioLabEntry` 10/10（含默认窗口高下入口不必滚动就点得到）、生产构建浏览器隔离 `scenarioLabProdIsolation` 2/2；**真实 Windows／WebView2 实机 `accept-scenario-lab-tauri` 7/7**（真窗口内入口唯一且提示正确、145 条加载、工具展开 9 行、播放推进到「第 2/3 帧」且 4 条动画在跑、返回原样恢复、真窗口 560 宽下三栏重排且溢出 0px、实验室阶段 0 错误 0 次后端调用），截图与 JSON 在 `apps/workbench/results/scenario-lab/tauri/`。见[测试计划 §49](docs/testing/verification-plan/part-07.md#49-ai-回复场景实验室全状态回放与批量截图的开发期出口2026-10-30)与[§50 桌面入口与集成验收](docs/testing/verification-plan/part-07.md#50-ai-回复场景实验室的桌面入口与集成验收2026-10-30)、[工作台交互规范 §55](docs/frontend/workbench-design/part-15.md#55-开发期出口侧栏开发工具与-ai-回复场景实验室2026-10-30已实施实机已验)、[功能验收表](docs/testing/overall-acceptance-2026-09-28.md#当前功能验收表) | 独立验收未做；未 commit/push；实机用到两处环境限制，均与实验室无关：①`scripts/dev-desktop.ps1` 把数据根指到仓库内 `.relay-test/data`，被 API 的 `validateDataRoot` 拒为 `CONFIG_INVALID`，本轮改用构建产物＋`RELAY_DESKTOP_CONFIG_PATH` 绕开；②实机全程唯一 4xx 是工作台页的会话待办接口 404，根因是桌面内置 API 产物早于并行会话加入该路由，重建即消失；结果只描述界面呈现与交互，不写入 Task／Run／Review／Completion 或任何业务账本，也不构成模型语义质量验收。实测发现两条产品问题单列在报告「实测发现」：Run 轨迹面板状态行换措辞使自身由 58px 变 76px、把首条轨迹行顶移 19px 且无滚动补偿；产品无暗色主题。A03 的加载分支在确定性回放里抓不到，按未覆盖记录 |
+| 长短期记忆与上下文压缩（2026-10-30） | 召回、计量与会话档位已接续；设置及圆环提供256K/512K/1024K选择。新增有界增量批次与父检查点恢复，资料注入压力先整理再续跑，活动工具增长按容量收尾或停止；相关后端自检通过，依据归[条目 093](docs/testing/acceptance-details/part-05.md#条目-093)，UI历史证据同条分层记录 | 真实Provider摘要/提取质量与成本、Windows/安装及本轮独立验收未覆盖；单个完整轮次装不下仍明确失败；原分层、来源撤销与执行权机制保持；本轮未执行 commit/push |
 | Agent 主链逐层排查（2026-10-30） | 修复宿主停止准入、同会话排队排他及异步生成的心跳/停止监听生命周期，依据归[条目 191](docs/testing/acceptance-details/part-11.md#条目-191)；接续修复 SSE 完整超长行校验、上游流清理与已知缓存计量保留，模型接缝和相关 Agent/工具回归自检通过，依据归[条目 297](docs/testing/acceptance-details/part-16.md#条目-297) | 受控 Provider 不代替真实外呼与计费；Windows/WebView2、安装和独立验收未新增证据；既有间歇冷启动问题未据此关闭；未 commit/push |
 | 基础后端逐层排查（2026-10-29–30） | 修复 IPv6 Origin、IPv6 Host 及编译后源码根定位三处启动边界缺陷；修正迁移清单与聊天回归夹具。基础 PG/HTTP、选定执行恢复和基础聊天自检通过，分别见[条目 282](docs/testing/acceptance-details/part-16.md#条目-282)、[条目 283](docs/testing/acceptance-details/part-16.md#条目-283)、[条目 298](docs/testing/acceptance-details/part-16.md#条目-298) | 间歇冷启动无输出超时根因未确认；聊天全量、真实 Provider、桌面与安装各自出口仍须核对，不继承历史通过；未 commit/push |
 | 输入器与消息内联插件标识 | 2026-10-28/29 第二轮精修实施者自检通过：芯片宽度按 `@标签` 实测矩形下发（配名称省略号收口），「盖住后续正文/光标落进名称」结构上不可能；新增唯一视觉件 `components/PluginChip` 统一编辑态与消息态（sage 容器底 + `radius.badge`，零新增 token），图标两态 16px、名称只读态升到 body；修掉只读态 `<img>` 基线撑高消息气泡 1px 与禁用态灰度不一致；`forced-colors` 下补系统描边。**2026-10-29 第三轮把「跨行只盖首片段」这条按用户指认当缺陷改掉**：`placeChips()` 按 `getClientRects()` 段数判定，mention 被原生折行拆成两段以上时整枚芯片收起（`display:none`，不留半枚图标）、原文 `@标签` 恢复可见（`color: inherit`，禁用灰度照旧），折行规则不改、不用镜像层 `nowrap`，降级实测零矩形位移（光标/选区/IME/撤销落点不变）；回归从 14 条扩到 19 条，含三档宽度 × 21 档长度扫描、真实按键撤销恢复、多行消息、降级叠加 pending 禁用，并把「重载／真实发送回显／真正撤回」拆成三个状态各自取证。证据：真实 Chromium 几何套件 19/19、第一轮浏览器 7/7、芯片 jsdom 35/35、4-worker 全量 1882/1893（11 项失败逐条属既有基线，本轮路径零失败零新增）、typecheck 与 build exit 0、截图累计 34 张，见[验收详情 340](docs/testing/acceptance-details/part-19.md#条目-340)。**2026-10-29 第四轮 V3（用户「Codex 风格简洁内联 + 菜单去阴影 + 删尾随空格不得重开菜单」）**：`@` 菜单触发改绑「这一次键入」的 `mentionAt` 锚点——只有 `insertText` 新建查询，粘贴／拖入／IME／撤销／重做／删字都不新建，删除已选插件的尾随空格不再重开（无 setTimeout 或删完立刻关的掩盖），斜杠命令与键盘语义不变；标识去掉浅绿容器底/边框/阴影（透明背景、`color: inherit`、2px gap，编辑态与消息态同一套表面，宽度仍等于 `@标签` 原文字宽）；插件菜单去阴影并收成贴内容的紧凑浮层（≤320px、1px 分隔边框、常驻提示收进 `aria-describedby`），命令菜单与其他浮层不动。证据：jsdom 40/40、浏览器触发与菜单 11/11、几何与两态外观 21/21（含前后对照截图）、4-worker 全量 1887/1898（11 项失败身份属既有基线）、`tsc --noEmit` 与 `vite build` exit 0，见[验收详情 341](docs/testing/acceptance-details/part-19.md#条目-341)（第二轮见 [339](docs/testing/acceptance-details/part-19.md#条目-339)、第三轮见 [340](docs/testing/acceptance-details/part-19.md#条目-340)） | 真实 Windows/WebView2 **BLOCKED**：桌面壳固定互斥体 `Local\RelayAgentDesktopSingleInstance` 只允许单实例，第二次启动即退出；本机现有实例未开调试端口且属并行会话，接管需用户授权先关闭。窄容器跨行时读到的是 `@标签` 原文而非芯片（可读性与排版一致性的取舍）；编辑态名称留 meta 档（宽度预算）；菜单顶部键盘提示只存于无障碍语义，鼠标用户看不到；真实高对比与 DPI 缩放未验（工作台无暗色主题）；独立验收未做；未 commit/push |
@@ -68,3 +70,67 @@
 ## 按需追溯
 
 2026-10-25 整理前的完整进度内容（含并行未提交记录、具体故障与历史授权）已迁入[进度历史快照](docs/development/codex-next-step-history-20261025.md)。先用关键词/标题定位，再读取对应小节；该快照不再更新当前进度，也不构成新的任务授权。更早材料沿快照原链接保留。
+
+## 2026-10-30 上下文压力预警：发送前预检与真实路径边界
+
+本轮完成（定向修复，未提交、未改写他人文件）：
+
+- `apps/workbench/src/views/AssistView.tsx`：两条发送入口（`send` / `sendFirst`）统一走发送前预检
+  `gateThenSend` / `gateThenCreateSession`；命中新的 HIGH/SEVERE 时先在卡外停一次等确认（`ContextRiskGate`），
+  取消就是真取消（命令、正文、附件都还没生成），预检期间拒绝重复点击；审计超时/不可用/NO_FILE_ACCESS
+  一律显示「无法完成风险检查」并放行，不再静默消失。首条消息新增 `loadFirstRequiredContext`：
+  建会话之前就能看到必读文件预警（P0-A）。
+- `apps/workbench/src/components/ContextRiskNotice.tsx`：审计不可用、无读取权限、未扫描三种状态各自一行说明，
+  不再与「没有风险」混为一谈。
+- `apps/api/src/application/required-context-files.ts`：扫描改用 realpath 归一后判根内（覆盖父目录符号链接、
+  Windows Junction、失效链接、链接循环），声明文件只从复核过的真实路径读并读前重查 64 KiB 上限；
+  `readProviderWindow` 改查任意模型目录；审计指纹纳入模型、Provider 窗口、调用预算、有效输入预算（4K 取整）
+  与严重度；新增可选 `budgetTokens`（首条消息在建会话前传入已选档位）。
+- `apps/api/src/api/required-context-api.ts` + `apps/workbench/src/api/resources/requiredContext.ts`：
+  新增 `budget_tokens` 查询参数（可选，不传行为不变）。
+
+仍待做（按优先级）：
+
+1. P1-D：把同一套阈值接到受控 READ_FILE 的实际工具调用上。`gateway-actions.ts:2182` 的 `dispatchGatewayAction`
+  分派点有 `db` 与 `input.origin`（RUN 时带 runId），但没有冻结预算；需要从 Run 的 execution contract
+   读出 `callReservationTokens` 后传入 `fileReadExecute`，并把 `context_risk` 写进结算后 result。
+   本次未做：改结算结果形状会动到工具循环投影与既有集成用例，超出“最小实现”范围。
+2. P1-A 的历史上下文压力：审计目前 `history_tokens` 仍为 0。下一步在 `readCallBudget` 旁读最近一次
+   模型调用的实测 input tokens（会话维度），作为预算预留参与计算，并在 `confidence` 上区分“实测/未知”。
+3. PostgreSQL 集成与浏览器验收：本轮只跑了 apps/api 单测与两包 typecheck；`node --test` 需要 PG 的两组
+   集成用例（审计 API、工具循环）和 `tests/browser` 的 Playwright 本轮未跑。
+
+## 2026-10-30 晚补记：P1-A / P1-D 已接通，浏览器用例已跑
+
+- P1-A 历史压力：`required-context-files.ts` 新增 `readHistoryTokens()`，审计在未显式传 `historyTokens` 时
+  读该会话 `assist.latestContextUsageCall()` 的实测 `usage_input_tokens`，计入 `reserves.history_tokens`；
+  读不到就按 0 预留（不拿估计值冒充实测）。API 同时支持可选 `history_tokens` 查询参数。
+- P1-D 受控读取报警：`fileReadExecute()` 新增可选 `contextBudgetTokens`，`dispatchGatewayAction` 的
+  FILE_READ 分支通过新增 `frozenReadBudget()` 从 Run 冻结快照 `budget.call_reservation_tokens` 取预算，
+  读取成功时在 result 里附 `context_risk`（`assessReadRisk` 同一套阈值）。无冻结预算 / Mock / 快照缺失
+  时不写该字段。
+- 浏览器验收（真实 Chromium）：`tests/browser/contextRiskNotice.spec.ts` 3/3、
+  `composerDraftAssist.spec.ts` + `assistReplyHandover.spec.ts` 8/8 全部通过。
+
+仍待做：
+
+1. PostgreSQL 集成用例：本机 5432 无监听、仓库无 .env/compose 数据库配置，本轮未造库、未跑
+   `required-context-audit.integration.test.ts` 与工具循环集成用例。
+2. 真实 WebView2（Tauri 窗口）下的确认条交互、真实 Provider 窗口、真实 Codex 自动注入仍未取证。
+
+## 2026-10-30 定稿补记：PostgreSQL 集成与「拦截发送」端到端用例已跑
+
+上一条补记里「PostgreSQL 未跑」的说法已被本段取代：仓库自带 `apps/api/scripts/run-integration.ps1`
+会在 `.research/runtime-cache` 下用临时 PostgreSQL 18.6 集群 + Node 24 跑集成用例（动态回环端口、
+跑完停库删目录，不碰系统库）。本轮用它跑了三组：
+
+- `-TestFile required-context-audit`：8/8，包括「声明里的越界路径被拒」「模型窗口未知只按调用预算估算」
+  「文件改写后拿到新体积与新指纹」「有会话时按会话档位算分母」；
+- `-TestFile gateway`：31/31，含 P16 FILE_READ 的遍历/根外/失效链接、执行前重校钉住路径、上限与二进制拒读、
+  默认拒读、reconcile 重读——`fileReadExecute` 新增的 `context_risk` 未破坏既有断言；
+- `-TestFile tool-loop`：45/45。
+
+另新增浏览器用例 `tests/browser/contextRiskGate.spec.ts`（1/1 通过）：命中 SEVERE 时确认条先拦住、
+确认之前无任何 POST，取消后草稿仍在且仍未发送，再点发送仍会拦，只有点「仍然发送」才真的发出。
+
+仍缺（需人工/真实环境）：Tauri WebView2 窗口实际交互、真实 Provider 窗口读数、真实 Codex 自动注入。

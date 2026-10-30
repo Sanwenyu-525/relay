@@ -288,3 +288,106 @@ end as run_state
 **兼容。** 旧客户端读不到新字段不受影响；新客户端读旧服务端时字段缺失按 `null`（不猜），读到词表之外的值则整条解析失败——猜一个运行态会让界面画出不存在的生成过程。
 
 **验证。** 真实 PG/HTTP：`test/integration/assist-run-state.integration.test.ts` 6/6（无消息与只有终态读成 `null`、`PENDING`→`RUNNING`→结算回 `null`、`FAILED`/`CANCELLED` 不留在 `RUNNING`、`RUNNING` 压过 `PENDING`、同一列表内逐行不串、只读不推进修订与活动键）。
+
+### 10.119 项目必读文件体积审计（2026-10-30 源码实现，只读投影）
+
+输入器「必读文件预警」的后端读数（交互归[工作台 §54](../../frontend/workbench-design/part-15.md#54-必读文件体积预警发送前的上下文风险2026-10-30已实施实机未验)）。**Breaking Change: No**：只新增一个 GET，不改任何既有端点、表结构或命令回执。
+
+| 方法 | 路径（前缀 `/api/v1/workspaces/{workspace_id}`） | 查询 | 成功 |
+|---|---|---|---|
+| `GET` | `/working-directories/{resource_id}/required-context-audit` | `agent?`（`relay`\|`codex`\|`claude`\|`codebuddy`\|`gemini`\|`cursor`\|`copilot`\|`windsurf`，缺省 `relay`）、`model?`（目录模型 id）、`session_id?`（会话档位来源）、`refresh?`（`1` = 跳过目录遍历缓存） | 200 审计投影 |
+
+- **只读、无回执**：不写业务事实、不产生 `command_id`、重放无副作用（与 §10.96 工作区默认目录、`/runs/{id}/context-manifests` 同一类读路径）。
+- **必读范围靠枚举，不靠猜测**：只认各 Agent 的官方规则入口（`AGENTS.md`／`CLAUDE.md`／`CODEBUDDY.md`／`GEMINI.md`／`.cursorrules` + `.cursor/rules/*.mdc`／`.github/copilot-instructions.md`／`.windsurfrules`，同名文件在子目录继续生效）与项目显式声明 `.relay/context-required.json`（`required_documents[{path, category: AUTO_INJECTED|TASK_REQUIRED, reason?}]`，≤64 KiB）。项目里其余 Markdown **一律不**计入，也不报成「自动加载」。
+- **扫描口径**：只 `stat` 不读正文，因此不调模型、不把文件放进上下文；符号链接/Junction 先解析真实路径再判是否仍在受管根内，越界、无权限、回路、非普通文件一律记进 `skipped` 并给原因（安全失败，不抛错）。
+- **权限**：调用前要求存在覆盖该 `canonical_root` 的 ACTIVE `FILE_READ` 连接（与 `resolveSessionReadTools()` 同一判据）。不满足时 `state="NO_FILE_ACCESS"`、`files=[]`，不扫也不读。跨工作区的 `resource_id` 按不可见处理（`SCAN_UNAVAILABLE`）。
+- **预算口径**：`effective_input_tokens = min(provider_window_tokens, call_budget_tokens) − reserves`，其中 `call_budget_tokens` 按**执行链同一优先级**取：0145 会话档位 → 工作区默认档位 → 应用配置的 `RELAY_MODEL_MAX_CALL_TOKENS`（有会话却不传 `session_id` 会按工作区默认报偏，因此聊天入口必须传）；`reserves = output_tokens + system_prompt_tokens + tool_definition_tokens + history_tokens`（输出取 `RELAY_MODEL_MAX_OUTPUT_TOKENS`，系统提示按 `RELAY_AGENT_CORE_PROMPT` 字节数 ÷ 3 实算，工具定义取集中阈值中的保守常数，历史按 0——首次发送前历史尚未进入本次调用，实测占用只由界面圆环表达）。`provider_window_tokens` 只来自模型目录的 `context_window`，**未知必须是 `null`**，不假定 256K／512K／无限。
+- **档位**：单个文件占比 ≥15% / ≥30% / ≥50% 分别为 `NOTICE` / `HIGH` / `SEVERE`；累计占比 ≥30% / ≥50% / ≥75% 同理；预计总输入超过 `min(窗口, 档位)` 一律 `SEVERE`。阈值随响应下发（`thresholds`），客户端不复制一份判定。分母不可算时 `share`/`required_total_share` 为 `null` 且档位回到 `NONE`，并给出 `BUDGET_UNAVAILABLE` 原因，不给假百分比。
+- **响应字段**：`state`（`OK`/`NO_FILE_ACCESS`/`SCAN_UNAVAILABLE`）、`detail`、`agent{id,label}`、`root`、`scanned_at`、`fingerprint`（目录 + Agent + 逐文件 `path:bytes:modified_at` 的摘要，客户端用它判定「本次忽略」是否过期）、`severity`、`files[{path,category,scope,reason,bytes,estimated_tokens,modified_at,share,severity}]`（按体积降序）、`budget{...}`、`reasons[{code,text,ratio,path}]`、`suggestions[{code,text}]`、`skipped[{path,reason}]`、`access{project_id,connection_id}|null`（「查看文件」复用同一读取入口）、`thresholds`。
+- **缓存与失效**：只缓存「目录遍历 + 声明解析」（30 秒 TTL，键含根与 Agent）；每个候选文件的体积与修改时间**每次都重新 `stat`**，所以文件被改、被删或被替换后下一次审计立刻是新读数；`refresh=1` 跳过遍历缓存。
+- **与 §10.112 的关系**：「查看文件」不新增读取通道，直接用审计返回的 `access.connection_id` 调 `/projects/{project_id}/managed-resources/{resource_id}/file-read`（`READ_FILE`），因此仍走同一套 Gateway 准入、审批与回执语义。
+
+**验证。** 单测 `test/unit/required-context-files.test.ts` 14/14（阈值、`min(窗口, 档位)`、窗口未知、预留占满、累计口径、非必读不误报、换 Agent 换清单、声明文件、改/删后读数更新、越界与链接逃逸）；真实 PG/HTTP：`test/integration/required-context-audit.integration.test.ts` 7/7（DTO 投影完整、窗口未知、无连接不扫不读、跨工作区不可见、改/删后更新、声明与越界、换 Agent）。
+
+### 10.121 会话内临时 Agent 协作（2026-10-30）
+
+- `GET /workspaces/{workspace_id}/assist-sessions/{id}/delegations`：返回 `{items:[...]}`，最多最近 50 条。每项为 `delegation_id`、可空 `child_session_id`、`role`（INVESTIGATE / REVIEW）、`objective`、`scope:string[]`、可空 `baseline`、`required`、`status`（QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELLED）、`attempt_count`、`max_attempts`、可空 `result_summary`、`created_at` 和可空 `closed_at`。只读，不生成任务或模型调用；跨工作区或会话不存在返回 404，不暴露正文。
+- 会话列表和详情新增可空 `parent_session_id`，只表达临时委派来源，区别于分叉的 `forked_from_session_id`。
+- 子会话是冻结委派记录，普通 `RequestAssistMessage` 返回 409 / INVALID_TRANSITION，提示回主会话补充，不得将子历史当作可写主会话。
+- Breaking Change：普通根会话 No（新增只读接口及响应字段）；对子会话普通发送 Yes（此前未约束的路径被拒绝）。旧客户端读取新字段可忽略，更新客户端缺字段按 null 兼容；旧子会话仍可读取历史。无新增 migration，复用 0128。
+- 委派子调用与主调用共用根会话模型账本；子调用在同一原子预算准入内为主汇总预留一次调用及一次调用 token 预留。角色不授予权限，子结果不构成正式完成或验收。
+
+### 10.120 会话级上下文档位与上下文用量投影（2026-10-30 源码实现，迁移 0145）
+
+Breaking Change: **Yes（语义）**——上下文档位从「工作区默认」改为**会话自己的一行事实**。
+`/context-budget`（§10.99 沿用的工作区写入口）仍然存在且仍被设置页与 Run/委派等无会话消费者使用，
+但输入器圆环的浮层不再写它：同一条命令 `SetSessionContextBudget` 只改那一条会话。
+
+**档位（`POST /assist-sessions/{id}/context-budget`）**
+
+- 请求 `{command_id, expected_revision, context_budget_tokens}`，`context_budget_tokens` 只能是
+  `262144` / `524288` / `1048576`（路由 schema 与用例层各判一次）；未列出的值 422，不静默取整。
+- 200 回执 `{session_id, context_budget_tokens, revision}`；`revision` 是**该会话的档位修订**
+  （`assist_sessions.context_budget_revision`），与 `assist_sessions.revision` 分开：后者被改名、
+  置顶、归档、切模式共用，拿它做档位 CAS 会让一次无关的重命名把保存打成 409。
+- 幂等：同一 `command_id` 重放返回同一份回执；换档位按异载荷拒绝。陈旧 `expected_revision` → 409
+  `REVISION_CONFLICT`（`entityType=ASSIST_SESSION_CONTEXT_BUDGET`），不覆盖并发写入的一方。
+- 不推进会话 `revision`、不改状态、不授予任何权限；**不追改在途调用**——那次调用用它启动时
+  冻结的预算（既有冻结语义）。
+- 回执资源路径 `assist-sessions/{id}/context-budget`，GET 回执与首次响应一致。
+
+**继承（`POST /assist-sessions` 新增可选 `source_session_id` 与 `context_budget_tokens`）**
+
+- 新会话的档位在建会话事务里写一次，优先级从高到低：
+  1. `context_budget_tokens`——用户在**首条消息之前**明确选的档位（同样只接受三个合法值，
+     非法值 422）。它进命令体参与载荷 hash，因此「创建响应丢失后按原命令重试」写进去的
+     仍是同一档，第一个模型调用就按它冻结预算；
+  2. `source_session_id` 指向的**来源会话**的 `context_budget_tokens`（来源同工作区且存在时）；
+  3. 缺省 `262144`。
+  任何一级都不读工作区默认（那会让「会话独立」又变回全局配置）。
+- `source_session_id` 与 `context_budget_tokens` 都进命令体参与载荷 hash：同一 `command_id`
+  换来源或换档位重放按异载荷拒绝。
+- 继承只发生一次。此后改子不改父、改父不改子；重新打开既有会话读它自己的持久值。
+- `/new` 聊天命令建出的续篇沿用来源会话的 `context_budget_tokens`（服务端直接取，不经前端）。
+- 迁移 0145 对既有会话回填：工作区设过档位就按那个值，否则 262144，列不可空。
+
+**用量投影（`GET /assist-sessions/{id}/context-usage`，只读、无回执）**
+
+- `budget{tokens, revision}`：会话**当前**档位。
+- `last_call`：最近一次**已结算且带用量**的 `kind='ASSIST'` 模型调用（`status <> 'STARTED'`
+  且 `usage_input_tokens`／`usage_output_tokens` 至少一个非空；按 `settled_at` → `started_at` → `id`
+  倒序取一行）。在途（STARTED）行没有用量、失败行可能只有半截读数，用它们覆盖「最近一次有效
+  统计」会让圆环在生成进行中突然变成未知或半截数字。字段
+  `source`（`MODEL_CALL`／`MESSAGE`）、`call_id`、`message_id`、`provider`、`model`、`status`、
+  `input_tokens`、`output_tokens`、`cache_read_tokens`、`cache_creation_tokens`、
+  `reserved_tokens`（那次调用冻结的单次预算）、`settled_at`、`breakdown`。
+  没有任何调用行时退回最近一条带用量的助手消息（`source=MESSAGE`），此时 `reserved_tokens`
+  与 `breakdown` 均为 `null`——旧数据不编造分项。
+- `breakdown{version, method, precision, categories[{key,bytes,tokens}], estimated_total_tokens,
+  covered_bytes, image_parts}`：分类键 `HISTORY`／`SYSTEM`／`TOOLS`／`FILE_READS`／`MEMORY`／
+  `OTHER`，只出现非零项。`precision` 恒为 `ESTIMATED`（UTF-8 字节 ÷ 3，与端口容量检查同一换算），
+  `image_parts` 记录未被估算覆盖的图片段数。
+- 口径：**只统计真的进了这次请求的文本**。文件类只读工具（`FILE_QUERY`/`FILE_READ`/`GIT_READ`
+  能力）的结果记 `FILE_READS`，其余工具结果、工具声明与调用参数记 `TOOLS`，两者互斥；
+  压缩摘要、资料/Skill 注入段由装配方登记为 `MEMORY`（不按正文前缀猜）；缓存读取不是额外加数。
+  **Skill 的输入与依据只按 `turns` 里的那一段落账**：端口只发送 system + turns + toolTurns +
+  steers，Skill 的 facts/input 已被应用层渲染进 turns（且 facts 本身不发给 Provider），
+  再单独加一遍就是同一段内容累计两次。
+  分项之和与 Provider 总量**不强行相等**：总量是 Provider 的分词结果，分项是本地估算。
+- 存储：`model_calls.context_usage`（JSONB，随 STARTED 行一起提交），只存分类与数值，
+  不存提示词、文件正文、工具输出、路径或凭据。迁移前的行为 `NULL`。
+
+**运行时的预算来源**
+
+- 有会话的调用（请求消息冻结、自动压缩、目标轮次）读会话档位；无会话的消费者（Run 准入、
+  委派、连接验证）仍读工作区默认。冻结快照的字段由 `workspace_context_budget_tokens` 改名为
+  `context_budget_tokens`，解析侧兼容旧键（读成同一个数）。
+- Provider 窗口仍是硬上限：`call_reservation_tokens = min(档位, 目录 context_window)`；
+  作用域上限至少两倍预留。档位不改变候选资格门槛，也不冒充物理窗口。
+- 短期记忆的输入上限、自动压缩阈值与压缩输入容量全部按会话档位计算（无快照时同样如此）。
+
+**验证。** 真实 PG/HTTP：`test/integration/session-context-budget.integration.test.ts` 5/5
+（A/B 独立保存与 CAS/幂等、继承与跨工作区回落、0145 回填、用量投影与旧数据、HTTP 回执与严格请求体）；
+`test/integration/context-budget-runtime.integration.test.ts` 5/5（压缩阈值、真实外呼预留、
+Run 准入重算）。界面：jsdom `tests/contextUsagePanel.spec.tsx` 9/9；真实 Chromium
+`tests/browser/contextUsagePanel.spec.ts` 5/5。

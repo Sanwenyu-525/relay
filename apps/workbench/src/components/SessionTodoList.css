@@ -1,0 +1,97 @@
+/* 会话待办清单（ADR-038，2026-10-30）。
+   只补这一块的几何与排版，复用已确认的 tokens：间距、字号、分隔线、文字色。
+   两条硬约束：摘要行高度恒定（上不上待办都不推输入器）；展开后内部滚动、限高。 */
+
+.session-todos {
+  margin: 0;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: 8px;
+  background: var(--relay-color-selection-bg);
+}
+
+.session-todos-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  /* 高度恒定：计数从 0/2 变 2/2 时不得把输入器往下推。 */
+  min-height: 32px;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-secondary);
+}
+.session-todos-summary::-webkit-details-marker { display: none; }
+.session-todos-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--relay-color-text-muted);
+  transition: transform 120ms ease-out;
+}
+.session-todos[open] > .session-todos-summary .session-todos-chevron { transform: rotate(90deg); }
+.session-todos-heading-icon { flex: none; width: 14px; height: 14px; color: var(--relay-color-text-muted); }
+.session-todos-title { flex: none; font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-primary); }
+.session-todos-count { flex: none; font-variant-numeric: tabular-nums; }
+.session-todos-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--relay-color-text-muted);
+}
+.session-todos-error-label { flex: none; color: var(--relay-color-text-muted); }
+
+.session-todos-body { padding: 0 var(--relay-space-2) var(--relay-space-1); }
+.session-todos-error { display: grid; gap: var(--relay-space-1); padding: var(--relay-space-1) 0; }
+.session-todos-error p { margin: 0; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+
+.session-todos-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* 长清单不得把输入器顶出视窗：内部滚动，高度上限跟随视窗。 */
+  max-height: min(38vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.session-todos-item {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-1) 0;
+  min-width: 0;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.session-todos-item + .session-todos-item {
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.session-todos-icon { flex: none; width: 14px; height: 14px; color: var(--relay-color-text-muted); }
+.session-todos-text { min-width: 0; flex: 1; overflow-wrap: anywhere; color: var(--relay-color-text-primary); }
+.session-todos-text-completed { color: var(--relay-color-text-muted); text-decoration: line-through; }
+.session-todos-text-cancelled { color: var(--relay-color-text-muted); text-decoration: line-through; }
+.session-todos-status {
+  flex: none;
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-round);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+.session-todos-note {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-body);
+}
+
+/* 运行中的进度点：只让「正在做」那一行有呼吸感，不给整块加高度或位移。 */
+@keyframes session-todos-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.session-todos-icon-active { animation: session-todos-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .session-todos-icon-active { animation: none; }
+  .session-todos-chevron { transition: none; }
+}

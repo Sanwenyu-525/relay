@@ -1,3 +1,4 @@
+import { createElement, lazy, Suspense, type ComponentType } from "react";
 import { createBrowserRouter, createMemoryRouter, Navigate, type RouteObject } from "react-router-dom";
 import App from "./App";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
@@ -29,6 +30,21 @@ import ScheduledTaskDetailView from "./views/ScheduledTaskDetailView";
 import { useSearchParams } from "react-router-dom";
 import UnsupportedView from "./views/UnsupportedView";
 
+/**
+ * 场景实验室只在开发构建里存在。
+ *
+ * 隔离靠的是构建期，而不是运行时的判断：`import.meta.env.DEV` 在生产构建里是字面量 `false`，
+ * 这一条路由连同它对 `./dev/ScenarioLabView` 的动态 import 一起被摇掉，
+ * 因此生产产物里没有这条路径、也没有可点进去的入口。
+ *
+ * `lazy()` 必须写在这个条件里，不能提成顶层常量：实测 Rolldown 不摇顶层那次调用，
+ * 路由字符串确实没了，但整个 `ScenarioLabView` chunk 仍被生产产物带着（由
+ * `scripts/check-scenario-lab-isolation.mjs` 对生产构建逐串搜出来）。
+ */
+const ScenarioLabView: ComponentType = import.meta.env.DEV
+  ? lazy(() => import("./dev/ScenarioLabView"))
+  : () => null;
+
 /** 与归档 Vue router.ts 的 11 条记录一一对应，query 子页由对应组件处理。 */
 export const workbenchRoutes: RouteObject[] = [{
   path: "/",
@@ -36,8 +52,7 @@ export const workbenchRoutes: RouteObject[] = [{
   // 根级兜底：任何视图的渲染错误先落这里，不再摔到 React Router 的英文默认错误页。
   errorElement: <RouteErrorBoundary />,
   children: [
-    { index: true, element: <Navigate to="/projects" replace /> },
-    { path: "today", element: <TodayView /> },
+    { index: true, element: <Navigate to="/projects" replace /> },    { path: "today", element: <TodayView /> },
     { path: "inbox", element: <Navigate to="/tasks?tab=inbox" replace /> },
     { path: "activity", element: <ActivityView /> },
     { path: "agent", element: <CollaborationView /> },
@@ -68,6 +83,9 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "settings/connections", element: <ConnectionsView /> },
     { path: "runs/:id", element: <RunView /> },
     { path: "tasks/:id", element: <TaskSkillView /> },
+    ...(import.meta.env.DEV ? [{ path: "__dev/assist-scenarios", element: <Suspense
+      fallback={createElement("p", { className: "loading-text", role: "status" }, "正在载入场景实验室…")}>
+      <ScenarioLabView /></Suspense> }] : []),
     { path: "*", element: <UnsupportedView /> }
   ]
 }];

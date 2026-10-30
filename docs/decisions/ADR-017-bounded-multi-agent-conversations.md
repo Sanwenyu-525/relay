@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted（用户已确认的首版产品规则及沿用既有业务 Owner 的原则）。具体 API、物理 schema、图/claim 协议和预算数值仍为待核定工程设计；尚未实现或验收。本轮授权仅为文档和实施提示词。
+Accepted（用户已确认的首版产品规则及沿用既有业务 Owner 的原则）。2026-10-05 最初仅授权文档和实施提示词；2026-10-30 已授权会话内临时协作实施并接续最小接线。完整设计仍未整体实现或验收，当前实现边界见运行架构 §2.5，历史授权不替代当前范围。
 
 ## 日期
 
@@ -43,5 +43,7 @@ Assist/Workflow/Application、Context/模型计量、Gateway 只读准入、会�
 本轮仅文档，Breaking Change：No；未发布 API 或 migration。后续接口/存储变化须按实际协议另标 Breaking Change、旧会话/URL/checkpoint 兼容及回滚风险。本 ADR 不替代 ADR-010 的主栈、ADR-016 的对话授权或契约 01–04；也不前移多 Agent Router、N04/N06 或关闭应用后的后台执行。
 
 ## 后续
+
+2026-10-30 接续：用户明确要求先实施会话内多 Agent，暂不实施 Grok bot 式独立 Bot。先接通临时只读委派和可回看的结果，复用既有会话与调用账本，避免把项目长期成员机制混入一次协作。当前实现和目标差异见[运行架构 §2.5](../architecture/runtime-context/part-01.md#25-有界子-agent-的委派与会话关联)，实际验证只归统一验收表。角色编辑、子会话直接补充与正式完成 Gate 仍未闭合；因此早期完整方案的 Accepted 不代表全量交付。
 
 按[专项提示词](../../prompts/bounded-multi-agent.md)先核对单 Agent 相关依赖，再分片实施并以[测试计划 §21](../testing/verification-plan.md#21-有界多-agent-与自动会话验收规格)验收。当前授权和下一步只归 CODEX_NEXT_STEP，结果只归统一功能验收表。长期角色、多子实现或递归协作只有在真实收益和冲突证据形成后再另行决策，本轮不预建模块。

@@ -31,6 +31,7 @@ import {
   DomainError,
   invalidTransition,
   resourceNotFound,
+  revisionConflict,
   validationFailed,
 } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
@@ -44,6 +45,7 @@ import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { createGoalForMessage } from './assist-goals.js';
 import { assertChatModeSupportedForIdentity, parseChatModePrefix } from './chat-mode.js';
 
+import { DEFAULT_SESSION_CONTEXT_BUDGET } from '../assist/assist-repository.js';
 import { resolveSessionReadTools } from './assist-read-tools.js';
 import { inheritWorkspaceDefaultDirectory } from './workspace-default-directory.js';
 
@@ -56,6 +58,86 @@ import { inheritWorkspaceDefaultDirectory } from './workspace-default-directory.
  */
 
 const ACCEPT_COMMAND_TYPE = 'AcceptAssistProposal';
+
+/**
+ * 0145：新会话的起始档位。
+ *
+ * 只读**来源会话自己那一行**，且要求同工作区——读不到就退回缺省值。刻意不去读
+ * 「工作区默认档位」：那会让「会话独立保存」在新会话上又变回全局配置。
+ * 这里不加行锁：读的是来源会话的一个标量，来源之后被改档位不影响已经冻结的值。
+ */
+async function inheritedContextBudget(repositories: Repositories,
+  input: CreateAssistSessionInput): Promise<number> {
+  // 优先级：用户在首条消息前明确选的档位 > 来源会话的档位 > 缺省 256K。
+  if (input.contextBudgetTokens !== undefined) {
+    if (!SESSION_CONTEXT_BUDGETS.includes(input.contextBudgetTokens as SessionContextBudget)) {
+      throw validationFailed([{ field: 'context_budget_tokens',
+        message: '上下文档位只能是 262144、524288 或 1048576' }]);
+    }
+    return input.contextBudgetTokens;
+  }
+  if (input.sourceSessionId === undefined || input.sourceSessionId === '') {
+    return DEFAULT_SESSION_CONTEXT_BUDGET;
+  }
+  const source = await repositories.assist.readSession(input.sourceSessionId);
+  if (source === undefined || source.workspace_id !== input.workspaceId) {
+    return DEFAULT_SESSION_CONTEXT_BUDGET;
+  }
+  return source.context_budget_tokens;
+}
+
+/**
+ * 0145：保存会话档位（唯一写入口）。
+ *
+ * 与其它会话命令同一套骨架：命令幂等（同 command_id 重放返回原回执）、CAS（
+ * `expected_revision` 打在该会话的 `context_budget_revision` 上，不等即 409）、
+ * 回执里带新的档位与修订号供调用方逐字核对。
+ *
+ * 它**不**推进会话 `revision`：档位不是会话身份、状态或权限，拿它去推修订会把在途的
+ * 改名/置顶/归档打成冲突。也不追改在途调用——那次调用用的是它启动时冻结的预算。
+ */
+export async function setSessionContextBudget(db: DbExecutor, input: {
+  readonly workspaceId: string; readonly sessionId: string; readonly commandId: string;
+  readonly expectedRevision: string; readonly budgetTokens: number;
+}): Promise<CommandOutcome<{ readonly session_id: string; readonly context_budget_tokens: number;
+  readonly revision: string }>> {
+  const expected = requireRevision(input.expectedRevision, 'expected_revision');
+  if (!SESSION_CONTEXT_BUDGETS.includes(input.budgetTokens as SessionContextBudget)) {
+    throw validationFailed([{ field: 'context_budget_tokens',
+      message: '上下文档位只能是 262144、524288 或 1048576' }]);
+  }
+  return runIdempotentCommand<{ readonly session_id: string; readonly context_budget_tokens: number;
+    readonly revision: string }>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'SetSessionContextBudget',
+    target: { session_id: input.sessionId },
+    body: { expected_revision: expected.toString(), context_budget_tokens: input.budgetTokens },
+    execute: async (repositories) => {
+      const session = await repositories.assist.readSession(input.sessionId, true);
+      if (session?.workspace_id !== input.workspaceId) throw resourceNotFound('Assist session');
+      if (session.context_budget_revision !== expected) {
+        throw revisionConflict({ entityType: 'ASSIST_SESSION_CONTEXT_BUDGET',
+          expectedRevision: expected.toString(),
+          actualRevision: session.context_budget_revision.toString() });
+      }
+      const revision = await repositories.assist.setContextBudget(session.id, input.budgetTokens,
+        expected);
+      if (revision === undefined) {
+        // 行已被并发提交：重读一次给出真实修订，不把「没写成」说成「写成 0」。
+        const reread = await repositories.assist.readSession(session.id);
+        throw revisionConflict({ entityType: 'ASSIST_SESSION_CONTEXT_BUDGET',
+          expectedRevision: expected.toString(),
+          actualRevision: (reread?.context_budget_revision ?? 0n).toString() });
+      }
+      return { session_id: session.id, context_budget_tokens: input.budgetTokens,
+        revision: toDecimalString(revision) };
+    } });
+}
+
+/** 0145：会话档位的三个合法取值（单次调用预算，不是模型物理窗口）。 */
+export const SESSION_CONTEXT_BUDGETS = [262_144, 524_288, 1_048_576] as const;
+export type SessionContextBudget = (typeof SESSION_CONTEXT_BUDGETS)[number];
 
 export type CreateAssistSessionResult = {
   readonly session_id: string;
@@ -90,6 +172,23 @@ export interface CreateAssistSessionInput {
    * 用户在空会话里直接发 `/plan 内容`（客户端解析后一次提交），不必先建会话再切换。
    */
   readonly chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
+  /**
+   * 0145：上下文档位的继承来源——用户**跳转前所在**的那条会话。
+   *
+   * 继承发生在会话身份建立时（这里），不是每次进入会话时重算：新会话一旦建好就有
+   * 自己的档位，此后与来源会话各走各的。来源会话读不到（跨工作区、已删除、响应迟到）
+   * 时退回 262144 并把该值写进新会话——继承是便利，不是授权，绝不因为找不到来源
+   * 就去改别人的配置。
+   */
+  readonly sourceSessionId?: string | undefined;
+  /**
+   * 0145：用户在**首条消息之前**明确选的档位。
+   *
+   * 它与「继承来源会话」是两条不同的来源，优先级更高：用户点了 1024K，就该按 1024K 建会话，
+   * 而不是先按继承来的 512K 建、再补写一次（那会让第一个模型调用按错误预算冻结）。
+   * 它进命令体参与载荷 hash，因此「创建响应丢失后按原命令重试」重放的是同一份档位。
+   */
+  readonly contextBudgetTokens?: number | undefined;
 }
 
 export async function createAssistSession(
@@ -114,7 +213,11 @@ export async function createAssistSession(
     // 否则「先按普通会话建、再按人设建」会拿到同一条会话。
     body: { project_id: input.projectId ?? null, task_id: input.taskId ?? null, title,
       conversation_mode: conversationMode, assistant_profile_id: input.assistantProfileId ?? null,
-      ...(input.chatMode === undefined ? {} : { chat_mode: chatMode }) },
+      ...(input.chatMode === undefined ? {} : { chat_mode: chatMode }),
+      // 0145：继承来源进命令体——同一个 command_id 换个来源重放必须按异载荷拒绝，
+      // 否则「创建响应丢失后按原命令重试」可能建出档位不同的第二条会话。
+      source_session_id: input.sourceSessionId ?? null,
+      context_budget_tokens: input.contextBudgetTokens ?? null },
     execute: async (repositories) => {
       let projectId = input.projectId ?? null;
       const taskId = input.taskId ?? null;
@@ -141,6 +244,7 @@ export async function createAssistSession(
       await repositories.assist.insertSession({
         id: sessionId, workspaceId: input.workspaceId, projectId, taskId, title,
         conversationMode, chatMode,
+        contextBudgetTokens: await inheritedContextBudget(repositories, input),
         ...(defaultDirectory === undefined ? {} : { workingResourceId: defaultDirectory.id,
           workingDirectorySource: 'WORKSPACE_DEFAULT' as const }),
         ...(profile === null ? {} : { assistantProfileId: profile.id,
@@ -512,6 +616,11 @@ export async function requestAssistMessage(
       }
       // 工作台 §34：在首条消息开始处理、任何写入前建立会话基线（幂等）。采集失败不破坏原
       // 消息与执行流程——只记录原因，后续读取按「缺少会话起点」呈现。
+      // SESSION_SUBAGENT_HISTORY: frozen child contexts cannot become writable main chats.
+      if (session.parent_session_id !== null) {
+        throw invalidTransition('子 Agent 会话仅用于查看委派记录，请返回主会话补充要求。',
+          { sessionId: session.id });
+      }
       if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null &&
           session.status === 'ACTIVE') {
         try {
@@ -678,7 +787,7 @@ export async function requestAssistMessage(
         requiresTools: hasRuntimeTools,
         requiresJsonOutput: intent !== 'DISCUSS' || skill !== null ||
           session.conversation_mode === 'LEARNING',
-      }, session.workspace_id);
+      }, { workspaceId: session.workspace_id, sessionId: session.id });
 
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();

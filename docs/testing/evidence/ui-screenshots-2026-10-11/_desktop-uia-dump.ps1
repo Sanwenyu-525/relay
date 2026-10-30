@@ -12,7 +12,7 @@ public class Win32Focus2 {
 }
 "@
 
-$outDir = "D:\Develop\Relay-Agent\ui-screenshots-2026-10-11"
+$outDir = "D:\Develop\Relay-Agent\docs\testing\evidence\ui-screenshots-2026-10-11"
 $changeName = [string]([char]0x66F4 + [char]0x6362 + [char]0x76EE + [char]0x5F55)  # 更换目录
 $openName = [string]([char]0x6253 + [char]0x5F00 + [char]0x6587 + [char]0x4EF6 + [char]0x5939) # 打开文件夹
 Write-Host "changeName=$changeName openName=$openName"

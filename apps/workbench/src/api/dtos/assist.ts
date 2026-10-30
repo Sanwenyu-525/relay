@@ -27,6 +27,30 @@ export type RelayChatMode = "CHAT" | "PLAN" | "GOAL";
 export type RelayAssistRunState = "RUNNING" | "PENDING";
 
 /**
+ * 左栏一枚状态图标的取值（2026-10-30，服务端读时派生的 `list_state`）。
+ *
+ * 八个值各自对应一条既有事实，客户端只做「值 → 图形 + 文案」的映射，不再自己判定：
+ *
+ * - `RUNNING` / `PENDING`：`assist_messages` 里有在途的一轮（已认领 / 排队）。
+ * - `WAITING_APPROVAL`：这条会话有一条待确认的提案（`assist_proposals.status='PENDING'`）。
+ * - `COMPLETED` / `FAILED` / `CANCELLED`：**最后一轮**回复行的终态。
+ * - `NOT_STARTED`：会话里一条消息都没有。
+ * - `ARCHIVED`：会话已归档。
+ *
+ * `null` 只表示「服务端没有给出可判定的状态」——旧服务端缺字段，或有消息却读不出
+ * 最后一轮回复行。两种都不猜：界面回退到会话类型图标，不把 `null` 当成完成。
+ */
+export type RelayAssistSessionListState =
+  | "RUNNING"
+  | "PENDING"
+  | "WAITING_APPROVAL"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED"
+  | "NOT_STARTED"
+  | "ARCHIVED";
+
+/**
  * 人设助手配置（ADR-018、命令契约 §10.60）。
  *
  * 这里只有配置文本：能力、连接与权限不出现在这个类型里，助手能读什么由当前连接与
@@ -46,6 +70,8 @@ export interface RelayAssistantProfile {
 
 export interface RelayAssistSession {
   readonly id: string;
+  /** 临时委派子会话只提供历史读取；缺失兼容既有服务端与夹具。 */
+  readonly parentSessionId?: string | null;
   readonly projectId: string | null;
   readonly taskId: string | null;
   readonly title: string;
@@ -89,6 +115,15 @@ export interface RelayAssistSession {
    * 不替服务端编一个「在跑」）。
    */
   readonly runState: RelayAssistRunState | null;
+  /**
+   * 读时派生的列表状态（2026-10-30）：左栏这一行该画哪一枚图标。
+   *
+   * 与 `runState` 同源不同口径：`runState` 只回答「此刻有没有在跑」（轮询判据），
+   * 这里回答「这一行现在是什么状态」。终态与未开始都不再从 `null` 推断。
+   * 缺字段只来自尚未提供该字段的旧服务端；那时按 `runState` 兜底一次，仍读不出
+   * 就回退类型图标。
+   */
+  readonly listState: RelayAssistSessionListState | null;
   readonly revision: DecimalRevision;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -122,6 +157,22 @@ export interface RelayAssistSession {
       /** 作用域来源（运行架构 §2.8）。null＝历史未知，不得据此编造来源。 */
       readonly source: RelayWorkingDirectorySource | null } | null;
   };
+}
+
+export interface RelaySessionDelegation {
+  readonly delegationId: string;
+  readonly childSessionId: string | null;
+  readonly role: "INVESTIGATE" | "REVIEW";
+  readonly objective: string;
+  readonly scope: readonly string[];
+  readonly baseline: string | null;
+  readonly required: boolean;
+  readonly status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  readonly attemptCount: number;
+  readonly maxAttempts: number;
+  readonly resultSummary: string | null;
+  readonly createdAt: string;
+  readonly closedAt: string | null;
 }
 
 /**
@@ -778,3 +829,67 @@ export type RelayConversationDiffFile =
       readonly available: false;
       readonly reason: "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE" | "PATH_NOT_FOUND";
     };
+
+/**
+ * 会话上下文档位（0145 / 2026-10-30）。
+ *
+ * 与工作区级的 `RelayWorkspaceContextBudgetResult` 不是同一条事实：这一档属于**这一条会话**，
+ * 刷新、切会话、重启都读它；新会话在建会话时从来源会话继承一次，此后互不影响。
+ */
+export interface RelaySessionContextBudgetResult {
+  readonly sessionId: string;
+  readonly contextBudgetTokens: RelayContextBudgetTokens;
+  readonly revision: DecimalRevision;
+}
+
+/** 上下文构成的分类键。顺序即界面顺序，见 `contextUsageCategoryLabels`。 */
+export type RelayContextUsageCategory = "HISTORY" | "SYSTEM" | "TOOLS" | "FILE_READS"
+  | "MEMORY" | "OTHER";
+
+export interface RelayContextUsageEntry {
+  readonly key: RelayContextUsageCategory;
+  readonly bytes: number;
+  readonly tokens: number;
+}
+
+/**
+ * 一次模型调用的上下文构成。
+ *
+ * `precision` 恒为 `ESTIMATED`：分项由服务端按请求文本的 UTF-8 字节 / 3 估算，
+ * 不是 Provider 的分词结果；Provider 只回总量，两者口径不同，所以分项之和不等于总量
+ * 也不等于「剩下的是其他」。`imageParts` 说明有几段图片没能被估算覆盖。
+ */
+export interface RelayContextUsageBreakdown {
+  readonly version: number;
+  readonly method: string;
+  readonly precision: "ESTIMATED";
+  readonly categories: readonly RelayContextUsageEntry[];
+  readonly estimatedTotalTokens: number;
+  readonly coveredBytes: number;
+  readonly imageParts: number;
+}
+
+/** 面板引用的“最近一次记录”：一次真实调用，或（旧数据）一条消息上的用量。 */
+export interface RelayContextUsageCall {
+  readonly source: "MODEL_CALL" | "MESSAGE";
+  readonly callId: string | null;
+  readonly messageId: string | null;
+  readonly provider: string | null;
+  readonly model: string | null;
+  readonly status: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheCreationTokens: number | null;
+  /** 那次调用冻结的单次预算；解释历史占比时用它，而不是当前档位。 */
+  readonly reservedTokens: number | null;
+  readonly settledAt: string | null;
+  readonly breakdown: RelayContextUsageBreakdown | null;
+}
+
+/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 最近一次调用，一次读完。 */
+export interface RelaySessionContextUsage {
+  readonly sessionId: string;
+  readonly budget: { readonly tokens: RelayContextBudgetTokens; readonly revision: DecimalRevision };
+  readonly lastCall: RelayContextUsageCall | null;
+}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Folder, MessageSquare, Pin } from "lucide-react";
-import type { RelayApiClient, RelayAssistRunState, RelayAssistSession } from "../api/relayClient";
+import { Archive, Ban, CircleAlert, CircleCheck, Clock, Folder, MessageSquare, Pin,
+  SquareExclamationPoint, type LucideIcon } from "lucide-react";
+import type { RelayApiClient, RelayAssistSession, RelayAssistSessionListState } from "../api/relayClient";
+import { sessionStateTitle } from "../lib/sessionState";
 import SessionRowMenu, { type SessionRowMenuHandle, type SessionRowPatch } from "./SessionRowMenu";
 
 /**
@@ -82,34 +84,72 @@ export interface RecentWorkRowProps {
 }
 
 /**
- * 运行指示（2026-10-28）：把这一行的 12px 类型图标换成「运行中 / 排队中」。
+ * 会话行的状态图标（2026-10-30）：**同一格、同一尺寸、同一 class 基座**画出八种状态。
  *
- * 三件事刻意如此：
+ * 五件事刻意如此：
  *
- * 1. **同一格、同一尺寸、同一 class 基座。** 复用 `.recent-work-kind`（12px、`flex: none`、
- *    中性前景色）再加一个状态修饰类，所以标题可用宽、行高、行距、置顶徽标与未读圆点
- *    的位置都不动——这一列的下限只有 160px，换一枚图形不能换来一次重排。
- * 2. **只有两个形状，不靠颜色区分。** 运行中是**一段弧**（绕自身中心匀速旋转），
- *    排队中是**一道点线环**（静止）。关动效时弧不转，但形状仍是「运行中」那段弧，
- *    状态因此不依赖动效单独表达（设计系统 §9.18）；颜色沿用既有两档前景色，
- *    不开新的强调色。
- * 3. **不画整行。** 旋转的只有这枚 12px 图形：行、标题、边框、底色一律静止，
- *    也不做发光、呼吸与闪烁。终态时这个节点整个不存在，回到 `MessageSquare`，
- *    所以不存在「结束后动画还留在那儿」。
+ * 1. **几何不变。** 仍复用 `.recent-work-kind`（12px、`flex: none`），只加状态修饰类。
+ *    标题可用宽、行高、行距、置顶徽标与未读圆点的位置一像素不动——这一列的下限只有
+ *    160px，换一枚图形不能换来一次重排。
+ * 2. **形状先于颜色，颜色先于动效。** 八个状态各有自己的轮廓（三点、钟、圆勾、方框叹号、
+ *    圆叹号、斜线圆、消息框、归档盒），关掉动效或灰度打印时仍逐一分得开；颜色只在
+ *    失败与待确认两档离开中性色——它们真的需要被看见。
+ * 3. **只有运行态动。** 三个圆点按 0/140/280ms 错峰上下、约 1.1s 一轮；旋转、发光、
+ *    整行呼吸一概没有。完成态只允许 120ms 的一次性收敛（挂载即播、不循环），
+ *    其余状态完全静止。
+ * 4. **`state` 为 null 时退回类型图标。** 旧服务端不给 `list_state`、或有消息却读不出
+ *    最后一轮回复行时，「不知道」就画成不知道——不把 null 解释成完成。
+ * 5. **文案只有一份。** 悬停提示与行可访问名称都读 `sessionStateTitle/Note`，
+ *    不在这一层另写一套说法。
  */
-function RunStateMark({ state }: { state: RelayAssistRunState }) {
-  const running = state === "RUNNING";
-  return <svg className={`recent-work-kind recent-work-kind--${running ? "running" : "pending"}`}
-    viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"
-    data-testid="recent-work-run-state" data-run-state={state}>
-    {/* 原生 tooltip：鼠标停在这枚 12px 图形上能读到状态。可访问名称走行按钮的 aria-label
-        （左栏把「正在生成 / 排队中」写进那一句），所以这里 aria-hidden，不重复念一遍。 */}
-    <title>{running ? "正在生成回复" : "排队中，等待生成"}</title>
-    {/* 半径 9 与 lucide 图标同刻度；描边 2 在 12px 盒里就是 1px，与相邻的轮廓图标同粗细。 */}
-    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-      strokeDasharray={running ? "38.45 18.1" : "1.8 5.2"} />
-  </svg>;
+const STATE_CLASS: Readonly<Record<RelayAssistSessionListState, string>> = {
+  RUNNING: "running",
+  PENDING: "pending",
+  WAITING_APPROVAL: "waiting-approval",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
+  NOT_STARTED: "not-started",
+  ARCHIVED: "archived"
+};
+
+/** 三个圆点的横坐标：等距落在 12px 盒里，左右各留一个点的余量。 */
+const RUNNING_DOTS = [5.5, 12, 18.5] as const;
+
+function SessionStateMark({ state }: { state: RelayAssistSessionListState | null }) {
+  const title = sessionStateTitle(state);
+  // 图标属性按「已声明形状」下发：Lucide 组件只透传 SVG 属性，data-* 走同一份对象，
+  // 不必为八种图标各写一遍。
+  const attributes: Record<string, string> = {
+    className: `recent-work-kind${state === null ? "" : ` recent-work-kind--${STATE_CLASS[state]}`}`,
+    "data-testid": "recent-work-state",
+    "aria-hidden": "true",
+    focusable: "false",
+    ...(state === null ? {} : { "data-state": state })
+  };
+  // 可访问名称由行按钮承担（左栏把状态写进那一句），这里 aria-hidden，只留原生 tooltip。
+  if (state === "RUNNING") {
+    return <svg {...attributes} viewBox="0 0 24 24" fill="none" role="presentation">
+      <title>{title}</title>
+      {RUNNING_DOTS.map((cx) => <circle key={cx} className="recent-work-state-dot" cx={cx} cy="12"
+        r="2.4" fill="currentColor" />)}
+    </svg>;
+  }
+  if (state === null) return <MessageSquare {...attributes} />;
+  const Icon = STATE_ICONS[state];
+  return <Icon {...attributes}><title>{title}</title></Icon>;
 }
+
+/** 状态 → 图形。全部取自项目既有的 Lucide 体系，不引图片资源。 */
+const STATE_ICONS: Readonly<Record<Exclude<RelayAssistSessionListState, "RUNNING">, LucideIcon>> = {
+  PENDING: Clock,
+  WAITING_APPROVAL: SquareExclamationPoint,
+  COMPLETED: CircleCheck,
+  FAILED: CircleAlert,
+  CANCELLED: Ban,
+  NOT_STARTED: MessageSquare,
+  ARCHIVED: Archive
+};
 
 /** 悬停/聚焦摘要卡：标题 + 更新时刻 + 归属。纯展示，不接收指针。 */
 function RowSummary({ anchor, cardId, title, timeLabel, timeValue, timeTitle, scopeName, onClose }: {
@@ -172,11 +212,11 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
    */
   const notStarted = session !== undefined && !session.hasMessages;
   /**
-   * 运行态只读服务端的读时派生事实（`run_state`）。本地一律不猜：不看发送按钮的忙态、
+   * 状态只读服务端的读时派生事实（`list_state`）。本地一律不猜：不看发送按钮的忙态、
    * 不看 `hasMessages`、不看缓存的最后消息时刻——任一都比真实生成状态晚一拍或停在旧值。
    * 缺字段的旧服务端读成 `null`，这一行就照常显示类型图标。
    */
-  const runState = session?.runState ?? null;
+  const listState = session?.listState ?? null;
   const show = useCallback((element: HTMLElement) => setAnchor(element), []);
   const hide = useCallback(() => setAnchor(null), []);
   // 操作面板打开时不再压一张摘要卡：同一时刻这一行只出一个浮层。
@@ -206,10 +246,9 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
         onClick={onOpen}>
         <span className="recent-work-copy">
           {/* 类型差异只用一枚图标：会话有、任务没有，不靠读文字区分。
-              会话在生成或排队时，这一格换成运行指示（同一格、同一 12px，布局不动）。 */}
-          {kind === "session" && (runState === null
-            ? <MessageSquare className="recent-work-kind" aria-hidden="true" />
-            : <RunStateMark state={runState} />)}
+              会话的状态（运行 / 排队 / 终态 / 未开始 / 归档）也在这一格替换，
+              同一格、同一 12px，布局不动。 */}
+          {kind === "session" && <SessionStateMark state={listState} />}
           {unread && <span className="recent-work-unread" data-testid="recent-work-unread-dot" aria-hidden="true" />}
           <span className="recent-work-title">{title}</span>
           {/* 未开始：与置顶徽标同一形制（caption 文字 + 同一格间距），不占第二行。

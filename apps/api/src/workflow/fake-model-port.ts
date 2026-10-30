@@ -210,6 +210,18 @@ export interface AssistRequest {
    */
   readonly steers?: readonly string[] | undefined;
   /**
+   * 0145：装配方登记的上下文分类提示（哪几段 turn 是注入的记忆/资料）。
+   *
+   * 端口完全不消费它——它不是协议的一部分，也不发给 Provider。放在请求上是因为
+   * 「哪些 turn 属于注入」只有装配方知道（`buildGenerationInput` 亲手拼的），
+   * 而用量统计发生在记账处；靠正文前缀去猜会把用户自己说的话误判成系统注入。
+   *
+   * 类型只声明形状（下标 → 分类键字符串），不引用应用层模块：端口不认识这些分类，
+   * 也不该为了一个统计字段反向依赖应用层。
+   */
+  readonly contextUsage?: { readonly turnCategories?:
+    Readonly<Record<number, string>> } | undefined;
+  /**
    * 学习轮次（0072 / ADR-020 §4）：给出本轮**相关短状态**与获准来源身份，
    * 端口改用结构化信封返回正文与有限类型化候选增量。缺省时既有行为逐字不变。
    */

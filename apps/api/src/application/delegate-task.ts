@@ -467,7 +467,7 @@ export async function delegateTask(
       });
       const modelPlan = connectionPlan?.plan ??
         await freezeAssistModelSnapshot(repositories, modelSelection, modelEnv, requirements,
-          input.workspaceId);
+          { workspaceId: input.workspaceId });
       const semanticCheckerId = hasChecker('semantic-model-v1', '1')
         ? 'semantic-model-v1' : 'human-evidence-v1';
       const frozen = freezeExecutionContract({

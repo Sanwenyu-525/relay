@@ -100,6 +100,34 @@ interface Routes {
    * 需要控制会话归属的用例显式声明。
    */
   session?: () => Response;
+  /**
+   * 上下文用量投影（0145）。圆环与浮层现在只读它，不再从消息行推导：
+   * 消息行上的用量是整轮聚合，拿它当「这次调用」会把多轮工具调用加在一起。
+   * 默认给「没有调用」的空投影，用例需要读数时显式声明。
+   */
+  contextUsage?: () => Response;
+}
+
+/**
+ * 按一份真实用量造投影：冻结预算取 `reserved`，会话档位固定 262,144。
+ * 两者不同正是要覆盖的情形——占比必须按 `reserved` 解释。
+ */
+export function contextUsageProjection(usage: { input_tokens: number | null;
+  output_tokens: number | null; cache_read_tokens: number | null;
+  cache_creation_tokens: number | null }, reserved: number | null): unknown {
+  return { session_id: sessionId, budget: { tokens: 262_144, revision: "0" },
+    last_call: usage.input_tokens === null ? null : {
+      source: "MODEL_CALL", call_id: "call-usage", message_id: "assistant-usage",
+      provider: "openai-compatible", model: "gpt-4.1-mini", status: "COMPLETED",
+      input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
+      cache_read_tokens: usage.cache_read_tokens,
+      cache_creation_tokens: usage.cache_creation_tokens,
+      reserved_tokens: reserved, settled_at: "2026-10-30T00:00:00Z", breakdown: null } };
+}
+
+/** 默认投影：会话有档位、还没有调用记录。 */
+export function emptyContextUsage(): unknown {
+  return { session_id: sessionId, budget: { tokens: 262_144, revision: "0" }, last_call: null };
 }
 
 function router(routes: Routes) {
@@ -159,6 +187,9 @@ function router(routes: Routes) {
       throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
     }
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
+      return routes.contextUsage?.() ?? json(emptyContextUsage());
+    }
     if (path === `${prefix}/conversation-execution-requests`) return routes.executions?.() ?? json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return routes.proposals?.() ?? json({ items: [] });
     if (path === `${prefix}/activities`) return await routes.activities?.() ?? json({ items: [], next_cursor: null });
@@ -875,9 +906,11 @@ describe("协作工作区主路径", () => {
     { name: "Provider 未上报缓存时不显示命中率，也不画成 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "normal", aria: "50%" },
-    { name: "读不到单次上限时不画占用弧，说明预算未配置", maxCallTokens: null,
+    // 0145：会话档位恒存在，「预算未配置」不再是可达状态。占比的分母仍是那次调用
+    // 冻结的预算——这里档位 262,144、冻结 1,000，读数必须按 1,000 算。
+    { name: "档位与冻结预算不同时，占比按那次调用的冻结预算", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
-      hit: "缓存命中 50%", state: "unknown", aria: "预算未配置" },
+      hit: "缓存命中 50%", state: "normal", aria: "50%" },
     { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "unknown", aria: "尚无模型调用" },
@@ -895,6 +928,9 @@ describe("协作工作区主路径", () => {
       const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
         model: "gpt-4.1-mini", base_url: null, max_call_tokens: scenario.maxCallTokens }) });
       vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
+          return response(contextUsageProjection(scenario.usage, scenario.maxCallTokens));
+        }
         if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
           return response({ items: [
             { id: "user-usage", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
@@ -949,6 +985,10 @@ describe("协作工作区主路径", () => {
     const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
       model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000 }) });
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
+        return response(contextUsageProjection({ input_tokens: 800, output_tokens: 200,
+          cache_read_tokens: 600, cache_creation_tokens: 100 }, 1_000));
+      }
       if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
         return response({ items: [
           { id: "user-usage", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
@@ -1002,8 +1042,11 @@ describe("协作工作区主路径", () => {
         info.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
       }); await flush(0);
       const infoTip = document.querySelector('[data-testid="context-meter-info-tooltip"]');
-      expect(infoTip?.textContent).toContain("上下文用量按最近一次有记录的模型调用统计");
-      expect(infoTip?.textContent).toContain("占用比例相对于工作区配置预算计算");
+      // 0145：口径改成「最近一次调用的真实读数 + 相对那次调用冻结的预算」——
+      // 分母不再是工作区配置，分项也不是 Provider 的分词结果。
+      expect(infoTip?.textContent).toContain("总用量取最近一次模型调用的真实读数");
+      expect(infoTip?.textContent).toContain("占比相对那次调用冻结的预算");
+      expect(infoTip?.textContent).toContain("不是 Provider 的分词结果");
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));

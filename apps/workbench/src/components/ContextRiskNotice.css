@@ -1,0 +1,229 @@
+/* 必读文件体积预警（2026-10-30）。
+   这一列是「输入卡外」的说明区（与档位说明、命令回执同一列）：卡片本身不因预警出现或消失
+   而改变形状。默认只是一行 12px 文本＋一枚警示字形，不用大面积彩色卡片——它是要在打字时
+   一直待在旁边的东西，抢注意力就等于把输入器挤掉。 */
+
+.context-risk { position: relative; min-width: 0; padding-block-end: var(--relay-space-1); }
+
+/* 单行入口。整行都是按钮：一行文本的命中区小于 24px 时很难点中，做成整行即可，
+   同时保留「一行」这个视觉形状。 */
+.context-risk-line {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 1.5rem;
+  margin: 0;
+  padding: var(--relay-space-0-5) var(--relay-space-1);
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.context-risk-line:hover { background: var(--relay-color-bg-subtle); }
+.context-risk-line:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: var(--relay-space-0-5);
+}
+/* 档位只改字形与文字颜色，不加底色：三档在同一行上按「可读到的顺序」递进。 */
+.context-risk-line[data-severity="NOTICE"] { color: var(--relay-color-text-secondary); }
+.context-risk-line[data-severity="HIGH"] { color: var(--relay-color-text-warning); }
+.context-risk-line[data-severity="SEVERE"] { color: var(--relay-color-status-danger-text); }
+.context-risk-mark { flex: none; line-height: 1; }
+/* 文本单行省略：文件名很长时也不把「查看详情」挤到下一行。 */
+.context-risk-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 动作紧跟正文，不推到行尾：这一行整体读作一句「发现了什么 · 怎么办」，
+   推到右边的结果是在宽窗口里变成两段互不相干的字。 */
+.context-risk-action {
+  flex: none;
+  padding-inline-start: var(--relay-space-1);
+  color: inherit;
+  opacity: 0.85;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.context-risk-line:hover .context-risk-action,
+.context-risk-line:focus-visible .context-risk-action { text-decoration: underline; text-underline-offset: 0.2em; }
+
+/* 浮层：沿用模型下拉 / 用量浮层的同一套弹层语言——向上锚定、popover 层、panel 圆角、
+   floating 阴影，不新增 token 值。左缘贴住这一行左缘，向右展开，窄窗时被视口宽度封顶。 */
+.context-risk-panel {
+  position: absolute;
+  bottom: calc(100% + var(--relay-space-2));
+  left: 0;
+  right: auto;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-2);
+  box-sizing: border-box;
+  width: max-content;
+  min-width: min(20rem, calc(100vw - var(--relay-space-8)));
+  max-width: min(26rem, calc(100vw - var(--relay-space-8)));
+  max-height: min(26rem, 62vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+}
+/* 打开就把焦点移进浮层（dialog 语义）：容器自己不画一圈焦点环，可见反馈交给内部可交互项。 */
+.context-risk-panel:focus { outline: none; }
+.context-risk-panel > * { margin: 0; min-width: 0; }
+
+.context-risk-header { display: flex; align-items: center; gap: var(--relay-space-1); }
+.context-risk-heading {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.context-risk-badge {
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.context-risk-panel[data-severity="HIGH"] .context-risk-badge {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+}
+.context-risk-panel[data-severity="SEVERE"] .context-risk-badge {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+.context-risk-agent {
+  margin-inline-start: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
+}
+/* 与圆环分工的一句话：预计 ≠ 实测，必须贴在读数旁边，不能只写在文档里。 */
+.context-risk-note { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+
+.context-risk-files { display: grid; gap: var(--relay-space-1); margin: 0; padding: 0; list-style: none; }
+.context-risk-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "path view" "meta view";
+  align-items: center;
+  column-gap: var(--relay-space-2);
+  padding: var(--relay-space-1) 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.context-risk-file:first-child { border-top: 0; }
+.context-risk-file-path {
+  grid-area: path;
+  margin: 0;
+  overflow: hidden;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-risk-file-meta {
+  grid-area: meta;
+  display: flex;
+  gap: var(--relay-space-1);
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+.context-risk-file[data-severity="HIGH"] .context-risk-share { color: var(--relay-color-text-warning); }
+.context-risk-file[data-severity="SEVERE"] .context-risk-share { color: var(--relay-color-status-danger-text); }
+.context-risk-view { grid-area: view; white-space: nowrap; }
+
+.context-risk-budget {
+  display: grid;
+  gap: var(--relay-space-0-5);
+  margin: 0;
+  padding-top: var(--relay-space-1);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-caption);
+}
+.context-risk-budget > div { display: flex; gap: var(--relay-space-2); }
+.context-risk-budget dt { flex: none; min-width: 5.5rem; color: var(--relay-color-text-muted); }
+.context-risk-budget dd { margin: 0; color: var(--relay-color-text-secondary); font-variant-numeric: tabular-nums; }
+
+.context-risk-reasons {
+  display: grid;
+  gap: var(--relay-space-0-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+.context-risk-reasons > li::before { content: "· "; }
+
+/* 优化建议与跳过项默认收起：浮层首先给的是读数与原因，建议是按需展看的第二步。 */
+.context-risk-details { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-caption); }
+.context-risk-details > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
+.context-risk-details > ul { display: grid; gap: var(--relay-space-0-5); margin: var(--relay-space-1) 0 0; padding-inline-start: var(--relay-space-4); }
+
+.context-risk-estimate-note { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+
+.context-risk-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); }
+
+.context-risk-error { color: var(--relay-color-status-danger-text); font-size: var(--relay-font-size-caption); }
+
+/* 查看文件：只读预览，显式说明「只显示开头一段、文件未被改动」。 */
+.context-risk-preview {
+  display: grid;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+}
+.context-risk-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+.context-risk-preview-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-risk-preview-head > button { margin-inline-start: auto; }
+.context-risk-preview > pre {
+  margin: 0;
+  max-height: 9rem;
+  overflow: auto;
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-risk-line { transition: none; }
+}
+
+/* 审计不可用与发送前确认（2026-10-30）：复用同一条紧凑单行与同一列间距，不新造视觉语言。 */
+.context-risk-unavailable .context-risk-text { color: var(--text-muted, #6b7280); }
+.context-risk-unavailable .context-risk-mark,
+.context-risk-gate .context-risk-mark { color: var(--color-warning, #b45309); }
+.context-risk-gate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 8px; border: 1px solid var(--border-strong, rgba(0, 0, 0, 0.16)); border-radius: 8px; }
+.context-risk-gate[data-severity="SEVERE"] { border-color: var(--color-danger, #b91c1c); }
+.context-risk-gate-text { margin: 0; font-size: 12px; line-height: 1.5; }
+.context-risk-check-failed { margin: 0; font-size: 12px; color: var(--text-muted, #6b7280); }

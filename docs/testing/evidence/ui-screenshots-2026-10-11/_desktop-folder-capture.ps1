@@ -3,7 +3,7 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 
-$outDir = "D:\Develop\Relay-Agent\ui-screenshots-2026-10-11"
+$outDir = "D:\Develop\Relay-Agent\docs\testing\evidence\ui-screenshots-2026-10-11"
 function Save-Screen([string]$name) {
   $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
   $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height

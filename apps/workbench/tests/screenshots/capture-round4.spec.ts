@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const OUT = "D:/Develop/Relay-Agent/ui-screenshots-2026-10-11";
+const OUT = "D:/Develop/Relay-Agent/docs/testing/evidence/ui-screenshots-2026-10-11";
 const ENV_PATH = "D:/Develop/Relay-Agent/apps/api/.env";
 const SESSION_PATH = "D:/Develop/Relay-Agent/.relay-test/session.json";
 const IDS = JSON.parse(fs.readFileSync(path.join(OUT, "_deep-link-seed-ids.json"), "utf8").replace(/^\uFEFF/, "")) as {

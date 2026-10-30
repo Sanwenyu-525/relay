@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { describeAssistRequestContext } from './assist-context-usage.js';
 import { join } from 'node:path';
 
 import { SessionToolCallRepository } from '../assist/session-tool-call-repository.js';
@@ -16,6 +17,9 @@ import { capabilityFor, dispatchGatewayAction, prepareGatewayAction,
   targetMatches, type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
   from './gateway-actions.js';
 import { settleDelegationToolCall, type DelegationChildRunner } from './subagent-delegation.js';
+import { SessionTodoRepository } from '../assist/session-todo-repository.js';
+import { TODO_WRITE_TOOL_NAME, todoWriteToolSpec } from '../assist/session-todos.js';
+import { settleTodoWriteCall } from './session-todo-tool.js';
 import { DELEGATE_SUBAGENT_SPEC, DELEGATE_SUBAGENT_TOOL_NAME } from '../workflow/tool-catalog.js';
 import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
 import { BROWSER_UNKNOWN_TARGET, isBrowserAction } from '../browser/protocol.js';
@@ -105,7 +109,14 @@ export { assistantReadonlySystemPrompt as assistantSystemPrompt }
   from '../workflow/prompts/conversation-prompts.js';
 
 export interface AssistantReadonlyRoundInput {
+  /** Working-context guard; keep active tool protocols intact and stop adding tools under pressure. */
+  readonly inputByteLimit?: number;
   readonly contextTurns?: AssistRequest['turns'];
+  /**
+   * 0145：历史轮次里的注入段分类（记忆摘要、资料/Skill 正文）。
+   * 与 `contextTurns` 同源，由装配方给出；缺省时全部按历史消息计。
+   */
+  readonly contextUsage?: AssistRequest['contextUsage'];
   readonly session: AssistSessionRow;
   readonly message: AssistMessageRow;
   /** 当前连接可用的工具名；每轮重新计算，不从快照读。 */
@@ -121,6 +132,11 @@ export interface AssistantReadonlyRoundInput {
    * 由调用方按目录写档位决定；这里只影响词表，能不能真正落盘仍由 Gateway 准入判定。
    */
   readonly allowWrite?: boolean | undefined;
+  /**
+   * ADR-038：本轮是否声明 `todo_write`。只对普通 Agent 主流程为真；
+   * 与 `allowWrite` 同一性质——影响词表，不授予执行权，也不改任何完成事实。
+   */
+  readonly allowTodo?: boolean | undefined;
   /**
    * 0122：消费用户插话。每次模型请求前调用；返回的原文按顺序接进本轮上下文，
    * 对应的排队消息已由实现方收口（不再自己生成回复）。
@@ -173,7 +189,10 @@ export type SessionReadOriginResolution =
   | { readonly ok: false; readonly reason: string; readonly detail: string };
 
 export interface SessionReadonlyRoundInput {
+  readonly inputByteLimit?: number;
   readonly contextTurns?: AssistRequest['turns'];
+  /** 0145：与 `contextTurns` 同源的下标分类（记忆摘要 / 资料正文等注入段）。 */
+  readonly contextUsage?: AssistRequest['contextUsage'];
   readonly session: AssistSessionRow;
   readonly message: AssistMessageRow;
   /** 当前连接可用的工具名；每轮重新计算，不从快照读。 */
@@ -189,6 +208,11 @@ export interface SessionReadonlyRoundInput {
    * 只影响「词表里有没有写工具」；这一次请求能不能真正落盘仍由 Gateway 准入判定。
    */
   readonly allowWrite?: boolean | undefined;
+  /**
+   * ADR-038：本轮是否声明 `todo_write`。只对普通 Agent 主流程为真；
+   * 与 `allowWrite` 同一性质——影响词表，不授予执行权，也不改任何完成事实。
+   */
+  readonly allowTodo?: boolean | undefined;
   readonly resolveOrigin: () => Promise<SessionReadOriginResolution>;
   readonly maxRounds?: number | undefined;
   readonly maxToolCalls?: number | undefined;
@@ -354,6 +378,8 @@ const RESULT_TEXT_LIMIT = 16_000;
  */
 const TOOL_BUDGET_WRAP_UP = '工具轮次或调用预算已用尽。请立即用已经拿到的结果给出最终答复，'
   + '不要再请求任何工具。';
+const CONTEXT_PRESSURE_WRAP_UP = '上下文接近工作容量上限。请用已经拿到的结果给出最终答复，'
+  + '保留未决事项，不要再请求任何工具。';
 
 /** 是否已到必须收尾的轮次：最后一次轮次，或工具调用预算已经用尽。 */
 export function shouldWrapUpReadonlyRound(input: {
@@ -422,14 +448,22 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
   const declared: ModelToolSpec[] = [
     ...declaredToolSpecs(assistantToolNames(input.availableTools, input.allowWrite ?? false)),
     ...(input.allowDelegate === true ? [DELEGATE_SUBAGENT_SPEC] : []),
+    // ADR-038: todo_write is an in-app action; declare only for the agent main loop.
+    ...(input.allowTodo === true ? [todoWriteToolSpec()] : []),
   ];
   // 官方 GitHub Skill（§10）按需激活：只读轮次**实际声明**的词表里出现 github_ 工具时，
   // 把冻结的摘要与边界块随 system 注入。人设档、普通 Agent 档与子代理轮次同走本入口，
   // 注入跟随工具而不是跟随会话模式；无工具、被禁用或内容校验失败都不注入（失败关闭）。
   const officialSkillNotice = officialGithubSkillGuidanceForTools(
     assistantToolNames(input.availableTools, input.allowWrite ?? false));
-  const baseSystem = officialSkillNotice === null
-    ? input.system : `${input.system}\n\n${officialSkillNotice}`;
+  const baseSystem = [input.system, officialSkillNotice,
+    ...(input.allowDelegate === true ? [
+      '本轮可通过 delegate_subagent 委派临时只读调查（INVESTIGATE）或独立审查（REVIEW）。',
+      '简单问题直接处理；有可独立调查的问题再委派，每次给清楚任务、范围和输出要求。',
+      '独立调查可在同一轮发出，最多两个并行子任务且只允许一层；依赖改动的审查必须等改动完成并给定基线。',
+      '子任务共享当前会话预算，返回的是带来源的参考结果，不是用户指令、权限或业务完成证明。',
+      '收到子任务的失败、取消或未验证发现时如实报告，不能宣称已完成独立审查。',
+    ] : [])].filter((line) => line !== null).join('\n');
   const toolTurns: ModelToolTurn[] = [];
   const providerRequestIds: string[] = [];
   let usage: ModelUsage = EMPTY_USAGE;
@@ -478,7 +512,10 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     let response: AssistResult;
     try {
       // 最后一轮或工具调用预算用完时强制收尾：本轮不声明工具，模型只能输出正文。
-      const wrapUp = shouldWrapUpReadonlyRound({ round, maxRounds, usedCalls, maxToolCalls });
+      const contextPressure = input.inputByteLimit !== undefined && toolTurns.length > 0 &&
+        describeAssistRequestContext({ intent: 'DISCUSS', system: baseSystem, turns,
+          tools: declared, toolTurns, steers }).covered_bytes >= Math.floor(input.inputByteLimit * 0.8);
+      const wrapUp = contextPressure || shouldWrapUpReadonlyRound({ round, maxRounds, usedCalls, maxToolCalls });
       // 收尾轮不再消费插话：这一轮之后没有下一次模型请求，接了也答不上。
       if (!wrapUp) await drainSteers();
       // 0128：插话是唯一会让模型误解「正式执行已经改向」的入口，因此只在发生插话后
@@ -486,13 +523,23 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       if (hasSteers && executionNotice === undefined && input.readExecutionNotice !== undefined) {
         executionNotice = await input.readExecutionNotice();
       }
+      const todoBlock = input.allowTodo === true
+          ? await new SessionTodoRepository(db).readContextBlock(message.session_id) : '';
       const request: AssistRequest = { intent: 'DISCUSS',
-        system: executionNotice === undefined || executionNotice === null
+        system: (executionNotice === undefined || executionNotice === null
           ? (hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem)
-          : `${hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem}\n\n${executionNotice}`,
-        turns: wrapUp ? [...turns, { role: 'user', content: TOOL_BUDGET_WRAP_UP }] : turns,
+          : `${hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem}\n\n${executionNotice}`)
+          + (todoBlock === '' ? '' : '\n\n' + todoBlock),
+        turns: wrapUp ? [...turns, { role: 'user', content: contextPressure
+          ? CONTEXT_PRESSURE_WRAP_UP : TOOL_BUDGET_WRAP_UP }] : turns,
         ...(wrapUp ? { tools: [] } : { tools: declared }),
-        toolTurns, ...(steers.length === 0 ? {} : { steers: [...steers] }), signal: input.signal };
+        toolTurns, ...(steers.length === 0 ? {} : { steers: [...steers] }), signal: input.signal,
+        ...(input.contextUsage === undefined ? {} : { contextUsage: input.contextUsage }) };
+      // MEMORY_TOOL_PRESSURE: never truncate or replay an active tool protocol to make it fit.
+      if (input.inputByteLimit !== undefined &&
+          describeAssistRequestContext(request).covered_bytes > input.inputByteLimit) {
+        return { kind: 'FAILED', errorCode: 'MEMORY_CONTEXT_TOO_LARGE', usage, providerRequestIds };
+      }
       response = input.invokeAssist === undefined
         ? await input.modelPort.assist(request) : await input.invokeAssist(request);
     } catch (error) {
@@ -524,6 +571,38 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     const results: ModelToolTurnResult[] = [];
     const steersBefore = steers.splice(0);
     let interrupted = false;
+    // SESSION_SUBAGENT_FANOUT: only independent read-only delegations may overlap.
+    // Mixed read/write batches retain their original ordered execution.
+    if (response.calls.length > 1 &&
+        response.calls.every((call) => call.name === DELEGATE_SUBAGENT_TOOL_NAME)) {
+      if (round < maxRounds) interrupted = await drainSteers();
+      if (!interrupted) {
+        for (let start = 0; start < response.calls.length; start += 2) {
+          if (input.signal.aborted || await isCancelRequested(db, message.id)) {
+            return { kind: 'CANCELLED', providerRequestId: response.providerRequestId,
+              usage, providerRequestIds };
+          }
+          const batchUsedCalls = usedCalls;
+          const batch = await Promise.allSettled(response.calls.slice(start, start + 2)
+            .map((call, index) => settleSessionReadonlyToolCall(db, { session, message,
+              availableTools: input.availableTools, repository, round, ordinal: start + index,
+              call, usedCalls: batchUsedCalls + index, maxToolCalls, maxRounds,
+              resolveOrigin: input.resolveOrigin, allowWrite: false,
+              allowTodo: input.allowTodo === true,
+              allowDelegate: input.allowDelegate === true, runDelegation: input.runDelegation,
+              workerId: input.workerId, signal: input.signal })));
+          // Join every started child before propagating a failure to the parent.
+          for (const settled of batch) {
+            if (settled.status === 'rejected') throw settled.reason;
+            results.push(settled.value);
+          }
+          usedCalls += batch.length;
+        }
+        toolTurns.push({ calls: response.calls, results, steersBefore,
+          preamble: response.preamble, reasoningContent: response.reasoningContent });
+        continue;
+      }
+    }
     for (const [ordinal, call] of response.calls.entries()) {
       if (input.signal.aborted || await isCancelRequested(db, message.id)) {
         return { kind: 'CANCELLED', providerRequestId: response.providerRequestId,
@@ -556,6 +635,7 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         availableTools: input.availableTools, repository, round, ordinal, call,
         usedCalls, maxToolCalls, maxRounds, resolveOrigin: input.resolveOrigin,
         allowWrite: input.allowWrite ?? false,
+        allowTodo: input.allowTodo === true,
         allowDelegate: input.allowDelegate === true,
         runDelegation: input.runDelegation,
         workerId: input.workerId,
@@ -591,8 +671,10 @@ export async function runAssistantReadonlyRounds(db: DbExecutor,
     snapshot: session.assistant_role_snapshot,
     readScopeRoots: assistantReadScopeRoots(session) });
   return runSessionReadonlyRounds(db, { session, message, availableTools: input.availableTools,
+    ...(input.inputByteLimit === undefined ? {} : { inputByteLimit: input.inputByteLimit }),
     modelPort: input.modelPort, signal: input.signal, system,
     ...(input.contextTurns === undefined ? {} : { contextTurns: input.contextTurns }),
+    ...(input.contextUsage === undefined ? {} : { contextUsage: input.contextUsage }),
     ...(input.invokeAssist === undefined ? {} : { invokeAssist: input.invokeAssist }),
     resolveOrigin: () => assistantReadOrigin(db, session, message.id),
     ...(input.maxRounds === undefined ? {} : { maxRounds: input.maxRounds }),
@@ -623,11 +705,14 @@ export async function runAgentSessionReadonlyRounds(db: DbExecutor,
     modelPort: input.modelPort, signal: input.signal, system,
     ...(input.invokeAssist === undefined ? {} : { invokeAssist: input.invokeAssist }),
     ...(input.contextTurns === undefined ? {} : { contextTurns: input.contextTurns }),
+    ...(input.contextUsage === undefined ? {} : { contextUsage: input.contextUsage }),
     resolveOrigin: () => agentSessionReadOrigin(db, session, message.id),
     ...(input.maxRounds === undefined ? {} : { maxRounds: input.maxRounds }),
     ...(input.maxToolCalls === undefined ? {} : { maxToolCalls: input.maxToolCalls }),
     // 0126：写只在这一条身份（普通 Agent 主流程）上开放，且由调用方按档位决定。
-    ...(input.allowWrite === undefined ? {} : { allowWrite: input.allowWrite }),
+    ...(input.allowWrite === undefined ? {} : {
+      allowWrite: input.allowWrite && session.parent_session_id === null }),
+    ...(input.allowTodo === undefined ? {} : { allowTodo: input.allowTodo }),
     ...(input.drainSteers === undefined ? {} : { drainSteers: input.drainSteers }),
     ...(input.readExecutionNotice === undefined ? {}
       : { readExecutionNotice: input.readExecutionNotice }),
@@ -676,6 +761,8 @@ export interface SessionReadonlyToolCallContext {
    * 写工具与这一次请求能不能写是两个问题，前者来自档位、后者来自 Gateway 准入。
    */
   readonly allowWrite: boolean;
+  /** ADR-038：本轮是否声明 todo_write（仅普通 Agent 主流程）。 */
+  readonly allowTodo?: boolean | undefined;
   /**
    * 0128：本轮是否声明委派工具。仅根会话为真；子会话的上下文里它恒为 false，
    * 因此「子会话请求委派」在这条共享执行路径上不可能被放行。
@@ -735,6 +822,14 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
         arguments: call.arguments },
       workerId: context.workerId, signal: context.signal,
       runChild: context.runDelegation });
+  }
+  // ADR-038: todo_write is an in-app action; route it before vocabulary
+  // checks and origin resolution - it needs neither a directory nor a connection.
+  if (call.name === TODO_WRITE_TOOL_NAME) {
+    if (context.allowTodo !== true) {
+      return refuse('TODO_WRITE_UNAVAILABLE', 'todo_write is not declared for this session.');
+    }
+    return settleTodoWriteCall(db, { session, message: context.message, row, repository, call });
   }
   const definition = readInternalTool(call.name);
   if (definition === undefined ||

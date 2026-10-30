@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import type { RelayApiClient, RelayReview, RelayRun, RelayRunToolCall, RelayRunToolCalls } from "../api/relayClient";
@@ -33,6 +33,17 @@ const GIT_TOOLS = new Set(["git_status", "git_diff", "git_log"]);
 const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 /** 有结算结果的三态；其余三态都还没有执行结果。 */
 const SETTLED_CALL = new Set(["SETTLED", "REJECTED", "ABANDONED"]);
+
+/** 最近的纵向可滚动祖先：判据与浏览器测试探针一致（overflow-y 可滚且还有 40px 以上可滚余量）。 */
+function scrollableAncestor(from: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = from.parentElement;
+  while (node !== null) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight - node.clientHeight > 40) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
 
 /** head+tail 切分：折叠时保留头尾两半，展开时全部交给渲染层。
  *  行数不超过上限时不切分，调用方据此避免头尾重叠（同一条内容出现两次）。 */
@@ -224,6 +235,35 @@ export default function RunToolTrajectoryPanel({ client, run }: {
   }, [client, runId]);
 
   const counts = useMemo(() => projection === null ? null : countBy(projection), [projection]);
+
+  /**
+   * G05：面板上方那几行元信息会随 Run 推进改变行数（来源 Run 行的终态说明、事件流降级说明、
+   * 「上次读取」时间、等待原因）。面板在滚动容器里，上方一变长，用户正在读的那一行就被整体
+   * 推走（实测推移 19px，且滚动位置没有补偿）。这里做最小补偿：把锚点相对滚动容器的偏移
+   * 变化量加回 scrollTop，让下方内容在视觉上不动。
+   *
+   * 只在 scrollHeight 真的变了的那次渲染上补偿：容器被用户（或测量探针）滚动时偏移也会变，
+   * 但那不是「上方变长」，补偿它等于把滚动位置抢回去。贴底时也跳过，继续跟随新内容。
+   */
+  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+  const anchorStateRef = useRef<{ offset: number; scrollHeight: number } | null>(null);
+  useLayoutEffect(() => {
+    const anchor = scrollAnchorRef.current;
+    if (anchor === null) return;
+    const host = scrollableAncestor(anchor);
+    if (host === null) return;
+    const offset = anchor.getBoundingClientRect().top - host.getBoundingClientRect().top;
+    const scrollHeight = host.scrollHeight;
+    const previous = anchorStateRef.current;
+    anchorStateRef.current = { offset, scrollHeight };
+    if (previous === null || previous.scrollHeight === scrollHeight) return;
+    const delta = offset - previous.offset;
+    if (delta === 0) return;
+    const bottomGap = scrollHeight - host.clientHeight - host.scrollTop;
+    if (bottomGap <= delta + 8) return;
+    host.scrollTop += delta;
+    anchorStateRef.current = { offset: offset - delta, scrollHeight };
+  });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (id: string) => setExpanded((current) => {
     const next = new Set(current);
@@ -296,6 +336,7 @@ export default function RunToolTrajectoryPanel({ client, run }: {
         也不能据此认为已通过验证。
       </p>}
 
+      <div ref={scrollAnchorRef} className="trajectory-scroll-anchor" aria-hidden="true" />
       {projection.rounds.map((round) => {
         const deduped = dedupeCalls(round.calls);
         return <section key={round.round} className="trajectory-round"

@@ -1,6 +1,7 @@
 import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { contextUsageToJson, describeAssistRequestContext } from './assist-context-usage.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { createRepositories } from './unit-of-work.js';
 import { SessionToolCallRepository } from '../assist/session-tool-call-repository.js';
@@ -120,6 +121,7 @@ Promise<LearningRoundOutcome> {
         const recorded = await recordModelInvocation(db, {
           origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
             assistMessageId: message.id },
+          contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
           identity: input.modelPort.identity,
           signal: input.signal,
           invoke: async () => input.modelPort.assist(request),

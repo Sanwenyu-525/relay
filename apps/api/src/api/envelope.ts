@@ -68,6 +68,10 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'ClearSessionMemory':
     case 'SetSessionMemory':
       return typeof result.session_id === 'string' ? `assist-sessions/${result.session_id}/memory` : undefined;
+    // 0145：会话级上下文档位。回执指向该会话的档位资源，GET 回执与首次响应一致。
+    case 'SetSessionContextBudget':
+      return typeof result.session_id === 'string'
+        ? `assist-sessions/${result.session_id}/context-budget` : undefined;
     case 'SetWorkspaceDefaultDirectory':
     case 'ClearWorkspaceDefaultDirectory':
       return 'default-working-directory';

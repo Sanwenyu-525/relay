@@ -2161,6 +2161,26 @@ async function settleGatewayInvocation(db: DbExecutor, admitted: AdmittedInvocat
   });
 }
 
+/**
+ * 本次 Run 冻结的单次调用预算（P1-D）。
+ *
+ * 读 execution contract 的 `frozen_snapshot.budget.call_reservation_tokens`——与预发送审计用的是
+ * 同一个数（已含 Provider 窗口封顶）。快照缺失、Mock 轮次、字段不合法一律返回 null：
+ * 这种情况不给风险读数才是诚实的。
+ */
+async function frozenReadBudget(db: DbExecutor,
+  origin: DispatchGatewayInput['origin']): Promise<number | null> {
+  if (origin.kind !== 'RUN') return null;
+  try {
+    const contract = await createRepositories(db).runs.readContract(origin.runId);
+    const snapshot = contract?.frozen_snapshot as { readonly mock?: unknown;
+      readonly budget?: { readonly call_reservation_tokens?: unknown } } | null | undefined;
+    if (snapshot === null || snapshot === undefined || snapshot.mock === true) return null;
+    const tokens = snapshot.budget?.call_reservation_tokens;
+    return typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
+  } catch { return null; }
+}
+
 /** Admit commits before one FakeAdapter call. A crash leaves the same Invocation for reconciliation. */
 export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatewayInput): Promise<GatewayDispatchResult> {  let admitted: AdmittedInvocation;
   try {
@@ -2182,8 +2202,9 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   if (admitted.operation.capability_key === 'FILE_READ') {
     // Reads are bounded by the caller-provided deadline (the Worker execution
     // lease) and the caller's abort signal.
+    // P1-D：读取时把同一套「值不值得读」的判定带上，预算取本次 Run 的冻结预留。
     const read = await fileReadExecute(admitted.operation, admitted.invocation, input.signal,
-      input.deadline ?? null);
+      input.deadline ?? null, await frozenReadBudget(db, input.origin));
     await input.hooks?.afterFakeEffect?.();
     return settleGatewayInvocation(db, admitted, read.outcome, read.result, input.origin);
   }
@@ -2506,12 +2527,15 @@ async function cliExecute(op: LogicalOperationRow, invocation: InvocationAttempt
   };
 }
 
+import { assessReadRisk } from './required-context-files.js';
+
 const FILE_READ_MAX_BYTES = 128 * 1024;
 
 /** Reads are idempotent and side-effect free: a typed failure settles FAILED
  * (nothing happened) instead of UNKNOWN, and reconcile can safely re-read. */
 export async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
-  signal?: AbortSignal, deadline?: Date | null): Promise<{
+  signal?: AbortSignal, deadline?: Date | null,
+  contextBudgetTokens?: number | null): Promise<{
   outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject;
 }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file read');
@@ -2544,9 +2568,15 @@ export async function fileReadExecute(op: LogicalOperationRow, invocation: Invoc
     return { outcome: 'FAILED', result: { reason: 'FILE_BINARY_UNSUPPORTED',
       target: op.normalized_target, size: stat.size } };
   }
+  // P1-D：受控读取也报读数。预算取本次 Run 冻结的单次预留（与预发送审计同源）；
+  // 没有预算就不写 context_risk，不编一个分母。
+  const readRisk = typeof contextBudgetTokens === 'number' && contextBudgetTokens > 0
+    ? assessReadRisk({ bytes: stat.size, effectiveInputTokens: contextBudgetTokens }) : null;
   return { outcome: 'SUCCEEDED', result: { target: op.normalized_target, size: stat.size,
     sha256: createHash('sha256').update(bytes).digest('hex'), truncated: false,
-    content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id } };
+    content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id,
+    ...(readRisk === null ? {} : { context_risk: { severity: readRisk.severity,
+      ratio: readRisk.ratio, tokens: readRisk.tokens, budget_tokens: contextBudgetTokens ?? null } }) } };
 }
 
 /**

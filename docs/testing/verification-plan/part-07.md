@@ -270,3 +270,90 @@ Fake/受控端口只证明输入、顺序、规则接线与执行边界。真实
 | N04-N06-06 | P2 才扩大为 100–200 Tasks、多份计划/范围推演/任务链、长链及历史 Review/Completion，并反复切换项目、返回与刷新；检查顺序、游标、历史归属和恢复后状态 | P0/P1 必需场景闭合后运行；真实数据/持久层结合浏览器与 Windows 操作，不以合成样本代替实际闭环 |
 
 P0/P1 任一必需场景失败或真实桌面环境未可用时，P2 标记为 `NOT_RUN/BLOCKED` 并保留原因，不提前扩大为规模测试。真实 Provider 质量与受控 Worker 协议分开验收；没有真实 Provider 运行证据时不得宣称模型语义质量通过。
+
+## 49. AI 回复场景实验室：全状态回放与批量截图的开发期出口（2026-10-30）
+
+这一节规定「AI 回复模块能达到的每一种界面状态，都可以用产品自己的组件点出来、播出来、量出来」的开发期出口。它判的是**呈现与交互**，不是业务事实：任何一条场景通过都不写入 Task、Run、Review 或 Completion，也不代表任何真实任务、真实 Provider 或真实窗口通过。成绩只在[功能验收表](../overall-acceptance-2026-09-28.md#当前功能验收表)按轮次记录。
+
+### 49.1 分层与各自判什么
+
+| 层 | 位置 | 判据 | 不能替代 |
+|---|---|---|---|
+| 场景与回放 | `apps/workbench/src/dev/scenarios/*`、`scenarioWorld.ts`（`ScenarioRunner`）、`scenarioClient.ts` | 每场景的帧序列、世界快照、稳定 ID；`createScenarioClient` 只实现声明过的读取口，其余方法直接抛错 | 真实 API、数据库、Provider、子进程 |
+| 逐条静态断言（jsdom） | `apps/workbench/tests/scenarioLabMatrix.spec.tsx` | 节点在场与退场、行数、文案、状态属性、重复行——「界面上写了什么」 | 布局、动画、滚动位置 |
+| 十条浏览器性质＋批量判定 | `apps/workbench/tests/browser/assistScenarioLab.spec.ts` | 只有真实布局与动画能回答的性质，以及逐场景静态断言在浏览器里的复跑 | Windows/WebView2 与真实窗口 |
+| 批量截图与报告 | `apps/workbench/tests/browser/assistScenarioLabShots.spec.ts` | 每场景最后一帧、六条流程逐帧图证与 `results/scenario-lab/` 汇总 | 人工接受与业务验收 |
+| 生产隔离 | `apps/workbench/scripts/check-scenario-lab-isolation.mjs` | 开发构建必须注册 `assist-scenarios` 这条路由，生产构建必须一个实验室串都搜不到 | 运行时权限检查 |
+
+### 49.2 十条只能由真实浏览器判定的性质
+
+状态与状态词互证、展开折叠后入口仍在原地、失败与未知不产生成功标记、同一行身份不重复渲染、状态切换不卸载整块消息组件、流式交接没有空白帧、动效开启时只有一个主进度、动效关闭时受控动画全停而信息一条不少、长内容不产生页面级横向溢出、用户上滚站稳后下方续写不顶走正在看的那一行。每条先确认节点存在，再量样式与动画，避免空节点集合让检查错误通过。
+
+### 49.3 必须保持的安全边界
+
+不向真实业务数据库插入模拟会话、不向真实模型发送模拟请求、不执行真实命令、不修改用户真实项目文件、不创建真实审批或执行凭据；夹具身份一律带 `mock-` 前缀，界面把「模拟」写明。实验室只在开发构建可达，且不靠 URL 参数或隐藏按钮把关：路由与侧栏入口都写在 `import.meta.env.DEV` 折叠掉的分支里，`lazy()` 也必须留在这个分支内——实测提到顶层常量后，路由字符串虽被摇掉，整个实验室 chunk 仍会留在生产产物里。场景切换不污染正常聊天：播放与审批只操作 `ScenarioRunner` 的世界快照，动效与阅读密度这类设备偏好在离开页面时按进入前的值还原。
+
+### 49.4 运行口径
+
+```
+npx vitest run tests/scenarioLabMatrix.spec.tsx
+npx playwright test tests/browser/assistScenarioLab.spec.ts tests/browser/assistScenarioLabShots.spec.ts --workers=1
+node scripts/check-scenario-lab-isolation.mjs
+```
+
+浏览器两条 spec 必须按此顺序同批跑：报告只写 `browser-verdicts.json` 里实测出的判定，没跑到就写「未跑」，不补一个好看的数。截图按帧「单步」推进，批量判定先在第 0 帧挂稳再落到最后一帧；两者都不直接深链到目标帧——「先见过这些步骤、后一次返回空也不能抹掉」这类不变量，跳过前面帧就无从谈起，图证也会与判定各说各话。
+
+批量截图这一条会对每个场景做一次整页导航，`page.goto` 必须显式停在 `domcontentloaded` 并带导航上限：实测第 140 次导航等 `load` 事件一直没落地（同一条 URL 单独打开 0.6 秒即渲染完，是 dev server 侧的连接复用问题而非界面问题），把这条测试 900 秒的预算整个吃光。「这一帧确实挂上了」由挂载断言与停稳判据把关，`load` 不参与判定；卡住的导航要快速失败，不能拖到测试超时才报。
+
+## 50. AI 回复场景实验室的桌面入口与集成验收（2026-10-30）
+
+[测试计划 §49](part-07.md#49-ai-回复场景实验室全状态回放与批量截图的开发期出口2026-10-30) 判的是「场景本身呈现成什么样」。这一节判的是**开发者能不能真的用它**：打开开发版桌面应用，不手敲 URL，点一下就进得去、进去能干活、干完回得来；并且生产构建里连门都没有。界面形态归[工作台交互规范 §55](../../frontend/workbench-design/part-15.md#55-开发期出口侧栏开发工具与-ai-回复场景实验室2026-10-30已实施实机已验)，本节只写判据与口径。
+
+### 50.1 目标与非目标
+
+目标：开发者在真实桌面壳里点「开发工具」即进入完整实验室，并能原路返回。非目标：不新增项目、不重做 145 条场景、不另造演示 UI、不新增第二个入口；实验室仍判呈现与交互，不写入 Task／Run／Review／Completion，也不代表任何真实任务或真实 Provider 通过。
+
+### 50.2 分层证据与各自能回答什么
+
+| 层 | 位置 | 判据 | 不能替代 |
+|---|---|---|---|
+| 浏览器集成（开发构建） | `apps/workbench/tests/browser/scenarioLabEntry.spec.ts` | 入口位置与提示、选中态、返回来源、窄窗抽屉、场景切换清理、全程不连真实执行系统 | 真实 Windows 窗口与原生标题带 |
+| 生产构建浏览器隔离 | `apps/workbench/tests/browser-prod/scenarioLabProdIsolation.spec.ts`（`playwright.prod.config.ts` 起真实 production 产物） | 侧栏无入口、路由未注册、手输地址不加载实验室 | 产物串搜 |
+| 产物串搜 | `apps/workbench/scripts/check-scenario-lab-isolation.mjs` | 开发产物必须命中实验室串，生产产物必须 0 处命中 | 浏览器行为 |
+| 真实 Windows／WebView2 实机 | `apps/workbench/scripts/accept-scenario-lab-tauri.mjs`（CDP 驱动宿主自己开的那个窗口，Win32 改真窗口尺寸） | 真窗口里的入口可见、145 条加载、工具展开、动画播放、返回还原、窄窗重排、真窗口尺寸下无横向溢出 | 其它机器与多 DPI |
+
+### 50.3 必须成立的事实
+
+1. 入口在**底部辅助导航**，标签「开发工具」，悬停提示写全名「AI 回复场景实验室」，辅助导航里恰好一处，主导航与次级导航不重复挂载；进入后该条标为当前页。
+2. 窄窗（560px 级）档：侧栏收起时入口在导航抽屉里可达；近期工作栏收起不影响入口位置。
+3. 点击进入后：面包屑含「开发工具 → AI 回复场景实验室」，场景目录 145 条，manifest 145 条，预览区只挂一条场景。
+4. 「返回工作台」回到**进入前那一页**（含查询串）；没有来源时回 `/agent`；实验室组件从 DOM 上真的卸载；会话存储除动效与阅读密度两个视图偏好外不被改动。
+5. 场景切换后停播、帧归零，上一条场景的计时器与动画不留残留。
+6. 实验室打开期间**不向真实后端、Provider 或文件系统发请求**（本轮实测：实验室阶段 0 次请求）。
+7. 生产构建：辅助导航无「开发工具」、无指向 `__dev` 的链接、无该提示；手动访问 `/__dev/assist-scenarios` 落到「该入口不存在或未开放」，页面不加载实验室；产物里搜不到实验室路由与场景数据。
+
+### 50.4 生产隔离必须是构建期的
+
+不能只靠运行期判断或 URL 参数把关。路由、侧栏入口、面包屑分支与 `lazy()` 动态导入都写在 `import.meta.env.DEV` 折叠掉的分支里；`lazy()` 提到顶层常量时 Rolldown 不摇那次调用，路由字符串虽被摇掉但整个实验室 chunk 仍会进生产产物——这一条由 `check-scenario-lab-isolation.mjs` 的产物串搜复验。验证方式必须是「跑一次真实 production 构建并在浏览器里点」，不是读 `import.meta.env.DEV` 的写法。
+
+### 50.5 真实 Windows／WebView2 的口径
+
+- 用宿主自己开的那个窗口（CDP 连 WebView2），不是另开一个浏览器页；窗口尺寸用 Win32 `SetWindowPos` 改**真窗口**。
+- 两个实测坑：最大化态下程序化 resize 不生效（视口会塌成 146×20），先让应用自己还原窗口；PowerShell 未声明 DPI 感知，`SetWindowPos` 收的是虚拟化坐标，要按「窗口尺寸 ÷ CSS 视口」换算并迭代收敛。
+- 失败必须**按阶段归因**：工作台页自己就有的失败（例如会话待办接口 404）与实验室造成的失败不是一回事。混在一起既会掩盖实验室的问题，也会把别人的问题算到实验室头上。实验室阶段必须 0 控制台错误、0 失败响应、0 次后端调用；非实验室阶段的失败单独记录并说明根因。
+- Chromium 里的通过不能冒充 Tauri 实机通过；反之实机通过也不覆盖生产隔离，后者仍要单独跑 production 产物。
+
+### 50.6 运行口径
+
+```
+# 开发构建浏览器集成
+npx playwright test tests/browser/scenarioLabEntry.spec.ts --workers=1
+# 生产构建隔离（先起真实 production 产物）
+npx playwright test --config playwright.prod.config.ts
+# 产物串搜
+node scripts/check-scenario-lab-isolation.mjs
+# 真实 Windows／WebView2 实机（需先带 --remote-debugging-port=9333 启动桌面开发版）
+node scripts/accept-scenario-lab-tauri.mjs
+```
+
+实机脚本证据落在 `apps/workbench/results/scenario-lab/tauri/`（入口截图、整页截图、窄窗截图、返回后截图与 JSON 判定）；应用层既有失败单独写 `tauri-app-level-failures.json`，不算实验室成绩也不被它掩盖。

@@ -1000,6 +1000,10 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
 /* 圆环的点击外壳（2026-10-25 用户指令「上下文圆圈点击打开展示会话窗口的菜单」）：
    relative 只为锚定详情浮层；本身不占额外几何，圆环仍不参与收缩。 */
 .agent-chat-context-meter-group { position: relative; display: inline-flex; flex: none; }
+/* 浮层本身用 fixed 定位并按输入卡实测落位（见 AssistView 的 ContextMeter）：
+   圆环在工具行里、贴近卡片底缘，任何以圆环为锚点的绝对定位都会向上压进正文输入区，
+   以卡片为锚又会被中栏的 overflow 裁掉。fixed + 实测是唯一同时满足
+   「不遮挡输入区」「不被裁剪」「窄窗可读」的形态，因此这里不再改包含块。 */
 /* 圆环按钮＝环 + 百分比读数（2026-10-28）。3% 这类小比例在 32px 环上只剩一段两三个像素的
    弧，既读不出进度又像一枚「正在加载」的绿点；读数补上之后环仍是主标记，文字只承担读数。
    内边距给悬停底色留出边，同时把命中区撑到环以外，不必为点击再加一层外壳。 */
@@ -1078,8 +1082,11 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   min-width: min(18.75rem, calc(100vw - var(--relay-space-8)));
   max-width: min(21.25rem, calc(100vw - var(--relay-space-8)));
   /* 内容多时自己滚动；主读数在最上方，不需要滚动就能看见。
-     浮层是绝对定位，展开不会推动输入卡与消息列表重排。 */
-  max-height: min(24rem, 60vh);
+     浮层是绝对定位，展开不会推动输入卡与消息列表重排。
+     2026-10-30（0145）：正文多了「上下文构成」一段，24rem 在 782px 高的窗口里已经装不下
+     三段（实测内容 477px），一打开就要滚动，读起来像「还有东西被藏起来了」。
+     抬到 30rem / 68vh：桌面窗口一次读完，小窗口仍由内部滚动兜底。 */
+  max-height: min(30rem, 68vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--relay-space-3);

@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 
 import type { AssistMessageAttachmentMetaRow, AssistMessageAttachmentRow,
-  AssistMessagePreviewRow, AssistMessageRow,
+  AssistMessagePreviewRow, AssistMessageRow, AssistMessageStatus, ModelCallRow,
   AssistProposalRow, AssistSessionRow, AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
@@ -44,6 +44,81 @@ export interface AssistSessionContext {
 export type AssistSessionRunState = 'RUNNING' | 'PENDING';
 
 /**
+ * 左栏一枚状态图标的取值（2026-10-30）：**读时派生**的展示事实，不是 `assist_sessions`
+ * 的列，也不新增写入 Owner。派生只读三类既有事实——
+ *
+ * 1. `assist_messages.status`：在途（`RUNNING`/`PENDING`）与最后一轮终态
+ *    （`COMPLETED`/`FAILED`/`CANCELLED`）。`null` 不等于「完成」：它是「没有在途」，
+ *    终态要另外读最后一轮回复行，这条区分就是本类型存在的理由。
+ * 2. `assist_proposals.status = 'PENDING'`：一条提案正等人确认。这是仓库里唯一
+ *    会话级的「等待人工决定」权威事实，审批态只接它，不从消息正文、时间或工具调用猜。
+ * 3. `assist_sessions.status` 与「有没有消息」：归档与未开始是会话自身的生命周期事实。
+ *
+ * 优先级（前面的压过后面的）：在途 → 等待确认 → 归档 → 未开始 → 最后一轮终态。
+ * 在途压过一切，因为它是此刻正在发生的事；终态排在未开始之后，因为「没有消息」
+ * 比「上一轮的结局」更能描述这条会话现在是什么。全部读不出（有条目但没有任何助手行）
+ * 时为 `null`，界面回退类型图标——不编一个状态。
+ */
+export type AssistSessionListState =
+  | 'RUNNING'
+  | 'PENDING'
+  | 'WAITING_APPROVAL'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'NOT_STARTED'
+  | 'ARCHIVED';
+
+/** 派生 `AssistSessionListState` 所需的原始事实；列表与单条读取共用一份形状。 */
+interface AssistSessionStateFacts {
+  readonly status: AssistSessionStatus;
+  readonly has_messages: boolean;
+  readonly run_state: AssistSessionRunState | null;
+  readonly last_assistant_status: AssistMessageStatus | null;
+  readonly waiting_approval: boolean;
+}
+
+/**
+ * 唯一的派生点：列表与单条读取都调用它，不允许第二份判定散落在 SQL 或界面里。
+ *
+ * `last_assistant_status` 落到 PENDING/RUNNING 时说明有在途行、`run_state` 已先行返回；
+ * 真出现「在途但 run_state 为空」只可能是两条读法错位，那时返回 `null`（未知），
+ * 不挑一个终态顶上。
+ */
+function deriveListState(facts: AssistSessionStateFacts): AssistSessionListState | null {
+  if (facts.run_state !== null) return facts.run_state;
+  if (facts.waiting_approval) return 'WAITING_APPROVAL';
+  if (facts.status === 'ARCHIVED') return 'ARCHIVED';
+  if (!facts.has_messages) return 'NOT_STARTED';
+  return facts.last_assistant_status === 'COMPLETED' || facts.last_assistant_status === 'FAILED' ||
+    facts.last_assistant_status === 'CANCELLED' ? facts.last_assistant_status : null;
+}
+
+/**
+ * 0145：新会话在没有可继承来源时的档位，也是 `assist_sessions.context_budget_tokens`
+ * 的插入缺省值。三档里最小的一档——先把上下文从最省的一档起步，用户再按需要往上调。
+ */
+export const DEFAULT_SESSION_CONTEXT_BUDGET = 262_144;
+
+/** 0145：会话最近一次模型调用的用量行（含分项快照的原始 JSON）。 */
+export interface AssistContextUsageCallRow {
+  readonly id: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly status: ModelCallRow['status'];
+  readonly usage_input_tokens: number | null;
+  readonly usage_output_tokens: number | null;
+  readonly usage_cache_read_tokens: number | null;
+  readonly usage_cache_creation_tokens: number | null;
+  /** 该次调用冻结的单次预算；解释历史占比时以它为准，而不是当前档位。 */
+  readonly budget_reserved_tokens: number | null;
+  readonly context_usage: JsonObject | null;
+  readonly settled_at: Date | null;
+  readonly started_at: Date;
+  readonly assist_message_id: string | null;
+}
+
+/**
  * 会话列表投影：`has_messages` 与 `run_state` 都是**读时派生**的事实，不是 `assist_sessions` 的列。
  *
  * `has_messages` 回答「这段讨论有没有消息」，与 `last_message_at` 分开：后者是导航排序键，
@@ -53,10 +128,15 @@ export type AssistSessionRunState = 'RUNNING' | 'PENDING';
  * `run_state`（2026-10-28）同理只数消息表：左栏要在没点开某条会话时看出它正在生成回复，
  * 唯一可信来源就是这一轮回复行自己的状态。不从界面的发送按钮、`has_messages`、
  * 缓存的最后消息时刻或 `updated_at` 推断——那些在任何一条写入路径漏推进时都会说谎。
+ *
+ * `list_state`（2026-10-30）是在同一读法上补齐的展示态：在途之外还要看最后一轮终态、
+ * 待确认提案、归档与未开始。它同样是读时派生，`run_state` 保留为它的在途子集——
+ * 轮询与「有没有在跑」的判据要的正是这个窄口径，不必让调用方自己从八态里再挑一次。
  */
 export interface AssistSessionListRow extends AssistSessionRow {
   readonly has_messages: boolean;
   readonly run_state: AssistSessionRunState | null;
+  readonly list_state: AssistSessionListState | null;
 }
 
 /**
@@ -84,7 +164,14 @@ export class AssistRepository {
     chatMode?: 'CHAT' | 'PLAN' | 'GOAL' | undefined;
     /** 0128：主子关联。子会话两列都必须给；根会话两列都不给。 */
     parentSessionId?: string | null | undefined;
-    budgetScopeSessionId?: string | null | undefined }): Promise<void> {
+    budgetScopeSessionId?: string | null | undefined;
+    /**
+     * 0145：建立时写下的上下文档位。缺省 262144（新会话的确定起点）。
+     *
+     * 由用例层给出「继承自哪条会话」的结论；仓储不做继承判断，也不读工作区默认——
+     * 那样会让同一个事实有两个写入 Owner。
+     */
+    contextBudgetTokens?: number | undefined }): Promise<void> {
     const mode = input.conversationMode ?? 'AGENT';
     const parentSessionId = input.parentSessionId ?? null;
     const budgetScopeSessionId = input.budgetScopeSessionId ?? null;
@@ -94,7 +181,7 @@ export class AssistRepository {
     await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title,
       conversation_mode, chat_mode, working_resource_id, working_directory_source,
       assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
-      parent_session_id, budget_scope_session_id)
+      parent_session_id, budget_scope_session_id, context_budget_tokens)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.taskId},
       ${input.title}, ${mode}, ${input.chatMode ?? 'CHAT'},
       ${input.workingResourceId ?? null}, ${input.workingDirectorySource ?? null},
@@ -102,8 +189,53 @@ export class AssistRepository {
       ${mode === 'ASSISTANT' ? input.assistantProfileRevision ?? null : null},
       ${mode === 'ASSISTANT' && input.assistantRoleSnapshot !== undefined && input.assistantRoleSnapshot !== null
         ? JSON.stringify(input.assistantRoleSnapshot) : null}::jsonb,
-      ${parentSessionId}, ${budgetScopeSessionId})`.execute(this.db);
+      ${parentSessionId}, ${budgetScopeSessionId},
+      ${input.contextBudgetTokens ?? DEFAULT_SESSION_CONTEXT_BUDGET})`.execute(this.db);
   }
+
+  /**
+   * 0145：保存本会话的上下文档位（唯一写入口）。
+   *
+   * CAS 打在 `context_budget_revision` 上：不等即 0 行，调用方据此报 409，
+   * 不覆盖并发写入的一方。`revision`（会话总修订）不动——档位变化不是会话身份或状态变化，
+   * 让它去推进会话修订会把在途的改名、置顶打成冲突。
+   */
+  async setContextBudget(sessionId: string, tokens: number,
+    expectedRevision: bigint): Promise<bigint | undefined> {
+    const changed = await sql<{ context_budget_revision: bigint }>`update assist_sessions
+      set context_budget_tokens = ${tokens},
+        context_budget_revision = context_budget_revision + 1
+      where id = ${sessionId} and context_budget_revision = ${expectedRevision}
+      returning context_budget_revision`.execute(this.db);
+    return changed.rows[0]?.context_budget_revision;
+  }
+
+  /**
+   * 0145：会话最近一次**已结算**的真实模型调用（含上下文构成）。
+   *
+   * 绑定确切调用身份：一次外呼一行 `model_calls`，多轮工具调用各自一行。
+   * 不把整个会话的多次调用加起来冒充「单次构成」。`FAILED` 的调用没有分项意义，
+   * 但保留了实付总用量，因此也接收——由读侧按 status 区分。
+   */
+  async latestContextUsageCall(sessionId: string): Promise<AssistContextUsageCallRow | undefined> {
+    /*
+     * 只认**已结算且带用量**的调用。
+     *
+     * 在途（STARTED）行还没有用量，失败行可能只有一半读数；用它们覆盖「最近一次有效统计」
+     * 会让圆环在一次生成进行中突然变成未知或半截数字。排序先按结算时刻、再按开始时刻，
+     * 因此「最近一次有效统计」始终是上一次真正完成的调用。
+     */
+    return (await sql<AssistContextUsageCallRow>`select c.id, c.provider, c.model, c.status,
+        c.usage_input_tokens, c.usage_output_tokens, c.usage_cache_read_tokens,
+        c.usage_cache_creation_tokens, c.budget_reserved_tokens, c.context_usage,
+        c.settled_at, c.started_at, c.assist_message_id
+      from model_calls c join assist_messages m on m.id = c.assist_message_id
+      where m.session_id = ${sessionId} and c.kind = 'ASSIST' and c.status <> 'STARTED'
+        and (c.usage_input_tokens is not null or c.usage_output_tokens is not null)
+      order by c.settled_at desc nulls last, c.started_at desc, c.id desc
+      limit 1`.execute(this.db)).rows[0];
+  }
+
 
   async readSession(id: string, lock = false): Promise<AssistSessionRow | undefined> {
     const suffix = lock ? sql`for update` : sql``;
@@ -127,6 +259,11 @@ export class AssistRepository {
    * 每行还附带 `run_state`（2026-10-28）：同一次读取里按 `assist_messages.status` 派生
    * 「有没有在途的一轮」，`RUNNING` 压过 `PENDING`。两条都是相关子查询，
    * 左栏无论有多少行都只有这一条语句——不需要为每个条目单独发请求。
+   *
+   * `last_assistant_status` 与 `waiting_approval`（2026-10-30）补的是同一行状态图标需要的
+   * 另外两类事实：最后一轮回复的终态、有没有待确认提案。它们同样是相关子查询，
+   * 仍是一条语句、一次往返；`list_state` 由 `deriveListState` 在内存里合成，
+   * 不把八态判定写进 SQL（列表与单条读取必须共用同一个派生点）。
    */
   async listSessions(workspaceId: string, projectId?: string, taskId?: string,
     status?: AssistSessionStatus | 'ALL'): Promise<readonly AssistSessionListRow[]> {
@@ -134,7 +271,7 @@ export class AssistRepository {
     const task = taskId === undefined ? sql`` : sql`and s.task_id = ${taskId}`;
     const active = status === undefined || status === 'ALL' ? sql``
       : sql`and s.status = ${status}`;
-    return (await sql<AssistSessionListRow>`select s.*, exists(
+    const rows = await sql<AssistSessionStateFacts & AssistSessionRow>`select s.*, exists(
         select 1 from assist_messages m where m.session_id = s.id) as has_messages,
       case
         when exists (select 1 from assist_messages m
@@ -142,11 +279,17 @@ export class AssistRepository {
         when exists (select 1 from assist_messages m
           where m.session_id = s.id and m.status = 'PENDING') then 'PENDING'
         else null
-      end as run_state
+      end as run_state,
+      (select m.status from assist_messages m
+        where m.session_id = s.id and m.role = 'ASSISTANT'
+        order by m.seq desc limit 1) as last_assistant_status,
+      exists(select 1 from assist_proposals p
+        where p.session_id = s.id and p.status = 'PENDING') as waiting_approval
       from assist_sessions s
       where s.workspace_id = ${workspaceId} ${project} ${task} ${active}
       order by s.pinned_at desc nulls last,
-        coalesce(s.last_message_at, s.created_at) desc, s.id desc`.execute(this.db)).rows;
+        coalesce(s.last_message_at, s.created_at) desc, s.id desc`.execute(this.db);
+    return rows.rows.map((row) => ({ ...row, list_state: deriveListState(row) }));
   }
 
   /**
@@ -162,35 +305,41 @@ export class AssistRepository {
   }
 
   /**
-   * 读时派生「这段讨论有没有消息」：直接数 `assist_messages`，不读 `last_message_at`。
+   * 单条会话的三枚读时派生事实（2026-10-30）：有没有消息、在途的一轮、列表状态。
    *
-   * 活动键是排序用的可空列，任何写入路径漏了 `touchLastMessage` 都会让「NULL ⇒ 没消息」
-   * 的推断说谎（2026-10-24 的 0111 回填就是这种历史缺陷）。这里返回的是消息行是否存在，
-   * 与排序键分开；单条读取与会话列表共用同一口径。
-   */
-  async sessionHasMessages(sessionId: string): Promise<boolean> {
-    const rows = await sql<{ present: boolean }>`select exists(
-      select 1 from assist_messages where session_id = ${sessionId}) as present`.execute(this.db);
-    return rows.rows[0]?.present === true;
-  }
-
-  /**
-   * 读时派生「这段讨论此刻有没有在途的一轮」（2026-10-28）：与列表投影同一口径。
+   * 与列表投影**同一口径**——左栏切会话后按身份重读这一行，若这里另算一套，就会出现
+   * 「切走亮、切回灭」。三条子查询合成一次往返：单条读取不是热路径，但也没有理由
+   * 为同一行发三次请求。
    *
-   * 单条读取（左栏切会话后定向重读那一行）要显示同一枚运行态，不能因为走了另一条读法
-   * 就把刚亮的环清掉。`RUNNING` 压过 `PENDING`：有 Worker 认领的那一轮才是「真的在生成」。
-   * 只读消息状态，不看 `worker_id`、租约或心跳时间——那些是执行侧的恢复判据，
-   * 界面不需要也不该据此猜「大概还在跑」。
+   * 「有没有消息」直接数 `assist_messages`，不读 `last_message_at`：活动键是排序用的
+   * 可空列，任何写入路径漏了 `touchLastMessage` 都会让「NULL ⇒ 没消息」的推断说谎
+   * （2026-10-24 的 0111 回填就是这种历史缺陷）。
+   *
+   * 「在途」同样只看消息状态，不看 `worker_id`、租约或心跳时间——那些是执行侧的恢复
+   * 判据，界面不需要也不该据此猜「大概还在跑」。`RUNNING` 压过 `PENDING`。
    */
-  async sessionRunState(sessionId: string): Promise<AssistSessionRunState | null> {
-    const rows = await sql<{ run_state: AssistSessionRunState | null }>`select case
-        when exists (select 1 from assist_messages where session_id = ${sessionId}
-          and status = 'RUNNING') then 'RUNNING'
-        when exists (select 1 from assist_messages where session_id = ${sessionId}
-          and status = 'PENDING') then 'PENDING'
-        else null
-      end as run_state`.execute(this.db);
-    return rows.rows[0]?.run_state ?? null;
+  async sessionActivity(sessionId: string): Promise<{ readonly hasMessages: boolean;
+    readonly runState: AssistSessionRunState | null;
+    readonly listState: AssistSessionListState | null } | undefined> {
+    const rows = await sql<AssistSessionStateFacts>`select s.status,
+        exists(select 1 from assist_messages m
+          where m.session_id = s.id) as has_messages,
+        case
+          when exists (select 1 from assist_messages m
+            where m.session_id = s.id and m.status = 'RUNNING') then 'RUNNING'
+          when exists (select 1 from assist_messages m
+            where m.session_id = s.id and m.status = 'PENDING') then 'PENDING'
+          else null
+        end as run_state,
+        (select m.status from assist_messages m
+          where m.session_id = s.id and m.role = 'ASSISTANT'
+          order by m.seq desc limit 1) as last_assistant_status,
+        exists(select 1 from assist_proposals p
+          where p.session_id = s.id and p.status = 'PENDING') as waiting_approval
+      from assist_sessions s where s.id = ${sessionId}`.execute(this.db);
+    const row = rows.rows[0];
+    if (row === undefined) return undefined;
+    return { hasMessages: row.has_messages, runState: row.run_state, listState: deriveListState(row) };
   }
 
   /**
@@ -232,11 +381,13 @@ export class AssistRepository {
         id, workspace_id, project_id, task_id, title, conversation_mode,
         assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
         remember, working_resource_id, working_directory_source, status, pinned_at, unread_at, last_message_at,
-        forked_from_session_id)
+        forked_from_session_id, context_budget_tokens)
       select ${input.id}, s.workspace_id, s.project_id, s.task_id, ${input.title},
         s.conversation_mode, s.assistant_profile_id, s.assistant_profile_revision,
         s.assistant_role_snapshot, s.remember, s.working_resource_id, s.working_directory_source, s.status,
-        null, null, null, s.id
+        null, null, null, s.id,
+        -- 0145：分叉沿源会话的档位起步（档位修订从 0 起，子会话自己的保存不回头写父会话）。
+        s.context_budget_tokens
       from assist_sessions s where s.id = ${input.fromSessionId}
       returning *`.execute(this.db);
     return inserted.rows[0];
@@ -816,7 +967,11 @@ export class AssistRepository {
     const result = await sql<{ id: string }>`select m.id from assist_messages m
       join assist_sessions s on s.id = m.session_id
       left join projects p on p.id = s.project_id
-      where (m.status = 'PENDING' and (s.project_id is null or p.archived_at is null))
+      where (m.status = 'PENDING' and s.parent_session_id is null
+          and (s.project_id is null or p.archived_at is null))
+        or (m.status = 'PENDING' and m.updated_at < ${olderThan} and exists (
+          select 1 from assist_delegation_attempts a
+          where a.result_message_id = m.id and a.status = 'RUNNING'))
         or (m.status = 'RUNNING' and m.updated_at < ${olderThan})
       union all
       select j.anchor_message_id as id from assist_memory_requests j
@@ -833,6 +988,7 @@ export class AssistRepository {
     const session = (await sql<{ id: string }>`select s.id from assist_sessions s
       left join projects p on p.id = s.project_id
       where (s.project_id is null or p.archived_at is null)
+          and s.parent_session_id is null
         and exists (select 1 from assist_messages m where m.session_id = s.id and m.status = 'PENDING')
         and not exists (select 1 from assist_messages m where m.session_id = s.id and m.status = 'RUNNING')
         and not exists (select 1 from assist_memory_requests j where j.session_id = s.id
@@ -980,7 +1136,10 @@ export class AssistRepository {
     return (await sql<{ id: string }>`with failed as (
       update assist_messages set status = 'FAILED', error_code = 'LEASE_LOST',
         worker_id = null, updated_at = now()
-      where status = 'RUNNING' and updated_at < ${olderThan} returning id
+      where (status = 'RUNNING' or (status = 'PENDING' and exists (
+        select 1 from assist_delegation_attempts a
+        where a.result_message_id = assist_messages.id and a.status = 'RUNNING')))
+        and updated_at < ${olderThan} returning id
     ), cleared as (
       delete from assist_message_previews where message_id in (select id from failed)
     ) select id from failed`

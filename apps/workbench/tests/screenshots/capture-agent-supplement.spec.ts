@@ -2,11 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const OUT = "D:/Develop/Relay-Agent/ui-screenshots-2026-10-11";
+const OUT = "D:/Develop/Relay-Agent/docs/testing/evidence/ui-screenshots-2026-10-11";
 const ENV_PATH = "D:/Develop/Relay-Agent/apps/api/.env";
 const SESSION_PATH = "D:/Develop/Relay-Agent/.relay-test/session.json";
 const LIVE_PROJECT = "b7b7a62e-ef45-4247-8ce2-5372d9f703dd";
-/** From ui-screenshots-2026-10-11/_deep-link-seed-ids.json (screenshot-deep-link-seed). */
+/** From docs/testing/evidence/ui-screenshots-2026-10-11/_deep-link-seed-ids.json (screenshot-deep-link-seed). */
 const LAYOUT_TASK = "a3e57735-932b-4b96-85a9-1ea90bb884f9";
 const SEED_RUN = "0898fbbe-288a-493e-98ce-393ac4880ba9";
 const SEED_COMPLETION = "820ca548-60f9-469b-8fe3-6bff8d9081bb";

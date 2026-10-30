@@ -3,6 +3,7 @@ import { TaskChainRepository } from '../planning/task-chain-repository.js';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ModelCallRow } from '../infrastructure/database-schema.js';
+import type { JsonObject } from '../infrastructure/json.js';
 import type { ModelIdentity, ModelUsage } from '../workflow/fake-model-port.js';
 
 export interface ModelCallOrigin {
@@ -18,6 +19,13 @@ export interface ModelCallOrigin {
   readonly readInvocationId?: string;
   readonly criterionId?: string;
   readonly checkAttempt?: number;
+  /**
+   * 0145：本次调用的上下文构成（分类 + 估算 token）。
+   *
+   * 在**装配请求**时算好随调用一起写：调用结算后提示词早已不存在，事后再也还原不出
+   * 「这些 token 是历史、系统还是刚读的文件」。只带分类与数值，不带任何正文。
+   */
+  readonly contextUsage?: JsonObject;
 }
 
 export interface ModelCallSettlement {
@@ -214,9 +222,14 @@ export class ModelCallRepository {
           terminatedGrantTokens += Math.min(Number(row.granted_tokens),
             Math.max(0, Number(row.tokens_in) - baselineTokensLeft));
         }
-        if (Number(used.calls) >= budget.scopeCallLimit + grantedCalls + terminatedGrantCalls ||
+        // SESSION_SUBAGENT_SUMMARY_RESERVE: children share the root's ledger and
+        // leave one call reservation for its synthesis. The same root lock guards both.
+        const summaryReserve = assistScope !== undefined &&
+          assistScope.id !== assistScope.budget_session_id ? 1 : 0;
+        if (Number(used.calls) + summaryReserve >= budget.scopeCallLimit + grantedCalls + terminatedGrantCalls ||
             Number(used.tokens) + budget.callReservationTokens >
-              budget.scopeTokenLimit + grantedTokens + terminatedGrantTokens) {
+              budget.scopeTokenLimit + grantedTokens + terminatedGrantTokens
+                - summaryReserve * budget.callReservationTokens) {
           throw new ModelScopeBudgetError();
         }
       }
@@ -246,7 +259,7 @@ export class ModelCallRepository {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
       assist_message_id, member_message_id, manifest_id, criterion_id, check_attempt,
       provider, model, config_fingerprint, credential_fingerprint, input_sha256,
-      read_operation_id, read_invocation_id, budget_reserved_tokens)
+      read_operation_id, read_invocation_id, budget_reserved_tokens, context_usage)
       values (${id}, ${origin.workspaceId}, ${origin.kind},
         ${origin.stepAttemptId ?? null}, ${origin.assistMessageId ?? null},
         ${origin.memberMessageId ?? null}, ${origin.manifestId ?? null},
@@ -255,7 +268,9 @@ export class ModelCallRepository {
         ${identity.configFingerprint}, ${identity.credentialFingerprint ?? null},
         ${origin.inputHash ?? null},
         ${origin.readOperationId ?? null}, ${origin.readInvocationId ?? null},
-        ${identity.budget?.callReservationTokens ?? null})`.execute(db);
+        ${identity.budget?.callReservationTokens ?? null},
+        ${origin.contextUsage === undefined ? null
+          : JSON.stringify(origin.contextUsage)}::jsonb)`.execute(db);
   }
 
   async settle(id: string, input: ModelCallSettlement): Promise<void> {

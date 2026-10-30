@@ -25,6 +25,7 @@ import { registerRunRoutes } from './run-api.js';
 import { registerGatewayRoutes } from './gateway-api.js';
 import { registerGitUserActionRoutes } from './git-user-action-api.js';
 import { registerFileUserActionRoutes } from './file-user-action-api.js';
+import { registerRequiredContextRoutes } from './required-context-api.js';
 import { registerAssistantProfileRoutes } from './assistant-profile-api.js';
 import { registerInformationRoutes } from './information-api.js';
 import { registerReviewRoutes } from './review-api.js';
@@ -211,6 +212,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerGitUserActionRoutes(scope, apiDependencies);
       // 0134：人工受管目录浏览与文件读取（工具面板「文件」页签后端，只读）。
       registerFileUserActionRoutes(scope, apiDependencies);
+      // 2026-10-30：项目必读文件体积审计（只读投影，用于发送前的上下文风险预警）。
+      registerRequiredContextRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);

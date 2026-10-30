@@ -153,7 +153,13 @@ Development 的 `change-and-verify-v1` 目标流程：确认本次任务范围 �
 
 ### 2.5 有界子 Agent 的委派与会话关联
 
-2026-10-05 接续 2026-10-04 已确认的[产品规则](../../requirements/product-spec/part-01.md#09-有界多-agent-与自动会话)。**本节是待实施工程设计，尚未实现/验收。** 取舍见[ADR-017](../../decisions/ADR-017-bounded-multi-agent-conversations.md)，UI 与未运行出口分别归[工作台 §23](../../frontend/workbench-design/part-07.md#23-主子会话与有界协作)、[测试计划 §21](../../testing/verification-plan/part-04.md#21-有界多-agent-与自动会话验收规格)。
+2026-10-30 会话内临时协作接续：当前生产入口是普通 AGENT 的会话工具循环，并非独立 Bot 或项目长期成员。根会话可调用 `delegate_subagent`，同批纯委派以最多两个子任务并行执行，混合读写工具仍保持原顺序；子会话不进普通消息领取队列、不取得写工具或再次委派能力。主/子沿用公共核心提示词，子模板按冻结的 INVESTIGATE / REVIEW 角色、任务范围、基线和输出要求组成独立上下文。
+
+子尝试创建时即关联其消息，恢复按消息终态与心跳核对，`to_jsonb` 返回的日期及 bigint 在仓储归一化；旧 epoch 或已落定尝试不向主会话返回有效成功。一次有界重试保留前次失败、模型快照及凭据指纹；停止后不再创建重试。模型调用计入根会话的同一预算，子调用在根会话锁内为主汇总保留一次调用及一次 `callReservationTokens`，这只是准入额度预留，不保证 Provider 一定成功。
+
+当前子会话只供查看记录，普通发送以 INVALID_TRANSITION 拒绝，补充要求回主会话处理。直接向子会话补充并同步主会话、可编辑且版本化的角色配置、正式 Run 的必要审查完成 Gate 与完整故障恢复协议仍属下文目标设计，不将会话成功等同业务 Task 完成。没有新增 migration；复用 0128 关系与账本。查询协议见 [HTTP §10.121](../../api/http-command-contract/part-08.md#10121-会话内临时-agent-协作2026-10-30)。
+
+2026-10-05 接续 2026-10-04 已确认的[产品规则](../../requirements/product-spec/part-01.md#09-有界多-agent-与自动会话)。**下文保留完整目标设计，当前最小实现以上述 2026-10-30 说明为准，尚未整体验收。** 取舍见[ADR-017](../../decisions/ADR-017-bounded-multi-agent-conversations.md)，UI 与未运行出口分别归[工作台 §23](../../frontend/workbench-design/part-07.md#23-主子会话与有界协作)、[测试计划 §21](../../testing/verification-plan/part-04.md#21-有界多-agent-与自动会话验收规格)。
 
 #### 2.5.1 对象、责任与复用差异
 

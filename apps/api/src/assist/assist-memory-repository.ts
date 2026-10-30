@@ -39,7 +39,14 @@ export class AssistMemoryRepository {
       where id = ${id}`.execute(this.db)).rows[0];
   }
 
-  async history(sessionId: string, after: bigint, through?: bigint): Promise<readonly AssistMessageRow[]> {
+  async checkpointParent(id: string): Promise<string | null> {
+    return (await sql<{ parent_id: string | null }>`select
+      model_snapshot->'memory_compaction'->>'base_checkpoint_id' as parent_id
+      from assist_memory_requests where checkpoint_id = ${id} and status = 'COMPLETED'
+      limit 1`.execute(this.db)).rows[0]?.parent_id ?? null;
+  }
+
+  async history(sessionId: string, after: bigint, through?: bigint, limit = 10001): Promise<readonly AssistMessageRow[]> {
     // 0122：插话被消费的占位行（CANCELLED + STEERED）不是一轮历史——它的用户原文
     // 已经作为插话进入原在途回复的上下文，再以「该轮 CANCELLED」回放会凭空多出一个
     // 没有答案的助手回合。
@@ -47,7 +54,14 @@ export class AssistMemoryRepository {
       and seq > ${after} and status in ('COMPLETED', 'FAILED', 'CANCELLED')
       and not (role = 'ASSISTANT' and status = 'CANCELLED' and error_code is not distinct from 'STEERED')
       ${through === undefined ? sql`` : sql`and seq <= ${through}`}
-      order by seq limit 10001`.execute(this.db)).rows;
+      order by seq limit ${limit}`.execute(this.db)).rows;
+  }
+
+  async latestHistorySeq(sessionId: string): Promise<bigint> {
+    return (await sql<{ seq: bigint }>`select seq from assist_messages where session_id = ${sessionId}
+      and status in ('COMPLETED', 'FAILED', 'CANCELLED')
+      and not (role = 'ASSISTANT' and status = 'CANCELLED' and error_code is not distinct from 'STEERED')
+      order by seq desc limit 1`.execute(this.db)).rows[0]?.seq ?? 0n;
   }
 
   async request(id: string, lock = false): Promise<AssistMemoryRequestRow | undefined> {

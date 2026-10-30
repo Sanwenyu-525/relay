@@ -7,6 +7,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { resolveMotionPreference } from "../lib/motionPreference";
 import { railGroupKey, readCollapsedRailGroups, writeCollapsedRailGroups } from "../lib/railGroupPreferences";
 import { readRailSessionOrder, writeRailSessionOrder } from "../lib/railSessionOrder";
+import { sessionStateNote } from "../lib/sessionState";
 import { handleRosterKeyDown } from "../lib/tabNavigation";
 import { resolvedTokenValue } from "../lib/tokens";
 import EmptyState from "./EmptyState";
@@ -727,10 +728,11 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         // 「未开始」进可访问名称：标记是视觉上的，读屏与键盘用户同样要能分辨这条还没说过话。
         // 判据是服务端读时派生的 hasMessages（数消息表），不是活动键的可空性。
         const notStarted = session !== undefined && !session.hasMessages;
-        // 运行态也进可访问名称：旋转的环是视觉信号，读屏与键盘用户要能读到同一件事。
-        const runNote = session?.runState === "RUNNING" ? " · 正在生成"
-          : session?.runState === "PENDING" ? " · 排队中" : "";
-        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${notStarted ? " · 未开始" : ""}${runNote}${row.unread ? " · 未读" : ""}`;
+        // 状态也进可访问名称：图标是视觉信号，读屏与键盘用户要读到同一件事。
+        // 文案与服务端的八态同源（`lib/sessionState`），不只覆盖运行与排队两档；
+        // 旧服务端没有 list_state 时退回只有「未开始」这一条能从 hasMessages 确认的事实。
+        const stateNote = sessionStateNote(session?.listState ?? null);
+        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${stateNote || (notStarted ? " · 未开始" : "")}${row.unread ? " · 未读" : ""}`;
         // 同一组里出现同名行时，时刻要带上时分才分得清是哪一条；完整时间留在摘要卡的 time 上。
         const sameTitle = groupRows.some((other) => other.key !== row.key && other.title === row.title);
         return <RecentWorkRow key={row.key} kind={row.kind} title={row.title}

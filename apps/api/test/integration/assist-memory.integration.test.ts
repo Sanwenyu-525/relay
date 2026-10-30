@@ -17,6 +17,7 @@ import { createRepositories, withTransaction } from '../../src/application/unit-
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { FakeModelPort, type AssistRequest } from '../../src/workflow/fake-model-port.js';
+import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { createDataRoot, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from './integration-support.js';
 
@@ -67,6 +68,132 @@ async function compact(f: Awaited<ReturnType<typeof fixture>>, p = port(f.marker
   assert.equal(result?.status, 'COMPLETED', JSON.stringify(result));
   return { ...p, request };
 }
+
+test('compaction advances through more than 10000 originals without losing the recent window', async () => {
+  const f = await fixture(0);
+  await sql`insert into assist_messages (id, session_id, seq, role, status, intent, content, sources)
+    select gen_random_uuid(), ${f.sessionId}, n, case when n % 2 = 1 then 'USER' else 'ASSISTANT' end,
+      'COMPLETED', 'DISCUSS', 'original-' || n, '[]'::jsonb from generate_series(1, 10040) n`.execute(app.db);
+  const r = createRepositories(app.db);
+  let previous = 0n;
+  for (let batch = 0; batch < 20 && previous < 10032n; batch++) {
+    await compact(f);
+    const state = await r.assistMemory.state(f.sessionId);
+    const checkpoint = (await r.assistMemory.checkpoint(state!.checkpoint_id!))!;
+    assert.ok(checkpoint.through_seq > previous, 'each committed batch must advance');
+    assert.ok(checkpoint.source_message_ids.length <= 1000);
+    previous = checkpoint.through_seq;
+  }
+  assert.equal(previous, 10032n);
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId))
+    .checkpoint?.source_message_ids.length, 10032, 'public provenance still covers the full checkpoint prefix');
+  assert.equal((await r.assistMemory.history(f.sessionId, previous)).length, 8);
+  assert.equal((await sql<{ count: bigint }>`select count(*) as count from assist_messages
+    where session_id = ${f.sessionId}`.execute(app.db)).rows[0]?.count, 10040n);
+  const state = (await r.assistMemory.state(f.sessionId))!;
+  await resetSessionMemory(app.db, { ...f, commandId: randomUUID(), expectedRevision: state.revision.toString(),
+    expectedSessionRevision: (await r.assist.readSession(f.sessionId))!.revision.toString() });
+  assert.equal((await r.assistMemory.state(f.sessionId))?.cleared_through_seq, 10040n);
+});
+
+test('oversized history is compacted in bounded complete-turn batches with exact recent originals', async () => {
+  const f = await fixture(0);
+  const r = createRepositories(app.db);
+  for (let i = 1; i <= 40; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+    content: 'x'.repeat(42_000), sources: [] });
+  let previous = 0n;
+  for (let batch = 0; batch < 12 && previous < 32n; batch++) {
+    const p = await compact(f);
+    assert.ok(Buffer.byteLength(p.inputs[0]!.turns[0]!.content, 'utf8') <= 589824);
+    const state = await r.assistMemory.state(f.sessionId);
+    const checkpoint = (await r.assistMemory.checkpoint(state!.checkpoint_id!))!;
+    assert.ok(checkpoint.through_seq > previous);
+    assert.equal(checkpoint.through_seq % 2n, 0n);
+    previous = checkpoint.through_seq;
+  }
+  assert.equal(previous, 32n);
+  assert.equal((await r.assistMemory.history(f.sessionId, previous)).length, 8);
+});
+
+test('injected source pressure compacts old turns before the first model invocation', async () => {
+  const f = await fixture(0);
+  const r = createRepositories(app.db);
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+  for (let i = 1; i <= 12; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+    content: 'h'.repeat(15_000), sources: [] });
+  const refs = [];
+  for (let i = 0; i < 7; i++) {
+    const memory = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: null,
+      commandId: randomUUID(), title: `required-${i}`, text: '资'.repeat(16_000), confirmed: true });
+    refs.push({ kind: 'MEMORY' as const, root_id: memory.result.memory_id!, version: '1' });
+  }
+  const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue', sourceRefs: refs });
+  const p = port('preserved summary');
+  assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'DISCARDED');
+  assert.equal(p.inputs.length, 0, 'do not invoke the main model before pressure is resolved');
+  assert.equal((await r.assist.readMessage(sent.result.assistant_message_id))?.status, 'PENDING');
+  assert.equal((await runAssistMemoryTick(app.db, p.options))?.status, 'COMPLETED');
+  assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'COMPLETED');
+});
+
+test('automatic batches resume the same pending message without dropping oversized history', async () => {
+  const f = await fixture(0);
+  const r = createRepositories(app.db);
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+  for (let i = 1; i <= 40; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+    content: 'x'.repeat(42_000), sources: [] });
+  const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue after batches' });
+  const p = port('important goal retained');
+  let completed = false;
+  let batches = 0;
+  for (let step = 0; step < 12; step++) {
+    const outcome = await runAssistGenerationTick(app.db, p.options);
+    assert.equal(outcome?.messageId, sent.result.assistant_message_id);
+    if (outcome?.status === 'COMPLETED') { completed = true; break; }
+    assert.equal(outcome?.status, 'DISCARDED');
+    assert.equal((await r.assist.readMessage(sent.result.assistant_message_id))?.status, 'PENDING');
+    assert.equal((await runAssistMemoryTick(app.db, p.options))?.status, 'COMPLETED');
+    batches += 1;
+  }
+  assert.equal(completed, true);
+  assert.ok(batches > 1);
+  assert.equal((await sql<{ count: bigint }>`select count(*) as count from assist_messages
+    where session_id = ${f.sessionId}`.execute(app.db)).rows[0]?.count, 42n);
+});
+
+test('legacy queued compaction without a batch cursor remains executable', async () => {
+  const f = await fixture();
+  const request = await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
+  await sql`update assist_memory_requests set model_snapshot = model_snapshot - 'memory_compaction'
+    where id = ${String(request.result.request_id)}`.execute(app.db);
+  const p = port(f.marker);
+  assert.equal((await runAssistMemoryTick(app.db, p.options))?.status, 'COMPLETED');
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId)).checkpoint?.through_seq, '16');
+});
+
+test('an invalidated parent checkpoint rejects its queued delta before invoking the model', async () => {
+  const f = await fixture();
+  await compact(f);
+  const r = createRepositories(app.db);
+  const original = await r.assistMemory.state(f.sessionId);
+  for (let i = 25; i <= 36; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+    content: `increment-${i}`, sources: [] });
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
+  await createMemory(app.db, { workspaceId: f.workspaceId, projectId: null, commandId: randomUUID(),
+    title: 'new context baseline', text: 'changed after preparation', confirmed: true });
+  const p = port('must not run');
+  const result = await runAssistMemoryTick(app.db, p.options);
+  assert.equal(result?.status, 'FAILED');
+  assert.equal(result?.errorCode, 'MEMORY_SOURCE_CHANGED');
+  assert.equal(p.inputs.length, 0);
+  assert.equal((await r.assistMemory.state(f.sessionId))?.checkpoint_id, original?.checkpoint_id);
+});
 
 test('manual HTTP compaction is replayable; restart uses persisted summary plus exact recent originals and cost ledger', async () => {
   const f = await fixture(); const p = port(f.marker);
@@ -122,6 +249,11 @@ test('compaction refuses tool results and records their request and usage as a f
 
 test('automatic compaction requeues original message, commits checkpoint, then completes that same message', async () => {
   const f = await fixture(17); const p = port(f.marker);
+  // 0145 gives every session 256K: trigger real byte pressure rather than the retired 32-row rule.
+  await sql`update assist_messages set content = repeat('h', 14500)
+    where session_id = ${f.sessionId} and seq > 1`.execute(app.db);
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(), expectedRevision: '0',
+    recallEnabled: true, automaticCompaction: true, autoCapture: false });
   const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'automatic-continue' });
   assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'DISCARDED');
   assert.equal(p.inputs.length, 0);
@@ -276,6 +408,10 @@ test('transitive history and fork retain source invalidation; stale derived repl
 
 test('AUTO malformed summary does not retry same boundary and the original pending reply continues', async () => {
   const f = await fixture(17); const p = port('invalid', true);
+  await sql`update assist_messages set content = repeat('h', 14500)
+    where session_id = ${f.sessionId} and seq > 1`.execute(app.db);
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(), expectedRevision: '0',
+    recallEnabled: true, automaticCompaction: true, autoCapture: false });
   await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue-after-auto-failure' });
   await runAssistGenerationTick(app.db, p.options);
   await runAssistGenerationTick(app.db, p.options);
@@ -329,8 +465,12 @@ test('checkpoint reaches actual tool-loop input; changing directory excludes pre
 
 test('final UTF-8 input budget includes explicit Chinese source bodies and fails before model invocation', async () => {
   const f = await fixture(0);
+  // Ten legal source refs plus the recent, non-compressible window exceed this session's 256K guard.
+  for (let i = 1; i <= 6; i++) await createRepositories(app.db).assist.insertMessage({ id: randomUUID(),
+    sessionId: f.sessionId, seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED',
+    intent: 'DISCUSS', content: 'h'.repeat(25000), sources: [] });
   const refs: { kind: 'MEMORY'; root_id: string; version: string }[] = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 10; i++) {
     const saved = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: null, commandId: randomUUID(),
       title: `large-${i}`, text: '中'.repeat(16000), confirmed: true });
     refs.push({ kind: 'MEMORY', root_id: String(saved.result.memory_id), version: '1' });
