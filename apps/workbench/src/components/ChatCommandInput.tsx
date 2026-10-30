@@ -33,6 +33,27 @@ function cssLength(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * 这一次编辑是否**新起**了一个 `@` 查询（返回它的起点），否则 null。
+ *
+ * 菜单要回答的是「用户现在想选插件吗」，而不是「草稿末尾长得像不像 @query」：
+ * 选完插件后草稿是 `@电脑操控 `，删掉那个空格，文本末尾依旧是完整的 `@标签`——
+ * 按字符串判据会把已完成的 mention 重新解释成未完成的查询。
+ *
+ * 所以只有**真实键入**（`inputType === "insertText"`）的一次编辑能建立查询；
+ * 粘贴、拖入、IME 组词、撤销/重做各有自己的 inputType，一律不算。没有 InputEvent
+ * 的环境（jsdom、程序化填值）退化为草稿差分：只认「文本变长了、且这段查询不是
+ * 原来那段」的编辑——删字永远不会新起查询，按键删除末尾空格因此不可能重开菜单。
+ */
+function freshMentionStart(previous: string, next: string, caret: number, inputType: string | undefined): number | null {
+  if (inputType !== undefined && inputType !== "insertText") return null;
+  if (inputType === undefined && next.length <= previous.length) return null;
+  const match = /@([^\s@]{0,12})$/u.exec(next.slice(0, caret));
+  if (match === null) return null;
+  const at = caret - match[0].length;
+  return previous.slice(at, caret) === next.slice(at, caret) ? null : at;
+}
+
 /** 菜单仅消费服务端登记并编辑草稿；发送、身份与动作准入由原会话 Owner 处理。 */
 export default function ChatCommandInput({ client, mode, hasSession, value, onValueChange, onSelectCommand, ref,
   onKeyDown, onFocus, onBlur, onCompositionChange, onAttachFiles, pluginChips = false, disabled, ...props }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>,
@@ -67,6 +88,10 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
   const [focused, setFocused] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  /* `@` 查询的锚点：只有用户这一次键入的 `@` 会建立它（见 freshMentionStart），
+     选中插件、Esc 或文本把它挤走就失效。菜单开合因此绑在「这一次输入」上，
+     不绑在草稿字符串上（2026-10-29 用户指认：删掉已选插件后的空格会重开菜单）。 */
+  const [mentionAt, setMentionAt] = useState<number | null>(null);
   const [active, setActive] = useState(0);
   const [mentionActive, setMentionActive] = useState(0);
   /** 光标/选区变化计数：`@` 菜单的开合取决于光标位置，纯方向键移动也要重算。 */
@@ -192,16 +217,19 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
      `user@` 不弹菜单，中文前导无空格（`先用@`）照弹。斜杠菜单已展开时让位给它。
      查询依赖光标位置，因此监听选区变化（方向键/点击移光标也要重算开合）。 */
   const mentionQuery = useMemo((): { query: string; start: number; end: number } | null => {
-    if (!pluginChips || !focused || disabled || composing) return null;
+    if (!pluginChips || !focused || disabled || composing || mentionAt === null) return null;
     const caret = inputRef.current?.selectionStart ?? value.length;
     const before = value.slice(0, caret);
     const match = /@([^\s@]{0,12})$/u.exec(before);
     if (match === null) return null;
     const at = caret - match[0].length;
+    /* 必须就是这一次键入的那个 `@`：光标挪到别处的旧 mention、被编辑挤位的 `@`
+       都不算——这正是「已选插件不因退格重新变成查询」的判据。 */
+    if (at !== mentionAt || value[at] !== "@") return null;
     const preceding = at === 0 ? "" : before[at - 1]!;
     if (preceding !== "" && /[A-Za-z0-9_./\\-]/u.test(preceding)) return null;
     return { query: match[1]!.toLowerCase(), start: at, end: caret };
-  }, [value, caretTick, focused, composing, disabled, pluginChips]);
+  }, [value, caretTick, focused, composing, disabled, pluginChips, mentionAt]);
   const mentionOpen = mentionQuery !== null && dismissed !== value;
   const mentionEntries = PLUGIN_MENTIONS.filter((item) =>
     mentionQuery === null || mentionQuery.query === ""
@@ -247,6 +275,8 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
     const next = `${value.slice(0, mentionQuery.start)}@${label} ${value.slice(end)}`;
     pendingCaret.current = mentionQuery.start + label.length + 2;
     setMentionActive(0);
+    /* 选中即结束这次查询：之后无论怎么退格/撤销，这段文本都不再是「正在输入的 query」。 */
+    setMentionAt(null);
     setDismissed(next);
     onValueChange(next);
     inputRef.current?.focus();
@@ -328,22 +358,25 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
         </ul>}
     </div>}
     {mentionOpen && <div className="chat-command-menu chat-mention-menu" data-testid="chat-mention-menu">
-      <p className="chat-command-hint">选择插入插件提示（只改草稿，不发送）· ↑↓ 选择 · Enter 插入 · Esc 关闭</p>
       {mentionEntries.length === 0
         ? <p role="status">没有匹配的内置插件，请修改输入。</p>
-        : <ul id={mentionMenuId} role="listbox" aria-label="内置插件">
-          {mentionEntries.map((entry) => <li key={entry.key} role="none">
-            <button type="button" role="option" id={`${mentionMenuId}-${entry.key}`}
-              aria-selected={mentionSelected === entry} tabIndex={-1}
-              data-testid={`chat-mention-${entry.key}`}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => insertPluginMentionLabel(entry.label)}>
-              <span className="chat-mention-option">
-                <PluginIcon plugin={entry.key} className="chat-mention-option-icon" />
-                <strong>{entry.label}</strong>
-              </span>
-            </button></li>)}
-        </ul>}
+        : <>
+          <ul id={mentionMenuId} role="listbox" aria-label="内置插件" aria-describedby={`${mentionMenuId}-hint`}>
+            {mentionEntries.map((entry) => <li key={entry.key} role="none">
+              <button type="button" role="option" id={`${mentionMenuId}-${entry.key}`}
+                aria-selected={mentionSelected === entry} tabIndex={-1}
+                data-testid={`chat-mention-${entry.key}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertPluginMentionLabel(entry.label)}>
+                <span className="chat-mention-option">
+                  <PluginIcon plugin={entry.key} className="chat-mention-option-icon" />
+                  <strong>{entry.label}</strong>
+                </span>
+              </button></li>)}
+          </ul>
+          {/* 键盘提示不再常驻占位：视觉上只留图标 + 名称，操作说明给读屏。 */}
+          <span className="visually-hidden" id={`${mentionMenuId}-hint`}>↑↓ 选择 · Enter 插入 · Esc 关闭</span>
+        </>}
     </div>}
     <div className="chat-command-surface" ref={surfaceRef}
       data-chips={mentions.length > 0 ? "on" : undefined}>
@@ -374,7 +407,16 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
       aria-activedescendant={mentionOpen && mentionSelected !== undefined
         ? `${mentionMenuId}-${mentionSelected.key}`
         : open && selected ? `${menuId}-${selected.name}` : undefined}
-      onChange={(event) => { setActive(0); setMentionActive(0); setDismissed(null); onValueChange(event.target.value); }}
+      onChange={(event) => {
+        setActive(0); setMentionActive(0); setDismissed(null);
+        const next = event.target.value;
+        const caret = event.target.selectionStart ?? next.length;
+        const typed = freshMentionStart(value, next, caret, (event.nativeEvent as InputEvent | undefined)?.inputType);
+        /* 这一次编辑新起了查询就换成它的起点；否则只要那段文本里的 `@` 还在原位就
+           保住这次会话（继续过滤/退格改 query），`@` 被删或挤位即失效。 */
+        setMentionAt(typed ?? (mentionAt !== null && next[mentionAt] === "@" ? mentionAt : null));
+        onValueChange(next);
+      }}
       onPaste={(event) => {
         // 只有「剪贴板里真有文件项」才接管：截图/复制的图片进附件暂存，
         // 其余粘贴（文字、表格、代码）保持原生行为，一个字符都不改。
@@ -398,7 +440,7 @@ export default function ChatCommandInput({ client, mode, hasSession, value, onVa
         /* `@` 插件菜单与斜杠菜单同构：Esc 关、方向键选、Enter 插入。
            两者互斥展开（斜杠菜单要求 mentionQuery 为空），分支顺序只是防御。 */
         if (mentionOpen && plain) {
-          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(value); return; }
+          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissed(value); setMentionAt(null); return; }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             setMentionActive(mentionEntries.length === 0 ? 0

@@ -1,41 +1,235 @@
-/* 这一轮做了什么（工作台 §18.10）。开合、缩进与列表间距都沿用 .tech-details 既有规则，
-   这里只补摘要行的分档与轮次行本身的排布——不新造一套视觉语义。 */
-/* 摘要行只有三档：说清楚做了什么（activity，正文次级色）、还有多少步（同上）、
-   以及必须让人看见的例外（待核对 / 未执行）。不给整体加底色或图标，它不是一块面板。 */
-.session-round-trace-label { color: var(--relay-color-text-secondary); }
-.session-round-trace-activity { color: var(--relay-color-text-secondary); }
-/* 例外用警示色，但仍只是文字：不是徽牌、不是进度条，避免与消息行的三点抢同一档注意力。 */
-.session-round-trace-pending { color: var(--relay-color-status-warning-text); }
-.session-round-trace-rejected { color: var(--relay-color-text-muted); }
-.session-round-trace-round-title {
-  margin: 0;
+/* 执行过程（工作台 §18.10；2026-10-29 V3）。
+   这一块是 AI 回复里唯一的「过程」区域：标题行是一枚可整行点击的轻量带子，
+   展开后是按轮分组的纵向时间线。活动行本身的视觉在 ActivityRow.css，
+   这里只管标题、分组、空态/错误态与密度控件。
+
+   类名统一用 .activity-panel-* 前缀：`.activity-toolbar` 与 `.activity-list`
+   已被活动记录页（ActivityView.css）占用，同名会静默串样式（V2 踩过同类坑）。 */
+
+.activity-panel {
+  display: block;
+  margin: var(--relay-space-2) 0;
+  min-width: 0;
+}
+
+/* ── 标题行 ─────────────────────────────────────────────────────────────
+   整行可点：箭头 · 状态图标 · 标题 · 规模与状态 ·（右）耗时。
+   轻底色而不是卡片边框——它在消息列里是一层「带子」，不是一块面板。 */
+.activity-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1) var(--relay-space-2);
+  min-height: var(--relay-control-compact);
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
   color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  cursor: pointer;
+  list-style: none;
+  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.session-round-trace-calls li {
-  display: flex; flex-wrap: wrap; align-items: baseline;
+/* 原生 disclosure 三角去掉：箭头由下面这枚 svg 承担，位置与旋转都可控。 */
+.activity-header::-webkit-details-marker { display: none; }
+.activity-header:hover { background: var(--relay-color-selection-bg); }
+.activity-header:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+/* 运行中：整条带子换成极浅蓝并加一道细边，与「已结束」的中性带子区分开。
+   这是唯一允许整行变色的状态。 */
+.activity-panel[data-phase="RUNNING"] > .activity-header,
+.activity-panel[data-phase="WAITING"] > .activity-header {
+  background: var(--relay-color-status-running-bg);
+  border-color: var(--relay-color-status-running-line);
+}
+.activity-panel[data-phase="WAITING"] > .activity-header {
+  background: var(--relay-color-status-warning-bg);
+  border-color: var(--relay-color-status-warning-text);
+}
+
+.activity-header-chevron {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.activity-header-chevron > svg { width: 100%; height: 100%; }
+.activity-panel[open] > .activity-header .activity-header-chevron { transform: rotate(90deg); }
+
+.activity-header-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--relay-color-text-muted);
+}
+.activity-header-icon > svg { width: 1rem; height: 1rem; stroke-width: var(--relay-control-icon-stroke); }
+/* settled 用次级色而不是成功绿：这一轮的工具都结清了，仅此而已。
+   绿色留给将来真有验证证据的结果（success 档目前没有任何相位使用）。 */
+.activity-header-icon[data-tone="settled"] { color: var(--relay-color-text-secondary); }
+.activity-header-icon[data-tone="success"] { color: var(--relay-color-status-success-text); }
+.activity-header-icon[data-tone="running"] { color: var(--relay-color-status-running-text); }
+.activity-header-icon[data-tone="attention"] { color: var(--relay-color-status-warning-text); }
+.activity-header-icon[data-tone="danger"] { color: var(--relay-color-status-danger-text); }
+
+.activity-header-title {
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-medium);
+}
+/* 规模与状态：次级色，与标题同一行；它才是「几项、什么状态」的唯一出处。 */
+.activity-header-meta { color: var(--relay-color-text-secondary); }
+.activity-header-elapsed {
+  margin-left: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 唯一的主进度动效之一：只有当列表里没有任何一行在转时，标题图标才转。 */
+.activity-header-spin { animation: activity-header-rotate var(--relay-motion-loop-spin) linear infinite; }
+@keyframes activity-header-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── 提示块（空态 / 读取失败）───────────────────────────────────────────
+   两者都必须是「确定的反馈」：入口已经点开了，就不能让它凭空消失。 */
+.activity-panel-notice {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin-top: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-left: 2px solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.activity-panel-notice > p { margin: 0; }
+.activity-panel-notice-title {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+.activity-panel-notice-title > svg { width: 1rem; height: 1rem; flex: none; }
+.activity-panel-notice[data-tone="danger"] {
+  border-left-color: var(--relay-color-status-danger-text);
+  background: var(--relay-color-status-danger-bg);
+}
+.activity-panel-notice[data-tone="danger"] .activity-panel-notice-title {
+  color: var(--relay-color-status-danger-text);
+}
+.activity-panel-notice .secondary-button { justify-self: start; }
+
+.activity-panel-loading { margin: var(--relay-space-1) 0 0; }
+
+/* ── 密度控件 ─────────────────────────────────────────────────────────── */
+.activity-panel-toolbar {
+  display: flex;
+  align-items: center;
   gap: var(--relay-space-2);
+  margin: var(--relay-space-2) 0 var(--relay-space-1);
+  padding: 0 var(--relay-space-2);
 }
-.session-round-trace-tool { font-weight: var(--relay-font-weight-semibold); }
-.session-round-trace-status {
+.activity-panel-density { display: inline-flex; align-items: center; gap: var(--relay-space-1); }
+.activity-panel-density-option {
+  padding: 0 var(--relay-space-1);
+  border: 0;
+  background: transparent;
+  color: var(--relay-color-text-muted);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  cursor: pointer;
+  border-radius: var(--relay-radius-badge);
+  transition: color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.activity-panel-density-option:hover { color: var(--relay-color-text-primary); }
+.activity-panel-density-option[aria-pressed="true"] {
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+.activity-panel-density-option:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 轮次分组 ───────────────────────────────────────────────────────────
+   分组只按服务端给的轮次切，不编阶段名。组标题报真实数量与真实例外。 */
+.activity-panel .activity-panel-rounds {
+  display: grid;
+  gap: var(--relay-space-3);
+  margin: 0;
+  padding: 0 var(--relay-space-2);
+  list-style: none;
+}
+.activity-panel .activity-panel-round {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin-top: 0;
+}
+.activity-panel-round-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+.activity-panel-round-count { color: var(--relay-color-text-muted); }
+.activity-panel-round-flag[data-tone="danger"] { color: var(--relay-color-status-danger-text); }
+.activity-panel-round-flag[data-tone="attention"] { color: var(--relay-color-status-warning-text); }
+
+.activity-panel .activity-panel-list {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-panel .activity-panel-list > li { margin-top: 0; }
+
+/* 「展开其余 N 项」是文字按钮，不是主操作：不占一整行高度，靠左与行文字对齐。 */
+.activity-panel-more {
+  justify-self: start;
+  margin-left: calc(1rem + var(--relay-space-2));
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  cursor: pointer;
+  border-radius: var(--relay-radius-badge);
 }
-/* 未结算与结果未知都不是「已执行」，用警示色把它们与已结算分开。 */
-.session-round-trace-status[data-status="REQUESTED"],
-.session-round-trace-status[data-status="REJECTED"],
-.session-round-trace-status[data-status="ABANDONED"],
-.session-round-trace-status[data-status="UNKNOWN"] { color: var(--relay-color-status-warning-text); }
-.session-round-trace-elapsed {
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
+.activity-panel-more:hover { color: var(--relay-color-text-primary); text-decoration: underline; }
+.activity-panel-more:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
 }
-.session-round-trace-reason {
-  flex: 1 1 100%;
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  overflow-wrap: anywhere;
+
+/* 关动效：旋转停止，但箭头位置、图标形状与文字全部保留。 */
+@media (prefers-reduced-motion: reduce) {
+  .activity-header-spin { animation: none; }
+  .activity-header-chevron { transition: none; }
 }
-/* 展开后的路径可能是整段绝对路径：单行截断会藏掉末尾那个真正区分对象的目录名，
-   所以按任意位置折行，并且限定在消息列宽度内——窄窗口下不产生页面级横向溢出。 */
-.session-round-trace-calls .hash-code { max-width: 100%; overflow-wrap: anywhere; }
+html[data-motion="off"] .activity-header-spin { animation: none; }
+html[data-motion="off"] .activity-header-chevron { transition: none; }
+html[data-motion="off"] .activity-header { transition: none; }

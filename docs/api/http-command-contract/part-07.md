@@ -83,6 +83,8 @@
 
 **时刻是墙钟，不是固定偏移。** 请求传 `local_time`（`HH:MM`）+ `first_local_date`（`YYYY-MM-DD`）+ `timezone`，服务端算出绝对时刻并落 `first_run_at`/`next_due_at`。跨夏令时的「每天 09:00」仍是 09:00：春跳不存在的时刻顺延 +1 小时，秋回重复的时刻取较早一次。`first_local_date` 必须解析出严格晚于当前时刻的首次触发，否则 `422`。
 
+秋回规则也适用于半小时回拨（如 `Australia/Lord_Howe`）；2026-10-29 修复候选偏移仅按整小时枚举而误选较晚一次的问题，改为读取目标日期前后实际时区偏移。Breaking Change: No；请求、响应及数据库结构不变，已保存的触发时刻不批量重算。
+
 **授权一次性确认，到点只做准入。** `confirmed` 必须为 `true`；`max_runs` 取 1–100；`authorization_expires_at` 必须是带 `Z` 或偏移量的实际时刻，且在未来 90 天内（**这是对 N06 24 小时上限的有意偏离**，理由见 ADR-026）。触发不授予新权限：`delegateTask` 在**原命令事务内**核对触发发生身份、计划状态、代次、有效期与预算，未通过即拒绝且效果不落库。
 
 **准入以 Task 终态为准，不是 Run 是否活跃。** Run 完成后 Task 停在 `WAITING` 等人工验收；此时本轮记 `SKIPPED`（`reason='PREVIOUS_TASK_NOT_ACCEPTED'`），不自动代答验收，也不堆出第二个待验收任务。跳过的时段不消耗 `max_runs`——预算是「最多真正启动多少次」，不是「过了多少个时段」。
@@ -202,11 +204,15 @@
 
 已受理但尚未领取的整理，如果会话/Project 随后归档，Worker 以 `FAILED/MEMORY_SCOPE_CHANGED` 收敛且不调用模型，不让无效范围的 PENDING 请求永久挡住管理；该整理仍可通过取消命令提前收敛。
 
-普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配排序，零匹配时近期回退，消息 sources 附 `selection=AUTO_MEMORY`、`selection_basis=LITERAL_MATCH|RECENT_CONFIRMED`，不是语义向量召回。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
+普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配排序，零匹配时近期回退，消息 sources 附 `selection=AUTO_MEMORY`、`selection_basis=LITERAL_MATCH|RECENT_CONFIRMED`，不是语义向量召回。2026-10-30 修正：中英文混合查询按文字边界分词，显式来源在候选限制前排除，避免去重耗尽候选。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
 
-普通聊天自动整理在已结算增量达到32条消息或48000 UTF-8字节时申请，保留最近8条原文；此为应用工程阈值，不是模型物理窗口。整理和普通生成均有128000字节工作输入上限，实际端口另查 token/预算。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。
+2026-10-30 压缩策略：有冻结有效调用预算 B 时，以与端口相同的 UTF-8 字节/3 估算，工作输入上限为 `floor(B × 0.75) × 3` 字节，为提示、工具及输出预留余量；旧摘要＋已结算增量达到该上限的 80% 时申请自动整理，不再仅因达到32条消息触发。保留最近8条原文，在完整轮次边界建立检查点；整理输入与普通生成最终组装均使用同一工作上限，真实端口仍单独检查完整请求及输出预算。B 取冻结调用预算（包含已知 Provider 容量限制），不直接把所选档位冒充模型窗口；无真实模型快照时使用工作区所选档位，未选择的旧 Mock 路径保留32条/48000字节触发及128000字节保护。参数属于工程估算，不能证明 Provider 物理窗口、精确 tokenizer 或缓存收益。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。请求/响应与档位整数不变，Breaking Change: No，无 migration。
 
 整理请求冻结工作模型身份，使用既有 model_calls 与会话预算；call 以最后一条被覆盖的真实 assistant 消息作 ASSIST 计量锚点，整理请求的 model_call_id 区分用途，不修改原消息 usage。摘要严格 JSON `{summary}`，成功提交后才更换窗口；租约、取消、来源、权限/上下文/配置及窗口修订变化拒收迟到结果。未结算工具链不整理、不重放工具。真实 Provider 摘要质量、模型窗口与缓存效果须单独验证。
+
+有效预算过小、连保留段都超出工作容量时，会在创建 model_call 前以既有 MEMORY_CONTEXT_TOO_LARGE 收口；因此部分原先由端口返回 MODEL_BUDGET_EXHAUSTED 的输入现在更早被拒绝。客户端继续显示原记忆处理错误，不把它视为 Provider 故障或自动重试依据。
+
+2026-10-30 调用诊断修正：压缩端口返回不受支持的 TOOL_CALLS 时，整理仍以 MEMORY_SUMMARY_INVALID 失败且不发布检查点，其关联 model_call 改记 FAILED / MEMORY_TOOL_CALLS_UNSUPPORTED，并保留请求身份和已知用量；不执行工具。Breaking Change: No，HTTP 结构和数据库不变。
 
 ### 10.100 模型端口的图片输入能力投影（2026-10-19）
 

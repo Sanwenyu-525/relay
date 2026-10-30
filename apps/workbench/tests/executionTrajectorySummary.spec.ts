@@ -168,3 +168,49 @@ describe("长任务读取结果的分组与限高", () => {
     } finally { view.unmount(); }
   });
 });
+
+/**
+ * 命令输出的统一活动行（2026-10-30 验收整改）。
+ *
+ * 此前聊天区的执行摘要只有「读取结果」清单与逐文件 diff，命令类工具（run_check 等）
+ * 在会话里完全没有出口——stdout 与退出码只存在于右栏轨迹。这里补上同一套行 anatomy，
+ * 并钉住两条不能退让的口径：
+ *   * 读取与写入不在这个列表里重复出现（它们各有自己的清单/diff）。
+ *   * 展开后看到的是服务端回执原文与真实退出码，不是从状态推出来的「通过」。
+ */
+describe("命令输出", () => {
+  it("命令类工具按统一活动行列出，展开后给出真实输出与退出码", async () => {
+    const view = await mount([
+      call("check", "run_check", { content: "PASS 3 tests", exit_code: 0 }),
+      call("read", "read_file", { content: "source" }),
+      call("write", "apply_changeset", { outcome: "COMPLETED" })
+    ]);
+    try {
+      const list = view.wrapper.get('[data-testid="execution-activities"]');
+      const rows = list.findAll(".activity-item");
+      // 只有命令进这个列表：读取走「本次读取结果」，写入走逐文件 diff。
+      expect(rows).toHaveLength(1);
+      expect(rows[0].text()).toContain("运行检查");
+      expect(rows[0].attributes("data-category")).toBe("COMMAND");
+
+      await view.wrapper.get('[data-testid="execution-activity-check-toggle"]').trigger("click");
+      const detail = view.wrapper.get('[data-testid="execution-activity-check-detail"]');
+      expect(detail.get('[data-testid="activity-detail-result-check"]').text()).toBe("PASS 3 tests");
+      expect(detail.get('[data-testid="activity-detail-meta-check"]').text()).toContain("退出码 0");
+      // 结算不等于验证通过：界面上不出现由工具状态推出的成功结论。
+      expect(detail.text()).not.toContain("验证通过");
+    } finally { view.unmount(); }
+  });
+
+  it("命令失败时行上标失败，输出仍逐字可见", async () => {
+    const view = await mount([call("bad", "run_check", { content: "ERR 1", exit_code: 1,
+      outcome: "FAILED" })]);
+    try {
+      const row = view.wrapper.get('[data-testid="execution-activity-bad"]');
+      expect(row.attributes("data-failed")).toBe("true");
+      expect(row.text()).toContain("已结算但失败");
+      await view.wrapper.get('[data-testid="execution-activity-bad-toggle"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="activity-detail-result-bad"]').text()).toBe("ERR 1");
+    } finally { view.unmount(); }
+  });
+});

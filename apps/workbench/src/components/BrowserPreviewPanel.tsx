@@ -305,12 +305,15 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
   }
 
   if (bridge === null) {
+    // 浏览器预览模式没有原生容器：这是一条能力边界，不是警报。
+    // 与「终端未接入」「尚未关联项目」同一档排版——说明文字直接落在纸面上，
+    // 不再用一整块琥珀色警示区占住页签的大部分高度（2026-10-30 一致性检查）。
     return <section className="preview-panel" data-testid="browser-preview" aria-label="内置网页预览">
-      <p className="warning-callout" role="status" data-testid="browser-preview-unavailable">
+      <p className="preview-unavailable" data-testid="browser-preview-unavailable">
         内置网页预览需要桌面应用提供原生网页容器。当前运行在浏览器预览模式，因此这里不提供网页标签，
         也不会用 iframe 假装可用——外页放进 iframe 既拿不到真实地址，也无法保证与工作台隔离。
       </p>
-      <p className="helper-text">要在内置面板里查看网页，请用 Relay Agent 桌面应用打开工作台。</p>
+      <p className="preview-unavailable-note">要在内置面板里查看网页，请用 Relay Agent 桌面应用打开工作台。</p>
     </section>;
   }
 

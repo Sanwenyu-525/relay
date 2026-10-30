@@ -21,13 +21,14 @@ const OPTIONS: readonly { readonly value: Tier; readonly label: string;
   { value: null, label: "跟随应用默认", detail: "不指定工作区档位；上限取应用配置的单次预算。" },
   { value: 262144, label: "256K", detail: "适合日常对话与较短的项目上下文。" },
   { value: 524288, label: "512K", detail: "适合需要同时引用多份资料的对话。" },
-  { value: 1048576, label: "1M", detail: "适合长文档与跨文件的完整上下文。" },
+  { value: 1048576, label: "1024K", detail: "适合长文档与跨文件的上下文。" },
 ];
 
 type Pending = { readonly commandId: string; readonly expectedRevision: DecimalRevision;
   readonly budget: Tier; readonly reason: string };
 
-export default function ContextBudgetCard({ client }: { readonly client: RelayApiClient | null }) {
+export default function ContextBudgetCard({ client, compact = false, onSaved }: {
+  readonly client: RelayApiClient | null; readonly compact?: boolean; readonly onSaved?: () => void }) {
   const [projection, setProjection] = useState<RelayWorkspaceDefaultDirectory | null>(null);
   const [draft, setDraft] = useState<Tier>(null);
   const [loading, setLoading] = useState(true);
@@ -80,6 +81,7 @@ export default function ContextBudgetCard({ client }: { readonly client: RelayAp
         ? `已保存（修订 v${saved.revision}）：上下文长度跟随应用默认。`
         : `已保存（修订 v${saved.revision}）：每次模型调用最多携带 ${formatTier(saved.contextBudgetTokens)} tokens。`);
       await read();
+      if (!disposed.current) onSaved?.();
     } catch (caught) {
       if (disposed.current) return;
       const described = describeLiveError(caught);
@@ -114,6 +116,7 @@ export default function ContextBudgetCard({ client }: { readonly client: RelayAp
       setPending(null);
       setNotice(`原命令回执已核对：上下文长度已保存（修订 v${String(receipt.result.revision ?? "")}）。`);
       await read();
+      if (!disposed.current) onSaved?.();
     } catch (caught) {
       if (!disposed.current) setError(`回执尚未核对到：${describeLiveError(caught).message}`);
     } finally { if (!disposed.current) setChecking(false); }
@@ -126,10 +129,13 @@ export default function ContextBudgetCard({ client }: { readonly client: RelayAp
     </section>;
   }
 
-  return <section className="surface-panel settings-card" data-testid="context-budget">
-    <h2>上下文长度</h2>
-    <p className="helper-text">按工作空间生效，决定每次模型调用最多能携带多少上下文。
-      它是单次调用预算，不是模型物理窗口；选择更大的档位不会授予任何写权限，也不改变输出上限。</p>
+  return <section className={compact ? "context-budget-inline" : "surface-panel settings-card"}
+    data-testid={compact ? "context-budget-inline" : "context-budget"}>
+    {compact ? <h3>上下文档位</h3> : <h2>上下文长度</h2>}
+    {compact ? <p className="helper-text">用于新请求，实际容量受模型限制。</p>
+      : <p className="helper-text">选择 256K、512K 或 1024K，上下文接近可用上限时自动压缩较早的对话，保留近期原文。
+      按工作空间保存，新请求生效；实际容量受模型窗口限制，并为提示、工具和输出预留空间。可在记忆设置中关闭自动压缩。</p>
+    }
 
     {loading && projection === null && <p role="status" data-testid="context-budget-loading">正在读取上下文长度…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="context-budget-error">
@@ -145,11 +151,11 @@ export default function ContextBudgetCard({ client }: { readonly client: RelayAp
             disabled={saving} onChange={() => { setDraft(option.value); setNotice(null); }} />
           <span>
             <strong>{option.label}</strong>
-            <span className="helper-text">{option.detail}</span>
+            {!compact && <span className="helper-text">{option.detail}</span>}
           </span>
         </label>)}
       </div>
-      <p className="helper-text" data-testid="context-budget-revision">当前修订 v{projection.revision}</p>
+      {!compact && <p className="helper-text" data-testid="context-budget-revision">当前修订 v{projection.revision}</p>}
       <div className="context-budget-actions">
         <button className="primary-button" type="button" data-testid="context-budget-save"
           disabled={saving || !dirty} onClick={() => void save({ commandId: createCommandId(),

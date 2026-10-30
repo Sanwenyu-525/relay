@@ -826,18 +826,26 @@ export class AssistRepository {
     return result.rows.length > 0;
   }
 
-  /** 原子领取：for update skip locked 保证多 Worker/多 tick 恰好一个领取者。
+  /** 在调用方短事务内先锁会话，再用新语句快照领取消息；同会话生成期间保留后续排队。
    *  0122：同一句里清掉插话意图——这一行开始自己生成后，就不再是别人的插话对象。 */
   async claimNextPendingMessage(workerId: string): Promise<AssistMessageRow | undefined> {
+    // AGENT_SESSION_GENERATION_FENCE：会话锁跨两句持有，第二句重新核对已提交的 RUNNING。
+    const session = (await sql<{ id: string }>`select s.id from assist_sessions s
+      left join projects p on p.id = s.project_id
+      where (s.project_id is null or p.archived_at is null)
+        and exists (select 1 from assist_messages m where m.session_id = s.id and m.status = 'PENDING')
+        and not exists (select 1 from assist_messages m where m.session_id = s.id and m.status = 'RUNNING')
+        and not exists (select 1 from assist_memory_requests j where j.session_id = s.id
+          and j.status in ('PENDING', 'RUNNING'))
+      order by s.id limit 1 for update of s skip locked`.execute(this.db)).rows[0];
+    if (session === undefined) return undefined;
     return (await sql<AssistMessageRow>`update assist_messages set status = 'RUNNING',
       worker_id = ${workerId}, steer_requested = false, updated_at = now()
       where id = (select m.id from assist_messages m
-        join assist_sessions s on s.id = m.session_id
-        left join projects p on p.id = s.project_id
-        where m.status = 'PENDING' and (s.project_id is null or p.archived_at is null)
-            and not exists (select 1 from assist_memory_requests j where j.session_id = s.id
-              and j.status in ('PENDING', 'RUNNING'))
-          order by m.session_id, m.created_at, m.id limit 1 for update of m, s skip locked)
+        where m.session_id = ${session.id} and m.status = 'PENDING'
+          and not exists (select 1 from assist_messages running
+            where running.session_id = ${session.id} and running.status = 'RUNNING')
+        order by m.created_at, m.id limit 1 for update of m skip locked)
       returning *`.execute(this.db)).rows[0];
   }
 

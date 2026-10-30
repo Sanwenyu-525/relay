@@ -56,7 +56,7 @@ import { lockWritableProjectInWorkspace } from './guards.js';
 import { readAdmission } from './maintenance-admission.js';
 import { recallConfirmedMemoryRefs } from './memory-recall.js';
 import { captureMemoriesForTurn } from './memory-auto-capture.js';
-import { AssistMemoryUnavailable, historicalReplyAvailable, MEMORY_INPUT_BYTES, readWorkingMemory } from './assist-memory.js';
+import { AssistMemoryUnavailable, historicalReplyAvailable, readWorkingMemory } from './assist-memory.js';
 import { prepareAutomaticMemory, runAssistMemoryTick } from './assist-memory-runner.js';
 import { AssistHistorySourceUnavailable, loadAssistSourceContent, recheckAssistSources } from './assist-source-content.js';
 export { AssistHistorySourceUnavailable, loadAssistSourceContent, recheckAssistSources } from './assist-source-content.js';
@@ -108,16 +108,19 @@ const MAX_CRITERIA = 20;
 
 export async function runAssistGenerationTick(db: DbExecutor,
   options: AssistGenerationOptions): Promise<AssistGenerationOutcome | undefined> {
+  // AGENT_STOP_CLAIM_FENCE：已停止的宿主不能开始领取或调用模型。
+  if (options.signal?.aborted) return undefined;
   const r = createRepositories(db);
   await r.assist.failExpiredLeases(new Date(Date.now() - options.leaseMs));
   // 0128：委派尝试的恢复核对。租约清扫之后跑：崩溃窗口里「子消息已结算、尝试行未落定」
   // 与「子消息被清扫」都按原身份补结算，不盲重跑、不让悬空 RUNNING 永久占槽。
   await reconcileDelegationAttempts(db, { now: new Date(), leaseMs: options.leaseMs });
+  if (options.signal?.aborted) return undefined;
   const memoryWork = await runAssistMemoryTick(db, options);
-  if (memoryWork !== undefined) return undefined;
+  if (memoryWork !== undefined || options.signal?.aborted) return undefined;
 
   const message = await withTransaction(db, async (tx) => {
-    if ((await readAdmission(tx, 'share')).mode !== 'NORMAL') return undefined;
+    if ((await readAdmission(tx, 'share')).mode !== 'NORMAL' || options.signal?.aborted) return undefined;
     const claimed = await tx.assist.claimNextPendingMessage(options.workerId);
     if (claimed === undefined) return undefined;
     const session = await tx.assist.readSession(claimed.session_id);
@@ -145,6 +148,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
   const controller = new AbortController();
   const onOuterAbort = (): void => controller.abort(options.signal?.reason);
   options.signal?.addEventListener('abort', onOuterAbort, { once: true });
+  if (options.signal?.aborted) onOuterAbort();
   const heartbeat = setInterval(() => {
     void (async () => {
       const alive = await r.assist.heartbeatGeneration(message.id, options.workerId);
@@ -156,6 +160,10 @@ export async function runAssistGenerationTick(db: DbExecutor,
   let modelInvocationFailed = false;
   let modelInvocationError: unknown;
   try {
+    if (controller.signal.aborted) {
+      return { messageId: message.id, sessionId: message.session_id,
+        status: 'DISCARDED', errorCode: null, proposalIds: [] };
+    }
     const session = await r.assist.readSession(message.session_id);
     if (session === undefined) {
       await settleInTransaction(db, message, options.workerId, { status: 'FAILED', errorCode: 'SESSION_MISSING',
@@ -178,7 +186,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
     // B 档人设助手会话走只读工具轮次：领取身份、心跳租约、取消轮询与 Worker CAS 结算
     // 都是同一条既有机制，这里只换掉「模型拿到什么词表」与「结果落到哪张账本」。
     if (session.conversation_mode === 'ASSISTANT') {
-      return runAssistantReadonlyGeneration(db, { message, session,
+      return await runAssistantReadonlyGeneration(db, { message, session,
         options: { ...options, modelPort: modelRoute.modelPort }, controller,
         ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
     }
@@ -186,7 +194,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
     // 0072：学习身份走教学轮次（结构化信封 + 逐次计量）。它**不得**落入下面的 AGENT 分支——
     // 那条路径会装配提案意图、项目状态维护与自动执行解释，学习会话没有这些权限。
     if (session.conversation_mode === 'LEARNING') {
-      return runLearningGeneration(db, { message, session,
+      return await runLearningGeneration(db, { message, session,
         options: { ...options, modelPort: modelRoute.modelPort }, controller,
         ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
     }
@@ -287,7 +295,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
                 action: message.method_action, readTools: true, writeEnabled: allowWrite }).system
             : selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP', writeEnabled: allowWrite,
               readTools: availableTools.length > 0 }).system;
-        return runAgentMainLoopGeneration(db, { message, session, options, controller,
+        // AGENT_GENERATION_LIFETIME：等待生成结算，finally 才能移除心跳与停止监听。
+        return await runAgentMainLoopGeneration(db, { message, session, options, controller,
           availableTools,
           system: `${system}\n\n${capabilityNotice}` +
             (officialSkillNotice === null ? '' : `\n\n${officialSkillNotice}`),
@@ -680,6 +689,10 @@ async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
     availableTools: await sessionReadToolsForCurrentConnections(db, session), modelPort: options.modelPort,
     signal: controller.signal,
     ...(context.invokeAssist === undefined ? {} : { invokeAssist: context.invokeAssist }) });
+  if (options.signal?.aborted && !await createRepositories(db).assist.isCancelRequested(message.id)) {
+    return { messageId: message.id, sessionId: session.id,
+      status: 'DISCARDED', errorCode: null, proposalIds: [] };
+  }
   if (outcome.kind === 'CONTENT') {
     const settled = await settleInTransaction(db, message, options.workerId, {
       status: 'COMPLETED', errorCode: null, content: outcome.content,
@@ -931,6 +944,11 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       workerId: options.workerId,
     } : {}),
     invokeAssist });
+  // 宿主停机不是用户取消：保留原领取事实，由租约恢复核对，不能写成业务 CANCELLED。
+  if (options.signal?.aborted && !await createRepositories(db).assist.isCancelRequested(message.id)) {
+    return { messageId: message.id, sessionId: session.id,
+      status: 'DISCARDED', errorCode: null, proposalIds: [] };
+  }
   if (outcome.kind === 'CONTENT' && context.chatMode === 'PLAN') {
     /*
      * 计划模式结算：正文与计划版本在**同一事务**里落库。
@@ -1119,6 +1137,10 @@ async function runLearningGeneration(db: DbExecutor, context: {
       errorCode, proposalIds: [] };
   }
 
+  if (options.signal?.aborted && !await createRepositories(db).assist.isCancelRequested(message.id)) {
+    return { messageId: message.id, sessionId: session.id,
+      status: 'DISCARDED', errorCode: null, proposalIds: [] };
+  }
   if (outcome.kind === 'CONTENT') {
     // 学习增量先落、正文后落，且两层结算各自核对执行身份：
     //   * 增量结算（唯一 Owner `settleLearningRound`）在同一事务里核对消息仍归本
@@ -1366,7 +1388,7 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
   session: AssistSessionRow, message: AssistMessageRow,
   skillMode = false): Promise<GenerationInput> {
   const authority = await r.workspaces.readAuthority(session.workspace_id);
-  const working = await readWorkingMemory(r, storage, session, message.seq);
+  const working = await readWorkingMemory(r, storage, session, message.seq, message.model_selection_snapshot);
   const history = working.history;
   const excludedHistory = new Set<string>();
   const recallEnabled = (await r.information.readMemorySettings(session.workspace_id))?.recall_enabled !== false;
@@ -1482,7 +1504,7 @@ async function buildGenerationInput(r: Repositories, storage: ManagedContentStor
       };
     }),
   ];
-  if (turns.reduce((bytes, turn) => bytes + Buffer.byteLength(turn.content, 'utf8'), 0) > MEMORY_INPUT_BYTES) {
+  if (turns.reduce((bytes, turn) => bytes + Buffer.byteLength(turn.content, 'utf8'), 0) > working.inputByteLimit) {
     throw new AssistMemoryUnavailable('MEMORY_CONTEXT_TOO_LARGE');
   }
   if (message.worker_id !== null &&

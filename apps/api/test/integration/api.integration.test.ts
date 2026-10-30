@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test, { before } from 'node:test';
 
 import { Pool } from 'pg';
@@ -14,6 +16,7 @@ import {
 import {
   baseEnvironment,
   createDataRoot,
+  delay,
   expectProblemJson,
   pickFreePort,
   portIsFree,
@@ -98,6 +101,23 @@ test('illegal configuration fails explicitly with exit code 2', async () => {
     assert.match(output, /RELAY_API_ALLOWED_ORIGINS/u);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('compiled API refuses the source workspace as its data root before listening', async () => {
+  const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
+  const port = await pickFreePort();
+  const env = baseEnvironment({
+    port, allowedOrigin: 'http://127.0.0.1:5173',
+    bearerToken: randomBytes(32).toString('hex'), dataRoot: resolve(repository),
+  });
+  const api = startApi(env);
+  try {
+    assert.equal(await withTimeout(api.exit, EXIT_TIMEOUT_MS, 'invalid data-root startup to exit'), 2);
+    assert.match(api.readOutput(), /RELAY_DATA_ROOT must be outside the source repository/u);
+    assert.equal(await portIsFree(port), true);
+  } finally {
+    await stopApi(api);
   }
 });
 
@@ -269,6 +289,40 @@ test('reports database unavailability while liveness stays alive', async () => {
       api.child.kill();
     }
 
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('starts with an IPv6 loopback origin and serves authenticated readiness over IPv6', async () => {
+  const dataRoot = await createDataRoot();
+  const port = await pickFreePort();
+  const allowedOrigin = 'http://[::1]:5173';
+  const bearerToken = randomBytes(32).toString('hex');
+  const env = baseEnvironment({ port, allowedOrigin, bearerToken, dataRoot });
+  env.RELAY_API_BIND_HOST = '::1';
+  const api = startApi(env);
+  const url = `http://[::1]:${port}`;
+  try {
+    const deadline = Date.now() + 30000;
+    let live = false;
+    while (Date.now() < deadline && api.child.exitCode === null) {
+      try {
+        const response = await fetch(`${url}/health/live`, { signal: AbortSignal.timeout(1000) });
+        live = response.status === 200;
+        await response.body?.cancel();
+        if (live) break;
+      } catch { /* Startup may not have bound the port yet. */ }
+      await delay(100);
+    }
+    assert.equal(live, true, api.readOutput());
+    const ready = await fetch(`${url}/health/ready`, {
+      headers: { origin: allowedOrigin, authorization: `Bearer ${bearerToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ready.status, 200, await ready.text());
+    assert.equal(ready.headers.get('access-control-allow-origin'), allowedOrigin);
+  } finally {
+    await stopApi(api);
     await rm(dataRoot, { recursive: true, force: true });
   }
 });

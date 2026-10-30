@@ -31,3 +31,26 @@
   gap: var(--relay-space-2);
   margin-top: var(--relay-space-2);
 }
+
+/* CONTEXT_RING_TIER_PICKER: shared command flow, compact layout inside the usage popover. */
+.context-budget-inline {
+  min-width: 0;
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  overflow-wrap: anywhere;
+}
+
+.context-budget-inline h3 {
+  margin: 0 0 var(--relay-space-1);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.context-budget-inline .context-budget-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.context-budget-inline .context-budget-option {
+  align-items: center;
+}

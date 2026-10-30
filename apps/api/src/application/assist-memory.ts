@@ -11,13 +11,30 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict } fr
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
-import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { freezeAssistModelSnapshot, parseAssistModelSnapshot } from './assist-model-snapshot.js';
 import { recheckAssistSources } from './assist-source-content.js';
 
 export const MEMORY_RECENT_MESSAGES = 8;
 export const MEMORY_AUTO_MESSAGES = 32;
 export const MEMORY_AUTO_BYTES = 48000;
 export const MEMORY_INPUT_BYTES = 128000;
+
+/** Same UTF-8 / 3 estimate as the model port; reserve 25% for prompts, tools and output. */
+export function memoryContextLimits(callTokens: number | null) {
+  if (callTokens === null) return { inputBytes: MEMORY_INPUT_BYTES, autoBytes: MEMORY_AUTO_BYTES,
+    autoMessages: MEMORY_AUTO_MESSAGES };
+  const inputBytes = Math.floor(callTokens * 0.75) * 3;
+  return { inputBytes, autoBytes: Math.floor(inputBytes * 0.8), autoMessages: null };
+}
+
+export async function resolveMemoryContextLimits(r: Repositories, workspaceId: string,
+  snapshot?: JsonObject | null) {
+  // MEMORY_CONTEXT_TIERS: real calls use the frozen effective budget, including provider caps.
+  const tokens = snapshot != null && snapshot.mock !== true
+    ? parseAssistModelSnapshot(snapshot).budget.callReservationTokens
+    : (await r.workspaces.readDefaultDirectory(workspaceId))?.context_budget_tokens ?? null;
+  return memoryContextLimits(tokens);
+}
 
 export class AssistMemoryUnavailable extends DomainError {
   constructor(code: string) { super({ code, status: 409, type: '/problems/memory-context-unavailable',
@@ -73,8 +90,8 @@ export async function historicalReplyAvailable(r: Repositories, storage: Managed
 
 /** A committed checkpoint plus exact subsequent original messages, never a last-N substitute. */
 export async function readWorkingMemory(r: Repositories, storage: ManagedContentStore,
-  session: AssistSessionRow, throughSeq: bigint): Promise<{ history: readonly AssistMessageRow[];
-    checkpoint: AssistMemoryCheckpointRow | null; revision: bigint }> {
+  session: AssistSessionRow, throughSeq: bigint, snapshot?: JsonObject | null): Promise<{ history: readonly AssistMessageRow[];
+    checkpoint: AssistMemoryCheckpointRow | null; revision: bigint; inputByteLimit: number }> {
   const state = await r.assistMemory.state(session.id);
   const prior = state?.checkpoint_id == null ? null : await r.assistMemory.checkpoint(state.checkpoint_id) ?? null;
   const checkpoint = session.remember && prior !== null && await checkpointAvailable(r, storage, session, prior) ? prior : null;
@@ -84,8 +101,9 @@ export async function readWorkingMemory(r: Repositories, storage: ManagedContent
   if (!session.remember) history = history.filter((m) => m.role === 'USER').slice(-1);
   const bytes = history.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
     Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
-  if (bytes > MEMORY_INPUT_BYTES) throw new AssistMemoryUnavailable('MEMORY_CONTEXT_TOO_LARGE');
-  return { history, checkpoint, revision: state?.revision ?? 0n };
+  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot);
+  if (bytes > limits.inputBytes) throw new AssistMemoryUnavailable('MEMORY_CONTEXT_TOO_LARGE');
+  return { history, checkpoint, revision: state?.revision ?? 0n, inputByteLimit: limits.inputBytes };
 }
 
 async function lockedMemorySession(r: Repositories, workspaceId: string, sessionId: string) {
@@ -113,8 +131,15 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   const history = await r.assistMemory.history(session.id, state?.cleared_through_seq ?? 0n);
   if (history.length > 10000) throw new AssistMemoryUnavailable('MEMORY_HISTORY_LIMIT');
   const delta = history.filter((m) => m.seq > (forceRebuild ? 0n : checkpoint?.through_seq ?? 0n));
-  const bytes = delta.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'), 0);
-  if (reason === 'AUTO' && delta.length < MEMORY_AUTO_MESSAGES && bytes < MEMORY_AUTO_BYTES) return null;
+  const selection = await r.modelSelection.readForSession(session.id);
+  const frozen = modelSnapshot === undefined ? await freezeAssistModelSnapshot(r, selection, env,
+    { requiresTools: false, requiresJsonOutput: true }, session.workspace_id) : undefined;
+  const snapshot = modelSnapshot ?? frozen?.snapshot ?? { mock: true };
+  const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot);
+  const bytes = delta.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
+    forceRebuild ? 0 : Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
+  if (reason === 'AUTO' && bytes < limits.autoBytes &&
+      (limits.autoMessages === null || delta.length < limits.autoMessages)) return null;
   const candidates = delta.slice(0, -MEMORY_RECENT_MESSAGES);
   const anchor = [...candidates].reverse().find((m) => m.role === 'ASSISTANT' && m.status === 'COMPLETED');
   if (anchor === undefined) return null;
@@ -125,16 +150,13 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   const covered = history.filter((m) => m.seq <= anchor.seq);
   const authority = await r.workspaces.readAuthority(session.workspace_id);
   if (authority === undefined) throw resourceNotFound('Workspace authority');
-  const selection = await r.modelSelection.readForSession(session.id);
-  const frozen = modelSnapshot === undefined ? await freezeAssistModelSnapshot(r, selection, env,
-    { requiresTools: false, requiresJsonOutput: true }, session.workspace_id) : undefined;
   const id = randomUUID();
   await r.assistMemory.insertRequest({ id, workspaceId: session.workspace_id, sessionId: session.id,
     sessionRevision: session.revision, memoryRevision: state?.revision ?? 0n,
     authorityRevision: authority.revision, contextRevision: authority.context_revision,
     settingsRevision: settings?.revision ?? 0n, throughSeq: anchor.seq, anchorMessageId: anchor.id,
     sourceMessageIds: covered.map((m) => m.id), sourceSha256: memoryHistoryFingerprint(covered),
-    modelSnapshot: modelSnapshot ?? frozen?.snapshot ?? { mock: true }, reason });
+    modelSnapshot: snapshot, reason });
   return id;
 }
 

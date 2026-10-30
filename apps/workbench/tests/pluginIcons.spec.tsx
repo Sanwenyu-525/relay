@@ -61,6 +61,38 @@ async function typeInto(container: HTMLElement, next: string): Promise<HTMLTextA
   return textarea;
 }
 
+/** 在草稿的指定位置落一段新文本（光标停在插入内容之后），模拟真实键入。
+    `typeInto` 总把光标放到末尾；句中间插入要先摆好选区再报 input，`@` 查询才认得出。 */
+async function typeAt(container: HTMLElement, next: string, caret: number): Promise<HTMLTextAreaElement> {
+  const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    setter.call(textarea, next);
+    // onChange 读的是事件目标此刻的 selectionStart，必须先摆好选区再报 input。
+    textarea.setSelectionRange(caret, caret);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  return textarea;
+}
+
+/** 带 `inputType` 的一次编辑：浏览器里粘贴/撤销/IME 提交与键入走的是同一条 input 事件，
+    jsdom 只有显式带上 inputType 才能守住「哪种来源可以新起 `@` 查询」。 */
+async function editWith(container: HTMLElement, next: string, inputType: string,
+  caret = next.length): Promise<HTMLTextAreaElement> {
+  const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+  await act(async () => {
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    setter.call(textarea, next);
+    textarea.setSelectionRange(caret, caret);
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType }));
+    textarea.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  return textarea;
+}
+
 /** 把光标（或选区）移到指定偏移并报一次选区变化：芯片删除的开合与光标位置有关。 */
 async function moveCaret(container: HTMLElement, caret: number, caretEnd?: number): Promise<HTMLTextAreaElement> {
   const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -302,20 +334,108 @@ describe("输入器 @ 插件菜单（ChatCommandInput pluginChips）", () => {
   });
 
   it("插入位置跟随光标：在句子中间输入 @ 只替换该处 query", async () => {
-    const view = await mountReact(<MentionHarness initial="先看 @Gi 再看别的" />);
+    const view = await mountReact(<MentionHarness />);
     try {
-      const textarea = view.container.querySelector<HTMLTextAreaElement>("textarea")!;
-      await act(async () => {
-        textarea.focus();
-        // 光标停在 @Gi 之后（位置 6），query 生效。
-        textarea.setSelectionRange(6, 6);
-        textarea.dispatchEvent(new Event("select", { bubbles: true }));
-      });
+      // 2026-10-29 起菜单只认「这一次键入的 @」：光是把光标挪进旧文本不算查询。
+      // 按真实输入走：句子先落好，再把光标放到「先看 」之后键入 @Gi（这一次编辑新起了查询）。
+      await typeInto(view.container, "先看 再看别的");
+      const textarea = await typeAt(view.container, "先看 @Gi 再看别的", 6);
       expect(menu(view.container)).not.toBeNull();
       await pressKey(textarea, "Enter");
       // 只替换 @Gi，且吃掉紧跟的空格——不会留下两个空格。
       expect(textarea.value).toBe("先看 @GitHub 再看别的");
       expect(textarea.selectionStart).toBe(11);
+    } finally { view.unmount(); }
+  });
+});
+
+describe("@ 菜单的触发状态（2026-10-29 用户指认：删掉已选插件后的空格不得重开菜单）", () => {
+  const menu = (container: ParentNode) => container.querySelector('[data-testid="chat-mention-menu"]');
+
+  /** 真实选择一次：输入 @ → Enter 选中第一枚（电脑操控），菜单应立刻关闭。 */
+  async function chooseComputer(view: { container: HTMLElement }) {
+    const textarea = await typeInto(view.container, "@");
+    expect(menu(view.container)).not.toBeNull();
+    await pressKey(textarea, "Enter");
+    expect(textarea.value).toBe("@电脑操控 ");
+    expect(menu(view.container)).toBeNull();
+    return textarea;
+  }
+
+  it("删除尾随空格：菜单保持关闭，芯片仍在", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      const textarea = await chooseComputer(view);
+      await typeInto(view.container, "@电脑操控");
+      expect(textarea.value).toBe("@电脑操控");
+      expect(menu(view.container)).toBeNull();
+      expect(view.container.querySelector('[data-plugin-chip="computer"]')).not.toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("继续退格整枚删除、再撤销恢复：两次都不重开菜单", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      const textarea = await chooseComputer(view);
+      await typeInto(view.container, "@电脑操控");
+      await moveCaret(view.container, 5);
+      await pressKey(textarea, "Backspace");
+      // 删除本身由原生执行（jsdom 不跑编辑命令），这里只重放删除后的草稿。
+      await typeInto(view.container, "");
+      expect(menu(view.container)).toBeNull();
+      // Ctrl+Z 恢复原文与芯片（撤销栈同样归浏览器，按恢复后的草稿重放）。
+      await typeInto(view.container, "@电脑操控 ");
+      expect(menu(view.container)).toBeNull();
+      expect(view.container.querySelector('[data-plugin-chip="computer"]')).not.toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("点击已选插件末尾、在其后输入普通文字：都不重开菜单", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      await chooseComputer(view);
+      await moveCaret(view.container, 5);
+      expect(menu(view.container)).toBeNull();
+      await typeInto(view.container, "@电脑操控 帮我看看");
+      expect(menu(view.container)).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("在别处明确输入新的 @：照常弹出；菜单不再有常驻提示，键盘说明走无障碍描述", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      await chooseComputer(view);
+      await typeInto(view.container, "@电脑操控 再看 @Gi");
+      expect(menu(view.container)).not.toBeNull();
+      expect(view.container.querySelectorAll('[data-testid="chat-mention-menu"] [role="option"]').length).toBe(1);
+      const list = menu(view.container)!.querySelector('[role="listbox"]')!;
+      expect(menu(view.container)!.querySelector(".chat-command-hint")).toBeNull();
+      const describedBy = list.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)?.textContent).toContain("Enter");
+    } finally { view.unmount(); }
+  });
+});
+
+describe("@ 菜单只认真实键入的 inputType（粘贴/撤销/IME 不新起查询）", () => {
+  const menu = (container: ParentNode) => container.querySelector('[data-testid="chat-mention-menu"]');
+
+  it("insertFromPaste / historyUndo / insertCompositionText 都不弹，insertText 才弹", async () => {
+    const view = await mountReact(<MentionHarness />);
+    try {
+      await editWith(view.container, "@GitHub ", "insertFromPaste");
+      expect(menu(view.container), "粘贴已完成的插件文本不弹").toBeNull();
+
+      await editWith(view.container, "", "deleteContentBackward");
+      await editWith(view.container, "@GitHub", "historyUndo");
+      expect(menu(view.container), "撤销回来的 @标签 不弹").toBeNull();
+
+      await editWith(view.container, "@电", "insertCompositionText");
+      expect(menu(view.container), "IME 组词提交的 @查询 不弹").toBeNull();
+
+      await editWith(view.container, "@Gi", "insertText");
+      expect(menu(view.container), "真实键入的 @查询 照常弹出").not.toBeNull();
+      expect(view.container.querySelectorAll('[data-testid="chat-mention-menu"] [role="option"]').length).toBe(1);
     } finally { view.unmount(); }
   });
 });

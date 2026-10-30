@@ -52,6 +52,10 @@ const goal = {
 const emptyGoal = { ...goal, current_step: null, progress: null, criteria: [], steps: [],
   round_count: 0 };
 
+const longGoal = { ...goal,
+  objective: "用 three.js 做一个可以走进漫游的房子：包含客厅、厨房和二楼卧室，支持鼠标旋转视角、"
+    + "键盘 WASD 走动、碰撞检测与昼夜光照切换，并保留墙面材质与家具摆放的可编辑配置" };
+
 async function installRoutes(page: Page): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
@@ -145,8 +149,9 @@ test.describe("目标单行状态条版式", () => {
     // 状态是文字 + 色点，颜色不是唯一线索。
     expect(look.badgeDotWidth, detail).toBeGreaterThanOrEqual(4);
     expect(look.badgeDotBackground, detail).toBe(look.badgeColor);
-    // 单行不变量：行高紧凑、正文截断而不是换行。
-    expect(look.lineHeight, detail).toBeLessThanOrEqual(48);
+    // 单行不变量：收起高度对齐 40px 控件档，正文截断而不是换行。
+    expect(look.lineHeight, detail).toBeGreaterThanOrEqual(36);
+    expect(look.lineHeight, detail).toBeLessThanOrEqual(40);
     expect(look.objectiveWrapped, detail).toBe(false);
     // 状态条紧贴输入卡上方、同宽对齐（同一 chat-measure 列）。
     expect(look.gapToComposer, detail).toBeGreaterThanOrEqual(0);
@@ -158,6 +163,19 @@ test.describe("目标单行状态条版式", () => {
     expect(look.overflowX, detail).toBeLessThanOrEqual(0);
 
     await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-line.png" });
+    await page.screenshot({ path: "output/plan-goal-v2/after-goal-collapsed.png" });
+    // 全局 reduced-motion 规则同样覆盖目标条：箭头与条身不再有过渡时长。
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reducedDuration = await page.locator(".goal-strip-chevron").evaluate((element) =>
+      getComputedStyle(element).transitionDuration);
+    expect(Number.parseFloat(reducedDuration), reducedDuration).toBe(0);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    // 1280×900 的展开态整窗截图：面板仍在 42vh 内，输入框保持可见。
+    await page.getByTestId("goal-card-toggle").click();
+    await expect(page.getByTestId("goal-card-details")).toBeVisible();
+    await page.screenshot({ path: "output/plan-goal-v2/after-goal-expanded.png" });
+    await page.getByTestId("goal-card-toggle").click();
+    await expect(page.getByTestId("goal-card-details")).toHaveCount(0);
   });
 
   test("展开区锁事实与色彩，超高内容在区内滚动，单行与动作键不被挤走", async ({ page }) => {
@@ -193,6 +211,8 @@ test.describe("目标单行状态条版式", () => {
         pendingColor: getComputedStyle(pending).color, success, warning,
         clientHeight: details.clientHeight, scrollHeight: details.scrollHeight,
         scrollTop: details.scrollTop,
+        detailsHeight: details.getBoundingClientRect().height,
+        viewportHeight: window.innerHeight,
         lineVisible: inViewport(line), pauseVisible: inViewport(pause),
         cancelVisible: inViewport(cancel),
         overflowX: details.scrollWidth - details.clientWidth
@@ -208,6 +228,7 @@ test.describe("目标单行状态条版式", () => {
     expect(top.pendingColor, detail).not.toBe(top.metColor);
     // 这一档确实触发展开区内部滚动，才谈得上「单行不被挤走」。
     expect(top.scrollHeight, detail).toBeGreaterThan(top.clientHeight);
+    expect(top.detailsHeight, detail).toBeLessThanOrEqual(top.viewportHeight * 0.42 + 1);
     expect(top.lineVisible, detail).toBe(true);
     expect(top.pauseVisible, detail).toBe(true);
     expect(top.cancelVisible, detail).toBe(true);
@@ -223,6 +244,10 @@ test.describe("目标单行状态条版式", () => {
     expect(scrolled.pauseVisible, JSON.stringify(scrolled)).toBe(true);
     expect(scrolled.cancelVisible, JSON.stringify(scrolled)).toBe(true);
 
+    // 截图回到顶部，保留「当前步骤/进展」首屏事实，而不是滚动后的中段。
+    await page.evaluate(() => {
+      document.querySelector<HTMLElement>('[data-testid="goal-card-details"]')!.scrollTop = 0;
+    });
     await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-expanded.png" });
   });
 
@@ -265,9 +290,85 @@ test.describe("目标单行状态条版式", () => {
     expect(look.criteriaCount, detail).toBe(0);
     expect(look.steps, detail).toBeNull();
     expect(look.note, detail).not.toBeNull();
-    expect(look.lineHeight, detail).toBeLessThanOrEqual(48);
+    expect(look.lineHeight, detail).toBeGreaterThanOrEqual(36);
+    expect(look.lineHeight, detail).toBeLessThanOrEqual(40);
     expect(look.overflowX, detail).toBeLessThanOrEqual(0);
 
     await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-empty.png" });
+  });
+
+  // 超长目标不能把状态与动作挤出单行：宽窗截断正文，窄窗先收轮次计数。
+  test("超长目标：宽窗截断且状态/动作可见，窄窗收起轮次后仍不换行、不横向溢出", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    await page.route(`${apiBase}/**`, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (route.request().method() === "GET" && path === `${prefix}/assist-sessions/${sessionId}/goal`)
+        return fulfillJson(route, { goal: longGoal, rounds: [] });
+      return route.fallback();
+    });
+    await openGoal(page);
+
+    const read = () => page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>('[data-testid="goal-card"]')!;
+      const line = strip.querySelector<HTMLElement>(".goal-strip-line")!;
+      const toggle = strip.querySelector<HTMLElement>('[data-testid="goal-card-toggle"]')!;
+      const objective = strip.querySelector<HTMLElement>('[data-testid="goal-card-objective"]')!;
+      const badge = strip.querySelector<HTMLElement>('[data-testid="goal-card-status"]')!;
+      const rounds = strip.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!;
+      const pause = strip.querySelector<HTMLElement>('[data-testid="goal-card-pause"]')!;
+      const cancel = strip.querySelector<HTMLElement>('[data-testid="goal-card-cancel"]')!;
+      const lineBox = line.getBoundingClientRect();
+      const inside = (element: HTMLElement) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && box.left >= lineBox.left - 0.5
+          && box.right <= lineBox.right + 0.5 && box.top >= lineBox.top - 0.5
+          && box.bottom <= lineBox.bottom + 0.5;
+      };
+      return {
+        lineHeight: lineBox.height,
+        objectiveClipped: objective.scrollWidth > objective.clientWidth,
+        objectiveWrapped: objective.getBoundingClientRect().height > lineBox.height + 1,
+        objectiveWidth: objective.getBoundingClientRect().width,
+        metaVisible: getComputedStyle(rounds).display !== "none",
+        badgeVisible: inside(badge), pauseVisible: inside(pause), cancelVisible: inside(cancel),
+        toggleHeight: toggle.getBoundingClientRect().height,
+        overflowX: line.scrollWidth - line.clientWidth,
+        pageOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth
+      };
+    });
+
+    const wide = await read();
+    const wideDetail = JSON.stringify(wide);
+    expect(wide.lineHeight, wideDetail).toBeGreaterThanOrEqual(36);
+    expect(wide.lineHeight, wideDetail).toBeLessThanOrEqual(40);
+    expect(wide.objectiveClipped, wideDetail).toBe(true);
+    expect(wide.objectiveWrapped, wideDetail).toBe(false);
+    expect(wide.metaVisible, wideDetail).toBe(true);
+    expect(wide.badgeVisible, wideDetail).toBe(true);
+    expect(wide.pauseVisible, wideDetail).toBe(true);
+    expect(wide.cancelVisible, wideDetail).toBe(true);
+    expect(wide.overflowX, wideDetail).toBeLessThanOrEqual(0);
+    await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-long.png" });
+
+    // 窄窗：轮次计数先让位，状态、截断后的目标与动作仍留在同一行。
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.evaluate(() =>
+      getComputedStyle(document.querySelector<HTMLElement>('[data-testid="goal-card-rounds"]')!).display
+    )).toBe("none");
+    const narrow = await read();
+    const narrowDetail = JSON.stringify(narrow);
+    expect(narrow.lineHeight, narrowDetail).toBeGreaterThanOrEqual(36);
+    expect(narrow.lineHeight, narrowDetail).toBeLessThanOrEqual(40);
+    expect(narrow.metaVisible, narrowDetail).toBe(false);
+    expect(narrow.objectiveClipped, narrowDetail).toBe(true);
+    expect(narrow.objectiveWrapped, narrowDetail).toBe(false);
+    expect(narrow.objectiveWidth, narrowDetail).toBeGreaterThan(0);
+    expect(narrow.badgeVisible, narrowDetail).toBe(true);
+    expect(narrow.pauseVisible, narrowDetail).toBe(true);
+    expect(narrow.cancelVisible, narrowDetail).toBe(true);
+    expect(narrow.overflowX, narrowDetail).toBeLessThanOrEqual(0);
+    expect(narrow.pageOverflowX, narrowDetail).toBeLessThanOrEqual(0);
+    await page.getByTestId("goal-card").screenshot({ path: "results/goal-strip-narrow.png" });
   });
 });

@@ -5,7 +5,7 @@ import GoalCard from "../src/components/GoalCard";
 import PlanCard from "../src/components/PlanCard";
 import { chatModeCommandFromText } from "../src/lib/chatModeCommand";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import type { RelayGoalView, RelayPlanView } from "../src/api/relayClient";
+import type { RelayAssistPlan, RelayGoalView, RelayPlanView } from "../src/api/relayClient";
 import { feedbackText, flush, mountReact, mountWorkbench } from "./mountApp";
 
 /**
@@ -142,10 +142,68 @@ describe("目标单行状态条", () => {
       expect(view.wrapper.get('[data-testid="goal-card-rounds"]').text()).toContain("第 2 轮");
       // 细节默认折叠：成功条件不占消息流。
       expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(false);
-      await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
+      const toggle = view.wrapper.get('[data-testid="goal-card-toggle"]');
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+      expect(toggle.attributes("aria-controls")).toBe("goal-card-details");
+      await toggle.trigger("click");
       expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="goal-card-toggle"]').attributes("aria-expanded")).toBe("true");
       await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
       expect(view.wrapper.find('[data-testid="goal-card-details"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("11 种服务端状态按真实投影显示：暂停中不说已暂停，待确认不说已完成", async () => {
+    const expected: Record<string, string> = {
+      ACTIVE: "正在推进", PAUSING: "正在暂停", PAUSED: "已暂停",
+      CANCELLING: "正在取消", CANCELLED: "已取消", WAITING_USER: "等你决定",
+      BLOCKED: "已阻塞", BUDGET_EXHAUSTED: "额度耗尽",
+      AWAITING_ACCEPTANCE: "等你确认完成", COMPLETED: "已完成", FAILED: "失败",
+    };
+    const view = await mountReact(createElement(GoalCard, { view: goalView("ACTIVE"),
+      busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
+      onConfirm: vi.fn() }));
+    try {
+      for (const [status, label] of Object.entries(expected)) {
+        await view.rerender(createElement(GoalCard, { view: goalView(status),
+          busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
+          onConfirm: vi.fn() }));
+        expect(view.wrapper.get('[data-testid="goal-card-status"]').text(), status).toBe(label);
+      }
+      await view.rerender(createElement(GoalCard, { view: goalView("PAUSING"),
+        busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
+        onConfirm: vi.fn() }));
+      expect(view.wrapper.get('[data-testid="goal-card-status"]').text()).not.toBe("已暂停");
+      await view.rerender(createElement(GoalCard, { view: goalView("AWAITING_ACCEPTANCE"),
+        busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
+        onConfirm: vi.fn() }));
+      expect(view.wrapper.get('[data-testid="goal-card-status"]').text()).not.toBe("已完成");
+    } finally { view.unmount(); }
+  });
+
+  it("展开区按分组行给出当前步骤、进展、停止原因、条件依据与历史，不新增命令", async () => {
+    const onPause = vi.fn(); const onResume = vi.fn();
+    const view = await mountReact(createElement(GoalCard, {
+      view: { goal: { ...goalView("BLOCKED").goal!, currentStep: "补回归测试",
+          progress: "已完成前两步。", stopReason: { code: "NEEDS_INPUT", detail: "缺少登录超时规则",
+            questions: ["超时多久算失败？"], resumable: true },
+          steps: [{ title: "梳理现状", status: "DONE" }, { title: "补回归测试", status: "DOING" }] },
+        rounds: [{ roundIndex: 1, outcome: "CONTINUE", note: "已立墙", createdAt: "2026-10-20T00:00:00Z" },
+          { roundIndex: 2, outcome: "BLOCKED", note: null, createdAt: "2026-10-20T01:00:00Z" }] } as RelayGoalView,
+      busy: false, error: null, onPause, onCancel: vi.fn(), onResume, onConfirm: vi.fn() }));
+    try {
+      await view.wrapper.get('[data-testid="goal-card-toggle"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="goal-card-objective-full"]').text()).toContain("把 README 改到能跑");
+      expect(view.wrapper.get('[data-testid="goal-card-step"]').text()).toContain("补回归测试");
+      expect(view.wrapper.get('[data-testid="goal-card-progress"]').text()).toContain("已完成前两步。");
+      expect(view.wrapper.get('[data-testid="goal-card-reason"]').text()).toContain("缺少登录超时规则");
+      expect(view.wrapper.get('[data-testid="goal-card-reason"]').text()).toContain("超时多久算失败？");
+      expect(view.wrapper.get('[data-testid="goal-criterion-c1"]').text()).toContain("README 第 3 节");
+      expect(view.wrapper.get('[data-testid="goal-card-steps"]').text()).toContain("1/2");
+      expect(view.wrapper.get('[data-testid="goal-card-history"]').text()).toContain("最近 2 轮");
+      // 展开是纯视图偏好：按钮仍只来自服务端 actions，没有触发任何控制命令。
+      expect(onPause).not.toHaveBeenCalled();
+      expect(onResume).not.toHaveBeenCalled();
     } finally { view.unmount(); }
   });
 
@@ -164,6 +222,28 @@ describe("目标单行状态条", () => {
     } finally { view.unmount(); }
   });
 
+  it("暂停与继续各发对应命令；在途时两个键都禁用，不排队第二次命令", async () => {
+    const onPause = vi.fn(); const onResume = vi.fn();
+    const view = await mountReact(createElement(GoalCard, { view: goalView("ACTIVE"),
+      busy: false, error: null, onPause, onCancel: vi.fn(), onResume, onConfirm: vi.fn() }));
+    try {
+      await view.wrapper.get('[data-testid="goal-card-pause"]').trigger("click");
+      expect(onPause).toHaveBeenCalledTimes(1);
+      expect(onResume).not.toHaveBeenCalled();
+      await view.rerender(createElement(GoalCard, {
+        view: goalView("PAUSED", { actions: { pause: false, cancel: true, resume: true,
+          confirmCompletion: false } }),
+        busy: false, error: null, onPause, onCancel: vi.fn(), onResume, onConfirm: vi.fn() }));
+      expect(view.wrapper.find('[data-testid="goal-card-pause"]').exists()).toBe(false);
+      await view.wrapper.get('[data-testid="goal-card-resume"]').trigger("click");
+      expect(onResume).toHaveBeenCalledTimes(1);
+      await view.rerender(createElement(GoalCard, { view: goalView("ACTIVE"), busy: true,
+        error: null, onPause, onCancel: vi.fn(), onResume, onConfirm: vi.fn() }));
+      expect(view.wrapper.get('[data-testid="goal-card-pause"]').attributes("disabled")).toBeDefined();
+      expect(view.wrapper.get('[data-testid="goal-card-cancel"]').attributes("disabled")).toBeDefined();
+    } finally { view.unmount(); }
+  });
+
   it("成功条件按 key 展示逐条状态与依据", async () => {
     const view = await mountReact(createElement(GoalCard, { view: goalView("ACTIVE"),
       busy: false, error: null, onPause: vi.fn(), onCancel: vi.fn(), onResume: vi.fn(),
@@ -178,38 +258,118 @@ describe("目标单行状态条", () => {
   });
 });
 
-function planView(): RelayPlanView {
-  return { latest: {
+function planRecord(overrides: Partial<RelayAssistPlan> = {}): RelayAssistPlan {
+  return {
     planId: "plan-2", sessionId: "session-1", version: 2, status: "CURRENT",
-    goal: "登录流程重构", scope: ["web"], steps: [{ title: "梳理现状", detail: null }],
-    verification: [{ statement: "人工走查", method: "HUMAN" }], openQuestions: [],
-    sourceMessageId: "m1", createdAt: "2026-10-20T00:00:00Z" },
-    versions: [
-      { planId: "plan-1", sessionId: "session-1", version: 1, status: "SUPERSEDED" as const,
-        goal: "旧", scope: [], steps: [], verification: [], openQuestions: [],
-        sourceMessageId: "m0", createdAt: "2026-10-19T00:00:00Z" },
-      { planId: "plan-2", sessionId: "session-1", version: 2, status: "CURRENT" as const,
-        goal: "登录流程重构", scope: ["web"], steps: [{ title: "梳理现状", detail: null }],
-        verification: [{ statement: "人工走查", method: "HUMAN" }], openQuestions: [],
-        sourceMessageId: "m1", createdAt: "2026-10-20T00:00:00Z" }] };
+    goal: "登录流程重构", scope: ["web"],
+    steps: [{ title: "梳理现状", detail: "列出入口与重复实现" },
+      { title: "收敛接口", detail: "统一 token 读取" },
+      { title: "补回归测试", detail: "覆盖成功与失败路径" },
+      { title: "更新文档", detail: null }],
+    verification: [{ statement: "人工走查", method: "HUMAN" },
+      { statement: "回归测试通过", method: "AUTOMATED" }],
+    openQuestions: ["旧入口是否保留一版兼容？"],
+    sourceMessageId: "m1", createdAt: "2026-10-20T00:00:00Z", ...overrides };
+}
+
+function planView(overrides: Partial<RelayAssistPlan> = {}): RelayPlanView {
+  const latest = planRecord(overrides);
+  return { latest, versions: [
+    planRecord({ planId: "plan-1", version: 1, status: "SUPERSEDED", goal: "旧",
+      scope: [], steps: [], verification: [], openQuestions: [],
+      sourceMessageId: "m0", createdAt: "2026-10-19T00:00:00Z" }),
+    latest] };
 }
 
 describe("计划卡", () => {
-  it("显示确切版本号与目标；执行回调带的是这一版的确切 id", async () => {
+  it("摘要显示确切版本、目标、前 3 步与验证；执行回调带这一版的确切 id", async () => {
     const onExecute = vi.fn();
     const view = await mountReact(createElement(PlanCard, { view: planView(), busy: false,
-      error: null, onExecute, onExport: vi.fn(), onDismiss: vi.fn() }));
+      error: null, onExecute, onCopy: vi.fn(), onDismiss: vi.fn() }));
     try {
       expect(view.wrapper.get('[data-testid="plan-card"]').attributes("data-version")).toBe("2");
       expect(view.wrapper.get('[data-testid="plan-card-goal"]').text()).toBe("登录流程重构");
+      expect(view.wrapper.get('[data-testid="plan-card-title"]').text()).toContain("第 2 版");
+      expect(view.wrapper.get('[data-testid="plan-card-steps"]').findAll("li")).toHaveLength(3);
+      expect(view.wrapper.get('[data-testid="plan-card-steps"]').text()).toContain("梳理现状");
+      expect(view.wrapper.get('[data-testid="plan-card-steps"]').text()).toContain("列出入口与重复实现");
+      expect(view.wrapper.get('[data-testid="plan-card-steps"]').text()).not.toContain("更新文档");
+      expect(view.wrapper.get('[data-testid="plan-card-verification"]').text()).toContain("人工走查");
+      expect(view.wrapper.get('[data-testid="plan-card-more-steps"]').text()).toBe("查看全部 4 步");
+      // 默认摘要：详情面板、完整步骤、版本历史都不占高。
+      expect(view.wrapper.find('[data-testid="plan-card-details"]').exists()).toBe(false);
       await view.wrapper.get('[data-testid="plan-card-execute"]').trigger("click");
       expect(onExecute).toHaveBeenCalledWith("plan-2", 2);
     } finally { view.unmount(); }
   });
 
+  it("查看全部步骤后展开完整细节：全部步骤、范围、验证、待定与版本历史", async () => {
+    const view = await mountReact(createElement(PlanCard, { view: planView(), busy: false,
+      error: null, onExecute: vi.fn(), onCopy: vi.fn(), onDismiss: vi.fn() }));
+    try {
+      const toggle = view.wrapper.get('[data-testid="plan-card-toggle"]');
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+      expect(toggle.attributes("aria-controls")).toBeTruthy();
+      await view.wrapper.get('[data-testid="plan-card-more-steps"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="plan-card-toggle"]').attributes("aria-expanded")).toBe("true");
+      expect(view.wrapper.get('[data-testid="plan-card-details"]').exists()).toBe(true);
+      expect(view.wrapper.get('[data-testid="plan-card-all-steps"]').findAll("li")).toHaveLength(4);
+      expect(view.wrapper.get('[data-testid="plan-card-all-steps"]').text()).toContain("更新文档");
+      expect(view.wrapper.get('[data-testid="plan-card-scope"]').text()).toContain("web");
+      expect(view.wrapper.get('[data-testid="plan-card-verification-list"]').text()).toContain("回归测试通过");
+      expect(view.wrapper.get('[data-testid="plan-card-questions"]').text()).toContain("旧入口是否保留一版兼容？");
+      expect(view.wrapper.get('[data-testid="plan-card-details"]').text()).toContain("共 2 版");
+      expect(view.wrapper.get('[data-testid="plan-card-history"]').text()).toContain("第 1 版");
+      expect(view.wrapper.get('[data-testid="plan-version-1"]').text()).toContain("已被取代");
+      expect(view.wrapper.get('[data-testid="plan-version-2"]').text()).toContain("当前有效");
+      await view.wrapper.get('[data-testid="plan-card-toggle"]').trigger("click");
+      expect(view.wrapper.find('[data-testid="plan-card-details"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("没有结构化步骤时明确说明，不生成虚假清单", async () => {
+    const view = await mountReact(createElement(PlanCard, {
+      view: planView({ steps: [], scope: [], verification: [], openQuestions: [] }),
+      busy: false, error: null, onExecute: vi.fn(), onCopy: vi.fn(), onDismiss: vi.fn() }));
+    try {
+      expect(view.wrapper.get('[data-testid="plan-card-no-steps"]').text()).toContain("还没有结构化步骤");
+      expect(view.wrapper.find('[data-testid="plan-card-steps"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="plan-card-more-steps"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="plan-card-verification"]').text()).toContain("尚未指定验证标准");
+      await view.wrapper.get('[data-testid="plan-card-toggle"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="plan-card-all-steps-empty"]').text()).toContain("还没有结构化步骤");
+    } finally { view.unmount(); }
+  });
+
+  it("复制计划调用剪贴板回调并带上这一版 Markdown；不冒充导出文件", async () => {
+    const onCopy = vi.fn();
+    const view = await mountReact(createElement(PlanCard, { view: planView(), busy: false,
+      error: null, onExecute: vi.fn(), onCopy, onDismiss: vi.fn() }));
+    try {
+      const copy = view.wrapper.get('[data-testid="plan-card-copy"]');
+      expect(copy.text()).toBe("复制计划");
+      expect(view.wrapper.find('[data-testid="plan-card-export"]').exists()).toBe(false);
+      await copy.trigger("click");
+      expect(onCopy).toHaveBeenCalledTimes(1);
+      const [markdown, version] = onCopy.mock.calls[0] as [string, number];
+      expect(version).toBe(2);
+      expect(markdown).toContain("# 计划（第 2 版）");
+      expect(markdown).toContain("4. 更新文档");
+    } finally { view.unmount(); }
+  });
+
+  it("过期计划明确标注，版本历史仍指向确切版本", async () => {
+    const view = await mountReact(createElement(PlanCard, {
+      view: planView({ status: "SUPERSEDED" }), busy: false,
+      error: null, onExecute: vi.fn(), onCopy: vi.fn(), onDismiss: vi.fn() }));
+    try {
+      expect(view.wrapper.get('[data-testid="plan-card-version-status"]').text()).toBe("已被更新版取代");
+    } finally { view.unmount(); }
+  });
+
   it("没有计划时不渲染", async () => {
     const view = await mountReact(createElement(PlanCard, { view: null, busy: false,
-      error: null, onExecute: vi.fn(), onExport: vi.fn(), onDismiss: vi.fn() }));
+      error: null, onExecute: vi.fn(), onCopy: vi.fn(), onDismiss: vi.fn() }));
     try {
       expect(view.wrapper.find('[data-testid="plan-card"]').exists()).toBe(false);
     } finally { view.unmount(); }

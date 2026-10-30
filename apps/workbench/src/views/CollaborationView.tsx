@@ -316,9 +316,12 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
    * 会话当前目录的服务端投影。`source` 作为服务端事实的只读副本保留（`WORKSPACE_DEFAULT` /
    * `USER_PICKED` / 缺字段＝历史未知）；2026-10-20 用户指令「只显示目录名」后，它不再进
    * 细条或顶栏的可见文案。这里是显示用的只读副本，目录事实仍归会话行与目录命令。
+   *
+   * `confirmed` 区分「服务端读回的作用域」与「换会话瞬间的占位种子」（后者取上一条会话或
+   * 刚选的目录，只为顶栏不闪，不是归属事实）。工具面板的项目身份只认 `confirmed` 的那份。
    */
   const [boundDirectory, setBoundDirectory] = useState<{ sessionId: string; projectId: string | null;
-    path: string | null; source: RelayWorkingDirectorySource | null } | null>(null);
+    path: string | null; source: RelayWorkingDirectorySource | null; confirmed: boolean } | null>(null);
   const sessionContextRequest = useRef(0);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
@@ -739,6 +742,20 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const conversationProjectId = entryProjectId ?? boundDirectory?.projectId ?? folderProjectId ?? search.get("project");
   const projectScopeActive = conversationProjectId !== null && !bindingUnconfirmed;
   /**
+   * 右侧工具面板的项目身份（2026-10-30 用户指认「工具面板固定传 null」）。
+   *
+   * 只认**服务端已确认**的会话归属：`boundDirectory.confirmed` 为真才算；会话还没回报过时
+   * 退到入口那次 `?session=` 的服务端读取（同样是读回来的事实）。以下三种都不是归属：
+   *   * 换会话瞬间的占位种子（取上一条会话或刚选的目录，只为顶栏不闪）；
+   *   * 左栏刚选的目录 `folder.association`（目录选择只说明想读哪儿）；
+   *   * URL 上的 `?project=`（那是导航意图，不是这条会话的归属）。
+   * 归属在途、结果未知或失败时同样保持空值：文件与变更回到「尚未关联项目」的安全边界，
+   * 不因为目录已经打开就去读受管目录。这里只决定「面板显示哪一档」，真正的读取仍由服务端的
+   * 项目资格与受管目录规则判定——界面不因这个值获得任何额外权限。
+   */
+  const toolsProjectId = bindingUnconfirmed ? null
+    : boundDirectory !== null && boundDirectory.confirmed ? boundDirectory.projectId : entryProjectId;
+  /**
    * 新对话首帧的目标种子（2026-10-22，DEV-0104）。
    *
    * 目录「＋」与任务聊天在空白新对话上已经有宿主刚读到的目标事实（目录回执里的项目、
@@ -950,7 +967,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       setBoundDirectory({ sessionId: id, projectId: session.projectId,
         path: session.context?.workingDirectory?.canonicalRoot ?? null,
         // 缺字段（旧服务端）保持 null＝历史未知，不在这里补一个「用户选的」或「默认的」。
-        source: session.context?.workingDirectory?.source ?? null });
+        source: session.context?.workingDirectory?.source ?? null,
+        // 服务端读回：这一份才是归属事实，工具面板的项目身份只认它。
+        confirmed: true });
     }).catch((caught: unknown) => {
       if (activeSessionRef.current === id && version === sessionContextRequest.current) setFolderError(describeLiveError(caught).message);
     });
@@ -969,12 +988,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     // 同一项目内的新会话仍保留用户选定的目录；全局新对话由路由重新挂载清空。
     if (id === null) return;
     // 换会话先清除旧目录展示，但保留导航所属项目，避免退回工作区空会话并卸载原 Owner。
+    // 这一份是**占位**不是归属：`confirmed: false` 直到下面那次服务端读取回来。
     setBoundDirectory((current) => ({ sessionId: id,
       projectId: current?.projectId ?? folderRef.current?.association?.projectId ?? null,
       path: current?.sessionId === id ? current.path : null,
       // 同一条会话已读到的来源不能被这次回报抹掉：抹掉会让「来源」在重读返回前闪回成未知，
       // 两个说法短暂并存（来源本身已不上屏，仍按事实保留，不制造第二次推断）。
-      source: current?.sessionId === id ? current.source : null }));
+      source: current?.sessionId === id ? current.source : null,
+      confirmed: false }));
     if (previous !== null && previous !== id) setFolder(null);
     rereadSessionScope(id);
   }, [client, rereadSessionScope]);
@@ -992,7 +1013,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     setSessionId(scope.sessionId);
     setBoundDirectory({ sessionId: scope.sessionId, projectId: scope.projectId,
       path: scope.workingDirectory?.canonicalRoot ?? null,
-      source: scope.workingDirectory?.source ?? null });
+      source: scope.workingDirectory?.source ?? null,
+      // AssistView 只在服务端把作用域分配并读回之后回报这里，因此这份同样是确认过的。
+      confirmed: true });
   }, []);
 
   // 离开协作页时清掉高亮，避免左栏停在一条已经不在看的会话上。
@@ -1523,10 +1546,11 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             {conversationToolsOpen && <>
               <div className="collab-inspector-scrim" data-testid="collab-conversation-tools-scrim"
                 aria-hidden="true" onMouseDown={closeConversationTools} />
-              {/* 普通会话的工具面板：无 Project/Task 时文件与变更按资格说明，网页预览照常可用。 */}
+              {/* 普通会话的工具面板：项目身份取服务端已确认的会话归属（`toolsProjectId`）。
+                  未归属/在途/未知/失败时为 null，文件与变更按资格说明，网页预览照常可用。 */}
               <aside className="task-inspector collab-conversation-tools" id="collab-conversation-tools"
-                data-testid="collab-conversation-tools" aria-label="工具面板">
-                <DevToolsPanel client={client} projectId={null} taskId={null} run={null}
+                data-testid="collab-conversation-tools" data-project={toolsProjectId ?? "unbound"} aria-label="工具面板">
+                <DevToolsPanel client={client} projectId={toolsProjectId} taskId={null} run={null}
                   previewBridge={previewBridge} previewScope={previewScope} onClose={closeConversationTools} />
               </aside>
             </>}

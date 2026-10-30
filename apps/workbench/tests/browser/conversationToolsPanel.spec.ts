@@ -16,6 +16,7 @@ const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
+const projectId = "22222222-2222-4222-8222-222222222222";
 const origin = "http://127.0.0.1:4173";
 
 function cors(): Record<string, string> {
@@ -27,14 +28,26 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   await route.fulfill({ status, contentType: "application/json", headers: cors(), body: JSON.stringify(body) });
 }
 
-/** 没有关联项目、没有任务的普通会话：工具面板里文件与变更只有空态，网页可用。 */
-function sessionRow(): unknown {
-  return { id: sessionId, workspace_id: workspaceId, project_id: null, task_id: null,
+/** 普通会话的会话行：`project` 为空＝未归属，非空＝服务端已确认归入该项目。 */
+function sessionRow(project: string | null = null): unknown {
+  return { id: sessionId, workspace_id: workspaceId, project_id: project, task_id: null,
     title: "整理实验评价指标", status: "ACTIVE", revision: "1", conversation_mode: "AGENT",
     assistant_profile_id: null, created_at: "2026-10-28T20:00:00Z", updated_at: "2026-10-28T20:10:00Z" };
 }
 
-async function installRoutes(page: Page): Promise<void> {
+interface RouteOptions {
+  /** 会话归属：null＝未归属。工具面板的项目身份只认服务端这一份。 */
+  project?: string | null;
+  /** 该项目登记的受管目录；空数组＝有项目但没有受管目录。 */
+  resources?: readonly unknown[];
+}
+
+const managedResource = { id: "res-1", project_id: projectId, canonical_root: "D:/Develop/MyProject",
+  display_name: "MyProject", status: "ACTIVE", revision: "1", resource_epoch: "0",
+  file_write_identity_bound: true };
+
+async function installRoutes(page: Page, options: RouteOptions = {}): Promise<void> {
+  const project = options.project ?? null;
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
@@ -45,8 +58,8 @@ async function installRoutes(page: Page): Promise<void> {
     if (path === `${prefix}/model-port/verification`) return fulfillJson(route, {
       current_config_fingerprint: null, last: null, matches_current_config: false,
       worker_startup_validation: "NOT_CONFIGURED" });
-    if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [sessionRow()] });
-    if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, sessionRow());
+    if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [sessionRow(project)] });
+    if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, sessionRow(project));
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/model-selection`) return fulfillJson(route, { model: null, revision: "0" });
     if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
@@ -56,6 +69,15 @@ async function installRoutes(page: Page): Promise<void> {
     if (path === `${prefix}/chat-commands`) return fulfillJson(route, { items: [] });
     if (path.startsWith(`${prefix}/conversation-execution-requests`)) return fulfillJson(route, { items: [] });
     if (path.startsWith(`${prefix}/learning`)) return fulfillJson(route, { items: [], epoch: "0" });
+    if (path === `${prefix}/projects/${projectId}`) return fulfillJson(route, { id: projectId,
+      title: "人机协作工作流研究", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
+    if (path === `${prefix}/projects/${projectId}/state`) return fulfillJson(route, { project_id: projectId,
+      revision: "1", phase_key: "GENERAL", next_action_task_id: null,
+      selected_artifact_version_refs: [], completed_highlight_refs: [] });
+    if (path === `${prefix}/projects/${projectId}/managed-resources`) {
+      return fulfillJson(route, options.resources ?? [managedResource]);
+    }
+    if (path.startsWith(`${prefix}/projects/${projectId}/connections`)) return fulfillJson(route, []);
     return fulfillJson(route, { items: [], next_cursor: null });
   });
 }
@@ -70,9 +92,9 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-async function openSession(page: Page, width = 1440, height = 900): Promise<void> {
+async function openSession(page: Page, width = 1440, height = 900, options: RouteOptions = {}): Promise<void> {
   await page.setViewportSize({ width, height });
-  await installRoutes(page);
+  await installRoutes(page, options);
   await page.goto(`/agent?session=${sessionId}`);
   await connect(page);
   await page.getByTestId("assist-draft").waitFor({ timeout: 20_000 });
@@ -239,5 +261,74 @@ test.describe("普通会话的右侧工具面板（2026-10-28）", () => {
       const label = document.querySelector<HTMLElement>('[data-testid="devtools-tab-RUNS"] .devtools-tab-label');
       return label === null ? null : getComputedStyle(label).display;
     }), { timeout: 5_000 }).not.toBe("none");
+  });
+
+  /**
+   * 已归入项目的普通会话（2026-10-30 P0 退回项）。
+   *
+   * 上一轮工具面板的 projectId 固定为 null，于是「已归入项目」的会话也一直显示
+   * 「尚未关联项目」。这条用例走真实协作页：会话行给出 project_id，页面读回它，
+   * 面板据此显示受管目录与 Git 读取入口——不是只给组件传一个 projectId。
+   */
+  test("已归入项目：文件列出受管目录、变更是读取面板，五个页签各有清晰状态", async ({ page }) => {
+    await openSession(page, 1440, 900, { project: projectId });
+    await openTools(page);
+    const host = page.getByTestId("collab-conversation-tools");
+    await expect(host).toHaveAttribute("data-project", projectId);
+    const root = page.getByTestId("devtools-panel");
+    // 有项目时默认落在「文件」，并真的列出服务端登记的受管目录。
+    await expect(root).toHaveAttribute("data-tab", "FILES");
+    const files = page.getByTestId("devtools-files");
+    await expect(files).toContainText("受管目录");
+    await expect(files).toContainText("MyProject");
+    await expect(files).toContainText("资源修订 v1");
+    await expect(page.getByTestId("devtools-files-unavailable")).toHaveCount(0);
+
+    // 变更：是真正的 Git 读取面板（待显式点击），不是「尚未关联项目」空态。
+    await page.getByTestId("devtools-tab-GIT").click();
+    await expect(page.getByTestId("devtools-git-unavailable")).toHaveCount(0);
+    await expect(page.getByTestId("git-read-idle")).toContainText("尚未读取所选目录");
+
+    // 终端：轻量说明，不再是一整块抢眼的警告。
+    await page.getByTestId("devtools-tab-TERMINAL").click();
+    const terminal = page.getByTestId("devtools-terminal");
+    await expect(terminal).toContainText("不提供可执行提示符");
+    expect(await terminal.locator(".warning-callout").count()).toBe(0);
+    expect(await page.getByTestId("devtools-terminal-gap").evaluate(
+      (node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+
+    // 运行记录：没有 Run 时只有一句空态，不重复「不是启动按钮」这类免责声明。
+    await page.getByTestId("devtools-tab-RUNS").click();
+    await expect(page.getByTestId("devtools-runs-empty")).toHaveText("当前任务还没有 AI Run。");
+    await expect(page.getByTestId("devtools-runs")).not.toContainText("不是启动按钮");
+
+    // 轨迹：没有 Run 就不给「刷新」这种按了没用的操作，也不复述只读说明。
+    await page.getByTestId("devtools-tab-TRACE").click();
+    await expect(page.getByTestId("trajectory-no-run")).toContainText("没有工具调用轨迹");
+    await expect(page.getByTestId("trajectory-refresh")).toHaveCount(0);
+    await expect(page.getByTestId("run-tool-trajectory")).not.toContainText("只读");
+  });
+
+  test("已归入项目但受管目录为空：如实说明，不读成「工作目录干净」", async ({ page }) => {
+    await openSession(page, 1440, 900, { project: projectId, resources: [] });
+    await openTools(page);
+    const files = page.getByTestId("devtools-files");
+    await expect(files).toContainText("当前项目没有登记受管目录");
+    await expect(files).toContainText("工作目录干净");
+  });
+
+  test("终端未接入是轻量说明，不再是一整块警告", async ({ page }) => {
+    await openSession(page);
+    await openTools(page);
+    await page.getByTestId("devtools-tab-TERMINAL").click();
+    const terminal = page.getByTestId("devtools-terminal");
+    await expect(terminal).toContainText("不提供可执行提示符");
+    // 不是 warning-callout 那种整块警示：说明文字直接落在纸面上。
+    expect(await terminal.locator(".warning-callout").count()).toBe(0);
+    expect(await page.getByTestId("devtools-terminal-gap").evaluate(
+      (node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+    // 与「文件/变更」的空态同一档：说明文字用辅助色，不用状态底色。
+    expect(await page.getByTestId("devtools-terminal-gap").evaluate(
+      (node) => getComputedStyle(node).color)).toBe("rgb(66, 82, 72)");
   });
 });

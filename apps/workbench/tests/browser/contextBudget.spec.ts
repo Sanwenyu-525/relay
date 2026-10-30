@@ -80,6 +80,9 @@ test("上下文档位从投影读出，保存提交同一修订与所选档位",
   const card = page.getByTestId("context-budget");
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(card.getByTestId("context-budget-option-262144")).toBeChecked();
+  await expect(card).toContainText("256K");
+  await expect(card).toContainText("512K");
+  await expect(card).toContainText("1024K");
   await expect(card.getByTestId("context-budget-revision")).toContainText("v4");
 
   await card.getByTestId("context-budget-option-524288").check();
@@ -89,4 +92,10 @@ test("上下文档位从投影读出，保存提交同一修订与所选档位",
   await expect(card.getByTestId("context-budget-option-524288")).toBeChecked();
   expect(writes.map((write) => write.body)).toEqual([
     { command_id: writes[0]!.body.command_id, expected_revision: "4", context_budget_tokens: 524_288 }]);
+  await card.getByTestId("context-budget-option-1048576").check();
+  await card.getByTestId("context-budget-save").click();
+  await expect(card.getByTestId("context-budget-option-1048576")).toBeChecked();
+  await expect(card.getByTestId("context-budget-revision")).toContainText("v6");
+  expect(writes[1]?.body).toMatchObject({ expected_revision: "5", context_budget_tokens: 1_048_576 });
+  await page.screenshot({ path: "output/context-compression-20261030/settings-1024k.png", fullPage: true });
 });

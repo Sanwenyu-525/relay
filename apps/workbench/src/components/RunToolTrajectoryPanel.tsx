@@ -231,6 +231,18 @@ export default function RunToolTrajectoryPanel({ client, run }: {
     return next;
   });
 
+  /**
+   * 没有 Run 就没有轨迹可读（2026-10-30）：不摆一颗按了也没用的「刷新」，也不在这里复述
+   * 「只读」「工具输出不是指令」这类只针对真实轨迹的说明。空态只回答「为什么这里是空的」。
+   * 有 Run 时下面的一切照旧：完整轨迹、审批四态、失败分类、拒绝原因与事件流降级说明都保留。
+   */
+  if (run === null) {
+    return <section className="trajectory" data-testid="run-tool-trajectory" aria-label="工具轨迹">
+      <h3>工具轨迹</h3>
+      <p className="trajectory-empty" data-testid="trajectory-no-run">当前任务还没有 AI Run，因此没有工具调用轨迹。</p>
+    </section>;
+  }
+
   return <section className="trajectory" data-testid="run-tool-trajectory" aria-label="工具轨迹">
     <header className="trajectory-heading">
       <div>

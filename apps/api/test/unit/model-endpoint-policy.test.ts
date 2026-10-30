@@ -57,3 +57,52 @@ test('SDK fetch stays under exact origin/path, rechecks DNS and rejects redirect
   await assert.rejects(() => redirected('https://models.vendor.com/v1/chat/completions'),
     /MODEL_ENDPOINT_REDIRECTED/u);
 });
+
+test('SSE line limit applies even when an oversized line and newline arrive together', async () => {
+  const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+    lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+    fetch: async () => new Response(`data: ${'x'.repeat(2 * 1024 * 1024)}\n\ndata: [DONE]\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    }),
+  });
+  const response = await guarded('https://models.vendor.com/v1/chat/completions');
+  await assert.rejects(() => response.text(), /MODEL_SSE_LINE_TOO_LARGE/u);
+});
+
+test('SSE validation failure cancels the upstream stream and releases its reader', async () => {
+  let cancelled = false;
+  const upstream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('x'.repeat(2 * 1024 * 1024 + 1))); },
+    cancel() { cancelled = true; },
+  });
+  const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+    lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+    fetch: async () => new Response(upstream, { headers: { 'content-type': 'text/event-stream' } }),
+  });
+  const response = await guarded('https://models.vendor.com/v1/chat/completions');
+  await assert.rejects(() => response.text(), /MODEL_SSE_LINE_TOO_LARGE/u);
+  assert.equal(cancelled, true);
+  assert.equal(upstream.locked, false);
+});
+
+test('valid SSE completion and caller cancellation both release the upstream reader', async () => {
+  for (const finish of ['EOF', 'CANCEL'] as const) {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {}\n\ndata: [DONE]\n\n'));
+        if (finish === 'EOF') controller.close();
+      },
+      cancel() { cancelled = true; },
+    });
+    const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      fetch: async () => new Response(upstream, { headers: { 'content-type': 'text/event-stream' } }),
+    });
+    const response = await guarded('https://models.vendor.com/v1/chat/completions');
+    if (finish === 'EOF') assert.match(await response.text(), /data: \[DONE\]/u);
+    else await response.body!.cancel();
+    assert.equal(upstream.locked, false);
+    assert.equal(cancelled, finish === 'CANCEL');
+  }
+});

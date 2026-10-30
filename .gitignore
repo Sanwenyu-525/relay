@@ -72,6 +72,7 @@ dist-stage-b/
 # 代理会话导出：opencode `opencode export <id>` 的默认落点是仓库根目录，
 # 含完整对话与用量，不进入版本库。需要留档时放到 output/acceptance-raw/
 /ses_*.json
+/*功能_20*.md
 
 # 其他代理工作流在本机留下的记忆目录，不属于本仓库事实源
 .workbuddy-ai/
@@ -83,3 +84,20 @@ apps/api/dist-work-context-acceptance/
 # 原型 HTML 与根目录散落截图不进入版本库
 GPT页面原型/
 exec-*.png
+
+# Workbench 本机验收产物（截图、日志、构建快照）。output/ 下历史已跟踪的
+# triage-defects 等用例文件保持跟踪，此处只拦新增的临时产物。
+apps/workbench/output/
+apps/workbench/probe-*.png
+apps/workbench/zz-*.png
+apps/workbench/dev-*.png
+
+# 隔离发布构建的临时工作树：test-release/ 之外按日期命名的副本同样不入库
+/test-release-*/
+/apps/desktop/_tmp_*
+/apps/desktop/run-rust-tests.verify-tmp.cmd
+
+# 本机一次性补丁脚本与误落到子包的截图
+/scripts/patch-recovery.py
+/scripts/remap-scenarios.py
+/apps/api/DevelopRelay-Agent*.png

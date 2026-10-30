@@ -4,31 +4,325 @@
  * 两张卡共用一套外观：它们是同一条会话里的两种「结构化事实」，不该长得像两个产品。
  * 只新增这一个文件、只消费既有 token——没有新色值，也没有第二套圆角/间距。
  *
- * 尺寸与压缩权沿 `.execution-summary` 那一课：卡片与消息区同在协作页中列，
- * `min-height: 0` 让它先让出高度，而不是把转录区压没。
+ * 2026-10-30 用户指令：
+ *   * 目标状态条收成 40px 单行，中性分隔色描边、悬停才起淡底；展开区改为分组行 + 分隔线，
+ *     不再套第二层卡片。
+ *   * 计划卡默认给紧凑摘要（版本、目标、前 3 步、验证、两个入口），并住进会话消息流；
+ *     展开后才显示全部步骤、范围、验证、待定与版本历史。
+ *
+ * 尺寸与压缩权沿 `.execution-summary` 那一课：目标条与消息区同在协作页中列，
+ * 展开区先让出高度，而不是把输入器或消息滚动挤没。
  */
+
+/* 计划卡：消息流内的一等消息件 ------------------------------------------- */
 
 .goal-plan-card {
   display: flex;
   flex-direction: column;
   gap: var(--relay-space-2);
-  min-height: 0;
-  max-height: 42vh;
-  overflow: auto;
+  min-width: 0;
   padding: var(--relay-space-3);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
   background: var(--relay-color-bg-surface);
   font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
 }
 
-/*
- * 2026-10-25：目标卡收成输入框上方的单行状态条（用户指令，参照 Codex 的目标行）。
- * 单行只放「状态 + 目标（截断）+ 轮次计数 + 动作」；步骤、进展、成功条件、停止原因、
- * 轮次历史都在展开区。字段、服务端 actions 与呈现口径不变；计划卡共享的基座不动。
- * 容器宽度与 `.agent-chat-prereq-row` / 输入卡同轴（chat-measure 居中），
- * 且仍在输入卡**外**——条的出现/展开不改变输入卡自己的形状。
- */
+/* 计划卡跟着对应的助手消息走：与消息正文同一个阅读列，不再额外让出头像宽度。 */
+.agent-message-plan {
+  min-width: 0;
+  margin-top: var(--relay-space-1);
+}
+
+/* 消息投影里没有源消息时（分页或尚未读回），退到消息流末尾，仍只渲染一次。 */
+.agent-message-plan--fallback {
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin: var(--relay-space-2) auto 0;
+}
+
+.goal-plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+}
+
+.goal-plan-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.goal-plan-card-dismiss {
+  flex: none;
+  min-height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.goal-plan-badge {
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-plan-badge--neutral {
+  background: var(--relay-color-status-neutral-bg);
+  color: var(--relay-color-status-neutral-text);
+}
+
+.goal-plan-badge--busy {
+  background: var(--relay-color-status-running-bg);
+  color: var(--relay-color-status-running-text);
+}
+
+.goal-plan-badge--warning {
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+}
+
+.goal-plan-badge--danger {
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+}
+
+.goal-plan-badge--success {
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-status-success-text);
+}
+
+.goal-plan-objective {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-snug);
+  overflow-wrap: anywhere;
+}
+
+/* 摘要步骤：编号是真实序号，标题与说明都来自服务端计划；超过三行由 li 自己收住。 */
+.goal-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.goal-plan-steps > li {
+  display: grid;
+  grid-template-columns: var(--relay-font-size-body) minmax(0, 1fr);
+  gap: var(--relay-space-2);
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-snug);
+}
+
+.goal-plan-step-index {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  text-align: end;
+}
+
+.goal-plan-step-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.goal-plan-step-title {
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-plan-step-detail {
+  color: var(--relay-color-text-muted);
+}
+
+.goal-plan-step-detail::before {
+  content: " · ";
+}
+
+.goal-plan-empty {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-plan-verify {
+  display: flex;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.goal-plan-more {
+  align-self: flex-start;
+  min-height: var(--relay-control-target-minimum);
+  padding: 0;
+  color: var(--relay-color-action-text);
+  font-size: var(--relay-font-size-caption);
+}
+
+.goal-plan-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  flex-wrap: wrap;
+}
+
+.goal-plan-actions > .primary-button,
+.goal-plan-actions > .secondary-button {
+  min-height: var(--relay-control-height);
+  font-size: var(--relay-font-size-meta);
+}
+
+.goal-plan-actions > .primary-button > svg,
+.goal-plan-actions > .secondary-button > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+.goal-plan-actions svg[data-expanded="true"] {
+  transform: rotate(180deg);
+}
+
+/* 展开后的细节：与摘要同一张卡内的分组行，不再套第二层卡片。 */
+.goal-plan-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  min-height: 0;
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.goal-plan-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  min-width: 0;
+}
+
+.goal-plan-group + .goal-plan-group {
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.goal-plan-label {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.goal-plan-list {
+  margin: 0;
+  padding-left: var(--relay-space-4);
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.goal-plan-list--rows {
+  padding-left: 0;
+  list-style: none;
+}
+
+.goal-plan-list--rows > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--relay-space-1);
+  min-width: 0;
+  padding-block: var(--relay-space-1);
+  overflow-wrap: anywhere;
+}
+
+.goal-plan-list--rows > li + li {
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.goal-plan-detail {
+  color: var(--relay-color-text-muted);
+}
+
+.goal-plan-version-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-plan-version-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--relay-space-2);
+  min-width: 0;
+  padding-block: var(--relay-space-1);
+  color: var(--relay-color-text-secondary);
+}
+
+.goal-plan-version-list > li + li {
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.goal-plan-version-list > li[data-current="true"] {
+  color: var(--relay-color-text-primary);
+}
+
+.goal-plan-version-number {
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.goal-plan-version-state {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.goal-plan-version-goal {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-plan-note {
+  margin: 0;
+}
+
+/* 目标单行状态条：输入卡上方常驻，40px 一行 ------------------------------- */
+
 .goal-strip {
   width: 100%;
   max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
@@ -39,11 +333,25 @@
   display: flex;
   align-items: center;
   gap: var(--relay-space-1);
-  padding: var(--relay-space-0-5) var(--relay-space-1) var(--relay-space-0-5) var(--relay-space-2);
-  border: var(--relay-border-width) solid var(--relay-color-palette-forest);
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-1) 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
   background: var(--relay-color-bg-surface);
   font-size: var(--relay-font-size-meta);
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.goal-strip-line:hover,
+.goal-strip-line:focus-within {
+  border-color: var(--relay-color-border-control);
+  background: var(--relay-color-bg-subtle);
+}
+
+.goal-strip[data-expanded="true"] .goal-strip-line {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 /* 整段左侧都是展开/收起的命中区；文本截断只发生在目标正文上，状态徽标与计数不折行。 */
@@ -53,6 +361,7 @@
   gap: var(--relay-space-2);
   flex: 1 1 auto;
   min-width: 0;
+  min-height: calc(var(--relay-control-height) - 2 * var(--relay-border-width));
   padding: 0;
   border: 0;
   background: transparent;
@@ -63,11 +372,11 @@
   cursor: pointer;
 }
 
-.goal-strip-toggle > svg {
+.goal-strip-target {
   flex: none;
-  width: var(--relay-control-icon-size);
-  height: var(--relay-control-icon-size);
-  color: var(--relay-color-text-secondary);
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+  color: var(--relay-color-text-muted);
 }
 
 .goal-strip-objective {
@@ -81,10 +390,20 @@
 /* 轮次是辅助事实：flex:none 保住它，空间不够时先牺牲目标正文的截断宽度。 */
 .goal-strip-meta {
   flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
   white-space: nowrap;
 }
 
-.goal-strip-toggle > svg[data-expanded="true"] {
+.goal-strip-chevron {
+  flex: none;
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+  color: var(--relay-color-text-muted);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.goal-strip-chevron[data-expanded="true"] {
   transform: rotate(180deg);
 }
 
@@ -95,6 +414,7 @@
   align-items: center;
   gap: var(--relay-space-1);
   flex: none;
+  flex-wrap: nowrap;
 }
 
 .goal-strip-action {
@@ -109,9 +429,10 @@
   background: transparent;
   color: var(--relay-color-text-secondary);
   font-family: var(--relay-font-family-ui);
-  font-size: var(--relay-font-size-meta);
+  font-size: var(--relay-font-size-caption);
   font-weight: var(--relay-font-weight-medium);
   line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
   cursor: pointer;
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
     color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
@@ -119,8 +440,8 @@
 
 .goal-strip-action > svg {
   flex: none;
-  width: var(--relay-control-icon-size);
-  height: var(--relay-control-icon-size);
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
 }
 
 .goal-strip-action--icon {
@@ -148,25 +469,39 @@
   cursor: not-allowed;
 }
 
-/* 展开区：与单行同宽的一块事实面板，仍沿 `.execution-summary` 那一课先让出高度；
-   内容超过 42vh 时面板内滚动，单行状态条与动作键不被证据挤走。 */
+/* 展开区：与单行同宽的一块事实面板，分组行之间用分隔线；内容超过 42vh 时面板内滚动，
+   单行状态条与动作键不被证据挤走。 */
 .goal-strip-details {
   display: flex;
   flex-direction: column;
-  gap: var(--relay-space-2);
+  gap: 0;
   min-height: 0;
   max-height: 42vh;
   overflow: auto;
-  padding: var(--relay-space-3);
-  border: var(--relay-border-width) solid var(--relay-color-palette-forest);
+  overscroll-behavior: contain;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-top: 0;
   border-radius: 0 0 var(--relay-radius-panel) var(--relay-radius-panel);
   background: var(--relay-color-bg-surface);
   font-size: var(--relay-font-size-meta);
 }
 
+.goal-card-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  padding-block: var(--relay-space-2);
+  overflow-wrap: anywhere;
+}
+
+.goal-strip-details > * + * {
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
 .goal-strip-details .goal-plan-objective {
-  margin: 0;
+  display: block;
   font-size: var(--relay-font-size-body);
   font-weight: var(--relay-font-weight-medium);
   line-height: var(--relay-font-lineHeight-ui);
@@ -174,6 +509,7 @@
 
 .goal-strip-details .goal-card-note {
   margin: 0;
+  padding-block: var(--relay-space-2);
 }
 
 /* 状态徽标只给「目标状态」长色点；计划版本徽标仍是一句说明，不冒充状态。 */
@@ -183,7 +519,7 @@
   gap: var(--relay-space-0-5);
   flex: none;
   padding: 1px var(--relay-space-2);
-  line-height: var(--relay-font-lineHeight-ui);
+  white-space: nowrap;
 }
 
 .goal-card-status-badge::before {
@@ -197,13 +533,16 @@
 
 .goal-card-step,
 .goal-card-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--relay-space-2);
   margin: 0;
   color: var(--relay-color-text-secondary);
   line-height: var(--relay-font-lineHeight-ui);
 }
 
 .goal-card-step-label {
-  margin-inline-end: var(--relay-space-1);
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
 }
@@ -212,8 +551,8 @@
 .goal-card-criterion-status {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: var(--relay-space-0-5);
-  margin-right: var(--relay-space-2);
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
   font-weight: var(--relay-font-weight-medium);
@@ -228,106 +567,6 @@
   background: currentColor;
 }
 
-@media (max-width: 48rem) {
-  /* 窄窗先收掉轮次计数：状态与目标正文仍在一行，动作键不折到第二行。 */
-  .goal-strip-meta {
-    display: none;
-  }
-}
-
-.goal-plan-card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--relay-space-2);
-  flex-wrap: wrap;
-}
-
-.goal-plan-card-title {
-  display: flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-  flex-wrap: wrap;
-  margin: 0;
-  font-weight: var(--relay-font-weight-medium);
-}
-
-.goal-plan-badge {
-  padding: 0 var(--relay-space-2);
-  border-radius: var(--relay-radius-badge);
-  background: var(--relay-color-status-neutral-bg);
-  color: var(--relay-color-status-neutral-text);
-  font-size: var(--relay-font-size-caption);
-  font-weight: var(--relay-font-weight-medium);
-}
-
-.goal-plan-badge--busy {
-  background: var(--relay-color-selection-bg);
-  color: var(--relay-color-selection-text);
-}
-
-.goal-plan-badge--warning {
-  background: var(--relay-color-status-warning-bg);
-  color: var(--relay-color-status-warning-text);
-}
-
-.goal-plan-badge--danger {
-  background: var(--relay-color-status-danger-bg);
-  color: var(--relay-color-status-danger-text);
-}
-
-.goal-plan-badge--success {
-  background: var(--relay-color-status-success-bg);
-  color: var(--relay-color-status-success-text);
-}
-
-.goal-plan-objective {
-  margin: 0;
-  color: var(--relay-color-text-primary);
-  line-height: var(--relay-font-line);
-}
-
-.goal-card-step {
-  margin: 0;
-  color: var(--relay-color-text-secondary);
-}
-
-.goal-plan-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-1);
-}
-
-.goal-plan-label {
-  margin: 0;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
-  font-weight: var(--relay-font-weight-medium);
-}
-
-.goal-plan-list {
-  margin: 0;
-  padding-left: var(--relay-space-4);
-  color: var(--relay-color-text-secondary);
-  line-height: var(--relay-font-line);
-}
-
-.goal-plan-detail {
-  color: var(--relay-color-text-muted);
-}
-
-.goal-plan-history,
-.goal-card-details {
-  color: var(--relay-color-text-secondary);
-}
-
-.goal-plan-history > summary,
-.goal-card-details > summary {
-  cursor: pointer;
-  color: var(--relay-color-text-muted);
-}
-
-/* 条件状态用字重与色阶区分，不加新色值：达成=次级文字，未达成=警告文字。 */
 .goal-plan-list > li[data-status="MET"] .goal-card-criterion-status {
   color: var(--relay-color-status-success-text);
 }
@@ -336,43 +575,35 @@
   color: var(--relay-color-status-warning-text);
 }
 
-.goal-card-reason {
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-1);
-  padding: var(--relay-space-2);
-  border-radius: var(--relay-radius-control);
-  background: var(--relay-color-bg-subtle);
-}
-
-.goal-card-reason > p {
+/* 停止原因只改文字色，不再铺一层底色卡片。 */
+.goal-card-reason-text {
   margin: 0;
+  color: var(--relay-color-text-secondary);
+  line-height: var(--relay-font-lineHeight-ui);
 }
 
-.goal-card-reason > ul {
-  margin: 0;
-  padding-left: var(--relay-space-4);
-}
-
-.goal-card-reason--warning {
-  background: var(--relay-color-status-warning-bg);
+.goal-card-reason-text--warning {
   color: var(--relay-color-status-warning-text);
 }
 
-.goal-card-reason--danger {
-  background: var(--relay-color-status-danger-bg);
+.goal-card-reason-text--danger {
   color: var(--relay-color-status-danger-text);
 }
 
-.goal-plan-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-  flex-wrap: wrap;
+.goal-card-disclosure {
+  color: var(--relay-color-text-secondary);
 }
 
-.goal-plan-actions > .helper-text {
-  margin: 0;
+.goal-card-disclosure > summary {
+  display: list-item;
+  padding-block: var(--relay-space-1);
+  cursor: pointer;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.goal-card-disclosure[open] > summary {
+  margin-bottom: var(--relay-space-1);
 }
 
 /* 模式 chip 与档位 chip 同高同中线：两枚原生 select 并排时不能一高一低。 */
@@ -380,22 +611,15 @@
   flex: 0 0 auto;
 }
 
-/* 计划卡收在 details 里：summary 与会话其他折叠控件同一行高，展开后卡片宽度同列。 */
-.goal-plan-details {
-  margin: 0 0 var(--space-3, 12px);
-}
+@media (max-width: 48rem) {
+  /* 窄窗先收掉轮次计数：状态与目标正文仍在一行，动作键不折到第二行。 */
+  .goal-strip-meta {
+    display: none;
+  }
 
-.goal-plan-details > summary {
-  cursor: pointer;
-  color: var(--relay-color-text-secondary, #5a6b5a);
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-.goal-plan-details > summary:hover {
-  color: var(--relay-color-text, #1a2b1a);
-}
-
-.goal-plan-details[open] > summary {
-  margin-bottom: var(--space-2, 8px);
+  .goal-plan-actions > .primary-button,
+  .goal-plan-actions > .secondary-button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }

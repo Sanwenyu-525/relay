@@ -71,7 +71,7 @@ export class InformationRepository {
    * （MODEL_OBSERVATION）——后者可能是工具结果或网页正文的转述，最不能当依据。
    */
   async recallMemories(workspaceId: string, projectId: string | null, terms: readonly string[],
-    limit: number): Promise<readonly (MemoryStateRow & { literal_match: boolean })[]> {
+    limit: number, excludedIds: readonly string[] = []): Promise<readonly (MemoryStateRow & { literal_match: boolean })[]> {
     return (await sql<MemoryStateRow & { literal_match: boolean }>`select m.*, v.body_text,
       v.confirmed_by, v.confirmed_at, v.expires_at, 'ACTIVE'::text as effective_status,
       exists (select 1 from unnest(${[...terms]}::text[]) term
@@ -79,6 +79,7 @@ export class InformationRepository {
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
+        and not (m.id = any(${[...excludedIds]}::uuid[]))
         and (m.project_id is null or m.project_id = ${projectId})
         and (v.expires_at is null or v.expires_at > now())
         -- 来源失效（0132 撤回）：自动记忆绑定的那条原消息已撤回时，这条记忆不再有可核对的

@@ -86,6 +86,10 @@
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
 }
+/* 这条必须写在 `--secondary` 之后：两者同为单类选择器，先写的 `.devtools-tab--active`
+   会被上面的 `color: text-muted` 盖掉，激活的「终端/运行记录/轨迹」就只剩一条线、
+   文字还是灰的（2026-10-30 一致性检查发现）。 */
+.devtools-tab--secondary.devtools-tab--active { color: var(--relay-color-selection-text); }
 .devtools-tab--secondary > svg {
   width: var(--relay-font-size-meta);
   height: var(--relay-font-size-meta);

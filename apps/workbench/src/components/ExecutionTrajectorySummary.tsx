@@ -6,6 +6,11 @@ import { useRunToolCallPreviews } from "../lib/useRunToolCallPreviews";
 import { localFileDiffRows } from "../lib/localFileDiffRows";
 import { waitReasonText } from "../lib/waitReasons";
 import { failedToolResult } from "../lib/toolResults";
+import {
+  READ_TOOLS, activityItemsFromRunProjection, summarizeRunToolCalls, waitingOperationIds,
+} from "../lib/activityPresentation";
+import ActivityDetail from "./ActivityDetail";
+import ActivityRow from "./ActivityRow";
 import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../api/relayClient";
 
 /**
@@ -22,12 +27,11 @@ import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../api
  *
  * 折叠区里的读取结果逐字节来自同一份 `result_ref`（模型当时实际消费的那一份），不是另一次读取、
  * 也不是模型复述的目录清单。用户因此不必离开原会话去找唯一结果，右栏轨迹仍是逐轮全量视图。
+ *
+ * 2026-10-29：分类计数与等待动作身份移到 `lib/activityPresentation`（与聊天区的会话轮次共用
+ * 同一套展示模型）。这里只保留「Run 侧摘要怎么排」——计数口径、词表与去重规则一个字没改。
  */
 
-const READ_TOOLS = new Set(["read_file", "list_directory", "find_paths", "search_text"]);
-const WRITE_TOOLS = new Set(["apply_changeset"]);
-const CHECK_TOOLS = new Set(["run_check"]);
-/** Run 终态后不再有生成中预览，轮询到此为止（与轨迹页签同一词表）。 */
 const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 /** 折叠区最多逐字展示的正文行数；超出只算「还有更多」，不截断后冒充完整内容。 */
 const INLINE_MAX_LINES = 40;
@@ -38,39 +42,6 @@ const READ_GROUP_THRESHOLD = 8;
 const READ_CAP_THRESHOLD = 12;
 /** 找不到精确 Review 或读取失败时的审批入口：仍是原审批页，由面板自己列出待决项。 */
 const APPROVAL_FALLBACK_HREF = "/reviews?kind=ACTION_APPROVAL";
-
-interface Counts {
-  readonly reads: number;
-  readonly writes: number;
-  readonly checks: number;
-  readonly failed: number;
-  readonly running: number;
-  readonly waiting: number;
-  readonly unavailable: number;
-}
-
-function count(projection: RelayRunToolCalls): Counts {
-  const counts = { reads: 0, writes: 0, checks: 0, failed: 0, running: 0, waiting: 0, unavailable: 0 };
-  for (const round of projection.rounds) {
-    // 同一行身份的重复事件/重放只算一次：摘要被重放撑大就等于把一次调用说成多次。
-    const seen = new Set<string>();
-    for (const call of round.calls) {
-      if (seen.has(call.id)) continue;
-      seen.add(call.id);
-      // 先分流未结算与被拒的状态：把它们算进「进行中」会让用户以为模型还在动，
-      // 把被拒算作成功则更糟——两者都必须在计数之前判定。
-      if (call.status === "REJECTED" || call.status === "ABANDONED") { counts.failed += 1; continue; }
-      if (call.status === "WAITING_APPROVAL") { counts.waiting += 1; continue; }
-      if (call.status !== "SETTLED") { counts.running += 1; continue; }
-      if (call.resultRef === null) { counts.unavailable += 1; continue; }
-      if (CHECK_TOOLS.has(call.toolName)) counts.checks += 1;
-      if (failedToolResult(call.resultRef)) { counts.failed += 1; continue; }
-      if (READ_TOOLS.has(call.toolName)) counts.reads += 1;
-      else if (WRITE_TOOLS.has(call.toolName)) counts.writes += 1;
-    }
-  }
-  return counts;
-}
 
 /** 结果正文：与右栏轨迹同一套取值——优先人类可读内容，其余按 JSON 原样展开，不加工。 */
 function resultText(call: RelayRunToolCall): string {
@@ -104,17 +75,6 @@ function settledReads(projection: RelayRunToolCalls): readonly RelayRunToolCall[
   return reads;
 }
 
-/** 等待批准的那几次调用的动作身份；审批按 operation_id 与 ACTION_APPROVAL Review 对齐。 */
-function waitingOperationIds(projection: RelayRunToolCalls): string {
-  const ids = new Set<string>();
-  for (const round of projection.rounds) {
-    for (const call of round.calls) {
-      if (call.status === "WAITING_APPROVAL" && call.operationId !== null) ids.add(call.operationId);
-    }
-  }
-  return [...ids].sort().join(",");
-}
-
 /** 超过阈值后按工具名聚组（保持首次出现顺序）：同类的多次读取压成一行组行，
     组内仍是原来的逐项回执；这是呈现层聚合，不改变计数与「逐字来自 result_ref」的取值。 */
 function groupReadsByTool(reads: readonly RelayRunToolCall[]):
@@ -138,6 +98,8 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
   // 与右栏轨迹页签共用同一个读取入口：两处各读一次会出现两条可能不同步的事实来源。
   const { projection, loading, error } = useRunToolCalls(client, runId, revision);
   const [open, setOpen] = useState(false);
+  /** 命令/其它工具行的详情开合；用户手动开合优先，事件更新不会收回。 */
+  const [activityOpen, setActivityOpen] = useState<ReadonlySet<string>>(() => new Set());
   // 局部 diff 的行：数字来自同一份工具账本（已落盘）与生成中的临时预览（不落总数）。
   // 预览只在 Run 非终态时轮询，Run 结束或切换后整份清空，迟到的片段不会复活「正在生成」。
   const { previews } = useRunToolCallPreviews(client, runId,
@@ -176,7 +138,12 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
       {loading ? "正在读取这次执行的工具轨迹…" : "这次执行还没有可显示的工具轨迹。"}
     </p>;
   }
-  const counts = count(projection);
+  const counts = summarizeRunToolCalls(projection);
+  // 命令与其它工具的活动行（2026-10-30）：读取走「本次读取结果」清单、写入走逐文件 diff，
+  // 只有命令（run_check 等）此前在聊天区完全没有出口——它的 stdout 与退出码只存在于右栏。
+  // 这里按同一套行 anatomy 补上，详情用共享的 ActivityDetail 渲染真实回执。
+  const activities = activityItemsFromRunProjection(projection).filter((item) =>
+    item.category === "COMMAND" || item.category === "OTHER");
   // 统计标签按类别一枚一枚排；「等待你批准」是唯一需要用户动手的一类，
   // 单独标 attention 档（琥珀细线），不与普通计数混在同一个视觉层。
   const parts: { readonly text: string; readonly attention?: boolean }[] = [];
@@ -190,7 +157,7 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
   if (parts.length === 0) parts.push({ text: "这次执行没有调用工具" });
   const reads = settledReads(projection);
 
-  return <div className="execution-summary" data-testid="execution-summary">
+  return <div className="execution-summary execution-trajectory" data-testid="execution-summary">
     {/* 调用统计按类别各占一枚标签（§37.1）：一类一件事，扫读时不用在一串「·」里数项；
         等待原因跟在标签行下方，不与计数抢同一行。 */}
     <ul className="execution-counts" aria-label="本次执行的调用统计">
@@ -206,6 +173,18 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
     {/* 局部 diff：逐文件一行，紧邻这次编辑的摘要。同一文件被改多次留下多条，
         生成中的行只说「预览」，落账后才换成实际数并可以写「已修改」。 */}
     <ChatLocalFileDiff client={client} rows={localRows} />
+    {activities.length > 0 && <ul className="execution-activities" data-testid="execution-activities">
+      {activities.map((item) => <ActivityRow key={item.id} item={item}
+        testId={`execution-activity-${item.id}`}
+        current={item.tone === "active"}
+        expanded={activityOpen.has(item.id)}
+        detail={<ActivityDetail item={item} />}
+        onToggle={() => setActivityOpen((previous) => {
+          const next = new Set(previous);
+          if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+          return next;
+        })} />)}
+    </ul>}
     {reads.length > 0 && <>
       <button className="text-link" type="button" data-testid="execution-read-results-toggle"
         aria-expanded={open} onClick={() => setOpen((previous) => !previous)}>

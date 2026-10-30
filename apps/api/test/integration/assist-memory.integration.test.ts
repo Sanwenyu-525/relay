@@ -100,6 +100,26 @@ test('manual HTTP compaction is replayable; restart uses persisted summary plus 
   } finally { await restarted.close(); }
 });
 
+test('compaction refuses tool results and records their request and usage as a failed call', async () => {
+  const f = await fixture();
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
+  const p = port('unused');
+  p.model.assist = async () => ({ kind: 'TOOL_CALLS', calls: [], preamble: '',
+    providerRequestId: 'memory-tool-refusal', usage: { inputTokens: 17, outputTokens: 4 } });
+  const result = await runAssistMemoryTick(app.db, p.options);
+  assert.equal(result?.status, 'FAILED');
+  const job = await createRepositories(app.db).assistMemory.request(result!.requestId);
+  assert.equal(job?.checkpoint_id, null);
+  const call = (await sql<{ status: string; error_kind: string; provider_request_id: string;
+    usage_input_tokens: number; usage_output_tokens: number }>`select status, error_kind, provider_request_id,
+      usage_input_tokens, usage_output_tokens from model_calls where id = ${job!.model_call_id}`.execute(app.db)).rows[0]!;
+  assert.equal(call.status, 'FAILED');
+  assert.equal(call.error_kind, 'MEMORY_TOOL_CALLS_UNSUPPORTED');
+  assert.equal(call.provider_request_id, 'memory-tool-refusal');
+  assert.equal(call.usage_input_tokens, 17);
+  assert.equal(call.usage_output_tokens, 4);
+});
+
 test('automatic compaction requeues original message, commits checkpoint, then completes that same message', async () => {
   const f = await fixture(17); const p = port(f.marker);
   const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'automatic-continue' });

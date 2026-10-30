@@ -12,6 +12,7 @@ import { applyConversationExecution, isAutoStartConversationExecution } from
 import { createAssistSession, bindAssistSessionDirectory, requestAssistMessage,
   steerAssistMessage } from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
+import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { resolveSessionReadTools, sessionWriteAllowed } from '../../src/application/assist-read-tools.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
@@ -100,6 +101,9 @@ async function fixture(): Promise<Fixture> {
   }
   const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
     title: '普通会话', projectId, conversationMode: 'AGENT' });
+  // 词表记录只观察主轮次，不让独立的自动记忆提取覆盖最后一轮工具；生产默认值不变。
+  await setMemorySettings(app.db, { workspaceId, commandId: randomUUID(), expectedRevision: '0',
+    recallEnabled: true, automaticCompaction: true, autoCapture: false });
   await bindAssistSessionDirectory(app.db, { workspaceId, sessionId: session.result.session_id,
     commandId: randomUUID(), resourceId });
   return { workspaceId, projectId, sessionId: session.result.session_id, root };

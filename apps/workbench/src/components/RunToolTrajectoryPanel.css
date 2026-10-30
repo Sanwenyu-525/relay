@@ -1,6 +1,14 @@
 /* 工具轨迹：右栏只读呈现。只用既有 token，不新增数值源。 */
 
 .trajectory { display: flex; flex-direction: column; gap: var(--relay-space-3); }
+/* 没有 Run 时的空态说明：与工具面板其它空态同一档（14px、secondary、relaxed 行高）。
+   本组件也会挂在任务视图的「工具记录」里，因此这条留在自己的样式表里，不借工具面板的类。 */
+.trajectory-empty {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
 .trajectory-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--relay-space-3); }
 .trajectory-heading h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-rowTitle); }
 .trajectory-round { display: flex; flex-direction: column; gap: var(--relay-space-2); }

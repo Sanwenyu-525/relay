@@ -413,6 +413,103 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 首条消息的过渡行（2026-10-30，DEV-0110 续）。会话已建、服务端消息投影还没读回时，
+   这条用户消息就住在这里：骨架沿用上面的普通用户消息（右对齐、同一 meta 行、同一正文档），
+   不新建第二套消息视觉，只补状态词、附件名与挂在消息上的状态行。 */
+/* 状态词是这条消息自己的事实：在途/待读用次级色，未决与明确失败用警示色。
+   它替代了此前挂在会话标题下方那一行突兀的「正在发送首条消息…」。 */
+.agent-first-transition-state[data-state="sending"],
+.agent-first-transition-state[data-state="awaiting"] { color: var(--relay-color-text-secondary); }
+.agent-first-transition-state[data-state="unresolved"],
+.agent-first-transition-state[data-state="failed"] {
+  color: var(--relay-color-status-warning-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+/* 模式/资料/Skill 与正文一起冻结：它们和文字是同一份载荷，不能只在纯文本时出现。 */
+.agent-first-transition-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-round);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+/* 附件只给名字：字节还没随消息落库，这里不摆图片预览冒充已送达的内容。 */
+.agent-first-transition-attachments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--relay-space-1);
+  max-width: 100%;
+}
+.agent-first-transition-attachments > li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+.agent-first-transition-attachments > li > svg {
+  flex: none;
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+}
+.agent-first-transition-attachments > li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-first-transition-reason { margin: 0; text-align: right; font-size: var(--relay-font-size-meta); }
+/* 状态行（在途/未决）挂在消息体内部、与正文同宽同侧：回执入口因此贴在所属消息上，
+   而不是浮在会话标题下方另起一行。行高按一行算，出现/消失不推动消息列表。 */
+.agent-first-transition-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--relay-space-2);
+  margin: 0;
+}
+.agent-first-transition .unresolved-command-strip { justify-content: flex-end; }
+/* 正文已经投影回来、只剩状态行的那一条：不重复正文，只把回执入口挂在列表末尾，
+   与用户消息同列同侧。 */
+.agent-first-transition-strip { justify-items: end; }
+.agent-first-transition-strip > * { justify-self: end; }
+/* 短会话贴底（P1-A）：`.agent-message-list` 的 `margin-top: auto` 只有在列容器里才生效。
+   基础内容列此前是普通块，auto 上下边距按 0 解析，短会话的消息因此停在转录区顶部、
+   与输入卡之间留一大片空洞——首条消息刚发出去时尤其明显（那一屏本来就只有一条）。
+   只在滚动 Owner 内生效：嵌入态没有自己的高度，`100%` 解析为 auto，行为不变。 */
+.agent-chat-transcript > .agent-chat-content { display: flex; flex-direction: column; min-height: 100%; }
+/* 过渡行也占住时间线轨那一侧的留白（P1-A）。
+   阅读列的中线对齐靠 ChatTimelineNav.css 里那条 `:has(.agent-chat-timeline)` 的
+   padding-inline：轨道出现后，滚动容器两侧留白才对称，消息列才与输入卡同一条中轴。
+   而轨道只在有消息时存在——过渡行是「还没有消息」的那一段，于是它会先按没有轨道的方式
+   居中（相对输入卡左偏半个滚动条 6px），真实消息一读回又跳回中线。
+   过渡行与轨道是同一段时间轴上的前后两帧，留白必须一致，否则用户看到的正是
+   「先居中、再靠左、再回中间」。选择器与轨道那条同形，取同一组变量，不另写数值。
+   `--chat-timeline-gutter` 不写兜底：变量缺失时让整条声明失效（回到不留白），
+   不要用 0 拼出一个只有左侧有留白的对称假象。 */
+.agent-chat-transcript-shell:has(.agent-first-transition) .agent-chat-transcript {
+  padding-inline: calc(var(--chat-timeline-gutter) + var(--chat-scrollbar-width, 12px))
+    var(--chat-timeline-gutter);
+}
+/* 窄容器与轨道那一档同一条裁定：导航轨降为浮层，正文不再预留 gutter。
+   断点写字面档位（48rem），与 ChatTimelineNav.css 的容器查询同源，改断点必须两处同改。 */
+@container agent-chat (max-width: 48rem) {
+  .agent-chat-transcript-shell:has(.agent-first-transition) .agent-chat-transcript { padding-inline: 0; }
+}
+
 .agent-message-role { font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-primary); }
 /* 角色不只靠颜色区分：头像文字与角色名同时表达。 */
 .agent-message-status { color: var(--relay-color-text-muted); }
@@ -621,6 +718,37 @@
   font-size: var(--relay-font-size-body);
   line-height: var(--relay-font-lineHeight-relaxed);
 }
+/* 2026-10-29 V3：执行过程已经列出真实活动时，撤掉正文起始位的那组三点。
+   两处同时说「还在跑」只会让读者以为有两个进度在抢注意力（§6.2 只保留一个主进度动效）。
+   仅当面板里**确有活动行**时才撤：纯文本回复没有活动行，三点仍是唯一的「还在写」信号；
+   贴在草稿末尾的行内三点（[data-inline]）不受影响。 */
+.agent-message-body:has(.activity-panel .activity-item) .assist-inflight-dots:not([data-inline="true"]) {
+  display: none;
+}
+
+/* 主进度指示的优先级（2026-10-30 验收整改）。
+   同一时刻只允许一个东西在动：
+     1. 有「当前活动行」→ 由那一行的状态图标转动，它是唯一焦点；
+     2. 没有当前行但整轮在跑（工具之间、尚未开始调用）→ 由执行过程标题图标转动；
+     3. 整轮结束或没有过程面板 → 由正文/草稿的三点承担「还在写」。
+   因此：只要面板里出现了活动行，正文与草稿里的三点全部停转（含贴在草稿末尾的
+   inline 三点——V3 首版只关了非 inline 的那一组，导致工具执行时两处同时跳）。
+   三点本身不撤掉：它是「文字还在往下写」的静态标记，停转后不再抢注意力。 */
+.agent-message-body:has(.activity-panel .activity-item) .assist-inflight-dots > i {
+  animation: none;
+  opacity: 0.55;
+}
+
+/* 核对中的两种档位（2026-10-29 V2）：都只是呈现，不改权威状态。
+   settling —— 正常的过渡：草稿还在原位，最终正文正在读回。用次级色，读起来是「等一下」。
+   unverified —— 那次重读失败：状态待核对，需要用户点一下。用警示色，但仍是一行字，
+   不加底色与边框——它紧贴正文，块状底会把正文挤成两段。 */
+.assist-reply[data-verify="settling"] .assist-reply-note { color: var(--relay-color-text-secondary); }
+.assist-reply[data-verify="unverified"] .assist-reply-note {
+  color: var(--relay-color-status-warning-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+
 /* 交接是一次性的淡入（motion.duration.panel + 标准缓动）：只动 opacity，不位移、不缩放。
    起点 0.6 而不是 0——文字全程可读，读起来是「换上了」而不是「闪没了」。 */
 .assist-reply[data-state="final"][data-handover="true"] {
@@ -932,24 +1060,24 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   transition: stroke-dasharray var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
 }
 .agent-chat-context-meter[data-state="high"] .agent-chat-context-meter-fill { stroke: var(--relay-color-status-warning-text); }
-/* 点击圆环的详情浮层（2026-10-25；2026-10-28 重组为三层）：沿用模型下拉
-   .model-selector-menu 的同一套弹层语言——向上锚定、popover 层、panel 圆角、floating 阴影，
-   不新增 token 值。圆环在右端一组（tail）的左侧，浮层右缘对齐圆环右缘、向左展开，
-   不越过输入卡右缘。宽度按内容定，但给一个够读中文的口径：16rem 时关键数字与口径说明
-   会在同一行里互相折行，20rem 让「2,011 / 65,536 tokens」一行读完。 */
+/* 点击圆环的上下文用量浮层（2026-10-25 建；2026-10-29 第二轮整改）。
+   沿用模型下拉 .model-selector-menu 的同一套弹层语言——向上锚定、popover 层、panel 圆角、
+   floating 阴影，不新增 token 值。圆环在右端一组（tail）的左侧，浮层右缘对齐圆环右缘、
+   向左展开，不越过输入卡右缘。宽度按内容在 300–340px 之间自适应：低于 300px 时主行的
+   分子/分母与百分比会互相折行，高于 340px 又会在输入器旁显出一道空荡的长条。 */
 .agent-chat-context-meter-menu {
   position: absolute;
   bottom: calc(100% + var(--relay-space-2));
   left: auto;
   right: 0;
   z-index: var(--relay-zIndex-popover);
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-3);
+  display: grid;
+  gap: var(--relay-space-2);
   box-sizing: border-box;
   width: max-content;
-  max-width: min(20rem, calc(100vw - var(--relay-space-8)));
-  /* 内容多时自己滚动；第一层的关键数字在最上方，不需要滚动就能看见。
+  min-width: min(18.75rem, calc(100vw - var(--relay-space-8)));
+  max-width: min(21.25rem, calc(100vw - var(--relay-space-8)));
+  /* 内容多时自己滚动；主读数在最上方，不需要滚动就能看见。
      浮层是绝对定位，展开不会推动输入卡与消息列表重排。 */
   max-height: min(24rem, 60vh);
   overflow-y: auto;
@@ -961,10 +1089,15 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   box-shadow: var(--relay-shadow-floating);
 }
 /* 打开即把焦点移进浮层（dialog 语义），容器本身不再画一圈焦点环：
-   可见的焦点反馈由内部可交互项（「统计口径」摘要、滚动区）自己给。 */
+   可见的焦点反馈由内部可交互项（信息图标）自己给。 */
 .agent-chat-context-meter-menu:focus { outline: none; }
 .agent-chat-context-meter-menu > * { margin: 0; min-width: 0; }
-.agent-chat-context-meter-summary { display: grid; gap: var(--relay-space-1); }
+/* 标题行：左身份、右来源与一个信息图标。来源只是短标签，不重复解释。 */
+.agent-chat-context-meter-header {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+}
 .agent-chat-context-meter-heading {
   margin: 0;
   color: var(--relay-color-text-primary);
@@ -972,25 +1105,65 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   font-weight: var(--relay-font-weight-semibold);
   line-height: var(--relay-font-lineHeight-heading);
 }
-.agent-chat-context-meter-scope {
-  margin: 0;
+.agent-chat-context-meter-source {
+  margin-inline-start: auto;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-snug);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
 }
-/* 关键数字：左边是「分子 / 分母 tokens」，右边是百分比。基线对齐，两段读数落在同一行。 */
+/* 信息图标是标题行里的最后一枚小按钮，不是一排操作项：24px 命中区、20px 视觉盒，
+   悬停与键盘聚焦都浮出同一句口径说明。 */
+.agent-chat-context-meter-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  margin-inline-end: calc(-1 * var(--relay-space-1));
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-round);
+  color: var(--relay-color-text-muted);
+  cursor: help;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-chat-context-meter-info:hover { background: var(--relay-color-selection-hover); }
+}
+.agent-chat-context-meter-info svg {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+  flex: none;
+}
+.agent-chat-context-meter-info-ring,
+.agent-chat-context-meter-info-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+.agent-chat-context-meter-info-dot { fill: currentColor; }
+/* 主读数与进度线是一组：数字到线的距离比浮层各节之间更近。 */
+.agent-chat-context-meter-main { display: grid; gap: var(--relay-space-1); }
+/* 关键数字：左边是「已用 / 预算 tokens」，右边是真实占比。基线对齐，一行读完。
+   数字用 tabular-nums；长读数换行时，右侧占比仍靠右收在同一行。 */
 .agent-chat-context-meter-figure {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--relay-space-2);
-  margin: var(--relay-space-1) 0 0;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1) var(--relay-space-2);
+  margin: 0;
   font-variant-numeric: tabular-nums;
 }
 .agent-chat-context-meter-amount {
+  min-width: 0;
   color: var(--relay-color-text-primary);
   font-size: var(--relay-font-size-body);
-  font-weight: var(--relay-font-weight-medium);
+  font-weight: var(--relay-font-weight-semibold);
   line-height: var(--relay-font-lineHeight-heading);
   overflow-wrap: anywhere;
 }
@@ -1000,14 +1173,27 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   font-weight: var(--relay-font-weight-regular);
 }
 .agent-chat-context-meter-unit { font-size: var(--relay-font-size-caption); }
+/* 占比是这枚浮层里唯一需要一眼抓住的比率：比主数字大一档、沿用主题强调色；
+   高占用沿用 0.8 阈值换警示色。 */
 .agent-chat-context-meter-percent {
   flex: none;
+  margin-inline-start: auto;
   color: var(--relay-color-action-text);
-  font-size: var(--relay-font-size-body);
+  font-size: var(--relay-font-size-reading);
   font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
 }
 .agent-chat-context-meter-menu[data-state="high"] .agent-chat-context-meter-percent { color: var(--relay-color-status-warning-text); }
-/* 细进度线：只做辅助理解，不重复数字；高度取最小间距档（2px），两端全圆角。 */
+/* 预算不可用时只在占比的位置写一句短状态，不铺解释句，也不拿别的数凑分母。 */
+.agent-chat-context-meter-unbounded {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+/* 细进度线：只做辅助理解，不重复数字；高度取最小间距档（2px），两端全圆角。
+   低占用就是真实的一小段，不设最小宽度把它放大成「有一点占用」。 */
 .agent-chat-context-meter-bar {
   display: block;
   height: var(--relay-space-0-5);
@@ -1023,9 +1209,41 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   transition: width var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
 }
 .agent-chat-context-meter-menu[data-state="high"] .agent-chat-context-meter-bar > span { background: var(--relay-color-status-warning-text); }
-/* 第二层：轻量信息行，不是多张统计卡。标签左、数字右，上下留一档呼吸。 */
-.agent-chat-context-meter-stats { display: grid; gap: var(--relay-space-1); margin: 0; }
-.agent-chat-context-meter-row {
+/* 二级信息：两列并排的轻量读数组（标签在上、数值在下），不是两张统计卡；
+   只剩一项时占满一行，窄窗也退回一列。这里是浮层里唯一的分隔线。 */
+.agent-chat-context-meter-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--relay-space-2) var(--relay-space-3);
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.agent-chat-context-meter-secondary[data-single="true"] { grid-template-columns: minmax(0, 1fr); }
+.agent-chat-context-meter-stat { display: grid; gap: var(--relay-space-0-5); min-width: 0; }
+.agent-chat-context-meter-stat-label {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-snug);
+}
+.agent-chat-context-meter-stat-value {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  line-height: var(--relay-font-lineHeight-heading);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.agent-chat-context-meter-stat-value[data-over="true"] { color: var(--relay-color-status-warning-text); }
+.agent-chat-context-meter-stat-unit,
+.agent-chat-context-meter-cache-unit {
+  color: var(--relay-color-text-muted);
+  font-weight: var(--relay-font-weight-regular);
+  font-size: var(--relay-font-size-caption);
+}
+/* 缓存读取/写入/命中率是轻量信息行：标签左、数字右；未上报的项不占行，
+   也不出现「未采集」之类占位。 */
+.agent-chat-context-meter-cache { display: grid; gap: var(--relay-space-1); margin: 0; }
+.agent-chat-context-meter-cache-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1034,45 +1252,25 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   line-height: var(--relay-font-lineHeight-snug);
   font-variant-numeric: tabular-nums;
 }
-.agent-chat-context-meter-row > dt { flex: none; color: var(--relay-color-text-muted); }
-.agent-chat-context-meter-row > dd {
+.agent-chat-context-meter-cache-row > dt { flex: none; color: var(--relay-color-text-muted); }
+.agent-chat-context-meter-cache-row > dd {
   margin: 0;
   color: var(--relay-color-text-primary);
   text-align: end;
   overflow-wrap: anywhere;
 }
-/* 第三层：一句口径摘要 + 按需展开的完整说明。分隔线只留一档透明度，不与卡片边争层级。 */
-.agent-chat-context-meter-footnote {
-  display: grid;
-  gap: var(--relay-space-1);
-  padding-top: var(--relay-space-2);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-}
-.agent-chat-context-meter-note {
+/* 空态只留一句：没有记录时不铺统计行，更不把缺失读数写成 0。 */
+.agent-chat-context-meter-empty {
   margin: 0;
   color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-relaxed);
-}
-.agent-chat-context-meter-scope-details > summary {
-  cursor: pointer;
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-snug);
-}
-.agent-chat-context-meter-scope-details > ul {
-  display: grid;
-  gap: var(--relay-space-1);
-  margin: var(--relay-space-1) 0 0;
-  padding-inline-start: var(--relay-space-3);
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
+  font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-relaxed);
 }
 /* 极窄输入器（工具行本身已不足 22rem）：浮层右缘仍贴圆环，宽度改由工具行的实际宽度封顶，
-   保证左缘不越出输入卡——中栏是 overflow:hidden，越出即被裁掉。 */
+   保证左缘不越出输入卡——中栏是 overflow:hidden，越出即被裁掉；二级信息同时退回一列。 */
 @container composer-actions (max-width: 22rem) {
-  .agent-chat-context-meter-menu { max-width: calc(100cqi - var(--relay-space-2)); }
+  .agent-chat-context-meter-menu { min-width: 0; max-width: calc(100cqi - var(--relay-space-2)); }
+  .agent-chat-context-meter-secondary { grid-template-columns: minmax(0, 1fr); }
 }
 /* 工具控件：无胶囊底/边，图标+文字直接落在卡面上（对齐参考底栏）。 */
 .agent-chat-tool {

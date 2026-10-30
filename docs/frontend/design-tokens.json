@@ -138,6 +138,21 @@
       "$value": "#E9EDE9",
       "$description": "2026-10-14 由 line 方向收敛为冷绿灰；禁用文字仍用 muted 并保持 ≥4.5:1。"
     },
+    "color.palette.azure": {
+      "$type": "color",
+      "$value": "#2F6DB5",
+      "$description": "2026-10-29 新增：AI 执行「运行中」的强调色。此前色板只有森林绿/琥珀/红，绿色同时承担「主操作」与「已成功」，运行中与完成态无法区分。取低饱和蓝，与冷绿纸面同明度带；在 #FFFFFF 上 4.9:1，在 sage 底上 ≥4.5:1。"
+    },
+    "color.palette.azureSoft": {
+      "$type": "color",
+      "$value": "#EDF3FB",
+      "$description": "2026-10-29 新增：运行中行/标题的极浅底色，与 sage（成功底）区分但同为低饱和。"
+    },
+    "color.palette.azureLine": {
+      "$type": "color",
+      "$value": "#C9DBEF",
+      "$description": "2026-10-29 新增：运行中焦点行的细边框与时间线连接线。"
+    },
     "color.bg.canvas": {
       "$type": "color",
       "$value": "{color.palette.paper}"
@@ -250,6 +265,18 @@
     "color.status.neutral.bg": {
       "$type": "color",
       "$value": "{color.palette.sidebar}"
+    },
+    "color.status.running.text": {
+      "$type": "color",
+      "$value": "{color.palette.azure}"
+    },
+    "color.status.running.bg": {
+      "$type": "color",
+      "$value": "{color.palette.azureSoft}"
+    },
+    "color.status.running.line": {
+      "$type": "color",
+      "$value": "{color.palette.azureLine}"
     },
     "color.disabled.bg": {
       "$type": "color",

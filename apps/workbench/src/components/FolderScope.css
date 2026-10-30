@@ -199,6 +199,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 2026-10-29 V3：聊天区的「执行结果」与 AI 消息里的「执行过程」同一套视觉语言。
+   原来的面板卡（边框 + panel 圆角 + 内边距）在一个回复里会形成第二层白卡，
+   而它承载的只是几行计数与一份文件清单。这里把容器拍平，计数从徽牌改成一行
+   次级文字（标签之间用分隔点），与活动行的 caption 档节奏一致。
+   `.execution-summary` 的其它使用方（执行前摘要卡）不受影响：只作用于 .execution-trajectory。 */
+.execution-trajectory {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  gap: var(--relay-space-1);
+  overflow: visible;
+}
+.execution-trajectory .execution-counts { gap: 0; align-items: baseline; }
+.execution-trajectory .execution-count {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+.execution-trajectory .execution-count + .execution-count::before {
+  content: "·";
+  margin: 0 var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+}
+.execution-trajectory .execution-count[data-tone="attention"] {
+  border: 0;
+  color: var(--relay-color-status-warning-text);
+}
+.execution-trajectory .execution-waiting { border: 0; padding: 0; }
+/* 命令/其它工具的活动行（2026-10-30）：与 AI 消息里的执行过程同一套行 anatomy，
+   列表本身不画容器，只去掉 ul 的默认缩进与逐项上边距（全局 .tech-details 那套不适用）。 */
+.execution-activities {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.execution-activities > li { margin-top: 0; }
+
+.execution-trajectory .text-link { align-self: flex-start; font-size: var(--relay-font-size-caption); }
+
 /* attention 档只给「等待你批准」：琥珀细线 + 琥珀文字，是摘要里唯一要求用户动手的类别。
    与任务提案 PENDING 态（task-proposal-state[data-status]）同一个状态色来源。 */
 .execution-count[data-tone="attention"] {

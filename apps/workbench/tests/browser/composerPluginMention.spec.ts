@@ -84,7 +84,7 @@ async function openConversation(page: Page): Promise<void> {
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
 }
 
-test("@ 菜单行内左对齐：图标与名称相邻靠左，菜单贴输入框左缘", async ({ page }) => {
+test("@ 菜单行内左对齐、紧凑且无阴影：图标与名称相邻，菜单不铺满输入器", async ({ page }) => {
   await openConversation(page);
   const draft = page.getByTestId("assist-draft");
   await draft.click();
@@ -100,12 +100,16 @@ test("@ 菜单行内左对齐：图标与名称相邻靠左，菜单贴输入框
     const textarea = document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement;
     const box = (el: Element) => {
       const r = el.getBoundingClientRect();
-      return { left: r.left, right: r.right, width: r.width };
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
     };
+    const style = getComputedStyle(menu);
     return {
       justifyContent: getComputedStyle(span).justifyContent,
-      icon: box(icon), label: box(label), option: box(option),
-      menuLeft: box(menu).left, textareaLeft: box(textarea).left,
+      icon: box(icon), label: box(label), option: box(option), menu: box(menu), textarea: box(textarea),
+      boxShadow: style.boxShadow, filter: style.filter,
+      border: `${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}`,
+      padding: style.padding,
+      hint: menu.querySelector(".chat-command-hint") !== null
     };
   });
   const iconToLabelGap = layout.label.left - layout.icon.right;
@@ -113,10 +117,194 @@ test("@ 菜单行内左对齐：图标与名称相邻靠左，菜单贴输入框
   // 图标与名称相邻（同一行、间距只有既有 gap），名称没有被 space-between 顶到行尾。
   expect(layout.justifyContent, "菜单行内应压过命令菜单的 space-between").toBe("flex-start");
   expect(iconToLabelGap, "图标与名称应相邻").toBeGreaterThan(0);
-  expect(iconToLabelGap, "图标与名称的间距应只是既有 gap（约 8px），不是被顶开").toBeLessThan(24);
-  expect(labelToOptionRight, "名称右缘应远离选项右缘（不顶到行的另一端）").toBeGreaterThan(200);
-  // 菜单外壳与输入框左缘对齐（用户指认「菜单要左对齐」）。
-  expect(Math.abs(layout.menuLeft - layout.textareaLeft)).toBeLessThanOrEqual(1);
+  expect(iconToLabelGap, "图标与名称的间距应只是既有 gap，不是被顶开").toBeLessThan(24);
+  expect(layout.icon.left - layout.option.left, "图标靠行首（只有选项内边距，约 8px）").toBeLessThan(16);
+  expect(layout.icon.left - layout.option.left).toBeGreaterThanOrEqual(0);
+  expect(labelToOptionRight, "名称右缘不顶到行的另一端（行内容靠左）").toBeGreaterThan(24);
+  // 紧凑浮层（2026-10-29 用户指认「铺满输入器太重」）：宽度贴内容，远窄于输入器。
+  expect(layout.menu.width, `菜单宽度应紧凑（实测 ${layout.menu.width}px）`).toBeLessThanOrEqual(320);
+  expect(layout.menu.width, "菜单不铺满输入器").toBeLessThan(layout.textarea.width - 40);
+  // 纯净表面 + 轻分隔边框，无阴影、无投影滤镜。
+  expect(layout.boxShadow, "插件菜单的 computed box-shadow 必须是 none").toBe("none");
+  expect(layout.filter, "插件菜单不得用 drop-shadow 滤镜代替阴影").toBe("none");
+  expect(layout.border, "只有一条 1px 分隔色描边").toBe("1px solid rgb(232, 238, 232)");
+  // 操作提示不再常驻占位（键盘说明已收进 aria-describedby）。
+  expect(layout.hint, "菜单顶部不应再有常驻长篇提示").toBe(false);
+  // 菜单外壳与输入框左缘对齐，且与输入器保持既有间距。
+  expect(Math.abs(layout.menu.left - layout.textarea.left)).toBeLessThanOrEqual(1);
+  expect(layout.textarea.top - layout.menu.bottom, "菜单与输入器之间保留既有 8px 间距").toBeGreaterThanOrEqual(6);
+});
+
+/* —— 2026-10-29 第四轮 P0：`@` 菜单只认「这一次键入」—— */
+test("P0 选完插件删掉尾随空格：菜单绝不重开；整枚删除、撤销、点末尾、后接正文都不重开", async ({ page }) => {
+  await openConversation(page);
+  const draft = page.getByTestId("assist-draft");
+  const menu = page.getByTestId("chat-mention-menu");
+  await draft.click();
+  // 真实键入查询 → 过滤到一枚 → Enter 选中，菜单立即关闭。
+  await page.keyboard.type("@电");
+  await expect(menu).toBeVisible({ timeout: 5_000 });
+  await expect(menu.locator('[role="option"]')).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(draft).toHaveValue("@电脑操控 ", { timeout: 5_000 });
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator('[data-plugin-chip="computer"]')).toBeVisible();
+
+  // ① 本次 P0 的验收点：删除尾随空格后，菜单不得重新弹出来。
+  await page.keyboard.press("Backspace");
+  await expect(draft).toHaveValue("@电脑操控");
+  await expect(page.locator('[data-plugin-chip="computer"]')).toBeVisible();
+  // 留出重算/延迟的机会：仍然关闭（不是靠「删完立刻关」掩盖）。
+  await page.waitForTimeout(300);
+  await expect(menu).toHaveCount(0);
+
+  // ② 继续退格：一次删掉整枚，菜单依旧不弹。
+  await page.keyboard.press("Backspace");
+  await expect(draft).toHaveValue("", { timeout: 5_000 });
+  await expect(page.locator("[data-plugin-chip]")).toHaveCount(0);
+  await page.waitForTimeout(150);
+  await expect(menu).toHaveCount(0);
+
+  // ③ Ctrl+Z 撤销恢复原文与芯片，也不重开。
+  await page.keyboard.press("Control+z");
+  await expect(draft).toHaveValue("@电脑操控", { timeout: 5_000 });
+  await expect(page.locator('[data-plugin-chip="computer"]')).toBeVisible();
+  await expect(menu).toHaveCount(0);
+
+  // ④ 鼠标点击已选插件的末尾：不弹。
+  const chipBox = (await page.locator('[data-plugin-chip="computer"]').boundingBox())!;
+  await page.mouse.click(chipBox.x + chipBox.width - 1, chipBox.y + chipBox.height / 2);
+  await page.keyboard.press("End");
+  expect(await draft.evaluate((el) => (el as HTMLTextAreaElement).selectionStart)).toBe(5);
+  await page.waitForTimeout(150);
+  await expect(menu).toHaveCount(0);
+
+  // ⑤ 在已有插件之后输入普通文字：不弹。
+  await page.keyboard.type(" 帮我截图");
+  await expect(draft).toHaveValue("@电脑操控 帮我截图", { timeout: 5_000 });
+  await page.waitForTimeout(200);
+  await expect(menu).toHaveCount(0);
+
+  // ⑥ 只有在别处主动输入新的 `@` 才弹（触发状态与这一次键入、光标区间绑定）。
+  await page.keyboard.press("End");
+  await page.keyboard.type(" @Gi");
+  await expect(menu).toBeVisible({ timeout: 5_000 });
+  await expect(menu.locator('[role="option"]')).toHaveCount(1);
+  await page.screenshot({ path: "output/plugin-mention-menu-20261029/trigger-final.png" });
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+});
+
+test("P0 粘贴已完成的插件文本不弹菜单；IME 组词期间同样不弹", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+  await openConversation(page);
+  const draft = page.getByTestId("assist-draft");
+  const menu = page.getByTestId("chat-mention-menu");
+  await page.evaluate(() => navigator.clipboard.writeText("@GitHub "));
+  await draft.click();
+  await page.keyboard.press("Control+v");
+  await expect(draft).toHaveValue("@GitHub ", { timeout: 5_000 });
+  await expect(page.locator('[data-plugin-chip="github"]')).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(menu).toHaveCount(0);
+
+  // 中文输入法：组词串进 textarea（候选未提交）期间与提交之后都不得弹菜单。
+  const cdp = await page.context().newCDPSession(page);
+  await page.evaluate(() => {
+    const textarea = document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement;
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  });
+  await cdp.send("Input.imeSetComposition", { text: "@dian", selectionStart: 5, selectionEnd: 5 });
+  await page.waitForTimeout(200);
+  await expect(menu).toHaveCount(0);
+  await cdp.send("Input.insertText", { text: "@" });
+  await expect(draft).toHaveValue("@GitHub @", { timeout: 5_000 });
+  await page.waitForTimeout(200);
+  await expect(menu, "IME 提交的 @ 不是键入查询，不弹菜单").toHaveCount(0);
+  await cdp.detach();
+});
+
+test("P0 首条消息输入器与已有会话输入器同一触发语义", async ({ page }) => {
+  await installRoutes(page);
+  await page.route("**/assist-sessions?*", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    headers: cors(), body: JSON.stringify({ items: [] }) }));
+  await page.goto(`/agent?work=${taskId}`, { waitUntil: "domcontentloaded" });
+  await connect(page);
+  const firstDraft = page.getByTestId("assist-first-draft");
+  await firstDraft.waitFor({ timeout: 20_000 });
+  const menu = page.getByTestId("chat-mention-menu");
+  await firstDraft.click();
+  await page.keyboard.type("@电");
+  await expect(menu).toBeVisible({ timeout: 5_000 });
+  await page.keyboard.press("Enter");
+  await expect(firstDraft).toHaveValue("@电脑操控 ", { timeout: 5_000 });
+  await expect(menu).toHaveCount(0);
+  await page.keyboard.press("Backspace");
+  await expect(firstDraft).toHaveValue("@电脑操控");
+  await page.waitForTimeout(300);
+  await expect(menu, "首条消息输入器同样不得因删除空格重开菜单").toHaveCount(0);
+  await expect(page.locator('[data-plugin-chip="computer"]')).toBeVisible();
+});
+
+test("菜单在 390 / 768 / 桌面与 125% / 150% 字号下不裁切、不铺满输入器", async ({ page }) => {
+  await openConversation(page);
+  const draft = page.getByTestId("assist-draft");
+  const probe = () => page.evaluate(() => {
+    const menu = document.querySelector('[data-testid="chat-mention-menu"]')!;
+    const ul = menu.querySelector("ul")!;
+    const textarea = document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement;
+    const rect = menu.getBoundingClientRect(), ta = textarea.getBoundingClientRect();
+    const rows = Array.from(menu.querySelectorAll('[role="option"]')).map((row) => {
+      const r = row.getBoundingClientRect();
+      return { width: Math.round(r.width * 100) / 100, height: Math.round(r.height * 100) / 100,
+        visible: r.width > 0 && r.height > 0 };
+    });
+    return { width: Math.round(rect.width * 100) / 100, left: Math.round(rect.left * 100) / 100,
+      right: Math.round(rect.right * 100) / 100, top: Math.round(rect.top * 100) / 100,
+      bottom: Math.round(rect.bottom * 100) / 100, viewport: { w: window.innerWidth, h: window.innerHeight },
+      textareaWidth: Math.round(ta.width * 100) / 100, rows,
+      overflowY: getComputedStyle(ul).overflowY, maxHeight: getComputedStyle(ul).maxHeight };
+  });
+  const openMenu = async () => {
+    await draft.click();
+    await draft.fill("");
+    await draft.fill("@");
+    await page.getByTestId("chat-mention-menu").waitFor({ timeout: 5_000 });
+  };
+
+  for (const width of [390, 768, 1162]) {
+    await page.setViewportSize({ width, height: 782 });
+    await page.waitForTimeout(200);
+    await openMenu();
+    const m = await probe();
+    expect(m.left, `${width}px 菜单左缘不出视口`).toBeGreaterThanOrEqual(0);
+    expect(m.right, `${width}px 菜单右缘不出视口`).toBeLessThanOrEqual(m.viewport.w + 0.5);
+    expect(m.top, `${width}px 菜单整体在视口内`).toBeGreaterThanOrEqual(0);
+    expect(m.bottom, `${width}px 菜单整体在视口内`).toBeLessThanOrEqual(m.viewport.h);
+    expect(m.width, `${width}px 菜单不铺满输入器`).toBeLessThan(m.textareaWidth - 24);
+    expect(m.rows.every((row) => row.visible), `${width}px 三行都排得下`).toBe(true);
+    expect(m.rows.every((row) => row.height <= 40), `${width}px 行高紧凑（${m.rows[0]!.height}px）`).toBe(true);
+    expect(m.overflowY, "内容超高时在菜单内部滚动").toBe("auto");
+    await page.screenshot({ path: `output/plugin-mention-menu-20261029/menu-${width}.png` });
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("chat-mention-menu")).toHaveCount(0);
+  }
+
+  for (const scale of [125, 150]) {
+    await page.setViewportSize({ width: 1162, height: 782 });
+    await page.evaluate((percent) => { document.documentElement.style.fontSize = `${16 * percent / 100}px`; }, scale);
+    await page.waitForTimeout(200);
+    await openMenu();
+    const m = await probe();
+    expect(m.left).toBeGreaterThanOrEqual(0);
+    expect(m.right, `${scale}% 字号下菜单右缘不出视口`).toBeLessThanOrEqual(m.viewport.w + 0.5);
+    expect(m.width, `${scale}% 字号下仍不铺满输入器`).toBeLessThan(m.textareaWidth - 24);
+    expect(m.rows.every((row) => row.visible), `${scale}% 字号下三行都排得下`).toBe(true);
+    await page.screenshot({ path: `output/plugin-mention-menu-20261029/menu-zoom-${scale}.png` });
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("chat-mention-menu")).toHaveCount(0);
+  }
+  await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 });
 
 test("真实键盘删除闭环：退格一次删掉整枚芯片，不出现拆碎中间态，Ctrl+Z 可撤销", async ({ page }) => {

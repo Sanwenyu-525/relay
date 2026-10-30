@@ -16,9 +16,10 @@ const ALLOWED_HEADERS = 'authorization,content-type,x-request-id,last-event-id';
 const PREFLIGHT_MAX_AGE_SECONDS = '600';
 
 export function registerBoundary(app: FastifyInstance, config: BoundaryConfig): void {
+  const boundHostname = config.bindHost === '::1' ? '[::1]' : config.bindHost;
   const allowedHostnames = new Set(config.desktopMode
-    ? [config.bindHost]
-    : [config.bindHost, 'localhost']);
+    ? [boundHostname]
+    : [boundHostname, 'localhost']);
   const allowedOrigins = new Set(config.allowedOrigins);
 
   app.addHook('onRequest', async (request, reply) => {

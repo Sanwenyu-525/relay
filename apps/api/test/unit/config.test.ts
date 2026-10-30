@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   ConfigError,
+  findRepositoryRoot,
   loadConfig,
   validateDataRoot,
   validateDatabaseUrl,
@@ -184,4 +186,32 @@ test('origin, database URL and data root validators stay explicit', () => {
   assert.equal(validateDatabaseUrl('not-a-url'), 'must be a PostgreSQL connection URL');
 
   assert.equal(validateDataRoot('\\\\server\\share', REPOSITORY_ROOT), 'must not be a UNC or network path');
+});
+
+test('compiled configuration locates the workspace root and refuses it as the data root', () => {
+  const repository = findRepositoryRoot();
+  assert.equal(existsSync(join(repository, 'pnpm-workspace.yaml')), true);
+  assert.equal(existsSync(join(repository, 'apps/api/package.json')), true);
+  assert.equal(validateDataRoot(repository, repository), 'must be outside the source repository');
+  assert.equal(validateDataRoot(join(repository, 'docs'), repository), 'must be outside the source repository');
+});
+
+test('accepts IPv6 loopback origins during configuration loading but rejects other IPv6 hosts', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'relay-api-unit-ipv6-'));
+  try {
+    const env = baseEnvironment(dataRoot);
+    env.RELAY_API_BIND_HOST = '::1';
+    env.RELAY_API_ALLOWED_ORIGINS = 'http://[::1]:5173';
+    const config = loadConfig(env, REPOSITORY_ROOT);
+    assert.equal(config.bindHost, '::1');
+    assert.deepEqual(config.allowedOrigins, ['http://[::1]:5173']);
+    assert.equal(validateOrigin('https://[::1]:5173'), undefined);
+    assert.equal(validateOrigin('http://[0:0:0:0:0:0:0:1]:5173'),
+      'must be written in normalized form (expected http://[::1]:5173)');
+    for (const origin of ['http://[::]:5173', 'http://[2001:db8::1]:5173', 'http://[::ffff:192.168.1.1]:5173']) {
+      assert.equal(validateOrigin(origin), 'must point at a loopback host');
+    }
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
 });

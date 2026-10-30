@@ -109,8 +109,8 @@ async function runGeneration(modelPort: AssistModelPort) {
 const IDLE_REPLY = JSON.stringify({ reply: '（队列清理）' });
 
 /**
- * 整库「可被领取」的排队消息条数：谓词照抄 `claimNextPendingMessage`。
- * 用它区分两种 tick 返回 undefined：这一格被内存整理占了（还能等到），还是根本没有可领的行（等不到）。
+ * 整库通过项目/记忆整理筛选的排队消息数，不等于当前即可领取的数量。
+ * 同会话存在 RUNNING 时仍计入排队，生成 Worker 会保留它；清理循环不能据一次空 tick 静默漏掉它。
  */
 async function pendingMessages(): Promise<number> {
   const rows = await sql<{ n: string }>`select count(*) as n from assist_messages m

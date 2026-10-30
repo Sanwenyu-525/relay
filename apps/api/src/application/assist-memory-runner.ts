@@ -15,7 +15,7 @@ import { createRepositories, withTransaction } from './unit-of-work.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { readAdmission } from './maintenance-admission.js';
 import { recheckAssistSources } from './assist-source-content.js';
-import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, MEMORY_INPUT_BYTES,
+import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, resolveMemoryContextLimits,
   memoryHistoryFingerprint, prepareMemoryCompaction } from './assist-memory.js';
 
 export interface AssistMemoryWorkerOptions {
@@ -162,7 +162,8 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     }
     if (sources.size > 512) throw new AssistMemoryUnavailable('MEMORY_SOURCE_BUDGET');
     const content = JSON.stringify({ previous_summary: previous?.summary ?? null, completed_turns: turns });
-    if (Buffer.byteLength(content, 'utf8') > MEMORY_INPUT_BYTES) throw new AssistMemoryUnavailable('MEMORY_COMPACTION_INPUT_TOO_LARGE');
+    const limits = await resolveMemoryContextLimits(r, session.workspace_id, job.model_snapshot);
+    if (Buffer.byteLength(content, 'utf8') > limits.inputBytes) throw new AssistMemoryUnavailable('MEMORY_COMPACTION_INPUT_TOO_LARGE');
     const port = await resolveCompactionPort(db, job, options);
     const recorded = await recordModelInvocation(db, {
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: job.anchor_message_id },
@@ -177,7 +178,10 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
       }, settle: (result) => result.kind === 'CANCELLED'
         ? { status: 'CANCELLED', ...(result.usage === undefined ? {} : { usage: result.usage }),
           providerRequestId: result.providerRequestId ?? null }
-        : { status: 'COMPLETED', usage: result.usage, providerRequestId: result.providerRequestId } });
+        : result.kind === 'CONTENT'
+          ? { status: 'COMPLETED', usage: result.usage, providerRequestId: result.providerRequestId }
+          : { status: 'FAILED', errorKind: 'MEMORY_TOOL_CALLS_UNSUPPORTED',
+            usage: result.usage, providerRequestId: result.providerRequestId } });
     if ((await repository.request(job.id))?.cancel_requested) throw new AssistMemoryUnavailable('MEMORY_CANCELLED');
     if (lost || options.signal?.aborted) return { requestId: job.id, status: 'DISCARDED', errorCode: null };
     const summary = parseSummary(recorded.result);

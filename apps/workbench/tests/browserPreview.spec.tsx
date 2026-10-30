@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import BrowserPreviewPanel from "../src/components/BrowserPreviewPanel";
 import { flush, mountReact } from "./mountApp";
@@ -335,5 +336,33 @@ describe("内置网页预览的恢复描述一致性", () => {
     await flush();
     await typeAddress(wrapper, "https://b.example/second#frag");
     expect(store.read(scope).entries.map((entry) => entry.origin)).toEqual(["https://a.example", "https://b.example"]);
+  });
+});
+
+/**
+ * 空白态的边框（2026-10-30 用户指认「网页预览空白态是一整块占满视口的大型空边框」）。
+ *
+ * jsdom 不加载样式表，因此直接核对规则本身：空白/已停止/崩溃三态把 `.preview-surface`
+ * 的边框与底色收掉，但**不动尺寸**——首次导航前 `open()` 量的就是这块矩形，
+ * 收边框不能顺手把原生子窗口的落位几何改小。
+ */
+describe("网页预览空白态不画大空框", () => {
+  const css = readFileSync(`${process.cwd()}/src/components/BrowserPreviewPanel.css`, "utf8");
+  const blankRule = css.match(
+    /\.preview-panel\[data-preview-status="BLANK"\] \.preview-surface,[\s\S]*?\}/u)?.[0] ?? "";
+
+  it("空白/已停止/崩溃三态都收掉边框与底色", () => {
+    expect(blankRule).toContain('[data-preview-status="BLANK"]');
+    expect(blankRule).toContain('[data-preview-status="STOPPED"]');
+    expect(blankRule).toContain('[data-preview-status="CRASHED"]');
+    expect(blankRule).toMatch(/border-color:\s*transparent/u);
+    expect(blankRule).toMatch(/background:\s*transparent/u);
+    // 只改视觉：尺寸与流式占位仍由 `.preview-surface` 自己决定。
+    expect(blankRule).not.toMatch(/(min-height|height|flex):/u);
+  });
+
+  it("加载中与已就绪仍保留容器边框", () => {
+    expect(blankRule).not.toContain('[data-preview-status="LOADING"]');
+    expect(blankRule).not.toContain('[data-preview-status="READY"]');
   });
 });

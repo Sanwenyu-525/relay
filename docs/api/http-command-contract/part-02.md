@@ -200,6 +200,8 @@ Execute 为 SSRF 安全 GET（tool-adapters.md 第 3 节 + OWASP）：**每一�
 
 数据来源：`openai-compatible` 端口读取 Provider 的 `usage.prompt_tokens_details.cached_tokens` / `cache_write_tokens`（SDK 归一化为 `usage_metadata.input_token_details.cache_read` / `.cache_creation`），经既有 `validUsage()` 校验后原样落库。数据库关联 `0049_m04_model_call_cache_usage`：`model_calls` 与 `assist_messages` 各加两个可空列，历史行保持 `null`（迁移不回填，因为无法区分真实零与未知）；`USER` 消息由 CHECK 约束强制恒为 `null`——它从不是一次模型调用。检查约束保证 `cache_read + cache_creation ≤ input_tokens`，避免 Provider 口径不一致时落库自相矛盾。Fake 端口显式给 `null`：离线确定性模式不伪造计费事实。
 
+2026-10-30 端口修复：对于端口已经收到的 SDK 归一化 metadata，后续 chunk 缺省缓存字段时保留此前已知读数；显式 `0` 或 `null` 则更新对应字段，未知仍不补成零。本轮只修复既有字段的累计行为，Breaking Change: No，不新增字段或 migration。
+
 一处已知边界：LangChain SDK 的 `_streamResponseChunks` 用单个变量累积 usage，并在流结束时**只 yield 一次** usage chunk。若 Provider 把 `prompt_tokens_details` 与 token 数分开发送，SDK 层会用后到的裸 usage 覆盖，缓存读数丢失为 `null`。这是 SDK 行为，端口层无法补救；表现是「少报」而非「虚报」。
 
 `GET /model-port` 响应新增可空 `max_call_tokens`（整数或 `null`），即 `RELAY_MODEL_MAX_CALL_TOKENS`，供 UI 作为上下文占用的分母。`provider='fake'` 或配置残缺时为 `null`，客户端须据此显示「占用不可算」而不是回退到某个默认上限。这是**当前配置值**而非历史快照：配置变更后用它解释旧调用会失真，因此 UI 只把它用于「最近一次调用」的即时读数并旁标绝对 token 数，不作为可追溯的历史事实存储。

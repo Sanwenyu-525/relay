@@ -69,6 +69,24 @@ test('柏林秋回当日每日任务按较早一次推导下次触发', () => {
   assert.equal(next.toISOString(), '2026-10-25T00:30:00.000Z');
 });
 
+test('半小时夏令时秋回取较早一次，且下一次触发不会跳过该轮', () => {
+  const timezone = 'Australia/Lord_Howe';
+  const date = { year: 2026, month: 4, day: 5 };
+  const resolved = resolveLocalDateTime(date, { hour: 1, minute: 45 }, timezone);
+  assert.equal(resolved.toISOString(), '2026-04-04T14:45:00.000Z');
+  const next = nextDueAt({
+    rule: daily(1), timezone, localTime: '01:45',
+    from: new Date('2026-04-04T14:30:00.000Z'), anchor: resolved,
+  });
+  assert.equal(next.toISOString(), '2026-04-04T14:45:00.000Z');
+  const afterFirst = nextDueAt({
+    rule: daily(1), timezone, localTime: '01:45', from: resolved, anchor: resolved,
+  });
+  assert.equal(afterFirst.toISOString(), '2026-04-05T15:15:00.000Z');
+  assert.equal(resolveLocalDateTime(date, { hour: 1, minute: 15 }, timezone).toISOString(), '2026-04-04T14:15:00.000Z');
+  assert.equal(resolveLocalDateTime(date, { hour: 2, minute: 15 }, timezone).toISOString(), '2026-04-04T15:45:00.000Z');
+});
+
 test('半小时与四十五分钟偏移时区按本地墙钟解析', () => {
   const kolkata = resolveLocalDateTime({ year: 2026, month: 10, day: 18 }, { hour: 9, minute: 0 }, 'Asia/Kolkata');
   assert.equal(kolkata.toISOString(), '2026-10-18T03:30:00.000Z');

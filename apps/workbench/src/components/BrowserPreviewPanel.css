@@ -118,6 +118,20 @@
   font-size: var(--relay-font-size-meta);
 }
 
+/* 非桌面宿主：能力边界用普通说明排版，不铺整块警示底色。 */
+.preview-unavailable {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
+.preview-unavailable-note {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
+
 /* 原生子窗口的落位区域：只负责量尺寸，不承载视觉。 */
 .preview-surface {
   position: relative;
@@ -127,6 +141,17 @@
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
   background: var(--relay-color-bg-canvas);
+}
+
+/* 空白、已停止与崩溃：这块区域里没有原生页面，就不画那圈占满整栏的空边框
+   （2026-10-30 用户指认「网页预览空白态是一整块大型空边框」）。矩形本身保持不变——
+   首次导航前 `open()` 量的就是这块矩形，收掉边框不影响原生 WebView 的落位几何。
+   真实页面加载中/已就绪时边框照旧，因为那时它确实是页面的容器。 */
+.preview-panel[data-preview-status="BLANK"] .preview-surface,
+.preview-panel[data-preview-status="STOPPED"] .preview-surface,
+.preview-panel[data-preview-status="CRASHED"] .preview-surface {
+  border-color: transparent;
+  background: transparent;
 }
 
 .preview-native-hint {

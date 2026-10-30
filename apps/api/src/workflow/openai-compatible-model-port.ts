@@ -307,13 +307,15 @@ ${input.content}`),
           input_tokens?: unknown; output_tokens?: unknown;
           input_token_details?: { cache_read?: unknown; cache_creation?: unknown } } }).usage_metadata;
         if (metadata !== undefined) {
-          // cache_read/cache_creation are optional Provider extras. A chunk that
+          // MODEL_USAGE_CACHE_MERGE: cache_read/cache_creation are optional Provider extras. A chunk that
           // omits them must not erase a value an earlier chunk already reported.
           const details = metadata.input_token_details;
           usage = { inputTokens: validUsage(metadata.input_tokens),
             outputTokens: validUsage(metadata.output_tokens),
-            cacheReadTokens: validUsage(details?.cache_read),
-            cacheCreationTokens: validUsage(details?.cache_creation) };
+            cacheReadTokens: details?.cache_read === undefined
+              ? usage.cacheReadTokens ?? null : validUsage(details.cache_read),
+            cacheCreationTokens: details?.cache_creation === undefined
+              ? usage.cacheCreationTokens ?? null : validUsage(details.cache_creation) };
         }
         accumulated = accumulated === undefined ? chunk : accumulated.concat(chunk);
         const reasoningPiece = chunk.additional_kwargs.reasoning_content;

@@ -5,7 +5,9 @@ import type { Repositories } from './unit-of-work.js';
 /** Bounded literal tokens, including Chinese bigrams; this is not semantic search. */
 export function memoryRecallTerms(text: string): readonly string[] {
   const terms = new Set<string>();
-  for (const token of text.slice(0, 500).toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? []) {
+  // MEMORY_RECALL_ELIGIBILITY: split script boundaries so 中文PostgreSQL is searchable.
+  for (const token of text.slice(0, 500).toLowerCase()
+    .match(/\p{Script=Han}+|(?:(?!\p{Script=Han})[\p{L}\p{N}_-]){2,}/gu) ?? []) {
     if (/^[\p{Script=Han}]+$/u.test(token)) {
       for (let i = 0; i < token.length - 1 && terms.size < 24; i++) terms.add(token.slice(i, i + 2));
     } else terms.add(token.slice(0, 60));
@@ -24,7 +26,7 @@ export async function recallConfirmedMemoryRefs(r: Repositories, session: Assist
   const settings = await r.information.readMemorySettings(session.workspace_id);
   if (settings?.recall_enabled === false) return [];
   const candidates = await r.information.recallMemories(session.workspace_id, session.project_id,
-    memoryRecallTerms(content), 8);
+    memoryRecallTerms(content), 8, [...excludedIds]);
   const selected: { kind: 'MEMORY'; root_id: string; version: string; selection: 'AUTO_MEMORY';
     selection_basis: 'LITERAL_MATCH' | 'RECENT_CONFIRMED';
     origin: 'HUMAN_CONFIRMED' | 'AUTO_CAPTURE'; source_kind: MemorySourceKind }[] = [];

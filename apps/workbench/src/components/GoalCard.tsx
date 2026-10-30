@@ -9,7 +9,7 @@ import "./GoalPlanCards.css";
  * 输入框上方的目标单行状态条（工作台 §44.2、0127；2026-10-25 收成单行，参照 Codex）。
  *
  * 呈现口径：
- *   * 状态是**服务端**的状态，不是界面猜测。`PAUSING` 显示「正在安全停止在途行动」，
+ *   * 状态是**服务端**的状态，不是界面猜测。`PAUSING` 显示「正在暂停」，
  *     因为此刻在途的那一轮还没结束——点了暂停不等于已经停下。
  *   * 只有一种「完成」：`AWAITING_ACCEPTANCE` 时出现「确认完成」。模型说完成不会让条上
  *     变成已完成，条上写的是它给出的证据与还缺什么（展开后可见）。
@@ -18,18 +18,18 @@ import "./GoalPlanCards.css";
  *     工作台 §危险操作的既有裁定走「不可逆族」：就地一个确认框、danger 确认键、无撤销条，
  *     不叠加二次拦截；后果说明在点击前给出，不再只在取消后才解释。
  *   * 内部身份（task_id/run_id/revision）不进日常界面。
- *   * 单行只保留「状态 + 目标 + 轮次计数 + 动作」；当前步骤、进展、成功条件、停止原因、
- *     步骤与轮次历史收进展开区，展开状态是本地视图偏好，不发命令、不进服务端。
+ *   * 单行只保留「状态 + 目标 + 轮次/成功条件计数 + 动作」；当前步骤、进展、成功条件、
+ *     停止原因、步骤与轮次历史收进展开区。展开是本地视图偏好，不发命令、不进服务端。
  */
 const STATUS_LABELS: Record<RelayGoalStatus, string> = {
   ACTIVE: "正在推进",
-  PAUSING: "正在安全停止在途行动",
+  PAUSING: "正在暂停",
   PAUSED: "已暂停",
-  CANCELLING: "正在取消，等待在途动作结束",
+  CANCELLING: "正在取消",
   CANCELLED: "已取消",
   WAITING_USER: "等你决定",
   BLOCKED: "已阻塞",
-  BUDGET_EXHAUSTED: "额度耗尽，进度已保存",
+  BUDGET_EXHAUSTED: "额度耗尽",
   AWAITING_ACCEPTANCE: "等你确认完成",
   COMPLETED: "已完成",
   FAILED: "失败",
@@ -55,6 +55,8 @@ const ROUND_OUTCOMES: Record<string, string> = {
 
 const LIVE: readonly RelayGoalStatus[] = ["ACTIVE", "PAUSING", "CANCELLING"];
 
+const DETAILS_ID = "goal-card-details";
+
 /** 目标是否还在推进中（决定界面是否继续轮询）。 */
 export function goalIsLive(view: RelayGoalView | null): boolean {
   return view?.goal !== null && view?.goal !== undefined && LIVE.includes(view.goal.status);
@@ -75,6 +77,11 @@ export default function GoalCard({ view, busy, error, onPause, onCancel, onResum
   /** 展开只影响本条事实的可见性，是视图偏好；不发命令，目标切换后不跨目标沿用。 */
   const [expanded, setExpanded] = useState(false);
   const cancelAvailable = goal?.actions.cancel === true;
+  const goalId = goal?.goalId ?? null;
+  useEffect(() => {
+    // 展开属于当前目标的视图偏好：换成另一个目标时回到单行，不沿用上一个目标的展开态。
+    setExpanded(false);
+  }, [goalId]);
   useEffect(() => {
     // 取消意图已被服务端接受（actions.cancel 收回）或目标换了状态时收起确认框，避免留下悬空弹窗。
     if (!cancelAvailable && confirmingCancel) setConfirmingCancel(false);
@@ -83,18 +90,22 @@ export default function GoalCard({ view, busy, error, onPause, onCancel, onResum
   const done = goal.criteria.filter((item) => item.status === "MET").length;
   const reason = goal.stopReason;
   return <section className="goal-strip" data-testid="goal-card"
-    data-status={goal.status} aria-label="目标状态" aria-live="polite">
+    data-status={goal.status} data-expanded={expanded ? "true" : undefined}
+    aria-label="目标状态" aria-live="polite">
     <div className="goal-strip-line">
       <button className="goal-strip-toggle" type="button" data-testid="goal-card-toggle"
-        aria-expanded={expanded ? "true" : "false"} title={expanded ? "收起目标详情" : "展开目标详情"}
+        aria-expanded={expanded ? "true" : "false"} aria-controls={DETAILS_ID}
+        title={expanded ? "收起目标详情" : "展开目标详情"}
         onClick={() => setExpanded((value) => !value)}>
-        <Target aria-hidden="true" />
+        <Target className="goal-strip-target" aria-hidden="true" />
         <span className={`goal-plan-badge goal-plan-badge--${STATUS_TONES[goal.status] ?? "neutral"} goal-card-status-badge`}
           data-testid="goal-card-status">{STATUS_LABELS[goal.status]}</span>
-        <span className="goal-strip-objective" data-testid="goal-card-objective">{goal.objective}</span>
+        <span className="goal-strip-objective" data-testid="goal-card-objective"
+          title={goal.objective}>{goal.objective}</span>
         <span className="goal-strip-meta helper-text" data-testid="goal-card-rounds">
           第 {goal.roundCount} 轮{goal.criteria.length > 0 ? ` · 成功条件 ${done}/${goal.criteria.length}` : ""}</span>
-        <ChevronDown aria-hidden="true" data-expanded={expanded ? "true" : undefined} />
+        <ChevronDown className="goal-strip-chevron" aria-hidden="true"
+          data-expanded={expanded ? "true" : undefined} />
       </button>
       <div className="goal-strip-actions">
         {goal.actions.pause && <button className="goal-strip-action goal-strip-action--icon" type="button"
@@ -113,46 +124,52 @@ export default function GoalCard({ view, busy, error, onPause, onCancel, onResum
       </div>
     </div>
     {error !== null && <p className="action-error" role="alert" data-testid="goal-card-error">{error}</p>}
-    {expanded && <div className="goal-strip-details" data-testid="goal-card-details">
-      <p className="goal-plan-objective" data-testid="goal-card-objective-full">{goal.objective}</p>
-      {goal.planVersion !== null && <p className="goal-plan-detail" data-testid="goal-card-plan-version">
-        按第 {goal.planVersion} 版计划</p>}
-      {goal.currentStep !== null && <p className="goal-card-step" data-testid="goal-card-step">
-        <span className="goal-card-step-label">当前步骤：</span>{goal.currentStep}</p>}
-      {goal.progress !== null && <p className="helper-text goal-card-progress" data-testid="goal-card-progress">
-        {goal.progress}</p>}
-      {reason !== null && <div className={`goal-card-reason goal-card-reason--${STATUS_TONES[goal.status] ?? "neutral"}`}
-        data-testid="goal-card-reason" data-code={reason.code}>
-        <p>{reason.detail}</p>
-        {reason.questions.length > 0 && <ul>
+    {expanded && <div className="goal-strip-details" id={DETAILS_ID} data-testid="goal-card-details">
+      <div className="goal-card-row" data-testid="goal-card-objective-full">
+        <p className="goal-plan-objective">{goal.objective}</p>
+        {goal.planVersion !== null && <p className="goal-plan-detail" data-testid="goal-card-plan-version">
+          按第 {goal.planVersion} 版计划</p>}
+      </div>
+      {(goal.currentStep !== null || goal.progress !== null) && <div className="goal-card-row">
+        {goal.currentStep !== null && <p className="goal-card-step" data-testid="goal-card-step">
+          <span className="goal-card-step-label">当前步骤</span>{goal.currentStep}</p>}
+        {goal.progress !== null && <p className="goal-card-progress" data-testid="goal-card-progress">
+          <span className="goal-card-step-label">进展</span>{goal.progress}</p>}
+      </div>}
+      {reason !== null && <div className="goal-card-row" data-testid="goal-card-reason"
+        data-code={reason.code} data-tone={STATUS_TONES[goal.status] ?? "neutral"}>
+        <p className="goal-plan-label">停止原因</p>
+        <p className={`goal-card-reason-text goal-card-reason-text--${STATUS_TONES[goal.status] ?? "neutral"}`}>
+          {reason.detail}</p>
+        {reason.questions.length > 0 && <ul className="goal-plan-list">
           {reason.questions.map((item) => <li key={item}>{item}</li>)}
         </ul>}
       </div>}
-      {goal.criteria.length > 0 && <div className="goal-plan-block">
-        <p className="goal-plan-label">成功条件</p>
-        <ul className="goal-plan-list" data-testid="goal-card-criteria">
+      {goal.criteria.length > 0 && <div className="goal-card-row" data-testid="goal-card-criteria-group">
+        <p className="goal-plan-label">成功条件 · {done}/{goal.criteria.length}</p>
+        <ul className="goal-plan-list goal-plan-list--rows" data-testid="goal-card-criteria">
           {goal.criteria.map((item) => <li key={item.key} data-status={item.status}
             data-testid={`goal-criterion-${item.key}`}>
             <span className="goal-card-criterion-status">{CRITERION_LABELS[item.status] ?? item.status}</span>
-            {item.statement}
-            {!item.required && <span className="goal-plan-detail"> · 非必需</span>}
-            {item.evidence !== null && <span className="goal-plan-detail"> · 依据：{item.evidence}</span>}
+            <span>{item.statement}</span>
+            {(!item.required || item.evidence !== null) && <span className="goal-plan-detail">
+              {!item.required ? " · 非必需" : ""}{item.evidence !== null ? ` · 依据：${item.evidence}` : ""}</span>}
           </li>)}
         </ul>
       </div>}
-      {goal.steps.length > 0 && <details className="goal-card-details">
+      {goal.steps.length > 0 && <details className="goal-card-disclosure">
         <summary data-testid="goal-card-steps">步骤 {goal.steps.filter((step) => step.status === "DONE").length}
           /{goal.steps.length}</summary>
-        <ol className="goal-plan-list">
+        <ol className="goal-plan-list goal-plan-list--rows">
           {goal.steps.map((step) => <li key={step.title} data-status={step.status}>
-            {step.title}<span className="goal-plan-detail"> · {step.status === "DONE" ? "已完成"
-              : step.status === "DOING" ? "进行中" : "待办"}</span>
+            <span>{step.title}</span><span className="goal-plan-detail"> ·
+              {step.status === "DONE" ? "已完成" : step.status === "DOING" ? "进行中" : "待办"}</span>
           </li>)}
         </ol>
       </details>}
-      {view !== null && view.rounds.length > 0 && <details className="goal-card-details">
+      {view !== null && view.rounds.length > 0 && <details className="goal-card-disclosure">
         <summary data-testid="goal-card-history">最近 {view.rounds.length} 轮</summary>
-        <ol className="goal-plan-list" data-testid="goal-card-round-list">
+        <ol className="goal-plan-list goal-plan-list--rows" data-testid="goal-card-round-list">
           {view.rounds.map((round) => <li key={round.roundIndex}>
             第 {round.roundIndex} 轮 · {ROUND_OUTCOMES[round.outcome] ?? round.outcome}
             {round.note !== null && <span className="goal-plan-detail"> · {round.note}</span>}

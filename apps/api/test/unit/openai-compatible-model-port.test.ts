@@ -229,6 +229,31 @@ test('a tool request without any text leaves the preamble empty', async () => {
   assert.equal(result.preamble, '');
 });
 
+for (const details of ['missing', 'zero', 'null'] as const) {
+  test(`cache counters retain observed values only when later SDK metadata omits them: ${details}`, async (t) => {
+    t.mock.method(ChatOpenAI.prototype, 'stream', async () => (async function* () {
+      yield Object.assign(new AIMessageChunk({ content: '' }), { usage_metadata: {
+        input_tokens: 43, output_tokens: 1, total_tokens: 44,
+        input_token_details: { cache_read: 10, cache_creation: 2 },
+      } });
+      yield Object.assign(new AIMessageChunk({ content: 'complete' }), { usage_metadata: {
+        input_tokens: 43, output_tokens: 9, total_tokens: 52,
+        ...(details === 'missing' ? {} : { input_token_details: {
+          cache_read: details === 'zero' ? 0 : null,
+          cache_creation: details === 'zero' ? 0 : null,
+        } }),
+      } });
+    })());
+    const model = port(() => { throw new Error('SDK metadata fixture must not use transport'); });
+    const result = await model.assist({ intent: 'DISCUSS', system: 'synthetic',
+      turns: [{ role: 'user', content: 'reply' }] });
+    assert.equal(result.kind, 'CONTENT');
+    assert.deepEqual(result.usage, { inputTokens: 43, outputTokens: 9,
+      cacheReadTokens: details === 'missing' ? 10 : details === 'zero' ? 0 : null,
+      cacheCreationTokens: details === 'missing' ? 2 : details === 'zero' ? 0 : null });
+  });
+}
+
 for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content'] as const) {
   test(`tool refusal retains normalized SDK metadata: ${scenario}`, async (t) => {
     // Explicit SDK chunk seam: current SSE conversion emits usage only at stream end.

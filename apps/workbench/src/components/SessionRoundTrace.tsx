@@ -1,129 +1,78 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { RelayApiClient, RelayAssistMessage, RelaySessionToolCall, RelaySessionToolCalls } from "../api/relayClient";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronRight, CircleCheck, CircleX, Hourglass, Info, LoaderCircle, TriangleAlert,
+} from "lucide-react";
+import type { RelayApiClient, RelayAssistMessage, RelaySessionToolCalls } from "../api/relayClient";
+import {
+  activityHeaderState, activitySpanMs, formatSpan, sessionActivityRounds, summarizeActivity,
+  type ActivityItem, type ActivityPhaseTone,
+} from "../lib/activityPresentation";
+import {
+  ACTIVITY_DENSITY_LABEL, detailOpenByDefault, mustShowActivity, useActivityDensity,
+  type ActivityDensity,
+} from "../lib/activityDensity";
 import { describeLiveError } from "../lib/liveErrors";
+import ActivityDetail from "./ActivityDetail";
+import ActivityRow from "./ActivityRow";
 import "./SessionRoundTrace.css";
 
 /**
- * 这一轮做了什么（docs/frontend/workbench-design.md §18.10「原消息下展示读取中、执行中…实际阶段」）。
+ * 执行过程（docs/frontend/workbench-design.md §18.10；2026-10-29 V3 重构）。
  *
- * 2026-10-21 用户指认「ai 的思考过程看不到」：Agent 主流程每轮调了什么工具、被拒还是结算，
- * 一直只写在 `session_tool_calls` 里，界面上因此只剩一个「正在生成」和三点动画。
- * 这里只呈现已落账的轮次，四条口径：
- *   * 顺序按服务端给的 (round, ordinal)，客户端不重排、不按位置猜归属。
- *   * 未知就是未知：UNKNOWN 说「结果未知，需核对」，不从时间差或上下文推一个成功或失败出来。
- *   * 这里没有模型的私有推理（该表没有那一列），只有工具账本；它也不提供批准、重试或取消，
- *     控制仍走输入栏与 Run 控制的既有入口。
- *   * 读取分两段：在途立即读并轮询（那时它是唯一的活体过程信号），终态等首次展开再读一次
- *     （刷新后一整段历史不该为每条消息各发一次请求）。代价是刷新后的终态轮次要点开才有数字。
+ * 这一块只呈现**已落账的工具事实**：模型请求了什么、被准入拒绝还是结算、结果是否未知。
+ * 它不是模型的私有推理——`session_tool_calls` 没有那一列，因此这里也不会凭工具名、
+ * 耗时或最终正文编出一段「思考过程」。
  *
- * 2026-10-23 用户截图指令：删掉空轮次时的解释段与列表下方脚注（「没有调用任何工具…」、
- * 「以上是已落账的工具轮次…」）。没有轮次就什么都不摆——摘要行与在途三点已经足够，
- * 解释段读起来像免责声明。2026-10-25 用户再次指认「展开没内容」：终态读取确认是空轮次后，
- * 连摘要行一起收起，不留点开是空的壳；终态首次展开前仍保留入口（否则无法触发那一次读取）。
- * 删除只动呈现，不改变上面四条口径。
+ * 四条口径（V2 起未变，V3 继续成立）：
+ *   * 顺序信任服务端的 `(round, ordinal)`；轮次分组信任外层 `rounds`，客户端不重排。
+ *   * `REQUESTED` 不是已执行，`UNKNOWN` 不是失败也不是成功，`REJECTED` 与执行失败分开。
+ *   * 不提供批准/重试/取消：控制仍走输入栏与 Run 控制的既有入口。
+ *   * 读取分两段：在途立即读并轮询；终态等首次展开再读一次，避免整段历史各发一次请求。
  *
- * 2026-10-25 回复生命周期综合优化（P1）：
- *   * 摘要行先说人话：把工具名折成「读取文件 / 列目录 / 搜索内容 …」，只保留次数；
- *     工具名、路径、轮次与逐项状态全在展开内容里，技术细节不再挤在折叠行上。
- *   * 状态语言统一为三种：在途（正在做某件事 / N 步）、被拒 N 项未执行、未知 N 项待核对。
- *     不再单独写「进行中」——消息行首的三点已经承担「还在跑」这个信号，
- *     两处同时说同一件事只是多一个装饰性指示。
- *   * 原生 `<details>` 的程序化 open 也会触发 toggle：此前那次回声被当成人工开合，
- *     写进 touched 之后「完成时自动收起」就永远失效。现在 DOM 状态与我们记的 state 一致时
- *     直接忽略——只有真的差一位才算用户动手。
- *   * 已完成不等于任务完成：这里只用中性摘要与状态词，不给绿色成功样式。
+ * 2026-10-29 V3 的三处实质改动：
+ *
+ * 1. **入口永不消失（P0 缺陷修复）**。V2 在「终态 + 读回零条记录」时直接 `return null`，
+ *    于是用户点开一个本来存在的入口、读完之后它整块消失，看起来像点了没反应。
+ *    现在入口对每条 AI 消息恒在：读到零条就显示「本轮没有调用工具」的空状态，
+ *    读取失败显示错误与重读，身份不符显示拒绝原因——点击一定有确定的反馈。
+ *    这条由 `tests/sessionRoundTrace.spec.tsx` 的永久回归用例钉住。
+ *
+ * 2. **标题行按效果图重做**：`[箭头] [状态图标] 执行过程 [规模 · 状态] [耗时]`。
+ *    文案由 `activityHeaderState()` 从可验证的聚合状态派生——不知道总数就不报 `2/5`，
+ *    没有剩余时间就不报「预计还需」，未读取就不预判有没有工具（只说「展开查看」）。
+ *
+ * 3. **长轮次收敛**：单轮超过阈值时先显示前若干项 + 全部例外项，其余折叠为
+ *    「展开其余 N 项」。例外（待核对、未执行、失败）在任何档位、任何折叠下都可见。
  */
 
 const POLL_MS = 2_000;
 /** PENDING 也算在途：它是「已提交、Worker 尚未领取」，轮次会在领取后开始出现。 */
 const ACTIVE_STATUSES: readonly RelayAssistMessage["status"][] = ["PENDING", "RUNNING"];
+const DENSITIES: readonly ActivityDensity[] = ["concise", "standard", "detailed"];
+/** 单轮超过这个项数才收敛；常见短轮次不受影响。 */
+const COLLAPSE_THRESHOLD = 10;
+/** 收敛时保留的普通项数（例外项不受此限制，永远显示）。 */
+const COLLAPSED_HEAD = 6;
 
-const TARGET_KEYS = ["relative_path", "path", "pattern", "query", "check_id", "operation_id"] as const;
-
-/**
- * 工具名 → 用户能读懂的活动词。取不到就原样显示工具名：宁可露出一个英文名，
- * 也不为了顺口编一个不存在的动作。这是展示层映射，不新增任何业务含义。
- */
-const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
-  read_file: "读取文件",
-  list_directory: "列目录",
-  find_paths: "查找文件",
-  search_text: "搜索内容",
-  git_status: "查看 Git 状态",
-  git_diff: "查看改动",
-  git_log: "查看提交记录",
-  run_check: "运行检查",
-  apply_changeset: "修改文件",
-  read_change_set: "读取变更集",
-  computer_screenshot: "截屏",
-  computer_get_windows: "枚举窗口",
-  github_repo_view: "查询仓库",
-  github_pr_list: "列出 PR",
-  github_pr_view: "查看 PR",
-  github_issue_list: "列出 Issue",
-  github_issue_view: "查看 Issue",
-  browser_list_pages: "列出页面",
-  browser_read_page: "读取网页",
-  browser_screenshot: "网页截图",
-  browser_wait_for: "等待页面",
-};
-
-function activityOf(call: RelaySessionToolCall): string {
-  const known = TOOL_ACTIVITY[call.toolName];
-  if (known !== undefined) return known;
-  if (call.toolName.startsWith("computer_")) return "桌面操作";
-  if (call.toolName.startsWith("browser_")) return "浏览器操作";
-  if (call.toolName.startsWith("github_")) return "查询 GitHub";
-  return call.toolName;
+function noteOf(item: ActivityItem): string {
+  const { rejectionReason, rejectionDetail } = item.detail;
+  if (rejectionReason === null) return "";
+  return rejectionDetail === null ? rejectionReason : `${rejectionReason} · ${rejectionDetail}`;
 }
 
-function statusText(call: RelaySessionToolCall): string {
-  switch (call.status) {
-    case "REQUESTED": return "已请求，尚未结算";
-    case "SETTLED": return "已结算";
-    case "REJECTED": return "被拒绝，没有执行";
-    case "ABANDONED": return "已放弃，没有结算结果";
-    default: return "结果未知，需核对";
+/** 标题行状态图标：与行内同一套形状语言，尺寸更大一档。 */
+function HeaderIcon({ tone, live }: { readonly tone: ActivityPhaseTone; readonly live: boolean }) {
+  // settled 与 success 用的是同一枚对勾，但 settled 的语义只是「这一轮结清了」；
+  // 颜色在 CSS 里降到次级色，绿色留给将来真有验证证据的结果。
+  if (tone === "settled" || tone === "success") return <CircleCheck aria-hidden="true" />;
+  if (tone === "danger") return <CircleX aria-hidden="true" />;
+  if (tone === "attention") return <TriangleAlert aria-hidden="true" />;
+  if (tone === "running") {
+    // 只有列表里没有「当前行」时标题图标才转：整块区域只保留一个主进度动效。
+    return live ? <LoaderCircle className="activity-header-spin" aria-hidden="true" />
+      : <Hourglass aria-hidden="true" />;
   }
-}
-
-/** 折叠行点名对象：只取参数里那个真正说明「读的是哪里」的键，取不到就不猜。 */
-function targetText(call: RelaySessionToolCall): string {
-  for (const key of TARGET_KEYS) {
-    const value = call.args[key];
-    if (typeof value === "string" && value !== "") return value;
-  }
-  return "";
-}
-
-function elapsedSeconds(call: RelaySessionToolCall): number | null {
-  if (call.settledAt === null) return null;
-  const started = Date.parse(call.requestedAt);
-  const ended = Date.parse(call.settledAt);
-  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return null;
-  return Math.round((ended - started) / 100) / 10;
-}
-
-function allCalls(trace: RelaySessionToolCalls): readonly RelaySessionToolCall[] {
-  return trace.rounds.flatMap((round) => round.calls);
-}
-
-function stepCount(trace: RelaySessionToolCalls): number {
-  return trace.rounds.reduce((total, round) => total + round.calls.length, 0);
-}
-
-/** 折叠行的人话摘要：按出现顺序列出做过的事，同名动作合并成次数；超过三类只报类数。 */
-function activitySummary(calls: readonly RelaySessionToolCall[]): string {
-  const order: string[] = [];
-  const counts = new Map<string, number>();
-  for (const call of calls) {
-    const key = activityOf(call);
-    if (!counts.has(key)) order.push(key);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  const parts = order.slice(0, 3).map((key) => `${key} ${counts.get(key)} 次`);
-  if (order.length > 3) parts.push(`等 ${order.length} 类`);
-  return parts.join("、");
+  return <Info aria-hidden="true" />;
 }
 
 export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }: {
@@ -143,6 +92,15 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
   const request = useRef(0);
   /** 我们最后一次告诉 DOM 的开合状态；原生 toggle 与它一致时就是程序化回声。 */
   const openState = useRef(active);
+  const { density, setDensity } = useActivityDensity();
+  /** 第三层详情的逐行开合；用户手动开合永远优先于密度默认值。 */
+  const [rowOpen, setRowOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const rowTouched = useRef(false);
+  /** 长轮次里被用户点开的轮次；键是服务端给的外层轮次序号。 */
+  const [expandedRounds, setExpandedRounds] = useState<ReadonlySet<number>>(() => new Set());
+
+  const rounds = useMemo(() => (trace === null ? [] : sessionActivityRounds(trace)), [trace]);
+  const items = useMemo(() => rounds.flat(), [rounds]);
 
   const read = useCallback(async () => {
     const current = ++request.current;
@@ -152,7 +110,7 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
       if (current !== request.current) return;
       // 读回空轮次不覆盖已经看到的步骤：那可能是服务端并发清理或读取落在两次写入之间，
       // 而「真实发生过的步骤」不能因为后一次返回空就从这个界面上消失。
-      setTrace((previous) => previous !== null && stepCount(previous) > 0 && stepCount(next) === 0
+      setTrace((previous) => previous !== null && stepCountOf(previous) > 0 && stepCountOf(next) === 0
         ? previous : next);
       setError(null);
       setLoaded(true);
@@ -181,24 +139,34 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
 
   useLayoutEffect(() => { openState.current = open; }, [open]);
 
+  // 密度切到「详细」时把第三层默认展开；用户手动动过之后就只尊重用户。
+  // 用值比较而不是无条件 setState：轮询每两秒会给一份新数组，无条件写状态会变成持续重渲染。
+  useEffect(() => {
+    if (rowTouched.current) return;
+    setRowOpen((previous) => {
+      if (!detailOpenByDefault(density)) return previous.size === 0 ? previous : new Set();
+      if (previous.size === items.length && items.every((item) => previous.has(item.id))) return previous;
+      return new Set(items.map((item) => item.id));
+    });
+  }, [density, items]);
+
   if (message.role !== "ASSISTANT") return null;
-  const calls = trace === null ? [] : allCalls(trace);
-  const steps = trace === null ? null : stepCount(trace);
-  // 读取确认「这一轮没有工具轮次」之后不再留折叠行——点开是空的壳比不显示更差。
-  // 但只在真的确认过才收（loaded），且读过一次有步骤时上面已保证不会被空读数覆盖。
-  if (steps === 0 && loaded && !active && !loading && error === null) return null;
 
-  const pending = calls.filter((call) => call.status === "UNKNOWN" || call.status === "ABANDONED").length;
-  const rejected = calls.filter((call) => call.status === "REJECTED").length;
-  const running = calls.filter((call) => call.status === "REQUESTED").at(-1) ?? null;
-  const activity = steps === null || steps === 0 ? ""
-    : active ? (running !== null ? `正在${activityOf(running)}` : "") : activitySummary(calls);
-  const countText = steps !== null && steps > 0 ? `${steps} 步` : "";
-  const detail = [activity, countText].filter((part) => part !== "").join(" · ");
+  const summary = summarizeActivity(items);
+  const current = [...items].reverse().find((item) => item.tone === "active") ?? null;
+  const header = activityHeaderState({ loaded, error: error !== null, inFlight: active,
+    awaitingWorker: message.status === "PENDING", summary });
+  // 耗时只在整轮都结算之后才报：半个区间会被读成「已经跑完了」。
+  const span = active || !loaded ? "" : formatSpan(activitySpanMs(items));
+  // 标题图标转动的条件：确实在跑、且列表里没有哪一行正在转（一行都不转时才轮到它）。
+  const headerLive = active && current === null;
 
-  return <details className="tech-details session-round-trace" open={open}
+  return <details className="activity-panel" open={open}
     data-testid={`session-round-trace-${message.id}`}
     data-state={active ? "active" : "settled"}
+    data-phase={header.phase}
+    data-tone={header.tone}
+    data-density={density}
     onToggle={(event) => {
       const domOpen = event.currentTarget.open;
       // 原生 details 的 open 由 React 改也会派发 toggle；DOM 与我们记的一致时就是自己那次回声，
@@ -210,42 +178,119 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
       // 终态只在首次展开时读一次；读取失败后仍由「重新读取」显式重试，不自动反复回源。
       if (domOpen && !loaded && !loading && !active) void read();
     }}>
-    <summary data-testid="session-round-trace-toggle" aria-expanded={open}>
-      <span className="session-round-trace-label">这一轮做了什么</span>
-      {detail !== "" && <> · <span className="session-round-trace-activity"
-        data-testid="session-round-trace-activity">{detail}</span></>}
-      {pending > 0 && <> · <span className="session-round-trace-pending">{pending} 项待核对</span></>}
-      {rejected > 0 && <> · <span className="session-round-trace-rejected">{rejected} 项未执行</span></>}
+    <summary className="activity-header" data-testid="session-round-trace-toggle" aria-expanded={open}>
+      <span className="activity-header-chevron" aria-hidden="true"><ChevronRight /></span>
+      <span className="activity-header-icon" data-tone={header.tone} aria-hidden="true">
+        <HeaderIcon tone={header.tone} live={headerLive} />
+      </span>
+      <span className="activity-header-title">{header.title}</span>
+      <span className="activity-header-meta" data-testid="session-round-trace-activity">
+        {header.meta}
+      </span>
+      {span !== "" && <span className="activity-header-elapsed" data-testid="session-round-trace-span">
+        {span}</span>}
     </summary>
-    {loading && !loaded && <p className="helper-text" role="status"
-      data-testid="session-round-trace-loading">正在读取这一轮的过程…</p>}
-    {error !== null && <div className="action-error" role="alert" data-testid={`session-round-trace-error-${message.id}`}>
-      <p>过程读取失败：{error}</p>
+
+    {error !== null && <div className="activity-panel-notice" data-tone="danger" role="alert"
+      data-testid={`session-round-trace-error-${message.id}`}>
+      <p className="activity-panel-notice-title"><CircleX aria-hidden="true" />过程读取失败</p>
+      <p>{error}</p>
       <p className="helper-text">正文与最终回复不受这条影响；这里只说明工具轮次没读到。</p>
       <button className="secondary-button" type="button" data-testid={`session-round-trace-retry-${message.id}`}
         disabled={loading} onClick={() => void read()}>重新读取</button>
     </div>}
-    {trace !== null && trace.rounds.length > 0 && <ol className="session-round-trace-rounds"
-      data-testid={`session-round-trace-list-${message.id}`}>
-      {trace.rounds.map((round) => <li key={round.round} data-testid={`session-round-${round.round}`}>
-        <p className="session-round-trace-round-title">第 {round.round + 1} 轮</p>
-        <ul className="session-round-trace-calls">
-          {round.calls.map((call) => {
-            const target = targetText(call);
-            const elapsed = elapsedSeconds(call);
-            return <li key={call.id} data-testid={`session-round-call-${call.id}`}>
-              <strong className="session-round-trace-tool">{call.toolName}</strong>
-              {target !== "" && <code className="hash-code">{target}</code>}
-              <span className="session-round-trace-status" data-status={call.status}>{statusText(call)}</span>
-              {elapsed !== null && <span className="session-round-trace-elapsed">{elapsed}s</span>}
-              {/* 拒绝、放弃与未知的原因都按服务端原样回显，不改写也不补结论。 */}
-              {call.rejectionReason !== null && <span className="session-round-trace-reason"
-                data-testid={`session-round-call-reason-${call.id}`}>
-                {call.rejectionReason}{call.rejectionDetail !== null ? ` · ${call.rejectionDetail}` : ""}</span>}
-            </li>;
-          })}
-        </ul>
-      </li>)}
-    </ol>}
+
+    {loading && !loaded && error === null && <p className="helper-text activity-panel-loading" role="status"
+      data-testid="session-round-trace-loading">正在读取这一轮的过程…</p>}
+
+    {/* 空状态（V3 新增）：入口已经点开了，就必须给一个确定的答案。
+        这一轮确实没有工具调用——不制造空的技术时间线，也不补虚假的思考步骤。
+        **只在 EMPTY 相位显示**：在途且零记录是 RUNNING_NO_TOOLS，此刻说「没有调用工具」
+        就是替模型提前下结论（它随时可能开始调用）。 */}
+    {header.phase === "EMPTY" &&
+      <div className="activity-panel-notice" data-tone="neutral"
+        data-testid={`session-round-trace-empty-${message.id}`}>
+        <p className="activity-panel-notice-title"><Info aria-hidden="true" />本轮没有调用工具</p>
+        <p>本次回复仅基于已有信息与上下文生成，没有读取文件、执行命令或修改内容。</p>
+      </div>}
+
+    {items.length > 0 && <>
+      {/* 阅读密度只改视图：三个档位共享同一份事实，任何档位都不隐藏审批、被拒与未知。 */}
+      <div className="activity-panel-toolbar">
+        <span className="helper-text">阅读密度</span>
+        <div className="activity-panel-density" role="group" aria-label="活动阅读密度">
+          {DENSITIES.map((value) => <button key={value} type="button" className="activity-panel-density-option"
+            data-testid={`session-round-trace-density-${value}`}
+            aria-pressed={density === value}
+            onClick={() => setDensity(value)}>{ACTIVITY_DENSITY_LABEL[value]}</button>)}
+        </div>
+      </div>
+      <ol className="activity-panel-rounds" data-testid={`session-round-trace-list-${message.id}`}>
+        {trace?.rounds.map((round, index) => {
+          const roundItems = rounds[index] ?? [];
+          // 简洁档只留风险项；风险项由 mustShowActivity 统一判定，这里不自己再写一份。
+          const scoped = density === "concise"
+            ? roundItems.filter((item) => mustShowActivity(item.tone, item.detail.failed))
+            : roundItems;
+          if (scoped.length === 0) return null;
+          // 长轮次收敛：保留前若干项 + 全部例外项，其余折叠。顺序始终是原始顺序。
+          const collapsible = density !== "detailed" && scoped.length > COLLAPSE_THRESHOLD
+            && !expandedRounds.has(round.round);
+          const shown = collapsible
+            ? scoped.filter((item, position) => position < COLLAPSED_HEAD
+              || mustShowActivity(item.tone, item.detail.failed))
+            : scoped;
+          const hidden = scoped.length - shown.length;
+          // 组标题只报真实数量与真实状态，不给阶段编名字（后端没有阶段字段）。
+          const roundSummary = summarizeActivity(scoped);
+          return <li key={round.round} className="activity-panel-round" data-testid={`session-round-${round.round}`}>
+            <p className="activity-panel-round-title">
+              <span>第 {round.round + 1} 轮</span>
+              <span className="activity-panel-round-count">{roundSummary.total} 项</span>
+              {roundSummary.failed > 0 && <span className="activity-panel-round-flag" data-tone="danger">
+                {roundSummary.failed} 项失败</span>}
+              {roundSummary.rejected > 0 && <span className="activity-panel-round-flag" data-tone="danger">
+                {roundSummary.rejected} 项未执行</span>}
+              {roundSummary.unknown > 0 && <span className="activity-panel-round-flag" data-tone="attention">
+                {roundSummary.unknown} 项待核对</span>}
+            </p>
+            <ul className="activity-panel-list">
+              {shown.map((item) => {
+                const note = noteOf(item);
+                return <ActivityRow key={item.id} item={item}
+                  current={active && current?.id === item.id}
+                  testId={`session-round-call-${item.id}`}
+                  note={note === "" ? undefined : <span
+                    data-testid={`session-round-call-reason-${item.id}`}>{note}</span>}
+                  expanded={rowOpen.has(item.id)}
+                  detail={<ActivityDetail item={item} />}
+                  onToggle={() => {
+                    rowTouched.current = true;
+                    setRowOpen((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                      return next;
+                    });
+                  }} />;
+              })}
+            </ul>
+            {hidden > 0 && <button className="activity-panel-more" type="button"
+              data-testid={`session-round-more-${round.round}`}
+              onClick={() => setExpandedRounds((previous) => {
+                const next = new Set(previous); next.add(round.round); return next;
+              })}>展开其余 {hidden} 项</button>}
+            {!collapsible && expandedRounds.has(round.round) && <button className="activity-panel-more"
+              type="button" data-testid={`session-round-less-${round.round}`}
+              onClick={() => setExpandedRounds((previous) => {
+                const next = new Set(previous); next.delete(round.round); return next;
+              })}>收起这一轮</button>}
+          </li>;
+        })}
+      </ol>
+    </>}
   </details>;
+}
+
+function stepCountOf(trace: RelaySessionToolCalls): number {
+  return trace.rounds.reduce((total, round) => total + round.calls.length, 0);
 }

@@ -80,6 +80,11 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   const resourceRequest = useRef(0);
   const operationRequest = useRef(0);
   const scope = `${projectId ?? "no-project"}:${taskId ?? "no-task"}`;
+  // 会话身份与项目身份分开：前者决定「要不要把页签重置」，后者决定「能不能读受管目录」。
+  const conversationKey = `${previewScope}:${taskId ?? "no-task"}`;
+  const conversationRef = useRef(conversationKey);
+  const hasProjectRef = useRef(hasProject);
+  hasProjectRef.current = hasProject;
 
   const loadResources = useCallback(async () => {
     if (projectId === null) { setResources([]); setResourceError(null); setLoading(false); return; }
@@ -112,9 +117,22 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   useEffect(() => {
     resourceRequest.current++; operationRequest.current++;
     setResources([]); setOperations([]); setResourceError(null); setOperationError(null);
-    setTab(hasProject ? "FILES" : "WEB"); setDrawerTab(null);
     return () => { resourceRequest.current++; operationRequest.current++; };
-  }, [scope, hasProject]);
+  }, [scope]);
+
+  /**
+   * 页签只在**真的换了会话/任务**时重置。
+   *
+   * 项目归属从「未知」变「已确认」也会改 `scope`（多出 projectId 那一段），但那不是换会话：
+   * 用户刚点开的「网页」不该被这次确认拉回「文件」。会话身份取 `previewScope`（workspace +
+   * conversation）加 taskId，与项目身份分开。
+   */
+  useEffect(() => {
+    if (conversationRef.current === conversationKey) return;
+    conversationRef.current = conversationKey;
+    setTab(hasProjectRef.current ? "FILES" : "WEB");
+    setDrawerTab(null);
+  }, [conversationKey]);
 
   useEffect(() => { void loadResources(); }, [loadResources, scope]);
   useEffect(() => { if (drawerTab === "OUTPUT") void loadOperations(); }, [drawerTab, loadOperations]);
@@ -155,9 +173,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
               action={switchToPreview} />
             : <>
               <h3>受管目录</h3>
-              <p className="helper-text">这里只列出该 Project 已登记的受管目录；目录浏览与文件读取走下方「目录浏览」的显式只读动作，不推断本机任意路径。</p>
-              <p className="helper-text">下面是一次读取时的快照，不是实时监视：目录在窗口打开前后被停用、归档或以同一路径重新登记，
-                都要重新读取才知道；Git 读取也会把服务端的拒绝原样呈现。</p>
+              <p className="helper-text">只列出该 Project 已登记的受管目录；浏览与读取走下方显式动作，不推断本机任意路径。</p>
+              <p className="helper-text">这是一次读取的快照，不是实时监视；目录停用、归档或换登记都要重新读取才知道。</p>
               {loading && <p className="helper-text" role="status">正在读取受管目录…</p>}
               {resourceError && <p className="action-error" role="alert" data-testid="devtools-resource-error">{resourceError}</p>}
               {!loading && !resourceError && resources.length === 0 && <p className="helper-text">当前项目没有登记受管目录；这不是“工作目录干净”的结论。</p>}
@@ -193,20 +210,24 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
 
         {tab === "TERMINAL" && <section data-testid="devtools-terminal">
           <h3>交互终端 · 未接入</h3>
-          <p className="warning-callout" role="status" data-testid="devtools-terminal-gap">
-            交互终端的受管工作目录、人工执行身份、进程生命周期、权限、审计、资源排他与断连恢复协议尚未确定，因此本页不提供可执行提示符。
+          {/* 未接入是一条能力边界，不是一个警报：与「文件/变更」空态同一档排版
+              （标题 + 一句说明 + 一句边界注记），不占整块警示区。 */}
+          <p className="devtools-empty-detail" data-testid="devtools-terminal-gap">
+            交互终端的工作目录、执行身份、进程生命周期与审计协议尚未确定，因此这里不提供可执行提示符。
           </p>
-          <p className="helper-text">人工打开终端不授予 Agent 权限，也不能绕过在途写入与接手保护；缺少协议前不提供可执行入口。</p>
+          <p className="devtools-empty-note">打开终端不授予 Agent 权限，也不能绕过在途写入与接手保护。</p>
         </section>}
 
         {tab === "TRACE" && <RunToolTrajectoryPanel client={client} run={run} />}
 
         {tab === "RUNS" && <section data-testid="devtools-runs">
           <h3>运行记录</h3>
-          <p className="helper-text">这里只打开已有 Run 事实；它不是启动按钮，执行仍通过显式委托或受控命令入口。</p>
-          {run ? <><p className="helper-text">当前 Run：<code className="hash-code">{run.id}</code> · 状态 {run.status} · 修订 v{run.revision}</p>
-            <Link className="text-link" to={`/runs/${run.id}`}>打开运行记录（步骤、事件、控制与检查）</Link></>
-            : <p className="helper-text">当前任务没有 AI Run；本页不推断历史执行记录。</p>}
+          {/* 有 Run 时才需要说明「这里不是启动按钮」；没有 Run 就只留一句空态，不重复免责声明。 */}
+          {run ? <>
+            <p className="helper-text">这里只打开已有 Run 事实，不是启动按钮；执行仍通过显式委托或受控命令入口。</p>
+            <p className="helper-text">当前 Run：<code className="hash-code">{run.id}</code> · 状态 {run.status} · 修订 v{run.revision}</p>
+            <Link className="text-link" to={`/runs/${run.id}`}>打开运行记录（步骤、事件、控制与检查）</Link>
+          </> : <p className="devtools-empty-detail" data-testid="devtools-runs-empty">当前任务还没有 AI Run。</p>}
         </section>}
       </div>
     </div>

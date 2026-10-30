@@ -110,6 +110,28 @@
 .chat-command-menu [role="option"] > span:first-child { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--relay-space-2); }
 .chat-command-menu [role="option"][aria-selected="true"], .chat-command-menu [role="option"]:hover { background: var(--relay-color-bg-subtle); }
 .chat-command-menu small { color: var(--relay-color-text-muted); font-size: inherit; }
+/* `@` 插件菜单（2026-10-29 第四轮，用户指认「阴影 + 铺满输入器太重」）：Codex 风格的
+   紧凑浮层——去阴影、纯表面 + 1px 分隔色边框、宽度贴内容不铺满输入器、行内边距收紧、
+   常驻操作提示收进无障碍语义。只覆盖插件菜单，命令菜单保持原来的宽版外观。
+   用 `.chat-command-menu.chat-mention-menu`（0,2,0）压过基础外壳，不依赖规则顺序。 */
+.chat-command-menu.chat-mention-menu {
+  inset-inline: 0 auto;
+  width: fit-content;
+  min-width: 11rem;
+  max-width: min(100%, 20rem);
+  padding: var(--relay-space-1);
+  border-color: var(--relay-color-border-separator);
+  box-shadow: none;
+}
+.chat-command-menu.chat-mention-menu ul {
+  max-height: min(40dvh, 16rem);
+  overscroll-behavior: contain;
+}
+.chat-command-menu.chat-mention-menu [role="option"] {
+  display: block;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+}
 /* 在途输入仍可编辑草稿；菜单不被装饰光点的裁切规则截断。 */
 .agent-chat-composer[data-inflight="true"]:has(.chat-command-menu),
 .create-form[data-inflight="true"]:has(.chat-command-menu) { overflow: visible; }

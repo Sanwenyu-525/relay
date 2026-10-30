@@ -16,6 +16,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelayWorkspaceDefaultDirectory } from "../api/relayClient";
 import AssistSkillOutput from "../components/AssistSkillOutput";
 import ModelSelector from "../components/ModelSelector";
+import ContextBudgetCard from "../components/ContextBudgetCard";
 import { sessionModelSelectionFrom } from "../api/resources/modelSelection";
 import ChatTimelineNav from "../components/ChatTimelineNav";
 import ChatCommandInput, { chatCommandScope, chatCommandStatus } from "../components/ChatCommandInput";
@@ -215,6 +216,41 @@ type PendingFirstMessage = { readonly sessionId: string; readonly commandId: str
   readonly reason: string | null; readonly resourceId: string | null;
   readonly directoryCommandId?: string };
 /**
+ * 首条消息的冻结展示快照（DEV-0110 续）。
+ *
+ * 202 回执确认后 `pending` 会被清空，而消息投影还要等下一次 GET 才回来；这段空窗里
+ * 用户发出去的那条消息如果只存在于 `pending` 上，界面就只能显示空白。快照在**发送开始时**
+ * 一次性冻结（原文、附件名、模式、资料数量、Skill 身份），只用于过渡行展示：
+ * 不参与发送、不伪造 message id、不重建命令，也不因为用户后来改写输入而变化。
+ */
+export type FirstMessageSnapshot = {
+  readonly sessionId: string; readonly commandId: string;
+  readonly content: string;
+  /** 附件只留文件名：字节在会话建好后才上传，展示不需要也不应该再读一次。 */
+  readonly attachments: readonly string[];
+  readonly chatMode?: RelayChatMode | undefined;
+  readonly sourceCount: number;
+  readonly skillRef?: { readonly id: string; readonly version: string } | undefined;
+};
+/** 首条消息过渡行的呈现事实；每个档位都必须有可理解的可视内容，不能留空白消息区。 */
+export type FirstMessageTransition = {
+  readonly phase: "sending" | "unresolved" | "awaiting" | "failed";
+  readonly content: string;
+  readonly attachments: readonly string[];
+  readonly chatMode?: RelayChatMode | undefined;
+  readonly sourceCount: number;
+  readonly skillRef?: { readonly id: string; readonly version: string } | undefined;
+  /** 明确失败的原因；其余档位为 null（未决原因在核对弹窗里）。 */
+  readonly reason: string | null;
+};
+function snapshotOfPendingFirst(pending: PendingFirstMessage): FirstMessageSnapshot {
+  return { sessionId: pending.sessionId, commandId: pending.commandId, content: pending.content,
+    attachments: (pending.attachmentFiles ?? []).map((file) => file.name),
+    ...(pending.chatMode === undefined ? {} : { chatMode: pending.chatMode }),
+    sourceCount: pending.sourceRefs?.length ?? 0,
+    ...(pending.skillRef === undefined ? {} : { skillRef: pending.skillRef }) };
+}
+/**
  * 建会话命令连同首条原文：创建响应丢失后按原回执恢复时，交接的必须是这一份载荷。
  *
  * 模式与助手也在载荷里，不是 UI 状态：身份在建立时冻结，重试必须交回同一份身份，
@@ -248,6 +284,12 @@ export type FirstMessageProcess = {
   readonly draft: string;
   readonly pending: PendingFirstMessage | null;
   readonly busy: boolean;
+  /**
+   * 首条消息的冻结展示快照：发送开始时写入，之后只读。
+   * 202 回执确认清空 pending 后，过渡行仍要靠它显示原文与附件（见 FirstMessageSnapshot）。
+   * 可选字段：协作页构造的初始过程不带它，等同「这条会话还没有发过首条」。
+   */
+  readonly sent?: FirstMessageSnapshot | null;
   /**
    * 服务端明确拒绝首条命令时的可读原因。与 `pending.reason` 分开：明确拒绝说明命令
    * 没有落库、也没有可核对的结果，未决身份必须清空；这条原因仍要跨重挂载可见，
@@ -1043,7 +1085,10 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     if (!retry) setFirstPendingDialogOpen(false);
     // 重试开始时清掉上一次的未决原因：在途不是「结果待核对」。
     pending = { ...pending, reason: null };
-    firstOwner.write({ ...current, pending, busy: true, failure: null });
+    // 展示快照与在途标记同一次写入：此后无论回执确认（pending 清空）还是明确失败
+    // （pending 清空 + failure），过渡行都还有这份原文可显示，不会退回空白消息区。
+    firstOwner.write({ ...current, pending, busy: true, failure: null,
+      sent: snapshotOfPendingFirst(pending) });
     setCreating(true); setFirstError(null); setFirstPendingError(null);
     try {
       let expectedModelSelectionRevision: string | undefined;
@@ -1241,6 +1286,57 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   const firstPendingOpen = pendingFirst !== null && firstPendingDialogOpen;
   // 明确失败没有可核对的结果，走停留到关闭的 Notice；它的原因住在弹窗里，不混进这里。
   const firstNotice = firstError ?? sharedFailure;
+  /**
+   * 首条消息过渡行的呈现事实（P0-A/P0-B/P0-C）。
+   *
+   * 会话建好之后、服务端消息投影读回之前，这条用户消息在界面上**没有别的可见位置**：
+   * 它不在 messages 里（还没投影），也不该继续挂在首条输入器上（输入器已经换成会话输入器）。
+   * 四个档位按「命令身份还在不在」分，不按时间猜：
+   *   sending    —— 会话已建，消息命令在途，回执未确认；
+   *   unresolved —— 传输失败/结果不明，原命令身份保留，核对入口仍可达；
+   *   awaiting   —— 回执已确认（pending 清空、interpreted 落定），投影还没读回；
+   *   failed     —— 服务端明确拒绝，命令没有落库，只能改写后重发。
+   * 只读冻结载荷（pending 或 sent 快照），不参与发送、不伪造 message id。
+   */
+  const firstSentSnapshot = first.sent !== undefined && first.sent !== null &&
+    session !== null && first.sent.sessionId === session.id ? first.sent : null;
+  const firstTransition: FirstMessageTransition | null = session === null ? null
+    : pendingFirst !== null && pendingFirst.sessionId === session.id
+      ? { phase: firstPendingUnresolved ? "unresolved" : "sending", content: pendingFirst.content,
+        attachments: (pendingFirst.attachmentFiles ?? []).map((file) => file.name),
+        ...(pendingFirst.chatMode === undefined ? {} : { chatMode: pendingFirst.chatMode }),
+        sourceCount: pendingFirst.sourceRefs?.length ?? 0,
+        ...(pendingFirst.skillRef === undefined ? {} : { skillRef: pendingFirst.skillRef }),
+        reason: null }
+      : firstSentSnapshot !== null && first.interpreted === firstSentSnapshot.commandId
+        ? { phase: "awaiting", content: firstSentSnapshot.content,
+          attachments: firstSentSnapshot.attachments,
+          ...(firstSentSnapshot.chatMode === undefined ? {} : { chatMode: firstSentSnapshot.chatMode }),
+          sourceCount: firstSentSnapshot.sourceCount,
+          ...(firstSentSnapshot.skillRef === undefined ? {} : { skillRef: firstSentSnapshot.skillRef }),
+          reason: null }
+        : firstSentSnapshot !== null && sharedFailure !== null
+          ? { phase: "failed", content: firstSentSnapshot.content,
+            attachments: firstSentSnapshot.attachments,
+            ...(firstSentSnapshot.chatMode === undefined ? {} : { chatMode: firstSentSnapshot.chatMode }),
+            sourceCount: firstSentSnapshot.sourceCount,
+            ...(firstSentSnapshot.skillRef === undefined ? {} : { skillRef: firstSentSnapshot.skillRef }),
+            reason: sharedFailure }
+          : null;
+  /**
+   * 未决/在途状态行：原来挂在会话标题下方单独占一行，现在交给过渡行渲染（P0-C）。
+   * 会话面板没有挂载（读回的会话清单里还没有这条，或建会话未决）时仍回落到原位置，
+   * 否则未决命令会连同核对入口一起消失。
+   */
+  const firstPendingStrip = pendingFirst === null ? null : firstPendingUnresolved
+    ? <UnresolvedCommandStrip testId="assist-first-pending" busy={creating}
+        label="会话已创建，首条消息结果待核对。"
+        onOpen={() => setFirstPendingDialogOpen(true)} />
+    : <p className="helper-text agent-first-transition-note" role="status"
+        data-testid="assist-first-pending" data-state="sending">
+        正在发送首条消息…
+        <button type="button" className="text-link" data-testid="assist-first-receipt" disabled={creating}
+          onClick={() => void checkFirstReceipt()}>{creating ? "正在查询" : "查询回执"}</button></p>;
   /**
    * 模式是**会话属性**：已在会话上的身份以会话为准；没有会话时由协作页持有的工作对象身份
    * 决定「新建哪一条」。工作对象身份缺省即普通档，不猜助手。
@@ -1520,7 +1616,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
           上下文计量环与模型下拉收在发送键左边，两枚同进同退；这一档取代 2026-10-19 的「行左端两枚」。
           收成一组而不是散在工具行里，是为了窄栏换行时它们不跟发送键拆开。 */}
       <div className="agent-chat-composer-tail">
-        <ContextMeter ratio={null} hitRate={null} call={null} limit={null} />
+        <ContextMeter ratio={null} hitRate={null} call={null} limit={null} client={client} />
         <ModelSelector client={client} open={firstModelPickerOpen} onOpenChange={setFirstModelPickerOpen}
           selectedModel={first.model ?? null}
           onChoose={(model) => { updateFirst({ model });
@@ -1731,16 +1827,12 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     {/* 首条消息的提示渲染在首条输入区之外：建会话成功后协作页会切到该 Task，
         明确失败与未决命令都必须继续留在对话区可发现、可核对。
         2026-10-24 用户指令：提示按类型走通道——明确失败是停留到关闭的 Notice；
-        未决命令在正文只留一行状态，完整原因、原 command_id 与两个恢复出口进弹窗。 */}
-    {firstNotice !== null && <Notice testId="assist-first-error">{firstNotice}</Notice>}
-    {pendingFirst !== null && (firstPendingUnresolved
-      ? <UnresolvedCommandStrip testId="assist-first-pending" busy={creating}
-          label="会话已创建，首条消息结果待核对。"
-          onOpen={() => setFirstPendingDialogOpen(true)} />
-      : <p className="helper-text" role="status" data-testid="assist-first-pending" data-state="sending">
-          正在发送首条消息…
-          <button type="button" className="text-link" data-testid="assist-first-receipt" disabled={creating}
-            onClick={() => void checkFirstReceipt()}>{creating ? "正在查询" : "查询回执"}</button></p>)}
+        未决命令在正文只留一行状态，完整原因、原 command_id 与两个恢复出口进弹窗。
+        2026-10-30：会话面板已挂载时，失败原因与状态行都改由过渡行承载（贴住那条消息），
+        这里只保留「面板还没挂载」的回落——否则读回的会话清单暂时没有这条时，
+        未决命令会连同核对入口一起从界面上消失。 */}
+    {firstNotice !== null && firstTransition === null && <Notice testId="assist-first-error">{firstNotice}</Notice>}
+    {firstPendingStrip !== null && firstTransition === null && firstPendingStrip}
     <UnresolvedCommandDialog open={firstPendingOpen} testId="assist-first"
       title="首条消息结果待核对"
       summary="会话已创建，但还没有拿到这条消息的送达回执。先查询回执；查不到时按原命令重试。"
@@ -1771,6 +1863,8 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         standalone={standalone} embedded={embedded} onNavigationStateChange={reportSessionNavigation}
         sourcePicker={sourcePicker}
         firstMessageInflight={firstBusy || creating || pendingFirst !== null}
+        firstMessageTransition={firstTransition}
+        firstMessagePending={firstPendingStrip}
         preferredSkillId={preferredSkillId}
         initialExecution={first.execution?.sessionId === session.id ? first.execution : null}
         initialMaintenance={first.maintenance?.sessionId === session.id ? first.maintenance : null}
@@ -2785,7 +2879,8 @@ function isInFlight(message: RelayAssistMessage): boolean {
  * 带着正文回来才交接。它不新造业务状态：`SETTLING` / `UNVERIFIED` 都是本机呈现态，
  * 权威状态仍只读 `message.status`。
  */
-type ReplySettling = {
+// SCENARIO-LAB-EXPORT-ANCHOR：场景实验室按这一份呈现态驱动交接动画，不另造第二套。
+export type ReplySettling = {
   /** 最后一次草稿；失败与取消一律为空串——那两种终态要求立即清内容。 */
   readonly text: string;
   readonly revision: string;
@@ -2933,6 +3028,25 @@ function formatUsagePercent(value: number, limit: number): string {
 }
 
 /**
+ * 上下文占用比例的读数：不把超额压成 100%。
+ * 未满但四舍五入会进位到 100 时保留一位小数（99.6% 不能读成刚好打满）；
+ * 恰好 100% 就是真的 100%；超过 100% 时给出真实比例，四舍五入后恰好 100.0
+ * 的也保留 ".0"，免得把刚超出的读数又说回 100%。
+ */
+function formatRatioPercent(ratio: number): string {
+  const rounded = Math.round(ratio * 100);
+  if (ratio < 1) {
+    if (rounded < 100) return String(rounded);
+    const tenths = Math.floor(ratio * 1000) / 10;
+    return tenths >= 100 ? "99.9" : tenths.toFixed(1);
+  }
+  if (ratio === 1) return "100";
+  const tenths = Math.round(ratio * 1000) / 10;
+  if (tenths === 100) return "100.0";
+  return Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
+}
+
+/**
  * 输入区底栏的用量指示：左文字是缓存命中率，右圆环是最近一次调用的上下文占用。
  * 命中率只在 Provider 真的上报缓存读数时出现；没有读数时这一格直接留空，
  * 既不写"未采集"也不把 null 画成 0%，更不拿配置值冒充实际用量。占用圆环始终在。
@@ -2943,23 +3057,36 @@ function formatUsagePercent(value: number, limit: number): string {
  * 缓存命中与口径说明，读数仍是同一份 props，不新增第二份用量来源。浮层与模型下拉
  * 同一套弹层语言：向上锚定、独占（useMenuExclusive）、点外即收、Esc 收起还焦点。
  *
- * 2026-10-28 两处改版：
- * 1. **圆环旁加百分比**。3% 这类小比例在 32px 环上只剩一段两三个像素的弧，既读不出进度，
- *    又像一枚「正在加载」的绿点；旁边给出 `3%` 之后，环仍是主标记，文字只承担读数。
- *    数字用 tabular-nums，避免 3%→10% 时宽度跳动；输入器窄到放不下时由容器查询隐去，
- *    环、完整可访问名称与点击详情都不受影响。
- * 2. **详情浮层分三层**。顶部是这一次调用的关键数字（分子/分母 + 百分比 + 细进度线），
- *    中间是输出与缓存命中的轻量信息行，底部只留一句口径摘要，「统计口径」按需展开。
- *    原来的浮层把长段技术解释直接摊在数字下面，16rem 宽里挤成一团，读者先看到的是免责声明。
+ * 2026-10-28 圆环旁加百分比：3% 这类小比例在 32px 环上只剩两三个像素的弧，
+ * 既读不出进度又像一枚「正在加载」的绿点；读数补上之后环仍是主标记，文字只承担读数。
+ * 数字用 tabular-nums，避免 3%→10% 时宽度跳动；输入器窄到放不下时由容器查询隐去，
+ * 环、完整可访问名称与点击详情都不受影响。
+ *
+ * 2026-10-29 浮层第二轮整改（用户指令「先看到清楚的用量数据，而不是统计说明」）：
+ * 删掉「统计来源」行、常驻长句与「统计口径」清单，口径说明只留在标题旁的小信息图标里；
+ * 主行一次读完「已用 / 预算 tokens + 真实占比」，下面是细进度线；二级信息收成两列
+ * （预算余量（估算）/ 本次输出），缓存读取与缓存写入分开列、未上报就整项不出现。
+ * 超预算不画负剩余、也不把比例压成 100%：主行保留真实读数，余量一栏改为「超出预算（估算）」。
  */
-function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
-  hitRate: number | null; call: RelayAssistMessage | null; limit: number | null }) {
-  const percent = ratio === null ? null : formatUsagePercent(ratio, 1);
+function ContextMeter({ ratio, hitRate, call, limit, client = null, onBudgetRefresh }: { ratio: number | null;
+  hitRate: number | null; call: RelayAssistMessage | null; limit: number | null;
+  client?: RelayApiClient | null; onBudgetRefresh?: () => void }) {
+  const percent = ratio === null ? null : formatRatioPercent(ratio);
   const high = ratio !== null && ratio >= 0.8;
+  const over = ratio !== null && ratio > 1;
   const meterState = ratio === null ? "unknown" : high ? "high" : "normal";
+  const limitKnown = limit !== null && limit > 0;
+  const inputTokens = call?.usage.inputTokens ?? null;
+  const outputTokens = call?.usage.outputTokens ?? null;
+  const cacheRead = call?.usage.cacheReadTokens ?? null;
+  const cacheWrite = call?.usage.cacheCreationTokens ?? null;
+  const remaining = inputTokens !== null && limitKnown ? (limit as number) - inputTokens : null;
+  const inputText = inputTokens === null ? null : inputTokens.toLocaleString();
   const meterText = call === null ? "尚无模型调用"
-    : ratio === null ? `上下文 ${call.usage.inputTokens ?? "未知"} tokens · 占用不可算`
-      : `上下文 ${call.usage.inputTokens} / ${limit} tokens（${percent}%）`;
+    : inputTokens === null ? "上下文用量未上报"
+      : ratio === null ? `上下文 ${inputText} tokens · 预算未配置`
+        : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
+          + (over ? " · 已超出预算" : "");
   const hitText = hitRate === null ? null : `缓存命中 ${formatUsagePercent(hitRate, 1)}%`;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -2989,7 +3116,7 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
-  // 浮层是 dialog：打开就把焦点移进去，键盘用户可以立刻 Tab 到「统计口径」、用方向键读长内容。
+  // 浮层是 dialog：打开就把焦点移进去，键盘用户可以立刻读到读数或用 Tab 走到信息图标。
   // preventScroll 保证移焦不会把输入卡顶出视野。
   useEffect(() => {
     if (!open) return;
@@ -3001,80 +3128,128 @@ function ContextMeter({ ratio, hitRate, call, limit }: { ratio: number | null;
   // 浮层底上就成了两层。原生 title 一并去掉，不留两套提示叠着。
   const { tooltipHandlers, tooltipNode, dismissTooltip } = usePathTooltip(
     () => (open ? null : meterText), "context-meter-tooltip");
-  const usage = call?.usage ?? null;
-  const inputTokens = usage?.inputTokens ?? null;
-  const limitKnown = limit !== null && limit > 0;
-  const outputText = usage?.outputTokens === null || usage?.outputTokens === undefined
-    ? "未知" : usage.outputTokens.toLocaleString();
+  // 标题旁的小信息图标：口径说明只留这一句，悬停/聚焦即浮出，不占浮层正文。
+  const { tooltipHandlers: infoHandlers, tooltipNode: infoTooltipNode,
+    dismissTooltip: dismissInfoTooltip } = usePathTooltip(
+    () => (open ? "上下文用量按最近一次有记录的模型调用统计，占用比例相对于工作区配置预算计算。" : null),
+    "context-meter-info-tooltip");
+  // 浮层关掉后信息图标的锚点已经不在文档里，已浮出的提示要一并收掉。
+  useEffect(() => {
+    if (!open) dismissInfoTooltip();
+  }, [open, dismissInfoTooltip]);
   return <div className="agent-chat-usage">
     {hitText !== null && <span className="agent-chat-usage-text" data-testid="assist-cache-hit">{hitText}</span>}
     <div className="agent-chat-context-meter-group" ref={rootRef}>
       <button type="button" ref={triggerRef} className="agent-chat-context-meter"
-        data-testid="assist-context-meter" data-state={meterState}
+        data-testid="assist-context-meter" data-state={meterState} data-over={over ? "true" : undefined}
         aria-label={meterText} aria-haspopup="dialog" aria-expanded={open} aria-controls={panelId}
-        onClick={() => { setOpen((wasOpen) => !wasOpen); dismissTooltip(); }} {...tooltipHandlers}>
+        onClick={() => {
+          // Reopening also reconciles a save that completed after the popover was closed.
+          if (!open) onBudgetRefresh?.();
+          setOpen((wasOpen) => !wasOpen); dismissTooltip(); dismissInfoTooltip();
+        }}
+        {...tooltipHandlers}>
         <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
           <circle className="agent-chat-context-meter-track" cx="18" cy="18" r="15" />
           {/* 0% 不画弧：round 线帽会把长度为 0 的弧画成一颗点，读起来像「有一点占用」。
-              未知态连弧都不渲染，轨道改为虚线，与「真的 0%」在视觉上分开。 */}
+              未知态连弧都不渲染，轨道改为虚线，与「真的 0%」在视觉上分开。
+              超额时弧画满一圈，真实的比例读数仍以上方文字为准。 */}
           {ratio !== null && ratio > 0 && <circle className="agent-chat-context-meter-fill" cx="18" cy="18" r="15"
-            strokeDasharray={`${(ratio * 94.25).toFixed(2)} 94.25`} />}
+            strokeDasharray={`${(Math.min(1, ratio) * 94.25).toFixed(2)} 94.25`} />}
         </svg>
         {percent !== null && <span className="agent-chat-context-meter-value" aria-hidden="true">{percent}%</span>}
       </button>
       {open && <div className="agent-chat-context-meter-menu" id={panelId} ref={panelRef} tabIndex={-1}
         data-testid="assist-context-meter-panel" role="dialog" aria-label="上下文用量详情"
-        data-state={meterState}>
-        {/* 第一层：这一次调用的关键数字——用了多少、上限多少、占几成，一眼读完。
-            没有调用时这一层退化成一句空态说明，但标题仍在：浮层永远先说清它是什么。 */}
-        <div className="agent-chat-context-meter-summary">
+        data-state={meterState} data-over={over ? "true" : undefined}>
+        {/* 标题行：左边是浮层身份，右边只有「这份读数属于哪一次」与一个信息图标。
+            口径说明不摊在正文里，悬停/聚焦图标才浮出。 */}
+        <div className="agent-chat-context-meter-header">
           <p className="agent-chat-context-meter-heading">上下文用量</p>
-          {call === null
-            ? <p className="agent-chat-context-meter-note" data-testid="assist-context-meter-empty">
-              尚无模型调用。发送消息并收到回复后，这里显示该次调用的上下文占用。</p>
-            : <>
-              <p className="agent-chat-context-meter-scope">最近一次模型调用</p>
+          {call !== null && <>
+            <span className="agent-chat-context-meter-source">最近一次记录</span>
+            <button type="button" className="agent-chat-context-meter-info"
+              data-testid="assist-context-meter-info" aria-label="上下文用量统计说明"
+              {...infoHandlers}>
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <circle className="agent-chat-context-meter-info-ring" cx="8" cy="8" r="6.25" />
+                <path className="agent-chat-context-meter-info-mark" d="M8 7.1v3.4" />
+                <circle className="agent-chat-context-meter-info-dot" cx="8" cy="4.9" r="0.85" />
+              </svg>
+            </button>
+            {infoTooltipNode}
+          </>}
+        </div>
+        {call === null
+          ? <p className="agent-chat-context-meter-empty" data-testid="assist-context-meter-empty">
+            尚无模型调用。收到回复后这里显示该次调用的上下文用量。</p>
+          : <>
+            {/* 主行：用了多少、预算是多少、占几成，一行读完；下面一条细进度线。 */}
+            <div className="agent-chat-context-meter-main">
               <p className="agent-chat-context-meter-figure">
                 <span className="agent-chat-context-meter-amount">
-                  {inputTokens === null ? "未知" : inputTokens.toLocaleString()}
-                  {limitKnown && <><span className="agent-chat-context-meter-sep"> / </span>{limit?.toLocaleString()}</>}
+                  {inputText ?? "—"}
+                  {limitKnown && inputTokens !== null &&
+                    <><span className="agent-chat-context-meter-sep"> / </span>{limit?.toLocaleString()}</>}
                   <span className="agent-chat-context-meter-unit"> tokens</span>
                 </span>
-                {percent !== null && <span className="agent-chat-context-meter-percent">{percent}%</span>}
+                {percent !== null
+                  ? <span className="agent-chat-context-meter-percent"
+                    data-testid="assist-context-meter-percent">{percent}%</span>
+                  : !limitKnown
+                    ? <span className="agent-chat-context-meter-unbounded"
+                      data-testid="assist-context-meter-unbounded">预算未配置</span>
+                    : null}
               </p>
               {/* 没有比例就不画进度线：空轨道会被读成 0%，把「算不出」画成「没占用」。
-                  上限不可用时如实说明，不拿别的数值凑一个分母。 */}
-              {ratio === null
-                ? <p className="agent-chat-context-meter-note" data-testid="assist-context-meter-unbounded">
-                  {inputTokens === null ? "该次调用没有上报上下文读数。" : "上限不可用，无法换算占用比例。"}</p>
-                : <span className="agent-chat-context-meter-bar" aria-hidden="true">
-                  <span style={{ width: `${ratio * 100}%` }} /></span>}
-            </>}
-        </div>
-        {call !== null && <>
-          {/* 第二层：其余统计。标签左对齐、数字右对齐，长数字千位分隔，不铺成多张统计卡。 */}
-          <dl className="agent-chat-context-meter-stats">
-            <div className="agent-chat-context-meter-row"><dt>输出 tokens</dt><dd>{outputText}</dd></div>
-            {/* 命中率与底栏同一口径：Provider 未上报时整行不渲染，不写「未采集」也不画成 0%。 */}
-            {hitRate !== null && <div className="agent-chat-context-meter-row"><dt>缓存命中</dt>
-              <dd>{formatUsagePercent(hitRate, 1)}%</dd></div>}
-            <div className="agent-chat-context-meter-row"><dt>统计来源</dt><dd>最近一次模型调用</dd></div>
-          </dl>
-          {/* 第三层：默认只留一句口径摘要；完整说明收进「统计口径」，需要核对的人自己展开。 */}
-          <div className="agent-chat-context-meter-footnote">
-            <p className="agent-chat-context-meter-note">占用比例按本次调用的完整上下文与工作区预算计算。</p>
-            <details className="agent-chat-context-meter-scope-details">
-              <summary>统计口径</summary>
-              <ul>
-                <li>上下文包含该次调用重发的全部历史。</li>
-                <li>缓存命中的部分仍计入完整上下文。</li>
-                <li>分母取工作区上下文长度档位；未选择档位时取应用配置的单次预算。</li>
-                <li>该数值不等同模型物理上下文窗口。</li>
-                <li>也不代表触发上下文压缩的阈值。</li>
-              </ul>
-            </details>
-          </div>
-        </>}
+                  超额时进度线最多画满，真实比例由上方读数与「超出预算」承担。 */}
+              {ratio !== null && <span className="agent-chat-context-meter-bar" aria-hidden="true">
+                <span style={{ width: `${Math.min(1, ratio) * 100}%` }} /></span>}
+            </div>
+            {/* 二级信息：预算余量与本次输出并排两列，窄窗退回一列。余量是
+                预算减去上报用量得到的估算，不等于模型物理窗口的剩余容量。 */}
+            {(remaining !== null || outputTokens !== null) &&
+              <div className="agent-chat-context-meter-secondary"
+                data-single={remaining === null || outputTokens === null ? "true" : undefined}>
+                {remaining !== null && <div className="agent-chat-context-meter-stat">
+                  <span className="agent-chat-context-meter-stat-label">
+                    {remaining < 0 ? "超出预算（估算）" : "预算余量（估算）"}</span>
+                  <span className="agent-chat-context-meter-stat-value"
+                    data-testid="assist-context-meter-remaining" data-over={remaining < 0 ? "true" : undefined}>
+                    {Math.abs(remaining).toLocaleString()}
+                    <span className="agent-chat-context-meter-stat-unit"> tokens</span>
+                  </span>
+                </div>}
+                {outputTokens !== null && <div className="agent-chat-context-meter-stat">
+                  <span className="agent-chat-context-meter-stat-label">本次输出</span>
+                  <span className="agent-chat-context-meter-stat-value" data-testid="assist-context-meter-output">
+                    {outputTokens.toLocaleString()}
+                    <span className="agent-chat-context-meter-stat-unit"> tokens</span>
+                  </span>
+                </div>}
+              </div>}
+            {/* 缓存读取与写入分列，不混成一个数；Provider 未上报的项整行不出现，
+                命中率只在读取量与完整上下文都可靠时才有分母。 */}
+            {(cacheRead !== null || cacheWrite !== null) && <dl className="agent-chat-context-meter-cache">
+              {cacheRead !== null && <div className="agent-chat-context-meter-cache-row">
+                <dt>缓存读取</dt>
+                <dd data-testid="assist-context-meter-cache-read">{cacheRead.toLocaleString()}
+                  <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
+              </div>}
+              {cacheWrite !== null && <div className="agent-chat-context-meter-cache-row">
+                <dt>缓存写入</dt>
+                <dd data-testid="assist-context-meter-cache-write">{cacheWrite.toLocaleString()}
+                  <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
+              </div>}
+              {hitRate !== null && <div className="agent-chat-context-meter-cache-row">
+                <dt>缓存命中率</dt>
+                <dd data-testid="assist-context-meter-cache-hit">{formatUsagePercent(hitRate, 1)}%</dd>
+              </div>}
+            </dl>}
+          </>}
+        {/* CONTEXT_RING_TIER_PICKER: available before the first model call as well. */}
+        {client !== null && <ContextBudgetCard client={client} compact
+          {...(onBudgetRefresh === undefined ? {} : { onSaved: onBudgetRefresh })} />}
       </div>}
       {tooltipNode}
     </div>
@@ -3126,7 +3301,8 @@ function InflightDots({ message, inline = false }: {
     <i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></span>;
 }
 
-function AssistMessageRow({ client, target, message, preview, previewError, onRetryPreview, settling,
+// SCENARIO-LAB-EXPORT-ANCHOR：AI 回复场景实验室直接挂载这一行，产品与演示共用同一个消息行 Owner。
+export function AssistMessageRow({ client, target, message, preview, previewError, onRetryPreview, settling,
   handover, onVerifyFinal, writeBlocked, candidates, personaLabel,
   recallReceipt, recallBusy, recallReading, recallError, recallDisabledReason, onRecall, onReadRecall }: { client: RelayApiClient;
   /** 助手档显示冻结人设（名字 · 修订），普通档为 null，仍显示「AI」。 */
@@ -3257,6 +3433,11 @@ function AssistMessageRow({ client, target, message, preview, previewError, onRe
         交接时的行高差因此只剩 Markdown 块距，不产生明显滚动跳跃。 */}
     {replyState !== null && <div className="assist-reply" data-state={replyState}
       data-handover={handover ? "true" : undefined}
+      /* 2026-10-29 V2：把「核对中」与「状态待核对」分成两个视觉档。
+         前者是正常过渡（草稿还在、正文在路上），后者是那次重读失败、需要用户动手。
+         两者都只是呈现档位，权威状态仍只读 message.status。 */
+      data-verify={replyState === "verifying"
+        ? (settling?.stage === "UNVERIFIED" ? "unverified" : "settling") : undefined}
       data-testid={replyState === "final" ? `assist-reply-final-${message.id}`
         : replyState === "verifying" ? `assist-reply-verify-${message.id}` : `assist-live-preview-${message.id}`}>
       {replyState === "final"
@@ -3766,12 +3947,72 @@ function StateMaintenanceReceipt({ entry, onRetry, onWithdraw, onToggleUndoConfi
   </div>;
 }
 
+/**
+ * 首条消息的过渡行（2026-10-30，DEV-0110 续）。
+ *
+ * 会话刚建好、服务端消息投影还没读回时，这条用户消息在界面上没有别的可见位置：
+ * 它不在 messages 里，也不该继续挂在已经换掉的首条输入器上。此前这段时间消息区整块空白，
+ * 只有标题下方一行「正在发送首条消息…」——用户看不到自己发了什么，也看不出 AI 在做什么。
+ *
+ * 这一行按普通用户消息的骨架渲染（同一阅读列、同一字号、同一 meta 行），只多做三件事：
+ *   1. 状态词写明这条消息现在处于哪一步（发送中 / 结果待核对 / 已送达待读取 / 发送失败）；
+ *   2. 在途与等待用既有三点动效，不引入第二套加载视觉；
+ *   3. 状态行与恢复出口挂在这条消息下面，而不是会话标题下面。
+ * 它只读冻结载荷，不伪造 message id、不写库、不参与发送。
+ */
+function FirstMessageTransitionRow({ transition, pending, onRestoreDraft }: {
+  readonly transition: FirstMessageTransition;
+  readonly pending: ReactNode;
+  readonly onRestoreDraft?: (() => void) | undefined;
+}) {
+  const stateText = transition.phase === "sending" ? "发送中"
+    : transition.phase === "unresolved" ? "结果待核对"
+      : transition.phase === "awaiting" ? "已送达 · 正在读取"
+        : "发送失败";
+  const modeLabel = transition.chatMode === "PLAN" ? "计划模式"
+    : transition.chatMode === "GOAL" ? "目标模式" : null;
+  const waiting = transition.phase === "sending" || transition.phase === "awaiting";
+  return <li className="agent-message-slot agent-first-transition" data-phase={transition.phase}
+    data-testid="assist-first-transition">
+    <article className="agent-message" data-role="USER" data-state={transition.phase}>
+      <div className="agent-message-body">
+        <p className="agent-message-meta">
+          <span className="agent-message-role">我</span>
+          {/* 状态词是这条消息自己的事实，不是页面的全局状态；失败与待核对用警示色。 */}
+          <span className="agent-message-status agent-first-transition-state"
+            data-state={transition.phase} data-testid="assist-first-transition-state">{stateText}</span>
+          {waiting && <span className="assist-inflight-dots" data-inline="true" aria-hidden="true">
+            <i /><i /><i /></span>}
+          {modeLabel !== null && <span className="agent-first-transition-chip" data-kind="mode">{modeLabel}</span>}
+          {transition.sourceCount > 0 && <span className="agent-first-transition-chip" data-kind="sources">
+            引用 {transition.sourceCount} 份资料</span>}
+          {transition.skillRef !== undefined && <span className="agent-first-transition-chip" data-kind="skill">
+            Skill · {transition.skillRef.id}</span>}
+        </p>
+        {/* 附件只给名字：字节还没随消息落库，这里不摆图片预览冒充已送达的内容。 */}
+        {transition.attachments.length > 0 && <ul className="agent-first-transition-attachments">
+          {transition.attachments.map((name, index) => <li key={`${index}:${name}`}>
+            <Paperclip aria-hidden="true" /><span>{name}</span></li>)}
+        </ul>}
+        {transition.content !== "" && <p className="assist-message-content">
+          <UserMessageContent content={transition.content} /></p>}
+        {transition.reason !== null && <p className="action-error agent-first-transition-reason"
+          data-testid="assist-first-transition-reason">{transition.reason}</p>}
+        {transition.phase === "failed" && onRestoreDraft !== undefined &&
+          <button type="button" className="text-link" data-testid="assist-first-transition-restore"
+            onClick={onRestoreDraft}>放回输入框继续编辑</button>}
+        {pending}
+      </div>
+    </article>
+  </li>;
+}
+
 function AssistSessionPanel({ client, session, target, sources, writeBlockedReason,
   refreshTarget, clearSentSources, standalone, onNavigationStateChange,
   sourcePicker, preferredSkillId, embedded, externalReadBlockedReason, proposalActionHost,
   onExecutionPrepared, initialExecution, confirmedFirstMessageCommandId,
   initialMaintenance, modeSwitch, modeHints, onInflightChange, composerHeader, onLearningTransfer, recordLearning = true,
-  firstMessageInflight = false, onToggleSourceRef,
+  firstMessageInflight = false, firstMessageTransition = null, firstMessagePending = null, onToggleSourceRef,
   onChatSessionCreated }: { client: RelayApiClient;
   session: RelayAssistSession; target: AssistTarget | null; sources: readonly RelayAssistSourceRef[];
   writeBlockedReason: string | null;
@@ -3799,6 +4040,14 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       在途事实由输入卡上方的发送状态行独自承担，空态行会把在途读成空会话
       （2026-10-23 用户截图指认「先显示空页之后才是对话」）。 */
   firstMessageInflight?: boolean;
+  /**
+   * 首条消息的过渡事实：会话已建、服务端消息投影还没读回。非空时由本面板在消息时间线里
+   * 渲染一条过渡用户消息（见 FirstMessageTransitionRow），空态行与欢迎页都不再出现。
+   * 真实用户消息一旦读回（messages 里出现 USER 行），整行自动卸载，不做第二次去重。
+   */
+  firstMessageTransition?: FirstMessageTransition | null;
+  /** 在途/未决状态行（含查询回执与核对入口），由外层持有命令身份，面板只负责挂在过渡行里。 */
+  firstMessagePending?: ReactNode;
   /**
    * 在途状态上报。切档不是停止，禁用判定必须在真正看得见在途的那一层做，
    * 所以由面板把事实送上去，而不是外层另猜一份。
@@ -3995,6 +4244,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   /** Esc Esc 的第一次按键：记下它指向的那条 RUNNING 回复，超过间隔或换了回复就失效。 */
   const stopSequence = useRef<{ readonly messageId: string; readonly deadline: number } | null>(null);
   const [callLimit, setCallLimit] = useState<number | null>(null);
+  const [contextBudgetRevision, setContextBudgetRevision] = useState(0);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   /** 会话档写档位：由底栏 [权限] 芯片同源上报，上方状态行只读显示（助手档不显示写权限段）。 */
   const [sessionWriteTier, setSessionWriteTier] = useState<Tier | null>(null);
@@ -4019,7 +4269,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (active) setCallLimit(workspaceBudget ?? status.maxCallTokens);
     }).catch(() => { if (active) setCallLimit(null); });
     return () => { active = false; };
-  }, [client]);
+  }, [client, contextBudgetRevision]);
   /**
    * 每次文本变化都写回本机：离开这条会话不丢内容，回到它时按同一作用域恢复。
    * 发送成功、执行清空与「丢弃草稿」都会把 draft 置空，这里随之删除，不留空记录。
@@ -5032,6 +5282,36 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
    */
   const firstMessageAwaitingProjection = confirmedFirstMessageCommandId != null &&
     messages !== null && messages.length === 0;
+  /**
+   * 首条过渡行是否可见（P0-A/P0-B）。三条判据，缺一不可：
+   *   1. 外层确实交来了过渡事实（会话已建、这条命令还没投影回来）；
+   *   2. 消息列表里还没有任何 USER 行——真实消息一读回，过渡行立刻卸载，这就是去重，
+   *      不靠比对正文、不生成假 id（服务端消息始终是最终权威事实）；
+   *   3. 明确失败时，原文已经放回输入框（用户点过「放回输入框继续编辑」）就不再重复摆一遍。
+   * 消息列表还在读（messages === null）时也显示：那正是最需要可读内容的一段。
+   */
+  const firstTransition = firstMessageTransition ?? null;
+  const firstTransitionVisible = firstTransition !== null &&
+    (messages === null || !messages.some((item) => item.role === "USER")) &&
+    !(firstTransition.phase === "failed" && draft.trim() === firstTransition.content.trim());
+  /**
+   * 正文行去重后，状态行仍要可达：用户消息已经投影回来（202 回执可能还没到，也可能已经丢了），
+   * 但这条命令的回执事实仍然属于它自己。此时不再重复摆一份正文，只把状态行挂在列表末尾
+   * 同宽的一条上——核对入口不会因为「消息看起来已经到了」而消失。
+   */
+  const firstTransitionStatusSlot = firstTransition !== null && !firstTransitionVisible &&
+    firstMessagePending !== null && firstMessagePending !== undefined
+    ? <li className="agent-message-slot agent-first-transition-strip"
+        data-testid="assist-first-transition-status">{firstMessagePending}</li>
+    : null;
+  const firstTransitionSlot = firstTransition !== null && firstTransitionVisible
+    ? <FirstMessageTransitionRow transition={firstTransition} pending={firstMessagePending}
+        onRestoreDraft={firstTransition.phase === "failed" ? () => {
+          // 明确失败没有可核对的结果：把冻结原文放回会话输入器，用户改写后作为新命令重发。
+          setDraft(firstTransition.content);
+          composerBoxRef.current?.querySelector("textarea")?.focus();
+        } : undefined} />
+    : null;
   /* 0132：撤回回执写回两行（用户消息与直接回复）。服务端只返回一份终态，
      界面不在本地推算「回退了几条」，逐文件结果仍以回执为准。 */
   function storeRecallReceipt(recall: RelayAssistMessageRecall) {
@@ -5097,6 +5377,16 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (!disposed.current) setRecallReadingId(null);
     }
   }
+  /* 计划卡住在这条会话里，跟着生成它的那条助手消息走：默认给摘要，展开才看全部。
+     消息投影还没读回（或该消息尚未加载）时退到消息流末尾，只渲染一次，不另占转录区外高度。 */
+  const planSourceId = planView?.latest?.sourceMessageId ?? null;
+  const planSourceLoaded = planSourceId !== null &&
+    (messages ?? []).some((item) => item.id === planSourceId);
+  const planCardNode = planView === null || planView.latest === null ? null :
+    <PlanCard view={planView} busy={goalPlanBusy} error={goalPlanError}
+      onExecute={(planId) => void startGoalFromPlanVersion(planId)}
+      onCopy={(markdown) => { void navigator.clipboard?.writeText(markdown); }}
+      onDismiss={() => setPlanView(null)} />;
   const transcriptContent = <>
     {messages === null && !error && showMessagesLoading && <p className="loading-text" role="status">正在读取会话消息…</p>}
     {error && <p className="action-error" role="alert" data-testid="assist-transcript-error">
@@ -5106,8 +5396,11 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     {/* 协作页空会话与全局新对话同一欢迎空态：不同入口新建会话首屏一致。说明句按工作对象
         归属收敛——任务/项目作用域已有所属，不再宣称「不需要先创建项目、任务」。
         首条消息在途/待核对时两种空态都不摆：欢迎不出现（DEV-0110 起就不闪回），
-        「还没有消息。」也删掉——那一行把在途读成空会话，而发送状态行已经说明事实。 */}
-    {messages?.length === 0 && (standalone && !firstMessageInflight && !firstMessageAwaitingProjection
+        「还没有消息。」也删掉——那一行把在途读成空会话，而过渡行已经说明事实。
+        2026-10-30：判据加上过渡行本身——只要过渡行在，消息区就有内容，
+        欢迎页与空态行都不能再叠在上面（P0-B 的「不出现整个消息区空白」）。 */}
+    {messages?.length === 0 && !firstTransitionVisible &&
+      (standalone && !firstMessageInflight && !firstMessageAwaitingProjection
       ? <EmptyWorkWelcome testId="assist-empty-welcome" suggestTestIdPrefix="assist-empty-suggest"
           lede={sessionDirectorySource === "WORKSPACE_DEFAULT"
             ? `这段会话使用设置里的默认目录「${sessionDirectoryName ?? "默认目录"}」，可以直接讨论或描述目标。`
@@ -5118,8 +5411,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           onSuggest={(text) => { setDraft(text); draftRef.current?.focus(); }} />
       : firstMessageInflight || firstMessageAwaitingProjection ? null
         : <p className="helper-text">还没有消息。</p>)}
-    {!!messages?.length && <ol className="agent-message-list">{messages.map((message, index) => {
-      const previous = index > 0 ? messages[index - 1] : undefined;
+    {/* 过渡行与真实消息共用同一个列表（P1-A）：同宽、同轴、同一条阅读列，
+        短会话时一起贴底靠近输入框。它排在最前是因为这条消息本来就是会话的第一条；
+        真实用户消息读回后它自动卸载，两条不会同时出现。 */}
+    {((messages?.length ?? 0) > 0 || firstTransitionSlot !== null || firstTransitionStatusSlot !== null) &&
+      <ol className="agent-message-list">{firstTransitionSlot}{(messages ?? []).map((message, index) => {
+      const previous = index > 0 ? (messages ?? [])[index - 1] : undefined;
       const day = messageDay(message.createdAt);
       const newDay = day !== null && (previous === undefined || messageDay(previous.createdAt) !== day);
       return <li key={message.id} className="agent-message-slot" data-chat-timeline-slot="true"
@@ -5183,19 +5480,28 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             onAnswerDecision={(resolution, answerText) => {
               void answerStateDecision(message.id, resolution, answerText);
             }} />}
+        {planCardNode !== null && message.id === planSourceId &&
+          <div className="agent-message-plan" data-testid="plan-card-in-flow">{planCardNode}</div>}
       </li>;
-    })}</ol>}</>;
+    })}{firstTransitionStatusSlot}</ol>}
+    {planCardNode !== null && !planSourceLoaded &&
+      <div className="agent-message-plan agent-message-plan--fallback"
+        data-testid="plan-card-fallback">{planCardNode}</div>}</>;
 
   // 上下文占用与缓存命中率都取自最近一次有真实用量的 AI 回复。USER 消息没有模型
   // 调用，用量恒为 null；Provider 未上报缓存时命中率那一格不渲染（见 ContextMeter）。
+  // 占用比例不在这里钳到 1：超额是真实读数，浮层要如实显示，只有进度线在渲染时封顶。
   const lastCall = [...(messages ?? [])].reverse().find((message) =>
     message.role === "ASSISTANT" && (message.usage.inputTokens !== null ||
       message.usage.cacheReadTokens !== null || message.usage.cacheCreationTokens !== null)) ?? null;
   const contextRatio = lastCall?.usage.inputTokens !== null && lastCall?.usage.inputTokens !== undefined &&
     callLimit !== null && callLimit > 0
-    ? Math.min(1, lastCall.usage.inputTokens / callLimit) : null;
+    ? lastCall.usage.inputTokens / callLimit : null;
+  // 命中率只在分母可靠时出现：缓存读取量超过上报的完整上下文时，两个读数互相矛盾，
+  // 不拿这个比值去凑一个命中率。
   const cacheHitRate = lastCall !== null && lastCall.usage.cacheReadTokens !== null &&
-    lastCall.usage.inputTokens !== null && lastCall.usage.inputTokens > 0
+    lastCall.usage.inputTokens !== null && lastCall.usage.inputTokens > 0 &&
+    lastCall.usage.cacheReadTokens <= lastCall.usage.inputTokens
     ? lastCall.usage.cacheReadTokens / lastCall.usage.inputTokens : null;
 
   const visibleProposals = embedded ? proposals.filter((proposal) => preferredSkillId === "task-to-execution-contract"
@@ -5249,7 +5555,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   </ProposalContainer>;
 
   const emptyStandaloneWelcome = standalone && firstMessageInflight === false &&
-    !firstMessageAwaitingProjection && messages !== null && messages.length === 0;
+    !firstMessageAwaitingProjection && firstTransitionSlot === null &&
+    messages !== null && messages.length === 0;
   const transcript = <div ref={transcriptRef} className={standalone ? "agent-chat-transcript" : undefined}
     role="region" aria-label="会话消息" tabIndex={0} data-testid="assist-transcript"
     onScroll={(event) => {
@@ -5521,27 +5828,18 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
 
   /* 2026-10-25 用户指令（参照 Codex 的目标行）：目标状态收成输入框上方的一行，
      步骤/进展/成功条件/停止原因在行内展开；不再在转录区顶部占一张常驻大卡。
-     计划卡仍收进 details：只在要挑版本执行时展开，不常驻占高。 */
+     2026-10-30：计划卡改为会话消息流内的紧凑摘要（见 transcriptContent 内的 planCardNode）。 */
   const goalCardBlock = !externalReadBlockedReason && <GoalCard view={goalView}
     busy={goalPlanBusy} error={goalPlanError}
     onPause={() => void runGoalControl("pause")} onCancel={() => void runGoalControl("cancel")}
     onResume={() => void runGoalControl("resume")}
     onConfirm={() => void runGoalControl("complete")} />;
-  const planCardBlock = planView === null || planView.latest === null ? null :
-    <details className="goal-plan-details" data-testid="plan-card-details">
-      <summary>计划（{planView.versions.length} 版）</summary>
-      <PlanCard view={planView} busy={goalPlanBusy} error={goalPlanError}
-        onExecute={(planId) => void startGoalFromPlanVersion(planId)}
-        onExport={(markdown) => { void navigator.clipboard?.writeText(markdown); }}
-        onDismiss={() => setPlanView(null)} />
-    </details>;
 
   return <section className={standalone ? "surface-panel agent-chat-conversation" : "surface-panel"} data-testid="assist-session"
     onKeyDown={onPanelKeyDown}>
     {!externalReadBlockedReason && embedded && proposalPanel}
     {!externalReadBlockedReason && <div className={standalone ? "agent-chat-conversation-heading" : embedded ? "embedded-assist-session-heading" : undefined}><div>{!embedded && <h2>{standalone ? "对话" : "消息与提案"}</h2>}{standalone || embedded ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.status} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><button className="secondary-button" type="button" data-testid="assist-refresh" onClick={() => { void refresh(); /* 刷新同时覆盖计划/目标投影（#122）：投影读取失败后，页内刷新就是恢复入口之一。 */ setProjectionReload((value) => value + 1); }}>{standalone ? "刷新" : "刷新消息与提案"}</button></div>}
     {!externalReadBlockedReason && projectionReadError !== null && <div className="warning-callout" role="alert" data-testid="goal-projection-read-error"><p>{projectionReadError}读取恢复前不显示目标状态行，也不宣称这个会话没有目标。</p><button className="secondary-button" type="button" data-testid="goal-projection-retry" onClick={() => setProjectionReload((value) => value + 1)}>重试读取目标状态</button></div>}
-    {!externalReadBlockedReason && planCardBlock}
     {!externalReadBlockedReason && (embedded ? <details className="embedded-assist-history"><summary>查看会话历史与原始建议</summary>{transcript}</details> : <div className={standalone ? "agent-chat-transcript-shell" : undefined} data-top-fade={awayFromTop ? "on" : undefined}
         data-bottom-fade={awayFromBottom ? "on" : undefined}>{transcript}
       {/* 时间线只消费已加载消息与消息流容器；嵌入态的转录区在 details 里没有自己的滚动容器，
@@ -5741,7 +6039,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         {/* 工具行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
             上下文计量环与模型下拉收在发送键左边，两枚同进同退，窄栏换行时不拆开；与首条输入器同位。 */}
         <div className="agent-chat-composer-tail">
-          <ContextMeter ratio={contextRatio} hitRate={cacheHitRate} call={lastCall} limit={callLimit} />
+          <ContextMeter ratio={contextRatio} hitRate={cacheHitRate} call={lastCall} limit={callLimit}
+            client={client} onBudgetRefresh={() => setContextBudgetRevision((revision) => revision + 1)} />
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
             sessionId={session.id}
             selectedModel={selectedModel} disabled={busy || pending !== null || writeBlockedReason !== null}

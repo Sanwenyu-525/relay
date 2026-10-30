@@ -197,7 +197,9 @@ type Composer = {
   mention: Box[]; mentionFirst: Box[]; chip: Box[]; chipIcon: Box | null; chipLabel: Box | null;
   chipSplit: string[]; labelClipped: boolean[]; labelOverflow: number[];
   afterMention: ({ left: number; top: number; height: number } | null)[];
-  band: { height: string; background: string; radius: string; left: string; right: string } | null;
+  /** 标识的外观（2026-10-29 第四轮 Codex 风格）：无容器底、无阴影、无内缩。 */
+  skin: { background: string; pseudoBackground: string; boxShadow: string; filter: string;
+    paddingLeft: string; paddingRight: string; gap: string; color: string } | null;
   parity: Record<string, boolean | number | string>;
   overflowX: boolean; mirrorClip: Box;
   /** 跨行降级三件套（2026-10-29）：芯片是否真的画了、原文是否可见、有没有留下隐形占位。 */
@@ -279,7 +281,12 @@ function measureComposer(): Record<string, unknown> {
     .filter(({ index }) => painted[index] === true && (fragmentRects[index]?.length ?? 0) !== 1)
     .map(({ index }) => `第 ${index + 1} 枚芯片画在 ${fragmentRects[index]?.length ?? 0} 段片段上`);
   const chip = chips[0];
-  const band = chip ? getComputedStyle(chip, "::before") : null;
+  const skin = chip ? (() => {
+    const style = getComputedStyle(chip);
+    return { background: style.backgroundColor, pseudoBackground: getComputedStyle(chip, "::before").backgroundColor,
+      boxShadow: style.boxShadow, filter: style.filter, paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight, gap: style.gap, color: style.color };
+  })() : null;
   const contentWidth = (style: CSSStyleDeclaration, client: number) => round(client
     - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
     - Number.parseFloat(style.borderLeftWidth) - Number.parseFloat(style.borderRightWidth));
@@ -294,8 +301,7 @@ function measureComposer(): Record<string, unknown> {
     labelClipped: labelOverflow.map((value) => value > 0.5),
     labelOverflow,
     afterMention,
-    band: band === null ? null : { height: band.height, background: band.backgroundColor,
-      radius: band.borderRadius, left: band.left, right: band.right },
+    skin,
     // 光标对得上文字的唯一前提：两侧逐项同参数。
     parity: {
       fontFamily: same(taStyle.fontFamily, mStyle.fontFamily),
@@ -423,7 +429,7 @@ async function expectDegradationIsLayoutNeutral(page: Page, where: string): Prom
   expect(diff.fragments, `${where}：至少量到一段文字`).toBeGreaterThan(0);
 }
 
-test("① 单枚芯片＝原文矩形：位置误差 ≤1px，右缘不越过原文终点，容器按 token 画", async ({ page }) => {
+test("① 单枚芯片＝原文矩形：位置误差 ≤1px，右缘不越过原文终点，外观无底无影", async ({ page }) => {
   await openConversation(page);
   await fillDraft(page, "@电脑操控 打开记事本", ["computer"]);
   const m = await page.evaluate(measureComposer) as unknown as Composer;
@@ -456,12 +462,15 @@ test("① 单枚芯片＝原文矩形：位置误差 ≤1px，右缘不越过原
   expect(m.labelClipped, `名称不得被裁成省略号（溢出 ${m.labelOverflow[0]}px）`).toEqual([false]);
   expect(icon.t + icon.h / 2, "图标与名称垂直居中同一中线").toBeCloseTo(label.t + label.h / 2, 0);
 
-  const band = m.band!;
-  expect(Number.parseFloat(band.height), "容器高 = body × lineHeight.snug（21.6px 档）").toBeCloseTo(21.6, 1);
-  expect(band.radius, "容器用 radius.badge").toBe("6px");
-  expect(band.left, "容器贴芯片左缘").toBe("0px");
-  expect(band.right, "容器贴芯片右缘").toBe("0px");
-  expect(band.background, "容器底用 selection.bg token").toBe("rgb(237, 245, 239)");
+  const skin = m.skin!;
+  expect(skin.background, "默认透明背景：不铺整块色，也不做胶囊（Codex 风格，2026-10-29）").toBe("rgba(0, 0, 0, 0)");
+  expect(skin.pseudoBackground, "容器底伪元素也一起收掉（不是只把颜色调淡）").toBe("rgba(0, 0, 0, 0)");
+  expect(skin.boxShadow, "不加阴影/光晕/浮起").toBe("none");
+  expect(skin.filter, "不加 drop-shadow").toBe("none");
+  expect(skin.paddingLeft, "标签左右不加留白（宽度预算全给名称）").toBe("0px");
+  expect(skin.paddingRight).toBe("0px");
+  expect(Number.parseFloat(skin.gap), "图标与名称只留 space.0.5（2px），紧凑排列").toBeCloseTo(2, 1);
+  expect(skin.color, "文字取所在正文的前景色，不用插件绿").toBe("rgb(32, 51, 41)");
   await page.screenshot({ path: `${shots}/editing-single-chip.png` });
   await page.locator(".agent-chat-composer").screenshot({ path: `${shots}/closeup-editing-single.png` });
 });
@@ -783,7 +792,6 @@ test("⑪ 消息只读态：图标+名称与正文同流，不显示 @，不给�
     const plain = all.find((el) => el.textContent === "电脑操控 打开记事本" && !el.querySelector("[data-plugin-mention]"))!;
     const icon = chip.querySelector(".plugin-icon") as HTMLElement;
     const label = chip.querySelector(".plugin-chip-label") as HTMLElement;
-    const band = getComputedStyle(chip, "::before");
     // 同一条消息里 mention 之后的正文（真实文本节点）行盒。
     const tail = Array.from(rich.childNodes).find((node) => node.nodeType === 3
       && (node as Text).data.includes("打开")) as Text;
@@ -803,8 +811,8 @@ test("⑪ 消息只读态：图标+名称与正文同流，不显示 @，不给�
         + Number.parseFloat(getComputedStyle(rich).borderLeftWidth)),
       text: rich.textContent,
       style: { fontSize: getComputedStyle(chip).fontSize, display: getComputedStyle(chip).display,
-        color: getComputedStyle(chip).color, band: band.backgroundColor, radius: band.borderRadius,
-        bandHeight: band.height, gap: getComputedStyle(chip).gap },
+        color: getComputedStyle(chip).color, background: getComputedStyle(chip).backgroundColor,
+        boxShadow: getComputedStyle(chip).boxShadow, gap: getComputedStyle(chip).gap },
       overflowX: document.documentElement.scrollWidth > window.innerWidth + 1
     };
   });
@@ -813,9 +821,10 @@ test("⑪ 消息只读态：图标+名称与正文同流，不显示 @，不给�
   expect(m.chip.h, "标识行盒 = 正文行盒（16px × 1.5），不给气泡多出一行").toBe(Number(m.lineHeight.replace("px", "")));
   expect(m.icon.w, "只读态图标与正文同档（body 16px）").toBe(16);
   expect(m.style.fontSize, "只读态名称 = body 字号").toBe("16px");
-  expect(Number.parseFloat(m.style.bandHeight), "容器底比行盒略矮（snug 档 21.6px）").toBeCloseTo(21.6, 1);
-  expect(m.style.radius, "同一套容器圆角").toBe("6px");
-  expect(m.style.color, "同一套标识色").toBe("rgb(32, 93, 71)");
+  expect(m.style.color, "名称取消息正文前景色（不用插件绿，2026-10-29）").toBe("rgb(32, 51, 41)");
+  expect(m.style.background, "消息里的标识也默认透明，不铺底色").toBe("rgba(0, 0, 0, 0)");
+  expect(m.style.boxShadow, "消息里的标识同样不加阴影").toBe("none");
+  expect(Number.parseFloat(m.style.gap), "图标与名称同样只留 2px（与输入器同一套规范）").toBeCloseTo(2, 1);
   expect(m.label.t + m.label.h / 2, "名称与正文同一垂直中线（基线不跳）")
     .toBeCloseTo(m.tail.t + m.tail.h / 2, 0);
   expect(m.tail.l - m.chip.r, "标识与后续正文同流、不重叠").toBeGreaterThanOrEqual(0);
@@ -846,7 +855,7 @@ test("⑫ 重新加载：同一份历史再读一次仍按原文显示，展示�
   expect(await page.evaluate(() => document.querySelector(".assist-message-content")!.textContent)).toBe(shown);
 });
 
-test("⑬ 可读性与高对比：标识文字对容器底达到 AA，forced-colors 下补系统描边", async ({ page }) => {
+test("⑬ 可读性与高对比：标识文字对气泡底达到 AA，forced-colors 下补系统描边", async ({ page }) => {
   await openConversation(page, [message(userMessageId, "1", "USER", "@电脑操控 打开记事本")]);
   await page.locator("[data-plugin-mention=\"computer\"]").waitFor({ timeout: 20_000 });
   const ratio = await page.evaluate(() => {
@@ -859,32 +868,31 @@ test("⑬ 可读性与高对比：标识文字对容器底达到 AA，forced-col
     };
     const chip = document.querySelector("[data-plugin-mention=\"computer\"]") as HTMLElement;
     const content = chip.closest(".assist-message-content") as HTMLElement;
-    const band = getComputedStyle(chip, "::before");
     const bubble = getComputedStyle(content).backgroundColor;
     return {
-      labelOnBand: contrast(getComputedStyle(chip.querySelector(".plugin-chip-label")!).color, band.backgroundColor),
       labelOnBubble: contrast(getComputedStyle(chip.querySelector(".plugin-chip-label")!).color, bubble),
       bodyOnBubble: contrast(getComputedStyle(content).color, bubble),
-      bandColor: band.backgroundColor, bubbleColor: bubble,
-      bandDiffersFromBubble: band.backgroundColor !== bubble
+      bubbleColor: bubble,
+      chipBackground: getComputedStyle(chip).backgroundColor,
+      chipShadow: getComputedStyle(chip).boxShadow
     };
   });
-  expect(ratio.labelOnBand, `标识文字对容器底：${JSON.stringify(ratio)}`).toBeGreaterThanOrEqual(4.5);
-  expect(ratio.labelOnBubble, "标识文字即使落在气泡底上也读得出（容器底不是靠对比承担信息）")
-    .toBeGreaterThanOrEqual(4.5);
+  expect(ratio.labelOnBubble, `标识文字对气泡底：${JSON.stringify(ratio)}`).toBeGreaterThanOrEqual(4.5);
   expect(ratio.bodyOnBubble, "正文对比度不受影响").toBeGreaterThanOrEqual(4.5);
-  expect(ratio.bandDiffersFromBubble, "容器底确实画出来了（比气泡略起的色层）").toBe(true);
+  expect(ratio.chipBackground, "标识没有自己的底色，可读性直接由正文色对气泡底承担")
+    .toBe("rgba(0, 0, 0, 0)");
+  expect(ratio.chipShadow, "没有用阴影给标识找边界").toBe("none");
 
-  // forced-colors（高对比模式）：容器只剩系统描边，标识仍成立。
+  // forced-colors（高对比模式）：没有容器底可依赖，标识由系统描边 + 图标承担。
   await page.emulateMedia({ forcedColors: "active" });
   await page.waitForTimeout(120);
   const forced = await page.evaluate(() => {
     const chip = document.querySelector("[data-plugin-mention=\"computer\"]") as HTMLElement;
-    const band = getComputedStyle(chip, "::before");
-    return { border: `${band.borderTopWidth} ${band.borderTopStyle}`, visible: chip.getBoundingClientRect().width > 0,
+    const style = getComputedStyle(chip);
+    return { outline: `${style.outlineWidth} ${style.outlineStyle}`, visible: chip.getBoundingClientRect().width > 0,
       label: getComputedStyle(chip.querySelector(".plugin-chip-label")!).color };
   });
-  expect(forced.border, "高对比下补系统描边").toBe("1px solid");
+  expect(forced.outline, "高对比下补系统描边").toBe("1px solid");
   expect(forced.visible, "高对比下标识仍在版面上").toBe(true);
   await page.emulateMedia({ forcedColors: null });
   await page.waitForTimeout(120);
@@ -1103,6 +1111,80 @@ test("⑱ 跨行降级 + 发送中禁用态：只有一层原文可见，且用�
   expect(state.mirrorText, "发送中草稿文本不变").toBe(splitValue);
   await page.screenshot({ path: `${shots}/split-disabled-pending.png` });
   await page.locator(".agent-chat-composer").screenshot({ path: `${shots}/closeup-split-disabled.png` });
+});
+
+/* ⑲ 输入器与历史消息同一套视觉语言（2026-10-29 P1）：两侧都是 PluginChip。允许的差异只有
+   名称字号——编辑态受 `@标签` 原文字宽预算约束留在 meta 档，只读态与消息正文同档 body；
+   透明背景、无阴影、2px 图标间距、正文前景色、16px 图标必须逐项一致。 */
+test("⑲ 输入器芯片与历史消息芯片：表面、间距、前景色、图标一致", async ({ page }) => {
+  await openConversation(page, [message(userMessageId, "1", "USER", "@电脑操控 打开记事本")]);
+  await page.locator('[data-plugin-mention="computer"]').waitFor({ timeout: 20_000 });
+  await fillDraft(page, "@电脑操控 打开记事本", ["computer"]);
+  const pair = await page.evaluate(() => {
+    const read = (el: Element) => {
+      const style = getComputedStyle(el);
+      return { background: style.backgroundColor, boxShadow: style.boxShadow, filter: style.filter,
+        paddingLeft: style.paddingLeft, paddingRight: style.paddingRight, gap: style.gap,
+        color: style.color, fontSize: style.fontSize,
+        icon: Math.round(el.querySelector(".plugin-icon")!.getBoundingClientRect().width * 100) / 100 };
+    };
+    return { editing: read(document.querySelector(".chat-command-chip")!),
+      message: read(document.querySelector('[data-plugin-mention="computer"]')!) };
+  });
+  for (const key of ["background", "boxShadow", "filter", "paddingLeft", "paddingRight", "gap", "color", "icon"] as const) {
+    expect(pair.editing[key], `两态的 ${key} 必须一致：${JSON.stringify(pair)}`).toBe(pair.message[key]);
+  }
+  expect(pair.editing.background, "两态都默认透明").toBe("rgba(0, 0, 0, 0)");
+  expect(pair.editing.boxShadow, "两态都没有阴影").toBe("none");
+  expect(pair.editing.gap, "两态图标间距都是 space.0.5").toBe("2px");
+  expect(pair.editing.icon, "两态图标都是 body 档 16px").toBe(16);
+  expect(pair.editing.fontSize, "编辑态名称受字宽预算约束在 meta 档").toBe("14px");
+  expect(pair.message.fontSize, "只读态名称与消息正文同档").toBe("16px");
+  await page.screenshot({ path: `${shots}/chip-editor-vs-message.png` });
+});
+
+/* ⑳ 外观前后对照（2026-10-29 V3）：只注入上一轮的标识皮肤（浅绿容器底 + 插件绿文字 +
+   左右内缩），不改 DOM、不改产品代码。同一份内容分别截「上一轮」与「本轮」两态，
+   同时断言注入确实画出了容器底、而本轮的 ::before 与背景都是透明的。 */
+test("⑳ 外观前后对照：上一轮容器底退场，本轮透明内联", async ({ page }) => {
+  const v2Rules = ".plugin-chip{isolation:isolate!important;"
+    + "padding-inline:2px!important;color:#205D47!important}"
+    + ".plugin-chip-static{position:relative!important}"
+    + ".plugin-chip::before{content:\"\"!important;position:absolute!important;inset-inline:0!important;"
+    + "top:50%!important;height:21.6px!important;transform:translateY(-50%)!important;"
+    + "border-radius:6px!important;background:#EDF5EF!important;z-index:-1!important}";
+  await openConversation(page, [message(userMessageId, "1", "USER", "@电脑操控 打开记事本")]);
+  await page.locator('[data-plugin-mention="computer"]').waitFor({ timeout: 20_000 });
+  await fillDraft(page, "@电脑操控 打开记事本", ["computer"]);
+  const skin = () => page.evaluate(() => {
+    const editing = document.querySelector(".chat-command-chip") as HTMLElement;
+    const message = document.querySelector('[data-plugin-mention="computer"]') as HTMLElement;
+    const read = (el: HTMLElement) => ({ background: getComputedStyle(el).backgroundColor,
+      band: getComputedStyle(el, "::before").backgroundColor, color: getComputedStyle(el).color });
+    return { editing: read(editing), message: read(message) };
+  });
+  const after = await skin();
+  await page.screenshot({ path: `${shots}/chip-before-after-after.png` });
+  await page.locator(".agent-chat-composer").screenshot({ path: `${shots}/chip-before-after-editor-after.png` });
+
+  await page.addStyleTag({ content: v2Rules });
+  await page.waitForTimeout(150);
+  const before = await skin();
+  await page.screenshot({ path: `${shots}/chip-before-after-before.png` });
+  await page.locator(".agent-chat-composer").screenshot({ path: `${shots}/chip-before-after-editor-before.png` });
+  await page.evaluate(() => {
+    document.querySelectorAll("style").forEach((el) => { if (el.textContent?.includes(".plugin-chip::before")) el.remove(); });
+  });
+
+  // 注入的「上一轮」皮肤确实画出了容器底与插件绿文字（截图不是空对照）。
+  expect(before.editing.band, "上一轮编辑态有浅绿容器底").toBe("rgb(237, 245, 239)");
+  expect(before.message.band, "上一轮消息态同样有容器底").toBe("rgb(237, 245, 239)");
+  expect(before.editing.color, "上一轮文字用插件绿").toBe("rgb(32, 93, 71)");
+  // 本轮：没有容器底、没有背景、文字用正文前景色。
+  expect(after.editing.band, "本轮编辑态不画容器底").toBe("rgba(0, 0, 0, 0)");
+  expect(after.message.band, "本轮消息态不画容器底").toBe("rgba(0, 0, 0, 0)");
+  expect(after.editing.background).toBe("rgba(0, 0, 0, 0)");
+  expect(after.editing.color, "本轮文字取正文前景色").toBe("rgb(32, 51, 41)");
 });
 
 /* ⓪ 修复前后对照（同一套 DOM 与产品代码，只把宽度算法退回上一轮的写法）。

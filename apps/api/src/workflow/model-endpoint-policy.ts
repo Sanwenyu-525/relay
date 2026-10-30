@@ -83,17 +83,19 @@ export function guardedModelFetch(baseUrl: string,
 function requireCompleteSse(response: Response): Response {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
+  const maxLineChars = 2 * 1024 * 1024;
   let pending = '';
   let doneMarker = false;
   const scan = (text: string): void => {
     pending += text;
     let newline = pending.indexOf('\n');
     while (newline !== -1) {
+      if (newline > maxLineChars) throw new Error('MODEL_SSE_LINE_TOO_LARGE');
       if (pending.slice(0, newline).trim() === 'data: [DONE]') doneMarker = true;
       pending = pending.slice(newline + 1);
       newline = pending.indexOf('\n');
     }
-    if (pending.length > 2 * 1024 * 1024) throw new Error('MODEL_SSE_LINE_TOO_LARGE');
+    if (pending.length > maxLineChars) throw new Error('MODEL_SSE_LINE_TOO_LARGE');
   };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -103,14 +105,23 @@ function requireCompleteSse(response: Response): Response {
           scan(decoder.decode());
           if (pending.trim() === 'data: [DONE]') doneMarker = true;
           if (!doneMarker) throw new Error('MODEL_STREAM_INCOMPLETE');
+          reader.releaseLock();
           controller.close();
           return;
         }
         scan(decoder.decode(next.value, { stream: true }));
         controller.enqueue(next.value);
-      } catch (error) { controller.error(error); }
+      } catch (error) {
+        void reader.cancel(error).catch(() => undefined);
+        reader.releaseLock();
+        controller.error(error);
+      }
     },
-    cancel(reason) { return reader.cancel(reason); },
+    cancel(reason) {
+      const cancelled = reader.cancel(reason);
+      reader.releaseLock();
+      return cancelled;
+    },
   });
   return new Response(body, { status: response.status, statusText: response.statusText,
     headers: response.headers });

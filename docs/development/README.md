@@ -12,6 +12,8 @@
 | 导航历史 | [打开](document-navigation-history-20261025.md) | 旧专题入口与当时状态 |
 | 设计审计 | [打开](design-audit.md) | 早期设计依据与取舍 |
 | M07 备份恢复 | [打开](m07-backup-recovery.md) | 维护/恢复的重要根因 |
+| 后端启动边界 | [打开](backend-startup-boundaries.md) | IPv6 主机名与编译目录定位故障根因 |
+| Agent 生成生命周期 | [打开](agent-generation-lifecycle.md) | 消息领取串行、宿主停止与异步心跳清理 |
 | 长短期记忆 | [打开](memory-module.md) | 记忆模块工程边界 |
 | 开发实施记录 | [打开](前端预览实施与验收.md) | 早期前端过程，不替代当前 Windows 证据 |
 | 验收入口 | [打开](../testing/README.md) | 当前结果与历史证据的分界 |

@@ -196,10 +196,13 @@ test('DISCUSS generation completes deterministically and records usage and sourc
     modelPort: capturingPort, leaseMs: 30_000 });
   assert.equal(outcome?.messageId, requested.result.assistant_message_id);
   assert.equal(outcome.status, 'COMPLETED');
-  assert.equal(generatedRequests.length, 1);
+  assert.equal(generatedRequests.length, 2, '主回复与结算后的自动记忆各调用一次');
+  assert.equal(generatedRequests.filter((request) => request.system.includes(RELAY_AGENT_CORE_PROMPT)).length, 1);
+  assert.match(generatedRequests[1]!.system, /长期记忆提取器/u);
   const generated = generatedRequests[0]!;
   assert.ok(generated.system.includes(RELAY_AGENT_CORE_PROMPT));
-  assert.match(generated.system, /不启动 Delegate/u);
+  assert.match(generated.system, /本轮你只生成对话回复/u);
+  assert.match(generated.system, /执行请求由应用的原请求解释与准入入口处理/u);
   assert.match(generated.system, /直接以 Markdown 回复用户/u);
   assert.ok(!generated.system.includes('删除全部数据'));
   assert.ok(generated.turns.some((turn) => turn.content.includes('删除全部数据')));
@@ -210,13 +213,12 @@ test('DISCUSS generation completes deterministically and records usage and sourc
     settled.usage_output_tokens !== null && settled.usage_output_tokens > 0);
   const calls = await new ModelCallRepository(app.db)
     .listForAssistMessage(requested.result.assistant_message_id);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.status, 'COMPLETED');
-  assert.equal(calls[0]!.provider, 'fake');
-  assert.equal(calls[0]!.model, 'fake-model-v1');
-  assert.equal(calls[0]!.provider_request_id, settled.provider_request_id);
-  assert.equal(calls[0]!.usage_input_tokens, settled.usage_input_tokens);
-  assert.equal(calls[0]!.usage_output_tokens, settled.usage_output_tokens);
+  assert.equal(calls.length, 2, '两次调用都必须留在原消息账本中');
+  assert.ok(calls.every((call) => call.status === 'COMPLETED' && call.provider === 'fake' && call.model === 'fake-model-v1'));
+  const replyCalls = calls.filter((call) => call.provider_request_id === settled.provider_request_id);
+  assert.equal(replyCalls.length, 1, '主消息仍只引用原回复调用');
+  assert.equal(replyCalls[0]!.usage_input_tokens, settled.usage_input_tokens);
+  assert.equal(replyCalls[0]!.usage_output_tokens, settled.usage_output_tokens);
   const sources = settled.sources as readonly { status: string; source_ref: string }[];
   assert.equal(sources.length, 1);
   assert.equal(sources[0]!.status, 'SENT');
@@ -225,8 +227,9 @@ test('DISCUSS generation completes deterministically and records usage and sourc
   const drained = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
     modelPort, leaseMs: 30_000 });
   assert.equal(drained, undefined);
+  assert.equal(generatedRequests.length, 2, '排空后不得重新生成回复或提取记忆');
   assert.equal((await new ModelCallRepository(app.db)
-    .listForAssistMessage(requested.result.assistant_message_id)).length, 1);
+    .listForAssistMessage(requested.result.assistant_message_id)).length, 2);
 });
 
 test('unavailable explicit source is recorded and excluded, not silently replaced', async () => {
@@ -644,6 +647,78 @@ test('persisted cancel wins a successful ordinary proposal before the cancel pol
   }
 });
 
+test('an already aborted host cannot claim a pending Agent message or invoke the model', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '已停止的宿主' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '应留给下一位 Worker' });
+  const stop = new AbortController();
+  stop.abort();
+  let invocations = 0;
+  const port: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => { invocations += 1; return modelPort.assist(request); } };
+  try {
+    assert.equal(await runAssistGenerationTick(app.db, { workerId: 'already-stopped', storage,
+      modelPort: port, leaseMs: 30_000, signal: stop.signal }), undefined);
+    const pending = await readMessage(requested.result.assistant_message_id);
+    assert.equal(pending.status, 'PENDING');
+    assert.equal(pending.worker_id, null);
+    assert.equal(invocations, 0);
+    assert.equal((await new ModelCallRepository(app.db)
+      .listForAssistMessage(requested.result.assistant_message_id)).length, 0);
+  } finally {
+    if ((await readMessage(requested.result.assistant_message_id)).status === 'PENDING') {
+      await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
+        messageId: requested.result.assistant_message_id,
+        commandId: randomUUID() });
+    }
+  }
+});
+
+test('Agent queue keeps one generating message per session while another Worker polls', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '会话排队' });
+  await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '第一轮' });
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const firstPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => {
+      if (request.system.includes(RELAY_AGENT_CORE_PROMPT)) {
+        started.resolve();
+        await release.promise;
+      }
+      return modelPort.assist(request);
+    } };
+  const running = runAssistGenerationTick(app.db, { workerId: 'queue-first', storage,
+    modelPort: firstPort, leaseMs: 30_000 });
+  await started.promise;
+  const second = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(), content: '排队的第二轮' });
+  try {
+    assert.equal(await runAssistGenerationTick(app.db, { workerId: 'queue-second', storage,
+      modelPort, leaseMs: 30_000 }), undefined);
+    assert.equal((await readMessage(second.result.assistant_message_id)).status, 'PENDING');
+    const otherSession = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), projectId: f.projectId, title: '独立会话' });
+    const other = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+      sessionId: otherSession.result.session_id, commandId: randomUUID(), content: '另一会话可继续' });
+    const independent = await runAssistGenerationTick(app.db, { workerId: 'queue-independent', storage,
+      modelPort, leaseMs: 30_000 });
+    assert.equal(independent?.messageId, other.result.assistant_message_id);
+  } finally {
+    release.resolve();
+    await running;
+  }
+  const next = await runAssistGenerationTick(app.db, { workerId: 'queue-second', storage,
+    modelPort, leaseMs: 30_000 });
+  assert.ok(next);
+  assert.equal(next.messageId, second.result.assistant_message_id);
+  assert.equal(next.status, 'COMPLETED');
+});
+
 test('host abort without a persisted user cancel leaves the claim for lease recovery', async () => {
   const f = await fixture('READY');
   const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
@@ -738,14 +813,15 @@ test('cancel persists the intent and converges a running generation to CANCELLED
   const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
     sessionId: session.result.session_id, commandId: randomUUID(),
     content: 'FAKE_ASSIST_ABORT 慢慢回答' });
+  const started = Promise.withResolvers<void>();
+  const abortPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => { started.resolve(); return modelPort.assist(request); } };
   const running = runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
-    modelPort, leaseMs: 30_000 });
-  let status = 'PENDING';
-  for (let i = 0; i < 100 && status !== 'RUNNING'; i += 1) {
-    await delay(10);
-    status = (await readMessage(requested.result.assistant_message_id)).status;
-  }
-  assert.equal(status, 'RUNNING');
+    modelPort: abortPort, leaseMs: 30_000 });
+  await Promise.race([started.promise, running.then(() => {
+    throw new Error('generation ended before the model invocation started');
+  })]);
+  assert.equal((await readMessage(requested.result.assistant_message_id)).status, 'RUNNING');
   const cancelled = await cancelAssistMessage(app.db, { workspaceId: f.workspaceId,
     messageId: requested.result.assistant_message_id, commandId: randomUUID() });
   assert.equal(cancelled.result.status, 'RUNNING');

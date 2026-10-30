@@ -1,0 +1,238 @@
+/* 统一活动行（2026-10-29 V3）。
+   视觉语言：**没有卡片**。每行只是消息列里的一行字，靠状态图标、字重与层级区分，
+   不靠边框、底色或阴影——五十行调用如果每行都是卡片，整段过程会比正文更重。
+   只有「此刻正在执行的那一行」允许有底色（极浅的蓝），因为那是唯一的焦点。
+   数值全部引用既有 token；本文件只新增布局比例。 */
+
+/* 行容器：上下留 2px 呼吸，行间靠 gap 而不是 margin，
+   这样连接线可以按「行高 + gap」精确算长度，不靠猜。 */
+.activity-item { display: block; min-width: 0; padding-block: 1px; }
+
+/* 五个位置固定：状态图标 · 动作 · 对象 · 状态/耗时 · 展开。
+   基线对齐，让中文动作词、等宽路径与小字号状态词落在同一条阅读线上。 */
+.activity-item-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1) var(--relay-space-2);
+  margin: 0;
+  min-width: 0;
+  padding: 1px var(--relay-space-1);
+  border-radius: var(--relay-radius-badge);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 状态图标列：固定 1rem 宽，动作词因此永远从同一条竖线开始。
+   纵向时间线的连接线挂在这一列上（见下），所以整条线也永远对齐图标中心。 */
+.activity-item-status {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  align-self: center;
+  color: var(--relay-color-text-muted);
+}
+/* 全局 svg 规则给了 20px 固定尺寸，这里按列宽收敛，图标才跟着文字一起缩。 */
+.activity-item-status > svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: var(--relay-control-icon-stroke);
+  flex: none;
+}
+
+/* 状态色：只有这一列与右侧状态词允许变色。 */
+.activity-item-status[data-tone="active"] { color: var(--relay-color-status-running-text); }
+.activity-item-status[data-tone="attention"] { color: var(--relay-color-status-warning-text); }
+.activity-item-status[data-tone="negative"],
+.activity-item-status[data-failed="true"] { color: var(--relay-color-status-danger-text); }
+.activity-item-status[data-tone="neutral"] { color: var(--relay-color-text-muted); }
+
+/* 纵向时间线：每行（除首行）在图标上方补一段 1px 连接线。
+   长度 = 行间距 + 本行上内边距 + 图标半径，因此线与线首尾相接，不出现断口。
+   用 ::before 而不是列表级绝对定位，是为了分组/折叠后线仍然正确。 */
+.activity-item + .activity-item .activity-item-status::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  width: var(--relay-border-width);
+  height: calc(var(--relay-space-1) + 2px);
+  transform: translateX(-50%);
+  background: var(--relay-color-border-separator);
+}
+
+.activity-item-verb { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-medium); }
+
+/* 对象：目录退到次级色，文件名留在次级偏主色。长路径在任意位置折行，绝不撑破消息列。 */
+.activity-item-target {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  overflow-wrap: anywhere;
+}
+.activity-item-dir { color: var(--relay-color-text-muted); }
+.activity-item-name { color: var(--relay-color-text-secondary); }
+
+/* 工具名：核对用，但不与动作词抢注意力。
+   全局 `.tech-details code` 会把 code 变成 block（并加 overflow-wrap），这里显式拉回行内。 */
+.activity-item .activity-item-tool {
+  display: inline;
+  flex: none;
+  color: var(--relay-color-text-muted);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+/* 右端一组：状态词 + 耗时。整体靠右，但不参与折行竞争——
+   对象折行时它自己换到下一行右缘，行高变化最小。 */
+.activity-item-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.activity-item-state {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+/* 已结算且无例外：状态词退到视觉隐藏。
+   一行一个「已结算」在 50 行列表里只是噪音——对勾形状已经说完了这件事，
+   而文字仍在 DOM 里，屏幕阅读器与断言照常读到（§9.1「文字或形状」，不是「颜色」）。 */
+.activity-item-state[data-quiet="true"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.activity-item[data-tone="attention"] .activity-item-state { color: var(--relay-color-status-warning-text); }
+.activity-item[data-tone="negative"] .activity-item-state,
+.activity-item[data-failed="true"] .activity-item-state { color: var(--relay-color-status-danger-text); }
+.activity-item[data-tone="active"] .activity-item-state { color: var(--relay-color-status-running-text); }
+
+.activity-item-elapsed {
+  flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 当前活动行：全列表唯一的焦点。极浅蓝底 + 左侧 1px 强调线，
+   不做整块卡片、不加阴影——它只是把读者的眼睛带到正在动的那一行。 */
+.activity-item[data-current="true"] > .activity-item-head {
+  background: var(--relay-color-status-running-bg);
+  box-shadow: inset 2px 0 0 var(--relay-color-status-running-text);
+}
+.activity-item[data-current="true"] .activity-item-verb { color: var(--relay-color-text-primary); }
+
+/* 展开控件：只有真的能展开时才出现。旋转 90° 表示展开，动效可关。 */
+.activity-item-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  margin: calc(var(--relay-space-1) * -1) 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-muted);
+  cursor: pointer;
+  transition: color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.activity-item-toggle > svg {
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.activity-item-toggle:hover { color: var(--relay-color-text-primary); background: var(--relay-color-bg-subtle); }
+.activity-item-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.activity-item-toggle:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 常显次要信息（拒绝原因、放弃原因）：不需要展开就能读到，因为它本身就是风险信息。
+   缩进到动作词那一列，与第三层详情同一条左缘。 */
+.activity-item-note {
+  margin: var(--relay-space-1) 0 0 calc(1rem + var(--relay-space-2));
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+/* 第三层技术详情：缩进到动作词那一列，与行首图标对齐成一条干净的竖线，
+   但**不画**那条竖线本身——用缩进表达层级比用装饰线更轻。 */
+.activity-item-detail {
+  margin: var(--relay-space-1) 0 var(--relay-space-2) calc(1rem + var(--relay-space-2));
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+/* 共享详情渲染器（ActivityDetail）的排版：标签 caption、值等宽、块间距统一一档。 */
+.activity-detail { display: grid; gap: var(--relay-space-1); }
+.activity-detail-label {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+.activity-detail-meta {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  overflow-wrap: anywhere;
+}
+.activity-item-detail > :first-child { margin-top: 0; }
+.activity-item-detail > :last-child { margin-bottom: 0; }
+/* 参数与原始回执是代码，不是正文：等宽、限高、框内滚动，不让一段 JSON 把整轮顶出视野。 */
+.activity-item-detail pre {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-surface);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 唯一的主进度动效：只有当前行的图标转动，1 圈/秒，线性。
+   关掉动效后图标退化为静止的弧，状态词照旧可读。 */
+.activity-item-spin { animation: activity-item-rotate var(--relay-motion-loop-spin) linear infinite; }
+@keyframes activity-item-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-item-spin { animation: none; }
+  .activity-item-toggle > svg { transition: none; }
+}
+html[data-motion="off"] .activity-item-spin { animation: none; }
+html[data-motion="off"] .activity-item-toggle > svg { transition: none; }
+
+/* 窄窗口：状态与耗时换到下一行右缘，不压缩对象文本，也不产生横向滚动。 */
+@media (max-width: 40rem) {
+  .activity-item-meta { margin-left: 0; }
+}

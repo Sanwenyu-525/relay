@@ -68,6 +68,9 @@ async function installRoutes(page: Page, inflight = false,
       title: "Windows 桌面验收（测试）", project_type: "GENERAL", revision: "1", state_revision: "1",
       archived_at: null });
     if (path === `${prefix}/search`) return fulfillJson(route, { items: [], next_cursor: null });
+    if (path === `${prefix}/default-working-directory`) return fulfillJson(route,
+      { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
+        default_write_tier: null, context_budget_tokens: null, status: "UNSET", reason: null, revision: "0" });
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "fake",
       configured: false, model: null, base_url: null,
       max_call_tokens: override.maxCallTokens ?? null });
@@ -89,6 +92,48 @@ async function connect(page: Page): Promise<void> {
   await page.getByTestId("relay-connect").click();
   await page.getByTestId("relay-connection-state").filter({ hasText: "已连接" }).waitFor({ timeout: 20_000 });
   await page.keyboard.press("Escape");
+}
+
+for (const withUsage of [false, true]) {
+  test(`上下文圆环直接保存档位并刷新预算：${withUsage ? "已有调用" : "首次调用前"}`, async ({ page }) => {
+    await installRoutes(page, false, { messages: withUsage ? [usageRow(131_072, 74)] : [], maxCallTokens: 65_536 });
+    let tokens: number | null = 262_144;
+    let revision = 2;
+    const writes: Record<string, unknown>[] = [];
+    await page.route(`${apiBase}${prefix}/default-working-directory`, (route) => fulfillJson(route,
+      { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
+        default_write_tier: null, context_budget_tokens: tokens, status: "UNSET", reason: null, revision: String(revision) }));
+    await page.route(`${apiBase}${prefix}/context-budget`, async (route) => {
+      const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
+      writes.push(body); tokens = body.context_budget_tokens as number | null; revision += 1;
+      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
+        result: { workspace_id: workspaceId, context_budget_tokens: tokens, revision: String(revision) } });
+    });
+    await page.goto(withUsage ? `/agent?work=${taskId}&session=${sessionId}` : `/agent?work=${taskId}&new=1`);
+    await connect(page);
+    const meter = page.getByTestId("assist-context-meter");
+    await meter.click();
+    const panel = page.getByTestId("assist-context-meter-panel");
+    await expect(panel.getByTestId("context-budget-option-262144")).toBeChecked();
+    for (const next of [524_288, 1_048_576]) {
+      await panel.getByTestId(`context-budget-option-${next}`).check();
+      await panel.getByTestId("context-budget-save").click();
+      await expect(panel.getByTestId("context-budget-notice")).toContainText(next.toLocaleString("zh-CN"));
+      if (withUsage) await expect(panel.locator(".agent-chat-context-meter-amount")).toContainText(next.toLocaleString());
+      else await expect(meter).toHaveAttribute("data-state", "unknown");
+    }
+    expect(writes.map((body) => [body.expected_revision, body.context_budget_tokens]))
+      .toEqual([["2", 524_288], ["3", 1_048_576]]);
+    await page.setViewportSize({ width: 560, height: 840 });
+    await expect(panel).toBeVisible();
+    const box = await panel.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(560);
+    await page.screenshot({ path: `output/context-ring-20261030/${withUsage ? "usage" : "empty"}-560.png`, fullPage: true });
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(meter).toBeFocused();
+  });
 }
 
 interface Box { left: number; top: number; right: number; bottom: number; width: number; height: number }
@@ -325,7 +370,7 @@ test("极窄输入器（560×700）：读数收起但圆环仍在，浮层不越
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
   await meter.waitFor({ timeout: 20_000 });
   await expect(meter.locator(".agent-chat-context-meter-value")).toHaveCount(0);
-  await expect(meter).toHaveAttribute("aria-label", "上下文 2011 / 65536 tokens（3%）");
+  await expect(meter).toHaveAttribute("aria-label", "上下文 2,011 / 65,536 tokens（3%）");
   await meter.click();
   const panel = page.getByTestId("assist-context-meter-panel");
   await expect(panel).toBeVisible();
@@ -378,9 +423,13 @@ test("上下文圆环浮层（2026-10-25）：点击圆环打开用量详情，�
   const panel = page.getByTestId("assist-context-meter-panel");
   await panel.waitFor({ state: "visible", timeout: 5_000 });
   await expect(meter).toHaveAttribute("aria-expanded", "true");
-  await expect(panel).toContainText("最近一次模型调用");
+  await expect(panel).toContainText("最近一次记录");
   await expect(panel).toContainText("4,710");
   await expect(panel).toContainText("89%");
+  // 只上报了缓存读取：读取行在、写入行整项不出现，命中率有可靠分母时才有。
+  await expect(panel.getByTestId("assist-context-meter-cache-read")).toHaveCount(1);
+  await expect(panel.getByTestId("assist-context-meter-cache-write")).toHaveCount(0);
+  await expect(panel.getByTestId("assist-context-meter-cache-hit")).toHaveText("89%");
 
   // 几何：右缘贴圆环右缘、待在输入卡与视口内（中栏 overflow:hidden，越出即被裁）。
   const geo = await page.evaluate(() => {
@@ -428,13 +477,14 @@ test("上下文圆环浮层（2026-10-25）：点击圆环打开用量详情，�
  *   * 上限不可用时同样不画弧，浮层里如实写「上限不可用」，不拿别的数凑分母；
  *   * 高占用沿用 0.8 阈值换警示色，且**不**出现任何循环动画（它不是运行状态指示器）。
  */
-const usageRow = (inputTokens: number | null, outputTokens: number | null) => ({
+const usageRow = (inputTokens: number | null, outputTokens: number | null,
+  cacheReadTokens: number | null = null, cacheCreationTokens: number | null = null) => ({
   id: "x-reading", session_id: sessionId, role: "ASSISTANT", status: "COMPLETED", seq: "2",
   intent: "DISCUSS", content: "读数如下", error_code: null, provider_error_kind: null,
   created_at: "2026-10-28T00:00:00Z", updated_at: "2026-10-28T00:01:00Z", sources: [], skill: null,
   cancel_requested: false, steer_requested: false,
   usage: { input_tokens: inputTokens, output_tokens: outputTokens,
-    cache_read_tokens: null, cache_creation_tokens: null },
+    cache_read_tokens: cacheReadTokens, cache_creation_tokens: cacheCreationTokens },
   skill_input: null, skill_output: null, attachments: [], revision: "1" });
 
 for (const scenario of [
@@ -450,8 +500,12 @@ for (const scenario of [
     reading: "80%", state: "high", arc: true, unbounded: false },
   { name: "满额 100%", input: 65_536, max: 65_536,
     reading: "100%", state: "high", arc: true, unbounded: false },
-  { name: "上限不可用：不画弧，浮层说明不可算", input: 2_011, max: null,
-    reading: null, state: "unknown", arc: false, unbounded: true }
+  { name: "预算不可用：不画弧，浮层写预算未配置", input: 2_011, max: null,
+    reading: null, state: "unknown", arc: false, unbounded: true },
+  // 超预算不压成 100%：真实占比与「超出预算（估算）」都要保留；
+  // 进度线只画满，不画负剩余。
+  { name: "超预算：保留真实比例，不把超额藏成 100%", input: 70_000, max: 65_536,
+    reading: "106.8%", state: "high", arc: true, unbounded: false }
 ]) {
   test(`上下文圆环读数：${scenario.name}`, async ({ page }) => {
     await page.setViewportSize({ width: 1162, height: 782 });
@@ -493,9 +547,19 @@ for (const scenario of [
       if (scenario.reading !== null) {
         await expect(panel.locator(".agent-chat-context-meter-percent")).toHaveText(scenario.reading);
       }
-      if (scenario.unbounded) await expect(panel).toContainText("上限不可用，无法换算占用比例");
+      if (scenario.unbounded) {
+        await expect(panel.getByTestId("assist-context-meter-unbounded")).toHaveText("预算未配置");
+        await expect(panel.locator(".agent-chat-context-meter-bar")).toHaveCount(0);
+      }
+      if (scenario.input !== null && scenario.max !== null && scenario.input > scenario.max) {
+        await expect(panel.locator(".agent-chat-context-meter-stat-label").first())
+          .toHaveText("超出预算（估算）");
+        await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("4,464 tokens");
+        // 超额也是高占用警示态，读数不被钳到 100%。
+        await expect(panel.locator(".agent-chat-context-meter-percent")).toHaveCSS("color", "rgb(150, 98, 42)");
+      }
     }
-    // 浮层不越出输入卡与视口：宽度比旧版宽了一档（20rem），边界判据必须同时成立。
+    // 浮层不越出输入卡与视口：宽度在 300–340px 之间自适应，边界判据必须同时成立。
     const geometry = await page.evaluate(() => {
       const box = (selector: string) => {
         const el = document.querySelector<HTMLElement>(selector);
@@ -515,3 +579,227 @@ for (const scenario of [
     expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
   });
 }
+
+// —— 2026-10-29 上下文用量浮层第二轮整改 ——
+// 用户验收口径：点开圆环先看到清楚的用量数据，而不是一屏统计说明；浮层明显更紧凑，
+// 与输入器其余弹层同一套语言。以下用真实 Chromium 核对八类状态与几何，不只看 DOM 存在。
+
+test("用量浮层第二轮：2,101 / 65,536 · 输出 74，缓存未上报不占位，标题行与读数对齐", async ({ page }) => {
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, false, { messages: [usageRow(2_101, 74)], maxCallTokens: 65_536 });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await connect(page);
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+  await meter.click();
+  const panel = page.getByTestId("assist-context-meter-panel");
+  await expect(panel).toBeVisible();
+
+  // 主读数：一次读完「已用 / 预算 tokens」与真实占比；二级信息只有余量与输出。
+  await expect(panel.locator(".agent-chat-context-meter-amount")).toHaveText("2,101 / 65,536 tokens");
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("3%");
+  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("63,435 tokens");
+  await expect(panel.getByTestId("assist-context-meter-output")).toHaveText("74 tokens");
+
+  // 缓存未上报：读取、写入、命中率整项都不出现，也没有「未采集 / 未提供」式占位。
+  await expect(panel.getByTestId("assist-context-meter-cache-read")).toHaveCount(0);
+  await expect(panel.getByTestId("assist-context-meter-cache-write")).toHaveCount(0);
+  await expect(panel.getByTestId("assist-context-meter-cache-hit")).toHaveCount(0);
+  const text = await panel.innerText();
+  expect(text).not.toContain("缓存");
+  for (const removed of ["统计来源", "统计口径", "未采集", "未提供", "未知", "物理上下文窗口", "压缩阈值"]) {
+    expect(text, `浮层不应再出现「${removed}」`).not.toContain(removed);
+  }
+  expect(text.match(/上下文用量/g) ?? []).toHaveLength(1);
+  expect(text.match(/最近一次记录/g) ?? []).toHaveLength(1);
+
+  // 低占用进度线是真实的一小段：填充 ≈ 轨道 3%，颜色与圆环填充一致，不设最小宽度。
+  const bar = await panel.evaluate((node) => {
+    const track = node.querySelector<HTMLElement>(".agent-chat-context-meter-bar");
+    const fill = track?.firstElementChild as HTMLElement | null;
+    const ring = document.querySelector('[data-testid="assist-context-meter"] .agent-chat-context-meter-fill');
+    return { trackWidth: track?.getBoundingClientRect().width ?? 0,
+      fillWidth: fill?.getBoundingClientRect().width ?? 0,
+      fillColor: fill === null ? "" : getComputedStyle(fill).backgroundColor,
+      ringStroke: ring === null ? "" : getComputedStyle(ring).stroke };
+  });
+  expect(bar.trackWidth).toBeGreaterThan(200);
+  expect(bar.fillWidth / bar.trackWidth).toBeGreaterThan(0.02);
+  expect(bar.fillWidth / bar.trackWidth).toBeLessThan(0.04);
+  expect(bar.fillColor).toBe(bar.ringStroke);
+
+  // 尺寸与对齐：300–340px 宽、紧凑高度；标题左、来源与信息图标右，主读数与占比同排。
+  const layout = await panel.evaluate((node) => {
+    const rect = (selector: string) => {
+      const el = node.querySelector<HTMLElement>(selector);
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const panelRect = node.getBoundingClientRect();
+    return { heading: rect(".agent-chat-context-meter-heading"),
+      tiers: rect('[data-testid="context-budget-inline"]'),
+      source: rect(".agent-chat-context-meter-source"),
+      info: rect('[data-testid="assist-context-meter-info"]'),
+      amount: rect(".agent-chat-context-meter-amount"),
+      percent: rect('[data-testid="assist-context-meter-percent"]'),
+      panel: { top: panelRect.top, left: panelRect.left, right: panelRect.right, width: panelRect.width, height: panelRect.height,
+        scrollWidth: node.scrollWidth, clientWidth: node.clientWidth } };
+  });
+  if (layout.heading === null || layout.source === null || layout.info === null
+    || layout.amount === null || layout.percent === null) throw new Error("缺少浮层布局采样");
+  expect(layout.panel.width).toBeGreaterThanOrEqual(300);
+  expect(layout.panel.width).toBeLessThanOrEqual(340);
+  expect(layout.tiers).not.toBeNull();
+  expect(layout.tiers!.top - layout.panel.top).toBeLessThan(180); // The original usage area remains compact.
+  expect(layout.panel.height).toBeLessThanOrEqual(384); // Includes the new tier controls.
+  expect(layout.panel.scrollWidth).toBeLessThanOrEqual(layout.panel.clientWidth);
+  expect(layout.heading.left).toBeLessThan(layout.source.left);
+  const middle = (box: { top: number; bottom: number }) => (box.top + box.bottom) / 2;
+  expect(Math.abs(middle(layout.heading) - middle(layout.source))).toBeLessThanOrEqual(1);
+  expect(layout.info.right).toBeLessThanOrEqual(layout.panel.right - 8);
+  expect(layout.amount.right).toBeLessThanOrEqual(layout.percent.left);
+  expect(layout.percent.right).toBeLessThanOrEqual(layout.panel.right - 8);
+
+  // 信息图标可键盘到达：Tab 从浮层进入图标，提示恰好是任务书指定的那句。
+  await expect(panel).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(panel.getByTestId("assist-context-meter-info")).toBeFocused();
+  const infoTip = page.getByTestId("context-meter-info-tooltip");
+  await expect(infoTip).toBeVisible();
+  await expect(infoTip).toHaveText("上下文用量按最近一次有记录的模型调用统计，占用比例相对于工作区配置预算计算。");
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(meter).toBeFocused();
+});
+
+test("用量浮层第二轮：缓存读取与写入分列，命中率单独一行", async ({ page }) => {
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, false, {
+    messages: [usageRow(3_000, 500, 1_500, 300)], maxCallTokens: 65_536 });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await connect(page);
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  await page.getByTestId("assist-composer").getByTestId("assist-context-meter").click();
+  const panel = page.getByTestId("assist-context-meter-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("assist-context-meter-cache-read")).toHaveText("1,500 tokens");
+  await expect(panel.getByTestId("assist-context-meter-cache-write")).toHaveText("300 tokens");
+  await expect(panel.getByTestId("assist-context-meter-cache-hit")).toHaveText("50%");
+  await expect(panel.locator(".agent-chat-context-meter-cache-row")).toHaveCount(3);
+  // 读取与写入是两行两值，不能合成一个总数。
+  const rows = await panel.locator(".agent-chat-context-meter-cache-row").allInnerTexts();
+  expect(rows[0]).toContain("缓存读取");
+  expect(rows[0]).toContain("1,500");
+  expect(rows[1]).toContain("缓存写入");
+  expect(rows[1]).toContain("300");
+  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("62,536 tokens");
+});
+
+test("用量浮层第二轮：超长读数在 340px 内折行，不撑出浮层与输入卡", async ({ page }) => {
+  await page.setViewportSize({ width: 560, height: 800 });
+  await installRoutes(page, false, {
+    messages: [usageRow(123_456_789, 1_234_567, 100_000_000, 23_456_789)],
+    maxCallTokens: 200_000_000 });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await connect(page);
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+  await meter.click();
+  const panel = page.getByTestId("assist-context-meter-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".agent-chat-context-meter-amount")).toContainText("123,456,789");
+  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("76,543,211 tokens");
+  await expect(panel.getByTestId("assist-context-meter-cache-hit")).toHaveText("81%");
+
+  const geometry = await panel.evaluate((node) => {
+    const panelRect = node.getBoundingClientRect();
+    const rect = (selector: string) => {
+      const el = node.querySelector<HTMLElement>(selector);
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    const card = document.querySelector('[data-testid="assist-composer"]')?.getBoundingClientRect() ?? null;
+    return { panel: { left: panelRect.left, right: panelRect.right, top: panelRect.top, bottom: panelRect.bottom,
+        width: panelRect.width, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth },
+      card: card === null ? null : { left: card.left, right: card.right },
+      amount: rect(".agent-chat-context-meter-amount"),
+      percent: rect('[data-testid="assist-context-meter-percent"]'),
+      viewport: { width: window.innerWidth, height: window.innerHeight } };
+  });
+  if (geometry.card === null || geometry.amount === null || geometry.percent === null) {
+    throw new Error("缺少长读数几何采样");
+  }
+  expect(geometry.panel.width).toBeLessThanOrEqual(340);
+  expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.clientWidth);
+  expect(geometry.panel.left).toBeGreaterThanOrEqual(geometry.card.left - 0.5);
+  expect(geometry.panel.right).toBeLessThanOrEqual(geometry.card.right + 0.5);
+  expect(geometry.panel.top).toBeGreaterThanOrEqual(-0.5);
+  expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
+  expect(geometry.amount.right).toBeLessThanOrEqual(geometry.panel.right + 0.5);
+  expect(geometry.percent.right).toBeLessThanOrEqual(geometry.panel.right + 0.5);
+  await expect(panel.getByTestId("assist-context-meter-output")).toHaveText("1,234,567 tokens");
+});
+
+test("用量浮层第二轮：窄窗 + 1.5× 缩放模拟，浮层仍在卡内且二级信息不重叠", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 620, height: 640 }, deviceScaleFactor: 1.5 });
+  const page = await context.newPage();
+  try {
+    await installRoutes(page, false, { messages: [usageRow(2_101, 74, 1_200, 300)], maxCallTokens: 65_536 });
+    await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+    await connect(page);
+    await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+    const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+    await meter.click();
+    const panel = page.getByTestId("assist-context-meter-panel");
+    await expect(panel).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+      const box = (selector: string) => {
+        const el = document.querySelector<HTMLElement>(selector);
+        if (el === null) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width };
+      };
+      const stats = Array.from(document.querySelectorAll<HTMLElement>(".agent-chat-context-meter-stat"))
+        .map((el) => { const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
+      return { panel: box('[data-testid="assist-context-meter-panel"]'),
+        card: box('[data-testid="assist-composer"]'), stats,
+        overflowX: (document.scrollingElement as HTMLElement).scrollWidth
+          - (document.scrollingElement as HTMLElement).clientWidth,
+        viewport: { width: window.innerWidth, height: window.innerHeight } };
+    });
+    if (geometry.panel === null || geometry.card === null) throw new Error("缺少窄窗浮层几何采样");
+    expect(geometry.panel.left).toBeGreaterThanOrEqual(geometry.card.left - 0.5);
+    expect(geometry.panel.right).toBeLessThanOrEqual(geometry.card.right + 0.5);
+    expect(geometry.panel.left).toBeGreaterThanOrEqual(-0.5);
+    expect(geometry.panel.right).toBeLessThanOrEqual(geometry.viewport.width + 0.5);
+    expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
+    expect(geometry.overflowX).toBe(0);
+    expect(geometry.stats).toHaveLength(2);
+    for (const stat of geometry.stats) {
+      expect(stat.left).toBeGreaterThanOrEqual(geometry.panel.left - 0.5);
+      expect(stat.right).toBeLessThanOrEqual(geometry.panel.right + 0.5);
+    }
+    const [left, right] = geometry.stats;
+    const overlaps = left.left < right.right - 0.5 && right.left < left.right - 0.5
+      && left.top < right.bottom - 0.5 && right.top < left.bottom - 0.5;
+    expect(overlaps, "预算余量与本次输出不得互相压字").toBe(false);
+
+    await page.keyboard.press("Tab");
+    const infoTip = page.getByTestId("context-meter-info-tooltip");
+    await expect(infoTip).toBeVisible();
+    const tipBox = await infoTip.boundingBox();
+    if (tipBox === null) throw new Error("缺少信息提示几何");
+    expect(tipBox.x).toBeGreaterThanOrEqual(-0.5);
+    expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(geometry.viewport.width + 0.5);
+  } finally {
+    await context.close();
+  }
+});

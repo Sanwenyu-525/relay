@@ -49,6 +49,43 @@ async function mount() {
 }
 
 describe("上下文长度档位的读取与保存", () => {
+  it("圆环紧凑入口共用保存流程，保存后通知读数刷新", async () => {
+    const onSaved = vi.fn();
+    stubSequence([
+      () => json(directory(262144, "2")),
+      (_url, init) => {
+        const body = JSON.parse(String(init.body));
+        expect(body).toMatchObject({ expected_revision: "2", context_budget_tokens: 1048576 });
+        return json({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
+          result: { workspace_id: workspaceId, context_budget_tokens: 1048576, revision: "3" } });
+      },
+      () => json(directory(1048576, "3")),
+    ]);
+    const mounted = await mountReact(<ContextBudgetCard client={client} compact onSaved={onSaved} />);
+    unmount = mounted.unmount;
+    await flush();
+    const wrapper = mounted.wrapper;
+    expect(wrapper.get('[data-testid="context-budget-inline"]').text()).toContain("上下文档位");
+    expect(wrapper.find(".settings-card").exists()).toBe(false);
+    await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
+    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
+    await flush();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
+      .toBe(true);
+  });
+
+  it.each([262144, 524288, 1048576] as const)("三档可选择并读回：%s", async (tokens) => {
+    stubSequence([() => json(directory(tokens, "3"))]);
+    const wrapper = await mount();
+    expect(wrapper.text()).toContain("256K");
+    expect(wrapper.text()).toContain("512K");
+    expect(wrapper.text()).toContain("1024K");
+    expect(wrapper.text()).toContain("自动压缩");
+    expect((wrapper.get(`[data-testid="context-budget-option-${tokens}"]`).element as HTMLInputElement).checked)
+      .toBe(true);
+  });
+
   it("初始档位读服务端投影：未选择时选「跟随应用默认」，并显示当前修订", async () => {
     const fetchMock = stubSequence([() => json(directory(null, "2"))]);
     const wrapper = await mount();

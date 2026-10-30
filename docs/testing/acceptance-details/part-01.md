@@ -42,6 +42,10 @@
 
 ## 条目 004
 
+2026-10-29 后端排查补验（实施者自检）：`zoned-time.ts` 仅枚举整小时偏移，导致 `Australia/Lord_Howe` 2026-04-05 的重复 `01:45` 被解析为 `15:15Z`，而非较早的 `14:45Z`。先用 Node 24.21.0 断言复现失败，再改为从目标日期前后读取实际偏移。新增回归覆盖较早一次、每日下次触发、避免同日第二次触发及回拨前后相邻时刻；`zoned-time`、`scheduled-tasks`、`scheduled-task-scheduler` 共 19/19，当前 API 全量 TypeScript 编译 exit 0。该补验仅涉及纯计算与配置/调度日志单测，未新增真实 PG/HTTP、Provider 或桌面证据；已持久化的触发时间不批量重算。
+
+扩展全量单测未完成：首轮误用系统 Node 22，随后 Node 24 四并发批次仍耗时停留在恢复包/电脑运行时测试，主动终止本轮测试进程，不记为通过或将其归因于本次修复。文档检查 exit 1，仍为 25 处既有历史材料失链，本轮新增链接有效。
+
 | 功能 | 结论 | 已验证范围与依据 | 剩余项 |
 |---|---|---|---|
 | 定时任务 P0-A：发生时配置冻结、补跑/分发前准入与完成幂等（2026-10-25，当前 Agent 实施＋自检，未 commit/push） | **部分通过（后端闭环已验；独立验收未做）**：四个真实缺陷先构造失败复现再修复——①occurrence 落库时冻结 `frozen_template`/`frozen_execution_input`（迁移 `0138`），分发/补跑一律用冻结副本，未提交的 CreateTask 不再读到编辑后的新模板（#150 只覆盖了已提交分支）；②RETRY 补跑在命令事务内先做快照准入：暂停/停用/到期/预算耗尽/项目归档/旧代次/上一轮未验收→`409 INVALID_TRANSITION`，不重开发生也不建 Task；③分发在 CreateTask 未提交前同样先准入，必然不可执行直接 `BLOCKED`（reason=`PLAN_NOT_ENABLED`/`SCHEDULE_GENERATION_STALE`/`PROJECT_ARCHIVED`/`EXECUTION_SCOPE_DRIFT` 等新词表）；④`markDispatched`/`markSettled`/`freezeExecution` 加 `status='DISPATCHING'` 条件——重复完成不重复累计 `runs_started`，迟到失败写入不覆盖 `DISPATCHED` | 真实临时 PG18.6＋HTTP `scheduled-task-p0a.integration.test.ts` **4/4 先红后绿**（模板冻结含 `frozen_template` 落库断言；五类补跑拒绝且任务数零变化；SQL 还原「完成事实在、occurrence 标记丢」现场验证幂等与迟到写入；暂停计划的恢复分发零 Task）；回归 `scheduled-tasks`＋`scheduled-task-detail-history`＋`task-chain-execution`＋`task-chains` 集成全绿，`zoned-time`/`scheduled-tasks`/`scheduled-task-scheduler` 单测 18/18，API `tsc --noEmit` exit 0（`run-integration.ps1 -UseCLocale`，status PASSED，临时集群已清理） | 未验：多实例并发分发（维持 ADR-026 单进程假设，条件更新仅兜底）；真实 Windows 桌面内调度循环未复验；独立验收未做；契约 §10.94、数据库 §103、验证计划 §37 已同步 |

@@ -33,8 +33,8 @@ let api: TestApi | undefined;
 let storage: ManagedContentStore;
 let localOrigin: string;
 let totalRequests = 0;
-let active: { category: ModelErrorCategory | 'NATIVE_TOOL_CALL' | 'NATIVE_TOOL_AFTER_TEXT'; requests: number; body: string;
-  loopback: boolean; closedBeforeHeaders: boolean } | null = null;
+let active: { category: ModelErrorCategory | 'NATIVE_TOOL_CALL' | 'NATIVE_TOOL_AFTER_TEXT' | 'OVERSIZED_SSE'; requests: number; body: string;
+  loopback: boolean; closedBeforeHeaders: boolean; responseClosed: boolean } | null = null;
 
 const server = createServer((request, response) => {
   totalRequests += 1;
@@ -63,6 +63,14 @@ const server = createServer((request, response) => {
         return;
       }
       case 'TIMEOUT': return; // The real Adapter deadline must abort this HTTP request.
+      case 'OVERSIZED_SSE':
+        response.once('close', () => { evidence.responseClosed = true; });
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-oversized',
+          object: 'chat.completion.chunk', created: 1, model: 'controlled-model',
+          choices: [{ index: 0, delta: { content: 'x'.repeat(2 * 1024 * 1024) },
+            finish_reason: null }] })}\n\ndata: [DONE]\n\n`);
+        return; // Keep the response open until the consumer rejects and cancels it.
       case 'NETWORK':
         evidence.closedBeforeHeaders = !response.headersSent;
         request.socket.destroy();
@@ -207,11 +215,11 @@ after(async () => {
     assert.ok(stopped.status === 'fulfilled');
     assert.equal(stopped.value, 0, 'separate API did not stop cleanly');
   }
-  assert.equal(totalRequests, 8, 'unexpected HTTP requests outside the six faults and two tool refusals');
+  assert.equal(totalRequests, 9, 'unexpected HTTP requests outside controlled faults and tool refusals');
   console.log('controlled_provider_cleanup listener_closed=true sockets=0 api_exit=0');
 });
 
-for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTOCOL', 'NETWORK', 'NATIVE_TOOL_CALL', 'NATIVE_TOOL_AFTER_TEXT'] as const) {
+for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTOCOL', 'NETWORK', 'NATIVE_TOOL_CALL', 'NATIVE_TOOL_AFTER_TEXT', 'OVERSIZED_SSE'] as const) {
   test(`real Adapter loopback ${category} preserves one Assist call and projects a safe failure`,
     { timeout: 30_000 }, async () => {
       assert.ok(api);
@@ -222,9 +230,10 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         sessionId: session.result.session_id, commandId: randomUUID(), content: prompt });
       const messageId = requested.result.assistant_message_id;
       const calls = new ModelCallRepository(app.db);
-      active = { category, requests: 0, body: '', loopback: false, closedBeforeHeaders: false };
+      active = { category, requests: 0, body: '', loopback: false, closedBeforeHeaders: false, responseClosed: false };
       const evidence = active;
       const toolRefusal = category === 'NATIVE_TOOL_CALL' || category === 'NATIVE_TOOL_AFTER_TEXT';
+      const expectedCategory = category === 'OVERSIZED_SSE' ? 'STREAM_BROKEN' : category;
       let bridgeRequests = 0;
       let originalCallId: string | undefined;
       const dispatch: { signal: AbortSignal | null } = { signal: null };
@@ -277,12 +286,12 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         assert.equal(settled[0]!.id, originalCallId);
         assert.equal(settled[0]!.status, 'FAILED');
         assert.equal(settled[0]!.error_kind, toolRefusal
-          ? 'ModelToolOutputError' : category);
+          ? 'ModelToolOutputError' : expectedCategory);
         assert.equal(settled[0]!.provider, 'openai-compatible');
         const message = await new AssistRepository(app.db).readMessage(messageId);
         assert.ok(message);
         assert.equal(message.status, 'FAILED');
-        assert.equal(message.provider_error_kind, toolRefusal ? null : category);
+        assert.equal(message.provider_error_kind, toolRefusal ? null : expectedCategory);
         assert.equal(message.error_code, 'MODEL_FAILED');
         assert.equal(message.content, null);
         assert.equal(message.cancel_requested, false);
@@ -317,7 +326,7 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         const projected = items.find((item) => item.id === messageId);
         assert.ok(projected);
         assert.equal(projected.status, 'FAILED');
-        assert.equal(projected.provider_error_kind, toolRefusal ? null : category);
+        assert.equal(projected.provider_error_kind, toolRefusal ? null : expectedCategory);
         assert.equal(projected.error_code, 'MODEL_FAILED');
         assert.equal(projected.content, null);
         if (toolRefusal) {
@@ -331,6 +340,13 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
           'raw credentials or Provider error body entered persistent/API evidence');
         if (toolRefusal) assert.ok(!serialized.includes('write_file') && !serialized.includes('synthetic.txt'),
           'native tool arguments entered persistent/API evidence');
+        if (category === 'OVERSIZED_SSE') {
+          const deadline = Date.now() + 3000;
+          while (!evidence.responseClosed && Date.now() < deadline) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 10));
+          }
+          assert.equal(evidence.responseClosed, true, 'rejected SSE response is still streaming upstream');
+        }
       } finally {
         await closeSockets();
         active = null;

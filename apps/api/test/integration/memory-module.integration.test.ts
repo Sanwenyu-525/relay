@@ -8,6 +8,7 @@ import { bindAssistSessionDirectory, createAssistSession, requestAssistMessage }
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { createMemory, retireInformation } from '../../src/application/information-commands.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
+import { recallConfirmedMemoryRefs } from '../../src/application/memory-recall.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -95,6 +96,22 @@ for (const tools of [false, true]) {
     assert.ok(!second.text.includes(marker), 'disabled recall must not leak via historical automatic context');
   });
 }
+
+test('explicit memory sources do not consume the automatic recall candidate limit', async () => {
+  const f = await fixture();
+  const r = createRepositories(app.db);
+  const eligible = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    commandId: randomUUID(), title: 'retained', text: 'older eligible preference', confirmed: true });
+  const excluded = new Set<string>();
+  for (let i = 0; i < 8; i++) {
+    const saved = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+      commandId: randomUUID(), title: `explicit ${i}`, text: `explicit ${i}`, confirmed: true });
+    excluded.add(saved.result.memory_id!);
+  }
+  const session = (await r.assist.readSession(f.sessionId))!;
+  const recalled = await recallConfirmedMemoryRefs(r, session, 'explicit', excluded, 3);
+  assert.deepEqual(recalled.map((ref) => ref.root_id), [eligible.result.memory_id]);
+});
 
 test('message save requires confirmation, exact source hash and scope; provenance blocks physical source deletion', async () => {
   const f = await fixture();

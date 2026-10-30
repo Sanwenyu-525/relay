@@ -9,6 +9,8 @@ import { runAssistGenerationTick } from '../../src/application/assist-runner.js'
 import { freezeAssistModelSnapshot } from '../../src/application/assist-model-snapshot.js';
 import { resolveRunModelPort } from '../../src/application/run-model-port.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
+import { prepareAutomaticMemory, runAssistMemoryTick } from '../../src/application/assist-memory-runner.js';
+import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { setWorkspaceContextBudget } from '../../src/application/workspace-default-directory.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -31,7 +33,7 @@ import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDat
  *  3. Run 准入按「当前配置 + 冻结档位」重算预期预算：选中档位不再被误判成配置变化，
  *     且端口拿到的实际预算也是这一档。
  *
- * 未选定档位时与改动前完全一致（同一入口按进程默认拒绝超预算输入）。
+ * 未选定档位时按进程默认拒绝超预算输入；工作容量检查可在真实外呼前提前拒绝。
  */
 
 const app = openDatabase(APP_DATABASE_URL, 'relay-context-budget');
@@ -105,6 +107,53 @@ async function tick(workspaceId: string, sessionId: string) {
   return { sent, ticked };
 }
 
+test('selected tiers keep short turns uncompressed and permit history beyond the old 128KB limit', async () => {
+  for (const budgetTokens of [262_144, 524_288, 1_048_576] as const) {
+    const f = await fixture();
+    await setWorkspaceContextBudget(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), expectedRevision: '0', budgetTokens });
+    await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+      expectedRevision: '1', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+    const r = createRepositories(app.db);
+    for (let i = 1; i <= 34; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+      seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+      content: 'history '.repeat(700), sources: [] });
+    const options = { workerId: randomUUID(), leaseMs: 60_000, storage: new ManagedContentStore(dataRoot),
+      modelPort: new FakeModelPort() };
+    assert.equal(await prepareAutomaticMemory(app.db, f.sessionId, null, options), false,
+      'short turns must not trigger compaction simply because there are 32 messages');
+    const result = await tick(f.workspaceId, f.sessionId);
+    assert.equal(result.ticked?.status, 'COMPLETED', JSON.stringify(result.ticked));
+    assert.equal((await r.assistMemory.requests(f.sessionId)).length, 0);
+  }
+});
+
+test('256K compacts at its pressure threshold while 512K and 1024K retain the same originals', async () => {
+  for (const budgetTokens of [262_144, 524_288, 1_048_576] as const) {
+    const f = await fixture();
+    await setWorkspaceContextBudget(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), expectedRevision: '0', budgetTokens });
+    await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+      expectedRevision: '1', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+    const r = createRepositories(app.db);
+    for (let i = 1; i <= 12; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+      seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+      content: 'x'.repeat(42_000), sources: [] });
+    const modelPort = new FakeModelPort();
+    modelPort.assist = async () => ({ kind: 'CONTENT', content: JSON.stringify({ summary: 'retained goal and next step' }),
+      providerRequestId: randomUUID(), usage: { inputTokens: 100, outputTokens: 20 } });
+    const options = { workerId: randomUUID(), leaseMs: 60_000, storage: new ManagedContentStore(dataRoot), modelPort };
+    const prepared = await prepareAutomaticMemory(app.db, f.sessionId, null, options);
+    assert.equal(prepared, budgetTokens === 262_144);
+    if (prepared) {
+      assert.equal((await runAssistMemoryTick(app.db, options))?.status, 'COMPLETED');
+      const state = await r.assistMemory.state(f.sessionId);
+      assert.equal((await r.assistMemory.checkpoint(state!.checkpoint_id!))?.through_seq, 4n);
+    }
+    assert.equal((await r.assist.listMessages(f.sessionId)).length, 12, 'compression preserves originals');
+  }
+});
+
 test('CB-01: /context-budget 是带修订的幂等写；三档词表、重放与严格请求体同默认写档位', async () => {
   const api = await startTestApi();
   try {
@@ -152,7 +201,10 @@ test('CB-02: 选定 256K 后真实聊天入口按这一档外呼；账本预留�
   // 生成器把模型预算拒绝结算成失败的助手消息，不向调用方抛错。
   const baseline = await tick(f.workspaceId, f.sessionId);
   assert.equal(baseline.ticked?.status, 'FAILED', JSON.stringify(baseline.ticked));
-  assert.equal(baseline.ticked?.errorCode, 'MODEL_BUDGET_EXHAUSTED');
+  assert.equal(baseline.ticked?.errorCode, 'MEMORY_CONTEXT_TOO_LARGE');
+  const rejectedCalls = await sql<{ count: bigint }>`select count(*) as count from model_calls
+    where assist_message_id = ${baseline.sent.result.assistant_message_id}`.execute(app.db);
+  assert.equal(rejectedCalls.rows[0]?.count, 0n, 'work-window admission rejects before an external call is created');
 
   const second = await fixture();
   await setWorkspaceContextBudget(app.db, { workspaceId: second.workspaceId,

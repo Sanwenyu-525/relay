@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { clickPortal, DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, openUnresolvedDialog, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
+import { clickPortal, DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, openUnresolvedDialog, openWorkingDirectory, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
 import { COLLABORATION_LAYOUT_STORAGE_KEY } from "../src/lib/collaborationLayoutPreferences";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -94,6 +94,12 @@ interface Routes {
   goals?: () => Response;
   modelPort?: () => Response;
   modelVerification?: () => Response;
+  /**
+   * 会话单读（`GET /assist-sessions/{id}`）。协作页有两处读它：`?session=` 入口核对与
+   * 「作用域事实刚被确认」后的重读。默认不提供，保持本文件既有用例的行为不变（落到末尾 throw）；
+   * 需要控制会话归属的用例显式声明。
+   */
+  session?: () => Response;
 }
 
 function router(routes: Routes) {
@@ -146,6 +152,12 @@ function router(routes: Routes) {
     if (path === `${prefix}/assist-sessions`) return routes.sessions?.() ?? json({ items: [{ id: sessionId, workspace_id: workspaceId,
       project_id: projectId, task_id: taskId, title: "关于确定实验评价指标", status: "ACTIVE", revision: "1",
       updated_at: "2026-09-29T03:40:00Z" }] });
+    if (path === `${prefix}/assist-sessions/${sessionId}`) {
+      // 单读会话：只有声明了 `session` 夹具的用例才回应，其余保持原行为（落到末尾 throw），
+      // 免得给既有用例凭空补一份「会话已归属」的服务端事实。
+      if (routes.session !== undefined) return routes.session();
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    }
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? json({ items: [] });
     if (path === `${prefix}/conversation-execution-requests`) return routes.executions?.() ?? json({ items: [] });
     if (path === `${prefix}/assist-proposals`) return routes.proposals?.() ?? json({ items: [] });
@@ -863,9 +875,9 @@ describe("协作工作区主路径", () => {
     { name: "Provider 未上报缓存时不显示命中率，也不画成 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "normal", aria: "50%" },
-    { name: "读不到单次上限时不画占用弧，说明不可算", maxCallTokens: null,
+    { name: "读不到单次上限时不画占用弧，说明预算未配置", maxCallTokens: null,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
-      hit: "缓存命中 50%", state: "unknown", aria: "占用不可算" },
+      hit: "缓存命中 50%", state: "unknown", aria: "预算未配置" },
     { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "unknown", aria: "尚无模型调用" },
@@ -873,10 +885,10 @@ describe("协作工作区主路径", () => {
     { name: "部分命中不进位成 100%", maxCallTokens: 1_000,
       usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 996, cache_creation_tokens: null },
       hit: "缓存命中 99.6%", state: "high", aria: "100%" },
-    // Provider 上报不一致时钳到上限，不显示分母之外的比率。
-    { name: "上报超出输入时钳到 100%", maxCallTokens: 1_000,
+    // 缓存读取量超过上报的完整上下文时两个读数互相矛盾，命中率没有可靠分母，整项不出现。
+    { name: "上报缓存读取超过输入时不显示命中率", maxCallTokens: 1_000,
       usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 1_200, cache_creation_tokens: null },
-      hit: "缓存命中 100%", state: "high", aria: "100%" },
+      hit: null, state: "high", aria: "100%" },
   ]) {
     it(`输入区底栏：${scenario.name}`, async () => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
@@ -959,27 +971,39 @@ describe("协作工作区主路径", () => {
       await meter.trigger("click"); await flush();
       expect(meter.attributes("aria-expanded")).toBe("true");
       const panel = view.wrapper.get('[data-testid="assist-context-meter-panel"]');
-      // 第一层：关键用量。数字与百分比在同一段里读完，不再让人先看一屏技术口径。
+      // 2026-10-29 第二轮整改：打开先读数据；「属于哪一次」只用一枚短标签。
       expect(panel.get(".agent-chat-context-meter-heading").text()).toBe("上下文用量");
-      expect(panel.get(".agent-chat-context-meter-scope").text()).toBe("最近一次模型调用");
+      expect(panel.get(".agent-chat-context-meter-source").text()).toBe("最近一次记录");
       expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("800");
       expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("1,000");
       expect(panel.get(".agent-chat-context-meter-percent").text()).toBe("80%");
-      // 第二层：轻量信息行（标签左、数字右），命中率只有 Provider 上报时才占一行。
-      const rows = panel.findAll(".agent-chat-context-meter-row").map((row) => row.text());
-      expect(rows).toHaveLength(3);
-      expect(rows[0]).toContain("输出 tokens");
-      expect(rows[0]).toContain("200");
-      expect(rows[1]).toContain("缓存命中");
-      expect(rows[1]).toContain("75%");
-      expect(rows[2]).toContain("统计来源");
-      // 第三层：默认只有一句口径摘要，完整说明收在「统计口径」里。
-      expect(panel.get(".agent-chat-context-meter-footnote .agent-chat-context-meter-note").text())
-        .toContain("占用比例按本次调用的完整上下文与工作区预算计算");
-      const scopeDetails = panel.get(".agent-chat-context-meter-scope-details");
-      expect(scopeDetails.attributes("open")).toBeUndefined();
-      expect(scopeDetails.text()).toContain("不等同模型物理上下文窗口");
+      // 二级信息：预算余量（估算）与本次输出并排，各自一个读数。
+      expect(panel.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("200");
+      expect(panel.get('[data-testid="assist-context-meter-output"]').text()).toContain("200");
+      // 缓存读取与写入分列，命中率另起一行；未上报的项不占行。
+      const cacheRows = panel.findAll(".agent-chat-context-meter-cache-row").map((row) => row.text());
+      expect(cacheRows).toHaveLength(3);
+      expect(cacheRows[0]).toContain("缓存读取");
+      expect(cacheRows[0]).toContain("600");
+      expect(cacheRows[1]).toContain("缓存写入");
+      expect(cacheRows[1]).toContain("100");
+      expect(cacheRows[2]).toContain("缓存命中率");
+      expect(cacheRows[2]).toContain("75%");
+      // 删掉的冗余：来源行、常驻长句与统计口径清单都不再出现。
+      expect(panel.text()).not.toContain("统计来源");
+      expect(panel.text()).not.toContain("统计口径");
+      expect(panel.text()).not.toContain("物理上下文窗口");
+      expect(panel.text()).not.toContain("占用比例按本次调用");
       expect(panel.text()).not.toContain("max_call_tokens");
+      // 口径说明收进标题旁的信息图标：可聚焦按钮 + 一句准确说明。
+      const info = panel.get('[data-testid="assist-context-meter-info"]');
+      expect(info.attributes("aria-label")).toBe("上下文用量统计说明");
+      await act(async () => {
+        info.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+      }); await flush(0);
+      const infoTip = document.querySelector('[data-testid="context-meter-info-tooltip"]');
+      expect(infoTip?.textContent).toContain("上下文用量按最近一次有记录的模型调用统计");
+      expect(infoTip?.textContent).toContain("占用比例相对于工作区配置预算计算");
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -1036,12 +1060,17 @@ describe("协作工作区主路径", () => {
     try {
       const row = view.wrapper.get('.agent-message[data-role="ASSISTANT"]');
       // 正文 → 来源条 → 候选卡，同一条回复内按阅读顺序排列。
+      // 2026-10-30 修正陈旧断言：2026-10-25 起最终正文收进 `.assist-reply` 这一块阅读区
+      // （终态/核对中/生成中三态互斥），正文不再是 `.agent-message-body` 的直接子节点。
+      // 判据不变：正文在来源条之前，来源条在候选卡之前。
       const children = Array.from((row.element as HTMLElement).querySelector(".agent-message-body")!.children);
       const order = children.map((el) => el.className);
+      const bodyIndex = order.findIndex((name) => name.includes("assist-reply"));
       const sourceIndex = order.findIndex((name) => name.includes("assist-source-summary"));
       const candidateIndex = order.findIndex((name) => name.includes("assist-candidate-card"));
-      expect(order.some((name) => name.includes("assist-message-markdown"))).toBe(true);
-      expect(sourceIndex).toBeGreaterThan(order.findIndex((name) => name.includes("assist-message-markdown")));
+      expect(bodyIndex).toBeGreaterThanOrEqual(0);
+      expect(row.get(".assist-reply .assist-message-markdown").text()).toContain("已整理三项指标");
+      expect(sourceIndex).toBeGreaterThan(bodyIndex);
       expect(candidateIndex).toBeGreaterThan(sourceIndex);
       expect(row.get(".assist-source-summary").text()).toContain("已读取 1 份资料");
       expect(row.get(".assist-source-summary").text()).toContain("生成候选完成");
@@ -2520,4 +2549,148 @@ describe("不可恢复输入的离页保护", () => {
     await act(async () => { submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
     await flush(80);
   }
+});
+
+/**
+ * 普通会话工具面板的项目身份（2026-10-30 验收退回项）。
+ *
+ * 上一轮把 `DevToolsPanel` 的 `projectId` 固定写成 null，于是「已经归入项目的普通会话」
+ * 也永远显示「尚未关联项目」。这一组用例走的是**真实协作页集成路径**：服务端会话行给出归属，
+ * 页面读回它，再打开工具面板——不是只给 `DevToolsPanel` 传一个 projectId 的组件级断言。
+ *
+ * 同时把四条边界钉住：未归属、URL 上的 ?project=、归属读取失败、目录已选但会话未归属，
+ * 都必须留在「尚未关联项目」的安全边界，且不发出受管目录读取。
+ */
+describe("普通会话工具面板的项目身份", () => {
+  function sessionRow(project: string | null) {
+    return { id: sessionId, workspace_id: workspaceId, project_id: project, task_id: null,
+      title: "关于确定实验评价指标", status: "ACTIVE", revision: "1",
+      created_at: "2026-10-30T00:00:00Z", updated_at: "2026-10-30T00:10:00Z" };
+  }
+
+  async function openConversationTools(path: string) {
+    const view = await mountWorkbench(path);
+    await flush(80);
+    await view.wrapper.get('[data-testid="collab-conversation-tools-toggle"]').trigger("click");
+    await flush(80);
+    return view;
+  }
+
+  it("已归入项目：工具面板按服务端归属读出受管目录与 Git 读取入口", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ session: () => response(sessionRow(projectId)) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await openConversationTools(`/agent?session=${sessionId}`);
+    try {
+      const panel = view.wrapper.get('[data-testid="collab-conversation-tools"]');
+      expect(panel.attributes("data-project")).toBe(projectId);
+      // 有项目时默认落在「文件」，并真的列出服务端登记的受管目录。
+      expect(view.wrapper.get('[data-testid="devtools-tab-FILES"]').attributes("aria-selected")).toBe("true");
+      expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("资源修订 v1");
+      expect(fetchMock.mock.calls.some(([input]) =>
+        String(input).includes(`/projects/${projectId}/managed-resources`))).toBe(true);
+      // 「变更」是可用的读取面板，不是「尚未关联项目」的空态。
+      await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
+      await flush();
+      expect(view.wrapper.find('[data-testid="devtools-git-unavailable"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="git-read-idle"]').text()).toContain("尚未读取所选目录");
+      // 没有 Run 时：运行记录只留一句空态，工具轨迹不给「刷新」这种按了没用的操作。
+      await view.wrapper.get('[data-testid="devtools-tab-RUNS"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="devtools-runs-empty"]').text()).toBe("当前任务还没有 AI Run。");
+      expect(view.wrapper.get('[data-testid="devtools-runs"]').text()).not.toContain("不是启动按钮");
+      await view.wrapper.get('[data-testid="devtools-tab-TRACE"]').trigger("click");
+      await flush();
+      expect(view.wrapper.get('[data-testid="trajectory-no-run"]').text()).toContain("没有工具调用轨迹");
+      expect(view.wrapper.find('[data-testid="trajectory-refresh"]').exists()).toBe(false);
+      expect(view.wrapper.get('[data-testid="run-tool-trajectory"]').text()).not.toContain("只读");
+      // 打开面板只读：没有写命令。
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+
+  it("未归属：工具面板维持安全边界，且不读受管目录", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ session: () => response(sessionRow(null)) });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await openConversationTools(`/agent?session=${sessionId}`);
+    try {
+      expect(view.wrapper.get('[data-testid="collab-conversation-tools"]').attributes("data-project")).toBe("unbound");
+      // 没有项目时默认落在真的能用的「网页」。
+      expect(view.wrapper.get('[data-testid="devtools-tab-WEB"]').attributes("aria-selected")).toBe("true");
+      await view.wrapper.get('[data-testid="devtools-tab-FILES"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="devtools-files-unavailable"]').text()).toContain("尚未关联项目");
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/managed-resources"))).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("URL 上的 ?project= 不是归属：会话未归属时工具面板仍按未关联处理", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const fetchMock = router({ session: () => response(sessionRow(null)) });
+    vi.stubGlobal("fetch", fetchMock);
+    // 地址里带项目只说明「用户想在这个项目下讨论」，不等于这条会话已经归入它。
+    const view = await openConversationTools(`/agent?session=${sessionId}&project=${projectId}`);
+    try {
+      expect(view.wrapper.get('[data-testid="collab-conversation-tools"]').attributes("data-project")).toBe("unbound");
+      await view.wrapper.get('[data-testid="devtools-tab-FILES"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="devtools-files-unavailable"]').text()).toContain("尚未关联项目");
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/managed-resources"))).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("归属命令结果未知：工具面板留在未关联边界，不放行受管目录", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const base = router({ session: () => response(sessionRow(null)) });
+    // 目录打开成功并带回项目关联，随后归属命令「结果未知」（网络层失败）：
+    // 目录已经打开不等于这条讨论已经归入项目，工具面板必须继续按未关联处理。
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === "POST" && path.endsWith("/working-directories/open")) {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        return response({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
+          result: { canonical_root: "D:/Develop/MyProject", display_name: "MyProject", status: "READY",
+            reason: null, association: { project_id: projectId, project_title: "MyProject",
+              project_archived: false, resource_id: "res-1", resource_status: "ACTIVE",
+              file_write_identity_bound: true }, created_project: false, created_resource: false,
+            candidates: [], write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } },
+          links: { resource: "" } });
+      }
+      if (init?.method === "POST" && path.endsWith("/binding")) {
+        throw new TypeError("Failed to fetch");
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench(`/agent?session=${sessionId}`);
+    try {
+      await flush(80);
+      await openWorkingDirectory("D:/Develop/MyProject");
+      await flush(120);
+      // 归属在途/未知由细条如实说明；这里只钉住它对工具面板的后果。
+      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("UNKNOWN");
+      await view.wrapper.get('[data-testid="collab-conversation-tools-toggle"]').trigger("click");
+      await flush(80);
+      expect(view.wrapper.get('[data-testid="collab-conversation-tools"]').attributes("data-project")).toBe("unbound");
+      await view.wrapper.get('[data-testid="devtools-tab-FILES"]').trigger("click");
+      expect(view.wrapper.get('[data-testid="devtools-files-unavailable"]').text()).toContain("尚未关联项目");
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/managed-resources"))).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("已归入项目但受管目录为空：如实说明，不读成「工作目录干净」", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const base = router({ session: () => response(sessionRow(projectId)) });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === `${prefix}/projects/${projectId}/managed-resources`) {
+        return response([]);
+      }
+      return base(input, init);
+    }));
+    const view = await openConversationTools(`/agent?session=${sessionId}`);
+    try {
+      expect(view.wrapper.get('[data-testid="collab-conversation-tools"]').attributes("data-project")).toBe(projectId);
+      const files = view.wrapper.get('[data-testid="devtools-files"]').text();
+      expect(files).toContain("当前项目没有登记受管目录");
+      expect(files).toContain("不是“工作目录干净”的结论");
+    } finally { view.unmount(); }
+  });
 });

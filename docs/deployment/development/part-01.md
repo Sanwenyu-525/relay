@@ -204,6 +204,10 @@ Pop-Location
 
 必须显式给出、否则以退出码 2 结束的键：`RELAY_API_BIND_HOST`（只接受 127.0.0.1 或 ::1）、`RELAY_API_PORT`、`RELAY_API_ALLOWED_ORIGINS`（显式 origin 列表，拒绝 `*` 与 `null`）、`RELAY_API_BEARER_TOKEN`（至少 32 字符，占位符被拒）、`RELAY_DB_URL`、`RELAY_DB_POOL_MAX`、`RELAY_DB_CONNECT_TIMEOUT_MS`、`RELAY_DATA_ROOT`（绝对路径、必须已存在、必须在源码仓库之外）、`RELAY_LOG_LEVEL`、`RELAY_API_STOP_ON_STDIN_EOF`；没有任何静默默认值。
 
+IPv6 回环配置使用 `RELAY_API_BIND_HOST=::1`，来源和请求 URL 使用带方括号的规范形式，例如 `http://[::1]:5173`。2026-10-29 修复来源白名单与 HTTP Host 校验对 IPv6 方括号处理不一致的问题；非回环 IPv6、错误端口及未授权来源仍被拒绝。Breaking Change: No；不涉及数据库迁移。
+
+源码运行与编译运行都从模块目录向上定位实际工作区，再拒绝将源码仓库及其子目录用作 `RELAY_DATA_ROOT`；不再使用固定目录层数推断源码根。故障原因与安装布局边界见[启动边界记录](../../development/backend-startup-boundaries.md)。
+
 ### V001/V002 持久化与 Workspace 初始化（P01/P02）
 
 数据库角色与迁移都显式运行，不依赖手工改库，也不和应用启动混在一起：

@@ -10,6 +10,7 @@ import { createAssistSession, bindAssistSessionDirectory, cancelAssistMessage,
   requestAssistMessage, steerAssistMessage } from '../../src/application/assist-commands.js';
 import { listAssistMessages } from '../../src/application/assist-queries.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
+import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { runSessionReadonlyRounds } from '../../src/application/assistant-readonly-round.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
@@ -131,6 +132,9 @@ async function fixture(options: {
   }
   const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
     title: '普通会话', projectId, conversationMode: 'AGENT' });
+  // 本套断言主轮次的工具/插话；自动提取由 memory-auto-capture 套件独立覆盖，历史记忆仍开启。
+  await setMemorySettings(app.db, { workspaceId, commandId: randomUUID(), expectedRevision: '0',
+    recallEnabled: true, automaticCompaction: true, autoCapture: false });
   if (options.bind !== false) {
     await bindAssistSessionDirectory(app.db, { workspaceId,
       sessionId: session.result.session_id, commandId: randomUUID(), resourceId });
@@ -491,6 +495,44 @@ test('AM-08 绑定命令按原 command_id 重放拿回原回执，且不产生�
   const session = await createRepositories(app.db).assist.readSession(fx.sessionId);
   assert.equal(session?.working_resource_id, resourceId);
 });
+
+for (const stopKind of ['USER', 'HOST'] as const) {
+  test(`AM-09 主流程模型在途时持续监听停止：${stopKind}`, async () => {
+    const fx = await fixture();
+    const sent = await requestAssistMessage(app.db, { workspaceId: fx.workspaceId,
+      sessionId: fx.sessionId, commandId: randomUUID(), content: '读取目录信息' });
+    const started = Promise.withResolvers<void>();
+    const stop = new AbortController();
+    let interrupted = false;
+    const port: AssistModelPort = { identity: new FakeModelPort().identity,
+      assist: (request) => new Promise<AssistResult>((resolve) => {
+        const timer = setTimeout(() => resolve({ kind: 'CONTENT', content: '迟到的回复',
+          providerRequestId: 'late-stream', usage: { inputTokens: 1, outputTokens: 1 } }), 1500);
+        request.signal!.addEventListener('abort', () => {
+          interrupted = true;
+          clearTimeout(timer);
+          resolve({ kind: 'CANCELLED' });
+        }, { once: true });
+        started.resolve();
+      }) };
+    const running = runAssistGenerationTick(app.db, { workerId: `stop-${stopKind}`,
+      storage: new ManagedContentStore(dataRoot), modelPort: port, leaseMs: 60_000, signal: stop.signal });
+    await started.promise;
+    if (stopKind === 'USER') {
+      await cancelAssistMessage(app.db, { workspaceId: fx.workspaceId,
+        messageId: sent.result.assistant_message_id, commandId: randomUUID() });
+    } else {
+      stop.abort();
+    }
+    const outcome = await running;
+    assert.equal(interrupted, true, '模型请求结束前不能提前清理取消监听与心跳');
+    const message = await createRepositories(app.db).assist.readMessage(sent.result.assistant_message_id);
+    assert.equal(outcome?.status, stopKind === 'USER' ? 'CANCELLED' : 'DISCARDED');
+    assert.equal(message?.status, stopKind === 'USER' ? 'CANCELLED' : 'RUNNING');
+    assert.equal(message?.cancel_requested, stopKind === 'USER');
+    assert.equal(message?.content, null);
+  });
+}
 
 test('AM-09 取消先于领取时本轮根本不启动：消息按 CANCELLED 收口，且零工具读取', async () => {
   const fx = await fixture();

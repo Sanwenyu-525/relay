@@ -122,7 +122,7 @@ export function isoWeekday(date: LocalDate): number {
 /**
  * 把「本地日期 + 本地时刻」解析成绝对时刻。
  *
- * 围绕首遍偏移向两侧扩展候选偏移（DST 调整幅度现实时区不超过 2 小时，±3 小时留余量），
+ * 从 guess 及前后一天读取实际候选偏移，覆盖半小时回拨等非整小时 DST 调整，
  * 每个候选偏移换算出一个候选 instant，再用墙钟回读过滤。不能只从 guess 处的偏移做
  * 不动点迭代：对正 UTC 偏移时区（如柏林），guess 在秋回后段，迭代会收敛到较晚的一次。
  * 秋回重叠会得到两个有效候选，取较早的一次；都无效说明落在 gap，按 +1 小时顺延。
@@ -147,15 +147,12 @@ function resolveLocalDateTimeWithoutGap(date: LocalDate, time: { hour: number; m
   return valid.length === 0 ? undefined : new Date(Math.min(...valid));
 }
 
-/** DST 调整幅度的扫描余量：现实时区单次调整不超过 2 小时，±3 小时足够覆盖。 */
-const OFFSET_SCAN_DELTAS = [-3, -2, -1, 0, 1, 2, 3].map((hours) => hours * MS_PER_HOUR);
-
 function collectValidInstants(date: LocalDate, time: { hour: number; minute: number }, timezone: string): number[] {
   const guess = Date.UTC(date.year, date.month - 1, date.day, time.hour, time.minute);
-  const firstOffset = offsetAt(guess, timezone);
+  const offsets = new Set([-MS_PER_DAY, 0, MS_PER_DAY].map((delta) => offsetAt(guess + delta, timezone)));
   const candidates = new Set<number>();
-  for (const delta of OFFSET_SCAN_DELTAS) {
-    const instant = guess - (firstOffset + delta);
+  for (const offset of offsets) {
+    const instant = guess - offset;
     if (sameWallClock(instant, date, time, timezone)) candidates.add(instant);
   }
   return [...candidates];

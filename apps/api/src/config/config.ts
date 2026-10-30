@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,7 +28,7 @@ export interface ApiConfig {
 }
 
 const LOOPBACK_BIND_HOSTS: readonly string[] = ['127.0.0.1', '::1'];
-const LOOPBACK_ORIGIN_HOSTS: readonly string[] = ['127.0.0.1', '::1', 'localhost'];
+const LOOPBACK_ORIGIN_HOSTS: readonly string[] = ['127.0.0.1', '[::1]', 'localhost'];
 const LOG_LEVELS: readonly LogLevel[] = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'];
 const MINIMUM_BEARER_TOKEN_LENGTH = 32;
 const PLACEHOLDER_TOKEN_PREFIX = /^(replace|change|example|placeholder|your)/iu;
@@ -44,7 +44,15 @@ export class ConfigError extends Error {
 }
 
 export function findRepositoryRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  let candidate = moduleDirectory;
+  while (candidate !== dirname(candidate)) {
+    if (existsSync(resolve(candidate, 'pnpm-workspace.yaml')) &&
+        existsSync(resolve(candidate, 'apps/api/package.json'))) return candidate;
+    candidate = dirname(candidate);
+  }
+  // 安装包不含源码工作区标记，保留原有安装布局的边界。
+  return resolve(moduleDirectory, '..', '..', '..', '..');
 }
 
 export function validateOrigin(value: string): string | undefined {
