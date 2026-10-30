@@ -36,7 +36,7 @@ const session = { id: sessionId, workspace_id: workspaceId, project_id: projectI
     resource_id: resourceId, canonical_root: "D:\\Work\\Research" } },
   created_at: "2026-10-16T00:00:00Z", updated_at: "2026-10-16T00:00:00Z" };
 
-function auditBody(): unknown {
+function auditBody(overrides: Record<string, unknown> = {}): unknown {
   return {
     state: "OK",
     detail: "1 份必读文件已计入预计加载量。",
@@ -65,13 +65,18 @@ function auditBody(): unknown {
     access: { project_id: projectId, connection_id: connectionId },
     thresholds: { single_file: { notice: 0.15, high: 0.30, severe: 0.50 },
       total_files: { notice: 0.30, high: 0.50, severe: 0.75 } },
+    ...overrides,
   };
 }
 
-interface GateState { posts: number }
+interface GateState { posts: number; sessionPosts: number; lastSession: Record<string, unknown> | null }
 
-async function installRoutes(page: Page): Promise<GateState> {
-  const state: GateState = { posts: 0 };
+type AuditMode = "ok" | "server-error" | "no-access" | "hang";
+type SessionList = "list" | "empty";
+
+async function installRoutes(page: Page, auditMode: AuditMode = "ok",
+  sessions: SessionList = "list"): Promise<GateState> {
+  const state: GateState = { posts: 0, sessionPosts: 0, lastSession: null };
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -105,12 +110,29 @@ async function installRoutes(page: Page): Promise<GateState> {
           project_type: "GENERAL", archive_status: "ACTIVE", archived_at: null, revision: "1" } },
         linked_goals: [], sessions: [] });
     if (path === `${prefix}/working-directories/${resourceId}/required-context-audit`) {
+      if (auditMode === "server-error") {
+        return fulfillJson(route, { error: { code: "INTERNAL", message: "审计服务不可用" } }, 500);
+      }
+      if (auditMode === "hang") {
+        // 永不返回：页面的 6 秒超时必须自己收尾，不能等到请求回来。
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        return fulfillJson(route, auditBody());
+      }
+      if (auditMode === "no-access") {
+        return fulfillJson(route, auditBody({ state: "NO_FILE_ACCESS", severity: "NONE",
+          files: [], detail: "没有读取该目录的权限。" }));
+      }
       return fulfillJson(route, auditBody());
     }
     if (path === `${prefix}/search`) return fulfillJson(route, { items: [], next_cursor: null });
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/assist-sessions`) {
-      return fulfillJson(route, request.method() === "POST" ? session : { items: [session] });
+      if (request.method() !== "POST") {
+        return fulfillJson(route, { items: sessions === "empty" ? [] : [session] });
+      }
+      state.sessionPosts += 1;
+      state.lastSession = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      return fulfillJson(route, session);
     }
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
@@ -170,4 +192,71 @@ test("高风险：确认条先拦住，取消不发送、确认才发送", async
   await gate.waitFor({ timeout: 20_000 });
   await page.getByTestId("context-risk-gate-continue").click();
   await expect.poll(() => state.posts, { timeout: 20_000 }).toBeGreaterThan(0);
+});
+
+
+/* P0-3：确认期间改正文，旧确认不再适用，不能拿它去发新状态。 */
+test("确认期间改了草稿：旧确认不再适用，不发送", async ({ page }) => {
+  const state = await installRoutes(page);
+  await openSession(page);
+  const draft = page.getByTestId("assist-draft");
+  await draft.fill("帮我把实验评价指标整理成表格");
+  await page.getByTestId("assist-send").click();
+  const gate = page.getByTestId("context-risk-gate");
+  await gate.waitFor({ timeout: 20_000 });
+  await expect(gate).toHaveAttribute("data-severity", "SEVERE");
+  await draft.fill("帮我把实验评价指标整理成表格，并补一列基线");
+  await page.getByTestId("context-risk-gate-continue").click();
+  await expect(gate).toHaveCount(0);
+  expect(state.posts).toBe(0);
+});
+/* P0-1：审计失败与无权限都不能被当成「没有风险」直接发出去。 */
+test("审计失败：判为风险未知，取消不发、确认才发", async ({ page }) => {
+  const state = await installRoutes(page, "server-error");
+  await openSession(page);
+  const draft = page.getByTestId("assist-draft");
+  await draft.fill("帮我把实验评价指标整理成表格");
+  await page.getByTestId("assist-send").click();
+  const gate = page.getByTestId("context-risk-gate");
+  await gate.waitFor({ timeout: 20_000 });
+  await expect(gate).toHaveAttribute("data-mode", "unknown");
+  await expect(gate).toHaveAttribute("data-reason", "AUDIT_FAILED");
+  expect(state.posts).toBe(0);
+  await page.getByTestId("context-risk-gate-cancel").click();
+  await expect(gate).toHaveCount(0);
+  expect(state.posts).toBe(0);
+  await expect(draft).toHaveValue("帮我把实验评价指标整理成表格");
+  await page.getByTestId("assist-send").click();
+  await gate.waitFor({ timeout: 20_000 });
+  expect(state.posts).toBe(0);
+  await page.getByTestId("context-risk-gate-continue").click();
+  await expect.poll(() => state.posts, { timeout: 20_000 }).toBe(1);
+});
+
+test("无权限：同样停在风险未知，不自动发送", async ({ page }) => {
+  const state = await installRoutes(page, "no-access");
+  await openSession(page);
+  await page.getByTestId("assist-draft").fill("先看必读文件再回复");
+  await page.getByTestId("assist-send").click();
+  const gate = page.getByTestId("context-risk-gate");
+  await gate.waitFor({ timeout: 20_000 });
+  await expect(gate).toHaveAttribute("data-mode", "unknown");
+  await expect(gate).toHaveAttribute("data-reason", "NO_FILE_ACCESS");
+  expect(state.posts).toBe(0);
+});
+
+/* P0-1 的另一半：审计挂住不返回时，有界等待后同样判为风险未知，不发送。 */
+test("审计超时：有界等待后判为风险未知，不发送", async ({ page }) => {
+  const state = await installRoutes(page, "hang");
+  await openSession(page);
+  await page.getByTestId("assist-draft").fill("帮我把实验评价指标整理成表格");
+  const started = Date.now();
+  await page.getByTestId("assist-send").click();
+  const gate = page.getByTestId("context-risk-gate");
+  await gate.waitFor({ timeout: 20_000 });
+  await expect(gate).toHaveAttribute("data-mode", "unknown");
+  await expect(gate).toHaveAttribute("data-reason", "TIMEOUT");
+  expect(state.posts).toBe(0);
+  // 有界：不能等到请求真的回来（夹具里它挂 30 秒）。
+  expect(Date.now() - started).toBeLessThan(15_000);
 });

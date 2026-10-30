@@ -14,8 +14,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelayTaskSkillProposal, type RelayUndoPlan,
   type RelayWorkingDirectory, type RelayWorkingDirectorySource,
   type RelaySessionContextUsage, type RelayContextBudgetTokens,
-  type RelayWorkspaceDefaultDirectory, type RequiredContextAudit,
-  type RequiredContextSeverity } from "../api/relayClient";
+  type RelayWorkspaceDefaultDirectory, type RequiredContextAudit } from "../api/relayClient";
 import AssistSkillOutput from "../components/AssistSkillOutput";
 import ModelSelector from "../components/ModelSelector";
 import ContextUsagePanel from "../components/ContextUsagePanel";
@@ -38,6 +37,10 @@ import ChatModeSwitch, { ChatModeHint } from "../components/ChatModeSwitch";
 import PlanCard from "../components/PlanCard";
 import GoalCard from "../components/GoalCard";
 import { chatModeCommandFromText } from "../lib/chatModeCommand";
+import SendRiskGateNotice from "../components/SendRiskGateNotice";
+import { firstSendPayload, riskScopeSignature, type RiskSendScope,
+  type SendIntent } from "../lib/sendRiskGate";
+import { useSendRiskGate } from "../lib/useSendRiskGate";
 import ExecutionTrajectorySummary from "../components/ExecutionTrajectorySummary";
 import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import { RecentActivitySummary } from "../components/RecentActivitySummary";
@@ -448,26 +451,7 @@ function receiptMatches(receipt: RelayCommandReceipt, action: PendingAction, ses
 
 /** 项目与任务子页、独立 Agent 页共用同一个 Assist 业务入口。 */
 /** 发送前风险审计（P0-B）：超时与不可用都算「无法完成检查」，不冒充安全。 */
-async function requestSendAudit(client: RelayApiClient, scope: {
-  readonly resourceId: string | null; readonly sessionId: string | null;
-  readonly model: string | null; readonly budgetTokens: number | null;
-}): Promise<{ readonly audit: RequiredContextAudit | null; readonly failure: string | null }> {
-  if (scope.resourceId === null) return { audit: null, failure: null };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const audit = await Promise.race([
-      client.getRequiredContextAudit({ resourceId: scope.resourceId,
-        sessionId: scope.sessionId, model: scope.model,
-        budgetTokens: scope.budgetTokens, refresh: true }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { reject(new Error("风险检查超时（6 秒）。")); }, 6_000);
-      }),
-    ]);
-    return { audit, failure: null };
-  } catch (caught) {
-    return { audit: null, failure: describeLiveError(caught).message };
-  } finally { if (timer !== undefined) clearTimeout(timer); }
-}
+
 export default function AssistView({ targetKind, targetId, preferredSessionId, onSessionCreated,
   standalone = false, onNavigationStateChange, onRequestNewSession, embedded = false,
   onRequestSessionChange, onSessionSelected, onOpenRelatedSession, onActiveSessionChange,
@@ -733,12 +717,13 @@ onExecutionPrepared?: (taskId: string) => void;
    *   4. 审计超时或不可用时说清「无法完成风险检查」并放行，绝不卡死发送；
    *   5. 预检期间拒绝重复提交：命令、正文与附件在此之前都还没生成。
    */
-  const [riskGate, setRiskGate] = useState<{ readonly fingerprint: string;
-    readonly severity: RequiredContextSeverity; readonly files: number;
-    readonly share: number | null; readonly run: () => void } | null>(null);
-  const [riskCheckFailure, setRiskCheckFailure] = useState<string | null>(null);
-  const riskConfirmedRef = useRef<string | null>(null);
-  const riskGateBusyRef = useRef(false);
+  /*
+   * P0-C（2026-10-30）：预检结论不再「失败即放行」。上面第 4 点已由 useSendRiskGate 承担：
+   * 超时、失败、NO_FILE_ACCESS、SCAN_UNAVAILABLE 一律停在确认条上等用户选择，
+   * 命令与正文在此之前都还没生成。
+   */
+  const risk = useSendRiskGate(client, { onAudit: (audit) => {
+    setFirstRequiredContext({ audit, loading: false, error: null }); } });
   // 档位在本行之后才声明，而下面的回调要在调用时才读它（不重建回调、也不碰 TDZ）。
   const firstBudgetTierRef = useRef<RelayContextBudgetTokens | null>(null);
   const [firstRequiredContext, setFirstRequiredContext] = useState<{
@@ -772,30 +757,26 @@ onExecutionPrepared?: (taskId: string) => void;
   useEffect(() => { void loadFirstRequiredContext(true); },
     [loadFirstRequiredContext, first.model]);
 
-  async function gateSend(run: () => void, scope: { readonly resourceId: string | null;
-    readonly sessionId: string | null; readonly model: string | null;
-    readonly budgetTokens: number | null }): Promise<void> {
-    if (riskGateBusyRef.current) return;
-    if (client === null || scope.resourceId === null) { run(); return; }
-    riskGateBusyRef.current = true;
-    try {
-      const { audit, failure } = await requestSendAudit(client, scope);
-      setRiskCheckFailure(failure);
-      if (audit !== null) setFirstRequiredContext({ audit, loading: false, error: null });
-      if (audit === null || audit.state !== "OK") { run(); return; }
-      if (audit.severity !== "HIGH" && audit.severity !== "SEVERE") { run(); return; }
-      if (riskConfirmedRef.current === audit.fingerprint) { run(); return; }
-      setRiskGate({ fingerprint: audit.fingerprint, severity: audit.severity,
-        files: audit.files.length, share: audit.budget.requiredTotalShare,
-        run: () => { riskConfirmedRef.current = audit.fingerprint; run(); } });
-    } finally { riskGateBusyRef.current = false; }
+  function firstSendScope(): RiskSendScope {
+    return { resourceId: executionScope?.association?.resourceId ?? null,
+      sessionId: sourceSessionIdRef.current ?? urlSourceSessionId ?? null,
+      model: firstOwner.read().model ?? null, budgetTokens: firstBudgetTierRef.current };
   }
 
-  function gateThenCreateSession(): void {
-    void gateSend(() => { void createSession(); }, {
-      resourceId: executionScope?.association?.resourceId ?? null,
-      sessionId: sourceSessionIdRef.current ?? urlSourceSessionId ?? null,
-      model: firstOwner.read().model ?? null, budgetTokens: firstBudgetTierRef.current });
+  /** 预检放行（或用户已在确认条上选择继续）之后，才把建会话命令真正发出去。 */
+  async function gateFirstSend(intent: SendIntent): Promise<void> {
+    const verdict = await risk.check(intent, firstSendScope());
+    if (verdict === "PROCEED") await createSession(undefined, intent);
+  }
+
+  /** 确认条上的「仍然发送」：确认不再适用时放弃这一次发送，不拿旧状态去提交。 */
+  function confirmFirstRiskGate(): void {
+    const intent = firstSendPayload(first.draft);
+    const verdict = risk.confirm(firstSendScope(), intent);
+    if (verdict === "SEND") { void createSession(undefined, intent); return; }
+    if (verdict === "STALE") {
+      setFirstError("模型、目录、档位或正文已经变化，这次确认不再适用；请重新发送，会重新检查一次。");
+    }
   }  // 首条发送期间禁用输入区；真正的在途判定在 first.busy 上，这里只是输入态。
   const firstBusy = first.busy;
   /**
@@ -877,12 +858,11 @@ onExecutionPrepared?: (taskId: string) => void;
   }, [client, workspaceLevel]);
   /** 深链 `?skill=` 预选（宿主切到工作对象作用域时带上，省掉用户再选一次）。只应用一次。 */
   const firstSkillPreference = useRef(false);
-  /**
-   * 0127：首条输入里 `/plan 内容`、`/goal 内容` 解析出的模式。
-   * sendFirst 解析、createSession 消费；模式随建会话命令一起落库，空会话因此不需要
-   * 「先建会话再切模式」的两次往返。用 ref 而不是 state：只在发送那一刻被读一次。
+  /*
+   * P0-C（2026-10-30）：'/plan'、'/goal' 的模式不再存在跨预检的 ref 上。预检取消后它
+   * 不会回滚，下一次发送就会带着上一次的模式；改为随 SendIntent 一起传给 createSession，
+   * 只在命令真正生成时读一次。原来的 firstChatModeRef 因此删除。
    */
-  const firstChatModeRef = useRef<RelayChatMode | null>(null);
   useEffect(() => {
     if (firstSkillPreference.current || !preferredSkillId || firstSkills.length === 0) return;
     const preferred = firstSkills.find((item) => item.id === preferredSkillId && item.callSupported);
@@ -973,6 +953,14 @@ onExecutionPrepared?: (taskId: string) => void;
       : inheritRead.failed ? "failed" : inheritRead.tokens === null ? "loading" : "ready";
   const inheritedBudgetTier = inheritState === "ready" ? inheritRead?.tokens ?? null : null;
   /** 建会话要写进创建事务的那一档：用户显式选的 > 已读到的来源档位（冻结界面显示过的那一档）。 */
+  /*
+   * P0-C：换模型、换目录、换档位之后，屏上的旧确认条不再代表当前状态，直接收回；
+   * 用户若坚持发送会重新取一次审计，不会拿旧确认去发新状态。
+   */
+  const { syncScope: syncRiskScope } = risk;
+  useEffect(() => {
+    syncRiskScope(riskScopeSignature(firstSendScope()));
+  }, [syncRiskScope, first.model, firstContextResourceId, firstBudgetTier]);
   const firstBudgetEffective = firstBudgetTier ?? inheritedBudgetTier;
   const chooseFirstBudgetTier = useCallback((tier: RelayContextBudgetTokens) => {
     setFirstBudgetTier(tier);
@@ -1202,12 +1190,13 @@ onExecutionPrepared?: (taskId: string) => void;
     return client === liveClient() ? { session: resolved } : null;
   }
 
-  async function createSession(retry?: PendingCreate) {
+  async function createSession(retry?: PendingCreate, intent?: SendIntent) {
     if ((!target && !workspaceLevel) || !client || creating || (!retry &&
       (pendingCreate || projectWriteBlockedReason || firstAssistantBlockedReason !== null))) return;
     // 首条原文与目录资源在建会话命令产生时就固定：创建响应丢失后按原回执恢复时，
     // 交接的必须是这一份，而不是用户后来修改的输入或当前作用域的资源。
-    const content = retry ? retry.firstContent : firstOwner.read().draft.trim();
+    const content = retry ? retry.firstContent : (intent?.content ?? firstOwner.read().draft.trim());
+    const chatModeOf = intent?.chatMode ?? null;
     // 工作空间级讨论没有 target：归属留空，标题只能来自这条消息本身。
     // CHECK (title <> '') 会拒绝空标题，而「新建会话」按钮绕过 sendFirst 的空内容早退，
     // 因此这条路径上 content 确实可能为空，必须单独兜底而不是直接取 target.title。
@@ -1218,7 +1207,7 @@ onExecutionPrepared?: (taskId: string) => void;
       title: target === null ? (unassignedTitle === "" ? "新讨论" : unassignedTitle)
         : `关于${target.title}`.slice(0, 200),
       firstContent: content, resourceId: executionScope?.association?.resourceId ?? null,
-      ...(firstChatModeRef.current === null ? {} : { chatMode: firstChatModeRef.current }),
+      ...(chatModeOf === null ? {} : { chatMode: chatModeOf }),
       ...(firstOwner.read().model ? { modelSelection: { model: firstOwner.read().model!, commandId: createCommandId() } } : {}),
       conversationMode: wantedMode, assistantProfileId: wantedMode === "ASSISTANT" ? wantedAssistantId : null,
       // 图片随建会话载荷一起固定：重试按同一份文件重传，不会捡用户后来新加的图。
@@ -1235,7 +1224,7 @@ onExecutionPrepared?: (taskId: string) => void;
       // 或已经从来源会话读到的继承档位；两个都没有就交给服务端按来源会话／默认档决定。
       ...(firstBudgetEffective === null ? {} : { contextBudgetTokens: firstBudgetEffective }) };
     // 模式已随 action 固定；清掉 ref，下一次建会话不带上一次的 /plan /goal。
-    firstChatModeRef.current = null;
+    // 模式来自这一次的发送意图；下一次建会话不会带上一次的 /plan /goal。
     const version = requestVersion.current;
     // 新一轮创建不继承上一次的核对弹窗；按原命令重试时保持原样，失败原因仍留在那一层。
     if (!retry) setCreatePendingDialogOpen(false);
@@ -1632,6 +1621,9 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     const withImages = stagedFirst.items.length > 0;
     if ((content === "" && !withImages) || content.length > 32768 || firstBusy || creating ||
       creationPending || projectWriteBlockedReason !== null || firstAssistantBlockedReason !== null) return;
+    // P0-C：预检还没收尾、或确认条还停在屏上时不再受理第二条——命令都还没生成，
+    // 重复点击只会多跑一次审计，不会多出一条消息。
+    if (risk.gate !== null || risk.busy) return;
     // 选中的 Skill 缺上下文时不能发：服务端会按作用域不匹配拒绝，发出去只是把问题推给用户。
     if (firstSkillScopeMissing) {
       setFirstError(`这个 Skill 需要${firstSkill?.target === "TASK" ? "任务" : "项目"}上下文；先在工具行指定任务或项目。`);
@@ -1641,24 +1633,20 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     // 同一条消息，不是「先切模式再发送」两次操作。只写命令不写正文时不新建会话：
     // 空会话没有「当前模式」可供切换，提示里说清缺的是内容。
     const modeCommand = chatModeCommandFromText(content);
-    if (modeCommand !== null) {
-      if (modeCommand.rest === "") {
-        setFirstError(modeCommand.mode === "PLAN"
-          ? "先写要规划的内容：输入 /plan 加内容，一起发送。"
-          : "先写目标：输入 /goal 加内容，一起发送。");
-        return;
-      }
-      firstChatModeRef.current = modeCommand.mode;
-      setFirstError(null); updateFirst({ draft: modeCommand.rest });
-      void gateThenCreateSession();
+    if (modeCommand !== null && modeCommand.rest === "") {
+      setFirstError(modeCommand.mode === "PLAN"
+        ? "先写要规划的内容：输入 /plan 加内容，一起发送。"
+        : "先写目标：输入 /goal 加内容，一起发送。");
       return;
     }
-    if (chatControlFromText(content) !== null) {
+    if (modeCommand === null && chatControlFromText(content) !== null) {
       setFirstError("当前还没有会话历史。先发送一条普通消息；会话命令需在已有会话中使用。");
       return;
     }
-    setFirstError(null); updateFirst({ draft: content });
-    void gateThenCreateSession();
+    setFirstError(null);
+    // P0-C：预检之前不动草稿与模式。'/plan 内容' 只在命令真正建出来时才解析成模式，
+    // 预检取消后原文与模式都还在；普通文本也不在这里被 trim 改写。
+    void gateFirstSend(firstSendPayload(first.draft));
   }
   /**
    * 模式控件在输入器这一列的左侧，两档共用同一处位置。
@@ -1880,9 +1868,8 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         resourceId={firstContextResourceId} audit={firstRequiredContext.audit}
         loading={firstRequiredContext.loading} error={firstRequiredContext.error}
         onRefresh={() => void loadFirstRequiredContext(true)} />}
-    <ContextRiskGate gate={riskGate} failure={riskCheckFailure}
-      onContinue={() => { const run = riskGate?.run; setRiskGate(null); if (run !== undefined) run(); }}
-      onCancel={() => { setRiskGate(null); }} />
+    <SendRiskGateNotice gate={risk.gate} onContinue={confirmFirstRiskGate}
+      onCancel={() => { risk.cancel(); }} />
   </section>;
   /**
    * 只有「命令结果待核对」才拦住切换。未发送草稿已按会话留在本机（composerDrafts），
@@ -4525,35 +4512,34 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const requiredContextRequest = useRef(0);
   const requiredContextResourceId = session.context?.workingDirectory?.resourceId ?? null;
   /* （P0-B）发送前预检：与首条入口同一套判定，状态各自独立（两个输入器不在同一棵树里）。 */
-  const [riskGate, setRiskGate] = useState<{ readonly fingerprint: string;
-    readonly severity: RequiredContextSeverity; readonly files: number;
-    readonly share: number | null; readonly run: () => void } | null>(null);
-  const [riskCheckFailure, setRiskCheckFailure] = useState<string | null>(null);
-  const riskConfirmedRef = useRef<string | null>(null);
-  const riskGateBusyRef = useRef(false);
+  const risk = useSendRiskGate(client, { onAudit: (audit) => {
+    setRequiredContext({ audit, loading: false, error: null }); } });
+  /* 迟到的审计响应按「当时是哪条会话」丢弃：A 会话的读数不写进 B 会话的显示状态。 */
+  const liveSessionIdRef = useRef(session.id);
+  liveSessionIdRef.current = session.id;
 
-  async function gateSend(run: () => void, scope: { readonly resourceId: string | null;
-    readonly sessionId: string | null; readonly model: string | null;
-    readonly budgetTokens: number | null }): Promise<void> {
-    if (riskGateBusyRef.current) return;
-    if (client === null || scope.resourceId === null) { run(); return; }
-    riskGateBusyRef.current = true;
-    try {
-      const { audit, failure } = await requestSendAudit(client, scope);
-      setRiskCheckFailure(failure);
-      if (audit !== null) setRequiredContext({ audit, loading: false, error: null });
-      if (audit === null || audit.state !== "OK") { run(); return; }
-      if (audit.severity !== "HIGH" && audit.severity !== "SEVERE") { run(); return; }
-      if (riskConfirmedRef.current === audit.fingerprint) { run(); return; }
-      setRiskGate({ fingerprint: audit.fingerprint, severity: audit.severity,
-        files: audit.files.length, share: audit.budget.requiredTotalShare,
-        run: () => { riskConfirmedRef.current = audit.fingerprint; run(); } });
-    } finally { riskGateBusyRef.current = false; }
+  function sessionRiskScope(): RiskSendScope {
+    return { resourceId: requiredContextResourceId, sessionId: session.id,
+      model: selectedModel, budgetTokens: null };
   }
 
-  function gateThenSend(content: string): void {
-    void gateSend(() => { dispatchSend(content); }, { resourceId: requiredContextResourceId,
-      sessionId: session.id, model: selectedModel, budgetTokens: null });
+  async function gateThenSend(content: string): Promise<void> {
+    // 确认条还停在屏上时不再受理第二次发送：命令还没生成，重复点击只会多跑一次审计。
+    if (risk.gate !== null || risk.busy) return;
+    const sessionAtRequest = session.id;
+    const verdict = await risk.check({ content, chatMode: null }, sessionRiskScope(),
+      () => !disposed.current && liveSessionIdRef.current === sessionAtRequest);
+    if (verdict === "PROCEED") dispatchSend(content);
+  }
+
+  /** 确认条上的「仍然发送」：确认不再适用时放弃这一次发送，不拿旧状态去提交。 */
+  function confirmSessionRiskGate(): void {
+    const intent: SendIntent = { content: draft.trim(), chatMode: null };
+    const verdict = risk.confirm(sessionRiskScope(), intent);
+    if (verdict === "SEND") { dispatchSend(intent.content); return; }
+    if (verdict === "STALE") {
+      setActionError("模型、目录、档位或正文已经变化，这次确认不再适用；请重新发送，会重新检查一次。");
+    }
   }
   const loadRequiredContext = useCallback(async (force: boolean): Promise<void> => {
     const resourceId = requiredContextResourceId;
@@ -6426,9 +6412,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           loading={requiredContext.loading} error={requiredContext.error}
           onRefresh={() => void loadRequiredContext(true)} />}
       {/* 发送前风险确认条：只在命中新的 HIGH/SEVERE 且未被确认时出现，仍然在卡外。 */}
-      <ContextRiskGate gate={riskGate} failure={riskCheckFailure}
-        onContinue={() => { const run = riskGate?.run; setRiskGate(null); if (run !== undefined) run(); }}
-        onCancel={() => { setRiskGate(null); setNotice("已取消发送；可以先去精简必读文件。"); }} />
+      <SendRiskGateNotice gate={risk.gate} onContinue={confirmSessionRiskGate}
+        onCancel={() => { risk.cancel(); setNotice("已取消发送；可以先去精简必读文件。"); }} />
       {modeHints}
       {/* 0127：模式说明只在非普通模式出现一行（CHAT 返回 null），不常驻占高。
           停止中的目标按服务端目标状态投影（DEV-0105 退回项修复）：PAUSING/CANCELLING
@@ -6463,30 +6448,3 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
  * 卡片形状；取消就是真取消（命令、正文、附件都还没生成），继续发送不会暗中改模型或档位。
  * 审计失败时这里只说明「无法完成风险检查」，不阻止发送，也不冒充“没有风险”。
  */
-function ContextRiskGate({ gate, failure, onContinue, onCancel }: {
-  readonly gate: { readonly fingerprint: string; readonly severity: RequiredContextSeverity;
-    readonly files: number; readonly share: number | null } | null;
-  readonly failure: string | null;
-  readonly onContinue: () => void;
-  readonly onCancel: () => void;
-}) {
-  if (gate === null && failure === null) return null;
-  return <>
-    {gate !== null && <div className="context-risk context-risk-gate" role="alertdialog"
-      aria-label="发送前风险确认" data-testid="context-risk-gate" data-severity={gate.severity}>
-      <p className="context-risk-gate-text">
-        {`这条消息发送前会读 ${gate.files} 个必读文件，预计占用 `}
-        {gate.share === null ? "无法估算的" : `${Math.round(gate.share * 100)}%`}
-        {" 有效输入预算。"}
-      </p>
-      <div className="context-risk-actions">
-        <button type="button" className="primary-button" data-testid="context-risk-gate-continue"
-          onClick={onContinue}>仍然发送</button>
-        <button type="button" className="secondary-button" data-testid="context-risk-gate-cancel"
-          onClick={onCancel}>先去精简</button>
-      </div>
-    </div>}
-    {failure !== null && <p className="context-risk-check-failed" role="status"
-      data-testid="context-risk-check-failed">{`无法完成风险检查：${failure}（仍可发送）`}</p>}
-  </>;
-}

@@ -261,3 +261,51 @@ test('声明文件自身是根外链接：不读，并留下可解释的原因',
     } finally { await rm(outside, { recursive: true, force: true }); }
   });
 });
+
+import { readPinnedConfigText } from '../../src/application/required-context-files.js';
+
+test('深层嵌套的规则文件不再漏计：按层展开但仍有界', async () => {
+  await withRoot(async (root) => {
+    await writeFile(join(root, 'AGENTS.md'), 'a'.repeat(300));
+    await mkdir(join(root, 'services', 'api', 'internal'), { recursive: true });
+    await writeFile(join(root, 'services', 'api', 'internal', 'AGENTS.md'), 'd'.repeat(4_096));
+    const scanned = await scanRequiredContextFiles({ root, agent: 'relay', refresh: true });
+    const paths = scanned.files.map((entry) => entry.path).sort();
+    assert.ok(paths.includes('services/api/internal/AGENTS.md'), '深层规则未计入：' + paths.join(','));
+    assert.equal(scanned.files.find((entry) =>
+      entry.path === 'services/api/internal/AGENTS.md')?.scope, 'NESTED');
+  });
+});
+
+test('声明文件按单句柄读取：正常读、超限拒绝、非普通文件拒绝', async () => {
+  await withRoot(async (root) => {
+    const dir = join(root, '.relay');
+    await mkdir(dir);
+    const file = join(dir, 'context-required.json');
+    await writeFile(file, '{"documents":[]}');
+    const ok = await readPinnedConfigText(file);
+    assert.equal(ok.ok, true);
+    assert.equal(ok.ok ? ok.text : '', '{"documents":[]}');
+    await writeFile(file, 'x'.repeat(70_000));
+    const tooLarge = await readPinnedConfigText(file);
+    assert.equal(tooLarge.ok, false);
+    assert.equal(tooLarge.ok ? '' : tooLarge.reason, 'too-large');
+    await rm(file);
+    await mkdir(file);
+    const notFile = await readPinnedConfigText(file);
+    assert.equal(notFile.ok, false);
+    await rm(file, { recursive: true, force: true });
+  });
+});
+
+import { resolveProfile } from '../../src/application/required-context-files.js';
+
+test('未识别的 Agent 不冒充 relay：matched=false 且保留请求的 id', () => {
+  assert.equal(resolveProfile('relay').matched, true);
+  assert.equal(resolveProfile('claude').matched, true);
+  const other = resolveProfile('some-new-agent');
+  assert.equal(other.matched, false);
+  // 仍然用通用画像去扫，但调用方必须知道这是估算。
+  assert.equal(other.profile.id, 'relay');
+  assert.equal(resolveProfile(null).matched, false);
+});

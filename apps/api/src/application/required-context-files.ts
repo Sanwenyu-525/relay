@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 
 import type { DbExecutor } from '../infrastructure/database.js';
@@ -184,8 +184,18 @@ const AGENT_RULE_PROFILES: readonly AgentRuleProfile[] = [
 /** 项目可显式声明的必读文档清单（只读；不存在即视为没有声明）。 */
 export const REQUIRED_CONTEXT_DECLARATION_PATH = '.relay/context-required.json';
 
-function resolveProfile(agentId: string | null | undefined): AgentRuleProfile {
-  return AGENT_RULE_PROFILES.find((profile) => profile.id === agentId) ?? AGENT_RULE_PROFILES[0]!;
+export interface ResolvedProfile { readonly profile: AgentRuleProfile; readonly matched: boolean }
+
+/**
+ * 按 Agent 类型取规则画像（P1-4）。
+ *
+ * 认不出这个 Agent 时仍然用通用画像去扫（总比什么都不说好），但必须把「没核对上」带进
+ * 结果：`matched: false` 让审计输出标明「未识别的 Agent、按通用规则入口估算」，
+ * 而不是顶着 `relay` 的名字假装已经核对过——那会把「没查」说成「查了没问题」。
+ */
+export function resolveProfile(agentId: string | null | undefined): ResolvedProfile {
+  const found = AGENT_RULE_PROFILES.find((profile) => profile.id === agentId);
+  return { profile: found ?? AGENT_RULE_PROFILES[0]!, matched: found !== undefined };
 }
 
 /* ------------------------------------------------------------------ 类型 */
@@ -367,32 +377,90 @@ async function probeFile(root: string, relativePath: string): Promise<
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'target',
   'coverage', '.next', '.venv', 'venv', '__pycache__', 'vendor']);
 
+const NESTED_MAX_DEPTH = 6;
+
 /**
- * 一层子目录遍历：只为找出「在该子树里还会命中的同名规则文件」。
+ * 按层展开子目录，找出「在该子树里还会命中的同名规则文件」。
  *
- * 不递归整棵树——嵌套规则文件的作用域就是它所在的子树，一层足以回答「还有哪些文件会在
- * 子目录里生效」。目录数硬上限保证扫描有界。
+ * 2026-10-30（P1-5）：此前只走一层，`services/api/AGENTS.md` 这种深层规则文件不会被计入，
+ * 预警就会低报成「只有入口那一个文件」。现在按层展开，但预算只有一个：访问的目录数仍受
+ * `max_scanned_directories` 硬上限约束，深度再受 `NESTED_MAX_DEPTH` 约束，命中数到
+ * `max_required_files` 立刻停——深目录不会把扫描拖成无界遍历，也不会把无关文档算进来。
+ *
+ * 目录符号链接一律跳过：不去跟随可能指向根外的路径；文件侧的越界仍由 probeFile 的
+ * realpath 核对负责。
  */
 async function walkNested(root: string, names: readonly string[], skip: ReadonlySet<string>,
   skipped: { path: string; reason: string }[]): Promise<{ path: string; bytes: number;
     mtimeMs: number }[]> {
   if (names.length === 0) return [];
-  let entries: Dirent[];
-  try { entries = await readdir(root, { withFileTypes: true }); }
-  catch { skipped.push({ path: '.', reason: '根目录无法枚举，未检查嵌套规则文件' }); return []; }
-  const directories = entries.filter((entry) => entry.isDirectory() &&
-    !SKIPPED_DIRECTORIES.has(entry.name) && !entry.name.startsWith('.'))
-    .slice(0, REQUIRED_CONTEXT_THRESHOLDS.max_scanned_directories);
+  const budget = REQUIRED_CONTEXT_THRESHOLDS.max_scanned_directories;
   const found: { path: string; bytes: number; mtimeMs: number }[] = [];
-  for (const directory of directories) {
-    for (const name of names) {
-      const relativePath = posix.join(directory.name, name);
-      if (skip.has(relativePath)) continue;
-      const probe = await probeFile(root, relativePath);
-      if (probe.ok) found.push({ path: relativePath, bytes: probe.bytes, mtimeMs: probe.mtimeMs });
+  const queue: { path: string; depth: number }[] = [{ path: '', depth: 0 }];
+  let scanned = 0;
+  while (queue.length > 0 && scanned < budget) {
+    const current = queue.shift();
+    if (current === undefined) break;
+    scanned += 1;
+    // 根目录本身的同名文件由 discover 直接登记，这里只负责子目录里的。
+    if (current.path !== '') {
+      for (const name of names) {
+        const relativePath = posix.join(current.path, name);
+        if (skip.has(relativePath)) continue;
+        const probe = await probeFile(root, relativePath);
+        if (probe.ok) found.push({ path: relativePath, bytes: probe.bytes, mtimeMs: probe.mtimeMs });
+        if (found.length >= REQUIRED_CONTEXT_THRESHOLDS.max_required_files) return found;
+      }
+    }
+    if (current.depth >= NESTED_MAX_DEPTH) continue;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(current.path === '' ? root : join(root, current.path),
+        { withFileTypes: true });
+    } catch {
+      skipped.push({ path: current.path === '' ? '.' : current.path,
+        reason: '目录无法枚举，其下的嵌套规则文件未检查' });
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (SKIPPED_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
+      queue.push({ path: current.path === '' ? entry.name : posix.join(current.path, entry.name),
+        depth: current.depth + 1 });
     }
   }
   return found;
+}
+
+/**
+ * 用同一个文件句柄读声明文件（P1-7）。
+ *
+ * 「先 stat 再 readFile」在扫描与读取之间留了一个替换窗口：路径可能被换成另一份文件，
+ * 甚至换成超大文件或链接。这里 open 一次，在该句柄上 fstat 并读内容：
+ * 上限与正文来自同一个文件对象，读到的一定是被检查过的那个；
+ * 期间别人改了路径，结果只会是「读到旧内容」，不会是没检查过的内容。
+ *
+ * Node 在 Windows 上打开时带共享标志，别人仍可重命名/替换路径，但本句柄始终指向原来的
+ * 文件对象，所以这个策略在 Node/Windows 与 POSIX 上语义一致，不需要平台分支。
+ */
+export async function readPinnedConfigText(absolute: string): Promise<
+  { readonly ok: true; readonly text: string } |
+  { readonly ok: false; readonly reason: string }> {
+  let handle;
+  try { handle = await open(absolute, 'r'); }
+  catch { return { ok: false, reason: '声明文件在扫描后被替换或不可读，未采用' }; }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return { ok: false, reason: '声明文件不是普通文件，未采用' };
+    if (info.size > REQUIRED_CONTEXT_THRESHOLDS.max_config_bytes) {
+      return { ok: false, reason: 'too-large' };
+    }
+    return { ok: true, text: await handle.readFile('utf8') };
+  } catch {
+    return { ok: false, reason: '声明文件在扫描后被替换或不可读，未采用' };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 interface DeclaredDocument { readonly path: string; readonly category: RequiredContextCategory;
@@ -419,20 +487,17 @@ async function readDeclarations(root: string): Promise<Declarations> {
       skipped: [{ path: relativePath, reason: '声明文件超过 64 KiB 上限，未解析' }] };
   }
   // 读的路径只用 probeFile 复核过的真实路径：链接换了也改不了这次钉住的 canonical。
-  // 读前按真实路径再 stat 一次上限，避免扫描与读取之间被换成超大文件。
-  const absolute = probe.canonical;
-  let text: string;
-  try {
-    const current = await stat(absolute);
-    if (current.size > REQUIRED_CONTEXT_THRESHOLDS.max_config_bytes) {
-      return { documents: [], configKey: 'too-large',
-        skipped: [{ path: relativePath, reason: '声明文件超过 64 KiB 上限，未解析' }] };
-    }
-    text = await readFile(absolute, 'utf8');
-  } catch {
-    return { documents: [], configKey: 'unreadable',
-      skipped: [{ path: relativePath, reason: '声明文件在扫描后被替换或不可读，未采用' }] };
+  // P1-7：大小上限与内容取自同一个文件句柄（readPinnedConfigText），
+  // 扫描与读取之间路径被替换也读不到未经检查的内容。
+  const pinned = await readPinnedConfigText(probe.canonical);
+  if (!pinned.ok) {
+    return pinned.reason === 'too-large'
+      ? { documents: [], configKey: 'too-large',
+        skipped: [{ path: relativePath, reason: '声明文件超过 64 KiB 上限，未解析' }] }
+      : { documents: [], configKey: 'unreadable',
+        skipped: [{ path: relativePath, reason: pinned.reason }] };
   }
+  const text = pinned.text;
   let parsed: unknown;
   try { parsed = JSON.parse(text); }
   catch { return { documents: [], configKey: 'invalid',
@@ -565,7 +630,7 @@ export interface RequiredContextScan {
  */
 export async function scanRequiredContextFiles(input: { readonly root: string;
   readonly agent?: string | null; readonly refresh?: boolean }): Promise<RequiredContextScan> {
-  const profile = resolveProfile(input.agent);
+  const { profile } = resolveProfile(input.agent);
   const scanned = await materialise(input.root, await discover(input.root, profile,
     input.refresh === true));
   return { files: scanned.found, skipped: scanned.skipped };
@@ -722,9 +787,15 @@ const EMPTY_BUDGET_INPUT: BudgetInput = { providerWindow: null, callBudget: 1,
 export async function auditRequiredContext(db: DbExecutor,
   input: RequiredContextAuditInput): Promise<RequiredContextAudit> {
   const repositories = createRepositories(db);
-  const profile = resolveProfile(input.agent);
+  const resolved = resolveProfile(input.agent);
+  const profile = resolved.profile;
   const scannedAt = new Date().toISOString();
-  const base = { agent: { id: profile.id, label: profile.label },
+  // P1-4：认不出 Agent 时不能顶着画像的名字冒充已核对，如实标成未识别。
+  const requested = input.agent === null || input.agent === undefined || input.agent === ''
+    ? 'unknown' : input.agent;
+  // 画像 id 仍取实际用于扫描的那一个（契约里它是枚举），未识别的事实写在 label 与 skipped 里。
+  const base = { agent: { id: profile.id, label: resolved.matched ? profile.label
+      : '未识别的 Agent（按通用规则入口估算，可能少算）' },
     thresholds: REQUIRED_CONTEXT_THRESHOLDS } as const;
   const refuse = (state: RequiredContextState, detail: string, fingerprint: string,
     root: string | null = null): RequiredContextAudit => ({ ...base, state, detail, root,
@@ -786,7 +857,8 @@ export async function auditRequiredContext(db: DbExecutor,
   // 都会生成新指纹，旧的「本次忽略」自动失效，不会拿旧结论掩盖新风险。
   const effectiveBucket = assessed.budget.effective_input_tokens === null ? 'unknown'
     : String(Math.round(assessed.budget.effective_input_tokens / 4_096));
-  const fingerprint = createHash('sha256').update([root, profile.id,
+  const fingerprint = createHash('sha256').update([root,
+    resolved.matched ? profile.id : `unmatched:${requested}`,
     `model:${input.model ?? 'unknown'}`,
     `window:${assessed.budget.provider_window_tokens === null ? 'unknown'
       : String(assessed.budget.provider_window_tokens)}`,
@@ -801,7 +873,9 @@ export async function auditRequiredContext(db: DbExecutor,
       : `${String(assessed.files.length)} 份必读文件已计入预计加载量。`,
     root, scanned_at: scannedAt, fingerprint, severity: assessed.severity,
     files: assessed.files, budget: assessed.budget, reasons: assessed.reasons,
-    suggestions: assessed.suggestions, skipped: scanned.skipped,
+    suggestions: assessed.suggestions,
+    skipped: resolved.matched ? scanned.skipped : [...scanned.skipped,
+      { path: '.', reason: '这个 Agent 的规则入口没有已核对的画像，按通用入口估算，可能少算。' }],
     access: resource.project_id === null ? null
       : { project_id: resource.project_id, connection_id: connectionId } };
 }
