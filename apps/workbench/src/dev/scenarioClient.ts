@@ -49,11 +49,23 @@ function failureError(failure: ScenarioFailure | undefined): RelayApiError | Rel
 export function createScenarioClient(runner: ScenarioRunner): RelayApiClient {
   const current = (): ScenarioWorld => runner.world;
 
-  async function serve<T>(method: LabMethod, read: (world: ScenarioWorld) => T): Promise<T> {
-    const world = current();
+  function settle<T>(method: LabMethod, read: (world: ScenarioWorld) => T, world: ScenarioWorld): T {
     const error = failureError(world.fail[method]);
     if (error !== null) throw error;
     return read(world);
+  }
+
+  async function serve<T>(method: LabMethod, read: (world: ScenarioWorld) => T): Promise<T> {
+    const world = current();
+    const mode = world.hold?.[method];
+    if (mode !== undefined) {
+      // 受控挂起：这一刻不会回来。什么时候回来由场景的下一步取消 hold 决定，
+      // 因此「正在读取…」这一支在稳定帧上是可测的，也不用等固定睡眠。
+      return runner.holdRead(method, mode,
+        () => settle(method, read, current()),
+        () => settle(method, read, world));
+    }
+    return settle(method, read, world);
   }
 
   const surface = {

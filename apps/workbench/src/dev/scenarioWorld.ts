@@ -44,6 +44,9 @@ export type LabMethod =
   | "getFileWriteFrozenDiff"
   | "getFileWriteChangeSets";
 
+/** 受控挂起的两种完成方式：用当时的读数（fresh），或用挂起那一刻的旧读数（stale）。 */
+export type LabHold = "fresh" | "stale";
+
 /** 注入的读取结果。`mismatch` 只用于带身份字段的投影（Run 轨迹）。 */
 export type ScenarioFailure =
   | { readonly kind: "http"; readonly status: number; readonly code: string; readonly detail: string }
@@ -81,6 +84,11 @@ export interface ScenarioWorld {
   /** 人工审批演示（只改模拟状态，不提交真实审批）。 */
   readonly approvalChoices: Readonly<Record<string, "APPROVE" | "REJECT">>;
   readonly fail: Readonly<Partial<Record<LabMethod, ScenarioFailure>>>;
+  /**
+   * 受控挂起：声明「这一刻这些读取不回」。`fresh` 在取消挂起时用当时的世界完成，
+   * `stale` 用挂起那一刻的世界完成（演「旧请求迟到」）。没声明就是立即返回，与原来一致。
+   */
+  readonly hold?: Readonly<Partial<Record<LabMethod, LabHold>>>;
   /** SSE 不可用：真实 hook 因此降级为按 revision 轮询，界面上「实时」标记消失。 */
   readonly streamDown: boolean;
 }
@@ -228,6 +236,15 @@ export class ScenarioRunner {
   private indexValue = 0;
   private seqValue = 0;
   private readonly listeners = new Set<() => void>();
+  /** 挂起中的受控读取（见 `ScenarioWorld.hold`）。 */
+  private readonly holds: {
+    readonly method: LabMethod;
+    readonly mode: LabHold;
+    readonly fresh: () => unknown;
+    readonly stale: () => unknown;
+    readonly resolve: (value: unknown) => void;
+    readonly reject: (reason: unknown) => void;
+  }[] = [];
 
   constructor(scenario: Scenario) {
     this.scenario = scenario;
@@ -241,6 +258,25 @@ export class ScenarioRunner {
 
   /** 每次状态推进自增；fake client 用它判断是否需要重新供给数据。 */
   get seq(): number { return this.seqValue; }
+
+  /**
+   * 受控挂起：把这一刻的读取挂进等待队列。
+   *
+   * 什么时候回来不由真实时间决定，而由场景的下一步取消 `hold` 决定——测试因此可以
+   * 「显式释放」一次读取，或者让它带着旧读数迟到。
+   */
+  holdRead<T>(method: LabMethod, mode: LabHold, fresh: () => T, stale: () => T): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.holds.push({ method, mode, fresh: fresh as () => unknown, stale: stale as () => unknown,
+        resolve: (value: unknown) => resolve(value as T), reject });
+    });
+  }
+
+  /** 还挂着的读取数：界面与断言都读得到，不用猜时间。 */
+  heldCount(method?: LabMethod): number {
+    return method === undefined ? this.holds.length
+      : this.holds.filter((item) => item.method === method).length;
+  }
 
   get steps(): readonly ScenarioStep[] { return this.scenario.steps; }
 
@@ -299,6 +335,26 @@ export class ScenarioRunner {
     this.indexValue = index;
     this.worldValue = world;
     this.seqValue += 1;
+    this.settleHeldReads();
     for (const listener of [...this.listeners]) listener();
+  }
+
+  /**
+   * 完成「世界不再要求挂起」的读取。
+   *
+   * 受控挂起是两件事：世界声明这一刻的读数不回，下一步把它取消。取消的那一刻就是
+   * 「测试显式释放这次读取」——不看真实网络，也不用固定睡眠；仍被 hold 的读取继续挂着。
+   */
+  private settleHeldReads(): void {
+    for (const item of [...this.holds]) {
+      if (this.worldValue.hold?.[item.method] !== undefined) continue;
+      const atIndex = this.holds.indexOf(item);
+      if (atIndex >= 0) this.holds.splice(atIndex, 1);
+      try {
+        item.resolve(item.mode === "stale" ? item.stale() : item.fresh());
+      } catch (error) {
+        item.reject(error);
+      }
+    }
   }
 }

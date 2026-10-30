@@ -40,6 +40,54 @@ interface ScrollReading {
   readonly metricSelector: string | null;
   readonly metricBeforePx: number;
   readonly metricAfterPx: number;
+  /** 以下几条由探针写在同一个文件里。缺失就说明这次测量没有成立，不能当通过。 */
+  readonly anchorFound?: boolean;
+  readonly scrollablePx?: number;
+  readonly startScrollTop?: number;
+}
+
+/** 报告只使用实测读数：缺失、损坏或测量前提不成立一律记 NOT_RUN，绝不当成 PASS。 */
+type ReportVerdict = { readonly acceptance: "PASS" | "FAIL" | "NOT_RUN"; readonly detail: string };
+
+function readReading(file: string): ScrollReading | null {
+  try {
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, "utf8")) as ScrollReading;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 上滚位置稳定性的判定。
+ *
+ * `mode` 决定「什么才算这一次的推力」：`above` 是锚点上方变长（Run 轨迹面板），因此必须先证明
+ * 顶部状态行真的变了高度，滚动位置的补偿量就是这一次的增长量；`below` 是锚点下方续写（会话流），
+ * 滚动位置本来就不该动。两种模式下，读数缺失、损坏或前提不成立一律记 NOT_RUN。
+ */
+function judgeReading(reading: ScrollReading | null, what: string, mode: "above" | "below"): ReportVerdict {
+  if (reading === null) return { acceptance: "NOT_RUN", detail: `${what}：读数文件缺失或无法解析，不按通过计` };
+  const core = [reading.scrollTopShiftPx, reading.anchorShiftPx];
+  if (core.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
+    return { acceptance: "NOT_RUN", detail: `${what}：核心读数不是数字，不按通过计` };
+  }
+  if (reading.anchorFound !== true) {
+    return { acceptance: "NOT_RUN", detail: `${what}：锚点行没找到，测量前提不成立` };
+  }
+  if (!(typeof reading.startScrollTop === "number" && reading.startScrollTop > 0)) {
+    return { acceptance: "NOT_RUN", detail: `${what}：容器没有真的滚起来，测量前提不成立` };
+  }
+  if (mode === "above" && !(reading.metricAfterPx > reading.metricBeforePx)) {
+    return { acceptance: "NOT_RUN", detail: `${what}：顶部状态行没变高，这一次没有可测的推力，不按通过计` };
+  }
+  if (mode === "below" && reading.scrollTopShiftPx !== 0) {
+    return { acceptance: "FAIL", detail: `${what}：滚动位置被推移 ${reading.scrollTopShiftPx}px（限值 0px）` };
+  }
+  if (Math.abs(reading.anchorShiftPx) > 2) {
+    return { acceptance: "FAIL", detail: `${what}：正在阅读的锚点行被顶走 ${reading.anchorShiftPx}px（限值 2px）` };
+  }
+  return { acceptance: "PASS",
+    detail: `${what}：锚点行位移 ${reading.anchorShiftPx}px、滚动位置变化 ${reading.scrollTopShiftPx}px` };
 }
 
 interface VerdictFile {  readonly total: number;
@@ -186,8 +234,10 @@ test.describe("验收报告", () => {
       { id: string; frame: number; label: string; file: string }[];
     const stream = JSON.parse(fs.readFileSync(`${resultsDir}/stream-frames.json`, "utf8")) as
       { frame: number; label: string; state: string | null; draft: number; final: number }[];
-    const chat = JSON.parse(fs.readFileSync(`${resultsDir}/scroll-stability.json`, "utf8")) as ScrollReading;
-    const panel = JSON.parse(fs.readFileSync(`${resultsDir}/panel-shift.json`, "utf8")) as ScrollReading;
+    const chat = readReading(`${resultsDir}/scroll-stability.json`);
+    const panel = readReading(`${resultsDir}/panel-shift.json`);
+    const chatGeometry = judgeReading(chat, "会话流（F13）", "below");
+    const panelGeometry = judgeReading(panel, "Run 轨迹面板（G05）", "above");
 
     const verdictOf = (id: string): { acceptance: string; reason: string } =>
       verdicts.verdicts.find((item) => item.id === id) ?? { acceptance: "unchecked", reason: "批量没有覆盖到这一条" };
@@ -200,7 +250,8 @@ test.describe("验收报告", () => {
     const lines: string[] = [
       "# AI 回复场景实验室 · UI 验收结果", "",
       `判定时间：${verdicts.ranAt}（静态断言在真实浏览器里逐条跑出，非人工判读）`,
-      `场景总数：${entries.length}　通过 ${verdicts.pass}　失败 ${verdicts.fail.length}　未覆盖 ${verdicts.notCovered.length}　未跑 ${verdicts.unchecked.length}`,
+      `场景总数：${entries.length}　通过(PASS) ${verdicts.pass}　失败(FAIL) ${verdicts.fail.length}`
+      + `　未覆盖(NOT_COVERED) ${verdicts.notCovered.length}　未跑(NOT_RUN) ${verdicts.unchecked.length}`,
       `仅真实布局/动画才能量的检查：${verdicts.browserOnlyChecks} 条（由本文件的十条覆盖，jsdom 层不冒充通过）`,
       `控制台错误：${verdicts.consoleErrors.length === 0 ? "无" : verdicts.consoleErrors.join(" / ")}`,
       "",
@@ -235,10 +286,10 @@ test.describe("验收报告", () => {
       "| ⑦ 动效开启只有一个主进度 | ⑦ | D04 在途时 `data-current` 恰一、转动指示恰一 |",
       "| ⑧ 动效关闭受控动画停止 | ⑧ | 关闭后转动指示为 0，且正文一条不少 |",
       "| ⑨ 长内容无页面级横向溢出 | ⑨ | F03/F07/F08/F09/F10/F12 在 1280 / 720 / 390 三档下页面横向溢出为 0 |",
-      `| ⑩ 用户上滚后位置稳定 | ⑩ | 会话流（F13）：滚动位置推移 ${chat.scrollTopShiftPx}px、`
-      + `锚点行位移 ${chat.anchorShiftPx}px（正文 ${chat.beforeLength}→${chat.afterLength} 字）→ 位置稳定；`
-      + `Run 轨迹面板（G05）：滚动位置 ${panel.scrollTopShiftPx}px、锚点行位移 ${panel.anchorShiftPx}px`
-      + `（顶部状态行 ${panel.metricBeforePx}→${panel.metricAfterPx}px）→ 见下方「实测发现」第 1 条 |`,
+      `| ⑩ 用户上滚后位置稳定 | ⑩ | 会话流（F13，判定 ${chatGeometry.acceptance}）：${chatGeometry.detail}`
+      + `（正文 ${chat?.beforeLength ?? "?"}→${chat?.afterLength ?? "?"} 字）；`
+      + `Run 轨迹面板（G05，判定 ${panelGeometry.acceptance}）：${panelGeometry.detail}`
+      + `（顶部状态行 ${panel?.metricBeforePx ?? "?"}→${panel?.metricAfterPx ?? "?"}px） |`,
       "",
       "## 六条可播放流程的逐帧留影", ""
     );
@@ -248,18 +299,36 @@ test.describe("验收报告", () => {
         + shots.map((item) => `${item.frame + 1}. ${item.label}`).join(" / "));
     }
 
-    lines.push("", "## 实测发现（产品问题，与「场景是否生成」无关）", "",
-      "1. **Run 轨迹面板的阅读位置会被顶部状态行推移**（实测数字来自 `panel-shift.json`，不是推断）："
-      + `G05 逐帧推进时，面板顶部那一行 \`${panel.metricSelector ?? "trajectory-source-run"}\` 由 `
-      + `${panel.metricBeforePx}px 长到 ${panel.metricAfterPx}px（Run 状态换措辞后多占一行），`
-      + `其下方第一行轨迹整体下移 ${panel.anchorShiftPx}px，而滚动位置没有补偿（推移 ${panel.scrollTopShiftPx}px）：`
-      + `用户上滚站稳之后正在读的那一行会被顶走。会话流一侧没有这个问题（F13 位移 ${chat.anchorShiftPx}px）。`,
-      "2. **产品没有深色主题**：实验室的暗档只是外壳反相颜色变量（见 `ScenarioLab.css` 的注释），"
+    const x03 = verdictOf("X03");
+    const a03 = verdictOf("A03");
+    lines.push("", "## 实测发现（与「场景是否生成」无关）", "",
+      "1. **Run 轨迹面板的阅读位置**（判定 " + panelGeometry.acceptance + "，数字来自 panel-shift.json，不是推断）："
+      + "G05 逐帧推进时，面板顶部那一行 " + (panel?.metricSelector ?? "trajectory-source-run") + " 由 "
+      + (panel?.metricBeforePx ?? "?") + "px 长到 " + (panel?.metricAfterPx ?? "?") + "px（Run 状态换措辞后多占一行），"
+      + panelGeometry.detail + "。会话流一侧：" + chatGeometry.detail + "。"
+      + (panelGeometry.acceptance === "PASS"
+        ? "顶部状态行变高不再推移正在阅读的轨迹行。"
+        : "判定不是 PASS 时，请按这一句里的实测数字定位，不要沿用历史结论。"),
+      "2. **产品没有深色主题**：实验室的暗档只是外壳反相颜色变量（见 ScenarioLab.css 的注释），"
       + "F20 用它验证「暗底上结构一个不少」，不能当作产品支持主题切换的证据。",
-      "3. **X03 表头文案与行事实不一致**：正文已结束、过程仍有一项未结算时，摘要头部说「已结束」，"
-      + "而列表里那一行还在 REQUESTED——这条由 jsdom 层的检查盯住，界面措辞待产品侧确认。",
-      "4. **A03 的加载分支在确定性 harness 里挂不住**（记为未覆盖，不算通过）：模拟读数在调用那一刻就返回，"
-      + "稳定帧上必然已经读完，「正在读取这一轮的过程…」这个节点没有机会被拍到；要验它需要真实挂起的读数。",
+      "3. **X03 摘要与行事实**（场景判定 " + x03.acceptance + "）："
+      + (x03.acceptance === "pass"
+        ? "正文 COMPLETED 而工具仍 REQUESTED 时，摘要必须写出仍有未结算项，且不得宣布「已结束 / 全部完成 / 成功」——这条由 X03 场景自身的断言守住。"
+        : "场景判定不是通过：" + (x03.reason || "无原因") + "。"),
+      "4. **A03 的加载分支**（场景判定 " + a03.acceptance + "）："
+      + (a03.acceptance === "pass"
+        ? "已由受控读层的挂起/释放能力在真实浏览器里覆盖。"
+        : (a03.reason || "未覆盖") + "。"),
+      "5. **状态口径**：通过 " + counts.pass + "、失败 " + counts.fail + "、未覆盖 " + counts.notCovered
+      + "、未跑 " + counts.unchecked + "（报告只写实测判定：未跑不补数字，读数不可判一律记 NOT_RUN）。",
+      "",
+      "## 修复前历史证据（不属于当前问题，仅留档）", "",
+      "- G05：修复前 panel-shift.json 记录 anchorShiftPx = 19、scrollTopShiftPx = 0，顶部状态行 58→76px，"
+      + "即状态行变长时滚动位置当时完全没有补偿。该现象已由 RunToolTrajectoryPanel 的滚动锚点补偿修掉，"
+      + "并由 assistScenarioLab.spec.ts「⑩-补」的位移断言钗住（撤销修复会失败）。",
+      "- X03：修复前摘要头部对「正文已结束 + 工具 REQUESTED」写「N 项操作 · 已结束」，读起来像全部结清。"
+      + "该口径已由 activityPresentation.ts 的 UNSETTLED 相位修掉（改报「仍有 N 项未结算」）。",
+      "- 以上两条只出现在本留档区，不得再作为当前问题出现在「实测发现」里。",
       "",
       "## 日志与证据引用", "",
       `- 批量判定原始数据：\`${resultsDir.replace(/\\/g, "/")}/browser-verdicts.json\``,
@@ -275,5 +344,14 @@ test.describe("验收报告", () => {
       consoleErrors: verdicts.consoleErrors.length }, null, 2), "utf8");
     expect(counts.fail, "报告里有失败的条目").toBe(0);
     expect(counts.unchecked, "报告里有未跑的条目").toBe(0);
+    // 报告的正确性不只看计数：几何判定必须真的 PASS，否则报告不许写成通过；
+    // 读数缺失/损坏/前提不成立时判成 NOT_RUN，下面的断言会把这一次跑红。
+    expect(panelGeometry.acceptance, `G05 报告判定：${panelGeometry.detail}`).toBe("PASS");
+    expect(chatGeometry.acceptance, `F13 报告判定：${chatGeometry.detail}`).toBe("PASS");
+    expect(verdictOf("X03").acceptance, "X03 必须真的有判定，不能靠预设文字").toBe("pass");
+    const written = fs.readFileSync(`${resultsDir}/scenario-lab-acceptance.md`, "utf8");
+    expect(written, "报告必须按实测写出 G05 判定").toContain("1. **Run 轨迹面板的阅读位置**（判定 PASS");
+    expect(written, "报告不得把已修复的 G05 当作当前问题").not.toContain("会被顶部状态行推移");
+    expect(written, "报告不得把已修复的 X03 当作当前问题").not.toContain("X03 表头文案与行事实不一致");
   });
 });

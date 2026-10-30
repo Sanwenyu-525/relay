@@ -5,8 +5,8 @@ import {
 } from "../scenarioFixtures";
 import type { ScenarioWorld } from "../scenarioWorld";
 import {
-  attr, at, chain, count, frame, gone, make, notText, patch, sel, sessionCallId, sessionComponent,
-  text, visible, withTrace
+  attr, at, chain, count, frame, gone, inspect, liveWorld, make, notText, patch, sel, sessionCallId,
+  sessionComponent, text, visible, withTrace
 } from "./common";
 
 /**
@@ -106,17 +106,83 @@ export const LIFECYCLE = [
     id: "A03", title: "AI 正在处理，尚未调用工具", host: "SESSION", stateKind: "在途",
     component: sessionComponent,
     note: "在途且零记录只能说「正在执行」：这一档还没有任何结算事实，界面不许提前写成"
-      + "「本轮没有调用工具」（那是 EMPTY 相位，属于终态）。",
-    uncovered: "「正在读取这一轮的过程…」这一支没有记为通过：模拟读数按调用那一刻立即返回，"
-      + "稳定帧上必然已经读完，loading 节点在这个 harness 里挂不住。要拍到它需要真实的挂起读数。",
-    steps: frame("RUNNING 无草稿无工具", qa({ status: "RUNNING", content: null })),
+      + "「本轮没有调用工具」（那是 EMPTY 相位，属于终态）。第一次读数还没回来时，面板必须显式说"
+      + "「正在读取这一轮的过程…」，不许拿空状态或上一帧的旧事实顶替。读数什么时候回来不由真实时间决定，"
+      + "而由场景的下一步取消 hold 决定（受控挂起），所以这一支在稳定帧上可测，也不依赖任何固定睡眠。",
+    steps: [
+      at(0, "在途：第一次读数挂着没回来",
+        { ...liveWorld(), hold: { getAssistSessionToolCalls: "fresh" } }),
+      at(1_600, "读数回来：仍在途、确实零记录",
+        { ...liveWorld(), hold: {} }),
+      at(3_200, "读数失败：错误与恢复入口在场",
+        { ...liveWorld(), hold: {},
+          fail: { getAssistSessionToolCalls: { kind: "transport",
+            message: "模拟：这一轮的过程读数没有拿到响应。" } } }),
+      at(4_800, "读数恢复：错误消失、仍如实报在途",
+        { ...liveWorld(), hold: {}, fail: {} }),
+      at(6_400, "旧读数迟到：挂起的是这一刻的新事实",
+        { ...liveWorld(readCall(0, "package.json", { status: "REQUESTED", settledAt: null })),
+          hold: { getAssistSessionToolCalls: "stale" } }),
+      at(8_000, "新读数已到：两条未结算，迟到的旧读数不许盖回来",
+        { ...liveWorld(readCall(0, "package.json", { status: "REQUESTED", settledAt: null }),
+            readCall(1, "pnpm-workspace.yaml", { status: "REQUESTED", settledAt: null })),
+          hold: {} })
+    ],
     checks: [
       visible("在途三点在场", sel.inflight()),
       attr("在途默认把过程展开", sel.trace(), "data-state", "active"),
-      text("零记录只报正在执行", sel.traceActivity(), "正在执行"),
-      notText("在途不提前宣布本轮没有工具", sel.traceActivity(), "本轮没有调用工具"),
-      gone("零记录时不画任何调用行", sel.call(sessionCallId(0))),
-      text("状态词是正在生成", sel.status(), "正在生成")
+      text("状态词是正在生成", sel.status(), "正在生成"),
+      visible("末帧过程入口仍在", sel.trace()),
+      notText("迟到的旧读数不许盖回一条（浏览器里旧读数真到场时必须被丢掉）", sel.traceActivity(), "1 项操作"),
+      gone("终帧不留下错误", sel.traceError()),
+      gone("读完不再显示加载", sel.traceLoading())
+    ],
+    interactions: [
+      inspect("挂起中：明说正在读取这一轮的过程",
+        visible("加载节点在场", sel.traceLoading()),
+        text("加载文案如实", sel.traceLoading(), "正在读取这一轮的过程"),
+        gone("挂起时不提前画空状态", sel.traceEmpty()),
+        notText("挂起时不说没有调用工具", sel.traceActivity(), "本轮没有调用工具"),
+        attr("挂起相位是 RUNNING_NO_TOOLS", sel.trace(), "data-phase", "RUNNING_NO_TOOLS")),
+      { kind: "advance", label: "显式释放：读数回来，仍如实报在途",
+        then: [
+          gone("释放后不再显示加载", sel.traceLoading()),
+          gone("零记录也不写没有调用工具", sel.traceEmpty()),
+          notText("在途零记录不说没有调用工具", sel.traceActivity(), "本轮没有调用工具"),
+          text("零记录只报正在执行", sel.traceActivity(), "正在执行"),
+          gone("零记录时不画任何调用行", sel.call(sessionCallId(0)))
+        ] },
+      { kind: "advance", label: "读数失败：错误与重新读取入口都在",
+        then: [
+          visible("错误块在场", sel.traceError()),
+          text("错误块说明是过程没读到", sel.traceError(), "过程读取失败"),
+          visible("重新读取入口在场", sel.traceRetry()),
+          gone("失败时不冒充读完了", sel.traceEmpty())
+        ] },
+      { kind: "click", selector: sel.traceRetry(), label: "点重新读取：仍失败时如实留住错误",
+        then: [
+          visible("点了仍失败也不假装成功", sel.traceError()),
+          text("错误仍是过程读取失败", sel.traceError(), "过程读取失败"),
+          notText("错误块不出现成功结论", sel.traceError(), "过程已读取")
+        ] },
+      { kind: "advance", label: "世界不再失败：产品自己的读取入口把错误清掉",
+        then: [
+          gone("恢复后错误消失", sel.traceError()),
+          gone("恢复后不再显示加载", sel.traceLoading()),
+          text("恢复后仍如实报在途", sel.traceActivity(), "正在执行")
+        ] },
+      { kind: "advance", label: "旧读数挂着没回来：界面还停在上一次读到的读数",
+        then: [
+          text("挂起期间不动旧读数", sel.traceActivity(), "正在执行"),
+          notText("挂起的新事实不会自己冒出来", sel.traceActivity(), "1 项操作"),
+          visible("在途过程入口仍在", sel.trace())
+        ] },
+      { kind: "advance", label: "新读数已到：迟到的旧读数不许盖回来",
+        then: [
+          notText("旧读数不许盖回一条", sel.traceActivity(), "1 项操作"),
+          gone("迟到帧不留下错误", sel.traceError()),
+          gone("迟到帧不再显示加载", sel.traceLoading())
+        ] }
     ]
   }),
 
@@ -261,9 +327,10 @@ export const LIFECYCLE = [
     id: "X03", title: "正文已结束、过程却有一项没结算", host: "SESSION", stateKind: "未知",
     component: sessionComponent,
     note: "故意把两种事实放在一起：正文落定不等于工具都结清了。行内必须留住「已请求，尚未结算」，"
-      + "标题也不许把它盖成「全部完成 / 成功」一类结论。"
-      + "已发现的产品口径问题（单列进报告，不在此判通过）：标题写「1 项操作 · 已结束」，"
-      + "「结束」指的是这一轮不再推进，读起来却像所有事项都结清了。",
+      + "摘要也必须写出「仍有 N 项未结算」，不许盖成「已结束 / 全部完成 / 成功」一类结论。"
+      + "（历史：在 2026-10-30 之前，摘要头部对「正文 COMPLETED + 工具 REQUESTED」写「N 项操作 · 已结束」，"
+      + "读起来像全部结清；该口径已由 activityPresentation.ts 的 UNSETTLED 相位修掉，"
+      + "本场景现在断言的就是修正后的口径。）",
     steps: [{ at: 0, label: "正文 COMPLETED + 一行 REQUESTED 未结算",
       set: chain(patch(qa({ status: "COMPLETED", content: "先说结论：这一步还没结清。" })),
         withTrace(sessionTrace([[readCall(0, "package.json", { status: "REQUESTED", settledAt: null })]]))) }],
@@ -280,7 +347,9 @@ export const LIFECYCLE = [
         notText("行内不写成已结算", sel.call(sessionCallId(0)), "已结算"),
         notText("标题不把未结清盖成全部完成", sel.traceActivity(), "全部完成"),
         notText("标题不写成功结论", sel.traceActivity(), "成功"),
-        notText("标题不写都已结清", sel.traceActivity(), "都已结清")] }]
+        notText("标题不写都已结清", sel.traceActivity(), "都已结清"),
+        text("展开后摘要写出仍有未结算项", sel.traceActivity(), "仍有 1 项未结算"),
+        notText("展开后摘要不宣布已结束", sel.traceActivity(), "已结束")] }]
   }),
 
   make({
