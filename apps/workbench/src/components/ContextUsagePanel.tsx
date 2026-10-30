@@ -59,8 +59,18 @@ const CATEGORY_META: Readonly<Record<RelayContextUsageCategory,
 const CATEGORY_ORDER: readonly RelayContextUsageCategory[] = ["HISTORY", "SYSTEM", "TOOLS",
   "FILE_READS", "MEMORY", "OTHER"];
 
-type Pending = { readonly commandId: string; readonly expectedRevision: DecimalRevision;
-  readonly budget: RelayContextBudgetTokens; readonly reason: string };
+/**
+ * 一条「已发出、结果待核对」的档位写命令（P0，2026-10-30 复审）。
+ *
+ * 它必须带上**目标会话**：待核对属于那条会话的事实，不属于浮层这一屏。切到别的会话时它
+ * 照样保留（原 command_id 不能丢），只是不参与那一屏的渲染。
+ */
+type Pending = { readonly sessionId: string; readonly commandId: string;
+  readonly expectedRevision: DecimalRevision; readonly budget: RelayContextBudgetTokens;
+  readonly reason: string };
+
+/** 一条会话自己的显示态：只有 sessionId 与当前会话一致时才参与渲染。 */
+type Scoped<T> = { readonly sessionId: string; readonly value: T };
 
 export default function ContextUsagePanel({ client, sessionId, usage, loading, error, onReload,
   onSaved, draftTier, onDraftTierChange, inheritedTier = null, inheritState = "none",
@@ -86,7 +96,14 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   readonly inheritState?: "none" | "loading" | "ready" | "failed";
   readonly onRetryInherit?: () => void;
 }) {
-  const [saving, setSaving] = useState(false);
+  /*
+   * 正在保存的会话集合：按会话记，不按浮层记。
+   *
+   * 浮层是同一个组件实例，切会话只是换 props。用一个布尔表示「保存中」，会让 A 会话的在途
+   * 请求把 B 会话的「保存档位」也锁住；A 的请求结束时，又去解开 B 的锁。
+   */
+  const [savingSessions, setSavingSessions] = useState<readonly string[]>([]);
+  const saving = sessionId !== null && savingSessions.includes(sessionId);
   /**
    * 已选、还没保存的那一档（P0-C，2026-10-30 复审恢复「选择后点击保存」）。
    *
@@ -94,11 +111,32 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
    * 永远不会被读成「已经生效」——生效值只来自服务端已保存的那一档。
    */
   const [draftSelection, setDraftSelection] = useState<RelayContextBudgetTokens | null>(null);
-  const [conflict, setConflict] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  /** 选下这一档时服务端的基线值（P1）：基线被别人挪走时要说得出来。 */
+  const [draftBaseline, setDraftBaseline] = useState<RelayContextBudgetTokens | null>(null);
+  const [conflict, setConflict] = useState<Scoped<string> | null>(null);
+  const [actionError, setActionError] = useState<Scoped<string> | null>(null);
+  const [pendingBySession, setPendingBySession] = useState<readonly Pending[]>([]);
+  const [checkingSessions, setCheckingSessions] = useState<readonly string[]>([]);
+  const [notice, setNotice] = useState<Scoped<string> | null>(null);
+  /*
+   * 下面这些都是**按会话存放的显示态**：写入时登记它属于哪条会话，渲染时只取当前会话那一份。
+   * A 会话的迟到响应最多更新 A 的那一份，永远改不到 B 这一屏（P0-6）。
+   */
+  const conflictFor = conflict !== null && conflict.sessionId === sessionId ? conflict.value : null;
+  const actionErrorFor = actionError !== null && actionError.sessionId === sessionId
+    ? actionError.value : null;
+  const noticeFor = notice !== null && notice.sessionId === sessionId ? notice.value : null;
+  const pending = pendingBySession.find((item) => item.sessionId === sessionId) ?? null;
+  const checking = sessionId !== null && checkingSessions.includes(sessionId);
+  /** 把一条待核对的写命令登记到它自己的会话上；同一会话只保留一条。 */
+  const rememberPending = useCallback((entry: Pending) => {
+    setPendingBySession((current) => [...current.filter((item) => item.sessionId !== entry.sessionId),
+      entry]);
+  }, []);
+  /** 这条会话的写命令收口了（成功、明确失败或换基线），不再占着待核对名额。 */
+  const forgetPending = useCallback((targetSessionId: string) => {
+    setPendingBySession((current) => current.filter((item) => item.sessionId !== targetSessionId));
+  }, []);
   /*
    * 刚写成功、但父组件还没把新投影读回来的那一小段时间。
    *
@@ -108,9 +146,15 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
    *
    * 它只表示「服务端已经确认，但界面还没追上」；一旦投影读到的档位与修订和它一致，
    * 就清掉，让界面完全交给服务端事实。
+   *
+   * `baseRevision` 是这次写所用的 CAS 基线：投影的修订一旦不再等于它，就说明服务端已经走过
+   * 这一步了——不管它是被我们写成的，还是被别人改走的，覆盖层都必须让位（前者是「追上了」，
+   * 后者是「没轮上」）。P1 要的「外部改动必须显示出来」就靠这一条。
    */
-  const [committed, setCommitted] = useState<{ readonly tokens: RelayContextBudgetTokens;
-    readonly revision: DecimalRevision } | null>(null);
+  const [committed, setCommitted] = useState<{ readonly sessionId: string;
+    readonly tokens: RelayContextBudgetTokens;
+    readonly revision: DecimalRevision; readonly baseRevision: DecimalRevision } | null>(null);
+  const committedFor = committed !== null && committed.sessionId === sessionId ? committed : null;
   const name = useId();
   const disposed = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -119,15 +163,23 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
     return () => { disposed.current = true; };
   }, []);
   useEffect(() => {
-    setDraftSelection(null); setConflict(null); setPending(null); setActionError(null);
-    setNotice(null); setCommitted(null);
+    // 切会话只清这一屏的草稿：未决命令、提示与覆盖层都按会话存放，不需要清（P0-6）。
+    setDraftSelection(null); setDraftBaseline(null);
   }, [sessionId]);
   useEffect(() => {
     if (committed === null || usage === null) return;
-    if (usage.budget.tokens === committed.tokens && usage.budget.revision === committed.revision) {
-      setCommitted(null);
+    if (usage.sessionId !== committed.sessionId) return;
+    // 投影还停在这次写的基线上：界面还没追上，覆盖层继续顶住，避免回闪。
+    if (usage.budget.revision === committed.baseRevision) return;
+    setCommitted(null);
+    if (draftSelection === committed.tokens) {
+      // 服务端已落在这一档上、用户保存后没有再改选择：草稿兑现，清掉（P1）。
+      setDraftSelection(null); setDraftBaseline(null);
+    } else if (draftSelection !== null) {
+      // 保存之后用户又选了一档：草稿留着，但基线以服务端现在的值为准。
+      setDraftBaseline(usage.budget.tokens);
     }
-  }, [committed, usage]);
+  }, [committed, draftSelection, usage]);
 
   /**
    * 内容变了就把浮层滚回顶部。
@@ -139,7 +191,7 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   useEffect(() => {
     const menu = rootRef.current?.closest(".agent-chat-context-meter-menu");
     if (menu instanceof HTMLElement) menu.scrollTop = 0;
-  }, [usage, notice, conflict, pending, actionError]);
+  }, [usage, noticeFor, conflictFor, pending, actionErrorFor]);
 
   /*
    * 两个值必须分开说，界面才不会撒谎：
@@ -148,8 +200,16 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
    *   chosen    —— 单选组的显示值：用户刚点的那一档优先，否则就是生效值。
    * 「已选未保存」「保存中待确认」都只改 chosen，savedTier 不动，状态行照实说明。
    */
-  const savedTier = committed?.tokens ?? usage?.budget.tokens ?? draftTier ?? TIERS[0].value;
+  const savedTier = committedFor?.tokens ?? usage?.budget.tokens ?? draftTier ?? TIERS[0].value;
   const chosen = draftSelection ?? savedTier;
+  /**
+   * 草稿还在，但基线已经被别人挪走了（P1）。
+   *
+   * 「已选 X，尚未保存」说的是你和当前值的关系；这一句说的是基线自己也动过——少它的话用户
+   * 只会以为自己看漏了，而不知道服务端那一行已经换人写过。
+   */
+  const baselineMoved = draftSelection !== null && draftBaseline !== null
+    && draftBaseline !== savedTier;
   /** 空白新会话：用户显式选的 > 来源会话（已读到）> 无来源时的缺省 256K；读不到就留空。 */
   const firstChosen = draftTier ?? (inheritState === "ready" ? inheritedTier
     : inheritState === "none" ? TIERS[0].value : null);
@@ -180,70 +240,146 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
     if (usage === null) {
       // 读不到当前档位就写不了：CAS 需要基线修订。没有基线还硬写，等于把
       // 「不知道当前值」伪装成「知道」。这里说清楚，并让人能重读。
-      setActionError(loading ? "正在读取当前档位，稍后再点一次即可。"
-        : "读不到这条会话的当前档位，暂时无法保存；请先重新读取。");
+      setActionError({ sessionId, value: loading ? "正在读取当前档位，稍后再点一次即可。"
+        : "读不到这条会话的当前档位，暂时无法保存；请先重新读取。" });
       onReload();
       return;
     }
     if (saving) return;
+    // P0-1：有一条还没核对完的写命令时，绝不再生成新的 command_id。
+    if (pending !== null) {
+      setActionError({ sessionId, value: "上一条保存命令还没核对完：先查它的回执；确认它没有"
+        + "提交之后，再用原命令与同一档位重试。这里不会再发第二条写命令。" });
+      return;
+    }
     const commandId = createCommandId();
+    const origin = sessionId;
     // 用最近一次确认过的修订做 CAS：刚写成功但投影还没追上时，用旧修订会被打成 409。
-    const expectedRevision = committed?.revision ?? usage.budget.revision;
-    setSaving(true); setDraftSelection(next); setNotice(null); setActionError(null); setConflict(null);
+    const expectedRevision = committedFor?.revision ?? usage.budget.revision;
+    setSavingSessions((current) => [...current, origin]);
+    setDraftSelection(next); setNotice(null); setActionError(null); setConflict(null);
     try {
-      const result = await client.setSessionContextBudget({ sessionId, commandId,
+      const result = await client.setSessionContextBudget({ sessionId: origin, commandId,
         expectedRevision, budgetTokens: next });
       if (disposed.current) return;
-      setPending(null);
-      setCommitted({ tokens: result.contextBudgetTokens, revision: result.revision });
-      setNotice(`已保存（修订 v${result.revision}）：本会话每次模型调用最多携带 `
-        + `${result.contextBudgetTokens.toLocaleString()} tokens。`);
+      forgetPending(origin);
+      setCommitted({ sessionId: origin, tokens: result.contextBudgetTokens,
+        revision: result.revision, baseRevision: expectedRevision });
+      setNotice({ sessionId: origin,
+        value: `已保存（修订 v${result.revision}）：本会话每次模型调用最多携带 `
+          + `${result.contextBudgetTokens.toLocaleString()} tokens。` });
       onSaved();
     } catch (caught) {
       if (disposed.current) return;
       const described = describeLiveError(caught);
       if (described.kind === "conflict") {
-        // 409 不覆盖别人刚写入的值：重读最新档位并说明，用户再点一次即可。
-        setConflict(described.message);
+        // 409：这条命令没有被提交（对方赢了），不留待核对，直接换基线重读（P0-5）。
+        forgetPending(origin);
+        setConflict({ sessionId: origin, value: described.message });
         onReload();
       } else if (caught instanceof RelayTransportError) {
         // 传输失败不等于没写成功：保留原 command_id 与载荷，由回执核对收口。
-        setPending({ commandId, expectedRevision, budget: next, reason: described.message });
+        rememberPending({ sessionId: origin, commandId, expectedRevision, budget: next,
+          reason: described.message });
       } else {
-        setActionError(described.message);
+        // 明确失败：服务端说这条命令没写，就不再占着待核对名额。
+        forgetPending(origin);
+        setActionError({ sessionId: origin, value: described.message });
       }
     } finally {
-      if (!disposed.current) setSaving(false);
+      if (!disposed.current) {
+        setSavingSessions((current) => current.filter((item) => item !== origin));
+      }
     }
-  }, [client, committed?.revision, loading, onDraftTierChange, onReload, onSaved, saving,
-    sessionId, usage]);
+  }, [client, committedFor, forgetPending, loading, onDraftTierChange, onReload, onSaved,
+    pending, rememberPending, saving, sessionId, usage]);
 
   async function checkReceipt(): Promise<void> {
-    if (client === null || sessionId === null || pending === null) return;
-    setChecking(true); setActionError(null);
+    if (client === null || pending === null) return;
+    const origin = pending.sessionId;
+    setCheckingSessions((current) => [...current, origin]);
+    setActionError(null);
     try {
       const receipt = await client.getCommandReceipt(pending.commandId);
       if (disposed.current) return;
-      if (receipt.commandType !== "SetSessionContextBudget") {
-        setActionError(`原命令回执的类型是 ${receipt.commandType}，不是会话上下文档位；`
-          + "不能当作本次保存已生效。");
+      // 回执逐字核对：命令身份、命令类型、目标会话与档位值，缺一条都不能说「已生效」（P0-7）。
+      const receiptBudget: unknown = receipt.result.context_budget_tokens;
+      if (receipt.commandId !== pending.commandId
+        || receipt.commandType !== "SetSessionContextBudget"
+        || String(receipt.result.session_id ?? "") !== origin
+        || receiptBudget !== pending.budget) {
+        setActionError({ sessionId: origin, value: `原命令回执对不上（命令 ${receipt.commandId}、`
+          + `类型 ${receipt.commandType}、会话 ${String(receipt.result.session_id ?? "")}、`
+          + `档位 ${String(receiptBudget)}）；不能当作本次保存已生效，仍按原 command_id 处理。` });
         return;
       }
-      const receiptSession = String(receipt.result.session_id ?? "");
-      if (receiptSession !== sessionId) {
-        setActionError("原命令回执属于另一条会话，不能当作本次保存已生效。");
-        return;
-      }
-      setPending(null);
+      forgetPending(origin);
       const revision = String(receipt.result.revision ?? "");
       // 回执确认了服务端事实：先把这一档钉住，避免重读回来之前选择器回闪旧值。
-      setCommitted({ tokens: pending.budget, revision });
-      setNotice(`原命令回执已核对：会话档位已保存（修订 v${revision}）。`);
+      setCommitted({ sessionId: origin, tokens: pending.budget, revision,
+        baseRevision: pending.expectedRevision });
+      setNotice({ sessionId: origin,
+        value: `原命令回执已核对：会话档位已保存（修订 v${revision}）。` });
       onReload();
       onSaved();
     } catch (caught) {
-      if (!disposed.current) setActionError(`回执尚未核对到：${describeLiveError(caught).message}`);
-    } finally { if (!disposed.current) setChecking(false); }
+      if (!disposed.current) {
+        // 核对不到（服务还没记下这条命令，或回执读不到）也算 UNKNOWN：pending 保留，不换 ID。
+        setActionError({ sessionId: origin,
+          value: `回执尚未核对到：${describeLiveError(caught).message}` });
+      }
+    } finally {
+      if (!disposed.current) {
+        setCheckingSessions((current) => current.filter((item) => item !== origin));
+      }
+    }
+  }
+
+  /**
+   * 按原命令重试：同一个 command_id、同一条会话、同一个档位与同一个 CAS 基线（P0-4）。
+   *
+   * 这是「查不到回执」时唯一的第二条出口，而且它**不是**一次新写：同一 command_id 在服务端
+   * 是幂等的，重放只会返回原回执，不会写第二遍。
+   */
+  async function retryPending(): Promise<void> {
+    if (client === null || pending === null) return;
+    const origin = pending.sessionId;
+    if (savingSessions.includes(origin)) return;
+    setSavingSessions((current) => [...current, origin]);
+    setActionError(null); setConflict(null); setNotice(null);
+    try {
+      const result = await client.setSessionContextBudget({ sessionId: origin,
+        commandId: pending.commandId, expectedRevision: pending.expectedRevision,
+        budgetTokens: pending.budget });
+      if (disposed.current) return;
+      forgetPending(origin);
+      setCommitted({ sessionId: origin, tokens: result.contextBudgetTokens,
+        revision: result.revision, baseRevision: pending.expectedRevision });
+      setNotice({ sessionId: origin,
+        value: `原命令已重放并核对（修订 v${result.revision}）：会话档位已保存。` });
+      onReload();
+      onSaved();
+    } catch (caught) {
+      if (disposed.current) return;
+      const described = describeLiveError(caught);
+      if (described.kind === "conflict") {
+        // 原命令没被提交、修订又往前走：换基线重读，不再保留这条命令。
+        forgetPending(origin);
+        setConflict({ sessionId: origin, value: described.message });
+        onReload();
+      } else if (caught instanceof RelayTransportError) {
+        // 还是没取到回执：命令仍然待核对，原 command_id 不换。
+        setActionError({ sessionId: origin,
+          value: `按原命令重试仍未取到回执：${described.message}` });
+      } else {
+        forgetPending(origin);
+        setActionError({ sessionId: origin, value: described.message });
+      }
+    } finally {
+      if (!disposed.current) {
+        setSavingSessions((current) => current.filter((item) => item !== origin));
+      }
+    }
   }
 
   const lastCall = usage?.lastCall ?? null;
@@ -380,8 +516,8 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
             data-divider={TIERS.indexOf(tier) === 0 ? undefined : "true"}>
             <input type="radio" name={`${name}-tier`} value={tier.value}
               data-testid={`context-budget-option-${tier.value}`}
-              checked={chosen === tier.value} disabled={saving}
-              onChange={() => setDraftSelection(tier.value)} />
+              checked={chosen === tier.value} disabled={saving || pending !== null}
+              onChange={() => { setDraftSelection(tier.value); setDraftBaseline(savedTier); }} />
             <span>{tier.label}</span>
           </label>)}
         </div>
@@ -389,7 +525,7 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
           <button className="secondary-button secondary-button--compact" type="button"
             data-testid="context-budget-save"
             disabled={saving || loading || usage === null || draftSelection === null
-              || draftSelection === savedTier}
+              || draftSelection === savedTier || pending !== null}
             onClick={() => { if (draftSelection !== null) void applyTier(draftSelection); }}>
             {saving ? "正在保存" : "保存档位"}</button>
           <button className="secondary-button secondary-button--compact" type="button"
@@ -399,13 +535,17 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
         <p className="context-usage-note" role="status" data-testid="context-usage-tier-state">
           {tierState}
         </p>
-        {notice !== null && <p className="receipt-message" role="status"
-          data-testid="context-budget-notice">{notice}</p>}
-        {actionError !== null && <p className="action-error" role="alert"
-          data-testid="context-usage-action-error">{actionError}</p>}
-        {conflict !== null && <p className="action-error" role="alert"
+        {baselineMoved && <p className="action-error" role="alert"
+          data-testid="context-usage-baseline-moved">
+          基线已变：选档时服务端是 {formatTierLabel(draftBaseline)}，现在是 {formatTierLabel(savedTier)}。你的选择 {formatTierLabel(draftSelection)} 仍未保存，再点保存会按当前修订提交。
+        </p>}
+        {noticeFor !== null && <p className="receipt-message" role="status"
+          data-testid="context-budget-notice">{noticeFor}</p>}
+        {actionErrorFor !== null && <p className="action-error" role="alert"
+          data-testid="context-usage-action-error">{actionErrorFor}</p>}
+        {conflictFor !== null && <p className="action-error" role="alert"
           data-testid="context-budget-conflict">
-          档位已被其他操作改动：{conflict}。已重读最新值，再点一次即可。
+          档位已被其他操作改动：{conflictFor}。已重读最新值，再点一次即可。
         </p>}
         {pending !== null && <div className="action-error" role="alert"
           data-testid="context-budget-pending">
@@ -414,6 +554,9 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
           <button className="text-link" type="button" data-testid="context-budget-receipt"
             disabled={checking} onClick={() => void checkReceipt()}>
             {checking ? "正在查询…" : "查询原命令回执"}</button>
+          <button className="text-link" type="button" data-testid="context-budget-retry"
+            disabled={checking || saving} onClick={() => void retryPending()}>
+            {saving ? "正在重试…" : "按原命令重试"}</button>
         </div>}
       </section>
     </>}
