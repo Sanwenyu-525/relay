@@ -32,6 +32,12 @@
 .session-delegations-role { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-medium); }
 .session-delegations-content { max-height: min(18rem, 32vh); padding: var(--relay-space-2); overflow-y: auto; }
 .session-delegations-list { margin: 0; padding: 0; list-style: none; }
+.subagent-supplements { margin: var(--relay-space-2) 0; min-width: 0; }
+.subagent-supplements > details { max-height: 28vh; overflow-y: auto; }
+.subagent-supplements summary { cursor: pointer; font-size: var(--relay-font-size-meta); }
+.subagent-supplement-form { margin-top: var(--relay-space-2); }
+.subagent-supplement-form label { display: grid; gap: var(--relay-space-1); }
+.subagent-supplement-form textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .session-delegations-item { min-width: 0; padding: var(--relay-space-3) 0; }
 .session-delegations-item + .session-delegations-item { border-top: var(--relay-border-width) solid var(--relay-color-border-subtle); }
 .session-delegations-item-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); }

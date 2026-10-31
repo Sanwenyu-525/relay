@@ -61,6 +61,19 @@ export interface AttemptPatch {
   readonly errorCode?: string | null;
 }
 
+export interface DelegationSupplementRow {
+  readonly id: string;
+  readonly delegation_id: string;
+  readonly source_message_id: string;
+  readonly source_session_id: string;
+  readonly parent_session_id: string;
+  readonly content: string;
+  readonly delegation_status: DelegationStatus;
+  readonly parent_seen_at: Date | null;
+  readonly child_seen_at: Date | null;
+  readonly created_at: Date;
+}
+
 const DELEGATION_COLUMNS = sql.raw('id, workspace_id, parent_session_id, child_session_id, role, ' +
   'objective, scope, baseline, output_requirements, required, status, attempt_count, ' +
   'max_attempts, parent_message_id, parent_tool_call_id, result_summary, stop_reason, revision, ' +
@@ -71,6 +84,48 @@ const ATTEMPT_COLUMNS = sql.raw('id, delegation_id, attempt_index, claim_epoch, 
 
 export class SubagentRepository {
   constructor(private readonly db: DbExecutor) {}
+
+  async insertSupplement(input: { id: string; delegationId: string;
+    sourceMessageId: string }): Promise<void> {
+    await sql`insert into assist_delegation_supplements (id, delegation_id, source_message_id)
+      values (${input.id}, ${input.delegationId}, ${input.sourceMessageId})`.execute(this.db);
+  }
+
+  async listSupplements(sessionId: string, limit = 50,
+    context?: { messageId: string; child: boolean }): Promise<readonly DelegationSupplementRow[]> {
+    const seen = context?.child ? sql`s.child_seen_at` : sql`s.parent_seen_at`;
+    const seenMessage = context?.child ? sql`s.child_seen_message_id` : sql`s.parent_seen_message_id`;
+    const filter = context === undefined ? sql``
+      : sql`and (${seen} is null or ${seenMessage} = ${context.messageId})`;
+    const ordering = context === undefined ? sql`s.created_at desc, s.id desc`
+      : sql`case when ${seen} is null then 0 else 1 end, s.created_at, s.id`;
+    const rows = (await sql<DelegationSupplementRow>`select s.id, s.delegation_id,
+      s.source_message_id, m.session_id as source_session_id, d.parent_session_id,
+      m.content, d.status as delegation_status, s.parent_seen_at, s.child_seen_at, s.created_at
+      from assist_delegation_supplements s
+      join assist_delegations d on d.id = s.delegation_id
+      join assist_messages m on m.id = s.source_message_id
+      where (d.parent_session_id = ${sessionId} or d.child_session_id = ${sessionId}) ${filter}
+      order by ${ordering} limit ${limit}`.execute(this.db)).rows;
+    return context === undefined ? rows.reverse() : rows;
+  }
+
+  async markSupplementsSeen(input: { ids: readonly string[]; sessionId: string;
+    messageId: string; workerId: string; child: boolean }): Promise<void> {
+    if (input.ids.length === 0) return;
+    const assignments = input.child
+      ? sql`child_seen_at = now(), child_seen_message_id = ${input.messageId}`
+      : sql`parent_seen_at = now(), parent_seen_message_id = ${input.messageId}`;
+    const scope = input.child ? sql`d.child_session_id` : sql`d.parent_session_id`;
+    await sql`update assist_delegation_supplements s set ${assignments}
+      from assist_delegations d
+      where s.delegation_id = d.id and ${scope} = ${input.sessionId}
+        and s.id in (${sql.join(input.ids.map((id) => sql`${id}`), sql`, `)})
+        and exists (select 1 from assist_messages m where m.id = ${input.messageId}
+          and m.session_id = ${input.sessionId} and m.status = 'RUNNING'
+          and m.worker_id = ${input.workerId} and m.cancel_requested = false)`
+      .execute(this.db);
+  }
 
   // ------------------------------------------------------------------ 委派账本
 

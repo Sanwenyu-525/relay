@@ -1057,6 +1057,9 @@ export interface ConversationExecutionRequestRow {
   readonly resource_id: string;
   readonly command_id: string;
   readonly root_path: string;
+  /** 0149：执行范围在 claim 时冻结，委托阶段只读这两列，不回读会话状态。 */
+  readonly execution_kind: 'FILE_SCOPE' | 'MACHINE' | 'LEGACY_UNCLASSIFIED';
+  readonly machine_capability: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | null;
   readonly base_content_sha256: Buffer;
   readonly decision: ConversationDecision;
   readonly candidate_status: ConversationCandidateStatus;
@@ -1393,6 +1396,18 @@ export interface AssistDelegationAttemptRow {
   readonly error_code: string | null;
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+/** 0148：一份子会话用户原文，以及主/子模型各自的读取确认。 */
+export interface AssistDelegationSupplementRow {
+  readonly id: string;
+  readonly delegation_id: string;
+  readonly source_message_id: string;
+  readonly parent_seen_at: Date | null;
+  readonly parent_seen_message_id: string | null;
+  readonly child_seen_at: Date | null;
+  readonly child_seen_message_id: string | null;
+  readonly created_at: Date;
 }
 
 /** 0059：助手配置。配置文本存在这里，能力不在这里——能力来自连接与 Gateway 准入。 */
@@ -1925,6 +1940,7 @@ export interface RelayDatabaseSchema {
   assist_goal_budget_grants: AssistGoalBudgetGrantRow;
   assist_delegations: AssistDelegationRow;
   assist_delegation_attempts: AssistDelegationAttemptRow;
+  assist_delegation_supplements: AssistDelegationSupplementRow;
   assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
   assist_message_baselines: AssistMessageBaselineRow;

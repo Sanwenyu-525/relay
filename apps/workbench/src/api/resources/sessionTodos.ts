@@ -1,5 +1,5 @@
 import type { RelayHttp } from "../core/http";
-import { RelayContractError } from "../core/errors";
+import { RelayApiError, RelayContractError } from "../core/errors";
 import { isRecord } from "../core/primitives";
 
 /**
@@ -62,6 +62,43 @@ export function sessionTodoSnapshotFrom(body: unknown): RelaySessionTodoSnapshot
 
 export async function getAssistSessionTodos(http: RelayHttp,
   sessionId: string): Promise<RelaySessionTodoSnapshot | null> {
-  const body = await http.request(http.workspacePath(`/assist-sessions/${sessionId}/todos`));
-  return sessionTodoSnapshotFrom(body);
+  try {
+    const body = await http.request(http.workspacePath(`/assist-sessions/${sessionId}/todos`));
+    return sessionTodoSnapshotFrom(body);
+  } catch (caught) {
+    throw await sessionTodoReadError(http, sessionId, caught);
+  }
+}
+
+/**
+ * 待办读取失败的定位（2026-10-30）。
+ *
+ * 同一个 404 有两种含义：桌面端连的 API 构建早于本路由（Fastify 默认 404，没有 Relay
+ * 的 code，客户端只能拿到 HTTP_ERROR），或这条会话在当前 Workspace 下不可见
+ * （RESOURCE_NOT_FOUND）。都说成「读取失败」，用户会以为会话内容被删了。
+ */
+async function sessionTodoReadError(http: RelayHttp, sessionId: string,
+  caught: unknown): Promise<unknown> {
+  if (!(caught instanceof RelayApiError) || caught.problem.status !== 404) return caught;
+  // 已经带 Relay code 的 404 是服务端的明确语义（会话不可见），原样上抛。
+  if (caught.problem.code !== "HTTP_ERROR") return caught;
+  /*
+   * 无 Relay code 的 404（2026-10-30 二修）：只能说明「这个 URL 没有匹配到已注册路由」，
+   * 不能直接断言服务端版本旧——base URL/前缀写错、反代改写路径都会得到同一个结果。
+   * 用同一会话的既有读取接口做对照探测，把两种可能分开，并把探测事实写进文案。
+   */
+  try {
+    await http.request(http.workspacePath(`/assist-sessions/${sessionId}`));
+    return new RelayContractError("待办接口未注册（对照探测：同一会话的既有接口可用）。"
+      + "GET /assist-sessions/:id/todos 在服务端没有匹配路由，说明服务端构建早于该路由。"
+      + "请把桌面端连接的 API 升级到与本仓库同版本后重试。");
+  } catch (probe) {
+    if (probe instanceof RelayApiError && probe.problem.status === 404
+        && probe.problem.code === "HTTP_ERROR") {
+      return new RelayContractError("会话接口与待办接口都返回未注册的 404。"
+        + "这更像 API 基础地址或路径前缀不对，而不是版本问题；请核对桌面端配置的 API 地址。");
+    }
+    return new RelayContractError("待办接口返回未注册的 404，对照探测也未能确认服务端版本（"
+      + (probe instanceof Error ? probe.message : String(probe)) + "）。");
+  }
 }

@@ -7,6 +7,7 @@ import { Client } from 'pg';
 import { sql } from 'kysely';
 
 import { withTransaction } from '../../src/application/unit-of-work.js';
+import { applyConversationExecution } from '../../src/application/conversation-execution.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
 import type { DbExecutor } from '../../src/infrastructure/database.js';
@@ -211,6 +212,13 @@ const ALL_MIGRATIONS = [
   // 0144 为工作区默认连接与 Run 的连接身份（ADR-036 阶段三）：一张默认连接表 +
   // 契约两列。清单必须同步，否则真实库上会因多一条而失败。
   '0144_workspace_default_model_connection',
+  '0145_session_context_budget',
+  '0146_assist_session_todos',
+  '0147_assist_session_todo_scope',
+  '0148_subagent_supplements',
+    '0149_conversation_execution_scope',
+  '0150_assist_session_todo_scope_order',
+  '0151_assist_session_todo_turn_scopes',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -360,6 +368,8 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     files.delete('0049_m04_model_call_cache_usage.sql');
     files.delete('0050_n02_impact_candidate_groups.sql');
     files.delete('0051_conversation_execution_requests.sql');
+    // 0149 alters the 0051 table. Defer it to the second phase, where it is asserted below.
+    files.delete('0149_conversation_execution_scope.sql');
     files.delete('0052_n03_project_knowledge_guide.sql');
     files.delete('0053_n03_knowledge_curation_candidates.sql');
     files.delete('0054_m04_agent_tool_loop.sql');
@@ -417,7 +427,7 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
       // 不依赖被删掉的那一批，因此它留在历史夹具里，第二轮不会重复应用。
       '0086_impact_group_dependencies', '0108_scope_grant_browser_actions',
       // 0116 的授权对象由第二轮补回的 0050/0051 建出，因此它也在第二轮应用。
-      '0116_assist_session_delete']);
+      '0116_assist_session_delete', '0149_conversation_execution_scope']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);
@@ -810,5 +820,138 @@ test('uses real non-superuser roles for the migration and application connection
   } finally {
     await app.close();
     await migration.close();
+  }
+});
+
+test('0149 marks legacy execution requests LEGACY_UNCLASSIFIED and the use case fails closed', async () => {
+  const database = await createTemporaryDatabase('execution_scope_legacy');
+  const directory = await createMigrationDirectoryFixture((files) => {
+    for (const name of files.keys()) if (name >= '0149_') files.delete(name);
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-execution-scope-legacy');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory });
+    const workspaceId = randomUUID();
+    const projectId = randomUUID();
+    const sessionId = randomUUID();
+    const messageId = randomUUID();
+    const resourceId = randomUUID();
+    await withTransaction(app.db, async (repositories) => {
+      await repositories.workspaces.insertWorkspace({ id: workspaceId, name: 'Legacy scope' });
+      await repositories.workspaces.insertAuthorityRow(workspaceId);
+      await repositories.projects.insertProject({ id: projectId, workspaceId,
+        title: 'Legacy scope project', projectType: 'GENERAL' });
+      await repositories.projects.insertProjectState(projectId, 'PLANNING');
+      await repositories.assist.insertSession({ id: sessionId, workspaceId, projectId,
+        taskId: null, title: 'Legacy execution', conversationMode: 'AGENT' });
+      await repositories.assist.insertMessage({ id: messageId, sessionId, seq: 1n,
+        role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '把首页标题改一下',
+        sources: [] });
+    });
+    // 0149 之前的请求行：没有 execution_kind / machine_capability 两列。
+    await sql`insert into managed_resources (id, workspace_id, project_id, canonical_root,
+        identity_key, status)
+      values (${resourceId}, ${workspaceId}, ${projectId},
+        'legacy-scope-root', 'legacy-scope-root', 'ACTIVE')`.execute(app.db);
+    const requestId = randomUUID();
+    await sql`insert into conversation_execution_requests (id, workspace_id, project_id,
+        session_id, source_message_id, resource_id, command_id, root_path,
+        base_content_sha256, decision, candidate_status, candidate, status,
+        task_command_id, ready_command_id, delegate_command_id)
+      values (${requestId}, ${workspaceId}, ${projectId}, ${sessionId}, ${messageId},
+        ${resourceId}, ${randomUUID()}, 'legacy-scope-root',
+        ${Buffer.alloc(32, 7)}, 'PREPARE', 'READY',
+        ${JSON.stringify({ title: '改标题', objective: '把首页标题改一下',
+          criteria: [{ statement: '标题已更新', required: true, method: 'HUMAN' }],
+          expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, file_changes: [],
+          writes_files: false })}::jsonb, 'READY',
+        ${randomUUID()}, ${randomUUID()}, ${randomUUID()})`.execute(app.db);
+
+    const applied = await runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY });
+    assert.ok(applied.applied.includes('0149_conversation_execution_scope'));
+    const legacy = (await sql<{ execution_kind: string; machine_capability: string | null }>
+      `select execution_kind, machine_capability from conversation_execution_requests
+        where id = ${requestId}`.execute(app.db)).rows[0];
+    // 历史行失败关闭：可查询、可审计，但不参与执行，也不推断它当初是不是纯机器执行。
+    assert.equal(legacy?.execution_kind, 'LEGACY_UNCLASSIFIED');
+    assert.equal(legacy?.machine_capability, null);
+
+    // 冻结列的完整性：MACHINE 行必须带能力，反之不然（CHECK 约束，23514）。
+    await assert.rejects(() => sql`insert into conversation_execution_requests (id,
+        workspace_id, project_id, session_id, source_message_id, resource_id, command_id,
+        root_path, base_content_sha256, decision, candidate_status, status,
+        task_command_id, ready_command_id, delegate_command_id, execution_kind)
+      values (${randomUUID()}, ${workspaceId}, ${projectId}, ${sessionId}, ${randomUUID()},
+        ${resourceId}, ${randomUUID()}, 'legacy-scope-root', ${Buffer.alloc(32, 8)},
+        'PREPARE', 'PENDING', 'INTERPRETING', ${randomUUID()}, ${randomUUID()},
+        ${randomUUID()}, 'MACHINE')`.execute(app.db),
+      (error: unknown) => (error as { code?: string }).code === '23514');
+
+    // 失败关闭不是文档说法：原入口真的拒绝执行、不新建 Task/Run。
+    await assert.rejects(() => applyConversationExecution(app.db,
+      { workspaceId, requestId }),
+      /创建于执行范围冻结之前/u);
+    const untouched = (await sql<{ status: string; task_id: string | null }>
+      `select status, task_id from conversation_execution_requests where id = ${requestId}`
+      .execute(app.db)).rows[0];
+    assert.equal(untouched?.status, 'READY');
+    assert.equal(untouched?.task_id, null);
+  } finally {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+    await database.drop();
+  }
+});
+
+test('0150 backfills scope_seq from the opening user message and keeps history readable', async () => {
+  const database = await createTemporaryDatabase('todo_scope_order_legacy');
+  const directory = await createMigrationDirectoryFixture((files) => {
+    for (const name of files.keys()) if (name >= '0150_') files.delete(name);
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-todo-scope-legacy');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory });
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+    const userMessageId = randomUUID();
+    await withTransaction(app.db, async (repositories) => {
+      await repositories.workspaces.insertWorkspace({ id: workspaceId, name: 'Legacy order' });
+      await repositories.workspaces.insertAuthorityRow(workspaceId);
+      await repositories.assist.insertSession({ id: sessionId, workspaceId, projectId: null,
+        taskId: null, title: 'Legacy order session' });
+      // 作用域开启消息在第 7 位：0150 的回填依据就是这一位。
+      await repositories.assist.insertMessage({ id: userMessageId, sessionId, seq: 7n,
+        role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '开始迁移',
+        sources: [] });
+    });
+    // 0150 之前的快照与事件：有 scope_key，没有 scope_seq / request_digest。
+    await sql`insert into assist_session_todo_snapshots (session_id, workspace_id, scope_key,
+        version, items, in_progress_limit, last_tool_call_id, last_message_id)
+      values (${sessionId}, ${workspaceId}, ${'turn:' + userMessageId}, 1,
+        ${JSON.stringify([{ id: 'legacy-item', content: '旧事件', status: 'pending' }])}::jsonb,
+        1, ${randomUUID()}, ${randomUUID()})`.execute(app.db);
+    await sql`insert into assist_session_todo_events (id, session_id, workspace_id, scope_key,
+        version, items, tool_call_id, message_id, origin_version)
+      values (${randomUUID()}, ${sessionId}, ${workspaceId}, ${'turn:' + userMessageId}, 1,
+        ${JSON.stringify([{ id: 'legacy-item', content: '旧事件', status: 'pending' }])}::jsonb,
+        ${randomUUID()}, ${randomUUID()}, 0)`.execute(app.db);
+
+    const applied = await runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY });
+    assert.ok(applied.applied.includes('0150_assist_session_todo_scope_order'));
+    const snapshot = (await sql<{ scope_seq: string }>`select scope_seq
+      from assist_session_todo_snapshots where session_id = ${sessionId}`.execute(app.db)).rows[0];
+    const event = (await sql<{ scope_seq: string; request_digest: string | null }>
+      `select scope_seq, request_digest from assist_session_todo_events
+        where session_id = ${sessionId}`.execute(app.db)).rows[0];
+    // bigint 列在测试驱动里可能以字符串或 bigint 返回，统一按字符串比较。
+    assert.equal(String(snapshot?.scope_seq ?? ''), '7', '快照的轮次顺序回填自开启消息的 seq');
+    assert.equal(String(event?.scope_seq ?? ''), '7', '事件的轮次顺序同样回填');
+    assert.equal(event?.request_digest, null, '历史事件保持无摘要，由重放比较兜底');
+  } finally {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+    await database.drop();
   }
 });

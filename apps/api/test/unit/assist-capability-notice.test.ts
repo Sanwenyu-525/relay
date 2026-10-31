@@ -124,3 +124,28 @@ test('未归属会话的插件行指向执行候选，而不是要求先归入�
   assert.match(text, /没有受管目录，文件与 Git 类工具不可用/u);
   assert.doesNotMatch(text, /电脑操控：工作区还没有登记/u);
 });
+
+test('已归属项目但没绑定目录时，插件事实照实给出而不是压在「缺目录」一句里', () => {
+  const text = formatSessionCapabilities({ hasProject: true, workingRoot: null, writeTier: null,
+    tools: [], allowWrite: false, computerPlugin: true, browserPlugin: false,
+    computerRuntimeState: 'READY' });
+  assert.match(text, /还没有选定工作目录/u);
+  assert.match(text, /电脑操控：可用/u);
+  assert.match(text, /interaction="COMPUTER"/u);
+  assert.doesNotMatch(text, /浏览器操控：可用/u);
+});
+
+test('连接已登记但运行时没就位时，缺口指向运行时而不是授权', () => {
+  const text = formatSessionCapabilities({ hasProject: true, workingRoot: null, writeTier: null,
+    tools: [], allowWrite: false, computerPlugin: true, browserPlugin: false,
+    computerRuntimeState: 'NOT_PAIRED' });
+  assert.match(text, /连接已登记，但本机运行时不可用（NOT_PAIRED）/u);
+  assert.doesNotMatch(text, /电脑操控：可用/u);
+});
+
+
+test('没有目录但有可借用连接时，浏览器操作也说可用：判据是目录不是项目', () => {
+  const text = formatSessionCapabilities({ hasProject: false, workingRoot: null, writeTier: null,
+    tools: [], allowWrite: false, computerPlugin: false, browserPlugin: true });
+  assert.match(text, /浏览器操控：可用/u);
+});

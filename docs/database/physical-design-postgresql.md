@@ -607,6 +607,10 @@ TypeScript-first 评审后的新工程目标候选为 PostgreSQL 18 + Kysely/pg�
 
 [读取正文](physical-design-postgresql/part-05.md#116-0136-artifact-与-task-的-workspace-复合范围约束2026-10-25)
 
+## 0148 子任务补充来源与读取确认（2026-10-30）
+
+[会话内子任务补充来源与读取确认（0148）](physical-design-postgresql/part-05.md#0148-子任务补充来源与读取确认2026-10-30)。
+
 ## 115. 0140 成员私聊、群聊与消息（2026-10-25，ADR-034 包 B）
 
 [读取正文](physical-design-postgresql/part-05.md#115-0140-成员私聊群聊与消息2026-10-25adr-034-包-b)

@@ -1,0 +1,16 @@
+{
+  "scenario": "F13",
+  "anchorFound": true,
+  "scrollablePx": 815,
+  "startScrollTop": 203,
+  "scrollTopShiftPx": 0,
+  "anchorShiftPx": 0,
+  "framesAdvanced": 1,
+  "nodeKept": true,
+  "grew": true,
+  "beforeLength": 257,
+  "afterLength": 435,
+  "metricSelector": null,
+  "metricBeforePx": 0,
+  "metricAfterPx": 0
+}

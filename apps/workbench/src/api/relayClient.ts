@@ -11,6 +11,8 @@ export type { RelayCompactAccepted, RelayMemoryCompactionRequest, RelayMemoryCom
   RelayMemorySourceRef, RelayMessageMemoryUse, RelaySessionMemory, RelaySessionMemoryCheckpoint,
   RelaySessionMemoryResetResult } from "./dtos/memory";
 import * as assistApi from "./resources/assist";
+import * as subagentSupplementsApi from "./resources/subagentSupplements";
+export type { RelaySubagentSupplement, RelaySubagentSupplementResult } from "./resources/subagentSupplements";
 import * as sessionTodosApi from "./resources/sessionTodos";
 import type { RelaySessionTodoSnapshot } from "./resources/sessionTodos";
 export type { RelaySessionTodoItem, RelaySessionTodoSnapshot, RelaySessionTodoStatus }
@@ -610,6 +612,13 @@ export class RelayApiClient {
   /** 可选读取口让现有只实现部分能力的客户端保持兼容。 */
   readonly getAssistSessionDelegations?: (sessionId: string) => Promise<readonly RelaySessionDelegation[]> =
     (sessionId) => assistApi.getAssistSessionDelegations(this.#http, sessionId);
+
+  readonly getSubagentSupplements?: (sessionId: string) => Promise<readonly subagentSupplementsApi.RelaySubagentSupplement[]> =
+    (sessionId) => subagentSupplementsApi.getSubagentSupplements(this.#http, sessionId);
+
+  readonly supplementSubagent?: (input: { childSessionId: string; commandId: string; content: string }) =>
+    Promise<subagentSupplementsApi.RelaySubagentSupplementResult> =
+    (input) => subagentSupplementsApi.supplementSubagent(this.#http, input);
 
   /** ADR-038: read-only session todo projection. */
   readonly getAssistSessionTodos?: (sessionId: string) => Promise<RelaySessionTodoSnapshot | null> =

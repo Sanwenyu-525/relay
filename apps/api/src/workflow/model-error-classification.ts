@@ -110,3 +110,61 @@ function errorChain(error: unknown): unknown[] {
   }
   return chain;
 }
+
+/**
+ * 路由停因的归因（2026-10-30）。
+ *
+ * `assist-free-model-routing` 停下来时抛的是**字符串停因**（普通 Error），而
+ * `classifyProviderError` 只读 name / status / 传输标记，读不到这种 message —— runner
+ * 的 catch 只能把 429、账户额度耗尽、候选耗尽一起写成 MODEL_FAILED，消息行上再也
+ * 分不出来。截图里那条 MODEL_FAILED / 429 就是这样产生的。
+ *
+ * 这里只做一件事：把已知停因码映射成可聚合的原因，并给出它是否属于 Provider 侧。
+ * 不认识的码一律返回 undefined：不做前缀匹配，也不把内部缺陷冒充成上游故障。
+ */
+export type ModelRoutingStopReason =
+  | 'PROVIDER_RATE_LIMIT'
+  | 'ACCOUNT_QUOTA_EXHAUSTED'
+  | 'ACCOUNT_QUOTA_UNKNOWN'
+  | 'CANDIDATES_EXHAUSTED'
+  | 'CANDIDATE_UNAVAILABLE'
+  | 'CANDIDATE_STATE_LOST'
+  | 'CALL_OUTCOME_UNKNOWN'
+  | 'SNAPSHOT_INVALID';
+
+export interface ModelRoutingStop {
+  readonly reason: ModelRoutingStopReason;
+  /** 只有限流与额度两类写入 provider_error_kind；其余保持 undefined。 */
+  readonly providerErrorKind: ModelErrorCategory | undefined;
+}
+
+const ROUTING_STOP_REASONS: Readonly<Record<string, ModelRoutingStopReason>> = {
+  ASSIST_MODEL_ACCOUNT_QUOTA_EXHAUSTED: 'ACCOUNT_QUOTA_EXHAUSTED',
+  ASSIST_MODEL_ACCOUNT_QUOTA_UNKNOWN: 'ACCOUNT_QUOTA_UNKNOWN',
+  ASSIST_MODEL_ACCOUNT_COOLDOWN: 'PROVIDER_RATE_LIMIT',
+  ASSIST_MODEL_FREE_MODEL_COOLDOWN: 'PROVIDER_RATE_LIMIT',
+  ASSIST_FREE_MODEL_COOLDOWN: 'PROVIDER_RATE_LIMIT',
+  ASSIST_FREE_MODEL_CANDIDATES_EXHAUSTED: 'CANDIDATES_EXHAUSTED',
+  ASSIST_FREE_MODEL_NO_LONGER_ELIGIBLE: 'CANDIDATE_UNAVAILABLE',
+  ASSIST_MODEL_CANDIDATE_NO_LONGER_ELIGIBLE: 'CANDIDATE_UNAVAILABLE',
+  ASSIST_MODEL_CANDIDATE_CAS_LOST: 'CANDIDATE_STATE_LOST',
+  ASSIST_MODEL_CALL_CAS_LOST: 'CANDIDATE_STATE_LOST',
+  ASSIST_MODEL_CALL_OUTCOME_UNKNOWN: 'CALL_OUTCOME_UNKNOWN',
+  ASSIST_MODEL_SNAPSHOT_MISSING: 'SNAPSHOT_INVALID',
+  ASSIST_MODEL_SNAPSHOT_INVALID: 'SNAPSHOT_INVALID',
+};
+
+/** 停因码 → 原因与 Provider 归类；只认精确码，不做模糊匹配。 */
+export function classifyRoutingStop(error: unknown): ModelRoutingStop | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const reason = ROUTING_STOP_REASONS[error.message];
+  if (reason === undefined) return undefined;
+  // 2026-10-30 二修：候选耗尽是「本地可选模型用完了」，不等于上游限流。只有明确的
+  // 限流与账户额度两类才写 Provider 归类；候选耗尽保留自己的 reason，避免把所有
+  // 缺模型的情况都聚合到 RATE_LIMIT 里，让告警与排查同时失真。
+  const providerErrorKind: ModelErrorCategory | undefined =
+    reason === 'PROVIDER_RATE_LIMIT' || reason === 'ACCOUNT_QUOTA_EXHAUSTED' ||
+      reason === 'ACCOUNT_QUOTA_UNKNOWN'
+      ? 'RATE_LIMIT' : undefined;
+  return { reason, providerErrorKind };
+}

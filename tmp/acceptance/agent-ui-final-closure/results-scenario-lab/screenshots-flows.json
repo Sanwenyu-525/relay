@@ -1,0 +1,210 @@
+[
+  {
+    "id": "G01",
+    "frame": 0,
+    "label": "提交：还没有任何工具调用",
+    "file": "flow-G01-f0",
+    "sha256": "4a15f34b29c326dcf71c379edf7be9268a452adb0be030525a0893e5d027cdd9",
+    "bytes": 19432
+  },
+  {
+    "id": "G01",
+    "frame": 1,
+    "label": "第 1 项读取结算",
+    "file": "flow-G01-f1",
+    "sha256": "19d312ebc676ff819103bc1d15e60ee675de6133c439ee693717a903fece4f0f",
+    "bytes": 33554
+  },
+  {
+    "id": "G01",
+    "frame": 2,
+    "label": "第 2 项结算，第 3 项刚请求出去",
+    "file": "flow-G01-f2",
+    "sha256": "9e0e9e0efb22a7b68f66ec73e3752a3a5bcb8fb530aac710866188cc11c3e725",
+    "bytes": 49121
+  },
+  {
+    "id": "G01",
+    "frame": 3,
+    "label": "三处读完，写入参数还在流式生成（临时预览）",
+    "file": "flow-G01-f3",
+    "sha256": "6eee556a682c39e2a9f7ee6e7f659f9edf08560c1e41a21a530ce961da2efac3",
+    "bytes": 50693
+  },
+  {
+    "id": "G01",
+    "frame": 4,
+    "label": "写入结算：预览行换成落账行，临时预览清空",
+    "file": "flow-G01-f4",
+    "sha256": "d583dfdd4bd7f8388f6dcc7a9ac61571b755ee1ad5fc3c9aac2b656590d8ef9f",
+    "bytes": 50029
+  },
+  {
+    "id": "G01",
+    "frame": 5,
+    "label": "检查结算，正文落定",
+    "file": "flow-G01-f5",
+    "sha256": "2344852c2af4f5abc8ae468ccf654dd4e8651a92adb8e37eb64e2f1409cd1977",
+    "bytes": 42087
+  },
+  {
+    "id": "G02",
+    "frame": 0,
+    "label": "命令请求已发出",
+    "file": "flow-G02-f0",
+    "sha256": "ca6f70ad2e4994ebb223675d4a48dae3a57fb65844a6cc8ee1e31d91362a419f",
+    "bytes": 32396
+  },
+  {
+    "id": "G02",
+    "frame": 1,
+    "label": "回执：退出码 1，三条用例没过",
+    "file": "flow-G02-f1",
+    "sha256": "30acfb691fae2fe3ed1a526f238a938cdd8dc36a7b6ddf65c07a61041c748527",
+    "bytes": 31991
+  },
+  {
+    "id": "G02",
+    "frame": 2,
+    "label": "再跑一次仍失败，Run 停下等人工决定",
+    "file": "flow-G02-f2",
+    "sha256": "58acbf9f2c174608732f6e181c9c1e24ce430bf8191c834cb636a7edc2021442",
+    "bytes": 37146
+  },
+  {
+    "id": "G02",
+    "frame": 3,
+    "label": "正文说明停在哪里",
+    "file": "flow-G02-f3",
+    "sha256": "ebf5aad4c8b11aea86f23c4b1217ee51b5d9d19aade8480dd4ec654ae7ffecbf",
+    "bytes": 39801
+  },
+  {
+    "id": "G03",
+    "frame": 0,
+    "label": "写入参数还在生成",
+    "file": "flow-G03-f0",
+    "sha256": "3bbbfc6b40c7714bb0128975d02dc647fea8344a3d5af9efc95b0718eb14749a",
+    "bytes": 9416
+  },
+  {
+    "id": "G03",
+    "frame": 1,
+    "label": "冻结完成，等待你批准",
+    "file": "flow-G03-f1",
+    "sha256": "97e6ca6ca18f0c1beecae0190b0233fd68c10cb3b57886022d6762787eb051ef",
+    "bytes": 17129
+  },
+  {
+    "id": "G03",
+    "frame": 2,
+    "label": "批准之后落盘",
+    "file": "flow-G03-f2",
+    "sha256": "393d7f4546391ad217dfde0d563b4e54e4c48220bbef79e75180f76fc72e8700",
+    "bytes": 8306
+  },
+  {
+    "id": "G04",
+    "frame": 0,
+    "label": "草稿正常推进（v3，40%）",
+    "file": "flow-G04-f0",
+    "sha256": "e956ed8445a21033ae101b4301c1eb840e8288c87db48d07a47f2eccdd677808",
+    "bytes": 47801
+  },
+  {
+    "id": "G04",
+    "frame": 1,
+    "label": "预览读取连续失败",
+    "file": "flow-G04-f1",
+    "sha256": "556301c735cb44684fe165d604393977fe6afd1e4c2117c9fc4ca16f806eca5c",
+    "bytes": 48494
+  },
+  {
+    "id": "G04",
+    "frame": 2,
+    "label": "恢复：草稿回到原位并继续增长（v8，75%）",
+    "file": "flow-G04-f2",
+    "sha256": "f3f230ae9133aea100fe6942b65f9754fefcd413e29c664beb52a7355eddd7ee",
+    "bytes": 49447
+  },
+  {
+    "id": "G04",
+    "frame": 3,
+    "label": "正文读回，同一位置落定",
+    "file": "flow-G04-f3",
+    "sha256": "d1d65b3f221b26c3a191a2ade7c1bbf7a3bcb0b0d61773109e9c00d96bb65eba",
+    "bytes": 45120
+  },
+  {
+    "id": "G05",
+    "frame": 0,
+    "label": "第 0 轮三项读完",
+    "file": "flow-G05-f0",
+    "sha256": "452b0b4d7c485ab58ba282f1e47c709245b17294a69515d42c5009d6996c35e3",
+    "bytes": 52911
+  },
+  {
+    "id": "G05",
+    "frame": 1,
+    "label": "第 1 轮开始：四项里两项已结算",
+    "file": "flow-G05-f1",
+    "sha256": "9995eaf589c9a632b3b29ba1b81e58e3b4c92e64a39493fd7c33f48436236e6d",
+    "bytes": 55870
+  },
+  {
+    "id": "G05",
+    "frame": 2,
+    "label": "第 1 轮收尾，第 2 轮五项全部结算",
+    "file": "flow-G05-f2",
+    "sha256": "1948115680bab1212a07ebb101b5a5005773149abbe0f29cf41c852aaa754381",
+    "bytes": 59045
+  },
+  {
+    "id": "G05",
+    "frame": 3,
+    "label": "Run 进入终态",
+    "file": "flow-G05-f3",
+    "sha256": "2589267598efcd5d71411f804d31a1b4465f960c1061a874b1bcf20ff9079d5d",
+    "bytes": 61059
+  },
+  {
+    "id": "G06",
+    "frame": 0,
+    "label": "刚提交（PENDING）",
+    "file": "flow-G06-f0",
+    "sha256": "a7feb355a66a7f1c8b0e51fdbd55875cbfc2108172d3778819687ec90284aada",
+    "bytes": 14477
+  },
+  {
+    "id": "G06",
+    "frame": 1,
+    "label": "开始流式输出（v1，20%）",
+    "file": "flow-G06-f1",
+    "sha256": "05fa1fab1f25816699a24ee95f7ea58a5279f6b48dd732730328ff54b0100aea",
+    "bytes": 41738
+  },
+  {
+    "id": "G06",
+    "frame": 2,
+    "label": "草稿继续（v5，60%）",
+    "file": "flow-G06-f2",
+    "sha256": "53b3dc0e268927344a4074a44fc4c1ec7f63d0f9cda768cb7151b492c5895a9e",
+    "bytes": 48739
+  },
+  {
+    "id": "G06",
+    "frame": 3,
+    "label": "预览判终态、正文还没读回（SETTLING）",
+    "file": "flow-G06-f3",
+    "sha256": "eb6d871237e8ebd834dc14e80d1ec94338ced3cbbf398347fa522d603a2f10db",
+    "bytes": 48642
+  },
+  {
+    "id": "G06",
+    "frame": 4,
+    "label": "正文读回，同一位置落定",
+    "file": "flow-G06-f4",
+    "sha256": "babfc72d36ec678aca9975f7e4c3dd4be982ae011b7737b40dcd18493dc67dd4",
+    "bytes": 45086
+  }
+]

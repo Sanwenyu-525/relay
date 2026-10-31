@@ -85,6 +85,61 @@ test.describe("开发工具入口", () => {
     await expect(page).toHaveURL(/\/tasks\?tab=inbox$/u);
   });
 
+  test("刷新后仍返回进入前的页面，且只记录站内路径", async ({ page }) => {
+    await page.goto("/tasks?tab=inbox");
+    await openLabFromNav(page);
+    // 回退来源只保存 path+search，不夹带任何业务载荷。
+    const stored = await page.evaluate(() => window.sessionStorage.getItem("relay.scenario-lab.from"));
+    expect(stored).toBe("/tasks?tab=inbox");
+
+    await page.reload();
+    await expect(page.locator(".scenario-lab-page")).toBeVisible();
+    const back = page.locator('[data-testid="scenario-back-to-workbench"]');
+    await expect(back).toHaveText(/返回进入前的页面/u);
+    await back.click();
+    await expect(page).toHaveURL(/\/tasks\?tab=inbox$/u);
+  });
+
+  test("直接打开实验室时不沿用上次来源，仍回 /agent", async ({ page }) => {
+    // 先正常进入一次，让 sessionStorage 留下旧来源；再离开并从地址栏直接打开实验室。
+    await page.goto("/tasks?tab=inbox");
+    await openLabFromNav(page);
+    await page.goto("/agent");
+    await page.goto(LAB);
+    const back = page.locator('[data-testid="scenario-back-to-workbench"]');
+    await expect(back).toHaveText(/返回工作台/u);
+    // 直接打开时旧记录应被清掉：随后刷新也不能把旧来源借回来。
+    expect(await page.evaluate(() => window.sessionStorage.getItem("relay.scenario-lab.from"))).toBeNull();
+    await page.reload();
+    await expect(back).toHaveText(/返回工作台/u);
+    await back.click();
+    await expect(page).toHaveURL(/\/agent$/u);
+  });
+
+  test("来源不是站内路径时不跳转外站，回 /agent", async ({ page }) => {
+    await page.goto(LAB);
+    const back = page.locator('[data-testid="scenario-back-to-workbench"]');
+    // 正向对照：合法来源能经 history state 生效，证明下面不是「注入没生效」而误判。
+    await page.evaluate(() => {
+      window.history.pushState({ usr: { from: "/tasks?tab=inbox" }, key: "safe", idx: 0 },
+        "", "/__dev/assist-scenarios");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    });
+    await page.reload();
+    await expect(back).toHaveText(/返回进入前的页面/u);
+
+    // 反向：协议相对地址与实验室自身都不能成为返回目标。
+    for (const unsafe of ["//evil.example/phish", "/__dev/assist-scenarios?scenario=A03"]) {
+      await page.evaluate((from) => {
+        window.history.pushState({ usr: { from }, key: `unsafe-${from}`, idx: 0 },
+          "", "/__dev/assist-scenarios");
+        window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+      }, unsafe);
+      await expect(back, `来源 ${unsafe} 不应被当作返回目标`).toHaveText(/返回工作台/u);
+      expect(await back.getAttribute("href"), `来源 ${unsafe} 产生了越站链接`).toBe("/agent");
+    }
+  });
+
   test("从工作台进入时按钮写「返回工作台」，返回 /agent", async ({ page }) => {
     await page.goto("/agent");
     await openLabFromNav(page);

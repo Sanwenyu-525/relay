@@ -1,6 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
 import { resolve } from "node:path";
+import {
+  EXPECTED_SCENARIO_COUNT, expectManifestMatchesSource, hashJson, readGitEvidence, sourceDrift,
+  sourceEvidence, sourceFileDigests
+} from "./scenarioLabEvidence";
+import type { ScenarioManifestEntry as ManifestEntry } from "../../src/dev/scenarioManifest";
 
 /**
  * 场景实验室的浏览器验收（阶段 C）。
@@ -21,24 +26,15 @@ import { resolve } from "node:path";
  * 路由本身是构建期隔离的（生产产物没有这条路径，由 `scripts/check-scenario-lab-isolation.mjs` 复验）。
  */
 
-const resultsDir = resolve(import.meta.dirname, "../../results/scenario-lab");
+/** 证据落盘目录：默认仍在 `results/scenario-lab`，验收轮可用 RELAY_SCENARIO_LAB_RESULTS_DIR 挪到指定证据区。 */
+const resultsDir = process.env.RELAY_SCENARIO_LAB_RESULTS_DIR === undefined
+  ? resolve(import.meta.dirname, "../../results/scenario-lab")
+  : resolve(process.env.RELAY_SCENARIO_LAB_RESULTS_DIR);
 /** 矩阵每族要求的条数：与 `src/dev/scenarios/index.ts` 同一份口径，写在这里是为了让「缺哪条」由测试说，不是由实现说。 */
 const REQUIRED_FAMILIES: readonly (readonly [string, number])[] =
   [["A", 16], ["B", 22], ["C", 17], ["D", 16], ["E", 17], ["F", 20], ["G", 6]];
 /** 界面不允许出现的「宣布成功」措辞：失败、未知、被拒的场景里一条都不该出现。 */
 const SUCCESS_CLAIMS = /全部完成|全部通过|均已通过|执行成功|成功写入|一切正常/;
-
-interface ManifestEntry {
-  readonly id: string;
-  readonly title: string;
-  readonly stateKind: string;
-  readonly host: string;
-  readonly component: string;
-  readonly frames: readonly { readonly at: number; readonly label: string }[];
-  readonly browserOnly: readonly string[];
-  readonly interactions: number;
-  readonly uncovered: string | null;
-}
 
 function labUrl(scenario: string, frame = 0): string {
   return `/__dev/assist-scenarios?scenario=${encodeURIComponent(scenario)}&frame=${frame}`;
@@ -526,6 +522,13 @@ test.describe("批量运行", () => {
     const errors = watchErrors(page);
     await page.goto("/__dev/assist-scenarios");
     const entries = await manifest(page);
+    // 先证清单就是这个版本源码定义的那一份，再让判定与它绑定；
+    // 否则 A03 这类「源码六帧、页面旧清单单帧」的错位会被原样写进判定文件。
+    expectManifestMatchesSource(entries);
+    // 内容指纹要在运行前后各取一次：批量要跑好几分钟，期间源码被改而判定不作声，
+    // 旧快照的 PASS 就会冒充新结果——漂移必须把这次判定标成 STALE。
+    const digestsBefore = sourceFileDigests();
+    const gitEvidence = readGitEvidence();
     await page.locator("[data-testid='scenario-run-all']").click();
     await expect(page.locator("[data-testid='scenario-run-all']"), "批量没有在跑").toContainText("运行中", { timeout: 60_000 });
     await expect(page.locator("[data-testid='scenario-run-all']")).toContainText("运行全部场景", { timeout: 840_000 });
@@ -537,6 +540,7 @@ test.describe("批量运行", () => {
         reason: node.getAttribute("title") ?? ""
       })));
     const failed = verdicts.filter((item) => item.acceptance === "fail");
+    const drift = sourceDrift(digestsBefore, sourceFileDigests());
     const report = {
       ranAt: new Date().toISOString(),
       total: entries.length,
@@ -546,11 +550,23 @@ test.describe("批量运行", () => {
       unchecked: verdicts.filter((item) => item.acceptance === "unchecked").map((item) => item.id),
       browserOnlyChecks: entries.reduce((sum, item) => sum + item.browserOnly.length, 0),
       verdicts,
-      consoleErrors: errors
+      consoleErrors: errors,
+      // 判定必须能追溯到自己是在哪份清单、哪个源码版本上跑出来的；
+      // 报告会拿这两个摘要与 shots-meta/manifest 对齐，旧判定不能冒充新结果。
+      manifestSha256: hashJson(entries),
+      /** 关键输入在批量运行期间发生了内容变化：判定不对应任何一份完整源码快照。 */
+      stale: drift.length > 0,
+      driftFiles: drift,
+      source: sourceEvidence(entries, gitEvidence)
     };
+    // 先落盘再断言：漂移时证据要留在盘上供归因，而不是让用例一红什么都没了。
     fs.writeFileSync(`${resultsDir}/browser-verdicts.json`, JSON.stringify(report, null, 2), "utf8");
+    expect(drift, `批量运行期间关键输入发生了变化，本次判定已标 STALE，不得当作任何源码快照的 PASS：`
+      + `${drift.join(", ")}`).toEqual([]);
     expect(failed, `有 ${failed.length} 条在真实浏览器里失败`).toEqual([]);
     expect(report.unchecked, "有场景没跑到").toEqual([]);
     expect(errors, "批量过程中出现控制台错误").toEqual([]);
+    expect(report.total).toBe(EXPECTED_SCENARIO_COUNT);
+    expect(report.notCovered, "当前清单里不应再有未覆盖的条目").toEqual([]);
   });
 });

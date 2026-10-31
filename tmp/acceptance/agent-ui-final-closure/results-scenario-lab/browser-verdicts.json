@@ -1,0 +1,751 @@
+{
+  "ranAt": "2026-10-31T02:17:03.392Z",
+  "total": 145,
+  "pass": 145,
+  "fail": [],
+  "notCovered": [],
+  "unchecked": [],
+  "browserOnlyChecks": 154,
+  "verdicts": [
+    {
+      "id": "A01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "A16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B17",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B18",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B19",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B20",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B21",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "B22",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "C17",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "D16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "E17",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F17",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F18",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F19",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "F20",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "G06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X01",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X02",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X03",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X04",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X05",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X06",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X07",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X08",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X09",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X10",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X11",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X12",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X13",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X14",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X15",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X16",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X17",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X18",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X19",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X20",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X21",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X22",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X23",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X24",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X25",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X26",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X27",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X28",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X29",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X30",
+      "acceptance": "pass",
+      "reason": ""
+    },
+    {
+      "id": "X31",
+      "acceptance": "pass",
+      "reason": ""
+    }
+  ],
+  "consoleErrors": [],
+  "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+  "stale": false,
+  "driftFiles": [],
+  "source": {
+    "gitHead": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+    "gitBranch": "main",
+    "gitDirty": true,
+    "workspaceDigest": "1e0693db564466c47108cd2e86a1418107694a85b83adf5e8632e444df3d4005",
+    "sourceDigest": "a9c17ad3fafec59c0727e455b9c807dac9a71320f1a9aee46a9f3fe2a5e3ca30",
+    "sourceFileCount": 221,
+    "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+    "scenarioCount": 145,
+    "capturedAt": "2026-10-31T02:15:25.934Z"
+  }
+}

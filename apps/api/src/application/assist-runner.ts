@@ -18,7 +18,7 @@ import { contextUsageToJson, describeAssistRequestContext, type ContextUsageCate
   from './assist-context-usage.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../model/model-call-repository.js';
 import { ModelCallBudgetError } from '../workflow/openai-compatible-model-port.js';
-import { classifyProviderError, type ModelErrorCategory }
+import { classifyProviderError, classifyRoutingStop, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
 import { type InternalToolName } from '../workflow/tool-catalog.js';
 import { selectRuntimeSystemPrompt, UnknownRuntimePromptRouteError,
@@ -30,13 +30,14 @@ import { describeLiveRunExecution } from './assist-execution-notice.js';
 import { describeSessionCapabilities } from './assist-capability-notice.js';
 import { officialGithubSkillGuidanceForTools } from '../skills/official-skills.js';
 import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
-  recordConversationExecutionCandidate, resolveWorkspaceMachineAttribution }
+  recordConversationExecutionCandidate, resolveMachineAttribution }
   from './conversation-execution.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
   recordStateMaintenanceCandidate } from './conversation-state.js';
 import { runLearningRounds } from './learning-round.js';
 import { readSubagentEnvelope, reconcileDelegationAttempts, type SubagentChildOutcome }
   from './subagent-delegation.js';
+import { reconcileTodoWriteSettlements } from './session-todo-tool.js';
 import { recordPlanFromMessage } from './assist-plans.js';
 import { goalStateForPrompt } from './assist-goals.js';
 import { goalEnvelopeToJson, readGoalEnvelope, readPlanEnvelope } from './plan-goal-envelope.js';
@@ -117,6 +118,10 @@ export async function runAssistGenerationTick(db: DbExecutor,
   // 0128：委派尝试的恢复核对。租约清扫之后跑：崩溃窗口里「子消息已结算、尝试行未落定」
   // 与「子消息被清扫」都按原身份补结算，不盲重跑、不让悬空 RUNNING 永久占槽。
   await reconcileDelegationAttempts(db, { now: new Date(), leaseMs: options.leaseMs });
+  // ADR-038：todo_write 账本的恢复核对（2026-10-30 四轮）。同一窗口的另一侧——
+  // 「清单快照已提交、工具账本未结算」的 REQUESTED 行按原调用身份补结算；
+  // 事件表里没有的调用保持 REQUESTED，不重新执行写入。
+  await reconcileTodoWriteSettlements(db);
   if (options.signal?.aborted) return undefined;
   const memoryWork = await runAssistMemoryTick(db, options);
   if (memoryWork !== undefined || options.signal?.aborted) return undefined;
@@ -280,15 +285,23 @@ export async function runAssistGenerationTick(db: DbExecutor,
       // 解析（连接 + 该项目的受管资源齐备才算可用）。可用即走主流程，模型才能按
       // 执行候选协议给出 interaction="COMPUTER"/"BROWSER"，而不是用纯文本拒绝。
       const machineRepositories = createRepositories(db);
-      const machinePluginAvailable = session.project_id === null &&
-        session.working_resource_id === null &&
-        ((await resolveWorkspaceMachineAttribution(machineRepositories, session.workspace_id,
-          'COMPUTER_INPUT')) !== undefined ||
-         (await resolveWorkspaceMachineAttribution(machineRepositories, session.workspace_id,
-          'BROWSER_ACTION')) !== undefined);
+      // 2026-10-30：判据是「本次有没有文件工作范围」，不是「会话有没有项目」。原条件把
+      // 「已归属项目但未绑定目录」的会话排除在主流程之外，模型拿不到执行候选协议，
+      // 只能回答做不到——那正是截图的复现路径。
+      const machinePluginAvailable = session.working_resource_id === null &&
+        ((await resolveMachineAttribution(machineRepositories, { workspaceId: session.workspace_id,
+          projectId: session.project_id, capability: 'COMPUTER_INPUT' })) !== undefined ||
+         (await resolveMachineAttribution(machineRepositories, { workspaceId: session.workspace_id,
+          projectId: session.project_id, capability: 'BROWSER_ACTION' })) !== undefined);
       // 计划/目标轮次即使没有可用工具也走主流程：它们的输出协议是信封，单次生成路径
       // 没有解析与落库入口，走那条路等于把结构化结果丢掉。
-      if (availableTools.length > 0 || planMode || goalRound || machinePluginAvailable) {
+      // ADR-038（2026-10-30 第三轮）：待办清单是应用内动作，不依赖文件/Git/浏览器连接。
+      // 之前的条件只看「有没有外部只读工具」，于是一个没有任何连接的普通 Agent 会话会
+      // 落到单次生成路径：词表为空，模型根本没机会声明 todo_write。这里把「可以维护待办」
+      // 也算作进主流程的理由；它不授予任何外部能力，只让模型能写下自己打算做的事。
+      const todoMainLoop = !planMode && !goalRound;
+      if (availableTools.length > 0 || planMode || goalRound || machinePluginAvailable ||
+          todoMainLoop) {
         const system = planMode
           ? selectRuntimeSystemPrompt({ kind: 'AGENT_PLAN_MODE' }).system
           : goalRound ? await goalRoundSystem(db, session, message, allowWrite)
@@ -610,10 +623,14 @@ export async function runAssistGenerationTick(db: DbExecutor,
           status: 'DISCARDED', errorCode: null, proposalIds: [] };
       }
       const status = current.cancel_requested ? 'CANCELLED' : 'FAILED';
+      // 2026-10-30：路由停因（普通 Error 上的 ASSIST_MODEL_* 码）原先在这里被整块丢成
+      // MODEL_FAILED，429 / 账户额度 / 候选耗尽在消息行上再也分不出来。Provider 归因
+      // 先看真实错误，再看精确停因码；两者都没有就保持 null（不猜）。
+      const routingStop = errorCode === 'MODEL_FAILED' ? classifyRoutingStop(error) : undefined;
       const providerErrorKind = status === 'FAILED' && errorCode === 'MODEL_FAILED' &&
           modelInvocationFailed && Object.is(error, modelInvocationError) &&
           !(error instanceof DomainError)
-        ? classifyProviderError(error) ?? null : null;
+        ? classifyProviderError(error) ?? routingStop?.providerErrorKind ?? null : null;
       const settled = await settle(tx, message, options.workerId, { status,
         errorCode: status === 'FAILED' ? errorCode : null, providerErrorKind,
         content: null, ...modelErrorEvidence(error) });
@@ -852,7 +869,7 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
       session: childSession, message: childMessage,
       availableTools: await sessionReadToolsForCurrentConnections(db, childSession),
       system: context.system, modelPort: route.modelPort, signal: controller.signal,
-      invokeAssist });
+      workerId: options.workerId, invokeAssist });
     if (outcome.kind === 'CONTENT') {
       // 消息正文存可读结论（reply），回传委派层的是**原始输出**——结构化 findings
       // 由委派层解析成结果摘要，两边各自可核对，不互相覆盖。
@@ -1046,10 +1063,12 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
         : 'BROWSER_ACTION' as const
       : undefined;
     let borrowedCapability: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | undefined;
-    if (session.working_resource_id === null && session.project_id === null &&
-        machineCapability !== undefined &&
-        (await resolveWorkspaceMachineAttribution(createRepositories(db), session.workspace_id,
-          machineCapability)) !== undefined) {
+    // 登记事实只认持久化结果：写入完成才算登记，不拿「有连接」推断。
+    let machineRegistered = false;
+    let registrationError: string | undefined;
+    if (session.working_resource_id === null && machineCapability !== undefined &&
+        (await resolveMachineAttribution(createRepositories(db), { workspaceId: session.workspace_id,
+          projectId: session.project_id, capability: machineCapability })) !== undefined) {
       borrowedCapability = machineCapability;
     }
     if (sourceMessageId !== null && (decided.kind === 'PREPARE' || decided.kind === 'CLARIFY') &&
@@ -1062,13 +1081,66 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
           action: message.method_action, argument: message.method_argument,
           session_id: session.id, source_message_id: sourceMessageId })
         : undefined;
-      await recordConversationExecutionCandidate(db, { workspaceId: session.workspace_id,
-        sessionId: session.id, sourceMessageId,
-        resourceId: session.working_resource_id,
-        commandId: mainLoopCommandId(message.id),
-        ...(borrowedCapability === undefined ? {} : { machineCapability: borrowedCapability }),
-        ...(method === undefined ? {} : { method }), outcome: decided });
+      try {
+        await recordConversationExecutionCandidate(db, { workspaceId: session.workspace_id,
+          sessionId: session.id, sourceMessageId,
+          resourceId: session.working_resource_id,
+          commandId: mainLoopCommandId(message.id),
+          ...(borrowedCapability === undefined ? {} : { machineCapability: borrowedCapability }),
+          ...(method === undefined ? {} : { method }), outcome: decided });
+        machineRegistered = true;
+      } catch (error) {
+        // 登记失败不外抛：这一轮仍要给用户一句真话，而不是一个 500。具体原因只记类型名，
+        // 不把底层错误正文拼进回复（可能含表名与参数）。
+        machineRegistered = false;
+        registrationError = error instanceof Error ? error.name : undefined;
+        // 2026-10-30（执行链整改）：回复只到用户眼前，账本必须另外留痕——基础设施异常
+        // （连接断开、约束冲突）不能只活在这轮回复文本里。写入失败本身不拖垮回复结算。
+        try {
+          await createRepositories(db).activities.insertActivityRecord({ id: randomUUID(),
+            workspaceId: session.workspace_id, actorKind: 'AI', actorRef: options.workerId,
+            commandId: mainLoopCommandId(message.id), projectId: session.project_id,
+            taskId: null, eventType: 'CONVERSATION_EXECUTION_REGISTRATION_FAILED',
+            factRefs: { session_id: session.id, source_message_id: sourceMessageId,
+              message_id: message.id, error_name: registrationError ?? 'UnknownError',
+              ...(borrowedCapability === undefined ? {}
+                : { machine_capability: borrowedCapability }) } });
+        } catch { /* 审计失败不再叠加：回复里的失败说明与账本行已是可追踪下限。 */ }
+      }
     }
+    /*
+     * 登记结果只来自持久化事实（2026-10-30 三修）。
+     *
+     * 「工作区里有可用连接」不等于「执行请求已登记」：写入可能抛错，也可能因为同一
+     * command_id 走幂等分支。下面以这次写入是否真的完成为准，回复里的状态行只读它，
+     * 不由 borrowedCapability 推断。
+     */
+    /*
+     * 结果表达由服务端状态驱动（2026-10-30 二修）。
+     *
+     * 四种事实必须能分开：候选生成 / 已登记执行请求 / 已委托 / 真正执行完。消息的
+     * COMPLETED 只表示这一轮生成结束，候选登记也只表示请求可被委托，两者都不等于
+     * 电脑操作成功。因此：登记失败时丢弃模型原文（它常写着「已交给后台」），只保留
+     * 服务端事实；登记成功时保留原文但补一句权威状态，明确「尚未执行」。
+     */
+    const machineLabel = machineCapability === 'COMPUTER_INPUT' ? '电脑操控' : '浏览器操控';
+    const machineOutcome = decided.kind !== 'PREPARE' || session.working_resource_id !== null
+        || machineCapability === undefined
+      ? undefined
+      : machineRegistered ? 'REGISTERED' : 'BLOCKED';
+    const machineOutcomeText = machineOutcome === 'BLOCKED'
+      ? '【服务端状态】未登记执行请求（' + machineLabel + '）：'
+        + (borrowedCapability === undefined
+          ? '工作区没有该能力的可用连接与受管资源，'
+          : '候选写入执行请求时失败' + (registrationError === undefined ? '' : '（' + registrationError + '）') + '，')
+        + '这次没有提交后台执行，也没有任何操作被执行；登记成功后可重试。'
+      : machineOutcome === 'REGISTERED'
+        ? '【服务端状态】已登记执行请求（' + machineLabel + '），尚未执行：这次只是把候选写成了'
+          + '可委托的请求，操作本身还没有开始，也没有结果可报告；进展与结果见执行记录。'
+        : '';
+    const replyContent = machineOutcome === 'BLOCKED'
+      ? machineOutcomeText
+      : decided.reply + (machineOutcomeText === '' ? '' : '\n\n' + machineOutcomeText);
     if (sourceMessageId !== null && session.project_id !== null) {
       const envelope = mainLoopEnvelope(outcome.content);
       const maintenance = readMainLoopStateCandidate(
@@ -1082,7 +1154,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       }
     }
     const settled = await settleInTransaction(db, message, options.workerId, {
-      status: 'COMPLETED', errorCode: null, content: decided.reply,
+      status: 'COMPLETED', errorCode: null, content: replyContent,
       providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage,
       finalSources: memoryInput.sourceRecords });
     if (settled) {

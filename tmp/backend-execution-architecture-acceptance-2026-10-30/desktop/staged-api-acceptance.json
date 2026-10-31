@@ -1,0 +1,48 @@
+﻿{
+    "ranAt":  "2026-10-30T18:28:43.2082816Z",
+    "stagedApi":  "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\resources\\api",
+    "results":  {
+                    "staged entry exists":  {
+                                                "passed":  true,
+                                                "detail":  "D:\\Develop\\Relay-Agent\\apps\\desktop\\src-tauri\\resources\\api\\dist\\src\\main.js"
+                                            },
+                    "staged fingerprint record":  {
+                                                      "passed":  true,
+                                                      "detail":  "sourceHash=3874dee74b51 builtAt=2026-10-30T17:44:44Z"
+                                                  },
+                    "no swap leftovers":  {
+                                              "passed":  true,
+                                              "detail":  "leftovers=0"
+                                          },
+                    "staged cli migrate":  {
+                                               "passed":  true,
+                                               "detail":  "exit=0"
+                                           },
+                    "staged cli install-graph":  {
+                                                     "passed":  true,
+                                                     "detail":  "exit=0"
+                                                 },
+                    "first boot liveness":  {
+                                                "passed":  true,
+                                                "detail":  "port=5121 pid=68552"
+                                            },
+                    "todos 404 is session-invisible":  {
+                                                           "passed":  true,
+                                                           "detail":  "status=404 code=RESOURCE_NOT_FOUND ct=application/problem+json; charset=utf-8"
+                                                       },
+                    "route-missing 404 is shaped problem+json":  {
+                                                                     "passed":  true,
+                                                                     "detail":  "status=404 ct=application/problem+json; charset=utf-8 code=RESOURCE_NOT_FOUND"
+                                                                 },
+                    "restart liveness":  {
+                                             "passed":  true,
+                                             "detail":  "pid=83268"
+                                         },
+                    "todos route after restart":  {
+                                                      "passed":  true,
+                                                      "detail":  "status=404"
+                                                  }
+                },
+    "passed":  10,
+    "failed":  0
+}

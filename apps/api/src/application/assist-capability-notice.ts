@@ -1,7 +1,8 @@
 import type { AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import { INTERNAL_TOOL_DEFINITIONS, type InternalToolName } from '../workflow/tool-catalog.js';
-import { resolveWorkspaceMachineAttribution } from './conversation-execution.js';
+import { computerRuntimeStatus } from '../plugins/runtime-status.js';
+import { resolveMachineAttribution } from './conversation-execution.js';
 import { createRepositories } from './unit-of-work.js';
 
 /**
@@ -69,6 +70,14 @@ export interface SessionCapabilityFacts {
    */
   readonly computerPlugin: boolean;
   readonly browserPlugin: boolean;
+  /**
+   * 电脑操控运行时的安装级状态（`computerRuntimeStatus().state`）：READY / NOT_PAIRED /
+   * UNAVAILABLE / NOT_INSTALLED / NOT_AUTHENTICATED。未探测时为 undefined。
+   *
+   * 它与「连接是否登记」是两件事：连接登记在项目里，运行时装在这台机器上。两层都写，
+   * 模型才不会把「运行时没就位」说成「没有这项授权」。
+   */
+  readonly computerRuntimeState?: string | undefined;
 }
 
 /** 某个能力族在本轮是否有可用工具：同一能力下任一工具可用即算可用。 */
@@ -103,11 +112,22 @@ export function formatSessionCapabilities(facts: SessionCapabilityFacts): string
       : WRITE_TIER_LABELS[facts.writeTier] ?? facts.writeTier}`);
   }
   lines.push(`本轮可用工具：${facts.tools.length === 0 ? '无' : facts.tools.join('、')}`);
-  if (!facts.hasProject) {
-    lines.push(facts.computerPlugin
+  /*
+   * 机器插件两行（2026-10-30 修订）：输出条件从「会话没归入项目」改成「会话没有工作
+   * 目录」。机器操作与文件操作是两种授权，判据是本次有没有文件工作范围；挂在项目归属
+   * 上会漏掉「已归属项目、未绑定目录」这一档——那正是截图里模型说「做不到」的会话形态。
+   */
+  if (facts.workingRoot === null) {
+    const runtimeUnavailable = facts.computerRuntimeState !== undefined &&
+      facts.computerRuntimeState !== 'READY';
+    lines.push(facts.computerPlugin && !runtimeUnavailable
       ? '电脑操控：可用。用户明确要求操作电脑（打开应用、点击、输入）时，在 execution 里带 '
-        + 'interaction="COMPUTER" 作为执行候选交给后台执行，不要在 reply 里回答「会话没有归入项目所以做不到」。'
-      : '电脑操控：工作区还没有登记可用的电脑操控连接；用户这样要求时请如实说明缺这一项。');
+        + 'interaction="COMPUTER" 作为执行候选交给后台执行；输入类动作在执行阶段可能触发'
+        + '人工审批。不要在 reply 里回答「做不到」或「会话没有归入项目所以做不到」。'
+      : facts.computerPlugin
+        ? '电脑操控：连接已登记，但本机运行时不可用（' + facts.computerRuntimeState + '）；'
+          + '用户这样要求时请如实说明缺的是运行时，而不是连接授权。'
+        : '电脑操控：工作区还没有登记可用的电脑操控连接；用户这样要求时请如实说明缺这一项。');
     lines.push(facts.browserPlugin
       ? '浏览器操控：可用。用户明确要求浏览器操作（打开网页、点击、填表）时，在 execution 里带 '
         + 'interaction="BROWSER" 作为执行候选交给后台执行。'
@@ -170,11 +190,17 @@ export async function describeSessionCapabilities(db: DbExecutor, session: Assis
   // 与主流程落库门（assist-runner）共用 resolveWorkspaceMachineAttribution：连接与
   // 该项目的受管资源齐备才算可用，两处判断不漂移。
   const [computerPlugin, browserPlugin] = await Promise.all([
-    resolveWorkspaceMachineAttribution(repositories, session.workspace_id, 'COMPUTER_INPUT')
+    resolveMachineAttribution(repositories, { workspaceId: session.workspace_id,
+      projectId: session.project_id, capability: 'COMPUTER_INPUT' })
       .then((attribution) => attribution !== undefined),
-    resolveWorkspaceMachineAttribution(repositories, session.workspace_id, 'BROWSER_ACTION')
+    resolveMachineAttribution(repositories, { workspaceId: session.workspace_id,
+      projectId: session.project_id, capability: 'BROWSER_ACTION' })
       .then((attribution) => attribution !== undefined),
   ]);
+  // 运行时状态是同步的纯路径检查，不产生副作用；探测失败不外抛，缺事实时不写这一层。
+  let computerRuntimeState: string | undefined;
+  try { computerRuntimeState = computerRuntimeStatus().state; } catch { computerRuntimeState = undefined; }
   return formatSessionCapabilities({ hasProject: session.project_id !== null, workingRoot, writeTier,
-    tools: input.tools, allowWrite: input.allowWrite, computerPlugin, browserPlugin });
+    tools: input.tools, allowWrite: input.allowWrite, computerPlugin, browserPlugin,
+    ...(computerRuntimeState === undefined ? {} : { computerRuntimeState }) });
 }

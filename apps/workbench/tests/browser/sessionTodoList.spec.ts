@@ -16,10 +16,16 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+// CORS origin 必须与页面实际端口一致：playwright.config.ts 用 RELAY_E2E_PORT 换端口时，
+// 这里的 origin 必须跟着换，否则连接握手静默失败（页面 404 或 mock 路由跨域被拦）。
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 // 截图落在被忽略的 apps/workbench/results/ 下（仓库相对），不再写仓库根或已删除的验收归档目录。
 const shotDir = resolve(import.meta.dirname, "../../results/session-todo-list");
 fs.mkdirSync(shotDir, { recursive: true });
+
+// dev server 冷启动的首屏编译在这台机器上可能超过默认 30s（首例 page.goto 等 load）；
+// 提高预算只覆盖编译等待，不断言任何产品时序。
+test.setTimeout(90_000);
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -165,4 +171,92 @@ test("长清单 + 短窗口：清单内部滚动，输入器不被顶出视窗",
   // 清单自身限高：16 项不得整排撑开。
   expect(Math.round(listBox?.height ?? 0)).toBeLessThan(420);
   await page.screenshot({ path: `${shotDir}/03-todo-long-short-window.png` });
+});
+test("新轮次暂无清单：旧清单不从上一轮残留", async ({ page }) => {
+  const state: { items: readonly { id: string; content: string; status: string }[] | null } =
+    { items: shortItems };
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, state);
+  await openSession(page);
+  await page.getByTestId("session-todo-list").waitFor({ timeout: 20_000 });
+
+  // 新任务开始，服务端明确返回 { snapshot: null }：上一轮的清单必须从视图消失。
+  state.items = null;
+  await page.reload();
+  await openSession(page, false);
+  await expect(page.getByTestId("session-todo-list")).toHaveCount(0);
+  await page.screenshot({ path: `${shotDir}/04-todo-cleared-new-turn.png` });
+});
+
+test("迟到响应不回退视图：旧版本后到，面板停留在新版本", async ({ page }) => {
+  // 助手消息 RUNNING → active=true → 组件按 2.5s 轮询，两次读取之间可以制造迟到响应。
+  const runningAssistant = { ...assistantMessage, status: "RUNNING" };
+  const todosCalls: { release: () => void }[] = [];
+  let todosSeq = 0;
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await page.route(`${apiBase}/**`, async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
+    if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
+    if (path === `${prefix}/tasks/${taskId}`) return fulfillJson(route, { id: taskId,
+      project_id: projectId, title: "会话待办验收", status: "IN_PROGRESS", mode: "ME",
+      revision: "2", created_at: "2026-10-16T00:00:00Z", updated_at: "2026-10-16T00:00:00Z",
+      executor: { kind: "HUMAN", run_id: null, ownership_epoch: "1" },
+      current_completion_id: null, waiting_reason: null, blocking_task_ids: [],
+      unresolved_blocker_ids: [], allowed_actions: [],
+      acceptance: { acceptance_revision: "2", objective: "待办清单可用", source: "CREATE",
+        created_at: "2026-10-16T00:00:00Z", criteria: [] }, dependencies: [] });
+    if (path === `${prefix}/projects/${projectId}`) return fulfillJson(route, { id: projectId,
+      title: "验收项目", project_type: "GENERAL", revision: "1", state_revision: "1",
+      archived_at: null });
+    if (path === `${prefix}/search`) return fulfillJson(route, { items: [], next_cursor: null });
+    if (path === `${prefix}/default-working-directory`) return fulfillJson(route,
+      { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
+        default_write_tier: null, context_budget_tokens: null, status: "UNSET", reason: null,
+        revision: "0" });
+    if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "openai-compatible",
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 65_536 });
+    if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
+    if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
+    if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route,
+      { items: [userMessage, runningAssistant] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/todos`) {
+      const index = ++todosSeq;
+      if (index === 1) {
+        // 第一次读取被服务端拖住：响应比第二次（新版本）晚到。
+        await new Promise<void>((resolveDelay) => { todosCalls.push({ release: resolveDelay }); });
+      }
+      return fulfillJson(route, index === 1
+        ? { snapshot: { sessionId, scopeKey: "turn:old", version: 7, inProgressLimit: 1,
+            updatedAt: "2026-10-30T08:00:00.000Z", items: shortItems } }
+        : { snapshot: { sessionId, scopeKey: "turn:old", version: 8, inProgressLimit: 1,
+            updatedAt: "2026-10-30T09:00:00.000Z", items: longItems.slice(0, 4) } });
+    }
+    if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
+    return fulfillJson(route, { items: [], next_cursor: null });
+  });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await page.getByTestId("relay-connection-open").click();
+  await page.locator('input[name="relay-base-url"]').fill(apiBase);
+  await page.locator('input[name="relay-workspace-id"]').fill(workspaceId);
+  await page.locator('input[name="relay-bearer-token"]').fill("session-todo-token");
+  await page.getByTestId("relay-connect").click();
+  await page.getByTestId("relay-connection-state").filter({ hasText: "已连接" })
+    .waitFor({ timeout: 20_000 });
+  await page.keyboard.press("Escape");
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  // 第二次轮询（v8）先落地：面板显示第 8 版的 4 项清单。
+  const list = page.getByTestId("session-todo-list");
+  await expect(list).toHaveAttribute("data-session-todo-version", "8", { timeout: 20_000 });
+  await expect(list.locator("[data-testid='session-todo-item']")).toHaveCount(4);
+
+  // 迟到的第一次响应（v7）此刻才到：不得把视图拉回旧版本。
+  todosCalls[0]?.release();
+  await page.waitForTimeout(300);
+  await expect(list, "迟到响应不得回退版本").toHaveAttribute("data-session-todo-version", "8");
+  await expect(list.locator("[data-testid='session-todo-item']"), "迟到响应不得替换条目")
+    .toHaveCount(4);
+  await page.screenshot({ path: `${shotDir}/05-todo-late-response.png` });
 });

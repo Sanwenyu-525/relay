@@ -5,6 +5,7 @@ import {
   categoryOfProviderStatus,
   classifyProviderError,
   classifyProviderErrorOrProtocol,
+  classifyRoutingStop,
   readProviderHttpStatus,
   type ModelErrorCategory,
 } from '../../src/workflow/model-error-classification.js';
@@ -75,3 +76,17 @@ test('readProviderHttpStatus 只接受合法状态码并沿 cause 链查找', ()
 class ModelTimeoutError extends Error {
   override readonly name = 'ModelTimeoutError';
 }
+
+test('路由停因按精确码归因，只有限流与额度类才写 Provider 归类', () => {
+  assert.deepEqual(classifyRoutingStop(new Error('ASSIST_MODEL_ACCOUNT_QUOTA_EXHAUSTED')),
+    { reason: 'ACCOUNT_QUOTA_EXHAUSTED', providerErrorKind: 'RATE_LIMIT' });
+  // 候选耗尽是本地可选集用完，不是上游限流：只保留 reason，不写 Provider 归类。
+  assert.deepEqual(classifyRoutingStop(new Error('ASSIST_FREE_MODEL_CANDIDATES_EXHAUSTED')),
+    { reason: 'CANDIDATES_EXHAUSTED', providerErrorKind: undefined });
+  assert.deepEqual(classifyRoutingStop(new Error('ASSIST_MODEL_CANDIDATE_CAS_LOST')),
+    { reason: 'CANDIDATE_STATE_LOST', providerErrorKind: undefined });
+  // 未知码不做前缀匹配：内部错误不能被写成 Provider 故障。
+  assert.equal(classifyRoutingStop(new Error('ASSIST_FREE_MODEL_ROUTING_BLOCKED')), undefined);
+  assert.equal(classifyRoutingStop(new Error('boom')), undefined);
+  assert.equal(classifyRoutingStop('ASSIST_MODEL_ACCOUNT_COOLDOWN'), undefined);
+});

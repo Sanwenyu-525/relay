@@ -1,0 +1,16 @@
+[
+  {
+    "frame": 0,
+    "label": "草稿留在原位（SETTLING）",
+    "state": "verifying",
+    "draft": 459,
+    "final": 0
+  },
+  {
+    "frame": 1,
+    "label": "正文读回，同一位置落定",
+    "state": "final",
+    "draft": 0,
+    "final": 394
+  }
+]

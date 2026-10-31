@@ -7,6 +7,7 @@ import { acceptAssistProposal, bindAssistSessionDirectory, bindAssistSessionProj
   from '../application/assist-commands.js';
 import { readSessionContextUsage } from '../application/assist-context-projection.js';
 import { listSessionDelegations } from '../application/subagent-delegation.js';
+import { listSubagentSupplements, supplementSubagent } from '../application/subagent-supplements.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import type { AssistSessionListState, AssistSessionRunState } from '../assist/assist-repository.js';
 import { establishConversationDiffBaseline, readConversationDiff, readConversationDiffFile }
@@ -702,6 +703,26 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
   });
 
   // Session-scoped collaboration reads the durable delegation ledger.
+  app.get('/assist-sessions/:id/supplements', { schema: { params: sessionItem } },
+  async (request, reply) => {
+    const params = request.params as { workspace_id: string; id: string };
+    try {
+      return { items: await listSubagentSupplements(dependencies.database.executor, {
+        workspaceId: params.workspace_id, sessionId: params.id }) };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  const supplementBody = Type.Object({ command_id: uuid,
+    content: Type.String({ minLength: 1, maxLength: 32_768 }) }, strict);
+  app.post('/assist-sessions/:id/supplements', { schema: { params: sessionItem,
+    body: supplementBody } }, createCommandHandler(dependencies, {
+    commandType: 'SupplementSubagent', bodySchema: supplementBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await supplementSubagent(executor, {
+        workspaceId: params.workspace_id ?? '', childSessionId: params.id ?? '',
+        commandId: body.command_id, content: body.content });
+      return { outcome, result: outcome.result };
+    } }));
+
   app.get('/assist-sessions/:id/delegations', { schema: { params: sessionItem } },
   async (request, reply) => {
     const params = request.params as { workspace_id: string; id: string };

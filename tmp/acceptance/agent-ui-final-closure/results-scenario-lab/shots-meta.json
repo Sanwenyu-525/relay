@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-10-31T02:19:16.523Z",
+  "source": {
+    "gitHead": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+    "gitBranch": "main",
+    "gitDirty": true,
+    "workspaceDigest": "1e0693db564466c47108cd2e86a1418107694a85b83adf5e8632e444df3d4005",
+    "sourceDigest": "a9c17ad3fafec59c0727e455b9c807dac9a71320f1a9aee46a9f3fe2a5e3ca30",
+    "sourceFileCount": 221,
+    "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+    "scenarioCount": 145,
+    "capturedAt": "2026-10-31T02:17:06.505Z"
+  },
+  "stale": false,
+  "driftFiles": [],
+  "frameShots": 190,
+  "expectedFrameShots": 190,
+  "lastFrameShots": 145
+}

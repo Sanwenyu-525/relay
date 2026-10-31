@@ -16,6 +16,7 @@ import { createDelegation, listSessionDelegations, reconcileDelegationAttempts,
   runDelegationAttemptFlow } from '../../src/application/subagent-delegation.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../../src/model/model-call-repository.js';
 import { freshAssistModelAttemptState } from '../../src/application/assist-model-snapshot.js';
+import { listSubagentSupplements, supplementSubagent } from '../../src/application/subagent-supplements.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
@@ -344,6 +345,174 @@ async function pendingDelegation(fx: AgentFixture) {
   return created;
 }
 
+test('MA-supplement: concurrent replays keep one user source and one parent projection', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const input = { workspaceId: fx.workspaceId, childSessionId: created.childSessionId,
+    commandId: randomUUID(), content: '只核对 README，保留未验证事项。' };
+  const results = await Promise.all([supplementSubagent(app.db, input), supplementSubagent(app.db, input)]);
+  assert.deepEqual(results[0]!.result, results[1]!.result);
+  await assert.rejects(supplementSubagent(app.db, { ...input, content: '不同载荷' }),
+    /already used with a different payload/);
+  const parent = await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId, sessionId: fx.sessionId });
+  const child = await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId, sessionId: created.childSessionId });
+  assert.equal(parent.length, 1);
+  assert.deepEqual(parent, child);
+  assert.equal(parent[0]?.source_message_id, results[0]!.result.source_message_id);
+  assert.equal(parent[0]?.parent_seen_at, null);
+  assert.equal(parent[0]?.child_seen_at, null);
+  const userMessages = (await createRepositories(app.db).assist.listMessages(created.childSessionId))
+    .filter((message) => message.role === 'USER');
+  assert.equal(userMessages.length, 1);
+  assert.equal(userMessages[0]?.content, input.content);
+});
+
+test('MA-supplement: root and foreign scopes are rejected without writing messages', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  await assert.rejects(supplementSubagent(app.db, { workspaceId: fx.workspaceId,
+    childSessionId: fx.sessionId, commandId: randomUUID(), content: '补充' }), /只接受临时委派/);
+  await assert.rejects(supplementSubagent(app.db, { workspaceId: randomUUID(),
+    childSessionId: created.childSessionId, commandId: randomUUID(), content: '越界' }));
+  await assert.rejects(listSubagentSupplements(app.db, { workspaceId: randomUUID(),
+    sessionId: fx.sessionId }));
+  assert.equal((await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId })).length, 0);
+});
+
+test('MA-supplement: an in-flight child receives additions only at the next safe model boundary', async () => {
+  const fx = await fixture();
+  const marker = `USER-SUPPLEMENT-${randomUUID()}`;
+  let childCalls = 0;
+  let sourceId = '';
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      if (request.system.includes('SUBAGENT_V1')) {
+        childCalls += 1;
+        if (childCalls === 1) {
+          assert.ok(!request.system.includes(marker));
+          const child = (await createRepositories(app.db).subagents.listByParent(fx.sessionId))[0]!;
+          const added = await supplementSubagent(app.db, { workspaceId: fx.workspaceId,
+            childSessionId: child.child_session_id!, commandId: randomUUID(), content: marker });
+          sourceId = added.result.source_message_id;
+          assert.ok(!request.system.includes(marker), 'the in-flight request remains unchanged');
+          return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'supplement-read',
+            name: 'read_file', arguments: { relative_path: 'README.md' } }], preamble: '',
+            providerRequestId: 'child-before', usage: { inputTokens: 1, outputTokens: 1 } };
+        }
+        assert.ok(request.system.includes(marker));
+        assert.ok(request.system.includes(sourceId));
+        assert.ok(!request.tools?.some((tool) => tool.name === 'delegate_subagent'
+          || tool.name === 'apply_changeset'));
+        assert.equal((await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId,
+          sessionId: fx.sessionId }))[0]?.child_seen_at, null, 'delivery is acknowledged after a response');
+        return { kind: 'CONTENT', content: '{"reply":"已按补充核对"}',
+          providerRequestId: 'child-after', usage: { inputTokens: 1, outputTokens: 1 } };
+      }
+      if ((request.toolTurns?.length ?? 0) === 0) {
+        return { kind: 'TOOL_CALLS', calls: [{ providerToolCallId: 'supplement-delegate',
+          name: 'delegate_subagent', arguments: { role: 'INVESTIGATE', objective: '只读核对' } }],
+          preamble: '', providerRequestId: 'parent-before', usage: { inputTokens: 1, outputTokens: 1 } };
+      }
+      assert.ok(request.system.includes(marker));
+      assert.ok(request.system.includes(sourceId));
+      return { kind: 'CONTENT', content: '已收到子任务补充与结果', providerRequestId: 'parent-after',
+        usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+  const result = await ask(fx, '调查 README 后汇总', port);
+  assert.equal(result.status, 'COMPLETED', JSON.stringify(result));
+  const records = await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId, sessionId: fx.sessionId });
+  assert.equal(records.length, 1);
+  assert.notEqual(records[0]?.child_seen_at, null);
+  assert.notEqual(records[0]?.parent_seen_at, null);
+});
+
+test('MA-supplement: adding after completion preserves the old outcome and never queues another generation', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  await runDelegationAttemptFlow(app.db, { created, workerId: 'ma-protocol',
+    signal: new AbortController().signal,
+    runChild: async () => ({ status: 'SUCCEEDED', errorCode: null, content: '{"reply":"旧结果"}' }) });
+  const r = createRepositories(app.db);
+  const before = await r.subagents.readDelegation(created.delegationId);
+  const beforeMessages = await r.assist.listMessages(created.childSessionId);
+  await supplementSubagent(app.db, { workspaceId: fx.workspaceId, childSessionId: created.childSessionId,
+    commandId: randomUUID(), content: '新的补充需要主会话决定是否重新委派' });
+  const after = await r.subagents.readDelegation(created.delegationId);
+  assert.equal(after?.status, 'SUCCEEDED');
+  assert.equal(after?.result_summary, before?.result_summary);
+  assert.equal(after?.attempt_count, before?.attempt_count);
+  const messages = await r.assist.listMessages(created.childSessionId);
+  assert.equal(messages.filter((message) => message.role === 'ASSISTANT').length,
+    beforeMessages.filter((message) => message.role === 'ASSISTANT').length);
+  assert.equal((await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId }))[0]?.child_seen_at, null);
+});
+
+test('MA-supplement: HTTP receipts, strict schema and workspace boundaries preserve the original source', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  const api = await startTestApi();
+  const path = workspacePath(fx.workspaceId, `/assist-sessions/${created.childSessionId}/supplements`);
+  const body = { command_id: randomUUID(), content: 'HTTP 补充原文' };
+  try {
+    const first = await api.post(path, body);
+    assert.equal(first.status, 200, first.text);
+    const replay = await api.post(path, body);
+    assert.equal(replay.status, 200, replay.text);
+    assert.deepEqual(replay.body, first.body);
+    const receipt = await api.get(workspacePath(fx.workspaceId, `/commands/${body.command_id}`));
+    assert.equal(receipt.status, 200, receipt.text);
+    assert.equal((receipt.body as { command_type: string }).command_type, 'SupplementSubagent');
+    assert.deepEqual((receipt.body as { result: unknown }).result,
+      (first.body as { result: unknown }).result);
+    assert.equal((await api.post(path, { ...body, content: '另一条原文' })).status, 409);
+    assert.equal((await api.post(path, { ...body, command_id: randomUUID(), role: 'ADMIN' })).status, 422);
+    assert.equal((await api.post(workspacePath(randomUUID(),
+      `/assist-sessions/${created.childSessionId}/supplements`), body)).status, 404);
+    const parent = await api.get(workspacePath(fx.workspaceId, `/assist-sessions/${fx.sessionId}/supplements`));
+    assert.equal(parent.status, 200, parent.text);
+    assert.equal((parent.body as { items: unknown[] }).items.length, 1);
+    assert.equal((await api.get(workspacePath(randomUUID(),
+      `/assist-sessions/${fx.sessionId}/supplements`))).status, 404);
+  } finally { await api.stop(); }
+});
+
+test('MA-supplement: pending sources are batched without starving older additions or losing earlier context', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  for (let index = 0; index < 21; index += 1) {
+    await supplementSubagent(app.db, { workspaceId: fx.workspaceId, childSessionId: created.childSessionId,
+      commandId: randomUUID(), content: `SUPPLEMENT-BATCH-${String(index).padStart(2, '0')}` });
+  }
+  let calls = 0;
+  const port: AssistModelPort = { identity: new FakeModelPort().identity,
+    assist: async (request) => {
+      calls += 1;
+      assert.ok(request.system.includes('SUPPLEMENT-BATCH-00'));
+      if (calls === 2) assert.ok(request.system.includes('SUPPLEMENT-BATCH-20'));
+      return { kind: 'CONTENT', content: '已读补充', providerRequestId: `batch-${calls}`,
+        usage: { inputTokens: 1, outputTokens: 1 } };
+    } };
+  assert.equal((await ask(fx, '处理已收到的补充', port)).status, 'COMPLETED');
+  assert.equal(calls, 2);
+  const records = await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId, sessionId: fx.sessionId });
+  assert.equal(records.length, 21);
+  assert.ok(records.every((record) => record.parent_seen_at !== null));
+});
+
+test('MA-supplement: failed model transport does not acknowledge reading a supplement', async () => {
+  const fx = await fixture();
+  const created = await pendingDelegation(fx);
+  await supplementSubagent(app.db, { workspaceId: fx.workspaceId, childSessionId: created.childSessionId,
+    commandId: randomUUID(), content: '故障后仍需读取的原文' });
+  const result = await ask(fx, '处理补充', { identity: new FakeModelPort().identity,
+    assist: async () => { throw new Error('controlled transport failure'); } });
+  assert.equal(result.status, 'FAILED');
+  assert.equal((await listSubagentSupplements(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId }))[0]?.parent_seen_at, null);
+});
+
 test('MA-session: recovery retains a live child and reconciles its saved result once', async () => {
   const fx = await fixture();
   const created = await pendingDelegation(fx);
@@ -498,9 +667,9 @@ test('AM-01/02 普通会话在同一条消息里读到真实目录与真实文�
   // 词表按当前连接裁剪，且只含只读工具。
   // 0128：根会话的普通 Agent 主流程额外声明 delegate_subagent——它是应用内动作
   // （子 Agent 只读轮次），不接 Gateway、不写盘，因此下面那条「不得出现写工具」的
-  // 断言仍然成立；词表里多出它是 0128 的既定接线，不是本用例放宽只读边界。
+  // 断言仍然成立。0146 的 todo_write 只更新会话清单，不取得文件写能力。
   assert.deepEqual(outcome.declaredTools,
-    ['list_directory', 'find_paths', 'search_text', 'read_file', 'delegate_subagent'],
+    ['list_directory', 'find_paths', 'search_text', 'read_file', 'delegate_subagent', 'todo_write'],
     '词表诊断：' + JSON.stringify({ declaredTools: outcome.declaredTools,
       assistCalls: outcome.assistCalls, fedBack: outcome.fedBack,
       identity: outcome.identity,

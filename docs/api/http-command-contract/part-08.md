@@ -311,11 +311,20 @@ end as run_state
 
 ### 10.121 会话内临时 Agent 协作（2026-10-30）
 
+专用子任务补充接口见本分册 §10.127；普通 `RequestAssistMessage` 的子会话生成限制保持，不再要求所有补充都回主会话输入。
+
 - `GET /workspaces/{workspace_id}/assist-sessions/{id}/delegations`：返回 `{items:[...]}`，最多最近 50 条。每项为 `delegation_id`、可空 `child_session_id`、`role`（INVESTIGATE / REVIEW）、`objective`、`scope:string[]`、可空 `baseline`、`required`、`status`（QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELLED）、`attempt_count`、`max_attempts`、可空 `result_summary`、`created_at` 和可空 `closed_at`。只读，不生成任务或模型调用；跨工作区或会话不存在返回 404，不暴露正文。
 - 会话列表和详情新增可空 `parent_session_id`，只表达临时委派来源，区别于分叉的 `forked_from_session_id`。
 - 子会话是冻结委派记录，普通 `RequestAssistMessage` 返回 409 / INVALID_TRANSITION，提示回主会话补充，不得将子历史当作可写主会话。
 - Breaking Change：普通根会话 No（新增只读接口及响应字段）；对子会话普通发送 Yes（此前未约束的路径被拒绝）。旧客户端读取新字段可忽略，更新客户端缺字段按 null 兼容；旧子会话仍可读取历史。无新增 migration，复用 0128。
 - 委派子调用与主调用共用根会话模型账本；子调用在同一原子预算准入内为主汇总预留一次调用及一次调用 token 预留。角色不授予权限，子结果不构成正式完成或验收。
+
+### 10.127 子任务补充与主会话来源同步（2026-10-30，迁移 0148）
+
+- `POST /workspaces/{workspace_id}/assist-sessions/{id}/supplements`，严格请求体 `{command_id, content}`，content 1–32768 字符且不能只含空白；只接受临时委派的子会话。返回 200 命令回执，result 包含 `supplement_id`、`source_message_id`、`child_session_id`、`parent_session_id`、`delegation_id`。原身份同载荷重放返回原回执；异载荷 409 / COMMAND_ID_REUSED。创建来源与回执在同一短事务内完成，响应丢失先查原回执，不换 command_id。
+- `GET /workspaces/{workspace_id}/assist-sessions/{id}/supplements`，主、子会话均可查询，返回最近最多 50 条 `{items:[...]}`；项包含 `id`、`delegation_id`、`source_message_id`、`source_session_id`、`parent_session_id`、`content`、`delegation_status`、可空 `parent_seen_at` / `child_seen_at`、`created_at`。这些是持久来源和分别读取的事实，不是验收结果。
+- 不存在或跨 Workspace 为 404；向根会话发送补充、归档会话或归档项目拒绝为 409；非法字段/正文 422。已结束的委派可保存补充，但不增加尝试、不创建新的 ASSISTANT、Task/Run 或模型调用。运行中仅在原轮次的下一模型请求安全点读取，仍受原只读能力和预算约束。
+- Breaking Change：No。新增专用端点与附加表，旧客户端可继续回主会话补充；普通子会话生成仍拒绝。存储和受控回滚风险见[物理设计 0148](../../database/physical-design-postgresql/part-05.md#0148-子任务补充来源与读取确认2026-10-30)。
 
 ### 10.120 会话级上下文档位与上下文用量投影（2026-10-30 源码实现，迁移 0145）
 
@@ -412,3 +421,14 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
   换个载荷就是身份伪造，返 `TODO_TOOL_CALL_CONFLICT`。
 - **版本与轮次**：轮次切换后 `version` 从 1 重新开始，这不是回退；同一轮次内版本单调递增，
   客户端只接受同轮次不降版本、换轮次接受重计版本。
+
+**第三轮补充（2026-10-30）**：
+
+- **轮次顺序**：快照带 `scopeSeq`（开启该轮次的用户消息序号语义）。旧轮次的写入返
+  `TODO_SCOPE_STALE`，不会改写当前投影；历史调用原身份重放仍返 `IDEMPOTENT` 与它当初那一版。
+- **工作连续性**：最新一条用户消息在上一轮清单仍有未完成项时延续同一作用域（版本继续递增）；
+  清单全部收尾后才是新作用域（版本从 1 重计）；`新任务：` / `/newtask` 前缀强制开新作用域。
+- **重放比对**：同身份重放按规范化请求摘要（基线版本 + 条目 id + 内容 + 状态）核对，
+  任一项不同即 `TODO_TOOL_CALL_CONFLICT`。
+- **结算事实**：清单已保存但工具账本未结算时不会被当成完成，接口层面仍返回本次快照，
+  账本行保留 `REQUESTED` 由恢复路径重结算。

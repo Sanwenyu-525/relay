@@ -78,27 +78,38 @@ function SessionTodoListContent({ client, sessionId, active = false, refreshKey 
   const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
   const latest = useRef<RelaySessionTodoSnapshot | null>(null);
+  // 已应用的请求序号：迟到的旧响应不能把视图拉回去，也不能抢在更新的响应之后落地。
+  const applied = useRef(0);
 
   useEffect(() => {
     if (sessionId === null) return undefined;
     const sessionKey = sessionId;
     let alive = true;
+    let issued = 0;
     let timer: number | undefined;
     async function read() {
+      const seq = ++issued;
       setLoading(true);
       try {
         const next = await client.getAssistSessionTodos!(sessionKey);
-        if (!alive) return;
-        if (next !== null && shouldAccept(latest.current, next)) {
-          latest.current = next;
-          setSnapshot(next);
+        if (alive && seq >= applied.current) {
+          applied.current = seq;
+          if (next === null) {
+            // 合法的空快照：这一轮没有清单，必须清掉上一轮的投影与版本缓存——
+            // 否则用户切到新任务后还会看到旧清单。
+            latest.current = null;
+            setSnapshot(null);
+          } else if (shouldAccept(latest.current, next)) {
+            latest.current = next;
+            setSnapshot(next);
+          }
+          setError(null);
         }
-        setError(null);
-        if (active) timer = window.setTimeout(() => void read(), 2500);
+        if (alive && active) timer = window.setTimeout(() => void read(), 2500);
       } catch (caught) {
         if (!alive) return;
         // 读失败不清空已有清单：说清「这份可能是旧的」，比退回「没有待办」诚实。
-        setError(describeLiveError(caught).message);
+        if (seq >= applied.current) setError(describeLiveError(caught).message);
         if (active) timer = window.setTimeout(() => void read(), 5000);
       } finally {
         if (alive) setLoading(false);

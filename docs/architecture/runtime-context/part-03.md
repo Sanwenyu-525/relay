@@ -82,7 +82,7 @@
 | Plan and Execute | [计划版本](../../../apps/api/src/application/assist-plans.ts)、[目标命令](../../../apps/api/src/application/assist-goals.ts)、[目标推进](../../../apps/api/src/application/goal-advance.ts)、[Worker](../../../apps/api/src/worker/main.ts) | 计划绑定确切版本，Worker 组织目标轮次；进度步骤不等同于每步已有独立 claim、产物验证和恢复协议 |
 | Reflexion | [Run 反馈与修正上下文](../../../apps/api/src/application/run-steps.ts)、[工具历史回传](../../../apps/api/src/application/tool-loop.ts) | 当前是工具/检查反馈驱动的局部纠错；未建立独立反思器与跨任务经验应用闭环。`learning-round.ts` 面向用户学习，不能作 Agent 自学习的实现依据 |
 | Workflow | [运行图](../../../apps/api/src/worker/run-graph.ts) | 使用 LangGraph `StateGraph`、审批 `interrupt`/恢复与 PostgreSQL checkpoint；checkpoint 不代替业务状态和外部效果核对 |
-| Multi Agent | [ADR-017](../../decisions/ADR-017-bounded-multi-agent-conversations.md)、本文件 §2.5 | 有界委派链（migration `0128` 与 `application/subagent-delegation.ts`）已进入生产会话链，但尚无一条真实跑完「主→子→汇合」的产品链证据；不得把普通 `DelegateTask` 业务命令解释为子 Agent 派发 |
+| Multi Agent | [ADR-017](../../decisions/ADR-017-bounded-multi-agent-conversations.md)、本文件 §2.5 | 有界委派、主子反馈及专用用户补充已进入生产会话链，已有真实 PG/HTTP 加受控模型的主→子→汇总证据；真实 Provider、Windows 及完整正式交付仍未闭合。普通 `DelegateTask` 业务命令不代表子 Agent 派发 |
 | Agent and Tool | [工具准入与派发](../../../apps/api/src/application/assistant-readonly-round.ts)、[Gateway 应用入口](../../../apps/api/src/application/gateway-actions.ts) | 单次调用复用原工具路径，无单独运行引擎；工具可用性按真实连接、当前权限和能力重算 |
 | Code as Action | [文件变更工具](../../../apps/api/src/application/tool-loop.ts)、[CLI 适配器](../../../apps/api/src/cli-worker/cli-adapter.ts)、[适配器边界](../tool-adapters.md) | 受控程序与结构化参数，`shell:false`；没有通用代码解释器或 OS 沙箱。CLI 结果丢失时按原动作核对，不能盲重放生成代码 |
 
@@ -100,7 +100,7 @@
 | Plan and Execute | **A** / **B** / 局部 **C** | 服务端双闸门只读、计划版本不可变、执行绑定确切版本、Worker 推进与类型化停止原因；真实 PG 集成通过（含 2026-10-21 计划内容读写形状修复） | 真实 Provider 的计划质量、重启后接续、独立验收 | 额度含义、识别来源与未知处理（总纲 §0.15 明写待工程核定，现按冻结快照、未知不记为零或无限）；无进展阈值（现为硬编码 3）与扩额幅度是否改走产品口径；计划卡步骤是否升级为具备独立执行与恢复的任务节点 |
 | Reflexion（当前任务内） | **A** | 检查失败→失败事实入库并回传→模型定位→原权限内修改→复检→据实结算，两个执行面都通，含真实 Provider 与只读独立复核 | — | — |
 | Reflexion（跨任务） | **D** | 无代码入口 | 「提炼什么经验、谁确认、何时召回、如何处理失效、如何衡量收益」尚未定义。`learning-round.ts` 面向用户学习，不能当 Agent 自学习的实现依据 | 只交最小方案。未确认前不新增反思记忆库、不自动修改 Skill、规则或用户偏好 |
-| Multi Agent | 会话临时只读协作 **A**；完整方案多项 **C** | 2026-10-30 已接入同批两子并行、结果回传与主汇总、根会话共享预算及汇总预留、真实委派读接口与主子记录导航；恢复/重试身份边界已补齐，证据归统一验收表 | 完整「主调查→主实施→独立审查→正式交付」、Provider/Windows 与独立验收未闭合；当前 PG/HTTP 和 Chromium 夹具不能替代这些出口 | C：必要独立审查作为正式完成前置、子→主补充同步及真实来源保留、角色配置版本化 |
+| Multi Agent | 会话临时只读协作 **A**；完整方案多项 **C** | 2026-10-30 已接入同批两子并行、结果回传与主汇总、根会话共享预算及汇总预留、真实委派查询与主子导航；0148 增加子任务补充的单一来源、主/子读取确认及安全点接收，证据归统一验收表 | 完整「主调查→主实施→独立审查→正式交付」、补充恢复全故障窗口、Provider/Windows 与独立验收未闭合；PG/HTTP 和 Chromium 夹具不能替代这些出口 | C：必要独立审查作为正式完成前置、角色配置版本化 |
 | Code as Action（受控基础） | **A** / **B** | 文件修改、`run_check` 冻结标识、`shell:false` 子进程、动作账本与 UNKNOWN 核对生产接线 | 结果丢失的**真实进程级**故障注入（现有注入点是 test-only，需确认覆盖 `CLI_RUN` 而不只 `FILE_WRITE`）、真实 Windows 子进程的窗口与取消行为 | — |
 | Code as Action（通用解释器） | **D** | 无代码入口 | 产品行为与安全边界均未定义 | 推荐复用 `cli-adapter` 与 Gateway `CLI_RUN` 账本，不另立第二套外部效果 Owner；任何文案不得把「当前工作目录＋参数白名单＋子进程」写成 OS 沙箱 |
 

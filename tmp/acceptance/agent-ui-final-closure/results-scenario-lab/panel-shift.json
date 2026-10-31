@@ -1,0 +1,16 @@
+{
+  "scenario": "G05",
+  "anchorFound": true,
+  "scrollablePx": 1588,
+  "startScrollTop": 701,
+  "scrollTopShiftPx": 19,
+  "anchorShiftPx": 0,
+  "framesAdvanced": 3,
+  "nodeKept": true,
+  "grew": true,
+  "beforeLength": 640,
+  "afterLength": 1460,
+  "metricSelector": "[data-testid='trajectory-source-run']",
+  "metricBeforePx": 58,
+  "metricAfterPx": 76
+}

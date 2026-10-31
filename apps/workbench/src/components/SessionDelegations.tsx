@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import type { RelayApiClient, RelaySessionDelegation } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./SessionDelegations.css";
+import SubagentSupplements from "./SubagentSupplements";
 
 type DelegationClient = Pick<RelayApiClient, "workspaceId" | "getAssistSessionDelegations">;
 interface Props {
@@ -56,7 +57,7 @@ function SessionDelegationsContent({ client, sessionId, parentRunning = false,
   if (items.length === 0 && error === null) return null;
   const activeCount = items.filter((item) => item.status === "QUEUED" || item.status === "RUNNING").length;
   const failedCount = items.filter((item) => item.status === "FAILED").length;
-  return <details className="session-delegations" data-testid="session-delegations">
+  return <><details className="session-delegations" data-testid="session-delegations">
     <summary className="session-delegations-header">
       <ChevronRight className="session-delegations-chevron" aria-hidden="true" />
       <span className="session-delegations-title">会话协作</span>
@@ -95,5 +96,7 @@ function SessionDelegationsContent({ client, sessionId, parentRunning = false,
         </li>)}
       </ul>
     </div>
-  </details>;
+  </details>
+    {items.length > 0 && <SubagentSupplements client={client} sessionId={sessionId} refreshKey={refreshKey} />}
+  </>;
 }

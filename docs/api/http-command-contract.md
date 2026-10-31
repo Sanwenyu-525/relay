@@ -2,6 +2,8 @@
 
 会话内临时协作的新增读取及子会话发送限制见 [§10.121](http-command-contract/part-08.md#10121-会话内临时-agent-协作2026-10-30)。
 
+子任务专用补充、原命令核对及主会话来源同步见 [§10.127](http-command-contract/part-08.md#10127-子任务补充与主会话来源同步2026-10-30迁移-0148)。
+
 > 2026-09-28 协作控制增量：新增 Artifact 原文锁定、手动影响检查/逐目标候选，以及人工介入提醒投影与投递回执；具体路径、状态与已验边界见[开发记录](../development/collaboration-controls-2026-09-28.md)。Breaking Change：**否**（仅新增端点，既有请求/响应未删改）。通知 claim/settle 是可去重的投递回执，不改变 Task/Run/Review 业务状态；同一事项/变化由数据库唯一键保证不重复认领。
 
 > 2026-09-24 技术改造状态：当前已实现接口仍以下文第 10 节与代码为准。M03 SSE、Review/RESUME 顺序、固定图及 Mock Gateway 工具动作已分别通过列明范围的独立分片验收；完整 G01–G08 待验。Idempotency-Key 若引入，需明确与 command_id 的唯一身份、载荷冲突和旧客户端兼容；不得开无鉴权别名。真实 Provider 仍关闭。

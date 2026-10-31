@@ -273,3 +273,88 @@ test('工作区没有机器连接时按类型化原因拒绝而不是伪造归�
       outcome: { kind: 'PREPARE', reply: 'ok', candidate: typedComputerCandidate() } }),
     /工作区还没有登记可用的电脑操控连接/u);
 });
+
+// ------------------------------------------------- 已归属项目、未绑定目录的借用判定
+
+/** 已归属项目但未绑定工作目录的会话夹具：机器插件是它唯一的执行通道。 */
+async function affiliatedFixture(options: {
+  readonly connectionProject: 'own' | 'other';
+}): Promise<{ readonly workspaceId: string; readonly sessionProjectId: string;
+  readonly ownerProjectId: string; readonly resourceId: string;
+  readonly connectionId: string; readonly sessionId: string }> {
+  const workspaceId = randomUUID();
+  const sessionProjectId = randomUUID();
+  const ownerProjectId = options.connectionProject === 'own' ? sessionProjectId : randomUUID();
+  const root = await mkdtemp(join(tmpdir(), 'relay-conv-machine-own-'));
+  roots.push(root);
+  await mkdir(join(root, 'src'), { recursive: true });
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.insertWorkspace({ id: workspaceId, name: 'conv-machine-own' });
+    await repositories.workspaces.insertAuthorityRow(workspaceId);
+    await repositories.projects.insertProject({ id: sessionProjectId, workspaceId,
+      title: 'session-project', projectType: 'DEVELOPMENT' });
+    if (ownerProjectId !== sessionProjectId) {
+      await repositories.projects.insertProject({ id: ownerProjectId, workspaceId,
+        title: 'owner-project', projectType: 'DEVELOPMENT' });
+    }
+  });
+  const registered = await registerManagedResource(app.db,
+    { workspaceId, projectId: ownerProjectId, rootPath: root });
+  const connection = await createFakeConnection(app.db, { workspaceId,
+    projectId: ownerProjectId, capabilities: ['COMPUTER_READ', 'COMPUTER_INPUT'] });
+  const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+    projectId: sessionProjectId, title: '已归属会话', conversationMode: 'AGENT' });
+  const sessionRow = await createRepositories(app.db).assist.readSession(session.result.session_id);
+  assert.equal(sessionRow?.project_id, sessionProjectId);
+  assert.equal(sessionRow?.working_resource_id, null, '夹具会话必须没有绑定目录');
+  return { workspaceId, sessionProjectId, ownerProjectId,
+    resourceId: registered.resourceId, connectionId: connection.connectionId,
+    sessionId: session.result.session_id };
+}
+
+async function requestedFacts(workspaceId: string, requestId: string): Promise<JsonObject> {
+  const rows = (await sql<{ fact_refs: JsonObject }>`select fact_refs from activity_records
+    where workspace_id = ${workspaceId} and event_type = 'CONVERSATION_EXECUTION_REQUESTED'
+      and fact_refs->>'request_id' = ${requestId}`.execute(app.db)).rows;
+  return rows[0]!.fact_refs;
+}
+
+test('已归属项目、未绑定目录的会话用自己的机器连接，审计里不记借用', async () => {
+  const fx = await affiliatedFixture({ connectionProject: 'own' });
+  const result = await ask({ workspaceId: fx.workspaceId, sessionId: fx.sessionId },
+    '@电脑操控 打开浏览器', oneShotPort(JSON.stringify({
+      reply: '我会把「打开浏览器」交给后台电脑操控。', maintenance: null,
+      execution: computerCandidate(),
+    })));
+  assert.equal(result.message?.status, 'COMPLETED');
+  assert.equal(result.requests.length, 1);
+  const request = result.requests[0]!;
+  assert.equal(request.project_id, fx.sessionProjectId, '归属自己的项目，不需要借用');
+  const facts = await requestedFacts(fx.workspaceId, request.id);
+  assert.equal(facts.machine_capability, 'COMPUTER_INPUT');
+  assert.equal(facts.machine_connection_id, fx.connectionId, '审计必须指回授权来源连接');
+  assert.equal(facts.machine_attribution_borrowed, false);
+});
+
+test('已归属项目、未绑定目录的会话跨项目借用时，授权来源与借用事实进审计', async () => {
+  const fx = await affiliatedFixture({ connectionProject: 'other' });
+  const result = await ask({ workspaceId: fx.workspaceId, sessionId: fx.sessionId },
+    '@电脑操控 打开浏览器', oneShotPort(JSON.stringify({
+      reply: '我会把「打开浏览器」交给后台电脑操控。', maintenance: null,
+      execution: computerCandidate(),
+    })));
+  assert.equal(result.message?.status, 'COMPLETED');
+  assert.equal(result.requests.length, 1);
+  const request = result.requests[0]!;
+  assert.equal(request.project_id, fx.ownerProjectId, '账本归属落在连接所属项目');
+  const facts = await requestedFacts(fx.workspaceId, request.id);
+  assert.equal(facts.machine_capability, 'COMPUTER_INPUT');
+  assert.equal(facts.machine_connection_id, fx.connectionId, '借用必须有明确的授权来源');
+  assert.equal(facts.machine_attribution_borrowed, true, '跨项目借用必须在审计里写明');
+  const applied = await applyConversationExecution(app.db,
+    { workspaceId: fx.workspaceId, requestId: request.id });
+  assert.equal(applied.status, 'DELEGATED');
+  const loop = await frozenToolLoop(applied.run_id!);
+  assert.equal(loop.connections.FILE_QUERY, undefined, '借用执行不携带文件能力');
+  assert.equal(loop.allowedTools.includes('read_file'), false, '借来的受管根不给文件工具');
+});

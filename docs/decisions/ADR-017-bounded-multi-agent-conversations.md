@@ -40,10 +40,10 @@ Accepted（用户已确认的首版产品规则及沿用既有业务 Owner 的�
 
 Assist/Workflow/Application、Context/模型计量、Gateway 只读准入、会话导航及补充反馈、API/数据库兼容和恢复测试。工程责任只维护在[运行架构 §2.5](../architecture/runtime-context.md#25-有界子-agent-的委派与会话关联)，交互归[工作台 §23](../frontend/workbench-design.md#23-主子会话与有界协作)。
 
-本轮仅文档，Breaking Change：No；未发布 API 或 migration。后续接口/存储变化须按实际协议另标 Breaking Change、旧会话/URL/checkpoint 兼容及回滚风险。本 ADR 不替代 ADR-010 的主栈、ADR-016 的对话授权或契约 01–04；也不前移多 Agent Router、N04/N06 或关闭应用后的后台执行。
+2026-10-05 最初仅文档，未发布 API 或 migration；2026-10-30 的当前接口与 0148 存储形态分别归 API/数据库主文档，兼容性与回滚风险按实际协议说明。本 ADR 不替代 ADR-010 的主栈、ADR-016 的对话授权或契约 01–04；也不前移多 Agent Router、N04/N06 或关闭应用后的后台执行。
 
 ## 后续
 
-2026-10-30 接续：用户明确要求先实施会话内多 Agent，暂不实施 Grok bot 式独立 Bot。先接通临时只读委派和可回看的结果，复用既有会话与调用账本，避免把项目长期成员机制混入一次协作。当前实现和目标差异见[运行架构 §2.5](../architecture/runtime-context/part-01.md#25-有界子-agent-的委派与会话关联)，实际验证只归统一验收表。角色编辑、子会话直接补充与正式完成 Gate 仍未闭合；因此早期完整方案的 Accepted 不代表全量交付。
+2026-10-30 接续：用户明确要求先实施会话内多 Agent，暂不实施 Grok bot 式独立 Bot。临时只读委派与可回看的结果复用既有会话及调用账本；专用子任务补充以一份 USER 原文和持久来源同步主会话，分开记录主/子读取，不用普通发送绕开只读身份，也不以终态补充自动重跑。当前实现和目标差异见[运行架构 §2.5](../architecture/runtime-context/part-01.md#25-有界子-agent-的委派与会话关联)，实际验证只归统一验收表。角色编辑与正式完成 Gate 等仍未闭合；因此早期完整方案的 Accepted 不代表全量交付。
 
 按[专项提示词](../../prompts/bounded-multi-agent.md)先核对单 Agent 相关依赖，再分片实施并以[测试计划 §21](../testing/verification-plan.md#21-有界多-agent-与自动会话验收规格)验收。当前授权和下一步只归 CODEX_NEXT_STEP，结果只归统一功能验收表。长期角色、多子实现或递归协作只有在真实收益和冲突证据形成后再另行决策，本轮不预建模块。

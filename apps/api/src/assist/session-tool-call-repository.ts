@@ -141,4 +141,17 @@ export class SessionToolCallRepository {
       where message_id = ${messageId} and status = 'REQUESTED'
       order by round, ordinal`.execute(this.db)).rows;
   }
+
+  /**
+   * ADR-038 恢复扫描：全 workspace 里还没结算的 `todo_write` 请求（有界）。
+   *
+   * 只做读取，不派发、不改状态——核对与结算由恢复用例按原调用身份进行。
+   * 快照已提交但账本未结算的调用在这里重新可见；事件表里查无此调用的行保持
+   * REQUESTED 可诊断，不会被当成已成功改写。
+   */
+  async listPendingTodoWrites(limit: number): Promise<readonly SessionToolCallRow[]> {
+    return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
+      where status = 'REQUESTED' and tool_name = 'todo_write' and operation_id is null
+      order by requested_at, id limit ${limit}`.execute(this.db)).rows;
+  }
 }

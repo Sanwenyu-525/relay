@@ -123,3 +123,64 @@ describe("SessionTodoList 停止态与迟到响应", () => {
     expect(shouldAccept(null, older)).toBe(true);
   });
 });
+describe("SessionTodoList 轮次切换与迟到响应", () => {
+  it("切到新任务、服务端返回空快照时，上一轮清单从视图消失", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      return call === 1 ? json(snapshot(7, threeItems)) : json({ snapshot: null });
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="1" />);
+    unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(true);
+
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="2" />);
+    await flush();
+    expect(call).toBe(2);
+    expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(false);
+  });
+
+  it("读失败保留已有清单，不把读失败渲染成没有待办", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      if (call === 1) return json(snapshot(7, threeItems));
+      throw new Error("network down");
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="1" />);
+    unmount = mounted.unmount;
+    await flush();
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="2" />);
+    await flush();
+    const list = mounted.wrapper.find('[data-testid="session-todo-list"]');
+    expect(list.exists()).toBe(true);
+    expect(list.text()).toContain("实现 todo_write");
+  });
+
+  it("迟到的旧响应不把已经清掉的清单拉回来", async () => {
+    const slow: { resolve?: (value: Response) => void } = {};
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      call += 1;
+      if (call === 1) {
+        return new Promise<Response>((resolve) => { slow.resolve = resolve; });
+      }
+      return Promise.resolve(json({ snapshot: null }));
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="1" />);
+    unmount = mounted.unmount;
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} refreshKey="2" />);
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(false);
+    slow.resolve?.(json(snapshot(7, threeItems)));
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(false);
+  });
+});

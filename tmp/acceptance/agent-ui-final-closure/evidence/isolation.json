@@ -1,0 +1,69 @@
+{
+  "checkedAt": "2026-10-31T02:21:00.245Z",
+  "productMarker": "relay.workbench.activityDensity",
+  "labMarkers": [
+    "assist-scenarios",
+    "ScenarioLabView",
+    "scenario-lab",
+    "scenario-run-all",
+    "data-scenario-preview",
+    "AI 回复场景实验室",
+    "ScenarioRunner"
+  ],
+  "dev": {
+    "mode": "development",
+    "outDir": "node_modules\\.tmp\\scenario-lab-isolation\\dev",
+    "fileCount": 9,
+    "hits": [
+      {
+        "marker": "assist-scenarios",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\main-Cdps5jes.js"
+      },
+      {
+        "marker": "ScenarioLabView",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\main-Cdps5jes.js"
+      },
+      {
+        "marker": "AI 回复场景实验室",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\main-Cdps5jes.js"
+      },
+      {
+        "marker": "scenario-lab",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-DsFU60ms.css"
+      },
+      {
+        "marker": "assist-scenarios",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      },
+      {
+        "marker": "ScenarioLabView",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      },
+      {
+        "marker": "scenario-lab",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      },
+      {
+        "marker": "scenario-run-all",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      },
+      {
+        "marker": "data-scenario-preview",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      },
+      {
+        "marker": "AI 回复场景实验室",
+        "file": "node_modules\\.tmp\\scenario-lab-isolation\\dev\\assets\\ScenarioLabView-vcILge6m.js"
+      }
+    ],
+    "productFound": true
+  },
+  "prod": {
+    "mode": "production",
+    "outDir": "node_modules\\.tmp\\scenario-lab-isolation\\prod",
+    "fileCount": 7,
+    "hits": [],
+    "productFound": true
+  },
+  "problems": []
+}

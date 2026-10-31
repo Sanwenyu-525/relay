@@ -134,13 +134,20 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
    */
   const newConversationKey = useMemo(() => crypto.randomUUID(),
     [location.key, activeConversation.sessionId]);
+  /**
+   * 0145 收口反例（场景 C，2026-10-31）：来源只认**非空字符串**会话 id。
+   * 登记器类型上是 string | null，但「未定义身份」的反例要求连防御性的 undefined / 空串
+   * 都不得写成 `source_session=undefined`——那会在建会话时被服务端当畸形 UUID 拒掉。
+   */
+  const activeSessionId = activeConversation.sessionId;
   const newConversationHref = `/agent?new=${encodeURIComponent(newConversationKey)}${
-    activeConversation.sessionId === null ? ""
-      : `&source_session=${encodeURIComponent(activeConversation.sessionId)}`}`;
+    typeof activeSessionId === "string" && activeSessionId !== ""
+      ? `&source_session=${encodeURIComponent(activeSessionId)}` : ""}`;
   const secondaryNavigation: readonly NavEntry[] = [
     // 开发工具入口只在开发构建里存在：路由本身是构建期隔离的，这里少一条入口只是不让它藏在侧栏外面。
     // 悬停提示写实验室全名，入口名仍是一个不占宽度的「开发工具」。
-    // 带上进入前的 path+search：实验室的「返回工作台」按它回去（`location.state` 不跨刷新，刷新后回默认工作台）；
+    // 带上进入前的 path+search：实验室的「返回工作台」按它回去（`location.state` 不跨刷新；
+    // 刷新后的回退由实验室自己记录的 `sessionStorage` 承担，这里不写第二份来源）；
     // 已经在实验室里再点一次时原样保留现有来源（传空 state 会把它清掉，返回就只剩默认页），免返回时原地打转。
     //
     // 放在这一组的**第一**位：辅助导航整块是 `margin-top: auto` 贴底的，默认窗口高（780px）下

@@ -1,0 +1,2971 @@
+[
+  {
+    "id": "A05",
+    "title": "只有一行短回复",
+    "stateKind": "终态",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "用户提问 + 助手已完成正文"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A01",
+    "title": "新会话首次发送",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "PENDING 且还没有任何草稿"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A03",
+    "title": "AI 正在处理，尚未调用工具",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "在途：第一次读数挂着没回来"
+      },
+      {
+        "at": 1600,
+        "label": "读数回来：仍在途、确实零记录"
+      },
+      {
+        "at": 3200,
+        "label": "读数失败：错误与恢复入口在场"
+      },
+      {
+        "at": 4800,
+        "label": "读数恢复：错误消失、仍如实报在途"
+      },
+      {
+        "at": 6400,
+        "label": "旧读数迟到：挂起的是这一刻的新事实"
+      },
+      {
+        "at": 8000,
+        "label": "新读数已到：两条未结算，迟到的旧读数不许盖回来"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 7,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A04",
+    "title": "AI 开始流式输出",
+    "stateKind": "流式",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "首帧草稿（v1，15%）"
+      },
+      {
+        "at": 1400,
+        "label": "草稿推进（v4，55%）"
+      },
+      {
+        "at": 2900,
+        "label": "草稿推进（v9，92%）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X01",
+    "title": "草稿被服务端截断",
+    "stateKind": "流式",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "预览 truncated 为真"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X02",
+    "title": "草稿读取失败（不影响消息状态）",
+    "stateKind": "失败",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "预览读取抛错"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A11",
+    "title": "正在核对最终回复",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "预览已判终态、正文尚未读回"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A12",
+    "title": "最终回复读取失败",
+    "stateKind": "未知",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "核对失败，草稿留在原位"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A10",
+    "title": "流式草稿转换为正式回复",
+    "stateKind": "终态",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "草稿留在原位（SETTLING）"
+      },
+      {
+        "at": 1200,
+        "label": "正文读回，同一位置落定"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A14",
+    "title": "AI 生成失败",
+    "stateKind": "失败",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "服务端给出失败终态"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A15",
+    "title": "AI 回复被取消",
+    "stateKind": "取消",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "停止生效后的终态"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A13",
+    "title": "已完成但无正文",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "COMPLETED 且正文是空串"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X03",
+    "title": "正文已结束、过程却有一项没结算",
+    "stateKind": "未知",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "正文 COMPLETED + 一行 REQUESTED 未结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A16",
+    "title": "用户查看历史消息后继续生成",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "第一轮在途有读取，第二轮已终态纯文本"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X04",
+    "title": "撤回回执（逐文件回退结果）",
+    "stateKind": "恢复",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "用户消息带已完成的撤回回执"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X05",
+    "title": "来源、用量与人设标签",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "带三份来源与用量的终态回复"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A02",
+    "title": "消息已提交，等待处理",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "历史一轮已完成 + 新一轮 PENDING"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A06",
+    "title": "多段长文本回复",
+    "stateKind": "终态",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "六段纯文本正文落定"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A07",
+    "title": "Markdown 标题、列表、引用",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "含标题 / 有序列表 / 引用块的正文"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A08",
+    "title": "代码块与复制",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "含一段带语言标注的代码块的正文"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "A09",
+    "title": "Markdown 表格",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "含表格的正文"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B01",
+    "title": "读取单个文件",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "请求并结算一次 read_file"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B03",
+    "title": "列出目录",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "list_directory 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B04",
+    "title": "搜索文件",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "find_paths 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B05",
+    "title": "搜索文件内容",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "search_text 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X06",
+    "title": "读取变更集（独立的读类动作词）",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "read_change_set 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B06",
+    "title": "Git 状态查询",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "git_status 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B07",
+    "title": "Git Diff 查询",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "git_diff 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B08",
+    "title": "Git 历史查询",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "git_log 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B09",
+    "title": "运行简单命令",
+    "stateKind": "工具",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，退出码 0"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B14",
+    "title": "命令非零退出码",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，退出码 2 且带原因"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B17",
+    "title": "命令输出截断",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，truncated 且给出省略量"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B15",
+    "title": "命令超时",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算且 timed_out 为真"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B16",
+    "title": "命令取消",
+    "stateKind": "取消",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算且 cancelled 为真"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B19",
+    "title": "桌面工具调用",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "computer_screenshot 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X07",
+    "title": "枚举窗口（没有对象参数）",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "computer_get_windows 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B21",
+    "title": "未知或未适配的工具类型",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "computer_drag_window 尚未结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B18",
+    "title": "浏览器工具调用",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "browser_read_page 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X08",
+    "title": "未登记的浏览器动作",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "browser_wait_for_selector 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B20",
+    "title": "GitHub/MCP 工具调用",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "github_pr_view 结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B22",
+    "title": "多工具交替调用",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "四种工具在同一轮里依次结算"
+      }
+    ],
+    "browserOnly": [
+      "活动行动作词左缘对齐（同一套骨架）",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X09",
+    "title": "简洁档：正常完成行收起，风险项保留",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "两条已结算 + 一条被拒 + 一条结果未知"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "density": "concise"
+    }
+  },
+  {
+    "id": "X10",
+    "title": "详细档：第三层技术详情默认展开",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "两条已结算调用"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "density": "detailed"
+    }
+  },
+  {
+    "id": "B02",
+    "title": "连续读取多个文件",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "同一轮连续三次 read_file"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 4,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B10",
+    "title": "运行较长命令",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 点名一条标识很长的检查"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "narrow"
+    }
+  },
+  {
+    "id": "B11",
+    "title": "命令实时输出",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "命令已请求（REQUESTED）"
+      },
+      {
+        "at": 2000,
+        "label": "命令已派发、正在执行（PREPARED）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "B12",
+    "title": "命令大量 stdout",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，stdout 40 行"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "narrow"
+    }
+  },
+  {
+    "id": "B13",
+    "title": "命令包含 stderr",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，只有 stderr 与退出码"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C07",
+    "title": "文件修改预览",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "REQUESTED 写入 + 临时预览（+3 −1）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X11",
+    "title": "预览目标未收全：删除侧不给数字",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "预览里 targetComplete 为 false"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X12",
+    "title": "预览正文被截断：数字只是下界",
+    "stateKind": "边界",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "预览带 truncated 标记"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C08",
+    "title": "等待写入审批",
+    "stateKind": "审批",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "WAITING_APPROVAL + 预览 + OPEN 审批记录"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X13",
+    "title": "待批准且还没有预览：只列意图不给数字",
+    "stateKind": "审批",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "WAITING_APPROVAL，预览尚未到达"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C01",
+    "title": "修改单个文件",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "SETTLED + 逐文件账本 +41 −8"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C06",
+    "title": "同一文件连续修改",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "三轮同一文件的写入账本"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C02",
+    "title": "新增文件",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "账本给出 CREATE 与行数"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C03",
+    "title": "删除文件",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "账本给出 DELETE 与移除行数"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C10",
+    "title": "文件写入失败",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "逐文件账本 status FAILED"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X14",
+    "title": "基线冲突（CONFLICT）",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "逐文件账本 status CONFLICT + 原因码"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C12",
+    "title": "文件变更结果未知",
+    "stateKind": "未知",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "逐文件账本 status UNKNOWN，数字未落"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X15",
+    "title": "二进制内容：不可统计就不给行数",
+    "stateKind": "边界",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "APPLIED 但原因码 BINARY"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X16",
+    "title": "账本给 -1（待核对）：绝不折算成 +0 −0",
+    "stateKind": "未知",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "APPLIED 但两侧计数都是 -1"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X17",
+    "title": "已结算但没有逐文件账本：不编文件行",
+    "stateKind": "未知",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "SETTLED 写入调用，fileChanges 为空"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C13",
+    "title": "Diff 展开与折叠",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条已落盘的写入，正文尚未展开"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X18",
+    "title": "差异文本不可用：保留摘要，不补造基线",
+    "stateKind": "未知",
+    "host": "DIFF",
+    "component": "FileWriteFrozenDiffPanel（冻结计划文本差异）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "availability UNAVAILABLE（缺可信原文）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C04",
+    "title": "修改多行代码",
+    "stateKind": "写入",
+    "host": "DIFF",
+    "component": "FileWriteFrozenDiffPanel（冻结计划文本差异）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "冻结基线 vs 冻结目标：后 12 行改写、末 3 行删除、追加 4 行"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C05",
+    "title": "多文件修改",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条 apply_changeset 结算，逐文件账本给三个文件"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C09",
+    "title": "写入完成但验证尚未进行",
+    "stateKind": "写入",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "只有写入账本，本轮没有 run_check"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C11",
+    "title": "修改被拒绝",
+    "stateKind": "审批",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "apply_changeset 被拒：只有意图，没有账本"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C14",
+    "title": "大型 Diff",
+    "stateKind": "边界",
+    "host": "DIFF",
+    "component": "FileWriteFrozenDiffPanel（冻结计划文本差异）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "400 行基线 vs 400 行目标：超出对齐上限"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C15",
+    "title": "文件编辑后运行测试",
+    "stateKind": "工具",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "先写一个文件，再跑一次检查"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C16",
+    "title": "验证通过（界面只说已结算 + 退出码 0）",
+    "stateKind": "终态",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "检查结算，退出码 0，回执没有失败记录"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "C17",
+    "title": "验证失败",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "写入已落盘，随后的检查退出码 1"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D04",
+    "title": "工具已请求但未结算",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条还没结算的 read_file 请求"
+      }
+    ],
+    "browserOnly": [
+      "全场只有一个转动的主进度动效",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X19",
+    "title": "工具已请求（Run 侧措辞与会话侧不同）",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条尚未派发的 Run 工具请求"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D05",
+    "title": "工具已准备但未执行",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "检查已派发，等待回执"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D06",
+    "title": "工具等待审批",
+    "stateKind": "审批",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "写入动作等待人工批准（OPEN 审批记录）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X20",
+    "title": "工具等待审批（摘要侧给去原审批的入口）",
+    "stateKind": "审批",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "摘要统计把等待批准单独标出来"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X21",
+    "title": "工具已结算（会话侧只说已结算，不说成功）",
+    "stateKind": "终态",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条已结算的读取，消息已进入终态"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D10",
+    "title": "工具已结算但成功性未知",
+    "stateKind": "未知",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，回执为空"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D11",
+    "title": "工具实际执行失败",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "run_check 结算，退出码 2 + outcome FAILED"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D07",
+    "title": "工具审批被拒绝",
+    "stateKind": "失败",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一次读取被准入拒绝，原因随账本落库"
+      }
+    ],
+    "browserOnly": [
+      "活动行动作词左缘对齐（同一套骨架）",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X22",
+    "title": "工具审批被拒绝（Run 轨迹侧措辞与活动行不一致）",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "检查动作在准入阶段被拒"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D08",
+    "title": "工具已放弃",
+    "stateKind": "取消",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条已结算、一条被放弃（没有任何结果）"
+      }
+    ],
+    "browserOnly": [
+      "列表里没有当前行时才轮到标题转动",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D09",
+    "title": "工具结果未知",
+    "stateKind": "未知",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一次结算响应中断，结果未知"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X23",
+    "title": "审批已过期：未执行，不沿用旧批准",
+    "stateKind": "审批",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "调用仍在等批准，对应 Review 已 EXPIRED"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X24",
+    "title": "批准之后：已批准也不代表已执行",
+    "stateKind": "审批",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Review 已批准，调用进入 PREPARED 但还没有回执"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X25",
+    "title": "审批记录读不到：说无法确认，不显示已批准",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Review 读取返回 503"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X26",
+    "title": "Run 终态但仍有未结算调用",
+    "stateKind": "未知",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已 COMPLETED，一条请求仍停在 REQUESTED"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D01",
+    "title": "正在执行第一项工具",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已在跑，工具账本里还没有任何请求"
+      },
+      {
+        "at": 1200,
+        "label": "第一项 read_file 被请求，还没有结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D02",
+    "title": "连续执行多个工具",
+    "stateKind": "工具",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "同一轮里连续四项读取，前三项已结算，第四项仍在途"
+      }
+    ],
+    "browserOnly": [
+      "因此只有一个主进度动效",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D03",
+    "title": "已结算部分，工具仍在执行",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一项读取已结算、一项检查仍在执行、一项写入等待批准"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D12",
+    "title": "整轮执行已结束",
+    "stateKind": "终态",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已完成，三项调用全部结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D13",
+    "title": "Run 执行失败",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已进入 FAILED：一项检查回执失败，一项请求还没派发"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D14",
+    "title": "Run 已取消",
+    "stateKind": "取消",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已停止：一项已结算、一项被放弃、一项还没派发"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D15",
+    "title": "工具轨迹跨多个轮次",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "三轮各一项调用，行上的 round 字段与外层分组不一致"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "D16",
+    "title": "Run 与会话的关联轨迹",
+    "stateKind": "工具",
+    "host": "LINK",
+    "component": "AssistMessageRow + ExecutionTrajectorySummary（会话侧与 Run 侧同一轮的两处投影）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条写入：会话侧已结算，Run 侧给出逐文件账本"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E01",
+    "title": "工具轨迹读取 404",
+    "stateKind": "失败",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态消息 + 过程账本返回 404"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E14",
+    "title": "重试读取成功",
+    "stateKind": "恢复",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "过程读取失败（503）"
+      },
+      {
+        "at": 4000,
+        "label": "服务恢复：同一条账本现在能读到"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E03",
+    "title": "网络请求超时",
+    "stateKind": "失败",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态消息 + 过程账本没有拿到响应"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X27",
+    "title": "生成预览读取失败（草稿留在原位）",
+    "stateKind": "流式",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "草稿已有 60%，预览读取失败"
+      },
+      {
+        "at": 1800,
+        "label": "重新读取成功：错误撤掉，草稿继续"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E10",
+    "title": "返回身份不匹配：整份丢弃",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "投影自称属于另一个 Run"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E04",
+    "title": "SSE 中断",
+    "stateKind": "恢复",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "SSE 断开，轨迹改走轮询"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E09",
+    "title": "迟到的旧响应",
+    "stateKind": "终态",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "Run 已 COMPLETED，账本 +41 −8，仍收到一份迟到预览"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X28",
+    "title": "读到空轮次不抹掉已经见过的步骤",
+    "stateKind": "恢复",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "两条已结算的调用"
+      },
+      {
+        "at": 2500,
+        "label": "轮询读到零条（服务端并发清理）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E11",
+    "title": "空工具轨迹",
+    "stateKind": "终态",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态消息 + 服务端确认零轮次"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X29",
+    "title": "Run 摘要读取失败：说读不到，不说没调用工具",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "摘要所在的工具投影返回 503"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X30",
+    "title": "冻结正文读不到（失权）：不补造正文",
+    "stateKind": "失败",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "账本 +41 −8 可读，冻结正文 403"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "X31",
+    "title": "预览读取失败：保留上一次数字，不闪回零",
+    "stateKind": "在途",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "REQUESTED 写入 + 预览 +3 −1"
+      },
+      {
+        "at": 3000,
+        "label": "预览读取中断（传输失败）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E07",
+    "title": "重复事件：同一身份只渲染一行",
+    "stateKind": "未知",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一次读取里同时返回 SETTLED 与 REQUESTED 两份同身份记录"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E02",
+    "title": "工具轨迹读取 500",
+    "stateKind": "失败",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "轨迹读取返回 503"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E05",
+    "title": "SSE 恢复",
+    "stateKind": "恢复",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "事件流不可用（降级中）"
+      },
+      {
+        "at": 3000,
+        "label": "事件流恢复"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E06",
+    "title": "轮询回退",
+    "stateKind": "恢复",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "回退为轮询：两项已结算"
+      },
+      {
+        "at": 4000,
+        "label": "回退期间重读到第三项结算"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E08",
+    "title": "事件乱序",
+    "stateKind": "未知",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "同一轮里三份到达顺序与时间戳互相矛盾"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E12",
+    "title": "工具轨迹部分可用",
+    "stateKind": "未知",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "账本可读、预览读取失败"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E13",
+    "title": "最终正文重读失败",
+    "stateKind": "未知",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态已到、正文重读失败（UNVERIFIED）"
+      },
+      {
+        "at": 2000,
+        "label": "点击重读：正文读回"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E15",
+    "title": "取消请求待确认",
+    "stateKind": "在途",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "用户按下停止，Worker 尚未结清"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E16",
+    "title": "用户拒绝审批",
+    "stateKind": "审批",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "等待批准（Review 开着）"
+      },
+      {
+        "at": 2000,
+        "label": "人工拒绝：Review 已决定，调用未执行"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "E17",
+    "title": "等待审批期间刷新页面",
+    "stateKind": "审批",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "首次进入：等待你批准"
+      },
+      {
+        "at": 1500,
+        "label": "刷新后按同一身份重读：还是等待你批准"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F01",
+    "title": "20 次工具调用",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条在途消息 + 20 条已结算的读取"
+      }
+    ],
+    "browserOnly": [
+      "活动行动作词左缘对齐（同一套骨架）",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": {
+      "density": "standard"
+    }
+  },
+  {
+    "id": "F02",
+    "title": "50 次工具调用",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "50 条已结算 + 1 条 UNKNOWN + 1 条 REJECTED"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": {
+      "density": "standard"
+    }
+  },
+  {
+    "id": "F03",
+    "title": "100 次工具调用",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一轮 100 条已结算读取"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F04",
+    "title": "300 次工具调用",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一轮 300 条已结算读取"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F05",
+    "title": "多轮工具执行",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "三轮 3 + 4 + 2 条已结算读取"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F07",
+    "title": "超长文件路径",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "读取一个极深的路径"
+      }
+    ],
+    "browserOnly": [
+      "活动行动作词左缘对齐（同一套骨架）",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "narrow"
+    }
+  },
+  {
+    "id": "F08",
+    "title": "超长命令",
+    "stateKind": "边界",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条 run_check，命令极长"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F09",
+    "title": "超长终端输出",
+    "stateKind": "边界",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条 run_check，stdout 共 400 行"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F10",
+    "title": "超长 Markdown",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态消息带一段极长的 Markdown"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F11",
+    "title": "中文和英文混排",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态正文：中英混排与长路径"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "narrow"
+    }
+  },
+  {
+    "id": "F12",
+    "title": "表格与代码块混排",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态正文：一张很宽的表"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "narrow"
+    }
+  },
+  {
+    "id": "F13",
+    "title": "用户向上滚动时继续生成",
+    "stateKind": "流式",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "草稿出一段（约 35%）"
+      },
+      {
+        "at": 1200,
+        "label": "草稿续出（约 70%：同一块，只是更长）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 2,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F14",
+    "title": "展开详情后继续更新",
+    "stateKind": "在途",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "两条已结算调用"
+      },
+      {
+        "at": 2000,
+        "label": "第三条落账（前两条身份不变）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F15",
+    "title": "历史消息刷新恢复",
+    "stateKind": "恢复",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "终态消息：两条已结算"
+      },
+      {
+        "at": 2000,
+        "label": "刷新历史：按同一身份重读，得到同样两条"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F16",
+    "title": "快速切换会话",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "会话甲：两条已结算"
+      },
+      {
+        "at": 150,
+        "label": "切到会话乙：一条不同的调用"
+      },
+      {
+        "at": 300,
+        "label": "立刻切回甲"
+      },
+      {
+        "at": 450,
+        "label": "再切到乙（连续快速切换，最后停在乙）"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F17",
+    "title": "快速展开/收起",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条已结算的读取"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 4,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "F18",
+    "title": "小窗口与高 DPI",
+    "stateKind": "边界",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "手机宽度 + 2 倍像素比：两行调用 + 一段草稿"
+      }
+    ],
+    "browserOnly": [
+      "活动行动作词左缘对齐（同一套骨架）",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "viewport": "phone",
+      "devicePixelRatio": 2
+    }
+  },
+  {
+    "id": "F19",
+    "title": "reduced-motion",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一条在途请求（本来会转）"
+      }
+    ],
+    "browserOnly": [
+      "关闭动效后没有任何受控动画在跑",
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "motion": "off"
+    }
+  },
+  {
+    "id": "F20",
+    "title": "深色/浅色主题",
+    "stateKind": "呈现",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "暗色：终态正文 + 两条已结算调用"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 0,
+    "uncovered": null,
+    "conditions": {
+      "theme": "dark"
+    }
+  },
+  {
+    "id": "F06",
+    "title": "多文件变更摘要",
+    "stateKind": "边界",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "一次写入改动 14 个文件"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 1,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G01",
+    "title": "正常开发任务（读 → 改 → 验证 → 回复）",
+    "stateKind": "工具",
+    "host": "LINK",
+    "component": "AssistMessageRow + ExecutionTrajectorySummary（会话侧与 Run 侧同一轮的两处投影）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "提交：还没有任何工具调用"
+      },
+      {
+        "at": 1400,
+        "label": "第 1 项读取结算"
+      },
+      {
+        "at": 2800,
+        "label": "第 2 项结算，第 3 项刚请求出去"
+      },
+      {
+        "at": 4200,
+        "label": "三处读完，写入参数还在流式生成（临时预览）"
+      },
+      {
+        "at": 5600,
+        "label": "写入结算：预览行换成落账行，临时预览清空"
+      },
+      {
+        "at": 7000,
+        "label": "检查结算，正文落定"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 7,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G02",
+    "title": "命令失败并如实停在失败",
+    "stateKind": "失败",
+    "host": "LINK",
+    "component": "AssistMessageRow + ExecutionTrajectorySummary（会话侧与 Run 侧同一轮的两处投影）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "命令请求已发出"
+      },
+      {
+        "at": 2000,
+        "label": "回执：退出码 1，三条用例没过"
+      },
+      {
+        "at": 3600,
+        "label": "再跑一次仍失败，Run 停下等人工决定"
+      },
+      {
+        "at": 5000,
+        "label": "正文说明停在哪里"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 4,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G03",
+    "title": "审批等待与批准",
+    "stateKind": "审批",
+    "host": "RUN_SUMMARY",
+    "component": "ExecutionTrajectorySummary + ChatLocalFileDiff（Run 侧摘要与局部增删行）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "写入参数还在生成"
+      },
+      {
+        "at": 1600,
+        "label": "冻结完成，等待你批准"
+      },
+      {
+        "at": 3400,
+        "label": "批准之后落盘"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 5,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G04",
+    "title": "网络中断与恢复",
+    "stateKind": "恢复",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "草稿正常推进（v3，40%）"
+      },
+      {
+        "at": 1400,
+        "label": "预览读取连续失败"
+      },
+      {
+        "at": 3200,
+        "label": "恢复：草稿回到原位并继续增长（v8，75%）"
+      },
+      {
+        "at": 4800,
+        "label": "正文读回，同一位置落定"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 3,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G05",
+    "title": "长任务（多轮、逐项落账）",
+    "stateKind": "工具",
+    "host": "RUN_TRAJECTORY",
+    "component": "RunToolTrajectoryPanel（Run 侧逐轮全量轨迹）",
+    "frames": [
+      {
+        "at": 0,
+        "label": "第 0 轮三项读完"
+      },
+      {
+        "at": 2400,
+        "label": "第 1 轮开始：四项里两项已结算"
+      },
+      {
+        "at": 4800,
+        "label": "第 1 轮收尾，第 2 轮五项全部结算"
+      },
+      {
+        "at": 6600,
+        "label": "Run 进入终态"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 4,
+    "uncovered": null,
+    "conditions": null
+  },
+  {
+    "id": "G06",
+    "title": "纯文本回复（无工具、无空白交接帧）",
+    "stateKind": "流式",
+    "host": "SESSION",
+    "component": "AssistView → AssistMessageRow + SessionRoundTrace + ActivityRow",
+    "frames": [
+      {
+        "at": 0,
+        "label": "刚提交（PENDING）"
+      },
+      {
+        "at": 900,
+        "label": "开始流式输出（v1，20%）"
+      },
+      {
+        "at": 2400,
+        "label": "草稿继续（v5，60%）"
+      },
+      {
+        "at": 3800,
+        "label": "预览判终态、正文还没读回（SETTLING）"
+      },
+      {
+        "at": 5000,
+        "label": "正文读回，同一位置落定"
+      }
+    ],
+    "browserOnly": [
+      "阅读列不产生页面级横向溢出"
+    ],
+    "interactions": 5,
+    "uncovered": null,
+    "conditions": null
+  }
+]

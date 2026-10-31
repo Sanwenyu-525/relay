@@ -111,6 +111,20 @@ async function setWindowSize(page, cssWidth, cssHeight) {
 }
 
 const results = [];
+const repoRoot = resolve(appDir, "../..");
+function gitEvidence() {
+  try {
+    const run = (args) => execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" }).trim();
+    return {
+      head: run(["rev-parse", "HEAD"]),
+      branch: run(["branch", "--show-current"]) || "(detached)",
+      dirty: run(["status", "--porcelain", "--untracked-files=normal"]) !== "",
+      capturedAt: new Date().toISOString()
+    };
+  } catch {
+    return { head: "", branch: "", dirty: null, capturedAt: new Date().toISOString() };
+  }
+}
 function check(name, fn) {
   return Promise.resolve().then(fn).then(
     (detail) => results.push({ name, ok: true, detail: detail ?? "" }),
@@ -227,6 +241,8 @@ async function main() {
   await check("动画播放正常：A04 播放推进虚拟帧，预览里有在跑的动画", async () => {
     await page.locator('[data-testid="scenario-pick-A04"]').click();
     await page.waitForSelector('[data-scenario-preview] [data-scenario-id="A04"]');
+    await page.locator('[data-testid="scenario-motion-on"]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
     const head = page.locator(".scenario-lab-controls-head");
     assert.match(await head.innerText(), /第 1\/3 帧/u);
     await page.locator('[data-testid="scenario-play"]').click();
@@ -245,6 +261,127 @@ async function main() {
     await page.screenshot({ path: join(evidenceDir, "tauri-lab-full.png"), fullPage: true });
     await page.locator('[data-testid="scenario-play"]').click();
     return `推进到「${playing.frameText.match(/第 \d+\/\d+ 帧/u)?.[0] ?? "?"}」，运行中动画 ${String(playing.running)} 条`;
+  });
+
+  /**
+   * P5：主进度不是「页面动画总数为 1」。
+   *
+   * 在途场景里真正的进度元素是 `.activity-item[data-current="true"]` 行内的转动图标；
+   * 淡入、悬停、流式文字都可能同时存在。判据因此分成两层：
+   *   * 结构层：当前行恰好一个、行内转动图标恰好一个、标题行不再重复转一个；
+   *   * 动画层：运行中的「主进度动画」恰好一个，其余动画只登记类别，不数量硬凑。
+   */
+  await check("D04 主进度唯一：只有当前行转动，普通动画不计成第二个主进度", async () => {
+    await page.locator('[data-testid="scenario-pick-D04"]').click();
+    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="D04"]');
+    await page.locator('[data-testid="scenario-motion-on"]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
+    await page.waitForTimeout(500);
+    const reading = await page.evaluate(() => {
+      const root = document.querySelector("[data-scenario-preview]");
+      const rows = root === null ? [] : Array.from(root.querySelectorAll(".activity-item"));
+      const current = root === null ? [] : Array.from(root.querySelectorAll('.activity-item[data-current="true"]'));
+      const indicators = root === null ? []
+        : Array.from(root.querySelectorAll(".activity-item-spin, .activity-header-spin"));
+      const running = root === null ? [] : document.getAnimations().filter((animation) => {
+        const target = animation.effect?.target ?? null;
+        return animation.playState === "running" && target !== null && root.contains(target);
+      }).map((animation) => {
+        const target = animation.effect.target;
+        return {
+          animationName: getComputedStyle(target).animationName,
+          progress: target.closest(".activity-item-spin, .activity-header-spin") !== null,
+          stream: target.closest(".assist-inflight-dots") !== null
+        };
+      });
+      return {
+        rows: rows.length,
+        current: current.length,
+        rowSpinners: root === null ? 0 : root.querySelectorAll(".activity-item-spin").length,
+        headerSpinners: root === null ? 0 : root.querySelectorAll(".activity-header-spin").length,
+        spinning: indicators.filter((node) => getComputedStyle(node).animationName !== "none").length,
+        currentSpinning: current[0]?.querySelector(".activity-item-spin") != null,
+        totalRunning: running.length,
+        progressRunning: running.filter((item) => item.progress).length,
+        streamRunning: running.filter((item) => item.stream).length,
+        categories: [...new Set(running.map((item) => item.progress ? "progress" : item.stream ? "stream" : "other"))]
+      };
+    });
+    assert.ok(reading.rows > 0, "这一条没有过程行，主进度测量没有意义");
+    assert.equal(reading.current, 1, `在途时应恰好一个当前行，实际 ${String(reading.current)}`);
+    assert.equal(reading.rowSpinners, 1, `当前行内应恰好一个转动图标，实际 ${String(reading.rowSpinners)}`);
+    assert.equal(reading.headerSpinners, 0, "列表里已有当前行时，标题行不应再转一个");
+    assert.equal(reading.spinning, 1, `画面里转动的主进度应恰好一个，实际 ${String(reading.spinning)}`);
+    assert.equal(reading.progressRunning, 1,
+      `运行中的主进度动画应恰好一个，实际 ${String(reading.progressRunning)}`);
+    assert.ok(reading.currentSpinning, "转动的图标不在当前行里");
+    fs.writeFileSync(join(evidenceDir, "tauri-d04-motion.json"), JSON.stringify(reading, null, 2), "utf8");
+    return `行 ${String(reading.rows)}、当前行 1、转动主进度 1；另有 ${String(reading.totalRunning - reading.progressRunning)} 条普通动画（${reading.categories.join("+") || "无"}）不计入`;
+  });
+
+  await check("动效关闭：受控主进度停止，过程信息一条不少", async () => {
+    const selector = "[data-scenario-preview] .activity-item-spin, [data-scenario-preview] .activity-header-spin";
+    const before = await page.locator(selector).evaluateAll(
+      (nodes) => nodes.filter((node) => getComputedStyle(node).animationName !== "none").length);
+    assert.ok(before > 0, "开启动效时没有受控动画在跑，这条测量没有意义");
+    const infoBefore = await page.locator("[data-scenario-preview]").innerText();
+    await page.locator('[data-testid="scenario-motion-off"]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.motion === "off");
+    const after = await page.locator(selector).evaluateAll(
+      (nodes) => nodes.filter((node) => getComputedStyle(node).animationName !== "none").length);
+    assert.equal(after, 0, "关掉动效后主进度仍在动画");
+    assert.equal(await page.locator("[data-scenario-preview]").innerText(), infoBefore,
+      "关闭动效不能顺手少掉信息");
+    await page.locator('[data-testid="scenario-motion-on"]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
+    return "受控主进度从 1 条降为 0，过程文本不变";
+  });
+
+  await check("B01 工具行展开/收起不卸载节点", async () => {
+    await page.locator('[data-testid="scenario-pick-B01"]').click();
+    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="B01"]');
+    const row = page.locator("[data-scenario-preview] .activity-item").first();
+    assert.equal(await row.count(), 1, "B01 没有工具行");
+    await row.evaluate((node) => { node.dataset.tauriProbe = "kept"; });
+    const toggle = row.locator("button[aria-expanded]");
+    assert.equal(await toggle.count(), 1, "B01 工具行没有展开入口");
+    await toggle.click();
+    await row.locator(".activity-item-detail").waitFor({ state: "visible", timeout: 5_000 });
+    assert.equal(await row.getAttribute("data-tauri-probe"), "kept", "展开把工具行整块重挂了");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelectorAll(
+      "[data-scenario-preview] .activity-item .activity-item-detail").length === 0);
+    assert.equal(await row.getAttribute("data-tauri-probe"), "kept", "收起把工具行整块重挂了");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+    return "展开→收起期间同一 DOM 节点保持挂载";
+  });
+
+  await check("长工具详情不撑宽页面：F07 展开后无页面级横向溢出", async () => {
+    await page.locator('[data-testid="scenario-pick-F07"]').click();
+    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="F07"]');
+    await page.locator('[data-testid="scenario-expand-all"]').click();
+    await page.waitForTimeout(400);
+    const reading = await page.evaluate(() => {
+      const root = document.querySelector("[data-scenario-preview]");
+      const cells = root === null ? [] : Array.from(root.querySelectorAll(
+        ".markdown-preview__table-scroll, [data-testid^='local-file-diff-body-'], pre, code, .hash-code, "
+        + ".activity-item-dir, .activity-item-name, .local-file-diff-path"));
+      const overflowing = cells.filter((element) => element.scrollWidth - element.clientWidth > 2);
+      const unscrolled = overflowing.filter((element) =>
+        !["auto", "scroll"].includes(getComputedStyle(element).overflowX));
+      return {
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        measured: cells.length,
+        overflowing: overflowing.length,
+        unscrolled: unscrolled.length
+      };
+    });
+    assert.ok(reading.pageOverflow <= 0, `F07 把页面撑出 ${String(reading.pageOverflow)}px 横向滚动`);
+    assert.ok(reading.measured > 0, "F07 没有可测量的长内容块");
+    assert.equal(reading.unscrolled, 0,
+      `F07 有 ${String(reading.unscrolled)} 块超宽内容没有在自己的容器里滚动`);
+    return `长内容块 ${String(reading.measured)} 个，超宽 ${String(reading.overflowing)} 个且都在容器内滚动，页面溢出 0`;
   });
 
   await check("返回工作台：回到进入前那一页，实验室组件卸掉", async () => {
@@ -273,7 +410,7 @@ async function main() {
     return `${origin.url} 原样恢复，存储只动了视图偏好`;
   });
 
-  await check("窄窗：真窗口缩到 560 宽后入口在导航抽屉里，实验室无页面级横向溢出", async () => {
+  await check("窄窗 560：入口可达、三栏重排、控制器可用、长详情不撑宽", async () => {
     const size = await setWindowSize(page, 560, 760);
     assert.ok(size.width <= 640, `真窗口没缩到窄窗档：innerWidth=${String(size.width)}`);
     assert.ok(size.width < 1100, `窄窗判定阈值未达到：innerWidth=${String(size.width)}`);
@@ -284,17 +421,65 @@ async function main() {
     assert.equal(await entry.count(), 1);
     await entry.click();
     await page.waitForSelector(".scenario-lab-page", { timeout: 15_000 });
+    phase = "lab";
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth
       - document.documentElement.clientWidth);
     assert.ok(overflow <= 0, `窄窗下出现 ${String(overflow)}px 页面级横向溢出`);
     const order = await page.evaluate(() => [".scenario-lab-directory", ".scenario-lab-stage", ".scenario-lab-controls"]
       .map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().top ?? -1)));
     assert.ok(order[0] < order[1] && order[1] < order[2], `窄窗三栏没有纵向重排：${order.join(" < ")}`);
+
+    // 「操作区可用」不是只看排布：按钮要有可点区域、不越出视口，并且真能推进一帧。
+    await page.locator('[data-testid="scenario-pick-A04"]').click();
+    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="A04"]');
+    const controls = await page.evaluate(() => {
+      const panel = document.querySelector(".scenario-lab-controls");
+      const buttons = panel === null ? []
+        : Array.from(panel.querySelectorAll("button[data-testid^='scenario-']"))
+          .filter((node) => node.offsetParent !== null);
+      const clipped = buttons.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width < 8 || rect.height < 8 || rect.left < -1 || rect.right > window.innerWidth + 1;
+      }).map((node) => node.getAttribute("data-testid"));
+      return { present: panel !== null, buttons: buttons.length, clipped };
+    });
+    assert.ok(controls.present, "窄窗下没有控制器");
+    assert.ok(controls.buttons > 0, "控制器里没有可见按钮");
+    assert.deepEqual(controls.clipped, [], `窄窗下按钮被裁切或越界：${controls.clipped.join(" / ")}`);
+    const step = page.locator('[data-testid="scenario-step"]');
+    assert.equal(await step.isEnabled(), true, "窄窗下「单步」不可用");
+    await step.click();
+    await page.waitForFunction(() => /第 2\/3 帧/u.test(
+      document.querySelector(".scenario-lab-controls-head")?.textContent ?? ""), null, { timeout: 5_000 });
+
+    // 长工具详情在窄窗同样只能在自己容器里滚动，不能把页面顶宽。
+    await page.locator('[data-testid="scenario-pick-F07"]').click();
+    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="F07"]');
+    await page.locator('[data-testid="scenario-expand-all"]').click();
+    await page.waitForTimeout(400);
+    const wide = await page.evaluate(() => {
+      const root = document.querySelector("[data-scenario-preview]");
+      const cells = root === null ? [] : Array.from(root.querySelectorAll(
+        ".markdown-preview__table-scroll, [data-testid^='local-file-diff-body-'], pre, code, .hash-code, "
+        + ".activity-item-dir, .activity-item-name, .local-file-diff-path"));
+      const overflowing = cells.filter((element) => element.scrollWidth - element.clientWidth > 2);
+      const unscrolled = overflowing.filter((element) =>
+        !["auto", "scroll"].includes(getComputedStyle(element).overflowX));
+      return {
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        measured: cells.length,
+        unscrolled: unscrolled.length
+      };
+    });
+    assert.ok(wide.pageOverflow <= 0, `560 宽下长详情把页面撑出 ${String(wide.pageOverflow)}px`);
+    assert.ok(wide.measured > 0, "560 宽下 F07 没有可测量的长内容块");
+    assert.equal(wide.unscrolled, 0, `560 宽下有 ${String(wide.unscrolled)} 块超宽内容没有容器内滚动`);
+
     await page.screenshot({ path: join(evidenceDir, "tauri-lab-narrow.png") });
     await page.locator('[data-testid="scenario-back-to-workbench"]').click();
     await page.waitForURL(/\/agent$/u, { timeout: 10_000 });
     phase = "return";
-    return `innerWidth=${String(size.width)}，三栏 top ${order.join(" < ")}，溢出 ${String(overflow)}px`;
+    return `innerWidth=${String(size.width)}，三栏 top ${order.join(" < ")}，可见按钮 ${String(controls.buttons)} 个且单步可用，F07 长内容 ${String(wide.measured)} 块、页面溢出 0`;
   });
 
   await check("实验室自身没有资源/路由错误，也没有连真实执行系统", async () => {
@@ -330,7 +515,7 @@ async function main() {
   });
 
   const evidence = { checkedAt: new Date().toISOString(), cdp: CDP, base: BASE,
-    userAgent: wevviewVersion, results };
+    source: gitEvidence(), userAgent: wevviewVersion, results };
   fs.writeFileSync(join(evidenceDir, "tauri-acceptance.json"), JSON.stringify(evidence, null, 2), "utf8");
 
   for (const item of results) console.log(`${item.ok ? "ok" : "xx"} ${item.name} — ${item.detail}`);
@@ -339,7 +524,8 @@ async function main() {
 
 main().catch((error) => {
   console.error("Tauri 实机验收失败：", error);
-  const evidence = { checkedAt: new Date().toISOString(), cdp: CDP, base: BASE, results };
+  const evidence = { checkedAt: new Date().toISOString(), cdp: CDP, base: BASE,
+    source: gitEvidence(), results };
   fs.writeFileSync(join(evidenceDir, "tauri-acceptance.json"), JSON.stringify(evidence, null, 2), "utf8");
   process.exitCode = 1;
 });

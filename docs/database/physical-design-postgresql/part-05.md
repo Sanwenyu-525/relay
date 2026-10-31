@@ -304,3 +304,24 @@ Migration：`0141_member_wakeup_processing.sql`。**Breaking Change: No**（新�
 **为什么必须冻结代数**：轮换覆盖同一引用下的秘密并把 `credential_version` 加一；只冻结连接 ID 的话，旧 Run 会在轮换后悄悄用新 Key 外呼（配额与计费归属都变了）。执行端比对代数即停，是 P0-2 的延续。
 
 **回滚**：`DROP TABLE workspace_default_model_connection`；`DROP` 两个契约列。列可空且无既有读依赖，删除后旧 Run 自动回到「进程默认」兼容路径，无需数据修复。
+
+## 0148 子任务补充来源与读取确认（2026-10-30）
+
+Migration：`0148_subagent_supplements.sql`，新增 `assist_delegation_supplements`。`id` 为补充身份，`delegation_id` 关联原委派，唯一 `source_message_id` 关联子会话的一条真实 USER 消息；正文不复制到补充表或父会话。`parent_seen_at / parent_seen_message_id` 与 `child_seen_at / child_seen_message_id` 各自同现同缺，表示主、子模型分别接收该来源的响应确认；`created_at` 保存补充时间。索引 `(delegation_id, created_at, id)` 支持来源查询。
+
+应用层在原 command_id 回执事务内锁定归属并写入消息与来源，不产生新的 ASSISTANT 排队行、Task 或 Run。模型调用前读取，响应返回后按当前 Worker / RUNNING / 未取消条件确认读取；读取不是完成、验收或权限授予。仓储只做持久读写，协作语义归[运行架构 §2.5.5](../../architecture/runtime-context/part-01.md#255-子会话用户补充的持久来源与安全点2026-10-30)。
+
+兼容性：仅追加表与索引，不修改旧消息、委派或迁移。权限为 SELECT / INSERT / UPDATE，不授予 DELETE；主子会话原有删除阻断继续保留有来源的历史。无旧数据回填。回滚风险：旧程序可忽略新增表；直接删表会丢失父子投递来源及已读依据，USER 正文虽仍在也不能据此伪造旧读取状态，应保留表或先导出来源，再安排受控回滚。
+
+## 0149 执行请求的执行范围冻结（2026-10-30）
+
+Migration：`0149_conversation_execution_scope.sql`，`conversation_execution_requests` 增两列：`execution_kind text NOT NULL`（CHECK 限 `FILE_SCOPE` / `MACHINE` / `LEGACY_UNCLASSIFIED`）与 `machine_capability text`（仅 MACHINE 行非空，CHECK 限 `COMPUTER_INPUT` / `BROWSER_ACTION`）。请求创建时冻结「本次执行是否纯机器操作」，委托阶段不再按会话当前状态重算——目录换绑或解绑不能改变同一请求的工具范围。
+
+兼容性：历史行**失败关闭**——迁移前没有可还原的原始授权事实，统一标 `LEGACY_UNCLASSIFIED`，可查询、可审计，但不参与执行、不接续、不新建 Task/Run，需用户重新发起（原入口对它返回类型化拒绝）。已有 Task/Run 的冻结契约不变：迁移只加列，不改 status、command_id 与已委托字段。回滚风险：删除两列后历史请求失去范围事实，重新执行将按会话当前状态推断授权——禁止直接回滚，应保留列。
+
+## 0150 待办清单的轮次顺序与规范化请求摘要（2026-10-30）
+
+Migration：`0150_assist_session_todo_scope_order.sql`，`assist_session_todo_snapshots` 与 `assist_session_todo_events` 各加 `scope_seq bigint NOT NULL DEFAULT 0`（该轮次开启用户消息的 `seq`），事件表另加 `request_digest text`（同身份重放的规范化请求摘要：基线版本 + 条目身份 + 内容 + 状态）。快照 UPSERT 按 `(scope_seq, version)` 行比较，旧轮次的迟到写入不能覆盖新轮次的当前投影；同身份换载荷重放由摘要拒绝。回填按 `scope_key = 'turn:' || message_id` 关联 `assist_messages.seq`。
+
+兼容性：仅加列与回填，不改事件、快照与调用身份语义。历史事件 `request_digest IS NULL` 保持无摘要，重放按 `(content, status)` 序列比较兜底——服务端为请求里没带 id 的条目补的内部身份不参与比较，旧调用仍可按原身份恢复。回滚风险：删列后轮次顺序闸门失效，旧轮次写入可再次覆盖当前投影；应保留列。
+

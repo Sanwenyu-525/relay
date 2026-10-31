@@ -1,0 +1,179 @@
+{
+  "generatedAt": "2026-10-31T02:22:17.539Z",
+  "playwright": {
+    "command": "RELAY_E2E_PORT=4176 RELAY_SCENARIO_LAB_RESULTS_DIR=<tmp>/results-scenario-lab pnpm exec playwright test tests/browser/assistScenarioLab.spec.ts tests/browser/assistScenarioLabShots.spec.ts --workers=1",
+    "startedAt": "2026-10-31T10:14:46+08:00 (run3, 源码冻结后最终证据轮)",
+    "finishedAt": null,
+    "exitCode": 0,
+    "reportedPassed": 18,
+    "reportedFailed": null,
+    "cases": [
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:176:3 › 实验室入口与真实组件 › 开发路由可访问，目录逐条列出矩阵要求的 ID",
+        "duration": "1.5s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:197:3 › 实验室入口与真实组件 › 中间一列挂的是产品组件，不是演示替身",
+        "duration": "3.9s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:218:3 › 十条 DOM 属性 › ① 元素与状态一一对应：状态标记与状态词同时在场且互相印证",
+        "duration": "4.5s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:244:3 › 十条 DOM 属性 › ② 展开与折叠稳定：入口不因展开而消失，收起后仍在原地",
+        "duration": "1.2s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:270:3 › 十条 DOM 属性 › ③ 不产生无效成功标记：先确认失败标记在场，再要求界面不宣布成功",
+        "duration": "5.6s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:308:3 › 十条 DOM 属性 › ④ 不出现重复工具行：同一身份只渲染一次",
+        "duration": "2.7s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:332:3 › 十条 DOM 属性 › ⑤ 状态切换不卸载整块组件：逐帧推进时消息行始终是同一个节点",
+        "duration": "2.1s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:359:3 › 十条 DOM 属性 › ⑥ 流式回复没有空白交接帧：每一帧都有草稿或正文",
+        "duration": "2.1s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:399:3 › 十条 DOM 属性 › ⑦ 动效开启时只有一个主进度指示",
+        "duration": "973ms"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:417:3 › 十条 DOM 属性 › ⑧ 动效关闭时受控动画全部停止，信息一条不少",
+        "duration": "1.1s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:439:3 › 十条 DOM 属性 › ⑨ 长内容不产生页面级横向溢出，宽内容在自己容器里滚动",
+        "duration": "5.9s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:470:3 › 十条 DOM 属性 › ⑩ 用户上滚后位置稳定：草稿在下方变长，不把我正在看的那一行顶走",
+        "duration": "955ms"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:495:3 › 十条 DOM 属性 › ⑩-补 Run 轨迹面板：状态行换措辞不得推移正在读的轨迹行",
+        "duration": "1.9s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLab.spec.ts:520:3 › 批量运行 › 运行全部场景：静态断言在真实浏览器里逐条给出结果",
+        "duration": "1.6m"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLabShots.spec.ts:177:3 › 批量截图 › 每条场景逐帧留影，末帧单独登记",
+        "duration": "2.2m"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLabShots.spec.ts:240:3 › 批量截图 › 六条流程逐帧留影（关键事件序列）",
+        "duration": "8.5s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLabShots.spec.ts:268:3 › 批量截图 › 实验室外壳（目录、控制器、展示全部状态）",
+        "duration": "1.9s"
+      },
+      {
+        "status": "PASS",
+        "name": "tests\\browser\\assistScenarioLabShots.spec.ts:288:3 › 验收报告 › 汇总判定、截图与实测发现，写成一份可执行的报告",
+        "duration": "518ms"
+      }
+    ],
+    "rawLog": "logs/playwright-run-20261031-run3.log",
+    "history": [
+      "logs/playwright-run-20261031.log（run1：F06 整页导航 30s 超时，dev server 连接复用抖动；批量判定 145/145 已过）",
+      "logs/playwright-run-20261031-run2.log（run2：18/18 过，但随后证据模块清理未用参数，指纹更新为终态）",
+      "logs/playwright-run-20261031-run3.log（run3：源码冻结后的最终证据轮，指纹 a9c17ad3… 与 source-snapshot-end.json 一致）"
+    ]
+  },
+  "scenarioLabEvidence": {
+    "verdicts": {
+      "ranAt": "2026-10-31T02:17:03.392Z",
+      "total": 145,
+      "pass": 145,
+      "fail": [],
+      "notCovered": [],
+      "unchecked": [],
+      "browserOnlyChecks": 154,
+      "consoleErrors": [],
+      "stale": false,
+      "driftFiles": [],
+      "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+      "source": {
+        "gitHead": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+        "gitBranch": "main",
+        "gitDirty": true,
+        "workspaceDigest": "1e0693db564466c47108cd2e86a1418107694a85b83adf5e8632e444df3d4005",
+        "sourceDigest": "a9c17ad3fafec59c0727e455b9c807dac9a71320f1a9aee46a9f3fe2a5e3ca30",
+        "sourceFileCount": 221,
+        "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+        "scenarioCount": 145,
+        "capturedAt": "2026-10-31T02:15:25.934Z"
+      }
+    },
+    "shotsMeta": {
+      "generatedAt": "2026-10-31T02:19:16.523Z",
+      "frameShots": 190,
+      "expectedFrameShots": 190,
+      "lastFrameShots": 145,
+      "stale": false,
+      "driftFiles": [],
+      "source": {
+        "gitHead": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+        "gitBranch": "main",
+        "gitDirty": true,
+        "workspaceDigest": "1e0693db564466c47108cd2e86a1418107694a85b83adf5e8632e444df3d4005",
+        "sourceDigest": "a9c17ad3fafec59c0727e455b9c807dac9a71320f1a9aee46a9f3fe2a5e3ca30",
+        "sourceFileCount": 221,
+        "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+        "scenarioCount": 145,
+        "capturedAt": "2026-10-31T02:17:06.505Z"
+      }
+    },
+    "summary": {
+      "pass": 145,
+      "fail": 0,
+      "notCovered": 0,
+      "unchecked": 0,
+      "generatedAt": "2026-10-31T02:19:16.523Z",
+      "source": {
+        "gitHead": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+        "gitBranch": "main",
+        "gitDirty": true,
+        "workspaceDigest": "1e0693db564466c47108cd2e86a1418107694a85b83adf5e8632e444df3d4005",
+        "sourceDigest": "a9c17ad3fafec59c0727e455b9c807dac9a71320f1a9aee46a9f3fe2a5e3ca30",
+        "sourceFileCount": 221,
+        "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+        "scenarioCount": 145,
+        "capturedAt": "2026-10-31T02:17:06.505Z"
+      },
+      "manifestSha256": "106d08dbbe78a1c5c43d665512a85788011bd067d07d289bb3e088e84b75e1a7",
+      "consoleErrors": 0
+    },
+    "screenshotCount": 190
+  },
+  "gitAtAssembly": {
+    "head": "4cc630da376140691e05cdf25db9dabbb5665c4f",
+    "branch": "main"
+  }
+}

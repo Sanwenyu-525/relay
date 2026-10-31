@@ -17,6 +17,7 @@ import { capabilityFor, dispatchGatewayAction, prepareGatewayAction,
   targetMatches, type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
   from './gateway-actions.js';
 import { settleDelegationToolCall, type DelegationChildRunner } from './subagent-delegation.js';
+import { readSubagentSupplementContext } from './subagent-supplements.js';
 import { SessionTodoRepository } from '../assist/session-todo-repository.js';
 import { TODO_WRITE_TOOL_NAME, todoWriteToolSpec } from '../assist/session-todos.js';
 import { settleTodoWriteCall } from './session-todo-tool.js';
@@ -30,7 +31,7 @@ import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 import { ASSIST_STEERING_RULES } from '../workflow/prompts/conversation-prompts.js';
 import { ModelCallBudgetError, ModelOutputBudgetError, ModelTimeoutError,
   ModelToolOutputError } from '../workflow/openai-compatible-model-port.js';
-import { classifyProviderError, type ModelErrorCategory } from
+import { classifyProviderError, classifyRoutingStop, type ModelErrorCategory } from
   '../workflow/model-error-classification.js';
 import { ModelScopeBudgetError } from '../model/model-call-repository.js';
 
@@ -490,6 +491,7 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
    */
   let steerEpoch = 0;
   const withdrawnActions: WithdrawnActionGuard = new Map();
+  const supplementContext = new Map<string, JsonObject>();
   const drainSteers = async (): Promise<boolean> => {
     if (input.drainSteers === undefined) return false;
     const drained = await input.drainSteers();
@@ -510,6 +512,7 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         usage, providerRequestIds };
     }
     let response: AssistResult;
+    let supplementIds: readonly string[] = [];
     try {
       // 最后一轮或工具调用预算用完时强制收尾：本轮不声明工具，模型只能输出正文。
       const contextPressure = input.inputByteLimit !== undefined && toolTurns.length > 0 &&
@@ -528,11 +531,15 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       const todoBlock = input.allowTodo === true
           ? await new SessionTodoRepository(db).readContextBlock(message.session_id, message.id)
           : '';
+      // SUBAGENT_SUPPLEMENT_SAFE_POINT: freeze additions per request, never mutate an in-flight input.
+      const supplements = await readSubagentSupplementContext(db, session, message.id, supplementContext);
+      supplementIds = supplements.ids;
       const request: AssistRequest = { intent: 'DISCUSS',
         system: (executionNotice === undefined || executionNotice === null
           ? (hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem)
           : `${hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem}\n\n${executionNotice}`)
-          + (todoBlock === '' ? '' : '\n\n' + todoBlock),
+          + (todoBlock === '' ? '' : '\n\n' + todoBlock)
+          + (supplements.block === '' ? '' : '\n\n' + supplements.block),
         turns: wrapUp ? [...turns, { role: 'user', content: contextPressure
           ? CONTEXT_PRESSURE_WRAP_UP : TOOL_BUDGET_WRAP_UP }] : turns,
         ...(wrapUp ? { tools: [] } : { tools: declared }),
@@ -552,7 +559,10 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       // 归不进上面任何一类的失败再补一条传输层类别：Provider 抖动（限流、断流、5xx）与
       // 本模块的代码缺陷必须在库里可分辨，否则「MODEL_FAILED」这个词承担两种完全不同的结论。
       return { kind: 'FAILED', errorCode: sessionModelErrorCode(error),
-        providerErrorKind: classifyProviderError(error) ?? null,
+        // 与主流程共用同一套归因链（2026-10-30 二修）：先看真实错误，再看精确停因码，
+        // 两条路径的 MODEL_FAILED 因此可用同一列聚合，不再一边有归因一边是 null。
+        providerErrorKind: classifyProviderError(error)
+          ?? classifyRoutingStop(error)?.providerErrorKind ?? null,
         usage, providerRequestIds };
     }
     if (response.kind === 'CANCELLED') {
@@ -561,12 +571,22 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     }
     providerRequestIds.push(response.providerRequestId);
     usage = addUsage(usage, response.usage);
+    // A delivery-receipt storage error is not a retryable Provider failure.
+    if (input.workerId !== undefined) {
+      await createRepositories(db).subagents.markSupplementsSeen({ ids: supplementIds,
+        sessionId: session.id, messageId: message.id, workerId: input.workerId,
+        child: session.parent_session_id !== null });
+    }
 
     if (response.kind === 'CONTENT') {
       // 0122：模型已经给出正文，但这一步之后还有插话到达 → 这一轮不结束，再跑一步。
       // 只在还能再跑一轮时消费（wrapUp 轮之后没有下一次请求）。
       const wrapUp = shouldWrapUpReadonlyRound({ round, maxRounds, usedCalls, maxToolCalls });
       if (!wrapUp && await drainSteers()) continue;
+      if (round < maxRounds) {
+        const latest = await readSubagentSupplementContext(db, session, message.id, supplementContext);
+        if (latest.ids.some((id) => !supplementIds.includes(id))) continue;
+      }
       return { kind: 'CONTENT', content: response.content, usage, providerRequestIds,
         rounds: round };
     }

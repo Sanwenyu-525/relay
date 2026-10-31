@@ -10,6 +10,7 @@ import { sql } from 'kysely';
 
 import { createAssistSession, requestAssistMessage, setSessionContextBudget }
   from '../../src/application/assist-commands.js';
+import { deleteAssistSession } from '../../src/application/assist-session-controls.js';
 import { executeChatCommand } from '../../src/application/execute-chat-command.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { readSessionContextUsage } from '../../src/application/assist-context-projection.js';
@@ -373,4 +374,49 @@ test('SB-08: 历史调用没有可靠冻结预算时，投影不拿当前档位�
   assert.equal(usage.last_call?.input_tokens, 1_200);
   assert.equal(usage.last_call?.reserved_tokens, null,
     '没有冻结预算就说没有：不能拿当前档位冒充历史预算');
+});
+
+test('SB-09: 来源不存在或已被删除——按「没有来源」回退默认档建会话，不抛错', async () => {
+  const workspaceId = await workspace();
+  // 合法 UUID、但库里没有这一行：继承是便利，不是授权，读不到来源就退回 256K。
+  const missing = randomUUID();
+  const created = await session(workspaceId, missing);
+  assert.equal(await tier(created), 262_144, '来源不存在按默认档建会话');
+
+  // 来源「被删除后」的语义与不存在相同：读不到行就回退，不伪造继承成功。
+  const doomed = await session(workspaceId);
+  const doomedRow = await createRepositories(app.db).assist.readSession(doomed);
+  assert.ok(doomedRow);
+  await deleteAssistSession(app.db, { workspaceId, sessionId: doomed, commandId: randomUUID(),
+    expectedRevision: String(doomedRow.revision) });
+  const afterDelete = await session(workspaceId, doomed);
+  assert.equal(await tier(afterDelete), 262_144, '来源删除后退回默认档');
+
+  // 空串与 undefined 同一条规则：视为没有来源。
+  const blank = await session(workspaceId, '');
+  assert.equal(await tier(blank), 262_144, '空串来源视为没有来源');
+});
+
+test('SB-10: HTTP 面——畸形 source_session_id 被请求契约明确拒绝，合法但无此行的来源按默认档建出', async () => {
+  const api = await startTestApi();
+  try {
+    const workspaceId = await workspace();
+    const createPath = workspacePath(workspaceId, '/assist-sessions');
+
+    // 畸形 UUID：TypeBox 的 uuid 契约在 HTTP 边界就拒掉，到不了领域层，更不会崩。
+    const malformed = await api.post(createPath, { command_id: randomUUID(),
+      title: 'malformed-source', source_session_id: 'null' });
+    assert.equal(malformed.status, 422, `字面 "null" 必须被请求契约拒绝：${malformed.text}`);
+    const notUuid = await api.post(createPath, { command_id: randomUUID(),
+      title: 'malformed-source', source_session_id: 'not-a-uuid' });
+    assert.equal(notUuid.status, 422, '畸形 UUID 必须被请求契约拒绝');
+
+    // 合法 UUID 但来源不存在：按契约回退默认档，创建成功。
+    const missingSource = await api.post(createPath, { command_id: randomUUID(),
+      title: 'missing-source', source_session_id: randomUUID() });
+    assert.equal(missingSource.status, 201, missingSource.text);
+    const createdId = String((missingSource.body as { result: { session_id: string } })
+      .result.session_id);
+    assert.equal(await tier(createdId), 262_144, '来源不存在按默认档建会话');
+  } finally { await api.stop(); }
 });

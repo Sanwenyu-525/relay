@@ -21,15 +21,20 @@ export class ConversationExecutionRepository {
     readonly sessionId: string; readonly sourceMessageId: string; readonly resourceId: string;
     readonly commandId: string; readonly rootPath: string; readonly baseContentSha256: Buffer;
     readonly taskCommandId: string; readonly readyCommandId: string; readonly delegateCommandId: string;
+    /** 冻结的执行范围（0149）：MACHINE 表示纯机器执行，委托阶段不回读会话状态。 */
+    readonly executionKind: 'FILE_SCOPE' | 'MACHINE';
+    readonly machineCapability: 'COMPUTER_INPUT' | 'BROWSER_ACTION' | null;
   }): Promise<ConversationExecutionRequestRow> {
     const result = await sql<ConversationExecutionRequestRow>`
       insert into conversation_execution_requests (id, workspace_id, project_id, session_id,
         source_message_id, resource_id, command_id, root_path, base_content_sha256,
-        decision, candidate_status, status, task_command_id, ready_command_id, delegate_command_id)
+        decision, candidate_status, status, task_command_id, ready_command_id, delegate_command_id,
+        execution_kind, machine_capability)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.sessionId},
         ${input.sourceMessageId}, ${input.resourceId}, ${input.commandId}, ${input.rootPath},
         ${input.baseContentSha256}, 'DISCUSS', 'PENDING', 'INTERPRETING',
-        ${input.taskCommandId}, ${input.readyCommandId}, ${input.delegateCommandId})
+        ${input.taskCommandId}, ${input.readyCommandId}, ${input.delegateCommandId},
+        ${input.executionKind}, ${input.machineCapability})
       returning *`.execute(this.db);
     const row = result.rows[0];
     if (row === undefined) throw new Error('conversation execution request insert returned no row');

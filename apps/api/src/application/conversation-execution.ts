@@ -367,22 +367,63 @@ function defaultModelPort(): AssistModelPort {
  * 「插件可不可用」，主流程（`assist-runner`）据它决定未归属会话的纯操作候选是否
  * 落成执行请求——两处判断漂移会让模型照着事实块给出候选、却在落库时被拒。
  */
-export async function resolveWorkspaceMachineAttribution(repositories: Repositories,
-  workspaceId: string, capability: 'COMPUTER_INPUT' | 'BROWSER_ACTION',
-): Promise<{ readonly projectId: string; readonly resourceId: string } | undefined> {
+export type MachineCapability = 'COMPUTER_INPUT' | 'BROWSER_ACTION';
+
+export interface MachineAttribution {
+  readonly projectId: string;
+  readonly resourceId: string;
+  /** 授权来源：声明该能力的那条 ACTIVE 连接（借用审计据它指回登记处）。 */
+  readonly connectionId: string;
+  /** true = 连接登记在别的项目，本次只借用它的账本归属（事实说明必须写明）。 */
+  readonly borrowed: boolean;
+}
+
+/**
+ * 机器族执行的归属解析（2026-10-30 修订）。
+ *
+ * 原实现只回答「未归属会话能不能借」，于是「已归属项目但没绑定工作目录」的会话被
+ * 多处 `project_id === null` 判断同时漏掉：能力事实块不说、候选不落库、落库门再抛
+ * resourceNotFound。机器操作与文件操作是两种授权，判据只能是**本次执行有没有文件
+ * 工作范围**（`working_resource_id`），不是会话有没有项目。
+ *
+ * 解析顺序：先看会话自己项目里有没有该能力的 ACTIVE 连接与同项目 ACTIVE 受管资源；
+ * 没有才回落到工作区级借用，并置 `borrowed: true`。两种都必须齐备「连接 + 资源」，
+ * 因为机器动作在账本上必须绑定一个受管资源（0126 矩阵）。
+ */
+export async function resolveMachineAttribution(repositories: Repositories,
+  input: { readonly workspaceId: string; readonly projectId: string | null;
+    readonly capability: MachineCapability },
+): Promise<MachineAttribution | undefined> {
   const connections = await repositories.gateway
-    .listActiveConnectionsByCapability(workspaceId, capability);
+    .listActiveConnectionsByCapability(input.workspaceId, input.capability);
+  if (connections.length === 0) return undefined;
   const resources = (await repositories.gateway.listResources())
-    .filter((resource) => resource.workspace_id === workspaceId && resource.status === 'ACTIVE')
+    .filter((resource) => resource.workspace_id === input.workspaceId && resource.status === 'ACTIVE')
     .sort((left, right) => left.created_at.getTime() - right.created_at.getTime()
       || (left.id < right.id ? -1 : 1));
-  for (const connection of connections) {
+  const own = input.projectId === null ? []
+    : connections.filter((connection) => connection.project_id === input.projectId);
+  const others = input.projectId === null ? connections
+    : connections.filter((connection) => connection.project_id !== input.projectId);
+  for (const connection of [...own, ...others]) {
     const resource = resources.find((candidate) => candidate.project_id === connection.project_id);
     if (resource !== undefined) {
-      return { projectId: connection.project_id, resourceId: resource.id };
+      return { projectId: connection.project_id, resourceId: resource.id,
+        connectionId: connection.id,
+        borrowed: input.projectId !== null && connection.project_id !== input.projectId };
     }
   }
   return undefined;
+}
+
+/** 未归属会话视角的同一份解析（签名保持不变，既有调用点继续可用）。 */
+export async function resolveWorkspaceMachineAttribution(repositories: Repositories,
+  workspaceId: string, capability: MachineCapability,
+): Promise<{ readonly projectId: string; readonly resourceId: string } | undefined> {
+  const attribution = await resolveMachineAttribution(repositories,
+    { workspaceId, projectId: null, capability });
+  return attribution === undefined ? undefined
+    : { projectId: attribution.projectId, resourceId: attribution.resourceId };
 }
 
 /**
@@ -403,28 +444,45 @@ async function claimExecutionRequest(db: DbExecutor, input: InterpretConversatio
     if (session.conversation_mode !== 'AGENT') {
       throw invalidTransition('只有普通 Agent 会话可以进入执行；请明确转入普通会话。');
     }
-    // 归属先于资源判定：未归属会话只有机器族操作可借用插件连接归属项目，其余请求
-    // 维持「必须绑定明确的 Project」。
+    // 归属先于资源判定（2026-10-30 修订）：判据是本次执行有没有文件工作范围，不是
+    // 会话有没有项目。没有绑定工作目录时，纯机器操作候选（电脑 / 浏览器）由
+    // machineCapability 解析归属；文件类候选仍要求先选定目录。
     let projectId = session.project_id;
     let resourceId = input.resourceId;
-    if (projectId === null) {
+    let machineAttributionFacts: JsonObject | undefined;
+    if (resourceId === null) {
       if (input.machineCapability === undefined) {
-        throw invalidTransition('从对话直接进入执行要求会话绑定明确的 Project。');
+        throw invalidTransition(projectId === null
+          ? '从对话直接进入执行要求会话绑定明确的 Project。'
+          : '这条会话还没有绑定工作目录，文件类执行请先选定目录；纯电脑或浏览器操作不需要目录。');
       }
-      const attribution = await resolveWorkspaceMachineAttribution(repositories,
-        input.workspaceId, input.machineCapability);
+      const attribution = await resolveMachineAttribution(repositories, {
+        workspaceId: input.workspaceId, projectId: session.project_id,
+        capability: input.machineCapability });
       if (attribution === undefined) {
+        // 类型化阻断：不能执行时说清缺的是哪一项，不再报成「资源不存在」。
         throw invalidTransition('工作区还没有登记可用的'
           + (input.machineCapability === 'COMPUTER_INPUT' ? '电脑操控' : '浏览器操控')
-          + '连接；请先在任一项目的「连接与权限」页登记插件连接后再发起操作。');
+          + '连接；请先在项目的「连接与权限」页登记插件连接后再发起操作。');
       }
       projectId = attribution.projectId;
       resourceId = attribution.resourceId;
+      // 跨项目借用的授权来源与事实（2026-10-30 执行链整改）：授权永远是那条登记着该
+      // 能力的 ACTIVE 连接；借用事实（连接登记在别的项目）随请求事件一起进审计，
+      // 不只留在内存里的 borrowed 布尔上。
+      machineAttributionFacts = {
+        machine_capability: input.machineCapability,
+        machine_connection_id: attribution.connectionId,
+        machine_attribution_borrowed: attribution.borrowed };
     }
     if (session.status !== 'ACTIVE') throw invalidTransition('会话已归档。');
-    // 走到这里的 resourceId 一定非空：归属会话由调用方传受管资源，未归属会话刚由
-    // 借用解析赋值。空值只剩「调用方漏传」一种来源，按资源不存在处理。
-    if (resourceId === null) throw resourceNotFound('Managed resource');
+    // 走到这里 projectId 与 resourceId 一定非空：调用方传了受管资源，或刚由归属解析
+    // 赋值。空值只剩「调用方漏传」一种来源，按资源不存在处理。
+    if (projectId === null || resourceId === null) throw resourceNotFound('Managed resource');
+    // 执行范围冻结（2026-10-30 二修）：只有「带机器能力且没有绑定工作目录」才是纯机器
+    // 执行；有目录的会话即便夹带机器能力也保留文件工具。范围在 claim 时写进请求行，
+    // 委托阶段不再根据会话当前状态重算。
+    const machineOnlyExecution = input.machineCapability !== undefined && input.resourceId === null;
     await lockWritableProjectInWorkspace(repositories, input.workspaceId, projectId);
     const message = await repositories.assist.readMessage(input.sourceMessageId);
     if (message === undefined || message.session_id !== session.id || message.role !== 'USER' ||
@@ -442,13 +500,15 @@ async function claimExecutionRequest(db: DbExecutor, input: InterpretConversatio
       commandId: input.commandId, rootPath: resource.canonical_root,
       baseContentSha256: createHash('sha256').update(message.content, 'utf8').digest(),
       taskCommandId: randomUUID(), readyCommandId: randomUUID(), delegateCommandId: randomUUID(),
+      executionKind: machineOnlyExecution ? 'MACHINE' : 'FILE_SCOPE',
+      machineCapability: machineOnlyExecution ? (input.machineCapability ?? null) : null,
     });
     await repositories.activities.insertActivityRecord({ id: randomUUID(),
       workspaceId: input.workspaceId, actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF,
       commandId: input.commandId, projectId, taskId: null,
       eventType: 'CONVERSATION_EXECUTION_REQUESTED',
       factRefs: { request_id: row.id, session_id: session.id, source_message_id: message.id,
-        resource_id: resource.id } });
+        resource_id: resource.id, ...(machineAttributionFacts ?? {}) } });
     return { row, created: true };
   });
 }
@@ -1025,21 +1085,38 @@ async function planToolLoop(db: DbExecutor, input: {
   readonly canonicalRoot: string;
 }): Promise<PlannedToolLoop> {
   const { row, candidate } = input;
-  // 借用机器插件通道的执行（2026-10-25）：会话本身没有归入项目，请求行上的项目与
-  // 资源只是账本归属。工具词表因此收敛为本次 interaction 的机器族——借用的受管根
-  // 不是用户的工作范围，不给文件、Git 与检查工具。
-  const borrowedMachineExecution =
-    (await createRepositories(db).assist.readSession(row.session_id))?.project_id === null;
-  if (borrowedMachineExecution && (candidate.writes_files || candidate.file_changes.length > 0 ||
+  // 执行范围冻结（2026-10-30 二修）：只读请求行上冻结的 execution_kind，不再回读会话的
+  // working_resource_id。原实现在委托阶段重新推断，请求创建后解绑或换绑目录会让同一个
+  // 请求获得另一套工具范围——那是权限边界漂移，不是恢复。
+  if (row.execution_kind === 'LEGACY_UNCLASSIFIED') {
+    // 失败关闭（2026-10-30 三修）：0149 之前创建的请求没有冻结的执行范围，任何「按当前
+    // 会话推一下」的做法都是改写历史授权。这类请求不执行、不接续、不新建 Task/Run。
+    throw invalidTransition('这条执行请求创建于执行范围冻结之前，没有可核对的原始授权；'
+      + '按失败关闭处理：不会执行，也不会新建 Task/Run。请重新发起这次操作。');
+  }
+  const machineOnlyExecution = row.execution_kind === 'MACHINE';
+  if (machineOnlyExecution && (candidate.writes_files || candidate.file_changes.length > 0 ||
       candidate.check !== undefined || candidate.interaction === undefined)) {
-    throw invalidTransition('未归属会话的执行请求只承载浏览器或电脑操作（不带文件修改与检查）；' +
-      '文件类执行请先把会话归入项目并绑定目录。');
+    throw invalidTransition('没有绑定工作目录的执行请求只承载浏览器或电脑操作（不带文件修改与检查）；'
+      + '文件类执行请先给会话选定工作目录。');
+  }
+  if (machineOnlyExecution) {
+    // 冻结能力与候选交互必须一致（2026-10-30 三修）：候选说 BROWSER 而冻结的是电脑操控，
+    // 或冻结列没能力，都不能换通道执行；这不新建 Task/Run，直接类型化拒绝。
+    const frozenInteraction = row.machine_capability === 'COMPUTER_INPUT' ? 'COMPUTER'
+      : row.machine_capability === 'BROWSER_ACTION' ? 'BROWSER' : undefined;
+    if (frozenInteraction === undefined || candidate.interaction !== frozenInteraction) {
+      throw invalidTransition('候选的交互类型与冻结的机器能力不一致：这条请求只能执行'
+        + (frozenInteraction === 'COMPUTER' ? '电脑操控'
+          : frozenInteraction === 'BROWSER' ? '浏览器操控' : '未知（缺少冻结能力）')
+        + '，不会改用其它通道，也不会新建 Task/Run。');
+    }
   }
   const connections: Record<string, string> = {};
   const allowedTools: string[] = [];
   const allowedActions: string[] = [];
   const checks: FrozenCheck[] = [];
-  if (!borrowedMachineExecution) {
+  if (!machineOnlyExecution) {
     connections.FILE_QUERY = await requireConnection(db, row, 'FILE_QUERY');
     connections.FILE_READ = await requireConnection(db, row, 'FILE_READ');
     allowedTools.push(...TOOL_LOOP_READ_TOOLS);
@@ -1064,7 +1141,7 @@ async function planToolLoop(db: DbExecutor, input: {
     }
   }
 
-  if (!borrowedMachineExecution) {
+  if (!machineOnlyExecution) {
     // 写能力由「本次是否明确要改文件」决定，不取决于解释模型是否猜得出文件名。
     const wantsWrite = wantsConversationFileWrite(candidate);
     if (wantsWrite) {

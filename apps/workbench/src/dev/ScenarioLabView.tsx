@@ -6,8 +6,9 @@ import { useActivityDensity } from "../lib/activityDensity";
 import {
   applyMotionPreference, resolveMotionPreference, storeMotionPreference, storedMotionPreference
 } from "../lib/motionPreference";
-import { BROWSER_ONLY_KINDS, browserOnlyCount, failedResults, runChecks, type CheckResult } from "./scenarioChecks";
+import { browserOnlyCount, failedResults, runChecks, type CheckResult } from "./scenarioChecks";
 import { ScenarioShell, ScenarioStage } from "./scenarioHost";
+import { buildScenarioManifest } from "./scenarioManifest";
 import { ALL_SCENARIOS, SCENARIO_GROUPS } from "./scenarios";
 import { CATEGORY_META, ScenarioRunner, type Scenario, type ScenarioAcceptance } from "./scenarioWorld";
 import "./ScenarioLab.css";
@@ -82,21 +83,77 @@ async function yieldFrames(count = 3): Promise<void> {
  * 浏览器批次需要「有哪些条、每条几帧、哪几条断言只能在真实布局下量」，
  * 但我不想为测试另开一条只有 Playwright 认的私有接口：清单就是这一页已经知道的事实，
  * 原样落在 `script[type=application/json]` 里，人和机器读的都是同一份，不会有两套口径。
+ *
+ * 映射本身在 `scenarioManifest.ts`：Playwright 用同一个函数构造期望值，再和页面读回的
+ * JSON 逐字段比对。清单过期时验收直接非零退出，而不是拿旧清单写一份看起来通过的报告。
  */
 function manifest(): ReactElement {
-  return <script id="scenario-lab-manifest" type="application/json">{JSON.stringify(
-    ALL_SCENARIOS.map((item) => ({
-      id: item.id,
-      title: item.title,
-      stateKind: item.stateKind,
-      host: item.host,
-      component: item.component,
-      frames: item.steps.map((step) => ({ at: step.at, label: step.label })),
-      browserOnly: item.checks.filter((check) => BROWSER_ONLY_KINDS.includes(check.kind)).map((check) => check.label),
-      interactions: (item.interactions ?? []).length,
-      uncovered: item.uncovered ?? null,
-      conditions: item.conditions ?? null
-    })))}</script>;
+  return <script id="scenario-lab-manifest" type="application/json">
+    {JSON.stringify(buildScenarioManifest())}
+  </script>;
+}
+
+const BACK_TARGET_KEY = "relay.scenario-lab.from";
+
+/**
+ * 「返回」只接受站内、可安全写进 `Link` 的路径。
+ *
+ * 拒绝协议相对地址（`//evil.example`）、带控制字符的值和实验室自身：
+ * 前者会离开站点，后者会让「返回」原地打转。查询串与 hash 保留，语义仍由目标路由解释。
+ */
+function safeBackTarget(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2_048) return null;
+  if (!value.startsWith("/") || value.startsWith("//") || /[\u0000-\u001f\u007f]/u.test(value)) return null;
+  try {
+    const url = new URL(value, "http://relay.invalid");
+    if (url.origin !== "http://relay.invalid") return null;
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    // 已经在实验室里再点一次侧栏时，外壳会保留原来源；来源本身是实验室只可能是旧值，不能拿来回跳。
+    if (url.pathname === "/__dev/assist-scenarios") return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 返回目标的解析顺序：
+ *   1. 本次进入时外壳带来的 `location.state.from`（最可信；存在但无效时直接回默认页，不拿旧记录兜底）；
+ *   2. 整页刷新时用 `sessionStorage` 里上一次进入记录恢复——覆盖宿主不保留 history state 的情况；
+ *   3. 其余情况（直接打开、外链、无效来源）一律回 `/agent`，不读旧来源，避免把上次会话的页面当成这次的入口。
+ *
+ * 存储只在「有合法来源」时写入，在「直接打开」时清掉；
+ * 这样「直接打开后再刷新」也不会把上一次的页面借回来。
+ */
+function useBackTarget(state: unknown): string {
+  const hasState = state !== null && state !== undefined;
+  const fromState = hasState ? safeBackTarget((state as { from?: unknown }).from) : null;
+  // 这一次文档加载是不是刷新打开的：只在整页重新加载时才承认刷新回退。
+  const reloaded = useRef<boolean | null>(null);
+  if (reloaded.current === null) {
+    const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    reloaded.current = navigation?.type === "reload";
+  }
+  const target = useMemo(() => {
+    if (hasState) return fromState ?? "/agent";
+    if (reloaded.current === true) {
+      try {
+        return safeBackTarget(window.sessionStorage.getItem(BACK_TARGET_KEY)) ?? "/agent";
+      } catch {
+        return "/agent";
+      }
+    }
+    return "/agent";
+  }, [hasState, fromState]);
+  useEffect(() => {
+    try {
+      if (fromState !== null) window.sessionStorage.setItem(BACK_TARGET_KEY, fromState);
+      else if (!hasState && reloaded.current !== true) window.sessionStorage.removeItem(BACK_TARGET_KEY);
+    } catch {
+      // 隐私模式或配额满：只影响刷新后的回退，不阻断使用。
+    }
+  }, [hasState, fromState]);
+  return target;
 }
 
 export default function ScenarioLabView(): ReactElement {
@@ -104,10 +161,10 @@ export default function ScenarioLabView(): ReactElement {
   const location = useLocation();
   /**
    * 「返回工作台」回**进入本页之前**那一页（外壳把 path+search 放进 `location.state.from`）。
-   * 深链或刷新后 state 已丢，回默认工作台 `/agent`；若来源本身就是实验室（在页内再点一次侧栏），不记来源，
-   * 免得返回时原地打转。
+   * 刷新后 state 已丢，此时才读 `sessionStorage` 里的刷新回退；深链或直接打开仍回默认工作台 `/agent`。
+   * 来源是实验室自身时不记，免得返回时原地打转（见 `safeBackTarget`）。
    */
-  const backTo = (location.state as { from?: string } | null)?.from ?? "/agent";
+  const backTo = useBackTarget(location.state);
   const backLabel = /^\/agent(?:[?#]|$)/u.test(backTo) ? "返回工作台" : "返回进入前的页面";
   const requestedScenario = ALL_SCENARIOS.find((item) => item.id === query.get("scenario"));
   const initial = requestedScenario ?? ALL_SCENARIOS[0] as Scenario;

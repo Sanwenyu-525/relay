@@ -618,7 +618,7 @@ export async function requestAssistMessage(
       // 消息与执行流程——只记录原因，后续读取按「缺少会话起点」呈现。
       // SESSION_SUBAGENT_HISTORY: frozen child contexts cannot become writable main chats.
       if (session.parent_session_id !== null) {
-        throw invalidTransition('子 Agent 会话仅用于查看委派记录，请返回主会话补充要求。',
+        throw invalidTransition('子 Agent 会话仅用于查看记录与追加补充，普通生成请返回主会话。',
           { sessionId: session.id });
       }
       if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null &&

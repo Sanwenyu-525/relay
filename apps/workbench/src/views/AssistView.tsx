@@ -48,6 +48,7 @@ import { PendingWorkStrip } from "../components/PendingWorkStrip";
 import { SessionRoundTrace } from "../components/SessionRoundTrace";
 import SessionTodoList from "../components/SessionTodoList";
 import SessionDelegations from "../components/SessionDelegations";
+import SubagentSupplements from "../components/SubagentSupplements";
 import WritePermissionControl, { tierLabels, type Tier } from "../components/WritePermissionControl";
 import ComposerTargetPicker, { type ComposerTargetChoice } from "../components/ComposerTargetPicker";
 import SafeMarkdown from "../components/SafeMarkdown";
@@ -619,9 +620,14 @@ onExecutionPrepared?: (taskId: string) => void;
    * 跨组件的「新对话」入口（左栏链接、目录细条按钮）会把跳转前所在会话写进 URL 的
    * `source_session`：那条路径会**重挂载**本组件，组件内的 ref 因此拿不到来源，
    * 只能由 URL 带过来。两条来源合并：组件内 ref（视图内新建）优先，其次 URL。
+   * 0145 收口反例（场景 B/D，2026-10-31）：URL 是外部输入，字面 "null"/"undefined"/空串
+   * 不是会话身份（典型来自把 null 直接插进 URL 的调用方）——就地当作没有来源，
+   * 让服务端按默认档建会话，而不是把垃圾身份原样送上创建接口。
    */
-  const urlSourceSessionId = useMemo(() =>
-    new URLSearchParams(location.search).get("source_session"), [location.search]);
+  const urlSourceSessionId = useMemo(() => {
+    const raw = new URLSearchParams(location.search).get("source_session");
+    return raw === null || raw === "" || raw === "null" || raw === "undefined" ? null : raw;
+  }, [location.search]);
   const [sessionId, setSessionId] = useState<string | null>(() =>
     initialSession !== undefined && preferredSessionId === initialSession.id ? initialSession.id : null);
   useEffect(() => {
@@ -6151,7 +6157,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       sessionId={session.id} onOpenSession={onOpenSession}
       parentRunning={messages === null ? session.runState !== null : messages.some((message) =>
         message.status === "PENDING" || message.status === "RUNNING")}
-      refreshKey={(messages ?? []).map((message) => `${message.id}:${message.status}`).join("|")} />}
+      refreshKey={`${projectionReload}:${(messages ?? []).map((message) => `${message.id}:${message.status}`).join("|")}`} />}
     {!externalReadBlockedReason && (embedded ? <details className="embedded-assist-history"><summary>查看会话历史与原始建议</summary>{transcript}</details> : <div className={standalone ? "agent-chat-transcript-shell" : undefined} data-top-fade={awayFromTop ? "on" : undefined}
         data-bottom-fade={awayFromBottom ? "on" : undefined}>{transcript}
       {/* 时间线只消费已加载消息与消息流容器；嵌入态的转录区在 details 里没有自己的滚动容器，
@@ -6169,9 +6175,14 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     </div>)}
 
     {!externalReadBlockedReason && parentSessionId !== null && <p className="helper-text"
-      data-testid="session-delegation-readonly">只读子任务记录，请返回主会话补充要求。
+      data-testid="session-delegation-readonly">只读子任务记录，可追加补充；执行与重新委派由主会话协调。
       {onOpenSession !== undefined && <button className="text-button" type="button"
         data-testid="session-delegation-parent" onClick={() => onOpenSession(parentSessionId)}>返回主会话</button>}</p>}
+    {/* SUBAGENT-SUPPLEMENTS-ANCHOR：补充只写原来源，不启动普通子会话生成。 */}
+    {!externalReadBlockedReason && parentSessionId !== null && <SubagentSupplements client={client} sessionId={session.id}
+      child={parentSessionId !== null && session.status === "ACTIVE"}
+      refreshKey={`${projectionReload}:${(messages ?? []).map((message) => `${message.id}:${message.status}`).join(",")}`}
+      onRecorded={() => void refresh()} />}
     {/* 队列只读投影放在转录区之后、输入器之前：不抢焦点，也不遮挡控制入口。
         嵌入式子页同样渲染：停止键只覆盖那条 RUNNING，队列项的逐条取消入口只能在这里，
         只在 standalone 渲染会让 ?skill=assist 上的排队回复没有取消路径。 */}
