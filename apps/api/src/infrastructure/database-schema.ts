@@ -581,6 +581,8 @@ export interface SessionToolCallRow {
   readonly rejection_detail: string | null;
   readonly result_digest: string | null;
   readonly requested_at: Date;
+  /** 0156：绑定 Gateway Operation 的观察时刻；prepare/attach 崩溃窗口不伪造。 */
+  readonly bound_at: Date | null;
   readonly settled_at: Date | null;
 }
 
@@ -1029,6 +1031,19 @@ export interface RuleVersionRow {
 
 /** 0015：Assist 会话；只服务对话与提案，不参与业务判定。 */
 export type AssistSessionStatus = 'ACTIVE' | 'ARCHIVED';
+
+/**
+ * 0157：会话标题的来源（见迁移 0157）。
+ *
+ * `LEGACY` 是旧版本已有、来源无法确认的标题，迁移只给它打标、绝不批量改名；
+ * `PROVISIONAL` 是系统临时标题；`AI_GENERATED` 是语义生成并使用过的正式标题；
+ * `USER_DEFINED` 是用户手动设置，自动生成不得覆盖。
+ */
+export type AssistSessionTitleSource =
+  | 'LEGACY'
+  | 'PROVISIONAL'
+  | 'AI_GENERATED'
+  | 'USER_DEFINED';
 
 /** 0015：消息生成意图；提案意图要求会话绑定对应作用域（命令层校验）。 */
 export type AssistIntent = 'DISCUSS' | 'PROPOSE_CANDIDATE' | 'PROPOSE_TASK' | 'IMPACT_CHECK' | 'IMPACT_CANDIDATE';
@@ -1526,9 +1541,53 @@ export interface AssistSessionRow {
    * 与 `parent_session_id` 同生同灭：迁移 0128 的 CHECK 保证两列一致地为 NULL/非 NULL。
    */
   readonly budget_scope_session_id: string | null;
+  /**
+   * 0157：标题来源。旧行迁移默认 LEGACY（保护原样）；新会话由创建用例写 PROVISIONAL；
+   * 语义生成成功后写 AI_GENERATED；用户手动改名写 USER_DEFINED。
+   */
+  readonly title_source: AssistSessionTitleSource;
+  /** 0157：最近一次自动命名成功落标题的时刻；人工改名与旧行不写。 */
+  readonly title_generated_at: Date | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+/**
+ * 0157：一次会话标题生成请求（后台辅助调用）。
+ *
+ * 它是**请求身份与领取状态**，不是业务状态：模型输出不直接写会话标题。
+ * `base_title` / `base_title_source` 是请求发出那一刻的标题事实，落标题时必须在同一事务里
+ * 核对它们仍相等——迟到的模型结果不能覆盖用户之后的手动改名。
+ */
+export interface AssistTitleGenerationRow {
+  readonly id: string;
+  readonly session_id: string;
+  readonly request_kind: 'AUTO' | 'REGENERATE';
+  readonly status: 'PENDING' | 'CLAIMED' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+  readonly base_title: string;
+  readonly base_title_source: AssistSessionTitleSource;
+  readonly input_digest: string;
+  readonly anchor_message_id: string | null;
+  readonly generator: 'MODEL' | 'RULES' | null;
+  readonly result_title: string | null;
+  readonly error_code: string | null;
+  readonly attempts: number;
+  readonly claimed_by: string | null;
+  readonly lease_until: Date | null;
+  readonly requested_at: Date;
+  readonly claimed_at: Date | null;
+  readonly settled_at: Date | null;
+}
+
+/** 0157：列表/单条投影里的最新一次生成请求（只用于显示「正在生成」与失败原因）。 */
+export interface AssistTitleGenerationSummary {
+  readonly status: AssistTitleGenerationRow['status'];
+  readonly request_kind: AssistTitleGenerationRow['request_kind'];
+  readonly generator: AssistTitleGenerationRow['generator'];
+  readonly error_code: string | null;
+  readonly requested_at: Date;
+  readonly settled_at: Date | null;
 }
 
 export interface AssistMessageRow {
@@ -1561,6 +1620,10 @@ export interface AssistMessageRow {
   readonly usage_cache_read_tokens: number | null;
   readonly usage_cache_creation_tokens: number | null;
   readonly worker_id: string | null;
+  /** 0156：Worker 领取该消息的观察时刻；重新排队时清空，旧行 NULL。 */
+  readonly claimed_at: Date | null;
+  /** 0156：消息进入终态的观察时刻；撤回/编辑不覆盖，旧行 NULL。 */
+  readonly settled_at: Date | null;
   readonly cancel_requested: boolean;
   /**
    * 0122：排队消息的插话意图。`true` = 用户要求把这条并入正在生成的那一轮，
@@ -1788,10 +1851,10 @@ export interface ModelCallRow {
    * 0153：这次外呼的用途。
    *
    * `PRIMARY` 是面向用户的生成（含多轮工具续轮）；`MEMORY_CAPTURE` / `MEMORY_COMPACT`
-   * 是记忆提取与压缩这两类辅助外呼——它们同样进账本与预算闸门，但不参与
-   * 「最近一次调用」的读数，也不采上下文分项（不是对话上下文）。
+   * / `TITLE` 是辅助外呼——它们同样进账本与预算闸门，但不参与「最近一次调用」的读数，
+   * 也不采上下文分项（不是对话上下文）。
    */
-  readonly purpose: 'PRIMARY' | 'MEMORY_CAPTURE' | 'MEMORY_COMPACT';
+  readonly purpose: 'PRIMARY' | 'MEMORY_CAPTURE' | 'MEMORY_COMPACT' | 'TITLE';
   /**
    * 0145：这次调用送进模型的上下文构成（分类 + 估算 token）。
    *

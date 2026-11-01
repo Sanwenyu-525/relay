@@ -88,7 +88,7 @@ describe("设置页模型端口状态", () => {
     expect(mounted.wrapper.text()).toContain("没有真实服务实例状态");
     await mounted.wrapper.get('[data-testid="settings-group-basic"]').trigger("click");
     expect(mounted.wrapper.text()).toContain("当前仅支持浅色主题");
-    expect(mounted.wrapper.get("#settings-appearance").attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="settings-appearance"]').text()).toContain("浅色");
     expect(mounted.wrapper.text()).toContain("不改变已保存的稍后处理日期");
     expect(mounted.wrapper.findAll("button").some((button) => /深色|主题切换|切换主题/.test(button.text()))).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -116,11 +116,14 @@ describe("设置页模型端口状态", () => {
     expect(states.text()).toContain("本机服务已连接");
     expect(states.text()).toContain("模型已配置");
     expect(states.text()).toContain("模型验证成功");
-    expect(states.text()).toContain("Worker 可执行");
     expect(states.text()).toContain("未配置");
     expect(states.text()).not.toContain("尚未验证");
-    expect(states.text()).toContain("Worker 可执行性未探测");
-    expect(states.text()).not.toContain("同一配置文件");
+    expect(states.text()).not.toContain("Worker 可执行");
+    // Worker 诊断属于工程事实，收在默认折叠的高级区，不与主状态同屏。
+    const advanced = mounted.wrapper.get('[data-testid="settings-model-advanced"]');
+    expect(advanced.attributes("open")).toBeUndefined();
+    expect(advanced.get('[data-testid="worker-diagnostic"]').text()).toContain("Worker 可执行性未探测");
+    expect(advanced.get('[data-testid="worker-diagnostic"]').text()).not.toContain("同一配置文件");
     expect(states.text()).toContain("连接验证通过");
     expect(states.text()).toContain("不等于真实任务执行成功");
   });
@@ -171,7 +174,8 @@ describe("设置页模型端口状态", () => {
     const detail = mounted.wrapper.get('[data-testid="verification-detail"]');
     expect(detail.text()).toContain("与当前配置一致");
     expect(detail.text()).toContain("真实任务执行成功");
-    expect(detail.text()).toContain("连接验证通过");
+    // 详情页的结论句与主状态一致：验证只回答连接可用，不是任务成功。
+    expect(detail.text()).toContain("连接验证");
     // 验证时间用本设备可读格式显示，原始 ISO 串只保留在 time.dateTime 属性里。
     expect(detail.text()).not.toContain("2026-09-28T10:00:00.000Z");
     expect(detail.text()).toContain("2026-09-28 18:00:00");
@@ -307,6 +311,23 @@ describe("设置页模型端口状态", () => {
     expect(mounted.wrapper.find('[data-testid="plan-execution"]').exists()).toBe(false);
   });
 
+  it("四个页签按用途组织，未访问的页签不挂载内容", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    expect(mounted.wrapper.findAll('[role="tab"]').map((tab) => tab.text()))
+      .toEqual(["通用设置", "AI 与模型", "权限与执行", "工作台"]);
+    expect(mounted.wrapper.find('[data-testid="settings-ai-scope"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="execution-permissions"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="settings-workbench-preferences"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="execution-permissions"]').text()).toContain("当前执行权限");
+    expect(mounted.wrapper.get('[data-testid="execution-permissions"]').text()).toContain("打开连接与权限");
+    expect(mounted.wrapper.get("#settings-panel-execution").findAll("select")).toHaveLength(0);
+    await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="settings-default-workbench"]').exists()).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("不再有本设备的「计划执行方式」偏好：推进由服务端负责", async () => {
     // 撤掉这个开关的理由不是「少一个设置」，而是它此前是**唯一的第二个推进 Owner**：
     // 选「需要人工确认」时前端必须自己发 applications，页面关掉就会把一条已授权的
@@ -411,9 +432,9 @@ describe("设置页模型端口状态", () => {
     expect(mounted.wrapper.text()).toContain("读取失败");
     expect(mounted.wrapper.find('[data-testid="model-port-status"]').exists()).toBe(false);
     healthy = true;
-    const retry = Array.from(mounted.wrapper.element!.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("重新读取"))!;
-    await new DomWrapper(retry).trigger("click");
+    // 指定页面级重读键：记忆、上下文与默认目录各有自己的重读入口，按文案找会点错对象。
+    await new DomWrapper(mounted.wrapper.element!.querySelector(
+      '[data-testid="model-port-retry"]') as HTMLButtonElement).trigger("click");
     await flush();
     expect(mounted.wrapper.get('[data-testid="model-port-status"]').exists()).toBe(true);
     // 只断言模型端口那一处错误已清除：整页还有默认目录与记忆设置各自的读取结果，

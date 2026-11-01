@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { LoaderCircle, Undo2, WandSparkles } from "lucide-react";
 import { useMenuDismiss } from "../lib/popoverMenu";
+import { usePathTooltip } from "../lib/pathTooltip";
 
 import { RelayApiError, RelayTransportError, type RelayApiClient } from "../api/relayClient";
 import "./ComposerDraftAssist.css";
@@ -112,6 +114,8 @@ export interface ComposerDraftAssist {
   readonly polishBusy: boolean;
   readonly polishApplied: boolean;
   readonly polishEnabled: boolean;
+  /** 不可润色的原因（空草稿 / 在途 / 无连接等）：禁用键的悬停提示据此说明下一步。 */
+  readonly polishBlockedReason: string | null;
   readonly failedOutline: string | null;
   readonly polishFailed: string | null;
   /** 撤销润色的后果提示 id：工具行按钮用 aria-describedby 指向它，读屏可获取。 */
@@ -180,6 +184,14 @@ export function useComposerDraftAssist({
   const polishFailed = polish !== null && polish.kind === "FAILED" && polish.version === version;
   const polishEnabled = client !== null && !disabled && !inflight && !polishBusy
     && value.trim() !== "" && codePointLength(value) <= COMPOSER_MAX_DRAFT_CODE_POINTS;
+  // 与 polishEnabled 同一份判据的短路顺序：先说「为什么现在不亮」，不把空草稿说成在途。
+  const polishBlockedReason = polishEnabled || polishApplied ? null
+    : polishBusy ? "正在润色，请稍候"
+      : client === null ? "连接服务后可润色"
+        : disabled ? "当前输入不可编辑"
+          : inflight ? "等待当前发送或生成结束"
+            : value.trim() === "" ? "输入内容后可润色"
+              : "草稿超过 4000 字，暂不润色";
 
   const eligible = client !== null && !disabled && !inflight && !composing && !polishApplied
     && suppressRef.current !== value && outlineEligible(value)
@@ -312,7 +324,7 @@ export function useComposerDraftAssist({
   return {
     recordKey,
     ready, showPanel, outlineUndo,
-    polishBusy, polishApplied, polishEnabled,
+    polishBusy, polishApplied, polishEnabled, polishBlockedReason,
     failedOutline: failedOutline === null ? null : failedOutline.message,
     polishFailed: polishFailed && polish !== null && polish.kind === "FAILED"
       ? polish.message : null,
@@ -323,19 +335,38 @@ export function useComposerDraftAssist({
   };
 }
 
-/** 工具行里的润色键：同一键位三态，不并列放两颗常驻按钮（原型 `#polishBtn`）。 */
+/** 工具行里的润色键：同一键位三态，不并列放两颗常驻按钮（原型 `#polishBtn`）。
+ *
+ * 2026-11-01 收为纯图标键：常驻「润色 / 润色中… / 撤销润色」会把工具行推宽，也会在
+ * 三态之间改变键宽。动作名改由 `aria-label` 与悬停提示承担，字形分别是魔法棒、
+ * 旋转环与撤销箭头；三态共用同一个 32×32 命中区，切换不移动、不换行。
+ *
+ * 提示挂在外层槽位而不是按钮上：禁用态（空草稿、在途发送、无连接）的按钮不派发
+ * 鼠标事件，只有槽位还收得到 hover；键盘聚焦时由 focus 冒泡走同一条提示。
+ */
 export function ComposerPolishButton({ assist }: { assist: ComposerDraftAssist }) {
-  const label = assist.polishApplied ? "撤销润色" : assist.polishBusy ? "润色中…" : "润色";
-  const title = assist.polishApplied
-    ? "直接恢复本次润色前的草稿与当时编号，不弹确认框、不调用模型"
-    : assist.polishBusy ? "正在润色，重复点击不会重复提交" : "润色当前草稿的表达";
-  return <button type="button" className="agent-chat-tool composer-draft-polish"
-    data-testid={assist.polishApplied ? "composer-draft-undo-polish" : "composer-draft-polish"}
-    data-busy={assist.polishBusy ? "true" : undefined}
-    disabled={assist.polishBusy || (!assist.polishEnabled && !assist.polishApplied)}
-    title={title} aria-label={title}
-    aria-describedby={assist.polishApplied ? assist.consequenceId : undefined}
-    onClick={assist.togglePolish}>{label}</button>;
+  const state = assist.polishBusy ? "busy" : assist.polishApplied ? "applied" : "idle";
+  const label = assist.polishBusy ? "正在润色" : assist.polishApplied ? "撤销润色" : "润色输入内容";
+  const hint = assist.polishBusy ? "正在润色，请稍候"
+    : assist.polishApplied ? "撤销润色"
+      : assist.polishBlockedReason ?? "润色输入内容";
+  const { tooltipHandlers, tooltipNode } = usePathTooltip(() => hint, "composer-draft-polish-tooltip");
+  return <span className="composer-draft-polish-slot" {...tooltipHandlers}>
+    <button type="button" className="agent-chat-tool composer-draft-polish" data-state={state}
+      data-testid={assist.polishApplied ? "composer-draft-undo-polish" : "composer-draft-polish"}
+      data-busy={assist.polishBusy ? "true" : undefined}
+      disabled={assist.polishBusy || (!assist.polishEnabled && !assist.polishApplied)}
+      aria-label={label}
+      aria-describedby={assist.polishApplied ? assist.consequenceId : undefined}
+      onClick={assist.togglePolish}>
+      {assist.polishBusy
+        ? <LoaderCircle className="composer-draft-polish-spinner" aria-hidden="true" focusable="false" />
+        : assist.polishApplied
+          ? <Undo2 aria-hidden="true" focusable="false" />
+          : <WandSparkles aria-hidden="true" focusable="false" />}
+    </button>
+    {tooltipNode}
+  </span>;
 }
 
 /** 输入卡上方的提示行与锚定浮层（原型 `assist-bar` + `assist-popover`）。 */

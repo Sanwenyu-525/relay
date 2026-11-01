@@ -321,7 +321,7 @@ describe("新会话档位继承的来源身份反例", () => {
     view.unmount();
   });
 
-  it("场景 F：创建响应丢失后按原命令重试——命令、来源、档位冻结，不建第二条会话", async () => {
+  it("场景 F：创建响应丢失后按原命令重试——命令、来源冻结，不建第二条会话", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => server.route(input, init)));
@@ -330,11 +330,7 @@ describe("新会话档位继承的来源身份反例", () => {
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
     await flush();
     expect(view.router.currentRoute.value.query.source_session).toBe(sessionA);
-    // 显式选 1024K（随建会话命令冻结），再把首条发出去——第一次创建「已落库但响应丢失」。
-    await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
+    // 2026-11-01 用户指令：欢迎页不提供档位预选；首条直接按来源继承建会话（A=512K）。
     server.failNextCreate = true;
     await sendFirst(view, "响应丢失后的重试");
     await flush();
@@ -356,12 +352,12 @@ describe("新会话档位继承的来源身份反例", () => {
     const [first, retry] = server.calls as [Record<string, unknown>, Record<string, unknown>];
     expect(retry.command_id, "command_id 不变").toBe(first.command_id);
     expect(retry.source_session_id, "冻结的来源身份不变（不读界面当前那条 C）").toBe(sessionA);
-    expect(retry.context_budget_tokens, "冻结的显式档位不变").toBe(1_048_576);
+    expect(retry.context_budget_tokens, "欢迎页不再传显式档位").toBeUndefined();
     expect(retry).toEqual(first);
     // 服务端按同一 command_id 幂等回放：没有建出第二条会话。
     expect(server.createdSessions, "不重复创建第二条会话").toHaveLength(1);
     const createdId = server.createdSessions[0]!;
-    expect(server.sessions.get(createdId)?.tier).toBe(1_048_576);
+    expect(server.sessions.get(createdId)?.tier, "按来源继承 A 的 512K").toBe(524_288);
     // 首条消息随后按原计划送达，且属于建出来的那条会话。
     expect(server.messages, "重试成功后首条消息送达").toEqual([createdId]);
     view.unmount();

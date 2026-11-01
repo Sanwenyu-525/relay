@@ -157,3 +157,16 @@ DISCUSS 请求没有把该协议落实为 Provider 的 response_format，单靠 
 - **无迁移**。阶段需要的四枚时间列均在既有 `model_calls` 上；本轮不新增列，也不伪造「领取时刻」。诊断把「提交 → 模型请求登记」明确标为含排队与上下文准备的合并区间，Worker 领取时刻标为未记录，前端首次绘制标为本机未观测，避免把消息总耗时当作模型推理耗时。
 
 回归：单元 `assist-generation-progress`（阶段派生与 DTO）、真实 PG/HTTP `assist.integration.test.ts` 的流式观测用例（首流/首文本/首预览/结算四枚时间落库、辅助外呼排除）、组件 `generationStage` 与 `assistStage`、真实 Chromium `assistStageVisibility`（阶段推进、诊断展开、窄窗、减少动效）；成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应行。Breaking Change: **No**——消息 DTO 新增可选只读字段，旧客户端忽略即可；不改命令、表、权限或结算。
+
+## 会话标题的后台生成接缝（2026-11-01）
+
+会话标题不是主回复的一部分，也不是一次工具调用；它是一次**有持久身份的辅助外呼**，接在回复结算之后、与主生成循环解耦：
+
+1. **入队**（`enqueueSessionTitleAfterTurn`）：助手回复以 `COMPLETED` 结算后，生成循环重读会话与刚结算的消息，只写一条 `assist_title_generations` 请求（`request_kind='AUTO'`）。它不调用模型、不改变消息或回复，也不进入主 Agent 的工具循环。只有 `title_source` 为 `PROVISIONAL`/`AI_GENERATED` 时才入队；已有正式标题后，只有用户消息出现明确换任务标记才再次入队。同一会话 10 分钟内最多一次 AUTO 请求。
+2. **领取与推进**（`runSessionTitleGenerationTick`）：常驻后台 tick 的 `SESSION_TITLE` 阶段按租约领取一个请求（`for update skip locked`、尝试上限 2 次、失败退避 5s），装配受限输入（首条有效用户消息、最近用户消息、关联任务/项目标题、刚结算的回复摘要；不读工具日志、文件正文、附件或凭据），按消息冻结的模型快照解析一次辅助外呼，或在没有真实模型配置时直接走规则降级。
+3. **落标题**（仓储 `applyTitleGeneration`）：模型输出必须先是严格 `{category, subject}` JSON，再由后端按固定枚举校验、拼接 `分类-任务名`；随后在事务内核对请求仍由本次领取持有、会话仍 ACTIVE、**标题与来源仍等于请求时冻结的那一份**，才写 `title`/`title_source`/`title_generated_at` 并推进 `revision`。任一条件失效即 `SKIPPED`，迟到的模型结果不能覆盖用户之后的手动改名。
+4. **失败与降级**：模型未配置、超时、返回非法 JSON/非法分类时，AUTO 用规则标题（`generator='RULES'`，来源仍 `PROVISIONAL`）；显式重新生成不拿规则标题去覆盖手动标题，如实 `FAILED` 并保留原值。模型错误不升级成主 Agent 错误，也不改变消息终态。
+5. **记账**：辅助调用按 `purpose='TITLE'` 进 `model_calls` 与预算闸门；按 0153 口径不采对话分项、不抢「最近一次调用」读数，也不计入本轮 PRIMARY 用量。
+6. **输入不可信**：会话文本、任务/项目标题与回复摘要都包在 `<untrusted_data>` 里；系统提示词要求只输出 JSON，数据中的任何指令都不能改变分类、格式或权限。模型看不到会话 ID、权限、工具日志与文件正文。
+
+回归：单元 `session-title`（分类、格式、模型信封、恶意结构）、真实 PG/HTTP `assist-session-title.integration.test`（入队/领取/落库、手动改名后迟到 SKIPPED、显式重新生成、降级、LEGACY 保护、删除级联）、组件 `sessionRowMenu` 与真实 Chromium `sessionTitleRegeneration`；规则归 [HTTP §10.132](../api/http-command-contract/part-08.md#10132-会话标题的来源与系统命名2026-11-01-源码实现迁移-0157) 与 [ADR-040](../decisions/ADR-040-session-title-ownership.md)。

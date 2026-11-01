@@ -167,7 +167,7 @@ function settleExtractionCall(result: AssistResult) {
  * 复用同身份默认端口并复核型号/配置/凭据，openrouter 用冻结配置与免费约束重建端口，
  * 记账预算取冻结快照（与 `assist-free-model-routing` 同一口径）。
  */
-async function resolveCaptureModel(message: AssistMessageRow, input: {
+export async function resolveFrozenAssistModel(message: AssistMessageRow, input: {
   readonly modelPort: AssistModelPort;
   readonly modelEnv?: NodeJS.ProcessEnv;
   readonly modelFetchDependencies?: ModelFetchDependencies;
@@ -246,7 +246,7 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   // 用量，预算与归档闸门在 `begin` 里生效。预算不足时这里直接收口，不产生无账本调用。
   let result: AssistResult;
   try {
-    const captureModel = await resolveCaptureModel(message, input);
+    const captureModel = await resolveFrozenAssistModel(message, input);
     result = (await recordModelInvocation<AssistResult>(db, {
       // 0153：辅助外呼——进账本与预算闸门，但不抢「最近一次调用」的读数，也不采对话分项。
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id,

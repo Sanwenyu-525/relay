@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { ModelCallRepository, type ModelCallOrigin,
@@ -71,8 +72,39 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
 export async function observeModelFirstStream(db: DbExecutor, callId: string): Promise<void> {
   try {
     await new ModelCallRepository(db).recordFirstStreamEvent(callId, new Date());
-  } catch {
-    // 只丢这一枚观测时间；调用结算、正文与预览仍走原路径。
+  } catch (error) {
+    // ENG-OBS-02：证据写入失败不能改判业务结算；只留可诊断记录，绝不再抛出。
+    try {
+      const call = await new ModelCallRepository(db).read(callId);
+      if (call !== undefined) {
+        await new ActivityRecordRepository(db).insertActivityRecord({
+          id: randomUUID(),
+          workspaceId: call.workspace_id,
+          actorKind: 'SYSTEM',
+          actorRef: 'model-call-evidence',
+          commandId: null,
+          projectId: null,
+          taskId: null,
+          runId: null,
+          eventType: 'MODEL_CALL_EVIDENCE_WRITE_FAILED',
+          factRefs: {
+            model_call_id: callId,
+            assist_message_id: call.assist_message_id,
+            step_attempt_id: call.step_attempt_id,
+            error_name: error instanceof Error ? error.name : 'UNKNOWN',
+            observed_at: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (diagnosticError) {
+      // 诊断写入也失败时只写服务器日志；调用结算、正文与预览仍走原路径。
+      console.error('MODEL_CALL_EVIDENCE_WRITE_FAILED', {
+        callId,
+        errorName: error instanceof Error ? error.name : 'UNKNOWN',
+        diagnosticErrorName: diagnosticError instanceof Error
+          ? diagnosticError.name : 'UNKNOWN',
+      });
+    }
   }
 }
 

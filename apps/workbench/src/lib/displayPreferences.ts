@@ -28,10 +28,11 @@ function parsePreferences(raw: string | null): DisplayPreferences {
     const value: unknown = JSON.parse(raw);
     if (value === null || typeof value !== "object") return defaults;
     const stored = value as Record<string, unknown>;
+    const workbench = stored.defaultWorkbench;
     if (stored.version !== 1 || !validTimeZone(stored.timeZone) ||
-      typeof stored.defaultWorkbench !== "string" ||
-      !["general", "thesis", "development"].includes(stored.defaultWorkbench)) return defaults;
-    return { timeZone: stored.timeZone, defaultWorkbench: stored.defaultWorkbench as RelayViewKind };
+      (workbench !== null && (typeof workbench !== "string" ||
+        !["general", "thesis", "development"].includes(workbench)))) return defaults;
+    return { timeZone: stored.timeZone, defaultWorkbench: workbench as RelayViewKind | null };
   } catch { return defaults; }
 }
 
@@ -49,9 +50,10 @@ function subscribe(listener: () => void): () => void {
 
 /** 本设备显示偏好的唯一写入入口；不保存项目、任务或执行状态。 */
 export function saveDisplayPreferences(preferences: { readonly timeZone: string;
-  readonly defaultWorkbench: RelayViewKind }): void {
+  readonly defaultWorkbench: RelayViewKind | null }): void {
   if (!validTimeZone(preferences.timeZone) ||
-    !["general", "thesis", "development"].includes(preferences.defaultWorkbench)) {
+    (preferences.defaultWorkbench !== null &&
+      !["general", "thesis", "development"].includes(preferences.defaultWorkbench))) {
     throw new Error("请选择有效的界面时区和默认工作台。");
   }
   window.localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY,

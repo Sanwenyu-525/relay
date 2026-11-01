@@ -1,6 +1,7 @@
 import type { DbExecutor } from '../infrastructure/database.js';
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import { AssistRepository } from '../assist/assist-repository.js';
+import { AssistTitleGenerationRepository } from '../assist/session-title-repository.js';
 import { AssistMemoryRepository } from '../assist/assist-memory-repository.js';
 import { AssistantProfileRepository } from '../assist/assistant-profile-repository.js';
 import { ConversationExecutionRepository } from '../assist/conversation-execution-repository.js';
@@ -70,6 +71,13 @@ export interface Repositories {
   readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
+  /**
+   * 0157：会话标题生成请求的独占写入口。
+   *
+   * 标题的事实归 Assist；这张表只保存「一次自动命名请求」的身份与领取状态，
+   * 模型输出必须经由它的 CAS 路径才能写 `assist_sessions.title`。
+   */
+  readonly titleGenerations: AssistTitleGenerationRepository;
   /**
    * AGENT_LIVE_TOKEN_USAGE：回复轮次的真实用量只在 `model_calls` 账本里。
    *
@@ -171,6 +179,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
+    titleGenerations: new AssistTitleGenerationRepository(db),
     modelCalls: new ModelCallRepository(db),
     assistMemory: new AssistMemoryRepository(db),
     assistantProfiles: new AssistantProfileRepository(db),

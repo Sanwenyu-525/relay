@@ -6,6 +6,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import type { JsonObject, JsonValue } from '../infrastructure/json.js';
 import { readRunMethodBinding } from '../skills/builtin-methods.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from './markdown-deliverable.js';
+import { readInternalTool } from './tool-catalog.js';
 import { renderComposerUserPrompt } from './prompts/composer-prompts.js';
 import { selectRuntimeSystemPrompt } from './prompts/index.js';
 import type { AssistModelPort, AssistContentPart, AssistRequest,
@@ -119,13 +120,19 @@ export class OpenAiCompatibleModelPort implements ModelPort, AssistModelPort, Co
       // apply_changeset 分只读 / 写能力。只读清单与写清单不能串用。
       new SystemMessage(selectRuntimeSystemPrompt({ kind: 'DRAFT', capability: {
         toolsEnabled: tools.length > 0,
-        canWrite: tools.some((spec) => spec.name === 'apply_changeset') } }).system),
+        canWrite: tools.some((spec) => spec.name === 'apply_changeset'),
+        canOperate: tools.some((spec) => {
+          const definition = readInternalTool(spec.name);
+          return definition?.capability === 'COMPUTER_INPUT' ||
+            definition?.capability === 'BROWSER_ACTION' ||
+            definition?.capability === 'BROWSER_COMMIT';
+        }) } }).system),
       new HumanMessage(renderDraftUserPrompt(request.manifest)),
       ...renderToolTurns(request.toolTurns ?? []),
     ];
     try {
       const response = await this.complete(messages, request.signal, false,
-        request.onTextDelta, request.tools, undefined, request.onToolArgumentsDelta);
+        request.onTextDelta, request.tools, request.onStreamEvent, request.onToolArgumentsDelta);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
       if (response.toolCalls !== undefined) {

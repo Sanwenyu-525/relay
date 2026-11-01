@@ -3,6 +3,18 @@ import type { RelayPackDefinition } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 
+/** 当前可用组合的摘要行：只回答「有哪些组合、由几项组成」，不铺协议和 hash。 */
+function PackSummaryRow({ pack }: { pack: RelayPackDefinition }) {
+  return <article className="pack-catalog-summary-row" data-testid={`pack-summary-${pack.id}-${pack.version}`}>
+    <div>
+      <strong>{pack.title}</strong>
+      <small>{pack.id} v{pack.version} · 成员 {pack.members.length} 项</small>
+    </div>
+    <span className="status-chip status-chip--success">可用</span>
+  </article>;
+}
+
+/** 高级详情：协议、摘要与成员 hash，默认折叠在协议摘要区。 */
 function PackRow({ pack }: { pack: RelayPackDefinition }) {
   return <article className="assist-proposal pack-catalog-pack">
     <h3>{pack.title}</h3>
@@ -54,21 +66,25 @@ export default function PackCatalogPanel() {
   const historical = packs?.filter((pack) => pack.availability !== "AVAILABLE") ?? [];
   return <section className="surface-panel pack-catalog" data-testid="pack-catalog">
     <h2>内置 Pack（只读）</h2>
-    <p className="helper-text">此清单来自当前工作空间的固定注册表。AVAILABLE 表示当前组合，HISTORICAL_ONLY 仅供查阅旧定义；无额外 Connector 能力要求不表示模型 Provider 已配置。浏览或选择项目类型不会授权工具、启用规则、应用配置或启动 Run。</p>
+    <p className="helper-text">清单来自当前工作空间的固定注册表。浏览或选择不会授权工具、启用规则、应用配置或启动 Run。</p>
     {packs === null && !error && <p role="status">正在读取内置组合…</p>}
-    {error && <p className="action-error" role="alert">Pack 清单暂不可读：{error}。<button type="button" className="text-link" onClick={() => void load()}>重读</button></p>}
+    {error && <p className="action-error" role="alert">Pack 清单暂不可读：{error}。
+      <button type="button" className="text-button" onClick={() => void load()}>重读</button></p>}
     {packs?.length === 0 && <p className="helper-text">当前没有已注册的内置 Pack。</p>}
-    {packs && packs.length > 0 && <p className="helper-text pack-catalog-summary" data-testid="pack-catalog-summary">
-      当前可用组合：{available.map((pack) => `${pack.id} v${pack.version}`).join("、") || "无"}。
-      历史版本 {historical.length} 个已折叠；组合详情、协议与成员摘要可按需展开。
-    </p>}
-    {available.length > 0 && <details className="pack-catalog-available" data-testid="pack-catalog-available">
-      <summary>当前组合详情（{available.length} 个，含成员与摘要）</summary>
-      {available.map((pack) => <PackRow key={`${pack.id}@${pack.version}`} pack={pack} />)}
-    </details>}
-    {historical.length > 0 && <details className="pack-catalog-historical" data-testid="pack-catalog-historical">
-      <summary>历史版本（仅供查阅，{historical.length} 个）</summary>
-      {historical.map((pack) => <PackRow key={`${pack.id}@${pack.version}`} pack={pack} />)}
+    {available.length > 0 && <div className="pack-catalog-current" data-testid="pack-catalog-current">
+      {available.map((pack) => <PackSummaryRow key={`${pack.id}@${pack.version}`} pack={pack} />)}
+    </div>}
+    {packs && packs.length > 0 && <details className="settings-diagnostics pack-catalog-advanced"
+      data-testid="pack-catalog-advanced">
+      <summary>高级详情：协议摘要与成员 hash（{available.length + historical.length} 个组合）</summary>
+      {available.length > 0 && <div className="pack-catalog-group">
+        <h3>当前可用组合</h3>
+        {available.map((pack) => <PackRow key={`${pack.id}@${pack.version}`} pack={pack} />)}
+      </div>}
+      {historical.length > 0 && <div className="pack-catalog-group">
+        <h3>历史版本（仅供查阅）</h3>
+        {historical.map((pack) => <PackRow key={`${pack.id}@${pack.version}`} pack={pack} />)}
+      </div>}
     </details>}
   </section>;
 }

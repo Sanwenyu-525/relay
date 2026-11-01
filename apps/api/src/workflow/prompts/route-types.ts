@@ -32,6 +32,12 @@ export type RuntimeDraftCapabilityInput = {
   readonly toolsEnabled: boolean;
   /** 工具清单是否含 `apply_changeset`（只读清单与写清单不能串用）。 */
   readonly canWrite: boolean;
+  /**
+   * 工具清单是否包含桌面/浏览器**输入类**动作（COMPUTER_INPUT / BROWSER_ACTION /
+   * BROWSER_COMMIT）。这类工具会真实改变本机或页面状态，不能与只读工具共用同一句
+   * 「工具只读」的模板。
+   */
+  readonly canOperate?: boolean;
 };
 
 /**
@@ -148,6 +154,7 @@ export type RuntimeRouteId =
   | 'INTERPRETATION_STATE_MAINTENANCE'
   | 'DRAFT_NO_TOOLS'
   | 'DRAFT_READ_ONLY_TOOLS'
+  | 'DRAFT_OPERATION_TOOLS'
   | 'DRAFT_WRITE_TOOLS'
   | 'SEMANTIC_VERDICT'
   | 'COMPOSER_OUTLINE'
@@ -258,6 +265,10 @@ export const RUNTIME_ROUTES: Readonly<Record<RuntimeRouteId, RuntimeRouteDescrip
     templateVersion: '1.0.1', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/run-prompts.ts',
     summary: 'DRAFT 只读工具集：声明工具只读，不修改任何文件' },
+  DRAFT_OPERATION_TOOLS: { routeId: 'DRAFT_OPERATION_TOOLS', group: 'RUN',
+    templateVersion: '1.0.0', coreVersion: CORE,
+    templateSource: 'src/workflow/prompts/run-prompts.ts',
+    summary: 'DRAFT 桌面/浏览器操作工具集：工具会真实改变本机或页面状态，按观察—操作—再观察执行' },
   DRAFT_WRITE_TOOLS: { routeId: 'DRAFT_WRITE_TOOLS', group: 'RUN',
     templateVersion: '1.0.2', coreVersion: CORE,
     templateSource: 'src/workflow/prompts/run-prompts.ts',
@@ -303,9 +314,10 @@ export class UnknownRuntimePromptRouteError extends Error {
   }
 }
 
-/** DRAFT 能力档位 → 路由标识；穷尽三个合法值，未知值拒绝。 */
+/** DRAFT 能力档位 → 路由标识；写工具优先，其次操作类工具，最后只读；未知值拒绝。 */
 export function draftRouteIdFor(capability: RuntimeDraftCapabilityInput): RuntimeRouteId {
   if (!capability.toolsEnabled) return 'DRAFT_NO_TOOLS';
   if (capability.canWrite) return 'DRAFT_WRITE_TOOLS';
+  if (capability.canOperate === true) return 'DRAFT_OPERATION_TOOLS';
   return 'DRAFT_READ_ONLY_TOOLS';
 }

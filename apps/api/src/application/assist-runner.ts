@@ -33,7 +33,7 @@ import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
   recordConversationExecutionCandidate, resolveMachineAttribution,
   mainLoopEnvelopeRepairInstruction, mainLoopMachineIntentFailureText }
   from './conversation-execution.js';
-import { findKnownPluginMentions } from './plugin-mentions.js';
+import { findKnownPluginMentions, isMachineCapabilityQuestion } from './plugin-mentions.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
   recordStateMaintenanceCandidate } from './conversation-state.js';
 import { runLearningRounds } from './learning-round.js';
@@ -61,6 +61,7 @@ import { lockWritableProjectInWorkspace } from './guards.js';
 import { readAdmission } from './maintenance-admission.js';
 import { recallConfirmedMemoryRefs } from './memory-recall.js';
 import { captureMemoriesForTurn } from './memory-auto-capture.js';
+import { enqueueSessionTitleAfterTurn } from './session-title-generation.js';
 import { AssistMemoryUnavailable, historicalReplyAvailable, readWorkingMemory } from './assist-memory.js';
 import { prepareAutomaticMemory, runAssistMemoryTick } from './assist-memory-runner.js';
 import { AssistHistorySourceUnavailable, loadAssistSourceContent, recheckAssistSources } from './assist-source-content.js';
@@ -280,8 +281,14 @@ export async function runAssistGenerationTick(db: DbExecutor,
       // 2026-10-20 第二轮：把「缺哪个目录/连接/档位」作为服务端事实交给模型。
       // 没有这一步时，词表为空的那一轮只剩下旧模板，模型会自己编一个原因（系统没有
       // 访问能力）或把缺口说成「请补充任务目标与验收标准」。事实块不授予任何能力。
+      // 能力事实块要读的是**用户原消息**，不是正在生成的助手消息行。未读到时按没有
+      // 插件选择处理：不能根据助手自己的空正文推断用户选了哪个插件。
+      const requestMessage = message.seq > 0n ? await createRepositories(db).assist
+        .readMessageAtSeq(session.id, message.seq - 1n) : undefined;
+      const requestContent = requestMessage?.role === 'USER'
+        ? requestMessage.content ?? undefined : undefined;
       const capabilityNotice = await describeSessionCapabilities(db, session,
-        { tools: availableTools, allowWrite, requestContent: message.content ?? undefined });
+        { tools: availableTools, allowWrite, requestContent });
       // 官方 GitHub Skill（§10）按需激活：本轮词表里真实出现 github_ 工具时，才把
       // 冻结的摘要与边界块附在能力事实块之后；无工具、被禁用或内容校验失败都不注入。
       const officialSkillNotice = officialGithubSkillGuidanceForTools(availableTools);
@@ -593,6 +600,11 @@ export async function runAssistGenerationTick(db: DbExecutor,
               : { modelFetchDependencies: options.modelFetchDependencies }),
             ...(options.signal === undefined ? {} : { signal: options.signal }) });
         } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
+        // 0157：只写一条持久请求，不在这里调用模型；真正的生成由常驻后台 tick 推进。
+        try {
+          await enqueueSessionTitleAfterTurn(db, { sessionId: session.id,
+            assistantMessageId: message.id });
+        } catch { /* 标题生成同样是附带收益，失败不改变回复与消息终态。 */ }
       }
       return { messageId: message.id, sessionId: session.id,
         status: settled ? cancelled ? 'CANCELLED' : 'COMPLETED' : 'DISCARDED',
@@ -1175,7 +1187,10 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     let finalContent = outcome.content;
     let finalUsage = outcome.usage;
     const finalProviderRequestIds = [...outcome.providerRequestIds];
-    const selectedPlugins = findKnownPluginMentions(message.content).filter(
+    // 用户原消息是 `turns` 里的最后一条 user 轮，不是正在生成的助手消息行。
+    const originalUserContent = [...memoryInput.turns].reverse()
+      .find((turn) => turn.role === 'user')?.content ?? '';
+    const selectedPlugins = findKnownPluginMentions(originalUserContent).filter(
       (mention) => mention.key === 'computer' || mention.key === 'browser');
     const selectedPluginLabels = [...new Set(selectedPlugins.map((mention) => mention.label))];
     const explicitPluginIntent = selectedPlugins.length > 0;
@@ -1185,11 +1200,11 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
      *
      * 真实账本里 `@电脑操控 打开记事本` 的整段回复是模型的分析过程：没有 JSON 信封，
      * 于是没有执行请求，界面却把它当成一次普通讨论。修复轮只在这三种条件同时成立时
-     * 发生：主流程 CHAT、这位模型这一轮**没有调用任何工具**、且本工作区确实登记了
+     * 发生：主流程 CHAT、这位模型这一轮**没有有副作用的工具调用**、且本工作区确实登记了
      * 机器插件或用户明确选了插件。它不声明工具，不会重复任何副作用；修复结果仍走
      * `readMainLoopOutcome()` 与既有候选校验，不因为修复过就放宽。
      */
-    if (context.chatMode === 'CHAT' && decided.kind === 'REPLY' && outcome.toolCalls === 0 &&
+    if (context.chatMode === 'CHAT' && decided.kind === 'REPLY' && outcome.effectfulToolCalls === 0 &&
         (context.machinePluginConfigured || explicitPluginIntent) &&
         !controller.signal.aborted) {
       try {
@@ -1198,7 +1213,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
           system: context.system,
           turns: [...memoryInput.turns,
             { role: 'assistant', content: outcome.content },
-            { role: 'user', content: mainLoopEnvelopeRepairInstruction(message.content) }],
+            { role: 'user', content: mainLoopEnvelopeRepairInstruction(originalUserContent) }],
           tools: [],
           responseFormat: 'json_object',
           signal: controller.signal,
@@ -1221,8 +1236,19 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     }
     // 明确的插件操作请求在修复后仍没有可委托候选：不能把它静默结算成普通讨论，也不能
     // 把模型的分析过程当作用户可见的成功回答。给出服务端事实：没有登记、没有执行。
-    if (decided.kind === 'REPLY' && explicitPluginIntent) {
+    if (decided.kind === 'REPLY' && explicitPluginIntent && outcome.toolCalls === 0) {
       machineIntentFailure = mainLoopMachineIntentFailureText(selectedPluginLabels);
+    }
+    // 能力询问的保守降级（2026-11-01 COMPUTER-PLUGIN-E2E）：真实 Provider 会把
+    // 「@电脑操控 能不能打开记事本？」偶尔当成命令式请求并生成候选。自动委托一旦发生
+    // 就会开始在用户桌面输入，因此这里把这种候选降为澄清：不登记执行请求、不自动委托。
+    // 它只降级、不伪造 PREPARE；误判的代价是用户再说一句「现在执行」。
+    if (decided.kind === 'PREPARE' && decided.candidate.interaction !== undefined &&
+        isMachineCapabilityQuestion(originalUserContent)) {
+      decided = { kind: 'CLARIFY',
+        reply: '这条消息看起来是在询问电脑操控能否完成该操作。当前没有登记执行请求，'
+          + '也没有执行任何操作；如果需要我实际执行，请回复「现在执行」。',
+        questions: [`要我现在执行「${decided.candidate.title}」吗？`] };
     }
     const sourceMessageId = await previousUserMessageId(db, session, message);
     /*
@@ -1354,6 +1380,11 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
             : { modelFetchDependencies: options.modelFetchDependencies }),
           ...(options.signal === undefined ? {} : { signal: options.signal }) });
       } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
+      // 0157：标题请求只入队，不在主生成路径上外呼模型。
+      try {
+        await enqueueSessionTitleAfterTurn(db, { sessionId: session.id,
+          assistantMessageId: message.id });
+      } catch { /* 标题生成同样是附带收益，失败不改变本轮结果。 */ }
     }
     return { messageId: message.id, sessionId: session.id,
       status: settled ? 'COMPLETED' : 'DISCARDED', errorCode: null, proposalIds: [] };

@@ -56,6 +56,12 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
     }
   }, [client]);
 
+  /** 换工作空间时先清掉旧投影与在途命令，旧修订与旧开关不落进新范围。 */
+  useEffect(() => {
+    setSettings(null); setDraft(null); setNotice(null); setConflict(null);
+    setPending(null); setError(null);
+  }, [client]);
+
   useEffect(() => { void read(); }, [read]);
 
   const dirty = settings !== null && draft !== null &&
@@ -132,7 +138,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
 
   return <section className="surface-panel settings-card" data-testid="memory-settings">
     <h2>长期与短期记忆</h2>
-    <p className="helper-text">这两项按工作空间生效，初始状态读取服务端；改动会立即影响后续对话，不追溯已生成的回复。</p>
+    <p className="helper-text">这几项按工作空间生效；改动影响后续对话，不追溯已生成的回复。</p>
 
     {loading && settings === null && <p role="status" data-testid="memory-settings-loading">正在读取记忆设置…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="memory-settings-error">
@@ -171,11 +177,9 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
             }} />
           <span>
             <strong>自动记住有价值的约定</strong>
-            <span className="helper-text">每轮回复结算后由系统判断有没有值得沉淀的内容——决定、约定、偏好与事实性结论，
-              一次最多 3 条，直接写入长期记忆并参与后续召回；每会话每天最多 5 条。没有值得记的就什么都不写。
-              是否生成由系统判断，不逐条问你；你能做的是关掉它，或事后停用某一条。
-              它记的是模型判断，不是你的确认——在「资料 → 记忆」里标为「自动记住」，
-              并标明哪一条是「用户原话」、哪一条只是「模型观察」；关闭后不再新增，已有条目仍可召回。</span>
+            <span className="helper-text">每轮回复结算后由系统判断是否沉淀决定、约定、偏好或事实结论，一次最多 3 条；
+              它记的是模型判断，不是你的确认，来源会标为「自动记住」并区分用户原话与模型观察。
+              关闭后不再新增，已有条目仍可召回。</span>
           </span>
         </label>
       </div>

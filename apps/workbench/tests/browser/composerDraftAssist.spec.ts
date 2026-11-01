@@ -8,7 +8,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
-const origin = "http://127.0.0.1:4173";
+// 与 playwright.config.ts 的 RELAY_E2E_PORT 同源：4173 被别的预览服务占用时，
+// CORS 头必须跟着实际端口走，否则浏览器会把伪造响应拦在跨域检查上。
+const port = process.env.RELAY_E2E_PORT ?? "4173";
+const origin = `http://127.0.0.1:${port}`;
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 
 const DRAFT = "给登录页加个记住密码，密码输错了要提示原因，还有登录按钮现在太小了改大一点，先不要做短信登录";
@@ -147,8 +150,33 @@ test.describe("输入框自动分点与手动润色", () => {
     await page.getByTestId("composer-draft-adopt").click();
     await expect(draft).toHaveValue(OUTLINE_TEXT);
 
-    await page.getByTestId("composer-draft-polish").click();
-    await expect(page.getByTestId("composer-draft-undo-polish")).toBeVisible();
+    // 纯图标键的几何：32×32 命中区、16px 图标、无常驻文字；动作名只在提示与 aria-label 里。
+    const polish = page.getByTestId("composer-draft-polish");
+    await expect(polish).toHaveText("");
+    await expect(polish).toHaveAttribute("aria-label", "润色输入内容");
+    const keyBox = (await polish.boundingBox())!;
+    expect(keyBox.width).toBeCloseTo(32, 0);
+    expect(keyBox.height).toBeCloseTo(32, 0);
+    const iconBox = (await polish.locator("svg").boundingBox())!;
+    expect(iconBox.width).toBeCloseTo(16, 0);
+    expect(iconBox.height).toBeCloseTo(16, 0);
+    await polish.hover();
+    await expect(page.getByTestId("composer-draft-polish-tooltip")).toHaveText("润色输入内容");
+    // 键盘聚焦走同一条提示，不靠原生 title。
+    await polish.focus();
+    await expect(page.getByTestId("composer-draft-polish-tooltip")).toHaveText("润色输入内容");
+
+    // 让润色响应停留一小段时间，核对在途态：同一键位换旋转环、仍 disabled、尺寸不变。
+    log.holdMs = 800;
+    await polish.click();
+    await expect(polish).toHaveAttribute("aria-label", "正在润色");
+    await expect(polish).toBeDisabled();
+    await expect(polish.locator(".composer-draft-polish-spinner")).toHaveCount(1);
+    expect((await polish.boundingBox())!.width).toBeCloseTo(keyBox.width, 0);
+    await expect(page.getByTestId("composer-draft-undo-polish")).toBeVisible({ timeout: 5000 });
+    const undo = page.getByTestId("composer-draft-undo-polish");
+    await expect(undo).toHaveText("");
+    await expect(undo).toHaveAttribute("aria-label", "撤销润色");
     await expect(draft).toHaveValue(POLISHED);
     // 开始润色结束了分点撤销入口。
     await expect(page.getByTestId("composer-draft-undo-outline")).toHaveCount(0);
@@ -159,11 +187,15 @@ test.describe("输入框自动分点与手动润色", () => {
     const note = page.getByTestId("composer-draft-polish-note");
     await expect(note).toBeVisible();
     await expect(note).toContainText("撤销将恢复润色前原话");
-    const undo = page.getByTestId("composer-draft-undo-polish");
     const describedBy = await undo.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(await page.locator(`#${describedBy}`).textContent())
       .toContain("撤销将恢复润色前原话");
+    // 已润色态的悬停提示说明这一键现在的动作。先把指针移开：键位没动，
+    // 鼠标仍停在原地时不会再触发 mouseenter，提示会停留在切换前的文案。
+    await page.mouse.move(0, 0);
+    await undo.hover();
+    await expect(page.getByTestId("composer-draft-polish-tooltip")).toHaveText("撤销润色");
     const outlineCalls = log.calls.filter((call) => call.operation === "OUTLINE").length;
     await page.waitForTimeout(SETTLE_MS + 400);
     // 润色成功后的编辑不触发自动分点。

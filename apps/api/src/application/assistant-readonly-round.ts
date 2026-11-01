@@ -367,7 +367,14 @@ export type AssistantReadonlyOutcome =
        * 主流程的「信封修复」只能在没有执行过任何工具时触发：工具已产生回执说明这一轮
        * 已经做过真实动作，拿一次修复调用再生成执行候选可能重复同一副作用。
        */
-      readonly toolCalls: number }
+      readonly toolCalls: number;
+      /**
+       * 其中有副作用的工具调用次数（FILE_WRITE / CLI_RUN / 机器输入等）。
+       *
+       * 只读工具的回执不构成副作用，修复轮可以在它们之后安全重问协议；写工具的回执
+       * 则意味着本轮已经改过外部状态，不能再生成一个可能重复同一改动的候选。
+       */
+      readonly effectfulToolCalls: number }
   | { readonly kind: 'CANCELLED'; readonly providerRequestId: string | null;
       readonly usage: ModelUsage; readonly providerRequestIds: readonly string[] }
   | { readonly kind: 'FAILED'; readonly errorCode: string;
@@ -565,6 +572,8 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
   const providerRequestIds: string[] = [];
   let usage: ModelUsage = EMPTY_USAGE;
   let usedCalls = 0;
+  /** 其中有副作用的调用数；只用于决定修复轮是否可以安全重问协议。 */
+  let effectfulCalls = 0;
   /** 本次生成里 `todo_write` 的独立额度用量（不占读取额度，见 `MAX_TODO_SETTLEMENT_CALLS`）。 */
   let settlementCalls = 0;
   /** 上一轮正文为空：本请求强制收尾，只给一次机会（发出后即消费）。 */
@@ -739,10 +748,11 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         if (latest.ids.some((id) => !supplementIds.includes(id))) continue;
       }
       return { kind: 'CONTENT', content: response.content, usage, providerRequestIds,
-        rounds: round, toolCalls: usedCalls };
+        rounds: round, toolCalls: usedCalls, effectfulToolCalls: effectfulCalls };
     }
 
     const results: ModelToolTurnResult[] = [];
+    effectfulCalls += response.calls.filter((call) => isEffectfulToolCall(call)).length;
     const steersBefore = steers.splice(0);
     let interrupted = false;
     // SESSION_SUBAGENT_FANOUT: only independent read-only delegations may overlap.
@@ -1160,7 +1170,9 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
   }
   const content = projectToolResult(definition.actionType, dispatched.result_ref);
   const digest = createHash('sha256').update(content, 'utf8').digest('hex');
-  if (dispatched.status === 'SUCCEEDED') {
+  // ENG-OBS-02：Gateway 已明确返回 FAILED（文件过大/二进制/目标被替换等）是**已知失败**，
+  // 与 UNKNOWN 不同；账本必须落 SETTLED + 失败结果摘要，模型与界面都能看到原因。
+  if (dispatched.status === 'SUCCEEDED' || dispatched.status === 'FAILED') {
     await repository.settle(row.id, digest);
   } else {
     await repository.markUnknown(row.id);

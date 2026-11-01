@@ -11,7 +11,10 @@ const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+// 与 playwright.config.ts 的 RELAY_E2E_PORT 同源：4173 被别的预览服务占用时，
+// CORS 头必须跟着实际端口走，否则浏览器会把伪造响应拦在跨域检查上。
+const port = process.env.RELAY_E2E_PORT ?? "4173";
+const origin = `http://127.0.0.1:${port}`;
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -37,7 +40,28 @@ function row(id: string, seq: number, role: "USER" | "ASSISTANT", content: strin
       cache_creation_tokens: null } };
 }
 
-async function installRoutes(page: Page, withCache: boolean): Promise<void> {
+/**
+ * 会话用量投影：两次测量只有 cache_read_tokens 一项不同。
+ * 命中率现在从 `context-usage.last_call` 读取（不是从消息行自行推导），
+ * 所以夹具必须给出这条真实读数，否则两次都会退化成「尚无模型调用」。
+ */
+function contextUsage(withCache: boolean): unknown {
+  return {
+    session_id: sessionId,
+    budget: { tokens: 262_144, revision: "0" },
+    next_call: null,
+    last_call: {
+      source: "MODEL_CALL", call_id: "call-usage", message_id: "x-2",
+      provider: "fake", model: "fake-model", status: "COMPLETED",
+      input_tokens: 4710, output_tokens: 47,
+      cache_read_tokens: withCache ? 4200 : null,
+      cache_creation_tokens: null,
+      reserved_tokens: 100_000, settled_at: "2026-10-24T20:06:00Z", breakdown: null
+    }
+  };
+}
+
+async function installRoutes(page: Page, withCache: boolean, modelName: string | null = null): Promise<void> {
   const messages = [
     row("u-1", 1, "USER", "帮我把这个目录的说明读一遍。", null),
     row("x-1", 2, "ASSISTANT", "已经读完目录说明，结构与分工如下：文档、测试与运行脚本各自成块。", null),
@@ -51,8 +75,9 @@ async function installRoutes(page: Page, withCache: boolean): Promise<void> {
     if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
     const path = new URL(request.url()).pathname;
     if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
+    // 长模型名用来核对：缓存读数出现时，先由模型 chip 的省略号让位，不把发送键挤出卡外。
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "fake",
-      configured: false, model: null, base_url: null, max_call_tokens: null });
+      configured: modelName !== null, model: modelName, base_url: null, max_call_tokens: null });
     if (path === `${prefix}/model-port/verification`) return fulfillJson(route, {
       current_config_fingerprint: null, last: null, matches_current_config: false,
       worker_startup_validation: "NOT_CONFIGURED" });
@@ -62,6 +87,9 @@ async function installRoutes(page: Page, withCache: boolean): Promise<void> {
     if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return fulfillJson(route, { goal: null, rounds: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/plans`) return fulfillJson(route, { latest: null, versions: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/model-selection`) return fulfillJson(route, { model: null, revision: "0" });
+    if (path === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
+      return fulfillJson(route, contextUsage(withCache));
+    }
     if (path === `${prefix}/assist-proposals`) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     if (path === `${prefix}/chat-commands`) return fulfillJson(route, { items: [] });
@@ -81,10 +109,11 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-async function measure(page: Page, width: number, height: number, withCache: boolean): Promise<{
+async function measure(page: Page, width: number, height: number, withCache: boolean,
+  modelName: string | null = null): Promise<{
   composer: number; actions: number; hitVisible: boolean }> {
   await page.setViewportSize({ width, height });
-  await installRoutes(page, withCache);
+  await installRoutes(page, withCache, modelName);
   await page.goto(`/agent?session=${sessionId}`);
   await connect(page);
   await expect(page.getByTestId("assist-draft")).toBeVisible();
@@ -100,14 +129,53 @@ async function measure(page: Page, width: number, height: number, withCache: boo
 }
 
 // 1162×782 是 DEV-0110 报障时的真实桌面窗口尺寸（禅道那轮的现场），必须与 1280/1600 同判据跑。
-for (const [width, height] of [[1162, 782], [1280, 800], [1600, 800]] as const) {
+// 860×782 是侧栏展开后中栏的实际宽度：这里工具行已经放满，缓存读数按容器宽度收起
+// （信息仍可从上下文圆环详情里读到），因此断言的是「不出现也不增高」。
+for (const [width, height] of [[860, 782], [1162, 782], [1280, 800], [1600, 800]] as const) {
+  // 工具行容器 600px 以下收起缓存读数（见 AssistView.css 的 @container composer-actions）。
+  const cacheVisible = width >= 1000;
   test(`命中率出现不改变输入卡与底栏高度（${width}×${height}，DEV-0110）`, async ({ page }) => {
     const without = await measure(page, width, height, false);
     expect(without.hitVisible).toBe(false);
     const withHit = await measure(page, width, height, true);
-    expect(withHit.hitVisible).toBe(true);
-    // 高度逐帧一致：命中率文本出现前后，输入卡与底栏都不换行、不增高。
+    expect(withHit.hitVisible).toBe(cacheVisible);
+    // 高度逐帧一致：缓存读数出现（或按窄栏规则收起）前后，输入卡与底栏都不换行、不增高。
     expect(Math.abs(withHit.composer - without.composer)).toBeLessThan(0.5);
     expect(Math.abs(withHit.actions - without.actions)).toBeLessThan(0.5);
+  });
+}
+
+// 长模型名与缓存读数同时在场：让位的是模型 chip 的省略号，不是发送键或缓存指示器。
+const LONG_MODEL = "anthropic/claude-sonnet-4-5-20250929-extended-context-preview";
+for (const [width, height] of [[860, 782], [1162, 782], [1280, 800]] as const) {
+  const cacheVisible = width >= 1000;
+  test(`长模型名不挤走发送键，缓存指标保持单行（${width}×${height}）`, async ({ page }) => {
+    const measured = await measure(page, width, height, true, LONG_MODEL);
+    expect(measured.hitVisible).toBe(cacheVisible);
+    const boxes = await page.evaluate(() => {
+      const rect = (selector: string) => {
+        const box = document.querySelector(selector)!.getBoundingClientRect();
+        return { left: box.left, right: box.right, top: box.top,
+          height: box.height, width: box.width };
+      };
+      return {
+        composer: rect(".agent-chat-composer"),
+        send: rect("[data-testid='assist-send']"),
+        hit: document.querySelector("[data-testid='assist-cache-hit']") === null
+          ? null : rect("[data-testid='assist-cache-hit']"),
+        meter: rect("[data-testid='assist-context-meter']")
+      };
+    });
+    // 发送键仍在输入卡内右缘之内（不被长模型名顶出卡外）。
+    expect(boxes.send.right).toBeLessThanOrEqual(boxes.composer.right + 0.5);
+    expect(boxes.send.left).toBeGreaterThanOrEqual(boxes.composer.left - 0.5);
+    if (cacheVisible && boxes.hit !== null) {
+      // 缓存指标与上下文圆环同一中线、单行：缓存不是一段会被折行的文字。
+      expect(Math.abs((boxes.hit.top + boxes.hit.height / 2) - (boxes.meter.top + boxes.meter.height / 2))
+        ).toBeLessThan(1.5);
+      expect(boxes.hit.height).toBeLessThan(20);
+      // 紧凑宽度：图标 12px + 4px 间距 + 数值，远小于旧的「缓存命中 57%」整段文字。
+      expect(boxes.hit.width).toBeLessThan(60);
+    }
   });
 }

@@ -53,3 +53,14 @@ it("file_changes 形状非法时显式报错，不静默丢路径", () => {
   expect(() => conversationExecutionSummaryFrom({ ...baseRequest,
     candidate: { file_changes: "a.txt" } })).toThrow(/响应格式无效/u);
 });
+
+it("候选的操作交互类型被读出；缺省与旧服务端按文件执行处理", () => {
+  expect(conversationExecutionSummaryFrom({ ...baseRequest,
+    candidate: { title: "打开记事本", interaction: "COMPUTER" } }).interaction).toBe("COMPUTER");
+  expect(conversationExecutionSummaryFrom({ ...baseRequest,
+    candidate: { title: "打开页面", interaction: "BROWSER" } }).interaction).toBe("BROWSER");
+  expect(conversationExecutionSummaryFrom({ ...baseRequest,
+    candidate: { title: "改文件" } }).interaction).toBeNull();
+  expect(() => conversationExecutionSummaryFrom({ ...baseRequest,
+    candidate: { title: "非法", interaction: "DESKTOP" } })).toThrow(/无法识别/u);
+});

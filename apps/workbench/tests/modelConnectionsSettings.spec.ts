@@ -209,6 +209,24 @@ describe("模型连接登记卡片", () => {
     expect(document.body.textContent ?? "").not.toContain("synthetic-new-key-abcdef");
   });
 
+  it("换工作区后清空旧连接，不把旧列表与默认标记带进新范围", async () => {
+    const first = stubClient({ items: [connection({ name: "旧连接" })] });
+    const second = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client: first.client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="model-connections"]').text()).toContain("旧连接");
+
+    await mounted.rerender(createElement(ModelConnectionsCard, { client: second.client }));
+    await flush();
+    // 已展开状态下换范围：清空旧列表并只重读新范围的一份事实。
+    expect(second.calls.list).toBe(1);
+    expect(mounted.wrapper.get('[data-testid="model-connections"]').text()).not.toContain("旧连接");
+    expect(mounted.wrapper.get('[data-testid="model-connections-empty"]').text())
+      .toContain("还没有登记任何连接");
+  });
+
   it("读取失败显示错误但页面不崩，可重试", async () => {
     const { client, calls } = stubClient({ failList: true });
     const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));

@@ -100,7 +100,8 @@ export function selectRuntimePrompt(route: RuntimePromptRoute): RuntimePromptSel
     case 'DRAFT':
       return systemSelection(draftRouteIdFor(route.capability),
         route.capability.toolsEnabled
-          ? runPrompts.draftToolSystemPrompt(route.capability.canWrite)
+          ? runPrompts.draftToolSystemPrompt(route.capability.canWrite,
+            route.capability.canOperate === true)
           : runPrompts.draftNoToolSystemPrompt());
     case 'SEMANTIC_VERDICT':
       return systemSelection('SEMANTIC_VERDICT', runPrompts.semanticVerdictSystemPrompt());

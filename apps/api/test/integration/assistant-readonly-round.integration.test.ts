@@ -7,6 +7,7 @@ import { sql } from 'kysely';
 import test, { after, before } from 'node:test';
 
 import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
+import { readExecutionActivity } from '../../src/application/execution-activity-projection.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { createAssistantProfile } from '../../src/application/assistant-profile-commands.js';
 import { createGatewayPolicy, registerManagedResource } from
@@ -370,4 +371,36 @@ test('B path records a PRIMARY call and first stream evidence', async () => {
   assert.equal(calls.rows[0]?.purpose, 'PRIMARY');
   assert.ok(calls.rows[0]?.first_stream_event_at instanceof Date,
     '首流观测必须写进调用账本');
+});
+
+/**
+ * ENG-OBS-02 P0-B：Gateway 已明确返回 FAILED（这里用超过读取上限的文件触发
+ * FILE_TOO_LARGE）是**已知失败**，不是 UNKNOWN。账本必须落 SETTLED + 结果摘要，
+ * 让模型与执行活动投影都能看到原因；投影只读归因，不改写账本。
+ */
+test('已知 Gateway 失败落 SETTLED 而不是 UNKNOWN，执行活动投影给出已确认失败', async () => {
+  const fx = await fixture();
+  // 128 KiB 是受控读取上限；超过即 Gateway FAILED（不进入 UNKNOWN 分支）。
+  await writeFile(join(fx.root, 'oversized.txt'), 'a'.repeat(200_000), 'utf8');
+  const outcome = await askWithScript(fx, [
+    [{ name: 'read_file', arguments: { relative_path: 'oversized.txt' } }],
+  ]);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+  assert.equal(rows.length, 1);
+  const tool = rows[0]!;
+  assert.equal(tool.status, 'SETTLED', '已知失败必须结清，不能停在 UNKNOWN');
+  assert.notEqual(tool.operation_id, null);
+  assert.notEqual(tool.result_digest, null, '失败结果同样需要可核对的摘要');
+
+  const snapshot = await readExecutionActivity(app.db, { workspaceId: fx.workspaceId,
+    sessionId: fx.sessionId, detail: 'full' });
+  const message = snapshot.messages.find((item) => item.message_id === tool.message_id);
+  assert.ok(message !== undefined);
+  const activity = (message.activities ?? []).find((item) => item.kind === 'TOOL_CALL');
+  assert.ok(activity !== undefined);
+  assert.equal(activity.recovery?.disposition, 'CONFIRMED_FAILURE');
+  assert.equal(activity.recovery?.effective_outcome, 'FAILED');
+  assert.equal(activity.state.view, 'FAILED');
+  assert.equal(activity.evidence.result_available, true);
 });

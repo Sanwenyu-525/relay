@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyRound, Plug, RotateCcw, ShieldCheck } from "lucide-react";
 
 import { createCommandId, RelayApiError, type RelayApiClient } from "../api/relayClient";
@@ -27,6 +27,19 @@ export function ModelConnectionsCard({ client }: { readonly client: RelayApiClie
   const [notice, setNotice] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const expandedRef = useRef(false);
+  expandedRef.current = expanded;
+
+  /**
+   * 换 API / Workspace 立即清空上一条连接列表与表单草稿：连接身份、凭据代数和默认标记
+   * 都属于旧范围，不能在新范围里继续显示。已展开时只重读新范围的一份事实。
+   */
+  useEffect(() => {
+    setConnections([]); setDefaultId(null); setError(null); setNotice(null);
+    setFormOpen(false); setRotatingId(null); setBusyId(null);
+    if (expandedRef.current) { setLoading(true); void load(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
 
   async function load(): Promise<void> {
     setLoading(true);
@@ -70,7 +83,7 @@ export function ModelConnectionsCard({ client }: { readonly client: RelayApiClie
       <h2>模型连接</h2>
       <p className="helper-text">登记多条 OpenAI 兼容连接（端点、确切型号、调用预算），
         凭据保存在系统凭据库，业务库里只有不透明引用。</p>
-      <p className="helper-text">默认连接只影响**新的任务执行**：Run 冻结时会记住这条连接；
+      <p className="helper-text">默认连接只影响新的任务执行：Run 冻结时会记住这条连接；
         会话聊天仍按会话选择或进程默认，两者互不改写。</p>
       <p className="settings-verify-actions">
         <button className="secondary-button" type="button" data-testid="model-connections-open"

@@ -46,7 +46,7 @@ import { ModelCallBudgetError, ModelSourcePolicyError }
   from '../workflow/openai-compatible-model-port.js';
 import { resolveRunModelPort, type RunSemanticModel } from './run-model-port.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
-import { recordModelInvocation } from './model-call-recorder.js';
+import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
 import { AssistLivePreviewPublisher, AssistPreviewOwnershipLostError } from '../assist/live-preview.js';
 import { publishRunDraftPreview, recordRunDraftFirstTextDelta } from './run-draft-preview.js';
 import { ModelScopeBudgetError } from '../model/model-call-repository.js';
@@ -930,6 +930,7 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
                 outputSchema: CANDIDATE_OUTPUT_SCHEMA,
                   ...(toolPlan === undefined ? {} : { tools: toolPlan.specs, toolTurns }),
                   ...(input.signal === undefined ? {} : { signal: input.signal }),
+                  onStreamEvent: () => observeModelFirstStream(db, callId),
                   onTextDelta: async (piece) => {
                     const observedAt = new Date();
                     if (piece === '' || !previewEnabled || input.signal?.aborted) return;

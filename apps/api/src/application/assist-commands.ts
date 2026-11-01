@@ -45,6 +45,7 @@ import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { createGoalForMessage } from './assist-goals.js';
 import { assertChatModeSupportedForIdentity, parseChatModePrefix } from './chat-mode.js';
 import { parseNewTaskPrefix } from '../assist/session-todos.js';
+import { provisionalSessionTitle } from './session-title.js';
 
 import { DEFAULT_SESSION_CONTEXT_BUDGET } from '../assist/assist-repository.js';
 import { resolveSessionReadTools } from './assist-read-tools.js';
@@ -146,6 +147,8 @@ export type CreateAssistSessionResult = {
   readonly project_id: string | null;
   readonly task_id: string | null;
   readonly title: string;
+  /** 0157：新会话标题的来源；由调用方声明（缺省 USER_DEFINED，工作台发 PROVISIONAL）。 */
+  readonly title_source: 'PROVISIONAL' | 'USER_DEFINED';
   readonly status: string;
   readonly conversation_mode: ConversationMode;
   readonly assistant_profile_id: string | null;
@@ -162,6 +165,14 @@ export interface CreateAssistSessionInput {
   readonly projectId?: string | null;
   readonly taskId?: string | null;
   readonly title: string;
+  /**
+   * 0157：这条标题是不是**系统临时标题**。
+   *
+   * 工作台把首条消息截断后提交，此时标题只是占位：声明 PROVISIONAL 后由服务端
+   * 规范化为 `分类-任务名`（关联目标的讨论保留 `关于<目标>`），并在首轮回复后自动升级。
+   * 既有调用方不传时按 USER_DEFINED——调用方显式给的名字默认受保护，不因升级被改写。
+   */
+  readonly titleSource?: 'PROVISIONAL' | 'USER_DEFINED' | undefined;
   /** 缺省即 'AGENT'；既有调用方不传时语义不变。 */
   readonly conversationMode?: ConversationMode | undefined;
   /** conversationMode='ASSISTANT' 时必填。归档或跨 workspace 的 助手 建不出会话。 */
@@ -198,7 +209,18 @@ export async function createAssistSession(
 ): Promise<CommandOutcome<CreateAssistSessionResult>> {
   const titleProblem = checkRequiredText(input.title, 'title', 'title');
   if (titleProblem !== undefined) throw validationFailed([titleProblem]);
-  const title = normalizeText(input.title);
+  /*
+   * 0157：临时标题由服务端规范化，而不是原样保存客户端截取的前 30 字。
+   *
+   * 命令体仍记**输入**标题：同一 command_id 重试时，标题推导规则升级不能让
+   * 载荷摘要变化而把一次正当重试判成异载荷。结构化派生只发生在 execute 里。
+   *
+   * 关联了项目/任务的讨论保留既有 `关于<目标>`（它是作用域，不是任务判断），
+   * 由首次语义生成换成正式结构化标题；未关联目标且调用方声明 PROVISIONAL 时，
+   * 临时标题当场规范化为 `分类-任务名`。
+   */
+  const submittedTitle = normalizeText(input.title);
+  const titleSource = input.titleSource ?? 'USER_DEFINED';
   const conversationMode: ConversationMode = input.conversationMode ?? 'AGENT';
   const chatMode = input.chatMode ?? 'CHAT';
   // #145：带模式建会话与切换/发消息共用同一张身份×模式支持矩阵；不支持的身份
@@ -212,7 +234,8 @@ export async function createAssistSession(
     target: { workspace_id: input.workspaceId },
     // 模式进命令体：同一个 command_id 换模式重放必须被当成异载荷拒绝，
     // 否则「先按普通会话建、再按人设建」会拿到同一条会话。
-    body: { project_id: input.projectId ?? null, task_id: input.taskId ?? null, title,
+    body: { project_id: input.projectId ?? null, task_id: input.taskId ?? null,
+      title: submittedTitle, title_source: titleSource,
       conversation_mode: conversationMode, assistant_profile_id: input.assistantProfileId ?? null,
       ...(input.chatMode === undefined ? {} : { chat_mode: chatMode }),
       // 0145：继承来源进命令体——同一个 command_id 换个来源重放必须按异载荷拒绝，
@@ -242,8 +265,18 @@ export async function createAssistSession(
         ? await requireAssistantProfileForNewSession(repositories, input.workspaceId, input.assistantProfileId)
         : null;
       const sessionId = randomUUID();
+      // 只有调用方声明「这是占位标题」时才做结构化派生；显式给定的名字保持原样。
+      const title = titleSource === 'PROVISIONAL'
+        ? provisionalSessionTitle({
+          submittedTitle,
+          // 只按**调用方显式指定的**作用域判断；继承默认目录之后才落到项目里，
+          // 标题仍应来自首条消息，不能事后被改成「关于某项目」。
+          scoped: (input.projectId ?? null) !== null || (input.taskId ?? null) !== null,
+        }).title
+        : submittedTitle;
       await repositories.assist.insertSession({
-        id: sessionId, workspaceId: input.workspaceId, projectId, taskId, title,
+        id: sessionId, workspaceId: input.workspaceId, projectId, taskId,
+        title, titleSource,
         conversationMode, chatMode,
         contextBudgetTokens: await inheritedContextBudget(repositories, input),
         ...(defaultDirectory === undefined ? {} : { workingResourceId: defaultDirectory.id,
@@ -257,6 +290,7 @@ export async function createAssistSession(
       }
       return { session_id: created.id, workspace_id: created.workspace_id,
         project_id: created.project_id, task_id: created.task_id, title: created.title,
+        title_source: titleSource,
         status: created.status, conversation_mode: created.conversation_mode,
         assistant_profile_id: created.assistant_profile_id,
         assistant_profile_revision: created.assistant_profile_revision === null ? null

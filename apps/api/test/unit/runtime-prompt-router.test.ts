@@ -63,6 +63,7 @@ const SYSTEM_ROUTES: readonly RuntimeSystemRoute[] = [
   { kind: 'INTERPRETATION_STATE_MAINTENANCE' },
   { kind: 'DRAFT', capability: { toolsEnabled: false, canWrite: false } },
   { kind: 'DRAFT', capability: { toolsEnabled: true, canWrite: false } },
+  { kind: 'DRAFT', capability: { toolsEnabled: true, canWrite: false, canOperate: true } },
   { kind: 'DRAFT', capability: { toolsEnabled: true, canWrite: true } },
   { kind: 'SEMANTIC_VERDICT' },
   // §30 草稿辅助：分点（只给原文边界）与润色。同样登记在案就必须能被选中并与登记表互锁；

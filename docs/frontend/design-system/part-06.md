@@ -305,3 +305,16 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 **SVG 光学补偿。** 盒模型与 SVG 盒都居中，只有路径重心偏离：完全访问档 `TriangleAlert` 墨迹加权重心 827.69（行中心 826），比同排 14px 标签（825.78）低 1.9px；`ArrowUp` 发送箭头重心 824.65，在实底方键里读成偏上。只对这两条路径各做 1px 反向量补偿（`translate:0 -1px` / `0 1px`），补偿后为 826.69 与 825.65；眼/手掌/圆勾/禁止、chevron、计量环与发送键方框均不动。含下伸部的拉丁标签（`gpt-oss-3.0-flash`、`普通 Agent`）文字墨迹重心比中文标签低约 1px，这是字体度量而非盒模型错位，不做位移。
 
 **验证出口。** 自建浏览器量测矩阵：1280×900（DPR 1／1.25／1.5）、960、390，首条输入器与已有会话各一档；控件盒中心与工具行中心误差 0.00，各行组内中心误差 0，`composerScroll`／`pageScroll` 均为 0；权限/模式/普通讨论/模型/上下文/「+」六片浮层开合前后工具栏几何不变，Esc 均能收起；焦点环 2px 可见；在途停止态与菜单展开态同几何。截图与逐控件读数在 `tmp/UI-COMPOSER-ALIGN/`（亮色全卡、参考线、hover、focus、960/390 修复前后对照、暗色 token 探针）。回归：`defaultWriteTier` 2/2、`modelSelectorDropdown` 6/6、`composerSourcePanel` 5/5。产品当前只有亮色主题，暗色以场景实验室 dark token 档在真实输入器上做兼容探针，不宣称已交付暗色皮肤。未新增 token、未改后端 / API / 权限与排列顺序。
+
+### 9.29 输入器图标键与缓存读数紧凑化（2026-11-01）
+
+2026-11-01 UI-COMPOSER：底栏的两枚读数控件再收一档，目标是「更紧凑、更精细、切换不抖动」，不改任何数据来源与业务状态。
+
+**① 润色键收为纯图标键。** `ComposerPolishButton` 仍是同一键位三态（空闲 / 在途 / 已润色），但不再画「润色」「润色中…」「撤销润色」三套常驻文字；键宽因此不再随状态变化。几何：`control.height.compact`（32×32 命中区）、`radius.control`、透明底；图标取 `font.size.body`（16px），比「+」与发送键的 `control.icon.size`（20px）低一档——辅助动作不与主控件同权。三态字形为 lucide `WandSparkles` / `LoaderCircle` / `Undo2`；在途旋转取 `motion.loop.spin`，`prefers-reduced-motion: reduce` 与 `html[data-motion="off"]` 下停转、字形仍是环。Hover / disabled / focus 全部沿用 `.agent-chat-tool` 与全局 `:focus-visible`，没有新增色值、阴影或彩色胶囊。动作名由 `aria-label`（「润色输入内容」「正在润色」「撤销润色」）承担；悬停提示复用 `usePathTooltip`，挂在**不占几何的槽位**上，因此禁用态（空草稿、在途发送、无连接、草稿超长）也能说明具体原因；已润色态的 `aria-describedby` 仍指向既有后果说明。
+
+**② 缓存命中率收为「小图标 + 数值」。** 常驻文字从 `缓存命中 57%` 收成一枚 12px（`font.size.caption`）的 `Database` 图标 + `font.size.meta` 的 `57%`；数值 `tabular-nums`，读数变化不跳宽。**不用第二枚圆环**：同一行右侧已有 24px 的上下文占用环，再来一枚小环在余光里会被读成同一指标的两种尺寸；数据库图标 + 数值把「缓存命中」与「上下文占用」分开。图标描边取 `control.icon.stroke`（1.5px），比同排 20px 主图标轻一档。`role="img"` + `aria-label="缓存命中率 57%"` 把图标与数值合成一个可访问名称；悬停提示复用同一套 `usePathTooltip`，文案为「缓存命中率：57% · 缓存读取 2,685 / 上下文 4,710 tokens」，**不新建第二份用量来源**。数值仍走 `formatUsagePercent`：99.6% 不显示成 100%，`0%` 是真实读数，Provider 未上报或缓存读取超过输入时整项不渲染（只留圆环，不画成 0%）。
+
+**③ 窄栏让位的是读数，不是布局。** 工具行容器（`@container composer-actions`）窄于 `37.5rem` 时 `.agent-chat-cache-hit` 整项收起：在 860×782 的实测布局里，工具行可用宽度已被「+」、档位、模式、润色、合并芯片与右端一组占满，再塞约 40px 只能让工具行多折一行、输入卡当场增高（DEV-0110 的同一条退回）。信息没有消失——点开右侧上下文圆环，详情浮层仍列出「缓存命中率」；宽回阈值以上自动恢复。命中率与圆环仍是两个独立读数，不合并、不互相顶替。
+
+**验证出口。** jsdom `tests/composerDraftAssist.spec.tsx` **16/16**、`tests/collaborationWorkspace.spec.ts` 的 8 条缓存命中用例 **8/8**（三态无障碍名、禁用原因、悬停/聚焦提示、0% / 57% / 99.6% / 100% / 未上报、`aria-label` 与提示同源；该文件其余 15 条失败来自并行会话刚引入的 messages page `has_more` 与 `/activity` 契约，与本轮节点无关）；真实 Chromium `tests/browser/composerDraftAssist.spec.ts` **3/3**（32×32 命中区、16px 图标、悬停与聚焦提示、在途旋转环、撤销几何不变）、`tests/browser/composerCacheHitStability.spec.ts` **7/7**（860/1162/1280/1600 高度不变、长模型名不挤走发送键、缓存与圆环同中线）、`tests/browser/composerSourcePanel.spec.ts` **5/5**（工具行文档序）。截图在 `tmp/UI-COMPOSER-compact-controls/`（默认、悬停、已润色、窄栏、首条输入器、暗色 token 探针）。产品当前只有亮色主题；暗色仍按 §9.28 的实验室 token 反相做兼容探针，不宣称已交付暗色皮肤。未新增 token、未改后端 / API / Provider 用量口径。
+

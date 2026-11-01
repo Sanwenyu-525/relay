@@ -301,7 +301,7 @@ export class ModelCallRepository {
   /** Callers lock and verify the current business claim before these CAS writes. */
   async recordFirstStreamEvent(id: string, observedAt: Date): Promise<void> {
     await sql`update model_calls set first_stream_event_at = ${observedAt}
-      where id = ${id} and kind = 'ASSIST' and status = 'STARTED'
+      where id = ${id} and kind in ('ASSIST', 'DRAFT') and status = 'STARTED'
         and first_stream_event_at is null`.execute(this.db);
   }
 

@@ -381,3 +381,24 @@ P1（同类歧义，同批改）：
 - 产品侧只有亮色一套主题（`data-theme` 仅存在于场景实验室预览宿主）；本次改动只涉及宽度与换行，不含颜色，未另做暗色比对。
 - 极窄 + 投影失败提示同时出现时，执行准备面板会被压到内部滚动，底边可能截断半行；这是「面板先让高、消息区保可读」的既有取舍，本次未改压缩规则。
 - 32 个浏览器用例把 CORS origin 硬编码为 `127.0.0.1:4173`，本机该端口被另一个项目的预览服务占用（`Task Dock`），这些用例无法在本机启动，未纳入本次回归。
+
+### 59. 电脑操作执行的聊天反馈（2026-11-01 COMPUTER-PLUGIN-E2E）
+
+### 59.1 状态来源
+
+- 执行请求的「准备/等待/执行/结束」只读服务端事实：`conversation_execution_requests.status` 与 `getRunToolCalls` 投影里的 `runStatus` / `waitReason`；界面不新增业务状态词，也不把工具回执推断成完成。
+- Run 状态行沿用既有词表：`CREATED`「正在准备执行」、`RUNNING`「正在执行」、`WAITING_APPROVAL`「等待你批准」、`PAUSED`「已暂停」、`VERIFYING`「正在验证结果」、`COMPLETED`「执行已结束（不代表任务验收完成）」、`FAILED`「执行失败」、`CANCELLED`「已取消」；未知值原样透出。
+- `ACTION_APPROVAL_REQUIRED` 等等待原因走 `waitReasonText` 的人话映射，内部枚举不直接出现在界面上。
+
+### 59.2 操作范围与失败原因
+
+- 候选带 `interaction=COMPUTER|BROWSER` 时，执行摘要的「当前目录」改为「操作范围：电脑桌面/浏览器」；这是展示语义，不是权限或授权。
+- 失败原因（缺哪个 `COMPUTER_READ`/`COMPUTER_INPUT` 连接等）提到阶段行下方，早于标题、目标与操作范围：摘要本身是可收缩滚动容器，放在卡片底部时小窗口首屏看不到。
+- 日常界面不显示 `interaction`、`writes_files`、`file_changes` 或 JSON 协议字段。
+
+### 59.3 验证
+
+- jsdom：`executionSummary` 9/9、`executionTrajectorySummary` 14/14、`conversationExecutionClient` 5/5。
+- 真实 API + 真实 Chromium：`tests/browser/computerPluginE2E.spec.ts` 2/2（一次性 PG + API + Vite；等待批准显示 Run 状态与审批入口；缺少连接显示失败原因且首屏可见），截图在 `tmp/COMPUTER-PLUGIN-E2E/screenshots/`。
+- 未验：真实 Windows/WebView2 窗口；多 DPI；产品无暗色主题。
+

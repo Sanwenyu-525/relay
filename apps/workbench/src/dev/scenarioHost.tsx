@@ -71,6 +71,7 @@ export function ScenarioPreview({ world, client, onReread, onLabOnlyAction }: {
       ? <ol className="agent-message-list">{world.messages.map((message) => <li key={message.id}
         className="agent-message-slot" data-message-id={message.id}>
         <AssistMessageRow client={client} target={TARGET} message={message}
+          activity={null}
           preview={world.preview}
           previewError={isRoundSubject(message.id) ? world.previewError : null}
           onRetryPreview={onReread}

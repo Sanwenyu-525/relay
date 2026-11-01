@@ -68,6 +68,28 @@ export interface RelayAssistantProfile {
   readonly optionLabel: string;
 }
 
+/**
+ * 会话标题来源（0157）。
+ *
+ * 界面只据此决定要不要提示「重新生成会替换手动标题」，以及等待自动标题更新的时机；
+ * 它不参与任何权限或准入判断。
+ */
+export type RelayAssistTitleSource =
+  | "LEGACY"
+  | "PROVISIONAL"
+  | "AI_GENERATED"
+  | "USER_DEFINED";
+
+/** 最近一次标题生成请求的展示投影（0157）。 */
+export interface RelayAssistTitleGeneration {
+  readonly status: "PENDING" | "CLAIMED" | "COMPLETED" | "FAILED" | "SKIPPED";
+  readonly requestKind: "AUTO" | "REGENERATE";
+  readonly generator: "MODEL" | "RULES" | null;
+  readonly errorCode: string | null;
+  readonly requestedAt: string;
+  readonly settledAt: string | null;
+}
+
 export interface RelayAssistSession {
   readonly id: string;
   /** 临时委派子会话只提供历史读取；缺失兼容既有服务端与夹具。 */
@@ -75,6 +97,19 @@ export interface RelayAssistSession {
   readonly projectId: string | null;
   readonly taskId: string | null;
   readonly title: string;
+  /**
+   * 标题来源（0157）。缺字段只来自 0157 之前的服务端与本机夹具，按 LEGACY 读——
+   * 旧标题默认受保护。用户手动命名后是 USER_DEFINED：自动生成不得覆盖，
+   * 重新生成前必须明确告知。
+   */
+  readonly titleSource?: RelayAssistTitleSource;
+  /** 最近一次自动命名成功落标题的时刻；人工改名与旧服务端缺失时为 null。 */
+  readonly titleGeneratedAt?: string | null;
+  /**
+   * 最近一次标题生成请求。只在 PENDING/CLAIMED 时驱动界面等待；其余状态用于
+   * 显示失败原因，不把「请求失败」读成「标题不可信」。夹具可省略。
+   */
+  readonly titleGeneration?: RelayAssistTitleGeneration | null;
   readonly status: string;
   /**
    * 置顶时刻（0090）。null 表示未置顶；缺字段只来自 0090 之前的响应，同样读成未置顶。
@@ -271,6 +306,18 @@ export interface RelayAssistSessionTitle {
   readonly updatedAt: string;
 }
 
+/**
+ * 重新生成标题的**受理回执**（0157）。`status` 只表示请求已入队，
+ * 不代表标题已经变化；界面必须继续读会话直到 `titleGeneration` 落定。
+ */
+export interface RelayAssistSessionTitleRegeneration {
+  readonly sessionId: string;
+  readonly requestId: string;
+  readonly status: "PENDING";
+  readonly revision: DecimalRevision;
+  readonly requestedAt: string;
+}
+
 export interface RelayAssistSessionPin {
   readonly sessionId: string;
   readonly pinned: boolean;
@@ -444,6 +491,129 @@ export interface RelaySessionToolCalls {
   }[];
 }
 
+/** ENG-OBS-02：只读执行活动投影。字段与后端 `execution-activity-projection` 一一对应。 */
+export type RelayActivityRecoveryDisposition =
+  | "NO_OPERATION" | "OPERATION_MISSING" | "ORIGIN_UNVERIFIED" | "UNRESOLVED_OPEN"
+  | "UNRESOLVED_UNKNOWN" | "ORDERING_UNPROVEN" | "CONFIRMED_NOT_EXECUTED"
+  | "CONFIRMED_SUCCESS" | "CONFIRMED_FAILURE";
+
+export interface RelayActivityRecovery {
+  readonly disposition: RelayActivityRecoveryDisposition;
+  readonly effectiveOutcome: "SUCCEEDED" | "FAILED" | "NOT_EXECUTED" | null;
+  readonly operationRef: string | null;
+  readonly operationStatus: string | null;
+  readonly invocationStatus: string | null;
+  readonly effectState: "NOT_APPLICABLE" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "UNKNOWN";
+  readonly reconcileRequired: boolean;
+  readonly reconciled: boolean;
+  readonly resolvedAt: string | null;
+  readonly provenance: "LIVE" | "RECONCILED" | "LEDGER" | "ABSENT";
+  readonly reason: string | null;
+}
+
+export interface RelayActivityItem {
+  readonly activityId: string;
+  readonly kind: "MODEL_CALL" | "TOOL_CALL" | "TODO_WRITE" | "DELEGATION" |
+    "EXECUTION_REQUEST" | "RUN_STEP" | "APPROVAL" | "CONTROL" | "RECOVERY";
+  readonly rawState: string;
+  readonly view: string;
+  readonly tone: "active" | "wait" | "success" | "error" | "neutral";
+  readonly terminal: boolean;
+  readonly startedAt: string | null;
+  readonly endedAt: string | null;
+  readonly round: number | null;
+  readonly ordinal: number | null;
+  readonly modelCallId: string | null;
+  readonly toolCallId: string | null;
+  readonly operationId: string | null;
+  readonly invocationId: string | null;
+  readonly waitCode: string | null;
+  readonly errorCode: string | null;
+  readonly resultAvailable: boolean;
+  readonly resultDigest: string | null;
+  readonly failureKind: string | null;
+  readonly recovery: RelayActivityRecovery | null;
+  readonly toolName?: string;
+  readonly delegationRole?: "INVESTIGATE" | "REVIEW";
+  readonly childSessionId?: string | null;
+  readonly attemptCount?: number;
+  readonly maxAttempts?: number;
+  readonly resultSummary?: string | null;
+}
+
+export interface RelayMessagePhase {
+  readonly raw: string;
+  readonly view: string;
+  readonly tone: "active" | "wait" | "success" | "error" | "neutral";
+  readonly since: string | null;
+  readonly detail: string;
+  readonly waitCode: string | null;
+  readonly waitDetail: string | null;
+}
+
+export interface RelayExecutionRequestSummary {
+  readonly requestId: string;
+  readonly status: string;
+  readonly decision: string;
+  readonly candidateStatus: string;
+  readonly taskId: string | null;
+  readonly runId: string | null;
+  readonly failureCode: string | null;
+}
+
+export interface RelayRunSummary {
+  readonly runId: string;
+  readonly status: string;
+  readonly currentStepKind: string | null;
+  readonly waitReason: string | null;
+  readonly unresolvedCount: number;
+  readonly updatedAt: string;
+}
+
+export interface RelayActivityCounts {
+  readonly modelCalls: number;
+  readonly toolCalls: number;
+  readonly todoWrites: number;
+  readonly delegations: number;
+}
+
+export interface RelayActivityGap {
+  readonly code: string;
+}
+
+export interface RelayExecutionActivityMessage {
+  readonly messageId: string;
+  readonly seq: string;
+  readonly role: "USER" | "ASSISTANT";
+  readonly status: string;
+  readonly intent: string;
+  readonly createdAt: string;
+  readonly claimedAt: string | null;
+  readonly settledAt: string | null;
+  readonly updatedAt: string;
+  readonly cancelRequested: boolean;
+  readonly sourceUserMessageId: string | null;
+  readonly contentFingerprint: string;
+  readonly processEvidence: "RECORDED" | "UNKNOWN";
+  readonly phase: RelayMessagePhase;
+  readonly executionRequest: RelayExecutionRequestSummary | null;
+  readonly runSummary: RelayRunSummary | null;
+  readonly activities?: readonly RelayActivityItem[];
+  readonly activityCounts: RelayActivityCounts;
+  readonly gaps: readonly RelayActivityGap[];
+}
+
+export interface RelayExecutionActivitySnapshot {
+  readonly schemaVersion: number;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly generatedAt: string;
+  readonly snapshotAt: string;
+  readonly messages: readonly RelayExecutionActivityMessage[];
+  readonly nextBeforeSeq: string | null;
+  readonly hasMore: boolean;
+}
+
 /**
  * 生成中的工具预览（工作台 §34.4）：可丢弃的临时证据，不进入总数。
  * `added`/`removed` 为 -1 表示待核对。
@@ -507,6 +677,12 @@ export interface RelayConversationExecution {
    * 旧服务端没有这个字段时为空数组，不据此推断「本次不改文件」。
    */
   readonly fileChanges: readonly RelayConversationCandidateFileChange[];
+  /**
+   * 本次候选的操作类交互类型；缺省表示文件范围执行。
+   *
+   * 只用于界面说明操作范围（电脑桌面 / 浏览器），不是权限或状态词表。
+   */
+  readonly interaction?: "COMPUTER" | "BROWSER" | null;
   /**
    * 服务端已判定这次是明确的只读执行请求（无写意图、候选就绪）。
    *

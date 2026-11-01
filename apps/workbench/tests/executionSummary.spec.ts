@@ -97,4 +97,20 @@ describe("执行摘要：服务端推进，不做重复确认", () => {
       expect(view.wrapper.find('[data-testid="execution-summary-delete-note"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
+
+  it("电脑操作候选说明操作范围，不把桌面操作写成当前目录", async () => {
+    const view = await mountReact(createElement(ExecutionSummary, {
+      execution: execution({ status: "DELEGATED", interaction: "COMPUTER",
+        title: "打开记事本", objective: "在本机打开记事本并确认窗口出现" }),
+      busy: false, onApply: vi.fn(), onOpenTask: vi.fn(), error: null }));
+    try {
+      const text = view.wrapper.text();
+      expect(view.wrapper.get('[data-testid="execution-summary-root"]').text()).toBe("操作范围：电脑桌面");
+      expect(text).not.toContain("当前目录");
+      expect(text).toContain("需要你接管电脑批准输入动作时");
+      // 不把内部 interaction 或写入字段暴露成日常界面文字。
+      expect(text).not.toContain("interaction");
+      expect(text).not.toContain("writes_files");
+    } finally { view.unmount(); }
+  });
 });

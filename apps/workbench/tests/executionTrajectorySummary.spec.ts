@@ -11,8 +11,9 @@ const call = (id: string, toolName: string, resultRef: RelayRunToolCall["resultR
     operationId, adaptationOf: null, adaptedPath: null, fileChanges: [],
     createdAt: "2026-10-13T00:00:00Z", updatedAt: "2026-10-13T00:00:01Z" });
 
-async function mount(calls: readonly RelayRunToolCall[], reviews: readonly RelayReview[] | Error = []) {
-  const projection: RelayRunToolCalls = { runId: "run-a", runStatus: "RUNNING", waitReason: null,
+async function mount(calls: readonly RelayRunToolCall[], reviews: readonly RelayReview[] | Error = [],
+  runStatus = "RUNNING") {
+  const projection: RelayRunToolCalls = { runId: "run-a", runStatus, waitReason: null,
     rounds: [{ round: 0, modelCallId: "m", calls }] };
   const client = { getRunToolCalls: vi.fn(async () => projection),
     getRunReviews: vi.fn(async () => {
@@ -29,6 +30,22 @@ const approval = (id: string, operationId: string | null,
   status = "OPEN"): RelayReview => ({ id, kind: "ACTION_APPROVAL", status, operationId }) as RelayReview;
 
 describe("基础执行结果摘要", () => {
+  it("Run 状态原样来自服务端：等待批准与会话结束不被说成完成", async () => {
+    const waiting = await mount([
+      call("waiting-window", "computer_get_windows", { windows: [], count: 0 },
+        "WAITING_APPROVAL", "operation-1")], [], "WAITING_APPROVAL");
+    try {
+      expect(waiting.wrapper.get('[data-testid="execution-run-state"]').text())
+        .toBe("执行状态：等待你批准");
+    } finally { waiting.unmount(); }
+    const completed = await mount([
+      call("windows", "computer_get_windows", { windows: [], count: 0 })], [], "COMPLETED");
+    try {
+      expect(completed.wrapper.get('[data-testid="execution-run-state"]').text())
+        .toContain("不代表任务验收完成");
+    } finally { completed.unmount(); }
+  });
+
   it("检查失败后修正并复检，失败回执仍可见，失败写入不计为改动", async () => {
     const view = await mount([
       call("first-check", "run_check", { outcome: "FAILED", exitCode: 1 }),

@@ -1,11 +1,11 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
-import { Archive, Copy, Download, GitFork, Mail, MailOpen, MoreHorizontal, Pencil, Pin, PinOff, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Copy, Download, GitFork, Mail, MailOpen, MoreHorizontal, Pencil, Pin, PinOff, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { createCommandId, type RelayApiClient, type RelayAssistSession } from "../api/relayClient";
 import { deleteBlockerAdvice, describeLiveError, describeLiveRead } from "../lib/liveErrors";
 import { deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelete";
 import { reserveSessionExportFileName, saveExportFile } from "../lib/sessionExportFile";
 import { useMenuExclusive } from "../lib/popoverMenu";
-import { escalateFeedback, openUndoFeedback, Toast } from "./Feedback";
+import { closeUndoFeedback, escalateFeedback, openUndoFeedback, Toast } from "./Feedback";
 
 /**
  * 会话改动只回这一行自身的事实（改名/置顶/未读/归档/重开），调用方据此收敛这一行。
@@ -42,6 +42,29 @@ export interface SessionRowMenuHandle {
 
 /** 服务端标题上限（shared/text.ts 的 title）；本地先挡一次，省一趟必然 422 的往返。 */
 const TITLE_LIMIT = 200;
+
+/**
+ * 重新生成失败时给用户读的原因。只翻服务端已经落库的错误码，不猜模型内部原因；
+ * 未知码统一收敛为「原标题保留」，不把技术码摊进主提示句。
+ */
+function titleGenerationFailureText(generation: RelayAssistSession["titleGeneration"]): string {
+  switch (generation?.errorCode) {
+    case "TITLE_MODEL_UNAVAILABLE":
+      return "没有可用的模型配置，没能生成新标题；原标题保留。";
+    case "TITLE_MODEL_OUTPUT_INVALID":
+      return "模型没有给出可用的标题，原标题保留。";
+    case "TITLE_SUPERSEDED":
+      return "标题在生成期间被改动，这次结果没有写入；当前标题保留。";
+    case "TITLE_INPUT_MISSING":
+      return "这段讨论还没有可用于命名标题的内容。";
+    case "TITLE_ATTEMPTS_EXHAUSTED":
+      return "多次尝试仍未生成标题；原标题保留。";
+    case "TITLE_SESSION_UNAVAILABLE":
+      return "这段讨论当前不可用，没能生成新标题。";
+    default:
+      return "这次没有生成新标题，原标题保留。";
+  }
+}
 
 /** 浮层离视口边缘的留边取 space.2（8px）。 */
 const MARGIN_PX = 8;
@@ -133,7 +156,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   /** 行本体右键时由调用方（RecentWorkRow）拿来展开同一个面板。 */
   ref?: Ref<SessionRowMenuHandle>;
 }) {
-  const [panel, setPanel] = useState<"none" | "actions" | "rename" | "confirm" | "result">("none");
+  const [panel, setPanel] = useState<"none" | "actions" | "rename" | "confirm" | "result" | "regenerate">("none");
   const [draft, setDraft] = useState(session.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +174,19 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   const [exported, setExported] = useState<{ fileName: string; partial: boolean } | null>(null);
   /** 删除之后停在哪一档：阻断、明确失败，还是「是否生效未知」。 */
   const [deleteResult, setDeleteResult] = useState<DeleteResult | null>(null);
+  /**
+   * 0157：重新生成标题已受理、仍在等待后台落定。
+   *
+   * 回执不是结果：标题可能因模型不可用、输出不合法或被并发改名而保持原样。
+   * 这个状态只驱动「正在生成」文案与一次有界轮询，不把请求写成已成功。
+   */
+  const [titleRegenerating, setTitleRegenerating] = useState(false);
+  /** 成功后的短暂反馈；失败走反馈栈的 Notice，面板收起后仍读得到。 */
+  const [titleNotice, setTitleNotice] = useState<string | null>(null);
+  /** 轮询期间读到的最新一行标题与回调：用 ref 避免父级重渲染不断重启计时。 */
+  const titleWatch = useRef<{ title: string; onChanged: (patch: SessionRowPatch) => void }>({
+    title: session.title, onChanged });
+  titleWatch.current = { title: session.title, onChanged };
   const copyTimer = useRef<number | null>(null);
   /**
    * 摆位结果与「尖角朝哪边」一起存：确认浮层的卡片比左栏还宽，开在 ⋯ 左边会被推到窗口左缘，
@@ -176,12 +212,17 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
    * `exported` 只在这里收，不在 `close()` 里收——那条成功提示挂在页壳的反馈栈上，面板收了它不该跟着消失。
    */
   function openPanel() {
-    setDraft(session.title); setError(null); setCopied(false); setExported(null); setPanel("actions");
+    setDraft(session.title); setError(null); setCopied(false); setExported(null);
+    // 成功提示只描述「这一次打开里发生过的事」；在途的标题生成状态不重置，
+    // 面板收起再打开仍要如实显示它还在等后台落定。
+    setTitleNotice(null); setPanel("actions");
   }
   useImperativeHandle(ref, () => ({ open: openPanel }));
 
   useEffect(() => { if (panel === "rename") inputRef.current?.focus(); }, [panel]);
-  useEffect(() => { if (panel === "confirm") cancelRef.current?.focus(); }, [panel]);
+  useEffect(() => {
+    if (panel === "confirm" || panel === "regenerate") cancelRef.current?.focus();
+  }, [panel]);
   // 结果态的焦点落在「关闭」上：这一档没有可点的删除键，读完原因只能走。
   useEffect(() => { if (panel === "result") resultCloseRef.current?.focus(); }, [panel]);
   useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
@@ -206,7 +247,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       const height = element.offsetHeight;
       const clampTop = (top: number) => Math.max(MARGIN_PX,
         Math.min(top, window.innerHeight - MARGIN_PX - height));
-      if (panel === "confirm" || panel === "result") {
+      if (panel === "confirm" || panel === "result" || panel === "regenerate") {
         const right = box.right + GAP_PX;
         const toRight = right + width <= window.innerWidth - MARGIN_PX;
         setPlaced({ arrow: toRight ? "start" : "top", style: {
@@ -223,7 +264,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [open, panel]);
+  }, [open, panel, titleRegenerating]);
 
   // 固定坐标不跟随滚动：滚一下或点到别处就收起，不把面板留在旧位置上。
   useEffect(() => {
@@ -242,6 +283,68 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       window.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
+
+  /**
+   * 重新生成标题的有界等待（0157）。
+   *
+   * 回执只说请求已入队；标题是否变化、是否失败或被他处改名取代，只能由服务端读回。
+   * 每拍读一次这条会话，落定即收口并把这一行交给调用方重读；40 拍仍未落定就停止，
+   * 之后由左栏既有的「有标题生成在途」轮询继续更新——界面等待不是生成完成的保证。
+   */
+  useEffect(() => {
+    if (!titleRegenerating) return;
+    let stopped = false;
+    let timer: number | null = null;
+    let ticks = 0;
+    const settle = (text: string) => {
+      setTitleRegenerating(false);
+      escalateFeedback(`session-title:${session.id}`, {
+        text, testId: `recent-work-title-generate-failed-${session.id}` });
+    };
+    const poll = async () => {
+      timer = null;
+      if (stopped) return;
+      ticks += 1;
+      try {
+        const next = await client.getAssistSession(session.id, true);
+        if (stopped) return;
+        const status = next.titleGeneration?.status;
+        if (status === "PENDING" || status === "CLAIMED") {
+          if (ticks >= 40) {
+            setTitleRegenerating(false);
+            setError("重新生成仍在进行；标题完成后会自动出现在列表里。");
+            return;
+          }
+          timer = window.setTimeout(() => { void poll(); }, 1000);
+          return;
+        }
+        setTitleRegenerating(false);
+        titleWatch.current.onChanged({ kind: "title" });
+        /*
+         * 成败只看请求的终态，不拿「标题是否变化」推断：别处的重读（左栏当前会话刷新）
+         * 可能先把新标题显示出来，那时标题已经相等，但这一次生成明明是成功的。
+         * COMPLETED 表示服务端已在同一事务里落了标题；FAILED/SKIPPED 才是没写成。
+         */
+        if (next.titleGeneration?.status === "COMPLETED") {
+          // 上一条「没生成」的常驻说明就没有意义了，先收走它。
+          closeUndoFeedback(`session-title:${session.id}`);
+          setTitleNotice(`已重新生成标题「${next.title}」`);
+          setPanel("none");
+          return;
+        }
+        settle(titleGenerationFailureText(next.titleGeneration));
+      } catch (caught) {
+        if (stopped) return;
+        setTitleRegenerating(false);
+        settle(`没能核对标题生成结果：${describeLiveRead(caught)}`);
+      }
+    };
+    timer = window.setTimeout(() => { void poll(); }, 1000);
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [titleRegenerating, client, session.id]);
 
   // Esc 收起并把焦点还给 ⋯：展开是用户主动动作，收起必须回到同一个位置。
   function close() { setPanel("none"); setError(null); setCopied(false); triggerRef.current?.focus(); }
@@ -306,6 +409,31 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
     }
     openUndoFeedback(key, { text: `已归档「${session.title}」`, actionLabel: "撤销", testId,
       onUndo: () => { void undoArchive(); } });
+  }
+
+  /**
+   * 发起重新生成标题（0157）。
+   *
+   * 只发一条受理命令并进入等待：不在这里调用模型、也不把回执当标题已更新。
+   * 手动命名过的会话先经过确认浮层——用户必须先知道这会替换自己设置的名字。
+   */
+  async function startRegenerate() {
+    if (busy || titleRegenerating) return;
+    setBusy(true); setError(null); setTitleNotice(null);
+    closeUndoFeedback(`session-title:${session.id}`);
+    setPanel("actions");
+    try {
+      await client.regenerateAssistSessionTitle({ sessionId: session.id,
+        commandId: createCommandId(), expectedRevision: session.revision });
+      setTitleRegenerating(true);
+    } catch (caught) {
+      const described = describeLiveError(caught);
+      if (described.kind === "conflict") {
+        // 修订落后：重读这一条，让人对着新事实重新决定，不静默覆盖、也不换 ID 重试。
+        onStale();
+        setError("这条会话刚被改过，已重新读取最新内容，请核对后再试。");
+      } else setError(described.message);
+    } finally { setBusy(false); }
   }
 
   /**
@@ -466,7 +594,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       onClick={() => { if (open) { setPanel("none"); setError(null); setCopied(false); } else openPanel(); }}>
       <MoreHorizontal aria-hidden="true" />
     </button>
-    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}${(panel === "confirm" || panel === "result") ? " recent-work-row-panel--confirm" : ""}${(panel === "confirm" || panel === "result") && placed?.arrow === "start" ? " recent-work-row-panel--arrow-start" : ""}`}
+    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}${(panel === "confirm" || panel === "result" || panel === "regenerate") ? " recent-work-row-panel--confirm" : ""}${(panel === "confirm" || panel === "result" || panel === "regenerate") && placed?.arrow === "start" ? " recent-work-row-panel--arrow-start" : ""}`}
       id={`recent-work-row-panel-${session.id}`} onKeyDown={onKeyDown}
       style={placed?.style ?? { visibility: "hidden" }}
       data-testid={`recent-work-panel-${session.id}`}>
@@ -495,6 +623,19 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
           <button type="button" className="text-button recent-work-row-action" disabled={busy}
             onClick={() => { setDraft(session.title); setPanel("rename"); }}>
             <Pencil aria-hidden="true" />重命名</button>
+          {/*
+            重新生成标题（0157）：紧挨重命名——它们是同一件事的两种写法（用户写 / 语义生成）。
+            手动命名过的会话先弹一次确认，因为这一次会替换用户自己设置的名字；
+            其他来源直接发起。归档态不提供：服务端与改名同一条「先重开」边界。
+          */}
+          <button type="button" className="text-button recent-work-row-action"
+            disabled={busy || titleRegenerating}
+            data-testid={`recent-work-regenerate-title-${session.id}`}
+            onClick={() => { setError(null); setTitleNotice(null);
+              if (session.titleSource === "USER_DEFINED") setPanel("regenerate");
+              else void startRegenerate(); }}>
+            <Sparkles aria-hidden="true" />
+            {titleRegenerating ? "正在生成标题…" : "重新生成标题"}</button>
           <button type="button" className="text-button recent-work-row-action" disabled={busy}
             data-testid={`recent-work-unread-${session.id}`}
             onClick={() => void run((commandId) => client.setAssistSessionUnread({ sessionId: session.id,
@@ -532,6 +673,26 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
             data-testid={`recent-work-delete-${session.id}`} onClick={openDelete}>
             <Trash2 aria-hidden="true" />删除</button>
         </>)}
+      {/* 标题生成在途：只说明「已受理、正在等后台落定」，不是「标题已经更新」。
+          面板收起后这一行仍会在左栏的既有轮询里更新。 */}
+      {titleRegenerating && <p className="recent-work-confirm-text" role="status"
+        data-testid={`recent-work-title-generating-${session.id}`}>
+        正在根据当前对话生成标题；完成后会自动更新这一行的标题。</p>}
+      {/* 手动命名过才会走到这一档：明确告知会替换用户自己设置的标题，取消是初始焦点。 */}
+      {panel === "regenerate" && <>
+        <p className="recent-work-confirm-title">重新生成标题？</p>
+        <p className="recent-work-confirm-text">
+          你当前手动设置的标题会被替换；聊天内容、执行与各项状态不受影响。
+          如果模型不可用，原标题会保留。</p>
+        <div className="recent-work-confirm-actions">
+          <button className="primary-button" type="button" disabled={busy}
+            data-testid={`session-title-regenerate-confirm-${session.id}`}
+            onClick={() => void startRegenerate()}>{busy ? "正在提交…" : "重新生成"}</button>
+          <button ref={cancelRef} className="secondary-button" type="button"
+            disabled={busy} data-testid={`session-title-regenerate-cancel-${session.id}`}
+            onClick={close}>取消</button>
+        </div>
+      </>}
       {panel === "rename" && <form className="recent-work-rename" onSubmit={(event) => {
         event.preventDefault(); submitRename(); }}>
         <input ref={inputRef} type="text" value={draft} maxLength={TITLE_LIMIT} aria-label="会话标题"
@@ -595,6 +756,9 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
     {exported !== null && <Toast testId={`session-export-done-${session.id}`}>
       {`已导出「${exported.fileName}」${exported.partial
         ? "（部分导出：某一段超过单次上限，文件里的 completeness 写明了是哪一段）" : ""}`}
+    </Toast>}
+    {titleNotice !== null && <Toast testId={`session-title-regenerated-${session.id}`}>
+      {titleNotice}
     </Toast>}
   </>;
 }

@@ -48,6 +48,9 @@ interface Row {
   last_message_at: string | null;
   /** 服务端读时派生：这段讨论有没有消息（直接数消息表）。 */
   has_messages: boolean;
+  /** 0157：标题来源与最近一次生成请求；缺省按 LEGACY / null 读（旧服务端行为）。 */
+  title_source?: string;
+  title_generation?: Record<string, unknown> | null;
 }
 
 const row = (n: number, title: string, at: string): Row => ({
@@ -148,7 +151,12 @@ function fakeServer(rows: Row[], options: {
   /** 导出返回这个状态与问题体（404、500…）：验证失败说的是真实原因，且没有落任何文件。 */
   exportFailure?: { status: number; code?: string; detail?: string; request_id?: string };
   /** 导出请求挂着不返回：这一条自己进入「导出中…」，⋯ 与行上别的命令不该跟着锁死。 */
-  exportHang?: boolean } = {}): Fake {
+  exportHang?: boolean;
+  /**
+   * 0157 重新生成标题：命令受理后，第一次重读这条会话时落定的结果。
+   * `FAILED` 用来验证失败反馈与原标题保留，不在这里调用任何模型。
+   */
+  titleRegeneration?: { readonly title: string; readonly errorCode: string | null } } = {}): Fake {
   const posts: Record<string, unknown>[] = [];
   const reads: string[] = [];
   let conflicted = false;
@@ -169,7 +177,7 @@ function fakeServer(rows: Row[], options: {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname;
-    const command = /\/assist-sessions\/([^/]+)\/(title|pin|unread|archive|reopen|fork|delete)$/u.exec(path);
+    const command = /\/assist-sessions\/([^/]+)\/(title\/generate|title|pin|unread|archive|reopen|fork|delete)$/u.exec(path);
     if (init?.method === "POST" && command !== null) {
       const [, sessionId, action] = command;
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -231,9 +239,19 @@ function fakeServer(rows: Row[], options: {
       }
       if (action === "title") {
         target.title = String(body.title);
+        target.title_source = "USER_DEFINED";
         bump(target);
         return json({ ...committed, result: { session_id: target.id, title: target.title,
           revision: target.revision, updated_at: target.updated_at } });
+      }
+      if (action === "title/generate") {
+        // 受理请求：只写一条 PENDING 投影，标题一个字符都不改。
+        target.title_generation = { status: "PENDING", request_kind: "REGENERATE",
+          generator: null, error_code: null, requested_at: "2026-11-01T12:00:00.000Z",
+          settled_at: null };
+        return json({ ...committed, result: { session_id: target.id,
+          request_id: "99999999-9999-4999-8999-999999999999", status: "PENDING",
+          revision: target.revision, requested_at: "2026-11-01T12:00:00.000Z" } });
       }
       if (action === "pin") {
         if (options.pinReceiptCarriesForeignCommandId === true) {
@@ -302,6 +320,16 @@ function fakeServer(rows: Row[], options: {
       const target = find(String(single[1]));
       if (target === undefined) return json({ code: "RESOURCE_NOT_FOUND", detail: "gone" }, 404);
       reads.push(`single:${target.id}`);
+      // 标题生成在途：本次轮询就是它落定的一拍。模型结果由测试声明，
+      // 失败时不改标题——与服务端「保留原标题」的口径一致。
+      if (target.title_generation?.status === "PENDING" && options.titleRegeneration !== undefined) {
+        const settled = options.titleRegeneration;
+        target.title_generation = { status: settled.errorCode === null ? "COMPLETED" : "FAILED",
+          request_kind: "REGENERATE", generator: settled.errorCode === null ? "MODEL" : null,
+          error_code: settled.errorCode, requested_at: "2026-11-01T12:00:00.000Z",
+          settled_at: "2026-11-01T12:00:02.000Z" };
+        if (settled.errorCode === null) { target.title = settled.title; bump(target); }
+      }
       return json(target);
     }
     if (path.endsWith("/projects")) return json({ items: [], next_cursor: null });
@@ -371,6 +399,11 @@ const rowInActiveList = (container: HTMLElement, sessionId: string) => {
   const row = container.querySelector<HTMLElement>(`[data-testid="recent-work-list"] [data-testid="recent-work-${sessionId}"]`);
   return row !== null && row.closest('[data-testid="recent-work-archived"]') === null ? row : null;
 };
+
+/** 标题生成的等待是真实计时（1s 一拍）：这里不伪造时钟，只等它真的跑完一拍。 */
+async function wait(ms: number): Promise<void> {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+}
 
 async function openMenu(container: HTMLElement, sessionId: string): Promise<void> {
   const trigger = menuOf(container, sessionId);
@@ -696,7 +729,7 @@ it("标记为未读与取消未读：一条命令、一次重读，行上的圆�
 
   await openMenu(container, id(1));
   expect([...(panelOf(container, id(1))?.querySelectorAll("button") ?? [])]
-    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "导出会话", "归档", "删除"]);
+    .map((button) => (button.textContent ?? "").trim())).toEqual(["置顶", "重命名", "重新生成标题", "取消未读", "分叉这段讨论", "复制会话 ID", "导出会话", "归档", "删除"]);
   await clickAction(container, id(1), "取消未读");
   expect(fake.posts[1]).toMatchObject({ action: "unread", unread: false, expected_revision: "2" });
   expect(fake.rows[0]?.unread_at).toBeNull();
@@ -810,7 +843,7 @@ it("导出进行中只锁这一条自己：⋯ 与面板里别的动作照旧可
     expect(menuOf(container, sessionId)?.disabled).toBe(false);
     const others = [...(panelOf(container, sessionId)?.querySelectorAll("button") ?? [])]
       .filter((button) => button !== item);
-    expect(others).toHaveLength(7);
+    expect(others).toHaveLength(8);
     expect(others.every((button) => !button.disabled)).toBe(true);
     // 一个文件都没交出去：正文此刻还不存在，提前落盘就是一个空 JSON。
     expect(download.names).toEqual([]);
@@ -962,12 +995,12 @@ it("动作按参考菜单分组成「图标 + 名称」：置顶／重命名／�
   // 「取一份东西出去」，不该混在两个带不可逆读感的动作中间。
   expect([...panel.children].map((child) => child.getAttribute("role") === "separator"
     ? "separator" : (child.textContent ?? "").trim()))
-    .toEqual(["置顶", "重命名", "标记为未读", "分叉这段讨论", "separator", "复制会话 ID", "导出会话", "归档", "删除"]);
+    .toEqual(["置顶", "重命名", "重新生成标题", "标记为未读", "分叉这段讨论", "separator", "复制会话 ID", "导出会话", "归档", "删除"]);
   // 分组细线是 div 而不是 button：不吃焦点、不参与命令，只作视觉分隔。
   expect(panel.querySelector('[role="separator"]')?.tagName).toBe("DIV");
-  // 八条动作各带一枚前缀图标；图标不进 textContent，因此单独核对存在性。
+  // 九条动作各带一枚前缀图标；图标不进 textContent，因此单独核对存在性。
   expect([...panel.querySelectorAll("button")].map((button) => button.querySelector("svg") !== null))
-    .toEqual([true, true, true, true, true, true, true, true]);
+    .toEqual([true, true, true, true, true, true, true, true, true]);
   // 带图标的按钮仍按整条命中：点击落在按钮本身上，命令照旧发出。
   await clickAction(container, sessionId, "置顶");
   expect(fake.posts).toEqual([{ action: "pin", command_id: expect.any(String),
@@ -1392,4 +1425,59 @@ it("批量里连归档段那条也一起核对掉：活跃与归档两份投影�
   // 不再留「核对回执」，也不留一句已经过期的大白话结论。
   expect(barButton(container, "recent-work-batch-recheck")).toBeNull();
   expect(barOf(container)).toBeNull();
+});
+
+/**
+ * 0157 重新生成标题：回执只代表受理，界面必须等到读回终态才换标题。
+ *
+ * 这里守护三件事：手动命名先确认（初始焦点在取消）、受理后显示在途而不是成功、
+ * 终态读回后行标题与成功提示同时出现。模型与落库由真实集成用例负责。
+ */
+it("重新生成标题：手动命名先确认，受理后经轮询把服务端的新标题落回这一行", async () => {
+  const fake = fakeServer([
+    { ...row(1, "我手动起的名字", "01"), title_source: "USER_DEFINED" }],
+    { titleRegeneration: { title: "UI-聊天消息布局优化", errorCode: null } });
+  const { container } = await mount(fake);
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "重新生成标题");
+
+  // 手动命名：先说清会替换，初始焦点压在「取消」上。
+  expect(panelOf(container, id(1))?.textContent).toContain("你当前手动设置的标题会被替换");
+  expect(document.activeElement?.getAttribute("data-testid"))
+    .toBe(`session-title-regenerate-cancel-${id(1)}`);
+  await act(async () => {
+    panelOf(container, id(1))?.querySelector<HTMLButtonElement>(
+      `[data-testid="session-title-regenerate-confirm-${id(1)}"]`)?.click();
+  });
+  expect(fake.posts.filter((post) => post.action === "title/generate")).toHaveLength(1);
+  // 受理不是成功：标题一个字符没变，面板就地说明还在等后台落定。
+  expect(rowOf(container, id(1))?.querySelector(".recent-work-title")?.textContent)
+    .toBe("我手动起的名字");
+  expect(panelOf(container, id(1))?.querySelector(
+    `[data-testid="recent-work-title-generating-${id(1)}"]`)).not.toBeNull();
+
+  await wait(1200);
+  expect(rowOf(container, id(1))?.querySelector(".recent-work-title")?.textContent)
+    .toBe("UI-聊天消息布局优化");
+  expect(document.querySelector(`[data-testid="session-title-regenerated-${id(1)}"]`)?.textContent)
+    .toContain("已重新生成标题");
+  expect(panelOf(container, id(1))).toBeNull();
+});
+
+it("重新生成标题失败：保留原标题并给出真实原因，不显示成功提示", async () => {
+  const fake = fakeServer([row(1, "模型调不通的讨论", "01")],
+    { titleRegeneration: { title: "不该出现的标题", errorCode: "TITLE_MODEL_UNAVAILABLE" } });
+  const { container } = await mount(fake);
+  await openMenu(container, id(1));
+  await clickAction(container, id(1), "重新生成标题");
+  expect(fake.posts.filter((post) => post.action === "title/generate")).toHaveLength(1);
+  expect(rowOf(container, id(1))?.querySelector(".recent-work-title")?.textContent)
+    .toBe("模型调不通的讨论");
+
+  await wait(1200);
+  expect(rowOf(container, id(1))?.querySelector(".recent-work-title")?.textContent)
+    .toBe("模型调不通的讨论");
+  expect(document.querySelector(`[data-testid="session-title-regenerated-${id(1)}"]`)).toBeNull();
+  expect(document.querySelector(`[data-testid="recent-work-title-generate-failed-${id(1)}"]`)
+    ?.textContent).toContain("没有可用的模型配置");
 });

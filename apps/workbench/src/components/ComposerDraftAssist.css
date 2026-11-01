@@ -34,8 +34,33 @@
 }
 .composer-draft-bar-cta:hover { background: var(--relay-color-selection-hover); }
 
-/* 工具行内的润色键：沿用 .agent-chat-tool 外观，只在忙态与已应用时给一点区分。 */
-.composer-draft-polish[data-busy="true"] { color: var(--relay-color-text-muted); }
+/* 工具行内的润色键（2026-11-01 UI-COMPOSER）：纯图标、32×32 命中区、无常驻文字。
+   三态共用同一键位与尺寸，切换字形不改变行宽；图标取正文字号 1rem（16px）作为
+   光学尺寸，比「+」与发送键的 control.icon.size（20px）低一档，辅助动作不与主控件同权。
+   底色、hover、禁用与焦点沿用 .agent-chat-tool / 全局 :focus-visible，不另造一套。 */
+.composer-draft-polish-slot { display: inline-flex; flex: none; }
+button.agent-chat-tool.composer-draft-polish {
+  width: var(--relay-control-height-compact);
+  padding: 0;
+  justify-content: center;
+}
+button.agent-chat-tool.composer-draft-polish > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+/* 润色在途：字形换成匀速旋转的环（motion.loop.spin，1 圈/秒）。键仍 disabled，
+   重复点击不会重复提交；关动效后停在第一帧，形状仍可辨认。 */
+.composer-draft-polish[data-busy="true"] > svg {
+  animation: composer-draft-polish-spin var(--relay-motion-loop-spin) linear infinite;
+}
+@keyframes composer-draft-polish-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-draft-polish[data-busy="true"] > svg { animation: none; }
+}
+html[data-motion="off"] .composer-draft-polish[data-busy="true"] > svg { animation: none; }
 
 /* 浮层：锚在输入区上方、限高局部滚动、非模态、不遮输入与发送。
    整块限高，列表在内部滚——否则矮窗里浮层会从消息区顶部被裁掉。 */

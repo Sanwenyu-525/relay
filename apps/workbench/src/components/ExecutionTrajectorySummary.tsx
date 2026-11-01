@@ -34,6 +34,20 @@ import type { RelayApiClient, RelayRunToolCall, RelayRunToolCalls } from "../api
  */
 
 const TERMINAL_RUN = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+/**
+ * Run 状态的人类可读说法。词表直接来自服务端 `runStatus`，不新增第二套业务状态；
+ * `COMPLETED` 只表示这次执行结束，不冒充任务验收或业务完成。
+ */
+const RUN_STATE_LABELS: Record<string, string> = {
+  CREATED: "正在准备执行",
+  RUNNING: "正在执行",
+  WAITING_APPROVAL: "等待你批准",
+  PAUSED: "已暂停",
+  VERIFYING: "正在验证结果",
+  COMPLETED: "执行已结束（不代表任务验收完成）",
+  FAILED: "执行失败",
+  CANCELLED: "已取消",
+};
 /** 折叠区最多逐字展示的正文行数；超出只算「还有更多」，不截断后冒充完整内容。 */
 const INLINE_MAX_LINES = 40;
 /** 读取结果超过这个项数后，平铺列表改按工具名聚成组行（页面原型 V5.26「轻量分组行」）：
@@ -165,6 +179,9 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
       {parts.map((part, index) => <li key={index} className="execution-count"
         data-tone={part.attention ? "attention" : undefined}>{part.text}</li>)}
     </ul>
+    <p className="helper-text" data-testid="execution-run-state" data-status={projection.runStatus}>
+      执行状态：{RUN_STATE_LABELS[projection.runStatus] ?? projection.runStatus}
+    </p>
     {projection.waitReason !== null &&
       <p className="helper-text">Run 等待原因 {waitReasonText(projection.waitReason)}</p>}
     {counts.waiting > 0 && <p className="execution-waiting" data-testid="execution-waiting-approval">

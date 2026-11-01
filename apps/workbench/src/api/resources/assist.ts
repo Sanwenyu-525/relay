@@ -1,3 +1,5 @@
+import { assistExecutionActivityFrom } from "../parse/assist";
+import type { RelayExecutionActivitySnapshot } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelayWriteTier } from "../dtos/gateway";
 import { RelayContractError, RelayTransportError } from "../core/errors";
@@ -10,6 +12,8 @@ import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAs
 import type { RelayCommandEnvelope } from "../dtos/projects";
 import type { RelaySessionDelegation } from "../dtos/assist";
 import { sessionDelegationFrom } from "../parse/assist";
+import { assistSessionTitleRegenerationFrom } from "../parse/assist";
+import type { RelayAssistSessionTitleRegeneration } from "../dtos/assist";
 
 export async function getAssistSessionDelegations(http: RelayHttp, sessionId: string): Promise<readonly RelaySessionDelegation[]> {
   const body = object(await http.request(http.workspacePath(
@@ -92,6 +96,9 @@ export async function getFirstPartyPacks(http: RelayHttp): Promise<readonly Rela
 export async function createAssistSession(http: RelayHttp, input: { commandId: string; projectId: string | null; taskId: string | null; title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode; assistantProfileId?: string | null; sourceSessionId?: string | null; contextBudgetTokens?: RelayContextBudgetTokens | null }): Promise<RelayAssistSession> {
   const body = await http.request(http.workspacePath("/assist-sessions"), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId, project_id: input.projectId,
+      // 0157：工作台提交的是首条消息截断后的占位标题，声明 PROVISIONAL 让服务端
+      // 统一规范化为 `分类-任务名`；显式命名的调用方不传，标题按用户来源保护。
+      title_source: "PROVISIONAL",
       task_id: input.taskId, title: input.title,
       ...(input.conversationMode === undefined ? {} : { conversation_mode: input.conversationMode }),
       // 0127：空会话里直接发 `/plan 内容` 时，模式随建会话命令一起落库。
@@ -180,6 +187,17 @@ export function renameAssistSession(http: RelayHttp, input: { sessionId: string;
     assistSessionTitleFrom, (r) => r.sessionId !== input.sessionId || r.title !== input.title.trim(), "改名");
 }
 
+/**
+ * 重新生成标题（0157）。回执只是「已受理」，不是「标题已更新」：
+ * 命令只写一条持久请求，模型调用由后台推进，界面随后按 `titleGeneration` 落定。
+ */
+export function regenerateAssistSessionTitle(http: RelayHttp, input: { sessionId: string;
+  commandId: string; expectedRevision: DecimalRevision }): Promise<RelayAssistSessionTitleRegeneration> {
+  return postSessionControl(http, { ...input, path: "title/generate" },
+    assistSessionTitleRegenerationFrom,
+    (r) => r.sessionId !== input.sessionId, "重新生成标题");
+}
+
 export function setAssistSessionPin(http: RelayHttp, input: { sessionId: string; commandId: string;
   expectedRevision: DecimalRevision; pinned: boolean }): Promise<RelayAssistSessionPin> {
   return postSessionControl(http, { ...input, path: "pin", extra: { pinned: input.pinned } },
@@ -228,6 +246,39 @@ export function forkAssistSession(http: RelayHttp, input: { sessionId: string; c
 export async function getAssistMessages(http: RelayHttp, sessionId: string): Promise<readonly RelayAssistMessage[]> {
   const body = object(await http.request(http.workspacePath(`/assist-sessions/${encodeURIComponent(sessionId)}/messages?limit=200`)), "assist messages");
   return array(body, "items", "assist messages").map(assistMessageFrom);
+}
+
+/** ENG-OBS-02：最新优先分页；has_more 只由服务端 limit+1 证据给出。 */
+export async function getAssistMessagesPage(http: RelayHttp, input: {
+  sessionId: string; limit?: number; beforeSeq?: string;
+}): Promise<{ items: readonly RelayAssistMessage[]; hasMore: boolean; nextBeforeSeq: string | null }> {
+  const query = new URLSearchParams();
+  query.set("limit", String(input.limit ?? 200));
+  if (input.beforeSeq !== undefined) query.set("before_seq", input.beforeSeq);
+  const body = object(await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(input.sessionId)}/messages?${query.toString()}`)),
+  "assist messages page");
+  return {
+    items: array(body, "items", "assist messages page").map(assistMessageFrom),
+    // 旧服务端/旧夹具只返回 items；缺少分页字段就是「没有更早一页」，不是坏响应。
+    hasMore: body.has_more === undefined || body.has_more === null
+      ? false : boolean(body, "has_more", "assist messages page"),
+    nextBeforeSeq: body.next_before_seq === undefined
+      ? null : nullableString(body, "next_before_seq", "assist messages page"),
+  };
+}
+
+/** ENG-OBS-02：只读执行活动快照；summary 只返回 phase/计数/指纹，full 才含活动明细。 */
+export async function getAssistExecutionActivity(http: RelayHttp, input: {
+  sessionId: string; limit?: number; beforeSeq?: string; detail?: "summary" | "full";
+}): Promise<RelayExecutionActivitySnapshot> {
+  const query = new URLSearchParams();
+  query.set("limit", String(input.limit ?? 20));
+  if (input.beforeSeq !== undefined) query.set("before_seq", input.beforeSeq);
+  if (input.detail !== undefined) query.set("detail", input.detail);
+  const body = await http.request(http.workspacePath(
+    `/assist-sessions/${encodeURIComponent(input.sessionId)}/activity?${query.toString()}`));
+  return assistExecutionActivityFrom(body);
 }
 
 /**

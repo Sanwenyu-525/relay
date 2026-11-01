@@ -6,7 +6,7 @@ import test from 'node:test';
 import { Client } from 'pg';
 import { sql } from 'kysely';
 
-import { withTransaction } from '../../src/application/unit-of-work.js';
+import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { applyConversationExecution } from '../../src/application/conversation-execution.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
@@ -227,6 +227,10 @@ const ALL_MIGRATIONS = [
   '0153_model_call_purpose',
   '0154_assist_session_delete_recall_todos_and_execution_source',
   '0155_assist_message_preview_usage',
+  // 0156 为并行会话的执行活动观测时刻；0157 为会话标题来源与生成请求。
+  // 清单必须同步，否则真实库上会因多两条而失败。
+  '0156_execution_activity_observation_times',
+  '0157_assist_session_title_ownership',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -849,14 +853,19 @@ test('0149 marks legacy execution requests LEGACY_UNCLASSIFIED and the use case 
     const sessionId = randomUUID();
     const messageId = randomUUID();
     const resourceId = randomUUID();
-    await withTransaction(app.db, async (repositories) => {
+    await app.db.transaction().execute(async (trx) => {
+      const repositories = createRepositories(trx);
       await repositories.workspaces.insertWorkspace({ id: workspaceId, name: 'Legacy scope' });
       await repositories.workspaces.insertAuthorityRow(workspaceId);
       await repositories.projects.insertProject({ id: projectId, workspaceId,
         title: 'Legacy scope project', projectType: 'GENERAL' });
       await repositories.projects.insertProjectState(projectId, 'PLANNING');
-      await repositories.assist.insertSession({ id: sessionId, workspaceId, projectId,
-        taskId: null, title: 'Legacy execution', conversationMode: 'AGENT' });
+      // 本用例故意停在 0149 之前的 schema：不能用当前仓储（它会写 0157 的
+      // `title_source`），按当时已有的列直接播种会话行，仍在同一事务执行器上。
+      await sql`insert into assist_sessions (id, workspace_id, project_id, task_id,
+          title, conversation_mode, context_budget_tokens)
+        values (${sessionId}, ${workspaceId}, ${projectId}, null,
+          'Legacy execution', 'AGENT', 262144)`.execute(trx);
       await repositories.assist.insertMessage({ id: messageId, sessionId, seq: 1n,
         role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '把首页标题改一下',
         sources: [] });
@@ -928,11 +937,16 @@ test('0150 backfills scope_seq from the opening user message and keeps history r
     const workspaceId = randomUUID();
     const sessionId = randomUUID();
     const userMessageId = randomUUID();
-    await withTransaction(app.db, async (repositories) => {
+    await app.db.transaction().execute(async (trx) => {
+      const repositories = createRepositories(trx);
       await repositories.workspaces.insertWorkspace({ id: workspaceId, name: 'Legacy order' });
       await repositories.workspaces.insertAuthorityRow(workspaceId);
-      await repositories.assist.insertSession({ id: sessionId, workspaceId, projectId: null,
-        taskId: null, title: 'Legacy order session' });
+      // 本用例停在 0150 之前的 schema：按当时已有的列播种，不经过会写
+      // 0157 `title_source` 的当前仓储；仍在同一事务执行器上。
+      await sql`insert into assist_sessions (id, workspace_id, project_id, task_id,
+          title, conversation_mode, chat_mode, context_budget_tokens)
+        values (${sessionId}, ${workspaceId}, null, null,
+          'Legacy order session', 'AGENT', 'CHAT', 262144)`.execute(trx);
       // 作用域开启消息在第 7 位：0150 的回填依据就是这一位。
       await repositories.assist.insertMessage({ id: userMessageId, sessionId, seq: 7n,
         role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '开始迁移',

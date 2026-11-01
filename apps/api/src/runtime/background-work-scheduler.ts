@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { runConversationExecutionAutoStartTick } from '../application/conversation-execution-autostart.js';
 import { runMemberWakeupTick } from '../application/member-wakeup.js';
+import { runSessionTitleGenerationTick } from '../application/session-title-generation.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
@@ -39,9 +40,15 @@ export function registerBackgroundWorkScheduler(
   // 与 Worker 同一口径：未配置真实模型走离线 Mock；配置残缺只停掉成员唤醒这一段，
   // 不让它拖死不需要模型的导入与执行推进。
   let modelPort: AssistModelPort | undefined;
+  /*
+   * 0157：标题生成只在**真实配置**存在时才走模型。没有配置时 FakeModelPort 只是开发期
+   * 替身，它的输出不能冒充语义分析结果；此时标题 tick 走规则降级（仍给出结构化标题）。
+   */
+  let titleModelPort: AssistModelPort | undefined;
   try {
     const config = readModelPortConfig(process.env);
     modelPort = config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+    titleModelPort = config === undefined ? undefined : modelPort;
   } catch {
     app.log.warn({ code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED' },
       'background_member_wakeup_disabled_by_invalid_model_config');
@@ -81,6 +88,11 @@ export function registerBackgroundWorkScheduler(
         await runStage('MEMBER_WAKEUP', () => runMemberWakeupTick(d.database.executor,
           { workerId, modelPort: modelPort, signal: controller.signal }));
       }
+      // 0157：标题请求的推进者。放在最后：标题是异步展示事实，不能反过来推迟成员唤醒；
+      // 没有在途请求时只多一条返回空集的领取查询，有请求时一次 tick 最多一次辅助外呼。
+      await runStage('SESSION_TITLE', () => runSessionTitleGenerationTick(d.database.executor, {
+        workerId, modelPort: titleModelPort, signal: controller.signal,
+      }));
     } finally {
       if (active) { timer = setTimeout(() => { inFlight = tick(); }, TICK_INTERVAL_MS); timer.unref(); }
     }

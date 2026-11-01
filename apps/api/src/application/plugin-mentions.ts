@@ -51,3 +51,19 @@ export function findKnownPluginMentions(text: string): readonly KnownPluginMenti
   }
   return matches;
 }
+
+/**
+ * 这条消息看起来是在**询问能力/可行性**，而不是下达执行命令。
+ *
+ * 真实 Provider 会把 `@电脑操控 能不能打开记事本？` 偶尔答成「这是命令式请求」，直接
+ * 生成电脑操作候选。标签本身不区分提问与命令，而自动委托一旦发生就会开始在用户桌面
+ * 输入。这里提供一个**只用于降级**的保守判定：句尾问号 + 能力/可行性措辞。命中时把
+ * 机器候选降为澄清，不登记执行请求、不自动委托；用户回复「现在执行」后再走原链路。
+ *
+ * 它不会把任何候选升级为 PREPARE，也不绕过确定性校验；误判的代价只是多一次确认。
+ */
+export function isMachineCapabilityQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!/[？?]$/u.test(trimmed)) return false;
+  return /(能不能|能否|可不可以|是否|支持|会不会|怎么|如何|能不能帮)/u.test(trimmed);
+}

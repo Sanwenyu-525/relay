@@ -49,6 +49,14 @@ function ready(revision = "1"): Projection {
     default_write_tier: null, status: "READY", reason: null, revision };
 }
 
+/** 与真实截图同形：已保存的目录指向一个已被删除的 Temp 路径。 */
+const missingRoot = "C:\\Users\\ASUS\\AppData\\Local\\Temp\\relay-agent-file-crud-20261017-093012";
+function unavailable(revision = "1"): Projection {
+  return { resource_id: "res-gone", canonical_root: missingRoot,
+    display_name: "relay-agent-file-crud-20261017-093012", write_tier: "READ_ONLY",
+    default_write_tier: null, status: "UNAVAILABLE", reason: "DIRECTORY_UNAVAILABLE", revision };
+}
+
 function openResult(over: Record<string, unknown> = {}) {
   return { canonical_root: root, display_name: "Demo", status: "READY", reason: null,
     association: { project_id: projectId, project_title: "Demo", project_archived: false,
@@ -66,6 +74,8 @@ interface Routes {
   conflictOnSet?: boolean;
   /** GET /default-working-directory 的受控延迟（用于换 Workspace 的迟到响应反例）。 */
   gateGet?: (workspace: string) => Promise<void> | null;
+  /** 读取被服务端拒绝：页面只能如实报错，不能显示未设置 / 有效 / 已保存。 */
+  denyRead?: boolean;
   receipt?: (commandId: string) => Response;
 }
 
@@ -88,6 +98,7 @@ function router(routes: Routes, calls: { method: string; path: string; body: Rec
     if (path.endsWith("/default-working-directory")) {
       const projection = routes.projection?.() ?? unset();
       if (init?.method !== "POST") {
+        if (routes.denyRead) return response({ code: "PERMISSION_DENIED", detail: "没有读取这个设置的权限。" }, 403);
         const gate = routes.gateGet?.(workspace) ?? null;
         if (gate !== null) await gate;
         return response(projection);
@@ -227,14 +238,14 @@ describe("设置页默认工作目录", () => {
     expect(valueText(view)).toContain("Demo");
     expect(view.wrapper.get('[data-testid="settings-default-directory-path"]').text()).toBe(root);
     expect(view.wrapper.get('[data-testid="settings-default-directory-tier"]').text()).toContain("只读");
-    expect(view.wrapper.get('[data-testid="settings-default-directory-notice"]').text()).toContain("修订 1");
+    expect(view.wrapper.get('[data-testid="settings-default-directory-notice"]').text()).toContain("设为默认工作目录");
 
     await view.wrapper.get('[data-testid="settings-default-directory-clear"]').trigger("click");
     await flush(60);
     expect(writes[1]).toEqual({ command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       expected_revision: "1" });
     expect(view.wrapper.get('[data-testid="settings-default-directory-value"]').text()).toContain("未设置");
-    expect(view.wrapper.get('[data-testid="settings-default-directory-notice"]').text()).toContain("修订 2");
+    expect(view.wrapper.get('[data-testid="settings-default-directory-notice"]').text()).toContain("已清除");
   });
 
   it("409 刷新当前事实并提示冲突，不自动覆盖新设置", async () => {
@@ -291,6 +302,100 @@ describe("设置页默认工作目录", () => {
     expect(view.wrapper.find('[data-testid="settings-default-directory-pending"]').exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="settings-default-directory-notice"]').text()).toContain("原命令已确认");
     expect(valueText(view)).toContain("有效");
+  });
+
+  it("服务端拒绝读取时如实报错，不显示未设置、有效或已保存", async () => {
+    connect();
+    const calls: { method: string; path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", router({ denyRead: true }, calls));
+    const view = await mountWorkbench("/settings"); unmount = view.unmount;
+    await flush();
+    const value = valueText(view);
+    expect(value).toContain("读取失败");
+    expect(value).toContain("无法读取默认目录");
+    expect(value).not.toContain("未设置");
+    expect(value).not.toContain("有效");
+    expect(view.wrapper.get('[data-testid="settings-default-directory"]').text()).not.toContain("已保存");
+    expect(view.wrapper.find('[data-testid="settings-default-directory-notice"]').exists()).toBe(false);
+  });
+
+  it("默认目录失效时只显示可操作结论，路径、原因码与修订收进折叠诊断", async () => {
+    connect();
+    const calls: { method: string; path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal("fetch", router({ projection: () => unavailable("4") }, calls));
+    const view = await mountWorkbench("/settings"); unmount = view.unmount;
+    await flush();
+
+    const value = valueText(view);
+    expect(value).toContain("默认目录不可用");
+    // 原始路径、原因码与资源身份不占据主状态区，不把工程复杂度转嫁给用户。
+    expect(value).not.toContain("DIRECTORY_UNAVAILABLE");
+    expect(value).not.toContain("Temp");
+    expect(value).not.toContain("relay-agent-file-crud");
+    const explanation = view.wrapper.get('[data-testid="settings-default-directory-unavailable"]').text();
+    expect(explanation).toContain("已保存的文件夹不存在或暂时无法访问");
+    expect(explanation).toContain("新会话不会继续使用该目录");
+    expect(explanation).toContain("已存在的会话保持原有绑定");
+
+    // 主操作是更换目录；清除与重新检查是次操作。
+    expect(choose(view).text()).toContain("更换目录");
+    expect(view.wrapper.get('[data-testid="settings-default-directory-clear"]').exists()).toBe(true);
+    expect(view.wrapper.get('[data-testid="settings-default-directory-recheck"]').exists()).toBe(true);
+
+    const diagnostics = view.wrapper.get('[data-testid="settings-default-directory-diagnostics"]');
+    expect(diagnostics.attributes("open")).toBeUndefined();
+    expect(diagnostics.text()).toContain("DIRECTORY_UNAVAILABLE");
+    expect(diagnostics.text()).toContain(missingRoot);
+    expect(diagnostics.text()).toContain("res-gone");
+    expect(diagnostics.text()).toContain("4");
+
+    const before = calls.filter((call) => call.path.endsWith("/default-working-directory") &&
+      call.method === "GET").length;
+    await view.wrapper.get('[data-testid="settings-default-directory-recheck"]').trigger("click");
+    await flush(60);
+    expect(calls.filter((call) => call.path.endsWith("/default-working-directory") &&
+      call.method === "GET").length).toBe(before + 1);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+
+  it("失效后更换目录会按原修订设置，清除后回到未设置", async () => {
+    connect();
+    let projection = unavailable("1");
+    const writes: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      const body = init?.method === "POST" ? JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> : null;
+      if (path.endsWith("/attention/interventions")) return response({ items: [] });
+      if (path.endsWith("/working-directories/open")) return response({ command_id: body?.command_id,
+        committed_at: "2026-10-19T00:00:00Z", result: openResult() });
+      if (path.endsWith("/default-working-directory/clear") && body !== null) {
+        writes.push(body);
+        projection = unset("3");
+        return response({ command_id: body.command_id, committed_at: "2026-10-19T00:00:00Z",
+          result: { workspace_id: workspaceId, resource_id: null, revision: "3" } });
+      }
+      if (path.endsWith("/default-working-directory") && body !== null) {
+        writes.push(body);
+        projection = ready("2");
+        return response({ command_id: body.command_id, committed_at: "2026-10-19T00:00:00Z",
+          result: { workspace_id: workspaceId, resource_id: "res-1", revision: "2" } });
+      }
+      if (path.endsWith("/default-working-directory")) return response(projection);
+      throw new Error(`Unexpected ${init?.method ?? "GET"} ${path}`);
+    }));
+    const view = await mountWorkbench("/settings"); unmount = view.unmount;
+    await flush();
+    expect(valueText(view)).toContain("默认目录不可用");
+    await manual(view);
+    expect(writes[0]).toEqual({ command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      expected_revision: "1", resource_id: "res-1" });
+    expect(valueText(view)).toContain("有效");
+    expect(view.wrapper.get('[data-testid="settings-default-directory-path"]').text()).toBe(root);
+    await view.wrapper.get('[data-testid="settings-default-directory-clear"]').trigger("click");
+    await flush(60);
+    expect(writes[1]).toEqual({ command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      expected_revision: "2" });
+    expect(valueText(view)).toContain("未设置");
   });
 
   it("换 Workspace 后清空旧投影，迟到的旧响应不落进新范围", async () => {

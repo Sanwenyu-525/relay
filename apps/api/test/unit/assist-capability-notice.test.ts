@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatSessionCapabilities } from '../../src/application/assist-capability-notice.js';
+import { formatSelectedPluginFact, formatSessionCapabilities }
+  from '../../src/application/assist-capability-notice.js';
 
 /**
  * 会话能力事实块（2026-10-20 第二轮；2026-10-25 增补机器插件行）。
@@ -48,9 +49,10 @@ test('有目录但档位只读时，写入口的缺口指向档位而不是连�
   // 有 git_status 就不列 Git 缺口；缺的是检查命令与操作类能力。
   assert.doesNotMatch(gapLine, /查看 Git 状态与历史/u);
   assert.match(gapLine, /运行检查命令/u);
-  // 归属会话不重复第二份插件状态：插件行只属于未归属会话的说明。
-  assert.doesNotMatch(text, /电脑操控：可用/u);
-  assert.doesNotMatch(text, /电脑操控：工作区还没有登记/u);
+  // 归属会话同样要看到插件是否可用：绑定目录不等于机器操作不可用（2026-11-01）。
+  assert.match(text, /电脑操控：可用/u);
+  assert.match(text, /interaction="COMPUTER"/u);
+  assert.match(text, /浏览器操控：可用/u);
 });
 
 test('AUTO 档位有写工具时不报写入缺口', () => {
@@ -160,4 +162,41 @@ test('没有目录但有可借用连接时，浏览器操作也说可用：判�
   const text = formatSessionCapabilities({ hasProject: false, workingRoot: null, writeTier: null,
     tools: [], allowWrite: false, computerPlugin: false, browserPlugin: true });
   assert.match(text, /浏览器操控：可用/u);
+});
+
+test('绑定目录的会话只认本项目连接：借用事实说成不可用，不承诺跨项目执行', () => {
+  const text = formatSessionCapabilities({ hasProject: true, workingRoot: 'D:\\proj\\demo',
+    writeTier: 'ASK', tools: [...READ_TOOLS], allowWrite: false, computerPlugin: true,
+    browserPlugin: true, computerPluginBorrowedOnly: true, browserPluginBorrowedOnly: true });
+  assert.match(text, /本会话所属项目还没有可用的电脑操控连接/u);
+  assert.match(text, /不能跨项目借用/u);
+  assert.doesNotMatch(text, /电脑操控：可用/u);
+  assert.match(text, /浏览器操控：本会话所属项目还没有可用的浏览器操控连接/u);
+});
+
+test('选中 @电脑操控 是服务端事实：明确操作要求写候选，询问可行性仍不启动', () => {
+  const facts = { hasProject: true, workingRoot: 'D:\\proj\\demo', writeTier: 'ASK',
+    tools: [...READ_TOOLS], allowWrite: false, computerPlugin: true, browserPlugin: false,
+    computerRuntimeState: 'READY' };
+  const fact = formatSelectedPluginFact('@电脑操控 打开记事本', facts);
+  assert.ok(fact);
+  assert.match(fact, /明确选择了内置插件：电脑操控（@电脑操控）/u);
+  assert.match(fact, /interaction="COMPUTER"/u);
+  assert.match(fact, /不是授权/u);
+  assert.match(fact, /询问能力、可行性/u);
+  assert.match(fact, /以问号结尾/u);
+  assert.match(fact, /不要先读文件、搜索路径或列目录/u);
+  // 没有 mention 时不输出这段事实，避免把普通消息解释成插件选择。
+  assert.equal(formatSelectedPluginFact('打开记事本', facts), null);
+  // GitHub mention 没有 interaction 协议，不在这里伪装成可执行操作。
+  assert.equal(formatSelectedPluginFact('@GitHub 看看仓库', facts), null);
+});
+
+test('选中插件但本会话不可用时，事实块要求说明缺口而不是伪造候选', () => {
+  const facts = { hasProject: true, workingRoot: 'D:\\proj\\demo', writeTier: 'ASK',
+    tools: [...READ_TOOLS], allowWrite: false, computerPlugin: false, browserPlugin: false };
+  const fact = formatSelectedPluginFact('@电脑操控 打开记事本', facts);
+  assert.ok(fact);
+  assert.match(fact, /没有可用的电脑操控连接或运行时/u);
+  assert.match(fact, /不要伪造执行候选/u);
 });

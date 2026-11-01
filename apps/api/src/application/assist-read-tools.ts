@@ -72,6 +72,11 @@ export async function resolveSessionReadTools(repositories: Repositories,
            capability === 'FILE_WRITE') &&
           (typeof connection.config.root_path !== 'string' ||
             !targetMatches(connection.config.root_path, resource.canonical_root, capability))) continue;
+      // 机器读取（截图/窗口枚举、页面读取）不在会话轮次里提供（2026-11-01
+      // COMPUTER-PLUGIN-E2E）：真实会话里模型因此在聊天轮次调用 computer_get_windows，
+      // 拿到 RESOURCE_NOT_FOUND 后放弃执行候选。观察—操作—再观察属于 Run 的工具循环，
+      // 会话轮次只负责把明确操作整理成执行候选。
+      if (capability === 'COMPUTER_READ' || capability === 'BROWSER_READ') continue;
       capabilities.add(capability);
     }
   }

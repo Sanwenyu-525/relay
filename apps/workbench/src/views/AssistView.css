@@ -334,6 +334,8 @@
    都从同一条阅读起点开始，长会话照常由滚动与 followLatest 跟到最新。 */
 .agent-message-list { list-style: none; margin: 0 auto; padding: 0; display: grid; align-content: start; gap: var(--relay-space-2); width: 100%; max-width: var(--chat-measure); }
 .agent-message-slot { display: grid; gap: var(--relay-space-1); }
+/* ENG-OBS-02：历史补读入口固定在消息列顶端，宽度跟随阅读列，不另起一档栅格。 */
+.agent-history-more { justify-items: center; padding-block: var(--relay-space-1); }
 
 /* 日期分隔线：跨栏细线 + 居中日期；上下各留半档间距，不占整条空白。 */
 .agent-date-separator {
@@ -1053,11 +1055,12 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   align-items: center;
   gap: var(--relay-space-1);
   min-width: 0;
-  /* DEV-0110（2026-10-24 修复）：命中率文本首次出现时整组不得把工具行挤到换行、
-     把输入卡顶高——组改为可收缩，收缩由命中率文本自己的省略号承担（圆环恒不缩，
-     见 .agent-chat-context-meter 的 flex:none）。 */
+  /* DEV-0110（2026-10-24 修复）：命中率首次出现时整组不得把工具行挤到换行、
+     把输入卡顶高。2026-11-01 起命中率收成「小图标 + 数值」：它自身不收缩也不折行，
+     窄栏时先由同一组的模型名省略号让位（.model-selector-trigger 的 min-width:0）。 */
   flex: 0 1 auto;
   min-height: var(--relay-control-height-compact);
+  white-space: nowrap;
 }
 /* 工具行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
    上下文计量环与模型下拉收在发送键左边，取代 2026-10-19「行左端两枚事实」那一档。
@@ -1085,18 +1088,36 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
 .agent-chat-composer-tail > .model-selector { min-width: 0; }
 /* 模型 chip 显示当前模型名，长名在工具行里沿用触发器内部的省略号收尾。 */
 .agent-chat-composer-tail > .model-selector .model-selector-trigger { flex: 0 1 auto; min-width: 0; }
-.agent-chat-usage-text {
+/* 缓存命中率（2026-11-01 UI-COMPOSER）：从一行「缓存命中 57%」收成一枚小图标 + 57%。
+   为什么不用第二枚圆环：同一行右侧已经有一枚表示上下文占用的 24px 环，再来一枚 12px
+   环在余光里就是「同一指标的另一种尺寸」；换成语义明确的小图标后，两个读数各指一件事。
+   图标取 caption 档 12px 作光学尺寸，比工具行 20px 主图标轻一档；数值保留 meta 字号，
+   tabular-nums 让 57 → 58 的宽度不跳。读数未知时整项不渲染（只留圆环），不画成 0%。 */
+.agent-chat-cache-hit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
-  font-variant-numeric: tabular-nums;
   line-height: var(--relay-font-lineHeight-heading);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 12rem;
-  /* DEV-0110：被挤占时先截断的是这条文本（ellipsis），不是换工具行。 */
-  flex: 0 1 auto;
-  min-width: 0;
+}
+.agent-chat-cache-hit-icon {
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  flex: none;
+  stroke-width: var(--relay-control-icon-stroke);
+}
+.agent-chat-cache-hit-value { font-variant-numeric: tabular-nums; }
+/* 窄中栏不放这枚读数（2026-11-01）：工具行在 550px 左右时已经放满（「+」、档位、
+   模式、润色、合并芯片 + 右端一组 + 发送键），再塞 40px 只能让工具行多折一行、
+   输入卡当场增高——正是 DEV-0110 要防的退回。这里按工具行的实际宽度收起，
+   与旧的「命中率文本可省略」同一目的：读数让位，布局不让位。
+   信息没有消失：点开右侧上下文圆环，详情浮层仍列出「缓存命中率」。
+   宽回 37.5rem 以上时自动恢复。 */
+@container composer-actions (max-width: 37.5rem) {
+  .agent-chat-cache-hit { display: none; }
 }
 /* 圆环的点击外壳（2026-10-25 用户指令「上下文圆圈点击打开展示会话窗口的菜单」）：
    relative 只为锚定详情浮层；本身不占额外几何，圆环仍不参与收缩。 */

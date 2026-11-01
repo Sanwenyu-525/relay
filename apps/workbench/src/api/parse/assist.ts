@@ -1,7 +1,12 @@
 import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
 import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
-import type { RelayAssistGenerationPhase, RelayAssistGenerationProgress } from "../dtos/assist";
+import type { RelayActivityItem, RelayActivityRecovery, RelayActivityRecoveryDisposition,
+  RelayExecutionActivityMessage, RelayExecutionActivitySnapshot, RelayExecutionRequestSummary,
+  RelayMessagePhase, RelayRunSummary, RelayAssistTitleGeneration,
+  RelayAssistTitleSource } from "../dtos/assist";
+import type { RelayAssistGenerationPhase, RelayAssistGenerationProgress,
+  RelayAssistSessionTitleRegeneration } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelaySessionDelegation } from "../dtos/assist";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
@@ -259,6 +264,11 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
     projectId: nullableString(row, "project_id", "assist session"),
     taskId: nullableString(row, "task_id", "assist session"),
     title: string(row, "title", "assist session"), status: string(row, "status", "assist session"),
+    // 0157：标题来源。缺字段只来自 0157 之前的服务端——旧标题来源未知，按 LEGACY
+    // 保护原样；读到没见过的值则显式失败，不猜一个来源去决定能否覆盖。
+    titleSource: titleSourceOf(row.title_source),
+    titleGeneratedAt: optionalNullable(row, "title_generated_at", "assist session"),
+    titleGeneration: titleGenerationFrom(row.title_generation),
     revision: decimal(row, "revision", "assist session"),
     // 0090：pinned_at 缺失只来自该迁移之前的响应，那时还没有置顶这件事。
     pinnedAt: optionalNullable(row, "pinned_at", "assist session"),
@@ -301,6 +311,47 @@ export function assistSessionFrom(value: unknown): RelayAssistSession {
         source: workingDirectorySourceOf(directory) } };
     })() }) };
 }
+
+/**
+ * 运行态只认两个词，缺失或显式 null 都读成「没有在途」（2026-10-28）。
+ *
+ * 与 `workingDirectorySourceOf` 同一条口径：缺字段＝旧服务端，读成 null 最保守；
+ * 读到没见过的词则失败，不猜——猜成 RUNNING 会让左栏画出一个不存在的运行指示，
+ * 猜成 null 又会把真的在跑的那一条显示成静止。
+ */
+/**
+ * 标题来源（0157）。缺字段＝旧服务端，读成 LEGACY（受保护）；未知值显式失败——
+ * 猜成 PROVISIONAL 会让自动生成有机会覆盖来源不明的标题。
+ */
+function titleSourceOf(value: unknown): RelayAssistTitleSource {
+  if (value === undefined || value === null) return "LEGACY";
+  if (value === "LEGACY" || value === "PROVISIONAL" || value === "AI_GENERATED" ||
+    value === "USER_DEFINED") return value;
+  throw new Error(SESSION_FORMAT_ERROR);
+}
+
+/**
+ * 最近一次标题生成请求。它是展示投影：读不懂或缺失都读成 null，
+ * 不让一枚可选字段把整条会话从列表里打掉；等待与失败提示都只是附加信息。
+ */
+function titleGenerationFrom(value: unknown): RelayAssistTitleGeneration | null {
+  if (value === undefined || value === null) return null;
+  const row = object(value, "assist title generation");
+  const status = string(row, "status", "assist title generation");
+  const requestKind = string(row, "request_kind", "assist title generation");
+  if (status !== "PENDING" && status !== "CLAIMED" && status !== "COMPLETED" &&
+    status !== "FAILED" && status !== "SKIPPED") return null;
+  if (requestKind !== "AUTO" && requestKind !== "REGENERATE") return null;
+  const generator = row.generator;
+  return {
+    status, requestKind: requestKind as RelayAssistTitleGeneration["requestKind"],
+    generator: generator === "MODEL" || generator === "RULES" ? generator : null,
+    errorCode: nullableString(row, "error_code", "assist title generation"),
+    requestedAt: string(row, "requested_at", "assist title generation"),
+    settledAt: optionalNullable(row, "settled_at", "assist title generation"),
+  };
+}
+
 
 /**
  * 运行态只认两个词，缺失或显式 null 都读成「没有在途」（2026-10-28）。
@@ -732,6 +783,20 @@ export function assistSessionTitleFrom(value: unknown): RelayAssistSessionTitle 
     updatedAt: string(row, "updated_at", "assist session title") };
 }
 
+/**
+ * 重新生成标题的受理回执（0157）。只接受 PENDING：服务端若说出别的状态，
+ * 说明回执与「已受理、尚未生成」的契约不一致，不能当成成功。
+ */
+export function assistSessionTitleRegenerationFrom(value: unknown): RelayAssistSessionTitleRegeneration {
+  const row = object(value, "assist title regeneration");
+  const status = string(row, "status", "assist title regeneration");
+  if (status !== "PENDING") throw new Error("Assist 会话标题生成回执无法识别。");
+  return { sessionId: string(row, "session_id", "assist title regeneration"),
+    requestId: string(row, "request_id", "assist title regeneration"),
+    status, revision: decimal(row, "revision", "assist title regeneration"),
+    requestedAt: string(row, "requested_at", "assist title regeneration") };
+}
+
 export function assistSessionPinFrom(value: unknown): RelayAssistSessionPin {
   const row = object(value, "assist session pin");
   if (typeof row.pinned !== "boolean") throw new Error("Assist 会话置顶回执格式无效。");
@@ -925,6 +990,16 @@ export function conversationCandidateFileChangesFrom(
   });
 }
 
+export function conversationCandidateInteractionFrom(candidate: Record<string, unknown>):
+"COMPUTER" | "BROWSER" | null {
+  const raw = candidate.interaction;
+  if (raw === undefined || raw === null) return null;
+  if (raw !== "COMPUTER" && raw !== "BROWSER") {
+    throw new Error("conversation execution candidate.interaction 无法识别。");
+  }
+  return raw;
+}
+
 export function conversationExecutionFrom(value: unknown): RelayConversationExecution {
   const row = object(value, "conversation execution");
   const decision = string(row, "decision", "conversation execution");
@@ -945,6 +1020,7 @@ export function conversationExecutionFrom(value: unknown): RelayConversationExec
     objective: candidate === null ? null : optionalString(candidate, "objective"),
     check: candidate === null ? null : conversationCheckFrom(candidate),
     fileChanges: candidate === null ? [] : conversationCandidateFileChangesFrom(candidate),
+    interaction: candidate === null ? null : conversationCandidateInteractionFrom(candidate),
     autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
     runId: nullableString(row, "run_id", "conversation execution"),
@@ -967,6 +1043,7 @@ export function conversationExecutionSummaryFrom(value: unknown): RelayConversat
     objective: candidate === null ? null : optionalString(candidate, "objective"),
     check: candidate === null ? null : conversationCheckFrom(candidate),
     fileChanges: candidate === null ? [] : conversationCandidateFileChangesFrom(candidate),
+    interaction: candidate === null ? null : conversationCandidateInteractionFrom(candidate),
     questions: stringArray(row, "questions", "conversation execution"),
     autoStart: row.auto_start === true,
     taskId: nullableString(row, "task_id", "conversation execution"),
@@ -1214,4 +1291,185 @@ function contextUsageCallFrom(value: unknown): RelayContextUsageCall {
     settledAt: nullableString(row, "settled_at", "context usage call"),
     breakdown: row.breakdown === null || row.breakdown === undefined ? null
       : contextUsageBreakdownFrom(row.breakdown) };
+}
+
+const ACTIVITY_RECOVERY_DISPOSITIONS: readonly RelayActivityRecoveryDisposition[] = [
+  "NO_OPERATION", "OPERATION_MISSING", "ORIGIN_UNVERIFIED", "UNRESOLVED_OPEN",
+  "UNRESOLVED_UNKNOWN", "ORDERING_UNPROVEN", "CONFIRMED_NOT_EXECUTED",
+  "CONFIRMED_SUCCESS", "CONFIRMED_FAILURE",
+];
+
+function activityRecoveryFrom(value: unknown, label: string): RelayActivityRecovery | null {
+  if (value === null || value === undefined) return null;
+  const row = object(value, label);
+  const disposition = string(row, "disposition", label);
+  if (!(ACTIVITY_RECOVERY_DISPOSITIONS as readonly string[]).includes(disposition)) {
+    throw new RelayContractError(`${label} 的恢复结论无效。`);
+  }
+  const effect = string(row, "effect_state", label);
+  if (!["NOT_APPLICABLE", "SUCCEEDED", "PARTIAL", "FAILED", "UNKNOWN"].includes(effect)) {
+    throw new RelayContractError(`${label} 的效果状态无效。`);
+  }
+  const outcome = row.effective_outcome;
+  if (outcome !== null && outcome !== undefined &&
+    !["SUCCEEDED", "FAILED", "NOT_EXECUTED"].includes(String(outcome))) {
+    throw new RelayContractError(`${label} 的有效结果无效。`);
+  }
+  return {
+    disposition: disposition as RelayActivityRecoveryDisposition,
+    effectiveOutcome: outcome === null || outcome === undefined ? null
+      : outcome as RelayActivityRecovery["effectiveOutcome"],
+    operationRef: nullableString(row, "operation_ref", label),
+    operationStatus: nullableString(row, "operation_status", label),
+    invocationStatus: nullableString(row, "invocation_status", label),
+    effectState: effect as RelayActivityRecovery["effectState"],
+    reconcileRequired: boolean(row, "reconcile_required", label),
+    reconciled: boolean(row, "reconciled", label),
+    resolvedAt: nullableString(row, "resolved_at", label),
+    provenance: string(row, "provenance", label) as RelayActivityRecovery["provenance"],
+    reason: nullableString(row, "reason", label),
+  };
+}
+
+function activityFrom(value: unknown, label: string): RelayActivityItem {
+  const row = object(value, label);
+  const state = object(row.state, `${label} state`);
+  const order = object(row.order, `${label} order`);
+  const refs = object(row.refs, `${label} refs`);
+  const evidence = object(row.evidence, `${label} evidence`);
+  const wait = row.wait === null || row.wait === undefined ? null
+    : object(row.wait, `${label} wait`);
+  const error = row.error === null || row.error === undefined ? null
+    : object(row.error, `${label} error`);
+  const kind = string(row, "kind", label);
+  return {
+    activityId: string(row, "activity_id", label),
+    kind: kind as RelayActivityItem["kind"],
+    rawState: string(state, "raw", `${label} state`),
+    view: string(state, "view", `${label} state`),
+    tone: string(state, "tone", `${label} state`) as RelayActivityItem["tone"],
+    terminal: boolean(state, "terminal", `${label} state`),
+    startedAt: nullableString(row, "started_at", label),
+    endedAt: nullableString(row, "ended_at", label),
+    round: order.round === null || order.round === undefined ? null
+      : integer(order, "round", `${label} order`),
+    ordinal: order.ordinal === null || order.ordinal === undefined ? null
+      : integer(order, "ordinal", `${label} order`),
+    modelCallId: nullableString(refs, "model_call_id", `${label} refs`),
+    toolCallId: nullableString(refs, "tool_call_id", `${label} refs`),
+    operationId: nullableString(refs, "operation_id", `${label} refs`),
+    invocationId: nullableString(refs, "invocation_id", `${label} refs`),
+    waitCode: wait === null ? null : string(wait, "code", `${label} wait`),
+    errorCode: error === null ? null : string(error, "code", `${label} error`),
+    resultAvailable: boolean(evidence, "result_available", `${label} evidence`),
+    resultDigest: nullableString(evidence, "result_digest", `${label} evidence`),
+    failureKind: nullableString(evidence, "failure_kind", `${label} evidence`),
+    recovery: activityRecoveryFrom(row.recovery, `${label} recovery`),
+    ...(row.tool_name === undefined ? {} : { toolName: string(row, "tool_name", label) }),
+    ...(row.delegation_role === undefined ? {}
+      : { delegationRole: string(row, "delegation_role", label) as RelayActivityItem["delegationRole"] }),
+    ...(row.child_session_id === undefined ? {}
+      : { childSessionId: nullableString(row, "child_session_id", label) }),
+    ...(row.attempt_count === undefined ? {}
+      : { attemptCount: integer(row, "attempt_count", label) }),
+    ...(row.max_attempts === undefined ? {}
+      : { maxAttempts: integer(row, "max_attempts", label) }),
+    ...(row.result_summary === undefined ? {}
+      : { resultSummary: nullableString(row, "result_summary", label) }),
+  };
+}
+
+function messagePhaseFrom(value: unknown, label: string): RelayMessagePhase {
+  const row = object(value, label);
+  const wait = row.wait === null || row.wait === undefined ? null
+    : object(row.wait, `${label} wait`);
+  return {
+    raw: string(row, "raw", label),
+    view: string(row, "view", label),
+    tone: string(row, "tone", label) as RelayMessagePhase["tone"],
+    since: nullableString(row, "since", label),
+    detail: string(row, "detail", label),
+    waitCode: wait === null ? null : string(wait, "code", `${label} wait`),
+    waitDetail: wait === null ? null : nullableString(wait, "detail", `${label} wait`),
+  };
+}
+
+function executionRequestFrom(value: unknown, label: string): RelayExecutionRequestSummary | null {
+  if (value === null || value === undefined) return null;
+  const row = object(value, label);
+  return {
+    requestId: string(row, "request_id", label),
+    status: string(row, "status", label),
+    decision: string(row, "decision", label),
+    candidateStatus: string(row, "candidate_status", label),
+    taskId: nullableString(row, "task_id", label),
+    runId: nullableString(row, "run_id", label),
+    failureCode: nullableString(row, "failure_code", label),
+  };
+}
+
+function runSummaryFrom(value: unknown, label: string): RelayRunSummary | null {
+  if (value === null || value === undefined) return null;
+  const row = object(value, label);
+  return {
+    runId: string(row, "run_id", label),
+    status: string(row, "status", label),
+    currentStepKind: nullableString(row, "current_step_kind", label),
+    waitReason: nullableString(row, "wait_reason", label),
+    unresolvedCount: integer(row, "unresolved_count", label),
+    updatedAt: string(row, "updated_at", label),
+  };
+}
+
+function activityMessageFrom(value: unknown, label: string): RelayExecutionActivityMessage {
+  const row = object(value, label);
+  const phase = messagePhaseFrom(row.phase, `${label} phase`);
+  const counts = object(row.activity_counts, `${label} activity counts`);
+  const activities = row.activities === undefined ? undefined
+    : array(row, "activities", `${label} activities`).map((entry, index) =>
+      activityFrom(entry, `${label} activity ${index}`));
+  return {
+    messageId: string(row, "message_id", label),
+    seq: string(row, "seq", label),
+    role: string(row, "role", label) as RelayExecutionActivityMessage["role"],
+    status: string(row, "status", label),
+    intent: string(row, "intent", label),
+    createdAt: string(row, "created_at", label),
+    claimedAt: nullableString(row, "claimed_at", label),
+    settledAt: nullableString(row, "settled_at", label),
+    updatedAt: string(row, "updated_at", label),
+    cancelRequested: boolean(row, "cancel_requested", label),
+    sourceUserMessageId: nullableString(row, "source_user_message_id", label),
+    contentFingerprint: string(row, "content_fingerprint", label),
+    processEvidence: string(row, "process_evidence", label) as RelayExecutionActivityMessage["processEvidence"],
+    phase,
+    executionRequest: executionRequestFrom(row.execution_request, `${label} execution request`),
+    runSummary: runSummaryFrom(row.run_summary, `${label} run summary`),
+    ...(activities === undefined ? {} : { activities }),
+    activityCounts: {
+      modelCalls: integer(counts, "model_calls", `${label} activity counts`),
+      toolCalls: integer(counts, "tool_calls", `${label} activity counts`),
+      todoWrites: integer(counts, "todo_writes", `${label} activity counts`),
+      delegations: integer(counts, "delegations", `${label} activity counts`),
+    },
+    gaps: array(row, "gaps", `${label} gaps`).map((entry, index) => ({
+      code: string(object(entry, `${label} gap ${index}`), "code", `${label} gap ${index}`),
+    })),
+  };
+}
+
+export function assistExecutionActivityFrom(value: unknown): RelayExecutionActivitySnapshot {
+  const row = object(value, "assist execution activity");
+  const session = object(row.session, "assist execution activity session");
+  return {
+    schemaVersion: integer(row, "schema_version", "assist execution activity"),
+    sessionId: string(session, "id", "assist execution activity session"),
+    workspaceId: string(session, "workspace_id", "assist execution activity session"),
+    generatedAt: string(row, "generated_at", "assist execution activity"),
+    snapshotAt: string(row, "snapshot_at", "assist execution activity"),
+    messages: array(row, "messages", "assist execution activity").map((entry, index) =>
+      activityMessageFrom(entry, `assist execution activity message ${index}`)),
+    nextBeforeSeq: nullableString(row, "next_before_seq", "assist execution activity"),
+    hasMore: boolean(row, "has_more", "assist execution activity"),
+  };
 }

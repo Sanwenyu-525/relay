@@ -12,6 +12,8 @@ afterEach(() => {
   resetRelayConnectionForTest();
   vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers();
   localStorage.removeItem(DISPLAY_PREFERENCES_STORAGE_KEY);
+  localStorage.removeItem("relay.motion");
+  delete document.documentElement.dataset.motion;
 });
 
 describe("本设备显示偏好", () => {
@@ -22,10 +24,13 @@ describe("本设备显示偏好", () => {
     let mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-10-01");
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("星期四");
-    expect(mounted.wrapper.get("#settings-appearance").attributes("disabled")).toBeDefined();
+    // 外观是只读事实，不是伪装成可用的主题开关。
+    expect(mounted.wrapper.get('[data-testid="settings-appearance"]').text()).toContain("浅色");
+    expect(mounted.wrapper.get('[data-testid="settings-appearance"]').text()).toContain("当前仅支持浅色主题");
     await mounted.wrapper.get('[data-testid="settings-timezone"]').setValue("UTC");
+    // 默认工作台属于「工作台」页签：切组后草稿保留，保存各自提交。
+    await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
     await mounted.wrapper.get('[data-testid="settings-default-workbench"]').setValue("development");
-    await mounted.wrapper.get('[data-testid="settings-group-model"]').trigger("click");
     await mounted.wrapper.get('[data-testid="settings-group-basic"]').trigger("click");
     expect((mounted.wrapper.get('[data-testid="settings-timezone"]').element as HTMLSelectElement).value).toBe("UTC");
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-10-01");
@@ -34,12 +39,34 @@ describe("本设备显示偏好", () => {
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-09-30");
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("星期三");
     expect(mounted.wrapper.get(".desktop-titlebar__date").attributes("title")).toBe("界面时区：UTC");
-    expect(mounted.wrapper.get('[role="status"]').text()).toBe("设置已保存，仅在本设备生效。");
+    expect(mounted.wrapper.get('[data-testid="settings-save-result"]').text())
+      .toBe("显示偏好已保存，仅在本设备生效。");
+    // 保存显示偏好不应顺手把未选的默认工作台写成 general：它仍是 null。
+    expect((JSON.parse(localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY) ?? "{}") as
+      { defaultWorkbench: unknown }).defaultWorkbench).toBeNull();
+    await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
+    expect((mounted.wrapper.get('[data-testid="settings-default-workbench"]').element as HTMLSelectElement).value)
+      .toBe("development");
+    await mounted.wrapper.get('[data-testid="settings-default-workbench-save"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="settings-default-workbench-result"]').text())
+      .toBe("默认工作台已保存。");
     mounted.unmount(); unmount = null;
     mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect((mounted.wrapper.get('[data-testid="settings-timezone"]').element as HTMLSelectElement).value).toBe("UTC");
+    await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
     expect((mounted.wrapper.get('[data-testid="settings-default-workbench"]').element as HTMLSelectElement).value).toBe("development");
     expect(mounted.wrapper.get(".desktop-titlebar__date").text()).toContain("2026-09-30");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("动效偏好保存在本设备，保存后即时应用到运行期开关", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    expect((mounted.wrapper.get('[data-testid="settings-motion"]').element as HTMLSelectElement).value).toBe("system");
+    await mounted.wrapper.get('[data-testid="settings-motion"]').setValue("off");
+    await mounted.wrapper.get(".settings-basic form").trigger("submit");
+    expect(localStorage.getItem("relay.motion")).toBe("off");
+    expect(document.documentElement.dataset.motion).toBe("off");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -62,6 +89,7 @@ describe("本设备显示偏好", () => {
       timeZone: "Invalid/Zone", defaultWorkbench: "thesis" }));
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect((mounted.wrapper.get('[data-testid="settings-timezone"]').element as HTMLSelectElement).value).toBe("Asia/Shanghai");
+    await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
     expect((mounted.wrapper.get('[data-testid="settings-default-workbench"]').element as HTMLSelectElement).value).toBe("general");
   });
 });

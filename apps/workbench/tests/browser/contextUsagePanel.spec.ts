@@ -476,30 +476,16 @@ test("用量浮层：历史调用没有可靠冻结预算时写「预算未知�
   await expect(meter.locator(".agent-chat-context-meter-fill")).toHaveCount(0);
 });
 
-test("空白新会话（还没有会话）也能选三档：选择不写服务端，只落草稿作用域", async ({ page }) => {
+test("空白新会话（还没有会话）不显示上下文圆环，也没有档位入口", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
-  const writes: unknown[] = [];
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-budget`,
-    async (route) => {
-      writes.push(route.request().postData());
-      return fulfillJson(route, { code: "RESOURCE_NOT_FOUND" }, 404);
-    });
   await page.goto("/agent?new=1");
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  // 空白新会话的输入器没有 assist-composer 标记，圆形计量环在它自己的尾部。
-  await page.getByTestId("assist-context-meter").first().click();
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await expect(panel).toBeVisible();
-  await expect(panel.getByTestId("context-usage-tiers")).toBeVisible();
-  // 没有来源会话（?new=1 直接打开）：写清楚「从 256K 起」，不冒充继承。
-  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("没有来源会话");
-  await panel.getByTestId("context-budget-option-1048576").check();
-  await expect(panel.getByTestId("context-budget-option-1048576")).toBeChecked();
-  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("已选 1024K");
-  // 还没有会话：不发任何档位写请求。
-  expect(writes).toHaveLength(0);
+  // 2026-11-01 用户指令：会话欢迎页（首条输入器）不显示上下文圆环。
+  await expect(page.getByTestId("assist-first-draft")).toBeVisible();
+  await expect(page.getByTestId("assist-context-meter")).toHaveCount(0);
+  await expect(page.getByTestId("assist-context-meter-panel")).toHaveCount(0);
 });
 
 test("用量浮层：写成功后不回闪——投影还没刷新时选择器仍停在刚写的那一档", async ({ page }) => {

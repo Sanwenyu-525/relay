@@ -24,7 +24,10 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+// 与 playwright.config.ts 的 RELAY_E2E_PORT 同源：4173 被别的预览服务占用时，
+// CORS 头必须跟着实际端口走，否则浏览器会把伪造响应拦在跨域检查上。
+const port = process.env.RELAY_E2E_PORT ?? "4173";
+const origin = `http://127.0.0.1:${port}`;
 /** 足够把内容区撑过 30dvh 一档，用来证明「限高 + 内部滚动」而不是整块面板被推高。 */
 const resultCount = 12;
 
@@ -321,9 +324,11 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(snapshot.tailOrder, `${where} · 右端一组不是「计量环 → 模型」`).toEqual(
         ["agent-chat-usage", "model-selector"]);
       // 工具行的完整文档序（合并后一枚芯片在行尾，模式芯片仍在它左侧）。
+      // 2026-11-01 UI-COMPOSER：润色键收为纯图标，并多了一层只负责悬停提示的槽位；
+      // 键位本身仍在「模式芯片」与合并芯片之间，顺序不因这次收窄而改变。
       expect(snapshot.toolOrder, `${where} · 工具行文档序变了`).toEqual([
         "agent-chat-attach", "agent-chat-permission", "agent-chat-mode",
-        "agent-chat-tool composer-draft-polish", "agent-chat-options agent-chat-send-options"]);
+        "composer-draft-polish-slot", "agent-chat-options agent-chat-send-options"]);
       expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),
         `${where} · 合并芯片不是工具行最右一枚`).toBe(snapshot.toolOrder.length - 1);
       expect(snapshot.toolOrder.indexOf("agent-chat-options agent-chat-send-options"),

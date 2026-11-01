@@ -2,7 +2,9 @@ import { sql } from 'kysely';
 
 import type { AssistMessageAttachmentMetaRow, AssistMessageAttachmentRow,
   AssistMessagePreviewRow, AssistMessageRow, AssistMessageStatus, ModelCallRow,
-  AssistProposalRow, AssistSessionRow, AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
+  AssistProposalRow, AssistSessionRow, AssistSessionStatus,
+  AssistSessionTitleSource, AssistTitleGenerationSummary, ConversationMode }
+  from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
@@ -139,6 +141,50 @@ export interface AssistSessionListRow extends AssistSessionRow {
   readonly has_messages: boolean;
   readonly run_state: AssistSessionRunState | null;
   readonly list_state: AssistSessionListState | null;
+  /**
+   * 0157：最近一次标题生成请求（只用于显示「正在生成」与失败原因）。
+   *
+   * 它是读时派生的投影，不是会话列；没有请求的会话为 null。界面只据此决定要不要
+   * 等待标题更新，不能把它的状态当成标题是否可信的依据——标题本身仍读 `title`。
+   */
+  readonly title_generation: AssistTitleGenerationSummary | null;
+}
+
+/** 列表/单条读取共用的标题生成投影列。 */
+const TITLE_GENERATION_SELECT = sql`
+  tg.status as title_generation_status,
+  tg.request_kind as title_generation_kind,
+  tg.generator as title_generation_generator,
+  tg.error_code as title_generation_error_code,
+  tg.requested_at as title_generation_requested_at,
+  tg.settled_at as title_generation_settled_at
+`;
+
+const TITLE_GENERATION_JOIN = sql`
+  left join lateral (
+    select g.status, g.request_kind, g.generator, g.error_code, g.requested_at, g.settled_at
+    from assist_title_generations g
+    where g.session_id = s.id
+    order by g.requested_at desc, g.id desc
+    limit 1
+  ) tg on true
+`;
+
+interface TitleGenerationProjectionRow {
+  readonly title_generation_status: AssistTitleGenerationSummary['status'] | null;
+  readonly title_generation_kind: AssistTitleGenerationSummary['request_kind'] | null;
+  readonly title_generation_generator: AssistTitleGenerationSummary['generator'] | null;
+  readonly title_generation_error_code: string | null;
+  readonly title_generation_requested_at: Date | null;
+  readonly title_generation_settled_at: Date | null;
+}
+
+function titleGenerationOf(row: TitleGenerationProjectionRow): AssistTitleGenerationSummary | null {
+  if (row.title_generation_status === null || row.title_generation_kind === null ||
+      row.title_generation_requested_at === null) return null;
+  return { status: row.title_generation_status, request_kind: row.title_generation_kind,
+    generator: row.title_generation_generator, error_code: row.title_generation_error_code,
+    requested_at: row.title_generation_requested_at, settled_at: row.title_generation_settled_at };
 }
 
 /**
@@ -156,6 +202,8 @@ export class AssistRepository {
    */
   async insertSession(input: { id: string; workspaceId: string; projectId: string | null;
     taskId: string | null; title: string;
+    /** 0157：新会话的标题来源。缺省 LEGACY 只覆盖旧调用方，创建用例总是显式给值。 */
+    titleSource?: AssistSessionTitleSource | undefined;
     conversationMode?: ConversationMode | undefined;
     workingResourceId?: string;
     workingDirectorySource?: 'USER_PICKED' | 'WORKSPACE_DEFAULT';
@@ -181,11 +229,11 @@ export class AssistRepository {
       throw new Error('assist session parent and budget scope must be set together');
     }
     await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title,
-      conversation_mode, chat_mode, working_resource_id, working_directory_source,
+      title_source, conversation_mode, chat_mode, working_resource_id, working_directory_source,
       assistant_profile_id, assistant_profile_revision, assistant_role_snapshot,
       parent_session_id, budget_scope_session_id, context_budget_tokens)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.taskId},
-      ${input.title}, ${mode}, ${input.chatMode ?? 'CHAT'},
+      ${input.title}, ${input.titleSource ?? 'LEGACY'}, ${mode}, ${input.chatMode ?? 'CHAT'},
       ${input.workingResourceId ?? null}, ${input.workingDirectorySource ?? null},
       ${mode === 'ASSISTANT' ? input.assistantProfileId ?? null : null},
       ${mode === 'ASSISTANT' ? input.assistantProfileRevision ?? null : null},
@@ -274,7 +322,8 @@ export class AssistRepository {
     const task = taskId === undefined ? sql`` : sql`and s.task_id = ${taskId}`;
     const active = status === undefined || status === 'ALL' ? sql``
       : sql`and s.status = ${status}`;
-    const rows = await sql<AssistSessionStateFacts & AssistSessionRow>`select s.*, exists(
+    const rows = await sql<AssistSessionStateFacts & AssistSessionRow &
+      TitleGenerationProjectionRow>`select s.*, exists(
         select 1 from assist_messages m where m.session_id = s.id) as has_messages,
       case
         when exists (select 1 from assist_messages m
@@ -287,12 +336,15 @@ export class AssistRepository {
         where m.session_id = s.id and m.role = 'ASSISTANT'
         order by m.seq desc limit 1) as last_assistant_status,
       exists(select 1 from assist_proposals p
-        where p.session_id = s.id and p.status = 'PENDING') as waiting_approval
+        where p.session_id = s.id and p.status = 'PENDING') as waiting_approval,
+      ${TITLE_GENERATION_SELECT}
       from assist_sessions s
+      ${TITLE_GENERATION_JOIN}
       where s.workspace_id = ${workspaceId} ${project} ${task} ${active}
       order by s.pinned_at desc nulls last,
         coalesce(s.last_message_at, s.created_at) desc, s.id desc`.execute(this.db);
-    return rows.rows.map((row) => ({ ...row, list_state: deriveListState(row) }));
+    return rows.rows.map((row) => ({ ...row, list_state: deriveListState(row),
+      title_generation: titleGenerationOf(row) }));
   }
 
   /**
@@ -323,8 +375,9 @@ export class AssistRepository {
    */
   async sessionActivity(sessionId: string): Promise<{ readonly hasMessages: boolean;
     readonly runState: AssistSessionRunState | null;
-    readonly listState: AssistSessionListState | null } | undefined> {
-    const rows = await sql<AssistSessionStateFacts>`select s.status,
+    readonly listState: AssistSessionListState | null;
+    readonly titleGeneration: AssistTitleGenerationSummary | null } | undefined> {
+    const rows = await sql<AssistSessionStateFacts & TitleGenerationProjectionRow>`select s.status,
         exists(select 1 from assist_messages m
           where m.session_id = s.id) as has_messages,
         case
@@ -338,11 +391,15 @@ export class AssistRepository {
           where m.session_id = s.id and m.role = 'ASSISTANT'
           order by m.seq desc limit 1) as last_assistant_status,
         exists(select 1 from assist_proposals p
-          where p.session_id = s.id and p.status = 'PENDING') as waiting_approval
-      from assist_sessions s where s.id = ${sessionId}`.execute(this.db);
+          where p.session_id = s.id and p.status = 'PENDING') as waiting_approval,
+        ${TITLE_GENERATION_SELECT}
+      from assist_sessions s
+      ${TITLE_GENERATION_JOIN}
+      where s.id = ${sessionId}`.execute(this.db);
     const row = rows.rows[0];
     if (row === undefined) return undefined;
-    return { hasMessages: row.has_messages, runState: row.run_state, listState: deriveListState(row) };
+    return { hasMessages: row.has_messages, runState: row.run_state,
+      listState: deriveListState(row), titleGeneration: titleGenerationOf(row) };
   }
 
   /**
@@ -354,11 +411,15 @@ export class AssistRepository {
    * 「取消」，因为取消置顶与取消未读都是把那一项写回 NULL，不是删掉一列。
    */
   async applySessionControl(id: string, expectedRevision: bigint, patch: {
-    readonly title?: string; readonly pinnedAt?: Date | null; readonly status?: AssistSessionStatus;
+    readonly title?: string; readonly titleSource?: AssistSessionTitleSource;
+    readonly pinnedAt?: Date | null; readonly status?: AssistSessionStatus;
     readonly unreadAt?: Date | null;
   }): Promise<AssistSessionRow | undefined> {
     const sets = [sql`revision = revision + 1`, sql`updated_at = now()`];
     if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    // 0157：标题来源与标题同一条 CAS 写入。用户改名必须同时把它标成 USER_DEFINED，
+    // 否则一次并发中的自动生成仍会认为「标题还归系统」。
+    if (patch.titleSource !== undefined) sets.push(sql`title_source = ${patch.titleSource}`);
     if (patch.pinnedAt !== undefined) sets.push(sql`pinned_at = ${patch.pinnedAt}`);
     if (patch.status !== undefined) sets.push(sql`status = ${patch.status}`);
     if (patch.unreadAt !== undefined) sets.push(sql`unread_at = ${patch.unreadAt}`);
@@ -1017,10 +1078,40 @@ export class AssistRepository {
     const bounded = limit === undefined ? sql`` : sql`limit ${limit}`;
     // 0122：插话被消费的那一行是「没有回复」的占位行（CANCELLED + STEERED），
     // 它的用户原文与答案都在原在途回复里；列出来只会多一条读起来像「已取消」的回复。
+    // NULL 安全比较：被用户取消的行 error_code 为 NULL，`error_code = 'STEERED'` 会得到
+    // NULL，整个 NOT(...) 也随之变成 NULL，把普通的已取消回复从列表里排除掉。
     return (await sql<AssistMessageRow>`select * from assist_messages
       where session_id = ${sessionId}
-        and not (role = 'ASSISTANT' and status = 'CANCELLED' and error_code = 'STEERED')
+        and not (role = 'ASSISTANT' and status = 'CANCELLED'
+          and coalesce(error_code, '') = 'STEERED')
       order by seq ${bounded}`.execute(this.db)).rows;
+  }
+
+  /**
+   * 0156/ENG-OBS-02：最新消息优先的分页读取。
+   *
+   * 有 limit/beforeSeq 时按 seq 倒序取 N+1 条，多出的第 N+1 条只用于证明“还有更早的
+   * 可见消息”，然后丢弃；返回仍是升序，前端可直接追加。过滤条件与 listMessages
+   * 完全一致，因此 CANCELLED+STEERED 造成的 seq 间隙不会让 has_more 误判。
+   */
+  async listMessagesPage(sessionId: string, options: {
+    limit?: number; beforeSeq?: bigint;
+  } = {}): Promise<{ items: readonly AssistMessageRow[]; hasMore: boolean;
+    nextBeforeSeq: bigint | null }> {
+    if (options.limit === undefined && options.beforeSeq === undefined) {
+      return { items: await this.listMessages(sessionId), hasMore: false, nextBeforeSeq: null };
+    }
+    const limit = Math.max(1, Math.min(200, Math.trunc(options.limit ?? 200)));
+    const before = options.beforeSeq === undefined ? sql`` : sql`and seq < ${options.beforeSeq}`;
+    const rows = (await sql<AssistMessageRow>`select * from assist_messages
+      where session_id = ${sessionId}
+        and not (role = 'ASSISTANT' and status = 'CANCELLED'
+          and coalesce(error_code, '') = 'STEERED')
+        ${before}
+      order by seq desc limit ${limit + 1}`.execute(this.db)).rows;
+    const hasMore = rows.length > limit;
+    const page = (hasMore ? rows.slice(0, limit) : rows).reverse();
+    return { items: page, hasMore, nextBeforeSeq: page.length === 0 ? null : page[0]!.seq };
   }
 
   async listCompletedHistory(sessionId: string, throughSeq: bigint,
@@ -1073,7 +1164,8 @@ export class AssistRepository {
       order by s.id limit 1 for update of s skip locked`.execute(this.db)).rows[0];
     if (session === undefined) return undefined;
     return (await sql<AssistMessageRow>`update assist_messages set status = 'RUNNING',
-      worker_id = ${workerId}, steer_requested = false, updated_at = now()
+      worker_id = ${workerId}, steer_requested = false, claimed_at = now(), settled_at = null,
+      updated_at = now()
       where id = (select m.id from assist_messages m
         where m.session_id = ${session.id} and m.status = 'PENDING'
           and not exists (select 1 from assist_messages running
@@ -1084,7 +1176,8 @@ export class AssistRepository {
 
   async requeueForMemory(messageId: string, workerId: string): Promise<boolean> {
     return (await sql<{ id: string }>`update assist_messages set status = 'PENDING', worker_id = null,
-      updated_at = now() where id = ${messageId} and status = 'RUNNING'
+      claimed_at = null, settled_at = null, updated_at = now()
+      where id = ${messageId} and status = 'RUNNING'
         and worker_id = ${workerId} and cancel_requested = false returning id`.execute(this.db)).rows.length === 1;
   }
 
@@ -1097,7 +1190,8 @@ export class AssistRepository {
    */
   async claimPendingMessage(messageId: string, workerId: string): Promise<boolean> {
     return (await sql<{ id: string }>`update assist_messages set status = 'RUNNING',
-      worker_id = ${workerId}, steer_requested = false, updated_at = now()
+      worker_id = ${workerId}, steer_requested = false, claimed_at = now(), settled_at = null,
+      updated_at = now()
       where id = ${messageId} and status = 'PENDING' and role = 'ASSISTANT'
       returning id`.execute(this.db)).rows.length === 1;
   }
@@ -1108,6 +1202,7 @@ export class AssistRepository {
       update assist_messages set
         status = case when status = 'PENDING' then 'CANCELLED' else status end,
         cancel_requested = true,
+        settled_at = case when status = 'PENDING' then now() else settled_at end,
         updated_at = now()
       where id = ${id} and status in ('PENDING', 'RUNNING')
       returning status
@@ -1145,7 +1240,7 @@ export class AssistRepository {
     const rows = (await sql<{ id: string; content: string | null }>`
       with steered as (
         update assist_messages set status = 'CANCELLED', error_code = 'STEERED',
-          worker_id = null, updated_at = now()
+          worker_id = null, claimed_at = null, settled_at = now(), updated_at = now()
         where session_id = ${sessionId} and seq > ${afterSeq}
           and role = 'ASSISTANT' and status = 'PENDING' and steer_requested = true
           and cancel_requested = false
@@ -1183,7 +1278,7 @@ export class AssistRepository {
       usage_output_tokens = ${input.usageOutputTokens},
       usage_cache_read_tokens = ${input.usageCacheReadTokens ?? null},
       usage_cache_creation_tokens = ${input.usageCacheCreationTokens ?? null},
-      worker_id = ${input.workerId}, updated_at = now()${sources}${skillOutput}
+      worker_id = ${input.workerId}, settled_at = now(), updated_at = now()${sources}${skillOutput}
       where id = ${input.messageId} and status = 'RUNNING' and worker_id = ${input.workerId}
       returning session_id`.execute(this.db)).rows[0];
     if (settled !== undefined) {
@@ -1212,7 +1307,7 @@ export class AssistRepository {
   async failExpiredLeases(olderThan: Date): Promise<readonly string[]> {
     return (await sql<{ id: string }>`with failed as (
       update assist_messages set status = 'FAILED', error_code = 'LEASE_LOST',
-        worker_id = null, updated_at = now()
+        worker_id = null, settled_at = now(), updated_at = now()
       where (status = 'RUNNING' or (status = 'PENDING' and exists (
         select 1 from assist_delegation_attempts a
         where a.result_message_id = assist_messages.id and a.status = 'RUNNING')))

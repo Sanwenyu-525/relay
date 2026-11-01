@@ -29,23 +29,26 @@ const WRITE_DELETE_LINE = '删除只在本次任务明确要求删除时提出�
 const WRITE_NO_BYPASS_LINE = '不得用清空内容、覆盖写、改名或新建同名文件绕过删除确认；目录范围之外的文件不在授权内。';
 const WRITE_RECEIPT_LINE = '只有拿到工具回执才可以说已经修改或删除；等待确认、被拒绝或失败时如实说明。';
 const READ_ONLY_LINE = '工具只读，不修改任何文件，也不创建 Task/Run；不要用它们宣布业务完成。';
+const OPERATION_LINE = '本次工具清单包含桌面或浏览器操作：这些工具会真实改变本机或页面状态，不是只读观察。';
+const OPERATION_FILE_LINE = '文件类工具只读，不修改任何文件，也不创建 Task/Run；桌面/浏览器操作按上面的纪律执行。';
 const NO_TOOL_LINE = '本次只输出候选正文，不执行文件修改、不创建 Task/Run，也不宣布业务完成。';
 
 function occurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
 }
 
-/** 与统一入口相同的 DRAFT 选择规则：空清单走无工具分支，否则按是否含写工具分流。 */
+/** 与统一入口相同的 DRAFT 选择规则：空清单走无工具分支，否则按写 / 操作 / 只读分流。 */
 function draftSystemFor(capability: RuntimeDraftCapabilityInput): string {
   return capability.toolsEnabled
-    ? draftToolSystemPrompt(capability.canWrite)
+    ? draftToolSystemPrompt(capability.canWrite, capability.canOperate === true)
     : draftNoToolSystemPrompt();
 }
 
 test('DRAFT branches follow the actual tool list and never mix read with write', () => {
   const cases: readonly {
     readonly capability: RuntimeDraftCapabilityInput;
-    readonly expectedRouteId: 'DRAFT_NO_TOOLS' | 'DRAFT_READ_ONLY_TOOLS' | 'DRAFT_WRITE_TOOLS';
+    readonly expectedRouteId: 'DRAFT_NO_TOOLS' | 'DRAFT_READ_ONLY_TOOLS' | 'DRAFT_OPERATION_TOOLS' |
+      'DRAFT_WRITE_TOOLS';
     readonly expected: readonly string[];
     readonly forbidden: readonly string[];
   }[] = [
@@ -55,7 +58,13 @@ test('DRAFT branches follow the actual tool list and never mix read with write',
     { capability: { toolsEnabled: false, canWrite: true }, expectedRouteId: 'DRAFT_NO_TOOLS',
       expected: [NO_TOOL_LINE], forbidden: [READ_ONLY_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
     { capability: { toolsEnabled: true, canWrite: false }, expectedRouteId: 'DRAFT_READ_ONLY_TOOLS',
-      expected: [READ_ONLY_LINE], forbidden: [NO_TOOL_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
+      expected: [READ_ONLY_LINE], forbidden: [NO_TOOL_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE,
+        OPERATION_LINE] },
+    { capability: { toolsEnabled: true, canWrite: false, canOperate: true },
+      expectedRouteId: 'DRAFT_OPERATION_TOOLS',
+      expected: [OPERATION_LINE, OPERATION_FILE_LINE,
+        '输入类动作可能等待人工批准；等待期间如实说明，不要重复提交同一动作'],
+      forbidden: [NO_TOOL_LINE, READ_ONLY_LINE, WRITE_ONLY_LINE, WRITE_DELETE_LINE] },
     { capability: { toolsEnabled: true, canWrite: true }, expectedRouteId: 'DRAFT_WRITE_TOOLS',
       expected: [WRITE_ONLY_LINE, WRITE_BASELINE_LINE, WRITE_CREATE_LINE, WRITE_DELETE_LINE,
         WRITE_NO_BYPASS_LINE, WRITE_RECEIPT_LINE],

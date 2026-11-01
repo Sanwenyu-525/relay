@@ -217,8 +217,14 @@ describe("输入框自动分点与手动润色", () => {
       expect(draftOf(view)).toBe(OUTLINE_TEXT);
 
       await view.wrapper.get('[data-testid="composer-draft-polish"]').trigger("click");
-      // 生成期间按钮显示「润色中…」，且分点撤销入口已结束（两个撤销不互相覆盖）。
-      expect(view.wrapper.get('[data-testid="composer-draft-polish"]').text()).toBe("润色中…");
+      // 生成期间键位只剩旋转环：无常驻文字、无障碍名称为「正在润色」、仍 disabled。
+      const busy = view.wrapper.get('[data-testid="composer-draft-polish"]');
+      expect(busy.text()).toBe("");
+      expect(busy.attributes("aria-label")).toBe("正在润色");
+      expect(busy.attributes("data-state")).toBe("busy");
+      expect(busy.attributes("disabled")).toBeDefined();
+      expect(busy.element!.querySelector(".composer-draft-polish-spinner")).not.toBeNull();
+      // 开始润色结束了分点撤销入口（两个撤销不互相覆盖）。
       expect(view.wrapper.find('[data-testid="composer-draft-undo-outline"]').exists()).toBe(false);
       polishPending[0]!(polishOk(POLISHED));
       await settle(20);
@@ -226,7 +232,11 @@ describe("输入框自动分点与手动润色", () => {
       expect(calls.filter((call) => call.operation === "POLISH")).toHaveLength(1);
 
       const undo = view.wrapper.get('[data-testid="composer-draft-undo-polish"]');
-      expect(undo.text()).toBe("撤销润色");
+      // 已润色：同一键位换撤销箭头，文字为空，动作名在 aria-label 里。
+      expect(undo.text()).toBe("");
+      expect(undo.attributes("aria-label")).toBe("撤销润色");
+      expect(undo.attributes("data-state")).toBe("applied");
+      expect(undo.element!.querySelector("svg")).not.toBeNull();
       // 后果提示可见，并且撤销键用 aria-describedby 指向一段可读屏的文字（读屏可获取）。
       const note = view.wrapper.get('[data-testid="composer-draft-polish-note"]');
       expect(note.text()).toContain("撤销将恢复润色前原话");
@@ -247,6 +257,58 @@ describe("输入框自动分点与手动润色", () => {
       expect(calls.filter((call) => call.operation === "POLISH")).toHaveLength(1);
       expect(view.wrapper.find('[data-testid="composer-draft-undo-polish"]').exists()).toBe(false);
       expect(view.wrapper.get('[data-testid="composer-draft-polish"]').exists()).toBe(true);
+    } finally { view.unmount(); }
+  });
+
+  it("纯图标润色键：空闲态、悬停/聚焦提示与禁用原因", async () => {
+    stubAssist({ outline: () => outlineOk(OUTLINE_TEXT), polish: () => polishOk(POLISHED) });
+    const view = await mountReact(<Harness />);
+    try {
+      const hover = async (): Promise<string | null> => {
+        await act(async () => {
+          view.wrapper.get(".composer-draft-polish-slot").element!
+            .dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+        });
+        await settle(0);
+        return document.querySelector('[data-testid="composer-draft-polish-tooltip"]')?.textContent ?? null;
+      };
+
+      // 空闲、空草稿：键位仍是无常驻文字的图标，提示说明点亮条件。
+      const idle = view.wrapper.get('[data-testid="composer-draft-polish"]');
+      expect(idle.text()).toBe("");
+      expect(idle.attributes("aria-label")).toBe("润色输入内容");
+      expect(idle.attributes("data-state")).toBe("idle");
+      expect(idle.attributes("disabled")).toBeDefined();
+      expect(await hover()).toBe("输入内容后可润色");
+
+      await type(view, DRAFT);
+      await settle();
+      expect(idle.attributes("disabled")).toBeUndefined();
+      expect(await hover()).toBe("润色输入内容");
+
+      // 键盘聚焦走同一条提示：按钮本身可聚焦，提示由槽位的 focus 冒泡收到。
+      await act(async () => { (idle.element as HTMLButtonElement).focus(); });
+      await settle(0);
+      expect(document.querySelector('[data-testid="composer-draft-polish-tooltip"]')?.textContent)
+        .toBe("润色输入内容");
+
+      await view.wrapper.get('[data-testid="composer-draft-polish"]').trigger("click");
+      await settle(30);
+      expect(await hover()).toBe("撤销润色");
+    } finally { view.unmount(); }
+  });
+
+  it("禁用输入时润色键的提示说明真实原因，而不是笼统地说不可用", async () => {
+    stubAssist({ outline: () => outlineOk(OUTLINE_TEXT) });
+    const view = await mountReact(<Harness disabled />);
+    try {
+      await act(async () => {
+        view.wrapper.get(".composer-draft-polish-slot").element!
+          .dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+      });
+      await settle(0);
+      expect(document.querySelector('[data-testid="composer-draft-polish-tooltip"]')?.textContent)
+        .toBe("当前输入不可编辑");
     } finally { view.unmount(); }
   });
 

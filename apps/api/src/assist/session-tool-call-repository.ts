@@ -28,12 +28,13 @@ export interface SessionToolCallRow {
   readonly rejection_detail: string | null;
   readonly result_digest: string | null;
   readonly requested_at: Date;
+  readonly bound_at: Date | null;
   readonly settled_at: Date | null;
 }
 
 const COLUMNS = sql.raw('id, session_id, message_id, round, ordinal, tool_name, arguments, ' +
   'arguments_sha256, provider_tool_call_id, operation_id, status, rejection_reason, ' +
-  'rejection_detail, result_digest, requested_at, settled_at');
+  'rejection_detail, result_digest, requested_at, bound_at, settled_at');
 
 export class SessionToolCallRepository {
   constructor(private readonly db: DbExecutor) {}
@@ -59,6 +60,14 @@ export class SessionToolCallRepository {
       where message_id = ${messageId} order by round, ordinal`.execute(this.db)).rows;
   }
 
+  /** 批量读取；投影按页一次取齐，避免逐消息 N+1。 */
+  async listByMessages(messageIds: readonly string[]): Promise<readonly SessionToolCallRow[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
+      where message_id in (${sql.join(messageIds, sql`, `)})
+      order by message_id, round, ordinal`.execute(this.db)).rows;
+  }
+
   async listBySession(sessionId: string): Promise<readonly SessionToolCallRow[]> {
     return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
       where session_id = ${sessionId} order by requested_at, id`.execute(this.db)).rows;
@@ -74,7 +83,8 @@ export class SessionToolCallRepository {
    */
   async attachOperation(id: string, operationId: string,
     origin: 'ASSISTANT_READ' | 'AGENT_SESSION_READ' | 'AGENT_SESSION_WRITE'): Promise<boolean> {
-    return (await sql<{ id: string }>`update session_tool_calls set operation_id = ${operationId}
+    return (await sql<{ id: string }>`update session_tool_calls set operation_id = ${operationId},
+      bound_at = now()
       where id = ${id} and operation_id is null
         and exists (select 1 from logical_operations o where o.id = ${operationId}
           and o.origin = ${origin})
@@ -124,7 +134,8 @@ export class SessionToolCallRepository {
    * 不改成成功也不清空引用——UNKNOWN 先核对，不盲重试。
    */
   async markUnknown(id: string): Promise<boolean> {
-    return (await sql<{ id: string }>`update session_tool_calls set status = 'UNKNOWN'
+    return (await sql<{ id: string }>`update session_tool_calls set status = 'UNKNOWN',
+      settled_at = now()
       where id = ${id} and status = 'REQUESTED' returning id`.execute(this.db)).rows.length === 1;
   }
 

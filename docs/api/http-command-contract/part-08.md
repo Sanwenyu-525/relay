@@ -348,9 +348,10 @@ Breaking Change: **Yes（语义）**——上下文档位从「工作区默认�
 **继承（`POST /assist-sessions` 新增可选 `source_session_id` 与 `context_budget_tokens`）**
 
 - 新会话的档位在建会话事务里写一次，优先级从高到低：
-  1. `context_budget_tokens`——用户在**首条消息之前**明确选的档位（同样只接受三个合法值，
-     非法值 422）。它进命令体参与载荷 hash，因此「创建响应丢失后按原命令重试」写进去的
-     仍是同一档，第一个模型调用就按它冻结预算；
+  1. `context_budget_tokens`——调用方显式指定的档位（同样只接受三个合法值，非法值 422）。
+     它进命令体参与载荷 hash，因此「创建响应丢失后按原命令重试」写进去的仍是同一档，
+     第一个模型调用就按它冻结预算。2026-11-01 起主界面首条输入器不再提供该选择，
+     字段保留给其他调用方；
   2. `source_session_id` 指向的**来源会话**的 `context_budget_tokens`（来源同工作区且存在时）；
   3. 缺省 `262144`。
   任何一级都不读工作区默认（那会让「会话独立」又变回全局配置）。
@@ -562,3 +563,59 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
 Breaking Change: **No**——纯追加可选只读字段；旧客户端忽略即可，命令、表、权限、结算与恢复语义均不变。
 
 **证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` 追加的流式观测用例 **1/1**（`run-integration.ps1 -TestFile assist -TestNamePattern "stream observation times"`，临时集群 PASSED 并清理）核对首流、首文本、首预览、结算四枚时间落库且辅助外呼不混入；组件 `generationStage` **8/8**、`assistStage` **3/3**（阶段文案、诊断、PENDING、草稿接管、取消）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、诊断展开、窄窗无溢出、减少动效三点静止）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。
+
+### 10.132 会话标题的来源与系统命名（2026-11-01 源码实现，迁移 0157）
+
+会话标题在既有契约里只有一个字符串；本批补上**它从哪来**、**谁有权改**与**一次自动命名请求的持久身份**。标题仍是 Assist 模块的事实：模型只给出 `{category, subject}`，由服务端校验、拼接 `分类-任务名` 并 CAS 落库，客户端不拼标题、也不决定能否覆盖。
+
+**建会话命令追加可选字段。**
+```json
+{
+  "command_id": "…", "project_id": "… | null", "task_id": "… | null",
+  "title": "首条消息截断或显式标题",
+  "title_source": "PROVISIONAL | USER_DEFINED"
+}
+```
+- 不传 `title_source` 按 `USER_DEFINED`：既有客户端/测试显式给的名字默认受保护，这不是行为破坏。
+- 传 `PROVISIONAL` 表示「这是系统占位」：未关联项目/任务的讨论由服务端把提交文本规范化为 `分类-任务名`（分类枚举固定为 UI／功能／修复／架构／测试／调研／文档／其他）；关联了项目/任务的讨论保留既有 `关于<目标>`，等首次语义生成换成正式结构化标题。
+- `title_source` 进命令体参与载荷摘要：同一 `command_id` 换来源重放按异载荷拒绝。
+
+**会话 DTO 追加只读字段。**
+```json
+{
+  "title_source": "LEGACY | PROVISIONAL | AI_GENERATED | USER_DEFINED",
+  "title_generated_at": "… | null",
+  "title_generation": {
+    "status": "PENDING | CLAIMED | COMPLETED | FAILED | SKIPPED",
+    "request_kind": "AUTO | REGENERATE",
+    "generator": "MODEL | RULES | null",
+    "error_code": "… | null",
+    "requested_at": "…", "settled_at": "… | null"
+  } | null
+}
+```
+`title_source` 是会话行自身的事实：`LEGACY` 旧行（迁移只打标不改名）、`PROVISIONAL` 系统临时、`AI_GENERATED` 语义生成成功、`USER_DEFINED` 用户手动。`title_generation` 是读时派生投影，只用于显示「正在生成」与失败原因，不作为标题可信度依据。
+
+**显式重新生成的命令端点。**
+```http
+POST /api/v1/workspaces/{workspace_id}/assist-sessions/{id}/title/generate
+{ "command_id": "…", "expected_revision": "…" }
+→ 200 { "session_id": "…", "request_id": "…", "status": "PENDING",
+        "revision": "…", "requested_at": "…" }
+```
+- 命令只**受理**：写一条 `assist_title_generations` 请求并返回其身份，不调用模型；`status='PENDING'` 不代表标题已变化。
+- 唯一允许替换 `USER_DEFINED` / `LEGACY` 标题的入口，因为它表达用户本人当前的选择；自动请求永远不越过这个边界。
+- 仍走既有 `command_id` 幂等与 `expected_revision` CAS：同命令重放返回同一条请求；修订落后 409。
+- 归档会话按「先重开」拒绝（`INVALID_TRANSITION`），与改名同一条边界；没有可用消息内容时同样拒绝。
+
+**自动生成生命周期。**
+1. 助手回复以 `COMPLETED` 结算后，生成循环**只入队**一条 AUTO 请求（`request_kind='AUTO'`），不调用模型、不改变消息或回复。
+2. 常驻后台 tick（`background-work-scheduler.ts` 的 `SESSION_TITLE` 阶段）领取请求，装配受限输入（首条有效用户消息、最近用户消息、关联任务/项目标题、刚结算的回复摘要；不读工具日志、文件正文、附件与凭据），调用一次辅助模型，输出必须是严格 JSON 信封。
+3. 服务端校验分类与任务名（长度、中文、无 Markdown/Emoji/执行状态/模糊话术），再凭请求时冻结的 `base_title`/`base_title_source` 在事务内 CAS 落标题；标题或来源已被用户改动时请求停在 `SKIPPED`。
+4. 模型未配置、超时、返回非法 JSON 或非法分类时，AUTO 用规则引擎给出确定性结构化临时标题（`generator='RULES'`，来源仍 `PROVISIONAL`）；显式重新生成如实 `FAILED` 并保留原标题。
+5. 同一会话 10 分钟内最多一次 AUTO 请求；已有正式标题后，只有用户消息出现明确换任务标记才再次入队。无法可靠判断目标变化时保持原标题。
+6. 辅助外呼按 `purpose='TITLE'` 进 `model_calls` 与预算闸门，但不抢「最近一次调用」读数，也不计入本轮 PRIMARY 用量。
+
+Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调用方保留原行为）。语义变化：工作台提交占位标题时传入 `title_source='PROVISIONAL'`，其未关联目标的临时标题由服务端结构化；旧会话一律 `LEGACY`，迁移不批量改名。
+
+**证据。** 单元 `session-title` **9/9**（分类、临时标题、任务名检查、长输入收口、模型信封、恶意结构拒绝）；真实 PG/HTTP `assist-session-title.integration.test` **8/8**（结构化临时标题、模型落库与 TITLE 不抢 PRIMARY 读数、手动改名后迟到结果 SKIPPED、显式重新生成的幂等与 CAS、无模型/非法输出降级、LEGACY 保护与归档拒绝、无模型重生成失败保留原标题、删除级联）；组件 `sessionRowMenu` **39/39**；真实 Chromium `sessionTitleRegeneration` **3/3**。规则归[ADR-040](../../decisions/ADR-040-session-title-ownership.md)、[工作台 §28.3](../../frontend/workbench-design/part-09.md#283-会话标题的系统命名与重新生成2026-11-01)、[生成生命周期](../../development/agent-generation-lifecycle.md#会话标题的后台生成接缝2026-11-01)。

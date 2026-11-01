@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
@@ -99,8 +99,76 @@ export async function renameAssistSession(db: DbExecutor,
     execute: async (repositories) => {
       const session = await requireEditableSession(repositories, input.workspaceId, input.sessionId,
         expectedRevision, '改名');
-      const updated = await repositories.assist.applySessionControl(session.id, expectedRevision, { title });
+      /*
+       * 0157：手动改名同时把来源标成 USER_DEFINED。
+       *
+       * 标题与来源必须在同一条 CAS 里写：只改标题的话，一次已经发出的自动生成仍会
+       * 认为「标题还归系统」，迟到结果就会覆盖用户刚输入的名字。
+       */
+      const updated = await repositories.assist.applySessionControl(session.id, expectedRevision,
+        { title, titleSource: 'USER_DEFINED' });
       return titleResult(appliedSession(session, expectedRevision, updated));
+    },
+  });
+}
+
+export type AssistSessionTitleRegenerationResult = {
+  readonly session_id: string;
+  /** 这次请求的持久身份：回执里给它，界面据此核对是否已开始而不是凭空等待。 */
+  readonly request_id: string;
+  readonly status: 'PENDING';
+  readonly revision: string;
+  readonly requested_at: string;
+};
+
+export interface RegenerateAssistSessionTitleInput {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly expectedRevision: string;
+}
+
+/**
+ * 显式重新生成标题（0157）。
+ *
+ * 这是**唯一**允许替换 USER_DEFINED / LEGACY 标题的入口，因为它表达用户本人当前的选择；
+ * 自动请求永远不会越过这个边界。命令本身不调用模型，只写一条持久请求并返回它的身份，
+ * 真正的生成由常驻后台推进；因此回执只代表「已受理」，不代表标题已经变化。
+ *
+ * 用既有 command_id 幂等与 expected_revision CAS：同一命令重放返回同一条请求；
+ * 修订落后时重读后由人重新决定，不静默覆盖。
+ */
+export async function regenerateAssistSessionTitle(db: DbExecutor,
+  input: RegenerateAssistSessionTitleInput): Promise<CommandOutcome<AssistSessionTitleRegenerationResult>> {
+  const expectedRevision = requireRevision(input.expectedRevision, 'expected_revision');
+  return runIdempotentCommand<AssistSessionTitleRegenerationResult>(db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'RegenerateAssistSessionTitle',
+    target: { session_id: input.sessionId },
+    body: { expected_revision: expectedRevision.toString() },
+    execute: async (repositories) => {
+      const session = await requireEditableSession(repositories, input.workspaceId, input.sessionId,
+        expectedRevision, '重新生成标题');
+      const messages = await repositories.titleGenerations.readMessages({
+        sessionId: session.id, anchorMessageId: null });
+      const anchor = [...messages.recentMessages].reverse().find((message) =>
+        message.content !== null && message.content.trim() !== '');
+      if (anchor === undefined) {
+        throw invalidTransition('这段讨论还没有可用于命名标题的内容。', { sessionId: session.id });
+      }
+      const now = new Date();
+      const job = await repositories.titleGenerations.enqueue({
+        id: randomUUID(), sessionId: session.id, requestKind: 'REGENERATE',
+        // 显式请求没有「同一段输入」的去重意义：每次都是用户重新按下的一次决定。
+        inputDigest: createHash('sha256').update(`regen|${session.id}|${randomUUID()}`).digest('hex'),
+        anchorMessageId: anchor.id, autoCooldownMs: 0, now,
+      });
+      if (job === undefined) {
+        throw invalidTransition('这条会话当前不能重新生成标题。', { sessionId: session.id });
+      }
+      return { session_id: session.id, request_id: job.id, status: 'PENDING',
+        revision: toDecimalString(session.revision), requested_at: job.requested_at.toISOString() };
     },
   });
 }

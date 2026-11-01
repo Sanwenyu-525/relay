@@ -1,133 +1,606 @@
-.settings-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
-.settings-card { margin-top: var(--relay-space-6); }
-.settings-layout { display: grid; gap: var(--relay-space-6); }
-.settings-content { min-width: 0; }
-.settings-navigation { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); align-content: start; }
-.settings-navigation button { position: relative; padding: var(--relay-space-3); min-height: var(--relay-control-target-minimum); text-align: left; background: transparent; border: 0; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-control); }
-.settings-navigation button:hover, .settings-navigation button:focus-visible { background: var(--relay-color-selection-hover); }
-.settings-navigation button[aria-selected="true"] { background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); font-weight: var(--relay-font-weight-medium); }
-.settings-navigation button[aria-selected="true"]::before { content: ""; position: absolute; left: var(--relay-space-3); right: var(--relay-space-3); bottom: 0; height: var(--relay-space-1); border-radius: var(--relay-radius-control); background: var(--relay-color-action-primary); }
-.settings-content > .settings-card:first-child { margin-top: 0; }
-.settings-basic-intro { margin-top: var(--relay-space-2); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-reading); }
-.settings-basic form { margin-top: var(--relay-space-4); }
-.settings-field { padding: var(--relay-space-4) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.settings-field:first-child { padding-top: 0; border-top: 0; }
-.settings-field label { display: block; margin-bottom: var(--relay-space-3); font-weight: var(--relay-font-weight-medium); }
-.settings-field select { width: 100%; max-width: var(--relay-layout-reading-maxWidth); min-height: var(--relay-control-height); padding: 0 var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); color: var(--relay-color-text-primary); font: inherit; }
-.settings-field select:disabled { color: var(--relay-color-disabled-text); background: var(--relay-color-disabled-bg); cursor: not-allowed; }
-.settings-field .helper-text { margin-top: var(--relay-space-3); }
-.settings-save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin-top: var(--relay-space-6); }
-.settings-save-actions .primary-button { min-width: 10rem; }
-.settings-save-result { color: var(--relay-color-action-text); font-size: var(--relay-font-size-meta); }
-/* 保存失败的错误信息独占一行，与按钮和表单左缘对齐，不与按钮挤在同一行。 */
-.settings-save-actions .action-error { flex-basis: 100%; margin: 0; }
-.settings-device-note { margin-top: var(--relay-space-3); }
-.settings-explanation { padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.settings-explanation p { margin-top: var(--relay-space-4); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); }
-.settings-explanation { margin-top: var(--relay-space-6); }
-.settings-explanation > summary { cursor: pointer; color: var(--relay-color-text-secondary); }
-.settings-explanation p + p { margin-top: var(--relay-space-3); }
-/* 宽视口两列 label 网格与全局 .field--grid 同构：设置页的 .settings-field 是
-   label+控件的自有结构（不是 .field/.field-label），换用全局变体需 SettingsView.tsx
-   重排标记（不在本轮所有权内），故先保留本地实现并保持 token 取值一致。 */
+/* 设置页：四组信息架构 + 本设备 / 工作区 / 目录三类配置的明确分区。
+   只使用 --relay-* 设计 Token；页面不参与 V5.28 原型皮肤层（.pv-page），
+   避免该层的硬编码色值与字号进入设置。 */
+
+.settings-page {
+  width: 100%;
+  max-width: var(--relay-layout-content-maxWidth);
+  margin: 0 auto;
+  padding: var(--relay-layout-main-padding);
+}
+
+.settings-layout {
+  display: grid;
+  gap: var(--relay-space-6);
+  margin-top: var(--relay-space-6);
+  align-items: start;
+}
+
 @media (min-width: 64rem) {
-  .settings-field { display: grid; grid-template-columns: minmax(0, 0.65fr) minmax(0, 1fr); gap: var(--relay-space-2) var(--relay-space-4); align-items: center; }
-  .settings-field label { margin: 0; }
-  .settings-field .helper-text { grid-column: 2; margin-top: 0; }
-}
-.settings-definition-list { margin: var(--relay-space-4) 0 0; display: grid; gap: var(--relay-space-3); }
-.settings-definition-list > div { display: grid; grid-template-columns: 8rem 1fr; gap: var(--relay-space-3); align-items: baseline; }
-.settings-definition-list dt { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.settings-definition-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.settings-links { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; display: grid; gap: var(--relay-space-2); }
-.settings-links .inline-link { margin-right: var(--relay-space-2); }
-.settings-verify-actions { margin: var(--relay-space-4) 0 0; display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: center; }
-.settings-verify-actions .helper-text { margin: 0; }
-.settings-page .pack-catalog .assist-proposal { margin-top: var(--relay-space-4); }
-.settings-page .pack-catalog-members { margin: var(--relay-space-3) 0 0; padding: 0; list-style: none; }
-.settings-page .pack-catalog-members li { padding: var(--relay-space-3) 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); overflow-wrap: anywhere; }
-.settings-page .pack-catalog-members small { display: block; margin-top: var(--relay-space-1); color: var(--relay-color-text-secondary); }
-.settings-page .pack-catalog-members .hash-code { background: var(--relay-color-bg-canvas); }
-
-/* 窄窗（width < 48rem）：
-   - 页面留白换紧凑档；
-   - definition-list 的 8rem 定宽 dt 列在窄窗挤压 dd，改单列上下排；
-   （原 700px 断点里的标题降级规则随 PageHeader 接管页头与 .settings-heading 移除已失效，一并删除。） */
-@media (width < 48rem) {
-  .settings-page { padding: var(--relay-layout-main-smallPadding); }
-  .settings-definition-list > div { grid-template-columns: 1fr; gap: var(--relay-space-1); }
+  .settings-layout {
+    grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr);
+    gap: var(--relay-space-8);
+  }
 }
 
-/* 设置 › 基本设置 › 默认工作目录（工作台 §18.1.5 / HTTP §10.96）。
-   它是服务端 Workspace 配置，因此与上面的本设备偏好表单分开：同一 section 里一个配置行，
-   不参与「保存设置」的提交。宽视口沿用 .settings-field 的两列标签网格；
-   窄窗由同一断点落回单列——本行不另写一套断点。 */
-/* 同特异度靠声明顺序取胜太脆（基座 .settings-field 在宽视口把 align-items 设成 center），
-   这里用双类抬到 (0,2,0)：这一行的右边是一块多行说明，不能垂直居中。 */
-.settings-field.settings-default-directory { align-items: start; }
-.settings-default-directory-body { display: grid; gap: var(--relay-space-2); min-width: 0; }
-.settings-default-directory-value {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2);
-  margin: 0; font-size: var(--relay-font-size-body); line-height: var(--relay-font-lineHeight-reading);
+/* 页签：宽屏为左侧竖向导航；窄屏折成两列，不横向溢出。 */
+.settings-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1);
+  min-width: 0;
+}
+
+@media (min-width: 64rem) {
+  .settings-navigation {
+    flex-direction: column;
+    position: sticky;
+    top: var(--relay-space-4);
+  }
+}
+
+.settings-navigation button {
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-3);
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 悬停比选中更轻：选中用 selection.bg，悬停只给一档底色，切换时不做淡入淡出，
+   避免两个页签在半透明过渡里同时像被选中。 */
+.settings-navigation button:hover {
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-primary);
+}
+
+.settings-navigation button[aria-selected="true"] {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-action-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.settings-navigation button:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.settings-content {
+  display: grid;
+  gap: var(--relay-space-4);
+  min-width: 0;
+}
+
+.settings-content > [role="tabpanel"] {
+  display: grid;
+  gap: var(--relay-space-4);
+  min-width: 0;
+}
+
+/* display:grid 会压掉 UA 的 [hidden]，这里显式收回：隐藏页签仍挂载以保留草稿。 */
+.settings-page [hidden] {
+  display: none !important;
+}
+
+/* 卡片：1px 分隔线 + 表面色，不再叠加阴影。 */
+.settings-page .settings-card,
+.settings-page .pack-catalog {
+  margin: 0;
+  padding: var(--relay-space-6);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: none;
+}
+
+.settings-page .settings-card > h2,
+.settings-page .pack-catalog > h2 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--relay-font-lineHeight-snug);
+}
+
+.settings-page .settings-card > h2 + .helper-text,
+.settings-page .pack-catalog > h2 + .helper-text {
+  margin-top: var(--relay-space-1);
+}
+
+/* 说明文字：正文可读档（meta 14px），不使用 11–12px 的小字铺满正文。 */
+.settings-page .helper-text {
+  margin: var(--relay-space-2) 0 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
   overflow-wrap: anywhere;
 }
-.settings-default-directory-value .hash-code { margin-inline-start: var(--relay-space-1); }
-.settings-default-directory-reason { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.settings-default-directory-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
-.settings-default-directory-pending { display: grid; gap: var(--relay-space-2); justify-items: start; }
-.settings-default-directory-pending .helper-text { margin: 0; }
-.settings-default-directory-manual { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
-.settings-default-directory-manual input {
-  flex: 1 1 16rem; min-width: 0; min-height: var(--relay-control-height);
-  padding: 0 var(--relay-space-4);
+
+.settings-page .action-error,
+.settings-page .settings-save-result,
+.settings-page .receipt-message {
+  margin-top: var(--relay-space-3);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-page .settings-save-result {
+  color: var(--relay-color-action-text);
+}
+
+.settings-page .action-error {
+  flex-basis: 100%;
+}
+
+/* 作用域提示：一档底色，不用边框、不用彩色左条。 */
+.settings-scope-note {
+  margin: 0;
+  padding: var(--relay-space-4);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 表单：标签在上、控件在下；宽屏保持单列，不把设置项拉成两栏说明墙。 */
+.settings-form {
+  display: grid;
+  gap: var(--relay-space-4);
+  margin-top: var(--relay-space-4);
+}
+
+.settings-field {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+}
+
+.settings-field > label,
+.settings-field .field-label,
+.settings-image-input .field-label {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.settings-field select,
+.settings-field input:not([type="checkbox"]):not([type="radio"]),
+.settings-default-directory-manual input,
+.settings-inline-form input {
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-3);
   border: var(--relay-border-width) solid var(--relay-color-border-control);
   border-radius: var(--relay-radius-control);
-  background: var(--relay-color-bg-surface); color: var(--relay-color-text-primary); font: inherit;
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  font-size: var(--relay-font-size-meta);
 }
-.settings-default-directory-manual input:disabled { color: var(--relay-color-disabled-text); background: var(--relay-color-disabled-bg); }
 
-/* 图片输入能力声明（2026-10-19）：与模型端口事实分开一段，但不另起一张卡——
-   它解释的正是上面那行「图片输入」的结论从哪来。 */
-.settings-image-input {
-  display: grid; gap: var(--relay-space-2);
-  margin-top: var(--relay-space-4); padding-top: var(--relay-space-4);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-control);
+.settings-field select:disabled,
+.settings-default-directory-manual input:disabled {
+  background: var(--relay-color-disabled-bg);
+  color: var(--relay-color-disabled-text);
+  cursor: not-allowed;
 }
-.settings-image-input h3 { margin: 0; font-size: var(--relay-font-size-body); }
-.settings-image-input .field { display: grid; gap: var(--relay-space-1); }
-.settings-image-input .settings-save-actions { margin-top: 0; }
 
-/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+.settings-field select:focus-visible,
+.settings-field input:focus-visible,
+.settings-default-directory-manual input:focus-visible {
+  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
+  outline-offset: 1px;
+}
 
-.pv-page .settings-navigation {
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 3px 15px #22553506;
-  overflow: hidden;
-}
-.pv-page .settings-navigation > button {
-  font-size: 12px;
-  min-height: 38px;
-  color: #53705b;
-  border-bottom: 1px solid #f0f3f0;
-}
-.pv-page .settings-navigation > button[aria-selected="true"] { color: #206846; background: #eaf5eb; font-weight: 650; }
-.pv-page .surface-panel.settings-card {
+.settings-field .helper-text {
   margin-top: 0;
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
-  box-shadow: 0 3px 15px #22553506;
 }
-.pv-page .surface-panel.settings-card + .surface-panel.settings-card { margin-top: 13px; }
-.pv-page .surface-panel.settings-card > h2 { font-size: 13px; color: #294635; }
-.pv-page .settings-definition-list dt { color: #899c8d; font-size: 11px; }
-.pv-page .settings-definition-list dd { color: #486452; font-size: 12px; }
 
-/* pv 皮肤：.settings-basic > h2（基本设置）不在 .settings-card 内，吃到全局 h2 的 section(24px) 档，
-   大于 pv 页头 h1(22px)；回与 .settings-card > h2 相同的 13px/700 卡片头档。
-   说明句两处（.settings-basic-intro、.settings-explanation p）全局用 reading(18px) 档，
-   pv 语言里说明句是 lede/meta(12px) 档，色对齐原型说明句 #819287。 */
-.pv-page .settings-basic > h2 { font-size: 13px; font-weight: 700; color: #294635; }
-.pv-page .settings-basic-intro { font-size: 12px; color: #819287; }
-.pv-page .settings-explanation p { font-size: 12px; color: #819287; }
+.settings-readonly-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height);
+}
+
+.settings-save-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--relay-space-3);
+}
+
+.settings-save-actions .settings-save-result,
+.settings-save-actions .action-error {
+  margin: 0;
+}
+
+/* 定义列表：标签窄列 + 值宽列；窄窗改单列上下排。 */
+.settings-definition-list {
+  display: grid;
+  gap: var(--relay-space-3);
+  margin: var(--relay-space-4) 0 0;
+}
+
+.settings-definition-list > div {
+  display: grid;
+  grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
+  gap: var(--relay-space-4);
+  align-items: start;
+}
+
+.settings-definition-list dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-definition-list dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.settings-page .status-chip {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 相关入口与验证动作：同一行内按钮与说明对齐。 */
+.settings-links {
+  display: grid;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-links .inline-link {
+  margin-right: var(--relay-space-2);
+}
+
+.settings-verify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-3);
+  margin: var(--relay-space-4) 0 0;
+}
+
+.settings-verify-actions .helper-text {
+  margin: 0;
+}
+
+/* 默认工作目录：状态、说明、动作、诊断四层，技术字段只进折叠区。 */
+.settings-default-directory-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-3) 0 0;
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-default-directory-value strong {
+  font-weight: var(--relay-font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.settings-directory-body {
+  display: grid;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.settings-directory-path {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  overflow-wrap: anywhere;
+}
+
+.settings-default-directory-unavailable {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 颜色只放在状态结论上；说明句仍用正文色，避免整段红字压过页面。 */
+.settings-default-directory-value[data-status="UNAVAILABLE"] strong {
+  color: var(--relay-color-status-danger-text);
+}
+
+.settings-default-directory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-1);
+}
+
+.settings-default-directory-pending {
+  display: grid;
+  gap: var(--relay-space-2);
+  justify-items: start;
+}
+
+.settings-default-directory-pending .helper-text {
+  margin: 0;
+}
+
+.settings-default-directory-manual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.settings-default-directory-manual input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* 诊断：默认折叠，展开后只列身份与原因，不铺技术长句。 */
+.settings-diagnostics {
+  margin-top: var(--relay-space-2);
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-diagnostics > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+}
+
+.settings-diagnostics > summary:hover {
+  color: var(--relay-color-text-primary);
+}
+
+.settings-diagnostic-list {
+  display: grid;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-2) 0 0;
+}
+
+.settings-diagnostic-list > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
+  gap: var(--relay-space-3);
+}
+
+.settings-diagnostic-list dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.settings-diagnostic-list dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  overflow-wrap: anywhere;
+}
+
+/* 高级诊断：工程事实默认收起；展开后不再套第二层卡片。 */
+.settings-advanced {
+  padding: var(--relay-space-4) var(--relay-space-6);
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+}
+
+.settings-advanced > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--relay-control-height-compact);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  cursor: pointer;
+}
+
+.settings-advanced > summary:hover {
+  color: var(--relay-color-text-primary);
+}
+
+.settings-advanced-body {
+  display: grid;
+  gap: var(--relay-space-4);
+  margin-top: var(--relay-space-2);
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-page .settings-advanced .settings-card {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.settings-page .settings-advanced .settings-card + .settings-card {
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-page .settings-advanced .settings-card > h2 {
+  font-size: var(--relay-font-size-meta);
+}
+
+/* 图片输入声明：已收在高级诊断内，用分隔线而不是第三层容器。 */
+.settings-image-input {
+  display: grid;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-4);
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-image-input h3 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.settings-image-input .field {
+  display: grid;
+  gap: var(--relay-space-1);
+}
+
+.settings-image-input .settings-save-actions {
+  margin-top: 0;
+}
+
+/* 模型连接行：动作在值下方换行，不把长端点挤成不可读的一行。 */
+.settings-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-2);
+}
+
+.settings-inline-form {
+  display: grid;
+  gap: var(--relay-space-2);
+  margin-top: var(--relay-space-3);
+  padding: var(--relay-space-4);
+  background: var(--relay-color-bg-subtle);
+  border-radius: var(--relay-radius-control);
+}
+
+.settings-inline-form label {
+  display: grid;
+  gap: var(--relay-space-1);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+/* Pack 目录：只读事实；当前组合平铺，协议与 hash 收进高级详情。 */
+.pack-catalog-current {
+  display: grid;
+  gap: 0;
+  margin-top: var(--relay-space-4);
+}
+
+.pack-catalog-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-3) 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.pack-catalog-summary-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.pack-catalog-summary-row > div {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+}
+
+.pack-catalog-summary-row strong {
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.pack-catalog-summary-row small {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  overflow-wrap: anywhere;
+}
+
+.pack-catalog-group h3 {
+  margin: var(--relay-space-4) 0 var(--relay-space-2);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.settings-page .pack-catalog .assist-proposal {
+  margin-top: var(--relay-space-3);
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-page .pack-catalog-members {
+  margin: var(--relay-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-page .pack-catalog-members li {
+  padding: var(--relay-space-3) 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  overflow-wrap: anywhere;
+}
+
+.settings-page .pack-catalog-members small {
+  display: block;
+  margin-top: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+}
+
+.settings-page .pack-catalog-members .hash-code {
+  background: var(--relay-color-bg-subtle);
+}
+
+/* 窄窗：页签两列、卡片留白收一档、定义列表与诊断列表改单列。 */
+@media (width < 48rem) {
+  .settings-page {
+    padding: var(--relay-layout-main-smallPadding);
+  }
+
+  /* 窄窗页签保持自适应宽度的胶囊并换行，不做 2×2 全宽色块：
+     后者会让两个页签同时像被选中。 */
+  .settings-navigation button {
+    flex: 0 1 auto;
+  }
+
+  .settings-page .settings-card,
+  .settings-page .pack-catalog,
+  .settings-page .settings-advanced {
+    padding: var(--relay-space-4);
+  }
+
+  .settings-definition-list > div,
+  .settings-diagnostic-list > div {
+    grid-template-columns: 1fr;
+    gap: var(--relay-space-1);
+  }
+}
+
+

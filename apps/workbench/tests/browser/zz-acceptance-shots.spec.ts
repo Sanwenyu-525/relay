@@ -3,6 +3,8 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 /**
  * 0145 P0 验收截图（2026-10-30）。
  * 只连页面内夹具：一台有状态的假服务端，按真实继承规则算档位。
+ * 2026-11-01：首条输入器（会话欢迎页）的上下文圆环与档位预选已移除，
+ * 依赖空白会话浮层的截图 1／3 退役；保留有会话一侧的档位截图。
  */
 
 const apiBase = "http://127.0.0.1:8787";
@@ -153,23 +155,6 @@ async function openFromA(page: Page, width = 1162, height = 782): Promise<void> 
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
 }
 
-async function openBlankMeter(page: Page): Promise<void> {
-  await page.getByTestId("assist-context-meter").first().click();
-  await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
-}
-
-test("截图 1：从 A（512K）新建，空白会话就显示 512K", async ({ page }) => {
-  await installStatefulServer(page);
-  await openFromA(page);
-  await page.getByTestId("context-new-conversation").click();
-  await page.getByTestId("assist-first-draft").waitFor({ timeout: 20_000 });
-  await openBlankMeter(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
-  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("继承来源会话：512K");
-  await page.screenshot({ path: `${out}/01-A512K-new-blank-inherits-512K.png`, fullPage: true });
-});
-
 test("截图 2：B 建出来后当前生效就是 512K", async ({ page }) => {
   await installStatefulServer(page);
   await openFromA(page);
@@ -189,29 +174,6 @@ test("截图 2：B 建出来后当前生效就是 512K", async ({ page }) => {
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
   await page.screenshot({ path: `${out}/02-B-created-512K.png`, fullPage: true });
-});
-
-test("截图 3：B 未发送改成 1024K 后从 A 新建 C，C 仍是 512K", async ({ page }) => {
-  await installStatefulServer(page);
-  await openFromA(page);
-  await page.getByTestId("context-new-conversation").click();
-  await page.getByTestId("assist-first-draft").waitFor({ timeout: 20_000 });
-  await openBlankMeter(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await panel.getByTestId("context-budget-option-1048576").check();
-  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("已选 1024K");
-  await page.screenshot({ path: `${out}/03a-B-blank-unsaved-1024K.png`, fullPage: true });
-  // 不回发、不保存：直接回 A 再新建一条（C）。
-  await page.goBack();
-  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  await page.getByTestId("context-new-conversation").click();
-  await page.getByTestId("assist-first-draft").waitFor({ timeout: 20_000 });
-  await openBlankMeter(page);
-  const cPanel = page.getByTestId("assist-context-meter-panel");
-  await expect(cPanel.getByTestId("context-budget-option-524288")).toBeChecked();
-  await expect(cPanel.getByTestId("context-budget-option-1048576")).not.toBeChecked();
-  await expect(cPanel.getByTestId("context-usage-first-tier-state")).toContainText("继承来源会话：512K");
-  await page.screenshot({ path: `${out}/03b-C-after-B-unsaved-1024K-still-512K.png`, fullPage: true });
 });
 
 test("截图 4：560px 窄窗三档仍在一行、浮层不压输入卡", async ({ page }) => {

@@ -14,9 +14,13 @@ import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
 import { formatReadableDateTime, saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
+import { applyMotionPreference, storeMotionPreference, storedMotionPreference,
+  type MotionPreference } from "../lib/motionPreference";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import { nativeFolderPickerAvailable, selectWorkingDirectory } from "../lib/desktopHost";
 import "./SettingsView.css";
+
+type SettingsGroup = "basic" | "model" | "execution" | "workbench";
 
 /** 验证错误分类的中文短名；原枚举保留在 chip 的 title 供核对。 */
 const verifyErrorCategoryLabels: Record<RelayModelVerifyErrorCategory, string> = {
@@ -95,77 +99,73 @@ const verificationLabels: Record<ModelVerificationStateKind,
   UNCONFIGURED: {
     chip: "未配置",
     tone: "neutral",
-    detail: "当前服务实例使用 Mock 端口，没有真实模型可验证。这不是故障，也不表示任务执行成功。"
+    detail: "当前服务实例使用 Mock 端口，没有真实模型可验证。这不是故障。"
   },
   UNVERIFIED: {
     chip: "已配置未验证",
     tone: "warning",
-    detail: "服务端已读到配置，但还没有与当前配置指纹匹配的验证记录。配置格式通过不等于网络调用成功；"
-      + "配置变更后旧验证结果自动失效。连接验证通过也不等于真实任务执行成功。"
+    detail: "服务端已读到配置，但还没有与当前配置匹配的验证记录。配置格式通过不等于网络调用成功；"
+      + "配置变更后旧验证结果自动失效。"
   },
   VERIFYING: {
     chip: "验证中",
     tone: "neutral",
-    detail: "正在用固定短文本发起一次连接验证（非任务调用）。请稍候；验证结果只证明当前配置可连通。"
+    detail: "正在用固定短文本做一次连接验证，结果只证明当前配置可连通。"
   },
   VERIFIED: {
     chip: "验证通过",
     tone: "success",
-    detail: "最近一次连接验证通过：认证、端点与模型对固定短文本调用有响应。"
-      + "这只证明连接可用，不表示任何真实任务已经执行成功。"
+    detail: "固定短文本连接验证通过；这不表示任何真实任务已经执行成功。"
   },
   VERIFY_FAILED: {
     chip: "验证失败",
     tone: "danger",
-    detail: "最近一次连接验证未通过。请按错误分类核对 API Key、配额、网络或端点后重新验证。"
-      + "失败不会回退 Mock，也不代表任务执行结果。"
+    detail: "最近一次连接验证未通过。按错误分类核对 API Key、配额、网络或端点后重新验证。"
   },
   UNAVAILABLE: {
     chip: "当前不可用",
     tone: "danger",
-    detail: "真实模型配置残缺或服务状态无法读取，连接验证不可用。生产进程会拒绝残缺配置，不会静默回退。"
+    detail: "真实模型配置残缺或服务状态无法读取；生产进程会拒绝残缺配置，不会静默回退。"
   },
   CONFIG_INCOMPLETE: {
     chip: "配置残缺",
     tone: "danger",
-    detail: "服务端读到了 Provider 声明，但缺少必需字段（例如 API Key 或模型名）。生产进程会拒绝启动，"
-      + "不会静默回退 Mock；补齐配置后再验证。"
+    detail: "Provider 声明缺少必需字段（例如 API Key 或模型名），补齐后再验证。"
   },
   AUTH_FAILED: {
     chip: "认证失败",
     tone: "danger",
-    detail: "Provider 拒绝了这次调用的认证或权限（401/403）。请核对 API Key 是否有效、是否有该型号的权限；"
-      + "换 Key 后必须重新验证。"
+    detail: "Provider 拒绝了这次调用的认证或权限（401/403）。请核对 API Key 与该型号的权限。"
   },
   MODEL_NOT_FOUND: {
     chip: "型号不存在",
     tone: "danger",
-    detail: "Provider 返回 404：这个确切型号在当前账户或端点下不存在。请核对型号 ID 与端点，不要改用别的型号冒充。"
+    detail: "Provider 返回 404：这个确切型号在当前账户或端点下不存在。"
   },
   CREDENTIAL_CHANGED: {
     chip: "凭据已更换",
     tone: "warning",
-    detail: "最近一次验证用的是另一份凭据（API Key 已更换）。旧结论不代表当前连接可执行，请重新验证。"
+    detail: "最近一次验证用的是另一份凭据；旧结论不代表当前连接可执行，请重新验证。"
   },
   CATALOG_STALE: {
     chip: "目录已过期",
     tone: "warning",
-    detail: "免费目录快照已过期，无法确认这个型号此刻是否仍然免费可调用。请先刷新目录，再验证或选择。"
+    detail: "免费目录快照已过期，无法确认这个型号此刻是否仍可调用。"
   },
   NOT_ELIGIBLE: {
     chip: "型号不可调用",
     tone: "warning",
-    detail: "这个型号不在当前免费目录里，或缺少文本输入/输出能力。目录存在不等于可执行，请选择目录内的免费文本型号。"
+    detail: "这个型号不在当前免费目录里，或缺少文本输入/输出能力。"
   },
   ACCOUNT_COOLDOWN: {
     chip: "账户冷却中",
     tone: "warning",
-    detail: "这个账户近期被平台或上游限流，冷却期内不发起调用。冷却按凭据身份隔离：换用另一个账户的 Key 互不影响。"
+    detail: "这个账户近期被平台或上游限流，冷却期内不发起调用。"
   },
   BUDGET_EXHAUSTED: {
     chip: "预算不足",
     tone: "warning",
-    detail: "这次调用超出已冻结的单次或作用域预算。请调整预算档位后重新验证；预算不会被切换模型重置。"
+    detail: "这次调用超出已冻结的单次或作用域预算，调整预算档位后再验证。"
   }
 };
 
@@ -178,7 +178,7 @@ interface StateRow {
 }
 
 /**
- * 四态各自独立：连接、配置、验证、Worker 执行是四个不同事实。
+ * 三态各自独立：连接、配置、验证是三个不同事实。
  * 「已配置」只表示服务端读到了配置格式，绝不能冒充网络验证成功；
  * 验证态来自 model_calls 账本（比对 config_fingerprint），不再写死。
  */
@@ -191,7 +191,6 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
   const verifyMeta = verificationLabels[verifyState];
   const last = verification?.last ?? null;
   const showGuide = verifyState === "VERIFY_FAILED" && last?.errorCategory != null;
-  const workerProbe = verification?.workerStartupValidation;
   const rows: StateRow[] = [
     { key: "connected", label: "本机服务已连接",
       tone: error ? "danger" : loading || status === null ? "neutral" : "success",
@@ -209,26 +208,15 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
       detail: status === null || loading
         ? "等待服务实例状态。"
         : status.configured
-          ? `服务端已读到模型配置：${status.model ?? "（缺模型名）"}。这只说明配置存在。`
+          ? `服务端已读到模型配置：${status.model ?? "（缺模型名）"}。`
           : status.provider === "invalid"
             ? "配置格式残缺（例如缺少 API Key 或模型名）；生产进程会拒绝启动，不会静默回退。"
             : "当前服务实例使用 Mock 端口，未配置真实模型。" },
     { key: "verified", label: "模型验证成功",
       tone: verifyMeta.tone, chip: verifyMeta.chip, detail: verifyMeta.detail },
-    { key: "worker", label: "Worker 可执行",
-      tone: "neutral", chip: "未探测",
-      detail: "Worker 可执行性未探测：本页不探测 Worker 进程，也不确认 Worker 与 API 是否使用同一配置来源。"
-        + (workerProbe === "OK"
-          ? "（诊断：API 进程环境的配置启动校验通过，仅供核对，不代表 Worker 已执行。）"
-          : workerProbe === "FAILED"
-            ? "（诊断：API 进程环境的配置启动校验失败；若 Worker 使用同一环境，启动会被拒绝。）"
-            : workerProbe === "NOT_CONFIGURED"
-              ? "（诊断：API 进程环境未配置真实模型。）"
-              : "") },
   ];
-  return <section id="settings-model" className="surface-panel settings-card" data-testid="service-state">
+  return <section className="settings-card" data-testid="service-state">
     <h2>连接与模型状态</h2>
-    {/* 2026-10-24 用户指令：导语不再复述下方四行标签，只留连接验证的边界说明。 */}
     <p className="helper-text">「连接验证通过」只表示固定短文本调用成功，不等于真实任务执行成功。</p>
     <dl className="settings-definition-list">
       {rows.map((row) => <div key={row.key} data-testid={`service-state-${row.key}`}>
@@ -238,12 +226,12 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
     </dl>
     {showGuide && last?.errorCategory != null && <p className="helper-text" data-testid="verify-error-guide">
       <Info aria-hidden="true" />{modelErrorGuides[last.errorCategory]}</p>}
-    {onVerify !== null && <p className="settings-verify-actions">
+    {onVerify !== null && <div className="settings-verify-actions">
       <button className="secondary-button" type="button" data-testid="verify-model-port"
         disabled={verifying} onClick={onVerify}>
         <ShieldCheck aria-hidden="true" />{verifying ? "验证中…" : "验证连接"}</button>
-      <span className="helper-text">用固定短文本发起一次连接验证，结果写入调用账本；不携带项目资料。</span>
-    </p>}
+      <span className="helper-text">用固定短文本发起一次连接验证，不携带项目资料。</span>
+    </div>}
   </section>;
 }
 
@@ -272,7 +260,7 @@ function ModelPortCard({ status, client, onSaved }: {
   readonly client: RelayApiClient | null;
   readonly onSaved: () => void;
 }) {
-  return <section className="surface-panel settings-card" data-testid="model-port-status">
+  return <section className="settings-card" data-testid="model-port-status">
     <h2>模型端口</h2>
     <dl className="settings-definition-list">
       <div><dt>当前端口</dt><dd><strong>{providerLabels[status.provider]}</strong></dd></div>
@@ -281,12 +269,11 @@ function ModelPortCard({ status, client, onSaved }: {
         ? <code className="hash-code">{status.baseUrl}</code>
         : status.provider === "openai-compatible" ? "未自定义（使用内置默认端点）" : "—"}</dd></div>
       <div><dt>图片输入</dt><dd data-testid="model-port-image-input">{imageInputText(status)}</dd></div>
-      {/* 2026-10-20（P1-5）：把「这条配置影响谁」写在页面上。此前用户要自己推断
-          端点是进程级的、声明是按模型的、会话选择是另一层。 */}
+      {/* 2026-10-20（P1-5）：把「这条配置影响谁」写在页面上。 */}
       <div><dt>生效范围</dt><dd data-testid="model-port-scope">本实例的所有会话共用；图片能力声明跟随
         provider 与模型名，换模型后要为新的模型名单独声明。</dd></div>
     </dl>
-    {status.provider === "fake" && <p className="helper-text"><Info aria-hidden="true" />当前服务实例未配置真实模型：任务委托与 Assist 使用确定性 Mock 模型，不调用外部服务。这是当前阶段的既定门槛，不是故障。</p>}
+    {status.provider === "fake" && <p className="helper-text"><Info aria-hidden="true" />当前服务实例未配置真实模型：任务委托与 Assist 使用确定性 Mock 模型，不调用外部服务。</p>}
     {status.provider === "invalid" && <p className="action-error" role="alert">服务实例的模型配置残缺（例如缺少 API Key 或模型名）；真实模型调用不可用，也不会静默回退。请检查服务端启动配置后重启实例。</p>}
     {client !== null && status.provider === "openai-compatible" && status.model !== null &&
       <ImageInputDeclaration client={client} model={status.model} onSaved={onSaved} />}
@@ -326,7 +313,7 @@ function ImageInputDeclaration({ client, model, onSaved }: {
   return <div className="settings-image-input" data-testid="model-image-input-declaration">
     <h3>图片输入能力声明</h3>
     <p className="helper-text">模型目录里没有这个模型时（自建 Provider 常见），只有这条声明能让带图消息通过；
-      目录里有条目时以目录为准，声明不生效。声明立即生效，不需要重启服务。</p>
+      目录里有条目时以目录为准，声明不生效。</p>
     <label className="field"><span className="field-label">声明依据（可选，最多 500 字）</span>
       <input value={note} maxLength={500} disabled={saving}
         onChange={(event) => { setNote(event.target.value); setSaved(null); }}
@@ -336,7 +323,7 @@ function ImageInputDeclaration({ client, model, onSaved }: {
         data-testid="model-image-input-support" onClick={() => void write(true)}>声明支持图片</button>
       <button className="secondary-button" type="button" disabled={saving}
         data-testid="model-image-input-deny" onClick={() => void write(false)}>声明不支持</button>
-      <button className="text-link" type="button" disabled={saving}
+      <button className="text-button" type="button" disabled={saving}
         data-testid="model-image-input-revoke" onClick={() => void write(null)}>撤销声明</button>
     </div>
     {saved !== null && <p className="settings-save-result" role="status"
@@ -359,12 +346,12 @@ function VerificationDetailCard({ verification, verifying }: {
     : verification.connection === "default" ? "应用默认连接"
       : `OpenRouter 免费型号 · ${verification.model ?? verification.target}`;
   const { timeZone } = useDisplayPreferences();
-  return <section className="surface-panel settings-card" data-testid="verification-detail">
+  return <section className="settings-card" data-testid="verification-detail">
     <h2>最近一次验证</h2>
     {targetLabel !== null && <p className="helper-text" data-testid="verification-target">
       验证目标：{targetLabel}。目标按确切型号区分：另一个型号验证通过，不代表这个型号可执行。</p>}
     {credentialChanged && <p className="helper-text" role="alert" data-testid="verification-credential">
-      凭据已更换：最近一次验证用的是另一份 API Key，旧结论不再代表当前连接可执行，请重新验证。</p>}
+      凭据已更换：最近一次验证用的是另一份 API Key，旧结论不再代表当前连接可执行。</p>}
     {last === null
       ? <p className="helper-text">尚无验证记录。配置后可点击「验证连接」发起一次固定短文本调用。</p>
       : <dl className="settings-definition-list">
@@ -384,8 +371,41 @@ function VerificationDetailCard({ verification, verifying }: {
           {" "}{modelErrorGuides[last.errorCategory]}</dd></div>}
       </dl>}
     {verifying && <p role="status">正在验证…</p>}
-    <p className="helper-text">「连接验证通过」≠「真实任务执行成功」：验证只使用固定短文本，不读取项目资料，也不代表任何 Task/Run 结果。</p>
+    <p className="helper-text">连接验证只使用固定短文本，不读取项目资料，也不代表真实任务执行成功或任何 Task/Run 结果。</p>
   </section>;
+}
+
+/**
+ * 高级诊断：端点、配置指纹、Worker 启动校验与图片能力声明。
+ * 这些是排查连接问题的工程事实，不参与任务执行判定，默认折叠。
+ */
+function ModelAdvancedDiagnostics({ client, status, verification, verifying, onSaved }: {
+  readonly client: RelayApiClient | null;
+  readonly status: RelayModelPortStatus | null;
+  readonly verification: RelayModelVerificationState | null;
+  readonly verifying: boolean;
+  readonly onSaved: () => void;
+}) {
+  const workerProbe = verification?.workerStartupValidation;
+  return <details className="settings-advanced" data-testid="settings-model-advanced">
+    <summary>高级诊断与能力声明</summary>
+    <div className="settings-advanced-body">
+      <p className="helper-text">以下内容用于排查连接问题，不代表任务可执行。</p>
+      {status !== null && <ModelPortCard status={status} client={client} onSaved={onSaved} />}
+      {status?.configured === true && <VerificationDetailCard verification={verification}
+        verifying={verifying} />}
+      <p className="helper-text" data-testid="worker-diagnostic">Worker 可执行性未探测：本页不探测 Worker 进程，
+        也不确认 Worker 与 API 是否使用同一配置来源。
+        {workerProbe === "OK"
+          ? "（诊断：API 进程环境的配置启动校验通过，仅供核对，不代表 Worker 已执行。）"
+          : workerProbe === "FAILED"
+            ? "（诊断：API 进程环境的配置启动校验失败；若 Worker 使用同一环境，启动会被拒绝。）"
+            : workerProbe === "NOT_CONFIGURED"
+              ? "（诊断：API 进程环境未配置真实模型。）"
+              : ""}
+      </p>
+    </div>
+  </details>;
 }
 
 const timeZoneOptions = [
@@ -434,7 +454,46 @@ type DefaultDirectoryCommand = { readonly commandId: string; readonly action: "S
   readonly resourceId: string | null; readonly expectedRevision: string };
 
 /**
- * 设置 › 基本设置 › 默认工作目录（工作台 §18.1.5 / HTTP §10.96）。
+ * 工作区默认目录的唯一读取 Owner。
+ *
+ * 基本设置行与权限页签消费同一份投影：读取一次、写入后重读一次，避免同一页对同一事实
+ * 维护两份互相漂移的状态。换 API / Workspace 立即清空，迟到的旧响应不落进新范围。
+ */
+function useWorkspaceDefaultDirectoryProjection(client: RelayApiClient | null) {
+  const [projection, setProjection] = useState<RelayWorkspaceDefaultDirectory | null>(null);
+  const [loading, setLoading] = useState(client !== null);
+  const [readError, setReadError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+
+  const read = useCallback(async () => {
+    const request = ++requestVersion.current;
+    if (client === null) {
+      setLoading(false); setProjection(null); setReadError(null);
+      return;
+    }
+    setLoading(true); setReadError(null);
+    try {
+      const next = await client.getWorkspaceDefaultDirectory();
+      if (request !== requestVersion.current) return;
+      setProjection(next); setLoading(false);
+    } catch (caught) {
+      if (request !== requestVersion.current) return;
+      setProjection(null); setReadError(describeLiveError(caught).message); setLoading(false);
+    }
+  }, [client]);
+
+  useEffect(() => {
+    requestVersion.current += 1;
+    setProjection(null); setReadError(null); setLoading(client !== null);
+    void read();
+    return () => { requestVersion.current += 1; };
+  }, [read, client]);
+
+  return { projection, loading, readError, read };
+}
+
+/**
+ * 设置 › 通用设置 › 默认工作目录（工作台 §18.1.5 / HTTP §10.96）。
  *
  * 这一行只做三件事：读服务端投影、走 `OpenWorkingDirectory` 选一个已登记目录、
  * 用最近一次读取的修订设置或清除。它**不提供写档位选项**——配置默认目录不等于授予
@@ -444,10 +503,13 @@ type DefaultDirectoryCommand = { readonly commandId: string; readonly action: "S
  * 与「清除」两条幂等命令，且都保留原 command_id；传输失败停在「结果未知」等核对，
  * 不换 ID 重发、不把命令成功当成事实已刷新。
  */
-function DefaultWorkingDirectoryRow({ client }: { client: RelayApiClient | null }) {
-  const [projection, setProjection] = useState<RelayWorkspaceDefaultDirectory | null>(null);
-  const [loading, setLoading] = useState(client !== null);
-  const [readError, setReadError] = useState<string | null>(null);
+function DefaultWorkingDirectoryRow({ client, projection, loading, readError, read }: {
+  readonly client: RelayApiClient | null;
+  readonly projection: RelayWorkspaceDefaultDirectory | null;
+  readonly loading: boolean;
+  readonly readError: string | null;
+  readonly read: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState<null | "OPEN" | "SET" | "CLEAR">(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -455,45 +517,22 @@ function DefaultWorkingDirectoryRow({ client }: { client: RelayApiClient | null 
   const [checking, setChecking] = useState(false);
   const [manualPath, setManualPath] = useState("");
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const version = useRef(0);
+  const manualInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<DefaultDirectoryCommand | null>(null);
   pendingRef.current = pending;
   const pickerAvailable = nativeFolderPickerAvailable();
 
-  const read = useCallback(async () => {
-    const request = ++version.current;
-    if (client === null) {
-      setLoading(false); setProjection(null); setReadError(null);
-      return;
-    }
-    setLoading(true); setReadError(null);
-    try {
-      const next = await client.getWorkspaceDefaultDirectory();
-      if (request !== version.current) return;
-      setProjection(next); setLoading(false);
-    } catch (caught) {
-      if (request !== version.current) return;
-      setProjection(null); setReadError(describeLiveError(caught).message); setLoading(false);
-    }
-  }, [client]);
-
-  /**
-   * 换 API / Workspace 立即清空旧投影与在途命令：旧工作区的目录名、修订与回执身份
-   * 都不能落进新范围。清理后只读一次新范围的事实，不发任何写命令。
-   */
+  /** 换 API / Workspace 立即清空旧范围的在途命令与结果，旧目录名与回执身份不落进新范围。 */
   useEffect(() => {
-    version.current++;
-    setProjection(null); setReadError(null); setNotice(null); setProblem(null);
-    setPending(null); setChecking(false); setBusy(null); setManualPath(""); setPickerError(null);
-    void read();
-    return () => { version.current++; };
-  }, [read]);
+    setNotice(null); setProblem(null); setPending(null); setChecking(false); setBusy(null);
+    setManualPath(""); setPickerError(null);
+  }, [client]);
 
   async function save(resourceId: string | null) {
     if (client === null) return;
     const current = projection;
     if (current === null) {
-      setProblem("默认工作目录尚未读取成功，先重新读取再设置。");
+      setProblem("默认工作目录尚未读取成功，先重新检查再设置。");
       setBusy(null);
       return;
     }
@@ -502,19 +541,21 @@ function DefaultWorkingDirectoryRow({ client }: { client: RelayApiClient | null 
     pendingRef.current = command; setPending(command);
     setBusy(resourceId === null ? "CLEAR" : "SET"); setProblem(null); setNotice(null);
     try {
-      const result = resourceId === null
-        ? await client.clearWorkspaceDefaultDirectory({ commandId: command.commandId,
-            expectedRevision: command.expectedRevision })
-        : await client.setWorkspaceDefaultDirectory({ commandId: command.commandId,
-            expectedRevision: command.expectedRevision, resourceId });
+      if (resourceId === null) {
+        await client.clearWorkspaceDefaultDirectory({ commandId: command.commandId,
+          expectedRevision: command.expectedRevision });
+      } else {
+        await client.setWorkspaceDefaultDirectory({ commandId: command.commandId,
+          expectedRevision: command.expectedRevision, resourceId });
+      }
       if (pendingRef.current?.commandId !== command.commandId) return;
       pendingRef.current = null; setPending(null); setBusy(null);
       const label = projection?.displayName ?? "所选目录";
       // 命令成功不等于事实已刷新：以重读到的投影为准，不用回执结果拼接第二份事实。
       await read();
       setNotice(resourceId === null
-        ? `已清除默认工作目录（修订 ${result.revision}）；已存在的会话与既有目录绑定保持不变。`
-        : `已把「${label}」设为默认工作目录（修订 ${result.revision}）。只引用这个已登记目录，不扩大任何权限。`);
+        ? "已清除默认工作目录；已存在的会话与既有目录绑定保持不变。"
+        : `已把「${label}」设为默认工作目录。只引用这个已登记目录，不扩大任何权限。`);
     } catch (caught) {
       if (pendingRef.current?.commandId !== command.commandId) return;
       setBusy(null);
@@ -590,9 +631,7 @@ function DefaultWorkingDirectoryRow({ client }: { client: RelayApiClient | null 
       if (pendingRef.current?.commandId !== record.commandId) return;
       pendingRef.current = null; setPending(null);
       await read();
-      setNotice(record.action === "CLEAR"
-        ? `原命令已确认：默认工作目录已清除（修订 ${result.revision}）。`
-        : `原命令已确认：默认工作目录已设置（修订 ${result.revision}）。`);
+      setNotice("原命令已确认：默认工作目录已更新。");
     } catch (caught) {
       if (pendingRef.current?.commandId !== record.commandId) return;
       setProblem(`${describeLiveError(caught).message} 原命令仍未确认，不能换 ID 重发。`);
@@ -602,94 +641,146 @@ function DefaultWorkingDirectoryRow({ client }: { client: RelayApiClient | null 
   const status = projection?.status ?? null;
   const disabled = client === null || loading || busy !== null || pending !== null;
   const name = projection?.displayName ?? projection?.canonicalRoot ?? null;
-  const reasonText = projection === null ? null : defaultDirectoryReasonText(projection.reason);
 
-  return <div className="settings-field settings-default-directory" data-testid="settings-default-directory">
-    <span className="field-label" id="settings-default-directory-label">默认工作目录</span>
-    <div className="settings-default-directory-body" role="group" aria-labelledby="settings-default-directory-label">
-      <p className="settings-default-directory-value" data-testid="settings-default-directory-value"
+  return <section className="settings-card settings-default-directory" data-testid="settings-default-directory">
+    <h2>默认工作目录</h2>
+    <p className="helper-text">新会话沿用的目录；只引用已登记目录，不授予写权限，也不改变已有会话的作用域。</p>
+    <div className="settings-directory-body" role="group" aria-label="默认工作目录">
+      <div className="settings-default-directory-value" data-testid="settings-default-directory-value"
         data-status={status ?? "LOADING"}>
         {client === null
           ? <span className="status-chip status-chip--neutral">未连接</span>
           : loading && projection === null
             ? <span className="status-chip status-chip--neutral">读取中</span>
             : readError !== null
-              ? <><span className="status-chip status-chip--danger">读取失败</span>{" "}{readError}</>
+              ? <><span className="status-chip status-chip--danger">读取失败</span>{" "}
+                <strong>无法读取默认目录</strong></>
               : status === "READY"
                 ? <><span className="status-chip status-chip--success">有效</span>{" "}
-                  <strong>{name ?? "未命名目录"}</strong>{" "}
-                  <code className="hash-code" data-testid="settings-default-directory-path">{projection?.canonicalRoot}</code></>
+                  <strong>{name ?? "未命名目录"}</strong></>
                 : status === "UNAVAILABLE"
-                  ? <><span className="status-chip status-chip--danger">失效</span>{" "}
-                    <strong>{name ?? "未命名目录"}</strong>{projection?.canonicalRoot === null || projection?.canonicalRoot === undefined
-                      ? null : <>{" "}<code className="hash-code">{projection.canonicalRoot}</code></>}
-                    <span className="settings-default-directory-reason" data-testid="settings-default-directory-reason">
-                      {" "}原因：{reasonText}。新普通会话会退回「没有默认目录」的行为，已存在的会话不改作用域。</span></>
+                  ? <><span className="status-chip status-chip--danger">不可用</span>{" "}
+                    <strong>默认目录不可用</strong></>
                   : <><span className="status-chip status-chip--neutral">未设置</span>{" "}
-                    还没有默认目录：未主动选过目录的新会话仍可普通讨论，读取文件前需要选择目录。</>}
-      </p>
-      {projection?.writeTier != null && status !== "UNSET" && <p className="helper-text" data-testid="settings-default-directory-tier">
-        当前目录写入档位：{writeTierLabels[projection.writeTier]}。设置默认目录只确定作用域，不授予写权限；
-        档位在对话页的目录行里调整，这一行不提供档位开关。
-      </p>}
-      {notice !== null && <p className="settings-save-result" role="status" data-testid="settings-default-directory-notice">{notice}</p>}
-      {problem !== null && <p className="action-error" role="alert" data-testid="settings-default-directory-problem">{problem}</p>}
-      {pending !== null && <div className="settings-default-directory-pending" data-testid="settings-default-directory-pending">
-        <p className="helper-text">原命令 {pending.commandId} 结果待核对（目标：
+                    <strong>没有默认目录</strong></>}
+      </div>
+
+      {client === null
+        ? <p className="helper-text">连接本机 API 后可读取和修改默认工作目录。</p>
+        : loading && projection === null
+          ? <p className="helper-text" role="status">正在读取默认目录…</p>
+          : readError !== null
+            ? <p className="action-error" role="alert" data-testid="settings-default-directory-problem">
+              读取失败：{readError}。原设置没有被清除，重新检查后再操作。</p>
+            : status === "READY"
+              ? <>
+                <p className="helper-text">新会话会沿用这个目录；已存在的会话保持原有绑定。</p>
+                <p className="settings-directory-path" data-testid="settings-default-directory-path">
+                  {projection?.canonicalRoot}</p>
+              </>
+              : status === "UNAVAILABLE"
+                ? <p className="settings-directory-unavailable" data-testid="settings-default-directory-unavailable">
+                  已保存的文件夹不存在或暂时无法访问。新会话不会继续使用该目录；已存在的会话保持原有绑定。</p>
+                : <p className="helper-text">未主动选过目录的新会话仍可普通讨论；读取文件前需要选择目录。</p>}
+
+      {projection?.writeTier != null && status === "READY" &&
+        <p className="helper-text" data-testid="settings-default-directory-tier">
+          当前目录写入档位：{writeTierLabels[projection.writeTier]}。它属于这个目录，设置默认目录只确定作用域，
+          不授予写权限；档位在对话页的目录行里调整。
+        </p>}
+
+      {notice !== null && <p className="settings-save-result" role="status"
+        data-testid="settings-default-directory-notice">{notice}</p>}
+      {problem !== null && <p className="action-error" role="alert"
+        data-testid="settings-default-directory-problem">{problem}</p>}
+      {pending !== null && <div className="settings-default-directory-pending"
+        data-testid="settings-default-directory-pending">
+        <p className="helper-text">原命令 {pending.commandId} 结果待核对（
           {pending.resourceId === null ? "清除默认目录" : "设置默认目录"}，基准修订 {pending.expectedRevision}）。</p>
         <button className="secondary-button secondary-button--compact" type="button"
-          data-testid="settings-default-directory-receipt" disabled={checking} onClick={() => void checkReceipt()}>
+          data-testid="settings-default-directory-receipt" disabled={checking}
+          onClick={() => void checkReceipt()}>
           {checking ? "正在查询" : "查询原命令回执"}</button>
       </div>}
       {pickerError !== null && <p className="action-error" role="alert">{pickerError}</p>}
       <div className="settings-default-directory-actions">
-        <button className="secondary-button" type="button" data-testid="settings-default-directory-choose"
-          disabled={disabled || !pickerAvailable} onClick={() => void pick()}
+        <button className={status === "READY" ? "secondary-button" : "primary-button"} type="button"
+          data-testid="settings-default-directory-choose"
+          disabled={disabled}
+          onClick={() => { if (pickerAvailable) void pick(); else manualInputRef.current?.focus(); }}
           title={pickerAvailable ? "选择本机文件夹；只有已登记且就绪的目录才能设为默认"
-            : "这个宿主没有原生目录选择器，请在下方填写本机绝对路径"}>
+            : "这个宿主没有原生目录选择器；点击后在下方填写本机已有绝对路径"}>
           <FolderOpen aria-hidden="true" />{status === null || status === "UNSET" ? "选择目录" : "更换目录"}</button>
         {status !== null && status !== "UNSET" && <button className="secondary-button" type="button"
           data-testid="settings-default-directory-clear" disabled={disabled} onClick={() => void save(null)}>
-          <X aria-hidden="true" />{busy === "CLEAR" ? "正在清除…" : "清除"}</button>}
-        {readError !== null && <button className="secondary-button secondary-button--compact" type="button"
-          data-testid="settings-default-directory-reload" onClick={() => void read()}>
-          <RotateCcw aria-hidden="true" />重读默认目录</button>}
+          <X aria-hidden="true" />{busy === "CLEAR" ? "正在清除…" : "清除默认目录"}</button>}
+        {(readError !== null || status === "UNAVAILABLE" || status === "READY") &&
+          <button className="secondary-button secondary-button--compact" type="button"
+            data-testid="settings-default-directory-recheck" disabled={loading} onClick={() => void read()}>
+            <RotateCcw aria-hidden="true" />重新检查</button>}
         {busy === "OPEN" && <span className="helper-text" role="status">正在打开并核对这个目录…</span>}
         {busy === "SET" && <span className="helper-text" role="status">正在保存默认目录…</span>}
       </div>
       {!pickerAvailable && <div className="settings-default-directory-manual">
         <label className="field-label" htmlFor="settings-default-directory-manual">本机已有绝对目录</label>
         <input id="settings-default-directory-manual" data-testid="settings-default-directory-manual"
-          value={manualPath} disabled={disabled} placeholder={"D:\\Develop\\MyProject"}
+          ref={manualInputRef} value={manualPath} disabled={disabled} placeholder={"D:\\Develop\\MyProject"}
           onChange={(event) => setManualPath(event.target.value)} />
         <button className="secondary-button secondary-button--compact" type="button"
           data-testid="settings-default-directory-manual-submit"
           disabled={disabled || manualPath.trim() === ""} onClick={() => void choose(manualPath.trim())}>
           使用这个目录</button>
       </div>}
+      {client !== null && (projection !== null || readError !== null) &&
+        <details className="settings-diagnostics" data-testid="settings-default-directory-diagnostics">
+          <summary>诊断详情</summary>
+          <dl className="settings-diagnostic-list">
+            <div><dt>状态</dt><dd>{status ?? "未读取"}</dd></div>
+            <div><dt>完整路径</dt><dd>{projection?.canonicalRoot === null || projection?.canonicalRoot === undefined
+              ? "—" : <code className="hash-code">{projection.canonicalRoot}</code>}</dd></div>
+            <div><dt>原因</dt><dd>{projection?.reason === null || projection?.reason === undefined
+              ? "—" : defaultDirectoryReasonText(projection.reason)}</dd></div>
+            <div><dt>修订</dt><dd>{projection?.revision ?? "—"}</dd></div>
+            <div><dt>资源 ID</dt><dd>{projection?.resourceId ?? "—"}</dd></div>
+          </dl>
+          {readError !== null && <p className="helper-text">读取错误：{readError}</p>}
+        </details>}
       <p className="helper-text">
-        这里只引用一个已登记的受管目录：选择时会走与对话页文件夹入口相同的登记，未就绪或需要再选项目时不写入默认值。
         默认目录不提供自动批准或完全访问，也不扩大 Git、CLI、浏览器或电脑权限。
       </p>
     </div>
-  </div>;
+  </section>;
 }
 
-function DisplayPreferencesCard({ client }: { client: RelayApiClient | null }) {
+/**
+ * 通用设置：只放本设备展示偏好与工作区默认目录。
+ *
+ * 时区与外观只写本机存储；默认目录是服务端 Workspace 配置，独立提交，
+ * 不参与这张表单的保存——本机偏好不能冒充服务端事实。
+ */
+function GeneralPreferencesCard() {
   const preferences = useDisplayPreferences();
   const [timeZone, setTimeZone] = useState(preferences.timeZone);
-  const [defaultWorkbench, setDefaultWorkbench] = useState<RelayViewKind>(preferences.defaultWorkbench ?? "general");
+  const [motion, setMotion] = useState<MotionPreference>(storedMotionPreference() ?? "system");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const changed = () => { setSaved(false); setError(null); };
 
-  return <section id="settings-preferences" className="settings-basic" aria-labelledby="settings-basic-title">
-    <h2 id="settings-basic-title">基本设置</h2>
-    <p className="settings-basic-intro">设置时区、界面外观、默认工作台与默认工作目录，定制你的工作环境。</p>
-    <form onSubmit={(event) => {
+  return <section className="settings-card settings-basic" data-testid="settings-general-preferences">
+    <h2>显示与界面</h2>
+    <p className="helper-text">仅保存在本设备，不改变服务端事实或任务状态。</p>
+    <form className="settings-form" onSubmit={(event) => {
       event.preventDefault(); setError(null); setSaved(false);
-      try { saveDisplayPreferences({ timeZone, defaultWorkbench }); setSaved(true); }
-      catch { setError("设置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。"); }
+      try {
+        // 尚未选择默认工作台时保留 null：保存时区不应顺手把「项目初始视图」覆盖成 general。
+        saveDisplayPreferences({ timeZone, defaultWorkbench: preferences.defaultWorkbench });
+        // 动效偏好同样是本设备事实：存储失败只影响下次启动，不阻断显示偏好保存。
+        storeMotionPreference(motion);
+        applyMotionPreference(motion);
+        setSaved(true);
+      } catch {
+        setError("设置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。");
+      }
     }}>
       <div className="settings-field">
         <label htmlFor="settings-timezone">界面时区</label>
@@ -701,30 +792,132 @@ function DisplayPreferencesCard({ client }: { client: RelayApiClient | null }) {
         <p id="settings-timezone-help" className="helper-text">用于顶栏日期显示，不改变已保存的稍后处理日期。</p>
       </div>
       <div className="settings-field">
-        <label htmlFor="settings-appearance">界面外观</label>
-        <select id="settings-appearance" value="light" disabled aria-describedby="settings-appearance-help">
-          <option value="light">浅色</option>
-        </select>
-        <p id="settings-appearance-help" className="helper-text">当前仅支持浅色主题。</p>
+        <span className="field-label" id="settings-appearance-label">界面外观</span>
+        <div id="settings-appearance" className="settings-readonly-value" role="group"
+          aria-labelledby="settings-appearance-label" data-testid="settings-appearance">
+          <span className="status-chip status-chip--neutral">浅色</span>
+          <span className="helper-text">当前仅支持浅色主题；深色与 Aurora Glass 仍在开发中。</span>
+        </div>
       </div>
       <div className="settings-field">
-        <label htmlFor="settings-default-workbench">默认工作台</label>
-        <select id="settings-default-workbench" data-testid="settings-default-workbench" value={defaultWorkbench}
-          aria-describedby="settings-workbench-help" onChange={(event) => { setDefaultWorkbench(event.target.value as RelayViewKind); changed(); }}>
-          <option value="general">通用</option><option value="thesis">论文</option><option value="development">开发</option>
+        <label htmlFor="settings-motion">动效</label>
+        <select id="settings-motion" data-testid="settings-motion" value={motion}
+          aria-describedby="settings-motion-help"
+          onChange={(event) => { setMotion(event.target.value as MotionPreference); changed(); }}>
+          <option value="system">跟随系统</option>
+          <option value="on">开启</option>
+          <option value="off">关闭</option>
         </select>
-        <p id="settings-workbench-help" className="helper-text">打开项目工作台时使用；项目已保存的默认视图优先，可随时在工作台内切换。</p>
+        <p id="settings-motion-help" className="helper-text">只影响装饰动画，不隐藏状态文字、进度或操作入口。</p>
       </div>
       <div className="settings-save-actions">
-        <button type="submit" className="primary-button" data-testid="settings-save">保存设置</button>
-        {saved && <p role="status" className="settings-save-result">设置已保存，仅在本设备生效。</p>}
+        <button type="submit" className="primary-button" data-testid="settings-save">保存显示偏好</button>
+        {saved && <p role="status" className="settings-save-result" data-testid="settings-save-result">
+          显示偏好已保存，仅在本设备生效。</p>}
         {error && <p role="alert" className="action-error">{error}</p>}
       </div>
-      <p className="settings-device-note helper-text">显示偏好仅保存在本设备。</p>
     </form>
-    {/* 默认工作目录是服务端 Workspace 配置，不是本设备偏好：它不进上面的表单，
-        也不写 localStorage——作用域是事实，本机偏好不能冒充授权。 */}
-    <DefaultWorkingDirectoryRow client={client} />
+  </section>;
+}
+
+/**
+ * 工作台默认视图（本设备偏好）。项目自己保存的视图优先，这里的值只用于
+ * 项目尚未保存视图时的工作台入口。
+ */
+function WorkbenchPreferencesCard() {
+  const preferences = useDisplayPreferences();
+  const [defaultWorkbench, setDefaultWorkbench] = useState<RelayViewKind>(preferences.defaultWorkbench ?? "general");
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return <section className="settings-card" data-testid="settings-workbench-preferences">
+    <h2>默认工作台</h2>
+    <p className="helper-text">打开项目工作台时使用；项目已保存的默认视图优先，可随时在工作台内切换。</p>
+    <form className="settings-form" onSubmit={(event) => {
+      event.preventDefault(); setSaved(false); setError(null);
+      try {
+        saveDisplayPreferences({ timeZone: preferences.timeZone, defaultWorkbench });
+        setSaved(true);
+      } catch {
+        setError("默认工作台未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。");
+      }
+    }}>
+      <div className="settings-field">
+        <label htmlFor="settings-default-workbench">默认视图</label>
+        <select id="settings-default-workbench" data-testid="settings-default-workbench" value={defaultWorkbench}
+          onChange={(event) => { setDefaultWorkbench(event.target.value as RelayViewKind); setSaved(false); setError(null); }}>
+          <option value="general">通用</option><option value="thesis">论文</option><option value="development">开发</option>
+        </select>
+        <p className="helper-text">这是本设备偏好，不修改项目的模板配置，也不改变活动任务的执行契约。</p>
+      </div>
+      <div className="settings-save-actions">
+        <button type="submit" className="primary-button" data-testid="settings-default-workbench-save">
+          保存默认工作台</button>
+        {saved && <p role="status" className="settings-save-result" data-testid="settings-default-workbench-result">
+          默认工作台已保存。</p>}
+        {error && <p role="alert" className="action-error">{error}</p>}
+      </div>
+    </form>
+  </section>;
+}
+
+/**
+ * 权限与执行：只读展示能核实的执行权限状态，并提供真实管理入口。
+ *
+ * 写入档位属于具体目录；新建目录的默认档位属于工作区。两者都不是全局开关，
+ * 因此本页不提供模拟的「全局执行策略」控件。
+ */
+function ExecutionPermissionsCard({ client, projection, loading, readError }: {
+  readonly client: RelayApiClient | null;
+  readonly projection: RelayWorkspaceDefaultDirectory | null;
+  readonly loading: boolean;
+  readonly readError: string | null;
+}) {
+  const status = projection?.status ?? null;
+  const currentTier = projection?.writeTier ?? null;
+  const defaultTier = projection?.defaultWriteTier ?? null;
+  return <section className="settings-card" data-testid="execution-permissions">
+    <h2>当前执行权限</h2>
+    <p className="helper-text">以下状态来自服务端投影；本页不改 Project、Directory、Run 或审批策略。</p>
+    <dl className="settings-definition-list">
+      <div>
+        <dt>默认目录写入档位</dt>
+        <dd data-testid="execution-current-write-tier">
+          {client === null
+            ? <><span className="status-chip status-chip--neutral">未连接</span>{" "}连接本机 API 后可读取。</>
+            : loading && projection === null
+              ? <><span className="status-chip status-chip--neutral">读取中</span></>
+              : readError !== null
+                ? <><span className="status-chip status-chip--danger">读取失败</span>{" " }{readError}</>
+                : status === "READY" && currentTier !== null
+                  ? <><span className={`status-chip status-chip--${currentTier === "READ_ONLY" ? "neutral" : "warning"}`}>
+                    {writeTierLabels[currentTier]}</span>{" "}绑定这个目录的所有会话共用；档位在对话页的目录行调整。</>
+                  : status === "UNAVAILABLE"
+                    ? <><span className="status-chip status-chip--danger">不可读取</span>{" "}默认目录不可用，无法读取该目录的写入档位。</>
+                    : <><span className="status-chip status-chip--neutral">暂无目录</span>{" "}选择默认目录后才能读取它的写入档位。</>}
+        </dd>
+      </div>
+      <div>
+        <dt>新目录默认档位</dt>
+        <dd data-testid="execution-default-write-tier">
+          {defaultTier === null
+            ? <><span className="status-chip status-chip--neutral">未设置</span>{" "}新打开的目录按「只读」起步。</>
+            : <><span className={`status-chip status-chip--${defaultTier === "READ_ONLY" ? "neutral" : "warning"}`}>
+              {writeTierLabels[defaultTier]}</span>{" "}只作用于以后新打开的目录，不改已有目录。</>}
+        </dd>
+      </div>
+      <div>
+        <dt>连接、插件与策略</dt>
+        <dd>按项目查看真实连接、受管目录与逐动作策略。<Link className="inline-link" to="/connections">
+          打开连接与权限</Link></dd>
+      </div>
+    </dl>
+    <p className="helper-text" data-testid="settings-pending-preferences"
+      title="完整通知规则见《工作台交互设计》11.5：仅提醒必须由用户介入的事项；Relay 运行期间应用内保留待处理标记，窗口外另发 Windows 通知；同一事项只提醒一次；短时间多个事项合并为一条通知。">
+      界面语言与通知偏好暂不可修改：语言偏好的读写接口尚未提供；通知规则已确认——
+      仅提醒必须由用户介入的事项，同一事项只提醒一次。
+    </p>
+    <p className="helper-text">推进与审批由服务端负责；本页不保存执行策略开关，也不改变任何 Run 的执行权。</p>
   </section>;
 }
 
@@ -738,7 +931,16 @@ export default function SettingsView() {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const requestVersion = useRef(0);
-  const [group, setGroup] = useState<"basic" | "model" | "execution" | "workbench">("basic");
+  const [group, setGroup] = useState<SettingsGroup>("basic");
+  // 页签首次访问才挂载内容：未访问过的页签不发起读取；访问过之后保持挂载，草稿不因切换丢失。
+  const [visited, setVisited] = useState<Record<SettingsGroup, boolean>>({
+    basic: true, model: false, execution: false, workbench: false });
+  const directory = useWorkspaceDefaultDirectoryProjection(client);
+
+  const selectGroup = (value: SettingsGroup) => {
+    setGroup(value);
+    setVisited((current) => current[value] ? current : { ...current, [value]: true });
+  };
 
   const refresh = useCallback(() => {
     const request = ++requestVersion.current;
@@ -746,7 +948,7 @@ export default function SettingsView() {
       setLoading(false); setError(null); setStatus(null); setVerification(null);
       return;
     }
-    setLoading(true); setError(null); setStatus(null);
+    setLoading(true); setError(null); setStatus(null); setVerification(null);
     void Promise.all([client.getModelPortStatus(), client.getModelPortVerification()])
       .then(([nextStatus, nextVerification]) => {
         if (request === requestVersion.current) {
@@ -780,68 +982,67 @@ export default function SettingsView() {
     });
   };
 
-return <section className="settings-page pv-page" data-testid="settings-page">
-    <PageHeader testId="settings-page-head" title="设置" overline="Settings" lede="以服务状态、模型端口、基本设置和执行策略为主；选项即时生效，不需要填写配置表。" />
+  const groups: readonly (readonly [SettingsGroup, string])[] = [
+    ["basic", "通用设置"], ["model", "AI 与模型"], ["execution", "权限与执行"], ["workbench", "工作台"]];
+
+  return <section className="settings-page" data-testid="settings-page">
+    <PageHeader testId="settings-page-head" title="设置"
+      lede="管理本设备偏好、默认工作目录、模型连接与执行权限；每项设置都标明生效范围。" />
     <div className="settings-layout">
       <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
-        {([['basic', '基本设置'], ['model', 'AI 设置'], ['execution', '执行策略'], ['workbench', '工作台']] as const)
-          .map(([value, label]) => <button key={value} type="button" data-testid={`settings-group-${value}`}
-            role="tab" id={`settings-tab-${value}`} aria-controls={`settings-panel-${value}`} aria-selected={group === value}
-            tabIndex={group === value ? 0 : -1} onClick={() => setGroup(value)}>{label}</button>)}
+        {groups.map(([value, label]) => <button key={value} type="button" data-testid={`settings-group-${value}`}
+          role="tab" id={`settings-tab-${value}`} aria-controls={`settings-panel-${value}`}
+          aria-selected={group === value} tabIndex={group === value ? 0 : -1}
+          onClick={() => selectGroup(value)}>{label}</button>)}
       </nav>
       <div className="settings-content">
-      <div role="tabpanel" id="settings-panel-basic" aria-labelledby="settings-tab-basic" hidden={group !== "basic"}><DisplayPreferencesCard client={client} /></div>
-      <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>{client === null ? <>
-      <div className="warning-callout" role="status">
-      当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，或通过顶栏「数据来源」连接本机 API。</div>
-      </> : <>
-      {loading && <p role="status">正在读取服务实例配置状态…</p>}
-      {error && <div className="action-error" role="alert"><p>读取失败：{error}</p>
-        <button className="secondary-button" type="button"
-          onClick={refresh}>
-          <RotateCcw aria-hidden="true" />重新读取</button></div>}
-      {verifyError && <div className="action-error" role="alert" data-testid="verify-error">
-        <p>验证未完成：{verifyError}</p></div>}
-      <ServiceStateCard loading={loading} error={error} status={status}
-        verification={verification} verifying={verifying} onVerify={onVerify} />
-      {status && <ModelPortCard status={status} client={client} onSaved={refresh} />}
-      {/* ADR-036：连接登记（懒加载，展开才发请求）。只在「AI 设置」页签激活时挂载，
-          避免隐藏页签仍挂载子组件时多发一条读取。 */}
-      {group === "model" && <ModelConnectionsCard client={client} />}
-      {status?.configured === true && <VerificationDetailCard verification={verification}
-        verifying={verifying} />}
-      {/* 记忆设置与模型端口同为「AI 行为」配置，但两者独立：模型不可用不影响这两个开关的读写。 */}
-      <MemorySettingsCard client={client} />
-      {/* 0135：上下文长度三档按工作空间生效。只在「AI 设置」页签激活时挂载：
-          隐藏页签仍会挂载子组件，不这样处理会在基本设置页多发一条默认目录读取。 */}
-      {group === "model" && <ContextBudgetCard client={client} />}
-      <section className="surface-panel settings-card">
-        <h2>相关入口</h2>
-        <ul className="settings-links">
-          <li><Link to="/connections">连接与权限</Link>：Gateway 连接、受管资源与策略在项目级管理。</li>
-          <li><Link to="/projects">项目</Link>：项目设置内可管理默认工作台视图与 Pack 清单。</li>
-        </ul>
-      </section>
-    </>}</div>
-      <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench" hidden={group !== "workbench"}>{group === "workbench" && <div id="settings-packs"><PackCatalogPanel /></div>}</div>
-      <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution" hidden={group !== "execution"}><section className="surface-panel settings-card">
-        <h2>执行策略</h2>
-        <p className="helper-text">执行连接与权限按项目管理，通知偏好尚无写接口。</p>
-        {/* 2026-10-20（P2）：两行「暂不可用」在这里没有任何可做的动作，占的是设置项的位置。
-            合成一句如实说明——语言偏好仍缺读写接口，通知规则已确认但还不能在此修改——
-            既不摆假开关，也不把待实现的需求从文档里删掉。 */}
-        <p className="helper-text" data-testid="settings-pending-preferences"
-          title="完整通知规则见《工作台交互设计》11.5：仅提醒必须由用户介入的事项；Relay 运行期间应用内保留待处理标记，窗口外另发 Windows 通知；同一事项只提醒一次；短时间多个事项合并为一条通知。">
-          界面语言与通知偏好暂不可修改：语言偏好的读写接口尚未提供；通知规则已确认——
-          仅提醒必须由用户介入的事项，同一事项只提醒一次。
-        </p>
-        <Link className="inline-link" to="/connections">查看连接与权限</Link>
-      </section></div>
-      <details className="settings-explanation"><summary>显示与执行说明</summary>
-        <p>切换工作台只改变展示，不改变活动任务的执行约定。</p>
-        <p>界面时区用于显示日期和时间，不会改写已保存的稍后处理日期。</p>
-        <p>AI 与执行权限在对应设置中单独管理。</p>
-      </details>
+        <div role="tabpanel" id="settings-panel-basic" aria-labelledby="settings-tab-basic" hidden={group !== "basic"}>
+          <GeneralPreferencesCard />
+          <DefaultWorkingDirectoryRow client={client} projection={directory.projection}
+            loading={directory.loading} readError={directory.readError} read={directory.read} />
+        </div>
+
+        <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>
+          {visited.model && (client === null ? <div className="warning-callout" role="status">
+            当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，
+            或通过顶栏「数据来源」连接本机 API。
+          </div> : <>
+            <p className="settings-scope-note" data-testid="settings-ai-scope">
+              会话聊天使用的模型在对话输入器里选择；本页的模型端口与默认连接只影响本实例新的任务执行。
+              上下文长度与记忆按工作空间生效，不改变已有会话自己的选择。
+            </p>
+            {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
+            {error && <div className="action-error" role="alert">
+              <p>读取失败：{error}</p>
+              <button className="secondary-button" type="button" data-testid="model-port-retry"
+                onClick={refresh}>
+                <RotateCcw aria-hidden="true" />重新读取</button>
+            </div>}
+            {verifyError && <div className="action-error" role="alert" data-testid="verify-error">
+              <p>验证未完成：{verifyError}</p></div>}
+            <ServiceStateCard loading={loading} error={error} status={status}
+              verification={verification} verifying={verifying} onVerify={onVerify} />
+            {status && <ModelConnectionsCard client={client} />}
+            <ContextBudgetCard client={client} />
+            <MemorySettingsCard client={client} />
+            <ModelAdvancedDiagnostics client={client} status={status} verification={verification}
+              verifying={verifying} onSaved={refresh} />
+          </>)}
+        </div>
+
+        <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution"
+          hidden={group !== "execution"}>
+          {visited.execution && <ExecutionPermissionsCard client={client} projection={directory.projection}
+            loading={directory.loading} readError={directory.readError} />}
+        </div>
+
+        <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench"
+          hidden={group !== "workbench"}>
+          {visited.workbench && <>
+            <WorkbenchPreferencesCard />
+            <div id="settings-packs"><PackCatalogPanel /></div>
+          </>}
+        </div>
       </div>
     </div>
   </section>;

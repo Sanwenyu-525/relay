@@ -33,13 +33,12 @@ const WRITE_TIER_LABELS: Record<string, string> = {
 /**
  * 需要如实报告的能力族与用户能看懂的名字。
  *
- * 顺序即报告顺序：文件优先（日常最常缺的就是它），然后操作类。
+ * 顺序即报告顺序：文件优先（日常最常缺的就是它），然后检查命令。
  *
- * 这里**只列读取族**（2026-10-22 DEV-0117 复核后维持原状）：BROWSER_ACTION 与
- * COMPUTER_INPUT 这类操作能力从不在会话轮次的词表里出现（它们在任务执行的 Run
- * 工具循环中按授权提供），列进来只会让每一轮都多两条永远补不上的缺口，还会
- * 让人以为在连接里补一项就能在对话里点鼠标。操作类边界由
- * `formatSessionCapabilities` 末尾单独一段说明，不混进这份缺口清单。
+ * 这里**只列文件/检查族**（2026-11-01 COMPUTER-PLUGIN-E2E 复核）：
+ * BROWSER_READ 与 COMPUTER_READ 也不在会话轮次词表里——观察—操作—再观察属于 Run 的
+ * 工具循环。把它们列成「本轮没有这些能力」会让模型以为在连接里补一项就能在对话里
+ * 截图或点鼠标；机器插件的可用性由上面的专用两行说明，不混进这份缺口清单。
  */
 const REPORTED_CAPABILITIES: readonly {
   readonly capability: string; readonly label: string;
@@ -49,8 +48,6 @@ const REPORTED_CAPABILITIES: readonly {
   { capability: 'FILE_WRITE', label: '修改文件' },
   { capability: 'GIT_READ', label: '查看 Git 状态与历史' },
   { capability: 'CLI_RUN', label: '运行检查命令' },
-  { capability: 'BROWSER_READ', label: '读取浏览器页面' },
-  { capability: 'COMPUTER_READ', label: '查看桌面窗口与截图' },
 ];
 
 export interface SessionCapabilityFacts {
@@ -250,6 +247,8 @@ export function formatSelectedPluginFact(content: string,
     lines.push(machinePluginUsableForSession(facts, 'computer')
       ? '用户要求操作电脑时，必须按执行候选协议在 execution 中带 interaction="COMPUTER"，'
         + '目标写进 objective；不要只给操作步骤，也不要把明确的操作请求写成普通讨论。'
+        + '打开应用或窗口操作不需要在仓库里找脚本或配置：不要先读文件、搜索路径或列目录，'
+        + '直接在 execution 里声明候选；具体动作由执行阶段观察后再决定。'
       : '本会话当前没有可用的电脑操控连接或运行时；用户要求操作电脑时，按上面的能力事实'
         + '说明缺哪一项，不要伪造执行候选，也不要把缺项说成「本轮缺少桌面工具」。');
   }
@@ -259,8 +258,10 @@ export function formatSelectedPluginFact(content: string,
         + '不要只给页面步骤，也不要把明确的操作请求写成普通讨论。'
       : '本会话当前没有可用的浏览器操控连接；用户要求浏览器操作时，按事实说明缺这一项。');
   }
-  lines.push('如果用户只是在询问插件能否做到、怎么使用或值不值得做，仍然填 execution=null 并直接回答，'
-    + '不要因为识别到插件标签就启动桌面或页面操作。');
+  lines.push('判定是否要填候选时，按用户语句本身区分，不要因为看到了插件标签就一律执行：',
+    '- 询问能力、可行性、是否支持、怎么做，或以问号结尾的句子：execution=null，直接回答；',
+    '- 命令式请求（打开、启动、点击、输入、切换、关闭，含「请」「帮我」的可执行要求）：填候选；',
+    '- 只有标签、没有明确动作或目标：execution=null，只问那一个缺失的目标。');
   return lines.join('\n');
 }
 

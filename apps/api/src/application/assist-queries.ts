@@ -1,6 +1,7 @@
 import type { AssistMessageRow, AssistProposalRow, AssistSessionRow, AssistSessionStatus } from '../infrastructure/database-schema.js';
 import type { AssistSessionListRow, AssistSessionListState, AssistSessionRunState
 } from '../assist/assist-repository.js';
+import type { AssistTitleGenerationSummary } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { resourceNotFound } from './domain-error.js';
@@ -50,13 +51,15 @@ export async function readAssistSession(db: DbExecutor, input: {
 export async function readAssistSessionWithActivity(db: DbExecutor, input: {
   workspaceId: string; sessionId: string }): Promise<{ readonly session: AssistSessionRow;
     readonly hasMessages: boolean; readonly runState: AssistSessionRunState | null;
-    readonly listState: AssistSessionListState | null }> {
+    readonly listState: AssistSessionListState | null;
+    readonly titleGeneration: AssistTitleGenerationSummary | null }> {
   const session = await readAssistSession(db, input);
   const activity = await createRepositories(db).assist.sessionActivity(session.id);
   // 会话刚刚读到、紧接着就消失只可能是并发删除：按「没有派生事实」返回，
   // 不在这里抛 404——身份本身已经由上面那条读取核过。
   return { session, hasMessages: activity?.hasMessages ?? false,
-    runState: activity?.runState ?? null, listState: activity?.listState ?? null };
+    runState: activity?.runState ?? null, listState: activity?.listState ?? null,
+    titleGeneration: activity?.titleGeneration ?? null };
 }
 
 export async function readAssistSessionContexts(db: DbExecutor, input: {
@@ -72,6 +75,17 @@ export async function listAssistMessages(db: DbExecutor, input: {
   const limit = input.limit === undefined ? undefined :
     Math.max(1, Math.min(200, Math.trunc(input.limit)));
   return r.assist.listMessages(session.id, limit);
+}
+
+/** 0156/ENG-OBS-02：最新优先 + before_seq 历史补读；has_more 由 limit+1 证据决定。 */
+export async function listAssistMessagesPage(db: DbExecutor, input: {
+  workspaceId: string; sessionId: string; limit?: number; beforeSeq?: bigint;
+}): Promise<{ items: readonly AssistMessageRow[]; hasMore: boolean; nextBeforeSeq: bigint | null }> {
+  const session = await readAssistSession(db, input);
+  return createRepositories(db).assist.listMessagesPage(session.id, {
+    ...(input.limit === undefined ? {} : { limit: input.limit }),
+    ...(input.beforeSeq === undefined ? {} : { beforeSeq: input.beforeSeq }),
+  });
 }
 
 /**

@@ -176,6 +176,48 @@ test('DD-05: disabled, archived and missing directories fall back without rewrit
   }
 });
 
+test('DD-05/09: missing directory projects as UNAVAILABLE, new sessions fall back, clear and reopen recover', async () => {
+  const f = await configured();
+  const r = createRepositories(app.db);
+  const old = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), title: 'old' });
+  const api = await startTestApi();
+  try {
+    const endpoint = workspacePath(f.workspaceId, '/default-working-directory');
+    await rm(f.root, { recursive: true });
+    const projection = await api.get(endpoint);
+    assert.equal(projection.status, 200, projection.text);
+    const body = projection.body as { status: string; reason: string | null; canonical_root: string | null;
+      revision: string; resource_id: string | null };
+    // 配置存在但目录已消失：必须是 UNAVAILABLE，不能读成「没设置」或「有效」。
+    assert.equal(body.status, 'UNAVAILABLE');
+    assert.equal(body.reason, 'DIRECTORY_UNAVAILABLE');
+    assert.equal(body.canonical_root, f.root);
+    assert.equal(body.revision, '1');
+    // 新会话回退到无默认目录；已有会话保持原绑定；原配置不被查询失败清除。
+    const fresh = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), title: 'fallback after missing' });
+    assert.equal(fresh.result.project_id, null);
+    assert.equal((await r.assist.readSession(fresh.result.session_id))?.working_resource_id, null);
+    assert.equal((await r.assist.readSession(old.result.session_id))?.working_resource_id, f.resourceId);
+    // 清除是真实恢复路径：修订前移，状态回到 UNSET。
+    const clear = await api.post(`${endpoint}/clear`, { command_id: randomUUID(), expected_revision: '1' });
+    assert.equal(clear.status, 200, clear.text);
+    assert.equal(((await api.get(endpoint)).body as { status: string }).status, 'UNSET');
+    // 重新打开一个现存目录：没有默认目录时按既有语义自动登记，状态恢复为 READY。
+    const nextRoot = await mkdtemp(join(tmpdir(), 'relay-default-directory-'));
+    roots.push(nextRoot);
+    const opened = await api.post(workspacePath(f.workspaceId, '/working-directories/open'), {
+      command_id: randomUUID(), root_path: nextRoot, project_id: f.projectId });
+    assert.equal(opened.status, 200, opened.text);
+    const recovered = (await api.get(endpoint)).body as { status: string; canonical_root: string | null;
+      revision: string };
+    assert.equal(recovered.status, 'READY');
+    assert.equal(recovered.canonical_root, nextRoot);
+    assert.equal(recovered.revision, '3');
+  } finally { await api.stop(); }
+});
+
 test('DD-09: concurrent first requests replay one receipt; competing revisions have exactly one winner', async () => {
   const f = await configured();
   const api = await startTestApi();

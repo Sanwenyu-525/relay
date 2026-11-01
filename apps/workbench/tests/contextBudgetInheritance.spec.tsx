@@ -239,7 +239,7 @@ describe("会话上下文档位的导航链路继承", () => {
     view.unmount();
   }, 15_000);
 
-  it("首条消息之前可选档位：选择随建会话命令落库，A 的档位不被改写", async () => {
+  it("首条消息之前不显示上下文圆环：建会话不再带显式档位，只按来源继承", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => server.route(input, init));
@@ -248,68 +248,41 @@ describe("会话上下文档位的导航链路继承", () => {
     const view = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
     await flush();
-    // 空白新会话的浮层里也有三档：选 1024K 不发任何写请求，只落草稿作用域。
-    await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    const options = view.layer.findAll('[data-testid^="context-budget-option-"]');
-    expect(options.length).toBeGreaterThanOrEqual(3);
-    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    expect(server.budgetWrites, "还没有会话时不得写档位").toHaveLength(0);
+    // 2026-11-01 用户指令：会话欢迎页（首条输入器）不显示上下文圆环，也没有档位预选。
+    expect(view.wrapper.find('[data-testid="assist-context-meter"]').exists()).toBe(false);
 
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按 1024K 跑");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按来源档位跑");
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
     await flush();
-    expect(server.created.at(-1)?.explicitTier, "显式档位随建会话命令落库").toBe(1_048_576);
-    expect(server.sessions.get(sessionB)?.tier).toBe(1_048_576);
+    expect(server.created.at(-1)?.explicitTier, "首条之前不再有显式档位").toBeNull();
+    expect(server.sessions.get(sessionB)?.tier, "B 继承 A 的 512K").toBe(524_288);
     expect(server.sessions.get(sessionA)?.tier, "来源会话不被改写").toBe(524_288);
     view.unmount();
   });
 
-  it("B 未发送就改成 1024K：从 A 新建的 C 不捡这档，刷新同一空白会话也读得回", async () => {
+  it("欢迎页不再读取本机旧档位草稿：旧值不改变来源继承", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => server.route(input, init));
     vi.stubGlobal("fetch", fetchMock);
 
-    const view = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
-    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
+    // 旧版本可能在本机留下档位草稿；新行为不再读取它，也不显示圆环。
+    const legacyKey = `relay.workbench.contextBudgetDraft:1:${workspaceId}:first:${workspaceId}:legacy`;
+    window.localStorage.setItem(legacyKey, JSON.stringify({ tokens: 1_048_576 }));
+    const view = await mountWorkbench(`/agent?new=legacy&work=${taskId}&source_session=${sessionA}`);
     await flush();
-    const blankQuery = view.router.currentRoute.value.query as Record<string, string>;
-    const firstBlank = `/agent?new=${encodeURIComponent(blankQuery.new ?? "-")}&work=${taskId}`;
-    await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    // P0-A：来源会话 A=512K，空白输入器直接显示 512K。
-    expect((view.layer.get('[data-testid="context-budget-option-524288"]').element as HTMLInputElement).checked,
-      "空白输入器要显示来源会话的 512K").toBe(true);
-    // 在 B 的空白里选 1024K，但不发送。
-    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    expect(server.budgetWrites, "空白会话不写服务端").toHaveLength(0);
+    expect(view.wrapper.find('[data-testid="assist-context-meter"]').exists(),
+      "首条输入器不显示上下文圆环").toBe(false);
+    expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
 
-    // P0-B：刷新同一个空白会话，草稿按这个会话键读得回来。
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("旧草稿不生效");
+    await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+    await flush();
+    expect(server.created.at(-1)?.sourceSessionId).toBe(sessionA);
+    expect(server.created.at(-1)?.explicitTier, "不再传显式档位").toBeNull();
+    expect(server.sessions.get(sessionB)?.tier, "按来源继承 512K").toBe(524_288);
+    expect(server.sessions.get(sessionA)?.tier, "来源会话不被改写").toBe(524_288);
     view.unmount();
-    const reopened = await mountWorkbench(firstBlank);
-    await reopened.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    expect((reopened.layer.get('[data-testid="context-budget-option-1048576"]')
-      .element as HTMLInputElement).checked, "同一个空白会话刷新后应读回草稿").toBe(true);
-    reopened.unmount();
-
-    // 再从 A 起另一条空白会话：不能捡到上面那份 1024K。
-    const second = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
-    await second.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
-    await flush();
-    await second.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    expect((second.layer.get('[data-testid="context-budget-option-524288"]')
-      .element as HTMLInputElement).checked, "另一条空白会话回到来源会话的 512K").toBe(true);
-    expect((second.layer.get('[data-testid="context-budget-option-1048576"]')
-      .element as HTMLInputElement).checked, "不得串到上一条空白会话的选择").toBe(false);
-    await second.wrapper.get('[data-testid="assist-first-draft"]').setValue("C 的首条");
-    await second.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
-    await flush();
-    expect(server.created.at(-1)?.explicitTier, "C 不带 B 没发出去的 1024K").toBe(524_288);
-    second.unmount();
+    window.localStorage.removeItem(legacyKey);
   });
 });

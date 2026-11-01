@@ -536,12 +536,16 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   }, [client, active.taskId, active.sessionId, active.contextEpoch, active.activityEpoch]);
 
   /**
-   * 有没有一段讨论此刻真的有在途的一轮（服务端读时派生的 `run_state`）。
+   * 这一列有没有需要按拍重读的在途事实：回复生成（`run_state`），或标题生成（0157）。
    *
-   * 只有它为真时才轮询：这一列平时一个请求都不多打，一次读取失败也不会自动变成
-   * 「一直在轮询」。任务聊天走任务行，不在这一列，也不进这个判据。
+   * 两种都只读服务端读时派生的投影；只有真在途时才轮询，平时一个请求都不多打。
+   * 标题生成是异步的辅助外呼，界面不靠它保证完成，只靠它把已确认的标题显示出来——
+   * 没有这条判据，左栏会一直停在旧标题直到下一次整列重读。
    */
-  const watchingRun = (loaded?.sessions ?? []).some((session) => session.runState !== null);
+  const watchingWork = (loaded?.sessions ?? []).some((session) =>
+    session.runState !== null ||
+    session.titleGeneration?.status === "PENDING" ||
+    session.titleGeneration?.status === "CLAIMED");
 
   /**
    * 运行态轮询（2026-10-28，用户要求「切到别的会话也能看出哪条在生成」）。
@@ -564,7 +568,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    *    避免旧响应盖掉新列表。
    */
   useEffect(() => {
-    if (!watchingRun) return;
+    if (!watchingWork) return;
     let stopped = false;
     let timer: number | null = null;
     let ticks = 0;
@@ -606,7 +610,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       document.removeEventListener("visibilitychange", onVisibility);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [client, watchingRun]);
+  }, [client, watchingWork]);
 
   const tasks = loaded?.tasks ?? [];
   const loadedSessions = loaded?.sessions ?? [];

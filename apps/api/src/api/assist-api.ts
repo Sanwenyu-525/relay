@@ -14,10 +14,12 @@ import { establishConversationDiffBaseline, readConversationDiff, readConversati
   from '../conversation-diff/net-diff-service.js';
 import { MAX_ASSIST_ATTACHMENT_BODY_BYTES, uploadAssistMessageAttachment }
   from '../application/assist-attachments.js';
-import { archiveAssistSession, deleteAssistSession, forkAssistSession, renameAssistSession,
+import { archiveAssistSession, deleteAssistSession, forkAssistSession,
+  regenerateAssistSessionTitle, renameAssistSession,
   reopenAssistSession, setAssistSessionPin, setAssistSessionUnread }
   from '../application/assist-session-controls.js';
-import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
+import { readExecutionActivity } from '../application/execution-activity-projection.js';
+import { listAssistMessagesPage, listAssistProposals, listAssistSessions, readAssistProposal,
   readAssistSession, readAssistSessionContexts, readAssistSessionWithActivity, projectAssistSkillMessage, readAssistLivePreview,
   readAssistMessageUsageSummaries, listAssistMessageAttachmentMeta, readAssistMessageAttachment,
   type AssistMessageAttachmentMeta }
@@ -32,7 +34,8 @@ import { resourceNotFound } from '../application/domain-error.js';
 import { exportAssistSession } from '../application/session-export.js';
 import { readSessionToolCalls } from '../application/session-tool-call-projection.js';
 import type { JsonObject } from '../infrastructure/json.js';
-import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
+import type { AssistSessionStatus, AssistSessionTitleSource, AssistTitleGenerationSummary,
+  ConversationMode } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
 import { readDeclaredImageInput } from '../workflow/model-port-config.js';
@@ -69,6 +72,27 @@ const AssistSessionDto = Type.Object({
   task_id: Type.Union([uuid, Type.Null()]),
   parent_session_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
+  /**
+   * 0157：标题来源。它是会话行自身的事实，不是界面推断：
+   * LEGACY 旧行；PROVISIONAL 系统临时；AI_GENERATED 语义生成；USER_DEFINED 用户手动。
+   */
+  title_source: Type.Union([Type.Literal('LEGACY'), Type.Literal('PROVISIONAL'),
+    Type.Literal('AI_GENERATED'), Type.Literal('USER_DEFINED')]),
+  /** 0157：最近一次自动命名成功落标题的时刻；人工改名与旧行为 null。 */
+  title_generated_at: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * 0157：最近一次标题生成请求（读时派生）。界面只据此显示「正在生成」与失败原因，
+   * 不把它的状态当作标题是否可信的依据——标题本身仍读 `title`。
+   */
+  title_generation: Type.Union([Type.Null(), Type.Object({
+    status: Type.Union([Type.Literal('PENDING'), Type.Literal('CLAIMED'),
+      Type.Literal('COMPLETED'), Type.Literal('FAILED'), Type.Literal('SKIPPED')]),
+    request_kind: Type.Union([Type.Literal('AUTO'), Type.Literal('REGENERATE')]),
+    generator: Type.Union([Type.Literal('MODEL'), Type.Literal('RULES'), Type.Null()]),
+    error_code: Type.Union([Type.String(), Type.Null()]),
+    requested_at: Type.String(),
+    settled_at: Type.Union([Type.String(), Type.Null()]),
+  }, strict)]),
   /** 0090：置顶时刻（导航排序键，不是业务事实）。未置顶为 null。 */
   pinned_at: Type.Union([Type.String(), Type.Null()]),
   /** 0104：未读标记时刻（导航标记，不是业务事实）。已读为 null。 */
@@ -139,6 +163,9 @@ const AssistSessionResult = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
+  /** 0157：建会话回执里的标题来源恒为 PROVISIONAL（自动生成的起点）。 */
+  title_source: Type.Union([Type.Literal('LEGACY'), Type.Literal('PROVISIONAL'),
+    Type.Literal('AI_GENERATED'), Type.Literal('USER_DEFINED')]),
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),
   assistant_profile_id: Type.Union([uuid, Type.Null()]),
   assistant_profile_revision: Type.Union([rev, Type.Null()]),
@@ -316,6 +343,12 @@ const createSessionBody = Type.Object({
   task_id: Type.Optional(Type.Union([uuid, Type.Null()])),
   title: Type.String({ minLength: 1, maxLength: 200 }),
   /**
+   * 0157：这条标题是不是系统占位标题。不传按 USER_DEFINED（调用方显式给的名字受保护）；
+   * 工作台提交首条消息截断时传 PROVISIONAL，由服务端规范化为 `分类-任务名`。
+   */
+  title_source: Type.Optional(Type.Union([Type.Literal('PROVISIONAL'),
+    Type.Literal('USER_DEFINED')])),
+  /**
    * 会话身份在建立时冻结，之后不改写：不传即 'AGENT'，既有客户端不受影响。
    * 'LEARNING' 是 0072 新增的独立受限身份：对项目只读，只多一项写个人学习记录的能力。
    * Breaking Change：Yes（语义）——同一 command_id 换模式重放按异载荷拒绝。
@@ -422,6 +455,11 @@ const SessionContextUsageResult = Type.Object({
 const SessionTitleResult = Type.Object({
   session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),
 }, strict);
+/** 0157：重新生成的受理回执。`status` 只代表请求已入队，不代表标题已变化。 */
+const SessionTitleRegenerationResult = Type.Object({
+  session_id: uuid, request_id: uuid, status: Type.Literal('PENDING'), revision: rev,
+  requested_at: Type.String(),
+}, strict);
 const SessionPinResult = Type.Object({
   session_id: uuid, pinned: Type.Boolean(),
   pinned_at: Type.Union([Type.String(), Type.Null()]), revision: rev, updated_at: Type.String(),
@@ -450,7 +488,24 @@ const SessionForkResult = Type.Object({
   session_id: uuid, title: Type.String(), revision: rev, updated_at: Type.String(),
   copied_messages: Type.Integer({ minimum: 0 }),
 }, strict);
-const messagesQuery = Type.Object({ limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })) }, strict);
+const messagesQuery = Type.Object({
+  limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })),
+  before_seq: Type.Optional(Type.String({ pattern: '^(?:[1-9][0-9]{0,18})$' })),
+}, strict);
+const activityQuery = Type.Object({
+  limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]{1,2}|200)$' })),
+  before_seq: Type.Optional(Type.String({ pattern: '^(?:[1-9][0-9]{0,18})$' })),
+  detail: Type.Optional(Type.Union([Type.Literal('summary'), Type.Literal('full')])),
+}, strict);
+const activityResponse = Type.Object({
+  schema_version: Type.Integer(),
+  session: Type.Any(),
+  generated_at: Type.String(),
+  snapshot_at: Type.String(),
+  messages: Type.Array(Type.Any()),
+  next_before_seq: Type.Union([Type.String(), Type.Null()]),
+  has_more: Type.Boolean(),
+}, strict);
 const sourceRef = Type.Object({
   kind: Type.Union([Type.Literal('KNOWLEDGE'), Type.Literal('MEMORY'), Type.Literal('DECISION')]),
   root_id: uuid, version: Type.String({ pattern: '^[1-9][0-9]*$' }),
@@ -518,7 +573,10 @@ const proposalAcceptBody = Type.Object({ command_id: uuid,
 
 function sessionDto(row: { id: string; workspace_id: string; project_id: string | null;
   task_id: string | null; parent_session_id: string | null;
-  title: string; status: string; revision: bigint;
+  title: string; title_source: AssistSessionTitleSource;
+  title_generated_at: Date | null;
+  title_generation: AssistTitleGenerationSummary | null;
+  status: string; revision: bigint;
   pinned_at: Date | null;
   unread_at: Date | null;
   last_message_at: Date | null;
@@ -534,6 +592,18 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
     id: row.id, workspace_id: row.workspace_id, project_id: row.project_id,
     task_id: row.task_id, title: row.title, status: row.status,
     parent_session_id: row.parent_session_id,
+    title_source: row.title_source,
+    title_generated_at: row.title_generated_at === null
+      ? null : row.title_generated_at.toISOString(),
+    title_generation: row.title_generation === null ? null : {
+      status: row.title_generation.status,
+      request_kind: row.title_generation.request_kind,
+      generator: row.title_generation.generator,
+      error_code: row.title_generation.error_code,
+      requested_at: row.title_generation.requested_at.toISOString(),
+      settled_at: row.title_generation.settled_at === null
+        ? null : row.title_generation.settled_at.toISOString(),
+    },
     revision: toDecimalString(row.revision),
     // 置顶时刻逐字返回：客户端据此排序并显示「已置顶」，不自行推断。
     pinned_at: row.pinned_at === null ? null : row.pinned_at.toISOString(),
@@ -665,6 +735,7 @@ export function registerAssistRoutes(app: FastifyInstance, dependencies: RouteDe
         ...(body.project_id === undefined ? {} : { projectId: body.project_id }),
         ...(body.task_id === undefined ? {} : { taskId: body.task_id }),
         title: body.title,
+        ...(body.title_source === undefined ? {} : { titleSource: body.title_source }),
         ...(body.conversation_mode === undefined ? {} : { conversationMode: body.conversation_mode }),
         ...(body.assistant_profile_id === undefined ? {} : { assistantProfileId: body.assistant_profile_id }),
         ...(body.source_session_id === undefined ? {} : { sourceSessionId: body.source_session_id }),
@@ -709,6 +780,24 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision,
         title: body.title });
+      return { outcome, result: outcome.result };
+    } }));
+
+  /**
+   * 0157：显式重新生成标题。这是唯一允许替换 USER_DEFINED / LEGACY 标题的入口。
+   *
+   * 命令只受理请求、不调用模型：回执里的 `request_id` 是这次请求的持久身份，
+   * 标题是否变化由后台推进与后续读取决定。界面不能把 202/200 的回执读成「标题已更新」。
+   */
+  app.post('/assist-sessions/:id/title/generate', { schema: { params: sessionItem,
+    body: sessionStateBody,
+    response: { 200: commandEnvelopeSchema(SessionTitleRegenerationResult) } } },
+  createCommandHandler(dependencies, { commandType: 'RegenerateAssistSessionTitle',
+    bodySchema: sessionStateBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await regenerateAssistSessionTitle(executor, {
+        workspaceId: params.workspace_id ?? '', sessionId: params.id ?? '',
+        commandId: body.command_id, expectedRevision: body.expected_revision });
       return { outcome, result: outcome.result };
     } }));
 
@@ -888,14 +977,16 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     response: { 200: AssistSessionDto } } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      const { session, hasMessages, runState, listState } = await readAssistSessionWithActivity(dependencies.database.executor, {
+      const { session, hasMessages, runState, listState,
+        titleGeneration } = await readAssistSessionWithActivity(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
       const q = request.query as { include_context?: 'true' | 'false' };
       const readContext = q.include_context === 'true' ? (await readAssistSessionContexts(dependencies.database.executor,
         { workspaceId: p.workspace_id, sessionIds: [session.id] }))[0] : undefined;
       const context = readContext?.session_revision === session.revision ? readContext : undefined;
       return { ...sessionDto({ ...session, has_messages: hasMessages, run_state: runState,
-        list_state: listState }), ...(context === undefined ? {} : { context: {
+        list_state: listState, title_generation: titleGeneration }),
+        ...(context === undefined ? {} : { context: {
         project_goals: context.project_goals, working_directory: context.working_directory } }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
@@ -971,17 +1062,39 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       return { outcome, result: outcome.result };
     } }));
 
-  app.get('/assist-sessions/:id/messages', { schema: { params: sessionItem,
-    querystring: messagesQuery,
-    response: { 200: Type.Object({ items: Type.Array(AssistMessageDto) }, strict) },
+  app.get('/assist-sessions/:id/activity', { schema: { params: sessionItem,
+    querystring: activityQuery, response: { 200: activityResponse },
   } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      const q = request.query as { limit?: string };
-      const rows = await listAssistMessages(dependencies.database.executor, {
+      const q = request.query as { limit?: string; before_seq?: string;
+        detail?: 'summary' | 'full' };
+      return await readExecutionActivity(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '',
         ...(q.limit === undefined ? {} : { limit: Number(q.limit) }),
+        ...(q.before_seq === undefined ? {} : { beforeSeq: BigInt(q.before_seq) }),
+        ...(q.detail === undefined ? {} : { detail: q.detail }),
       });
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.get('/assist-sessions/:id/messages', { schema: { params: sessionItem,
+    querystring: messagesQuery,
+    response: { 200: Type.Object({
+      items: Type.Array(AssistMessageDto),
+      has_more: Type.Boolean(),
+      next_before_seq: Type.Union([Type.String(), Type.Null()]),
+    }, strict) },
+  } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string; id: string };
+      const q = request.query as { limit?: string; before_seq?: string };
+      const page = await listAssistMessagesPage(dependencies.database.executor, {
+        workspaceId: p.workspace_id, sessionId: p.id ?? '',
+        ...(q.limit === undefined ? {} : { limit: Number(q.limit) }),
+        ...(q.before_seq === undefined ? {} : { beforeSeq: BigInt(q.before_seq) }),
+      });
+      const rows = page.items;
       const session = await readAssistSession(dependencies.database.executor, {
         workspaceId: p.workspace_id, sessionId: p.id ?? '' });
       // 0093：附件元数据按会话一次性取齐（只读 id/名/类型/字节数，不读内容字节），
@@ -1005,15 +1118,19 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         row.role === 'ASSISTANT' && row.status === 'RUNNING').map((row) => row.id);
       const generationProgress = await readAssistGenerationProgress(
         dependencies.database.executor, runningMessageIds);
-      return { items: await Promise.all(rows.map(async (row) => {
-        const progress = generationProgress.get(row.id);
-        return messageDto(row,
-          await projectAssistSkillMessage(dependencies.database.executor,
-            dependencies.storage, session, row),
-          attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null,
-          assistUsageDto(usageSummaries.get(row.id) ?? projectAssistUsage([])),
-          progress === undefined ? null : assistGenerationProgressDto(progress));
-      })) };
+      return {
+        items: await Promise.all(rows.map(async (row) => {
+          const progress = generationProgress.get(row.id);
+          return messageDto(row,
+            await projectAssistSkillMessage(dependencies.database.executor,
+              dependencies.storage, session, row),
+            attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null,
+            assistUsageDto(usageSummaries.get(row.id) ?? projectAssistUsage([])),
+            progress === undefined ? null : assistGenerationProgressDto(progress));
+        })),
+        has_more: page.hasMore,
+        next_before_seq: page.nextBeforeSeq === null ? null : String(page.nextBeforeSeq),
+      };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 

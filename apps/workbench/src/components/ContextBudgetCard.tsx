@@ -63,6 +63,12 @@ export default function ContextBudgetCard({ client, compact = false, onSaved }: 
     }
   }, [client]);
 
+  /** 换工作空间时先清掉旧投影与在途命令，旧修订与旧档位不落进新范围。 */
+  useEffect(() => {
+    setProjection(null); setDraft(null); setNotice(null); setConflict(null);
+    setPending(null); setError(null);
+  }, [client]);
+
   useEffect(() => { void read(); }, [read]);
 
   const current = projection?.contextBudgetTokens ?? null;
@@ -133,8 +139,9 @@ export default function ContextBudgetCard({ client, compact = false, onSaved }: 
     data-testid={compact ? "context-budget-inline" : "context-budget"}>
     {compact ? <h3>上下文档位</h3> : <h2>上下文长度</h2>}
     {compact ? <p className="helper-text">用于新请求，实际容量受模型限制。</p>
-      : <p className="helper-text">选择 256K、512K 或 1024K，上下文接近可用上限时自动压缩较早的对话，保留近期原文。
-      按工作空间保存，新请求生效；实际容量受模型窗口限制，并为提示、工具和输出预留空间。可在记忆设置中关闭自动压缩。</p>
+      : <p className="helper-text">本工作区的默认单次调用预算；不改变已有会话自己的选择。
+      上下文接近可用上限时自动压缩较早的对话并保留近期原文；实际容量仍受模型窗口限制，
+      并为提示、工具和输出预留空间。可在记忆设置中关闭自动压缩。</p>
     }
 
     {loading && projection === null && <p role="status" data-testid="context-budget-loading">正在读取上下文长度…</p>}

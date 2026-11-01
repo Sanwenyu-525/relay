@@ -7,6 +7,7 @@ export function waitReasonText(reason: string): string {
   switch (reason) {
     case "REPEATED_FAILURE": return "反复失败已停下，需要你决定";
     case "HUMAN_TOOL": return "有一个动作在等你批准";
+    case "ACTION_APPROVAL_REQUIRED": return "有一个动作在等你批准";
     case "AWAITING_HUMAN_EVIDENCE": return "等你提供证据";
     default: return reason;
   }

@@ -24,6 +24,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 const FILE_ACTION_LABELS = { CREATE: "新建", MODIFY: "修改", DELETE: "删除" } as const;
 
+/** 操作类候选的展示范围；不是权限，也不新增业务状态词。 */
+const OPERATION_SCOPE_LABELS = { COMPUTER: "电脑桌面", BROWSER: "浏览器" } as const;
+
 /** 可以「继续原请求」的阶段：只有失败，而且是还没产生 Run 的失败。 */
 const RESUMABLE_STATUSES = ["FAILED"];
 
@@ -51,10 +54,18 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
     <p className="execution-summary-stage" data-testid="execution-summary-stage">
       {STATUS_LABELS[request.status] ?? request.status}
     </p>
+    {/* 失败原因是**事实**，不是提示：缺哪个连接、哪个目录、哪一步被挡住，原样呈现。
+        放在阶段行之后而不是卡片底部：摘要可收缩滚动，底部原因在小窗口里首屏看不到。 */}
+    {failureReason !== null && <p className="action-error" role="alert"
+      data-testid="execution-summary-failure">{failureReason}</p>}
     {request.decision === "PREPARE" && <>
       <p className="execution-summary-title" data-testid="execution-summary-title">{request.title ?? "原执行请求已保存"}</p>
       {request.objective != null && <p className="helper-text">{request.objective}</p>}
-      <p className="helper-text" data-testid="execution-summary-root">当前目录：{request.rootPath}</p>
+      {request.interaction === undefined || request.interaction === null
+        ? <p className="helper-text" data-testid="execution-summary-root">当前目录：{request.rootPath}</p>
+        : <p className="helper-text" data-testid="execution-summary-root">
+          操作范围：{OPERATION_SCOPE_LABELS[request.interaction]}
+        </p>}
       {fileChanges.length > 0 && <>
         <ul className="execution-read-results" data-testid="execution-summary-files">
           {fileChanges.map((change) => <li key={`${change.action}:${change.path}`}
@@ -66,6 +77,7 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
             删除会在执行前单独请你确认。
           </p>}
       </>}
+      {/* 失败原因已提到阶段行下方；这里只保留重试与详情入口。 */}
       {(failed || request.taskId !== null) && <div className="form-actions">
         {failed && <button className="secondary-button" type="button"
           data-testid="execution-start" disabled={busy} onClick={() => onApply(request.requestId)}>
@@ -74,13 +86,14 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
           data-testid="execution-open-task" onClick={() => onOpenTask(request.taskId as string)}>
           查看执行详情</button>}
       </div>}
-      {/* 失败原因是**事实**，不是提示：缺哪个连接、哪个目录、哪一步被挡住，原样呈现。 */}
-      {failureReason !== null && <p className="action-error" role="alert"
-        data-testid="execution-summary-failure">{failureReason}</p>}
       {/* 2026-10-24 用户指令：正常态不再宣告「不需要再确认一次」；只有 DELEGATED 的
           「何时会需要你决定」是用户无从预知的，保留。 */}
       {failureReason === null && !failed && request.status === "DELEGATED" && <p className="helper-text">
-        文件内容在读取真实内容后决定；需要你决定时会在这里停下。
+        {request.interaction === "COMPUTER"
+          ? "需要你接管电脑批准输入动作时，会在这里停下并给出审批入口。"
+          : request.interaction === "BROWSER"
+            ? "需要你批准页面操作时，会在这里停下并给出审批入口。"
+            : "文件内容在读取真实内容后决定；需要你决定时会在这里停下。"}
       </p>}
     </>}
     {request.decision === "CLARIFY" && <p className="execution-summary-question"

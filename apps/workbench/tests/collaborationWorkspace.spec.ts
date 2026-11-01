@@ -903,22 +903,30 @@ describe("协作工作区主路径", () => {
   for (const scenario of [
     { name: "有真实读数时给出命中率与占用圆环", maxCallTokens: 1_000,
       usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600, cache_creation_tokens: 100 },
-      hit: "缓存命中 75%", state: "high", aria: "80%" },
+      hit: "75%", state: "high", aria: "80%" },
     { name: "Provider 未上报缓存时不显示命中率，也不画成 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "normal", aria: "50%" },
+    // 0% 是真实读数（Provider 上报了缓存读取为 0），必须显示，不能与「未上报」混为一谈。
+    { name: "命中率为 0 时如实显示 0%", maxCallTokens: 1_000,
+      usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: null },
+      hit: "0%", state: "normal", aria: "50%" },
+    // 全部命中是 100%，与「未上报」的空位分开。
+    { name: "全部命中时显示 100%", maxCallTokens: 1_000,
+      usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 500, cache_creation_tokens: null },
+      hit: "100%", state: "normal", aria: "50%" },
     // 0145：会话档位恒存在，「预算未配置」不再是可达状态。占比的分母仍是那次调用
     // 冻结的预算——这里档位 262,144、冻结 1,000，读数必须按 1,000 算。
     { name: "档位与冻结预算不同时，占比按那次调用的冻结预算", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
-      hit: "缓存命中 50%", state: "normal", aria: "50%" },
+      hit: "50%", state: "normal", aria: "50%" },
     { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "unknown", aria: "尚无模型调用" },
     // 996/1000 进位后是 100%，但 4 个 token 确实未命中。显示 100% 是把未命中说成完美命中。
     { name: "部分命中不进位成 100%", maxCallTokens: 1_000,
       usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 996, cache_creation_tokens: null },
-      hit: "缓存命中 99.6%", state: "high", aria: "100%" },
+      hit: "99.6%", state: "high", aria: "100%" },
     // 缓存读取量超过上报的完整上下文时两个读数互相矛盾，命中率没有可靠分母，整项不出现。
     { name: "上报缓存读取超过输入时不显示命中率", maxCallTokens: 1_000,
       usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 1_200, cache_creation_tokens: null },
@@ -957,7 +965,17 @@ describe("协作工作区主路径", () => {
         expect(card.find('[data-testid="assist-cache-hit"]').exists()).toBe(scenario.hit !== null);
         expect(card.find('[data-testid="assist-context-meter"]').exists()).toBe(true);
         if (scenario.hit !== null) {
-          expect(view.wrapper.get('[data-testid="assist-cache-hit"]').text()).toBe(scenario.hit);
+          const hit = view.wrapper.get('[data-testid="assist-cache-hit"]');
+          // 常驻只剩数值：名称与单位交给小图标、aria-label 与悬停提示。
+          expect(hit.text()).toBe(scenario.hit);
+          expect(hit.attributes("aria-label")).toBe(`缓存命中率 ${scenario.hit}`);
+          await act(async () => {
+            hit.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+          });
+          await flush(0);
+          // 提示复用同一份读数，不在 Tooltip 里再算一遍；真实 token 分子分母只做补充。
+          expect(document.querySelector('[data-testid="assist-cache-hit-tooltip"]')?.textContent)
+            .toContain(`缓存命中率：${scenario.hit}`);
         }
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);

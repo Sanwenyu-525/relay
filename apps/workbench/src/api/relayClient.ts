@@ -20,6 +20,7 @@ import type { RelaySessionExport } from "./resources/sessionExport";
 export type { RelaySessionTodoItem, RelaySessionTodoSnapshot, RelaySessionTodoStatus }
   from "./resources/sessionTodos";
 import type { RelaySessionDelegation } from "./dtos/assist";
+import type { RelayExecutionActivitySnapshot } from "./dtos/assist";
 export type { RelaySessionDelegation } from "./dtos/assist";
 import * as planGoalApi from "./resources/planGoal";
 import type { RelayAssistGoal, RelayChatModeTransition, RelayGoalView, RelayPlanView }
@@ -686,6 +687,15 @@ export class RelayApiClient {
     return assistApi.renameAssistSession(this.#http, input);
   }
 
+  /**
+   * 重新生成标题（0157）：只受理请求，回执里的 request_id 是持久身份。
+   * 标题是否变化要等 `getAssistSession` 读回 `titleGeneration` 落定，不拿回执当成功。
+   */
+  async regenerateAssistSessionTitle(input: { readonly sessionId: string; readonly commandId: string;
+    readonly expectedRevision: DecimalRevision }): ReturnType<typeof assistApi.regenerateAssistSessionTitle> {
+    return assistApi.regenerateAssistSessionTitle(this.#http, input);
+  }
+
   async setAssistSessionPin(input: { readonly sessionId: string; readonly commandId: string;
     readonly expectedRevision: DecimalRevision; readonly pinned: boolean }): ReturnType<typeof assistApi.setAssistSessionPin> {
     return assistApi.setAssistSessionPin(this.#http, input);
@@ -732,6 +742,17 @@ export class RelayApiClient {
 
   async getAssistMessages(sessionId: string): Promise<readonly RelayAssistMessage[]> {
     return assistApi.getAssistMessages(this.#http, sessionId);
+  }
+
+  async getAssistMessagesPage(sessionId: string, input: { limit?: number;
+    beforeSeq?: string }): Promise<{ items: readonly RelayAssistMessage[];
+      hasMore: boolean; nextBeforeSeq: string | null }> {
+    return assistApi.getAssistMessagesPage(this.#http, { sessionId, ...input });
+  }
+
+  async getAssistExecutionActivity(input: { sessionId: string; limit?: number;
+    beforeSeq?: string; detail?: "summary" | "full" }): Promise<RelayExecutionActivitySnapshot> {
+    return assistApi.getAssistExecutionActivity(this.#http, input);
   }
 
   async getAssistLivePreview(sessionId: string, messageId: string): Promise<RelayAssistLivePreview> {

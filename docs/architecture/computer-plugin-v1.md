@@ -66,7 +66,7 @@ API 进程（Node）
 ## 4. 能力、权限与审批
 
 - **两个能力**：`COMPUTER_READ`（截图/窗口枚举，effect READ，`approvalPassthrough: true`）、`COMPUTER_INPUT`（其余九个，effect WRITE，`approvalPassthrough: false`、`resumable: false`）。
-- **放行范围**：会话只读轮次（`ASSISTANT_READ`/`AGENT_SESSION_READ`）只放行 `COMPUTER_READ`；`COMPUTER_INPUT` 只在 RUN（Task/Run 工具循环）出现。
+- **放行范围**：Gateway 的会话只读来源词表仍含 `COMPUTER_READ`，但 2026-11-01 起会话轮次的工具解析不再声明该工具（见 §11）：观察—操作—再观察属于 Run 的工具循环。`COMPUTER_INPUT` 只在 RUN（Task/Run 工具循环）出现。
 - **放行手段**：默认策略可 AUTO 的只有读取；输入类即便策略为 AUTO 也会降级 ASK（非穿透适配器），因此必须有单动作批准（Review，Allow once）或**本次任务范围授权**（`run_scope_grants` 的动作类 `COMPUTER_INPUT`，Allow for task）。**V1 不提供「始终允许」**：与 CLI_RUN 同纪律，无人审批的桌面输入不开放。
 - **目标**：Computer 动作没有受管根，`normalized_target` 用合成值 `computer://desktop`，策略按全等匹配；动作仍绑定 Project 的受管资源（来源身份与账本归属）。
 
@@ -122,3 +122,46 @@ V1 的「默认前台执行」路径已被[V2 迁移审查](computer-plugin-v2-m
 - 执行路由（`src/computer/execution-router.ts`）：后台不可用时输入类动作的结论是「需要用户授权」，prepare 的审批文案写明「⚠️ 此操作需要接管你的电脑」。
 
 V1 的 SendInput/SetForegroundWindow 实现保留为 foreground 路径的实现体，不再是无条件默认。
+
+## 11. 会话到执行链修复（2026-11-01 COMPUTER-PLUGIN-E2E）
+
+真实账本复现：绑定目录的普通 Agent 会话里发送 `@电脑操控 打开记事本`，助手回复整段是
+模型的工具分析（「让我看看本轮可用的工具」），`conversation_execution_requests` 一行也
+没有。根因不是单一解析失败，而是四个事实缺口叠加：
+
+1. **能力事实块漏报插件**：机器插件两行只在「会话没有工作目录」时输出；绑定目录的
+   普通会话只看到文件工具，模型没有「执行阶段可用电脑操控」这一条事实。
+2. **`@电脑操控` 只是展示**：输入器芯片不进入服务端语义，服务端无法把用户明确选择的
+   插件作为一条事实交给模型。
+3. **会话轮次错误地暴露机器读取工具**：启用电脑插件后，`resolveSessionReadTools` 把
+   `COMPUTER_READ` 也放进会话词表；真实模型因此在聊天轮次调用 `computer_get_windows`，
+   拿到 `RESOURCE_NOT_FOUND` 后放弃执行候选。观察—操作—再观察属于 Run 的工具循环，
+   会话轮次只负责把明确操作整理成候选。
+4. **没有协议恢复**：模型输出纯文本时 `readMainLoopOutcome` 按普通回复结算，内部分析
+   被当作用户可见回答，且没有执行请求。
+
+修复（全部沿用原 Owner，不新建第二套状态或通道）：
+
+- `assist-capability-notice` 始终报告机器插件事实；已绑定目录的会话只认本项目连接，
+  「别的项目有登记」如实说成本项目不可用，不承诺跨项目执行。
+- `plugin-mentions` 在服务端识别 `@电脑操控`/`@浏览器操控`，作为「本条消息的插件选择」
+  事实拼进 system；它**不是授权**，候选仍走原确定性校验、连接准入与 Gateway 审批。
+  同一事实明确区分命令式请求与能力询问；能力询问由服务端保守降级为 CLARIFY，不启动
+  桌面操作。
+- `resolveSessionReadTools` 不再把 `COMPUTER_READ`/`BROWSER_READ` 放进会话词表。
+- 主流程纯文本回复触发一次**无工具信封修复**（`responseFormat=json_object`）：只在
+  CHAT、没有有副作用的工具调用、且工作区登记了机器插件或用户明确选了插件时发生；
+  修复结果仍走 `readMainLoopOutcome` 与既有候选校验。修复失败时，明确插件请求显示
+  「没有登记执行请求、没有执行任何操作」，不把分析正文当成功结算。
+- Run 的工具循环新增 `DRAFT_OPERATION_TOOLS` 路由：工具清单含 COMPUTER_INPUT/
+  BROWSER_ACTION/BROWSER_COMMIT 时，提示词声明这些工具会真实改变本机状态，要求
+  「先观察、再操作、操作后再观察」，等待人工批准时不重复提交；候选正文必须逐项写出
+  实际回执与核对结果。
+- 聊天界面只呈现服务端事实：操作类候选显示「操作范围：电脑桌面/浏览器」，不再写
+  「当前目录」；执行轨迹摘要增加 Run 状态行（等待批准/执行中/验证中/已结束/失败/
+  已取消），`COMPLETED` 明确「不代表任务验收完成」；失败原因提到阶段行下方，
+  小窗口首屏可见。
+
+安全边界不变：`COMPUTER_READ` 与 `COMPUTER_INPUT` 仍分离；输入类动作仍逐次人工
+批准或由本次任务范围授权覆盖；UNKNOWN 不盲重试；桌面独占与 Worker fencing 不变。
+
