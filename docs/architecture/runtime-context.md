@@ -117,6 +117,14 @@
 
 [读取正文](runtime-context/part-02.md#2101-推进-owner-收归服务端与能力事实说明2026-10-20-第二轮)
 
+### 2.11 常驻进程与后台 tick 的对应关系（2026-11-01，ENG-SA-01 修复）
+
+[读取正文](runtime-context/part-02.md#211-常驻进程与后台-tick-的对应关系2026-11-01eng-sa-01-修复)
+
+### 2.12 与长期自主协作机制的差距对照（2026-11-01，ENG-SA-01 审计）
+
+[读取正文](runtime-context/part-02.md#212-与长期自主协作机制的差距对照2026-11-01eng-sa-01-审计)
+
 ## 3. Context Builder 管道
 
 [读取正文](runtime-context/part-02.md#3-context-builder-管道)

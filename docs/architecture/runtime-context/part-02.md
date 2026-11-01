@@ -143,7 +143,8 @@
 后果是可预期的：关掉页面、刷新错过时机、或请求由另一台设备发起时，一条已经明确授权、
 已经落库的请求会停在 `READY` 等一次没有信息量的点击；同时前端与后台各自持有推进责任。
 
-- **唯一推进 Owner 是 Worker**：`runConversationExecutionAutoStartTick()` 每个 tick 扫
+- **唯一推进 Owner 是服务端 tick 函数**：`runConversationExecutionAutoStartTick()` 每次被调用
+  时扫
   「决定 PREPARE、候选 READY、还没有 Run、阶段在 READY/TASK_PREPARED」的原请求，沿
   请求行上**已固定的三个阶段命令身份**调用既有 `applyConversationExecution()`。
   没有新命令、新表或第二个推进状态；重复与迟到扫描只重放原回执。
@@ -173,6 +174,115 @@
   「普通检查不卡在人工验收」需要区分「内部执行载体」与「正式交付」两种 Run，属于下一
   项决定，本轮未做。
 - 真实 Provider 的选择质量、真实浏览器/桌面操作、Windows/WebView2 与安装态另验。
+
+### 2.11 常驻进程与后台 tick 的对应关系（2026-11-01，ENG-SA-01 修复）
+
+推进责任分散在若干 `run*Tick()` 应用 Owner 里，但**函数存在不等于有进程去调它**。桌面宿主与
+`dev-stack.ps1 -WithWorker` 实际拉起的进程组合是「常驻 API ＋ 常驻 Supervisor ＋ 按需一次性
+Worker」：`--once` 只领 Run 命令，`--assist-once` 只做会话生成，持续 Worker（`worker/main.ts`
+不带标志）在这两种拓扑里都没有启动入口。2026-11-01 核对到的现状：
+
+| 常驻进程 | 实际驱动的 tick | 归属位置 |
+|---|---|---|
+| API（Fastify，`onReady` 自挂载、`setTimeout` 自续、`timer.unref()`） | 定时任务扫描、项目提醒、任务链、后台工作派发（网页导入／会话执行自动推进／成员唤醒） | `api/routes.ts` 的四个 `register*Scheduler` |
+| Supervisor | 过期 invocation 上报、闲置控制意图、Run/Assist 派发决策、`runAssistGoalTick` | `worker/supervisor-main.ts` |
+| 一次性 Worker 子进程 | `--once`＝一条 Run 命令；`--assist-once`＝一轮会话生成 | `worker/supervisor.ts` |
+| 持续 Worker | 全部 tick（只在有人手工启动时存在） | `worker/main.ts` |
+
+修复前，成员唤醒、会话执行自动推进与网页导入**只出现在最后一行**，于是发布拓扑里没有执行者：
+不是「关掉页面才停」，而是没有任何页面能触发它们，只能等有人手工启动持续 Worker。这与 §2.10.1
+「推进 Owner 收归服务端」不矛盾——那一步把责任从前端 effect 收到应用函数，却把「谁周期性调用」
+留在了一个没人启动的进程里。
+
+- **新执行者挂 API，不挂 Supervisor**（取舍与备选见 [ADR-039](../../decisions/ADR-039-background-work-tick-host.md)）：API 是唯一在所有拓扑都常驻的进程；Supervisor 的主循环
+  是串行派发路径，一次成员唤醒的模型调用在租约内可持续数十秒，内联进去会推迟同进程的 Run 派发。
+  `runtime/background-work-scheduler.ts` 复用三个既有 tick，不新增状态机、命令或第二套调度引擎。
+  认领身份是 `api:<pid>`：宿主重启后的新进程不能顶着旧身份接续一条可能还活着的租约。
+- **与手工启动的持续 Worker 同时在跑是安全的**：领取 CAS、job 行锁、请求行命令身份与租约清扫
+  都在各 tick 内部。真实双宿主用例观察到一条消息只有一位结算者，只产生一条回信与一条
+  `kind='MEMBER'` 调用账本。
+- **维护排空与崩溃接续沿用原协议**：准入门在三个 tick 函数内部（各自 `readAdmission(..., 'share')`
+  先退出），派发器不重复判断；排空期间过期 CLAIMED 行也不清扫，恢复准入后才由
+  `sweepExpiredWakeup` 在尝试上限内回到 RECORDED 接续，超上限按 `WAKEUP_ATTEMPTS_EXHAUSTED`
+  收口，不改成静默重发。空闲时候选查询返回空集，不产生模型调用。
+- **本轮不动的归属**：`runAssistGoalTick` 仍归 Supervisor、`runAssistGenerationTick` 仍由
+  一次性 Worker 承担，各自只有一个驱动者；把它们并到 API 会造成同一个 tick 两个竞争者、
+  并把派发决策拆成两处。
+- **仍未闭合**：真实 Tauri 窗口的隐藏/销毁、Job 对象与「明确退出后不再发起本机执行」只有
+  代码路径与进程级用例支撑，缺实窗证据（见[验收表](../../testing/overall-acceptance-2026-09-28.md)）。
+
+### 2.12 与长期自主协作机制的差距对照（2026-11-01，ENG-SA-01 审计）
+
+以 DeepSeek Super Agent 的五类机制为**对照轴**，逐条标注本项目当前事实；它是参照物，不是照搬目标。
+标签只用五种：**已实现**（有代码与测试证据）／**部分实现**／**设计已确认未编码**／**新增未确认建议**／
+**明确排除**。本节只核定边界与差距，不改变当前阶段与开发顺序；范围与前置约束仍以
+[ADR-034](../../decisions/ADR-034-persistent-project-agent-team.md) 和[路线 §16](../../requirements/post-v1-roadmap/part-02.md#16-项目级长期-agent-团队与跨会话协作)为准。
+
+**A 路由与执行者（Router / Worker）**
+
+| 对照机制 | 本项目事实 | 标签 |
+|---|---|---|
+| 中心 Router 在多个执行后端之间选型 | 不存在选型组件：`run_command_outbox` 一行只被一条串行派发链消费（`worker/supervisor-main.ts:257` `listPending(1)`），后端固定为「一次性 Node Worker ＋ LangGraph」；`gateway/adapter-metadata.ts` 是静态能力描述表，`application/gateway-actions.ts` 按 `capability_key` 硬编码分支 | 明确排除（AGENTS.md 已列「不提前建设通用 Router Runtime」） |
+| 一次一条命令的独占领取 | `run/run-dispatch-repository.ts:18-23` `for update skip locked`、`:228-239` `claimInvocation` epoch+1 且 `where status='IDLE'`、`:178-199` outbox/invocation 行锁；`application/run-dispatch.ts:26,31,36,61-63` 再叠加准入门、项目写锁与 `PAUSED`/`WAITING_APPROVAL` 判断 | 已实现 |
+| 后台 tick 需要常驻驱动者 | 见 §2.11；本轮补齐 | 已实现（§2.11） |
+
+**B 事件驱动与会话订阅（event-driven / Thread Subscription）**
+
+| 对照机制 | 本项目事实 | 标签 |
+|---|---|---|
+| 状态变化推给前端 | 只有两条 SSE：`api/run-events-api.ts:81` 每帧只发 `event: run_hint` 与 `{kind}`，是「重新 GET」的提示而非载荷，且服务端自身按 `POLL_MS = 1000`（`:13`）轮 `run_events`；`api/preview-events-api.ts:84-167` 是同一 DTO 的重复投影，无事件表 | 已实现（但语义是提示，不是推送事实） |
+| 事件与业务事实同事务 | `migrations/0012_m03_run_events.sql:19-97`：触发器写 `run_events`，序号在 Run 行 `FOR UPDATE` 下分配，表只授 SELECT/INSERT，前端可断言连续（`run-events-api.ts:80`） | 已实现 |
+| 成员消息／会话生成完成／执行请求／定时事项有订阅面 | 四条都**没有**推送面：`assist_session_todo_events`、`work_segment_events` 无 SSE 路由，`api/routes.ts:178-239` 未注册任何相关订阅入口；前端靠定时轮询（`workbench/src/views/AssistView.tsx:4669,4991`、`components/RecentWorkRail.tsx:106-110` 等） | 设计已确认未编码 |
+| 唤醒改由事件触发而非秒轮询 | 现状是 §2.11 的 1s 轮询；改为 DB 通知（如 `LISTEN/NOTIFY`）能去掉最坏一秒延迟，但要新增连接生命周期与重连补扫，收益仅是延迟 | 新增未确认建议 |
+
+**C 异步多任务与执行隔离**
+
+| 对照机制 | 本项目事实 | 标签 |
+|---|---|---|
+| 同一实际工作目录跨 Task 互斥 | `application/gateway-actions.ts:1420-1423`（占用即 `RESOURCE_OCCUPIED`）与 `:558-564`（重叠检查 `rootsOverlap`）；数据库偏唯一索引 `migrations/0008_*.sql:129` `uq_resource_occupied` 兜底 | 已实现 |
+| 租约过期不等于旧进程已停 | 注释即写在代码里：`application/run-dispatch.ts:58-60`；收口靠停止证据与 `pg_advisory_lock`（`worker/supervisor.ts:64-66`，键为 `relay:stopped-run:<runId>`） | 已实现 |
+| 并发上限 | 只有结构性约束：一条 Task 一个活动 Run（`migrations/0004_*.sql:88-95`）、一个会话一条 RUNNING 消息（`assist/assist-repository.ts:1040-1060`）、桌面前台输入单例行。派发宽度是 `listPending(1)` 的串行循环，**没有**跨项目的全局 Worker 上限或令牌桶 | 部分实现（缺“同时最多 N 个执行者”这一显式闸） |
+| 模型消耗有预算闸 | `model/model-call-repository.ts:176-241` 目标额度与 `ModelScopeBudgetError`；`application/task-chains.ts:126` 预算耗尽即 `BUDGET_OR_USAGE_UNKNOWN` | 已实现 |
+
+**D 上下文与跨会话接续（Context / continuation）**
+
+| 对照机制 | 本项目事实 | 标签 |
+|---|---|---|
+| 上下文用量档位归会话 | ADR-037；运行时消费点 `application/assist-context-projection.ts:42,74,89-92` | 已实现 |
+| 待办清单跨重启可恢复 | ADR-038：事件＋快照同一事务，按 `(session_id, tool_call_id)` 幂等，UI 与模型读同一份投影 | 已实现 |
+| 子 Agent 补充回注主循环 | `application/subagent-supplements.ts:15-104`，仅 `conversation_mode === 'AGENT'`；消费在共享只读轮次 `application/assistant-readonly-round.ts:656-658,731` | 已实现 |
+| 一条会话的工作交接给**新**会话继续 | 没有载体。`project_member_messages.handoff_payload` 只有写入与 DTO 回显（`application/member-conversations.ts:178`、`:89`），唤醒路径恒写 `null`（`application/member-wakeup.ts:301`），`apps/workbench/src` 零引用；Run 侧交接载荷同理（`application/control-requests.ts:241-242` 写入后无人读取） | 设计已确认未编码（ADR-034 的跨会话交接） |
+
+**E 看门狗（第一层确定性监测／第二层可选语义诊断）**
+
+第一层现状按「发现了什么、谁收敛、收敛动作」拆开，差距不在检测而在收口：
+
+| 机制 | 本项目事实 | 标签 |
+|---|---|---|
+| 崩溃后接续原领取 | 成员唤醒：`team/member-conversation-repository.ts` 的 `sweepExpiredWakeup` 在上限内回到 RECORDED、超上限 `WAKEUP_ATTEMPTS_EXHAUSTED`；会话生成：`assist/assist-repository.ts:1188-1191` 过期 RUNNING 记 `FAILED`+`LEASE_LOST`（**只标记不重投**） | 已实现（收口强度不一致） |
+| 孤儿 claim 收敛 | `application/recover-run.ts:13` `scanRecoveryCandidates` **没有任何生产调用者**（只有集成测试子进程 `test/integration/recovery-worker-child.ts:21`）；Supervisor 检出过期 invocation 后只上报一帧 `worker_recovery_required`（`worker/supervisor-main.ts:228-240`，注释「Surface the stranded claim without making it executable」），桌面宿主解析该帧后与 `WorkerStarted`/`WorkerExit` 一起**故意丢弃**（`apps/desktop/src-tauri/src/lib.rs:629-632`）。实机后果已记录：Run `8d19e398` 卡 RUNNING ＋ 孤儿 ACTIVE claim，每轮启动报 `worker_recovery_required`、`retainedClaims=0`，并阻挡该项目归档（[验收详情 条目 327](../../testing/acceptance-details/part-17.md#条目-327)） | 部分实现（检测有、收口无、无人可见） |
+| 人工等待过期 | `review/review-repository.ts:98,107` 的过期只在读取与决策时惰性执行，`api/routes.ts` 未注册相关巡检 | 部分实现（未被查看的 Review 长期 `OPEN`） |
+| Gateway 结果歧义核对 | `application/gateway-reconcile.ts:21` 仅由 `worker/supervisor.ts:121-136` 的停止核对与人工 POST 触发，没有周期 reconciler；UNKNOWN 保持原 `operation_id` 不重发 | 已实现（符合「不盲重试」约束） |
+| 第二层语义诊断（判断“进度是否合理”而非“租约是否过期”） | 完全没有；也不该由进程自己判断业务完成 | 新增未确认建议 |
+
+Watchdog 的不可越界约束（本轮核定为边界，不是待议项）：监测者**不得**自行提升权限或放宽档位、
+**不得**放宽验收条件、**不得**重试 UNKNOWN 的外部动作、**不得**宣布 Task/Run 业务完成；它能做的只有
+按原 Owner 收口租约/控制意图，以及把事实呈现给人。第二层若要做，只能在第一层已把「滞留」变成
+可见事实之后，作为可选诊断建议出现，且默认不自动执行。**不新设 Watchdog 进程**：现有 Supervisor
+已经常驻并已在检出，缺的是给它接上既有恢复 Owner 与一条人可见的通知，属于扩展而非新增。
+
+**本轮结论**
+
+- 需要授权才能推进的结构性缺口只有一个：孤儿 claim 的收口与可见性（E 的第二行）。它跨
+  `apps/api` 与 Rust 宿主两侧，且实机已有受害 Run，建议按 P1 立项、P0 修最小收口（见
+  [CODEX_NEXT_STEP](../../../CODEX_NEXT_STEP.md)）。
+- `runAssistGoalTick` 是唯一不做准入判断的 tick Owner（`application/goal-advance.ts` 全文无
+  `readAdmission`，`enqueueRound` 直接 `insertMessage`），维护排空期间仍可能排入新的目标轮次。
+  其余 tick 都在 Owner 内部自带栅栏（§2.11）。本轮**未改**：`goal-advance.ts` 正被其他 Agent 修改，
+  且缺一个先失败的反例；登记为待复现候选。
+- 并发闸（C 第三行）与订阅面（B 第三行）是真实差距，但都没有本轮的复现证据支撑改动。
+- 明确不做：云端常驻、跨设备执行、通用 Router Runtime、多 Agent 自主扩权、未经批准的自主执行。
+
 
 ## 3. Context Builder 管道
 

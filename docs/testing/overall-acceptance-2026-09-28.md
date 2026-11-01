@@ -374,6 +374,8 @@
 
 | 正式目标管理与项目状态写入最终整改（2026-10-27） | **BLOCKED（自动化分层自检通过，最新源码与桌面验收未闭合）**：Workbench 14 个 Vitest 文件 137/137、typecheck/build 通过，真实 Chromium 14/14；9 组真实 PG/HTTP 58/58（迁移至 0143，覆盖双 Project Goal 主链）。随后并行 API 源码持续变化，release 构建因输入指纹变化中止；最新快照稳定性未确认 | [详情 011](acceptance-details/part-01.md#条目-011) | 当前源码 API/PG 需在并行改动停稳后复跑；最新源码 Windows/WebView2、干净 HEAD 构建、独立验收未完成。另一工作树持有单实例锁；六枚图标仍仅为暂存新增 |
 
+| ENG-SA-01 桌面后台调度修复：成员唤醒／会话执行自动推进／网页导入改由常驻 API 驱动（2026-11-01，实施者自检，未 commit/push） | 部分通过（缺陷已复现并修复，真实 PG ＋ 真实 API 子进程 ＋ 真实 Supervisor 子进程取证）：发布拓扑只拉起「常驻 API ＋ 常驻 Supervisor ＋ 按需一次性 Worker」，而这三条 tick 原本仅存在于无人启动的持续 Worker 分支——摘除新执行者后 6 条断言全部超时，同期构建/迁移/图安装/PG 退出码均为 0。修复只加一个 API 侧调度器（复用三个既有 Owner，准入门/CAS/行锁/租约全部留在 Owner 内部，身份 `api:<pid>`），不新增调度进程或第二套状态机；反例 6/6、拓扑 1/1、9 组定向回归 85 项 84 通过（唯一失败为 `maintenance-admission` 的 Gateway 目录边界一条，已用摘除本修复重跑仍复现证明是工作树既有红灯）；取舍归 [ADR-039](../decisions/ADR-039-background-work-tick-host.md)，拓扑表与五轴差距对照归 [runtime-context §2.11–§2.12](../architecture/runtime-context/part-02.md#211-常驻进程与后台-tick-的对应关系2026-11-01eng-sa-01-修复) | [详情 344](acceptance-details/part-19.md#条目-344) | 真实 Windows/Tauri 窗口隐藏·销毁·Job 对象·明确退出后不再发起本机执行未取证（随包 API 产物属并行共享验收状态，本轮不重 staging），真实 Provider 未取证（按文档化 Mock 路径），Unit 全量在本工作树不可用作基线（13 项失败集中在依赖原生 file-io helper 的文件，本机该二进制停在 09-27 且构建期 cargo 增量锁被拒），独立验收未做；孤儿 claim 收口、goal tick 缺准入门、`handoff_payload` 无消费者、全局并发闸缺失均按 §2.12 登记待授权 |
+
 ## 原始输出归档
 
 按需查看[原始输出入口](acceptance-details/part-17.md#原始输出归档)，保留原路径与证据限制。

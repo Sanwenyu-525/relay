@@ -1,0 +1,97 @@
+import type { FastifyInstance } from 'fastify';
+
+import { runConversationExecutionAutoStartTick } from '../application/conversation-execution-autostart.js';
+import { runMemberWakeupTick } from '../application/member-wakeup.js';
+import { runWebImportTick } from '../application/web-import-runner.js';
+import type { RelayDatabase } from '../infrastructure/database.js';
+import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
+import { FakeModelPort, type AssistModelPort } from '../workflow/fake-model-port.js';
+import { readModelPortConfig } from '../workflow/model-port-config.js';
+import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+
+/**
+ * 后台工作项的常驻推进 Owner（ENG-SA-01）。
+ *
+ * 成员唤醒、会话执行自动推进、网页导入原本只挂在持续 Worker 的循环分支里，而实际发布的拓扑是
+ * 「常驻 Supervisor + 按需一次性 Worker」：`--once` 只领 Run 命令，`--assist-once` 只做会话生成，
+ * 没有任何进程会走到那三个分支。于是这三类后台事实在桌面宿主和 `dev-stack -WithWorker` 里都没有
+ * 执行者，只能等有人手工启动持续 Worker，或者等页面来喊一声。
+ *
+ * 挂在 API 而不是 Supervisor 里有两个原因：
+ *   * API 是唯一在所有拓扑都常驻的进程（不带 Worker 的开发栈也只有它）；
+ *   * Supervisor 的循环是串行派发路径，一次成员唤醒的模型调用在租约内可以持续数十秒，
+ *     内联进去会推迟同进程的 Run 派发。
+ *
+ * 三段全部复用既有 Application tick：领取、租约、CAS、维护准入与幂等结算都在那些函数里，
+ * 这里只回答「谁来周期性喊这一声」，不是第二套调度引擎。与手工启动的持续 Worker 同时在跑也
+ * 安全——每个 tick 自己 fenced，重复扫描只会重放既有结算。空闲时候选查询返回空集，不产生模型调用。
+ */
+
+const TICK_INTERVAL_MS = 1000;
+
+export function registerBackgroundWorkScheduler(
+  app: FastifyInstance,
+  d: { database: RelayDatabase; schemaReadiness: SchemaReadinessChecker },
+): void {
+  // 认领身份按进程唯一：宿主重启后的新进程不能顶着旧身份去接续一条可能还活着的租约。
+  const workerId = `api:${process.pid}`;
+  const controller = new AbortController();
+  // 与 Worker 同一口径：未配置真实模型走离线 Mock；配置残缺只停掉成员唤醒这一段，
+  // 不让它拖死不需要模型的导入与执行推进。
+  let modelPort: AssistModelPort | undefined;
+  try {
+    const config = readModelPortConfig(process.env);
+    modelPort = config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+  } catch {
+    app.log.warn({ code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED' },
+      'background_member_wakeup_disabled_by_invalid_model_config');
+  }
+
+  let active = false;
+  let timer: NodeJS.Timeout | undefined;
+  let inFlight: Promise<void> = Promise.resolve();
+  const lastFailures = new Map<string, string>();
+
+  const runStage = async (stage: string, work: () => Promise<unknown>): Promise<void> => {
+    try {
+      await work();
+      lastFailures.delete(stage);
+    } catch (error) {
+      const name = error instanceof Error ? error.name : typeof error;
+      const message = error instanceof Error ? error.message : String(error);
+      // 同一阶段的同一失败只记一次，避免每秒刷屏；失败变化时重新记录，便于定位。
+      const signature = `${name}:${message}`;
+      if (lastFailures.get(stage) !== signature) {
+        lastFailures.set(stage, signature);
+        app.log.warn({ code: 'BACKGROUND_WORK_TICK_FAILED', stage,
+          error_name: name, error_message: message }, 'background_work_tick_failed');
+      }
+    }
+  };
+
+  const tick = async () => {
+    try {
+      const readiness = await d.database.checkReadiness(d.schemaReadiness);
+      if (!active || readiness.database !== 'up' || readiness.schema !== 'up') return;
+      await runStage('WEB_IMPORT', () =>
+        runWebImportTick(d.database.executor, { signal: controller.signal }));
+      await runStage('EXECUTION_AUTOSTART', () =>
+        runConversationExecutionAutoStartTick(d.database.executor));
+      if (modelPort !== undefined) {
+        await runStage('MEMBER_WAKEUP', () => runMemberWakeupTick(d.database.executor,
+          { workerId, modelPort: modelPort, signal: controller.signal }));
+      }
+    } finally {
+      if (active) { timer = setTimeout(() => { inFlight = tick(); }, TICK_INTERVAL_MS); timer.unref(); }
+    }
+  };
+
+  app.addHook('onReady', async () => { active = true; inFlight = tick(); await inFlight; });
+  app.addHook('onClose', async () => {
+    active = false;
+    // 退出只拦「尚未开始的调用」；已在途的唤醒不补写结算，留下的 CLAIMED 由租约清扫收敛。
+    controller.abort();
+    if (timer !== undefined) clearTimeout(timer);
+    await inFlight;
+  });
+}

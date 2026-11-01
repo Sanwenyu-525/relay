@@ -53,6 +53,7 @@ import { registerWorkSegmentRoutes } from './work-segment-api.js';
 import { registerPersonalPlanningRoutes } from './personal-planning-api.js';
 import { registerScopeSimulationRoutes } from './plan-scope-simulation-api.js';
 import { registerProjectReminderRoutes } from './project-reminder-api.js';
+import { registerBackgroundWorkScheduler } from '../runtime/background-work-scheduler.js';
 import { registerProjectReminderScheduler } from '../runtime/project-reminder-scheduler.js';
 import { registerTaskChainScheduler } from '../runtime/task-chain-scheduler.js';
 import { registerTaskChainRoutes } from './task-chain-api.js';
@@ -108,6 +109,7 @@ export function registerRoutes(
   registerProjectReminderScheduler(app, dependencies);
   const taskChainRuntimeId=registerTaskChainScheduler(app,dependencies);
   registerScheduledTaskScheduler(app, dependencies);
+  registerBackgroundWorkScheduler(app, dependencies);
   const apiDependencies: RouteDependencies = {
     database: dependencies.database,
     storage: new ManagedContentStore(dependencies.dataRoot),
