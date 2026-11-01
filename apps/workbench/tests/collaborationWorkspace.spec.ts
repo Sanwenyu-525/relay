@@ -727,7 +727,9 @@ describe("协作工作区主路径", () => {
       }));
       const view = await mountWorkbench(`/agent?work=${taskId}`);
       try {
-        await view.wrapper.get('[data-testid="assist-intent"]').setValue(intent);
+        // 2026-11-01 UI-FEAT-01-R2：意图不再是原生下拉框，改为发送方式单选组里的一行；
+        // 判据不变——选中它之后，发送键的可访问名称与最终载荷都必须是这个意图。
+        await view.wrapper.get(`[data-testid="assist-send-mode-${intent}"]`).setValue(true);
         await view.wrapper.get('[data-testid="assist-draft"]').setValue("请补充计算口径");
         // 发送键只留图标，意图与动作说明由可访问名称与 title 承担。
         const send = view.wrapper.get(".agent-chat-composer [data-testid='assist-send']");

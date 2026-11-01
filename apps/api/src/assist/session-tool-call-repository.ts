@@ -209,4 +209,42 @@ export class SessionToolCallRepository {
             and e.tool_call_id = session_tool_calls.id)
       order by requested_at, id limit ${limit}`.execute(this.db)).rows;
   }
+
+  /**
+   * AGENT-CORE-RELIABILITY（2026-11-01 P2-B）：消息已终止、且从未提交过任何 Gateway
+   * 动作的会话工具请求（有界）。
+   *
+   * 「从未提交」按稳定动作身份核对：会话轮次的 Operation 主键就是请求行 id，按
+   * `row.id` 查无 `logical_operations` 即 prepare 从未提交——派发严格晚于 prepare，
+   * 因此这类行确定没有外部副作用。todo_write 与 delegate_subagent 不在这里：它们各有
+   * 自己的恢复核对（`listOrphanedTodoWrites` / 委派尝试核对），不重复收口。
+   * 已绑定 Operation 的 REQUESTED 行同样不进来——那种行可能已经派出去了，归因由
+   * 执行活动投影按 Gateway 证据只读完成（ENG-OBS-02），不改写账本。
+   */
+  async listOrphanedGatewayRequests(limit: number): Promise<readonly SessionToolCallRow[]> {
+    return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
+      where status = 'REQUESTED' and operation_id is null
+        and tool_name not in ('todo_write', 'delegate_subagent')
+        and exists (select 1 from assist_messages m
+          where m.id = session_tool_calls.message_id
+            and m.status in ('COMPLETED', 'FAILED', 'CANCELLED'))
+        and not exists (select 1 from logical_operations o where o.id = session_tool_calls.id)
+      order by requested_at, id limit ${limit}`.execute(this.db)).rows;
+  }
+
+  /**
+   * P2-B 的收口写入：与扫描条件逐字一致地放进同一条 UPDATE，判定已变化的行
+   * 原样不动、留给下一轮扫描。ABANDONED 的 CHECK（0152）要求带原因与终止时刻。
+   */
+  async abandonNeverDispatchedRequest(id: string, reason: string,
+    detail: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update session_tool_calls set status = 'ABANDONED',
+      rejection_reason = ${reason}, rejection_detail = ${detail}, settled_at = now()
+      where id = ${id} and status = 'REQUESTED' and operation_id is null
+        and exists (select 1 from assist_messages m
+          where m.id = session_tool_calls.message_id
+            and m.status in ('COMPLETED', 'FAILED', 'CANCELLED'))
+        and not exists (select 1 from logical_operations o where o.id = session_tool_calls.id)
+      returning id`.execute(this.db)).rows.length === 1;
+  }
 }

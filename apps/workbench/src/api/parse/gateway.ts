@@ -1,5 +1,5 @@
 import { array, boolean, decimal, integer, nullableString, nullableStringArray, object, optionalString, string, stringArray } from "../core/primitives";
-import type { RelayDirectoryEntry, RelayFileBrowseAction, RelayGatewayDecision, RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedFileReadOutcome, RelayManagedGitReadOutcome, RelayManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission, RelayWriteReadiness } from "../dtos/gateway";
+import type { RelayDirectoryEntry, RelayFileBrowseAction, RelayGatewayDecision, RelayGatewayConnectionSettings, RelayGitReadAction, RelayManagedFileReadOutcome, RelayManagedGitReadOutcome, RelayManagedResource, RelayProjectToolAvailability, RelayProjectToolState, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission, RelayWriteReadiness } from "../dtos/gateway";
 
 /** 写档位投影：缺档位当作「未核对」，无法识别的档位显式失败，不当成空值蒙混。 */
 export function writeReadinessFrom(value: unknown): RelayWriteReadiness {
@@ -171,4 +171,30 @@ export function webImportOperationFrom(value: unknown, importJobId: string): Rel
     normalizedTarget: string(row, "normalized_target", "web import operation"),
     invocationStatuses: array(row, "invocations", "web import operation").map((invocation) =>
       string(object(invocation, "web import invocation"), "status", "web import invocation")) };
+}
+
+/**
+ * 项目工具有效性（PLUGIN-P0-01）。
+ *
+ * 未知的 `state` 直接报错而不是猜成可用：状态词表是服务端契约，界面拿到不认识的值时
+ * 宁可让这次读取失败，也不能把新状态渲染成「可用」。
+ */
+const TOOL_STATES: readonly string[] = ['READY', 'NEEDS_APPROVAL', 'SITE_SCOPED', 'READ_ONLY',
+  'PARTIAL', 'NOT_AUTHORIZED', 'DENIED', 'NOT_CONFIGURED', 'DISABLED', 'REVOKED',
+  'RUNTIME_UNAVAILABLE', 'UNKNOWN'];
+
+export function projectToolAvailabilityFrom(value: unknown): RelayProjectToolAvailability {
+  const row = object(value, "tool availability");
+  const state = string(row, "state", "tool availability");
+  if (!TOOL_STATES.includes(state)) throw new Error(`tool availability.state 无法识别：${state}`);
+  const counts = object(row.counts, "tool availability counts");
+  return { tool: string(row, "tool", "tool availability"), state: state as RelayProjectToolState,
+    detail: string(row, "detail", "tool availability"),
+    counts: { total: integer(counts, "total", "tool availability counts"),
+      auto: integer(counts, "auto", "tool availability counts"),
+      needsApproval: integer(counts, "needs_approval", "tool availability counts"),
+      siteScoped: integer(counts, "site_scoped", "tool availability counts"),
+      notAuthorized: integer(counts, "not_authorized", "tool availability counts"),
+      denied: integer(counts, "denied", "tool availability counts"),
+      unavailable: integer(counts, "unavailable", "tool availability counts") } };
 }

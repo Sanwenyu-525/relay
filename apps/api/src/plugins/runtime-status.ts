@@ -16,10 +16,12 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
+import { readBrowserBackendState } from '../browser/state.js';
 import { computerRuntimeExecutable, computerRuntimeMode, computerRuntimeUnavailableReason }
   from '../computer/config.js';
 import { githubExecutable, githubExecutableHint } from '../github/gh-executable.js';
 import { githubEnv } from '../github/gh-env.js';
+import type { DbExecutor } from '../infrastructure/database.js';
 
 export type PluginRuntimeState = 'READY' | 'NOT_INSTALLED' | 'NOT_PAIRED' | 'NOT_AUTHENTICATED'
   | 'UNAVAILABLE';
@@ -117,4 +119,26 @@ export async function githubRuntimeStatus(timeoutMs = 8000): Promise<PluginRunti
       detail: classified.detail, remediation: classified.remediation };
   }
   return { plugin: 'github', state: 'READY', detail: 'GitHub CLI 已安装并已登录。', remediation: null };
+}
+
+/** 浏览器后端的六种状态映射成同一套插件状态词表；未知状态一律 UNAVAILABLE，不猜成可用。 */
+export function browserPluginStatus(state: Awaited<ReturnType<typeof readBrowserBackendState>>)
+  : PluginRuntimeStatus {
+  const mapped: PluginRuntimeState =
+    state.status === 'READY' ? 'READY'
+      : state.status === 'NOT_STARTED' || state.status === 'DISCONNECTED' ? 'NOT_PAIRED'
+        : state.status === 'CHROME_MISSING' || state.status === 'BACKEND_MISSING' ? 'NOT_INSTALLED'
+          : 'UNAVAILABLE';
+  return { plugin: 'browser', state: mapped, detail: state.detail, remediation: state.remediation };
+}
+
+/**
+ * 三个内置插件的安装级状态（唯一组合点）。
+ *
+ * `/plugins/status` 与项目工具有效性投影都要这一份：两处各自拼一遍，就会在「浏览器后端
+ * 状态怎么映射」这种细节上漂移，而漂移的结果是同一台机器在两个页面显示不同的可用性。
+ */
+export async function allPluginRuntimeStatuses(db: DbExecutor): Promise<readonly PluginRuntimeStatus[]> {
+  const [browser, github] = await Promise.all([readBrowserBackendState(db), githubRuntimeStatus()]);
+  return [computerRuntimeStatus(), browserPluginStatus(browser), github];
 }

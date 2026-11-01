@@ -119,6 +119,45 @@ test('the catalog is a closed list: every entry maps to a declared Gateway actio
     '点号命名不在词表内：provider 协议只接受 snake_case');
 });
 
+/**
+ * 词表声明的必填参数必须真的到达 Gateway。
+ *
+ * 反例（2026-11-01 复现）：`github_issue_view` 在词表与适配器里都要求正整数 `number`，
+ * 但 `gatewayParamsFor` 没有它的转发分支，落进兜底 `return {}`。于是这个工具对模型
+ * 「一直可用」，每次调用却被适配器以「缺少 number」拒掉——声明与执行分叉，
+ * 而两端各自的测试都能通过，因为谁都没有把两半接起来看。
+ *
+ * `read_file` 的 relative_path 是目标位置而非动作参数，`run_check` 的 check_id 由冻结
+ * 检查清单展开成 executable/args，两者都不该出现在 Gateway 参数里，因此显式排除。
+ */
+test('declared required arguments survive the hop into Gateway parameters', () => {
+  const carriedElsewhere = new Set(['read_file', 'run_check']);
+  const sample = (property: Record<string, unknown>): unknown => {
+    if (Array.isArray(property.enum) && property.enum.length > 0) return property.enum[0];
+    switch (property.type) {
+      case 'string': return 'x';
+      case 'integer': return typeof property.minimum === 'number' ? property.minimum : 1;
+      case 'boolean': return true;
+      case 'object': return { x: 1, y: 1 };
+      case 'array': return [{ path: 'a.ts', action: 'CREATE', content: 'x' }];
+      default: return 'x';
+    }
+  };
+  for (const definition of INTERNAL_TOOL_DEFINITIONS) {
+    if (carriedElsewhere.has(definition.name)) continue;
+    const properties = (definition.spec.parameters.properties ?? {}) as
+      Record<string, Record<string, unknown>>;
+    const required = ((definition.spec.parameters.required ?? []) as readonly string[]);
+    const args: Record<string, unknown> = {};
+    for (const key of required) args[key] = sample(properties[key] ?? {});
+    const params = gatewayParamsFor(definition, args as JsonObject);
+    for (const key of required) {
+      assert.ok(Object.hasOwn(params, key),
+        `${definition.name} 声明了必填参数 ${key}，但 Gateway 参数里没有它`);
+    }
+  }
+});
+
 test('a bounded tool result is marked truncated instead of passing a partial body as complete', () => {
   const small = projectToolResult('SETTLED', { entries: [{ path: 'a.ts' }] }, null);
   assert.equal(small.includes('truncated'), false);

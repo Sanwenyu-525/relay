@@ -34,14 +34,16 @@ async function withFile(bytes: number, run: (path: string) => Promise<void>): Pr
 }
 
 test('大文件读取：带 context_risk 与一句读数', async () => {
-  await withFile(300_000, async (path) => {
-    const read = await fileReadExecute(operation(path), invocation, undefined, null, 100_000);
+  // 文件体量必须落在 FILE_READ_MAX_BYTES（128 KiB，gateway 套件锁定的硬上限）之内，
+  // SEVERE 用「相对预算的大文件」表达：100 KB ≈ 33.3k tokens，对 30k 预算占比 >1 ≥ 0.5。
+  await withFile(100_000, async (path) => {
+    const read = await fileReadExecute(operation(path), invocation, undefined, null, 30_000);
     assert.equal(read.outcome, 'SUCCEEDED');
     const risk = read.result.context_risk as { severity: string; ratio: number | null;
       budget_tokens: number | null; notice?: string } | undefined;
     assert.ok(risk !== undefined, '有预算时必须给读数');
     assert.equal(risk!.severity, 'SEVERE');
-    assert.equal(risk!.budget_tokens, 100_000);
+    assert.equal(risk!.budget_tokens, 30_000);
     assert.ok(typeof risk!.notice === 'string' && risk!.notice.includes('这次读取约占'));
   });
 });

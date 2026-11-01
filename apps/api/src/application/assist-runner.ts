@@ -10,7 +10,7 @@ import type { AssistContentPart, AssistIntent, AssistModelPort, AssistTurn,
   ModelUsage, AssistRequest, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { invokeAssistWithFreeModelRouting } from './assist-free-model-routing.js';
-import { applySnapshotBudget, parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { applySnapshotBudget, parseAssistModelSnapshot, readAssistModelRouteStopCode } from './assist-model-snapshot.js';
 import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
@@ -40,6 +40,7 @@ import { runLearningRounds } from './learning-round.js';
 import { readSubagentEnvelope, reconcileDelegationAttempts, type SubagentChildOutcome }
   from './subagent-delegation.js';
 import { reconcileTodoWriteSettlements } from './session-todo-tool.js';
+import { reconcileTerminatedGenerationToolCalls } from './session-tool-reconcile.js';
 import { recordPlanFromMessage } from './assist-plans.js';
 import { goalStateForPrompt } from './assist-goals.js';
 import { goalEnvelopeToJson, readGoalEnvelope, readPlanEnvelope } from './plan-goal-envelope.js';
@@ -127,6 +128,9 @@ export async function runAssistGenerationTick(db: DbExecutor,
   // 「清单快照已提交、工具账本未结算」的 REQUESTED 行按原调用身份补结算；
   // 事件表里没有的调用保持 REQUESTED，不重新执行写入。
   await reconcileTodoWriteSettlements(db);
+  // AGENT-CORE-RELIABILITY（2026-11-01 P2-B）：Gateway 工具请求的恢复核对——
+  // 生成已终止且从未提交过动作的 REQUESTED 行按原身份收口为 ABANDONED。
+  await reconcileTerminatedGenerationToolCalls(db);
   if (options.signal?.aborted) return undefined;
   const memoryWork = await runAssistMemoryTick(db, options);
   if (memoryWork !== undefined || options.signal?.aborted) return undefined;
@@ -650,7 +654,13 @@ export async function runAssistGenerationTick(db: DbExecutor,
     }
     if (error instanceof AssistMemoryRequeued) return { messageId: message.id, sessionId: message.session_id,
       status: 'DISCARDED', errorCode: null, proposalIds: [] };
-    const errorCode = agentInvocationCode ?? (error instanceof SkillBasisUnavailable ? error.code :
+    // AGENT-CORE-RELIABILITY（2026-11-01 P2-A）：路由解析在**进入调用之前**失败
+    // （快照不合法、模型配置或凭据已变更）时，消息行保留精确停因码，不再折叠成裸
+    // MODEL_FAILED。已进入调用的路由停因保持既有口径（MODEL_FAILED +
+    // provider_error_kind + Provider 状态账本），不在消息行上改词表。
+    const routeStopCode = modelInvocationFailed ? undefined : readAssistModelRouteStopCode(error);
+    const errorCode = agentInvocationCode ?? routeStopCode ??
+      (error instanceof SkillBasisUnavailable ? error.code :
       error instanceof AssistMemoryUnavailable ? error.code :
       error instanceof AssistHistorySourceUnavailable ? 'ASSIST_HISTORY_SOURCE_UNAVAILABLE' :
       error instanceof AssistPreviewOwnershipLostError ? 'PREVIEW_OWNERSHIP_LOST' :

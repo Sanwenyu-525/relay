@@ -138,7 +138,8 @@ async function measure(page: Page) {
     // 2026-10-24 发送选项与资料合成一枚芯片后，输入器里展开的就是 .agent-chat-send-options 这一枚。
     const openPanel = node(".agent-chat-send-options > .agent-chat-options-panel");
     const openSummary = node(".agent-chat-send-options > summary");
-    const options = node('[data-testid="assist-skill"]');
+    const modesView = node(".agent-chat-send-modes-view");
+    const sourcesView = node(".agent-chat-send-sources-view");
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       rootFontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
@@ -162,13 +163,30 @@ async function measure(page: Page) {
       openOptions: Array.from(root.querySelectorAll("details.agent-chat-options"))
         .filter((element) => element.hasAttribute("open")).length,
       totalOptions: root.querySelectorAll("details.agent-chat-options").length,
+      /* 两层视图的真实可见性（offsetParent）：两屏都挂载、只切换可见性，
+         因此只数元素存在会把「切换」误读成「并存」。 */
       panelSections: openPanel === null ? null : {
-        skill: openPanel.querySelector('[data-testid="assist-skill"]') !== null,
+        modes: openPanel.querySelector(".agent-chat-send-modes") !== null,
         picker: openPanel.querySelector('[data-testid="assist-source-picker"]') !== null,
         query: openPanel.querySelector("#assist-source-query") !== null,
-        sections: openPanel.querySelectorAll(":scope > .agent-chat-options-section").length },
-      panelStyle: style(panel) ? { maxHeight: style(panel)!.maxHeight, overflowY: style(panel)!.overflowY } : null,
-      title: { box: box(node(".assist-source-title")), fontSize: style(node(".assist-source-title"))?.fontSize ?? null },
+        modesVisible: modesView instanceof HTMLElement && modesView.offsetParent !== null,
+        sourcesVisible: sourcesView instanceof HTMLElement && sourcesView.offsetParent !== null },
+      panelStyle: style(openPanel) ? { maxHeight: style(openPanel)!.maxHeight, overflowY: style(openPanel)!.overflowY } : null,
+      /* 滚动 Owner 是内容区（.agent-chat-send-sources-view），不是整片浮层：
+         浮层封顶后由内容区滚，入口行常驻可见。两个量都要，才能锁住「只有一层滚动」。 */
+      panelScroll: openPanel === null ? null
+        : { scrollHeight: openPanel.scrollHeight, clientHeight: openPanel.clientHeight },
+      contentScroll: (() => {
+        const view = node(".agent-chat-send-sources-view");
+        return view === null ? null : { scrollHeight: view.scrollHeight, clientHeight: view.clientHeight,
+          overflowY: getComputedStyle(view).overflowY };
+      })(),
+      /* 资料屏的标题由「资料」展开行承担：浮层里不该再出现一份面板级大标题
+         （CT-02 当初要反的就是那块 1.75rem 的整页级标题）。 */
+      sourcesToggle: { box: box(node('[data-testid="assist-send-sources-toggle"]')),
+        fontSize: style(node('[data-testid="assist-send-sources-toggle"]'))?.fontSize ?? null,
+        label: node('[data-testid="assist-send-sources-toggle"]')?.textContent?.replace(/\s+/gu, " ").trim() ?? null },
+      pickerTitlePresent: node(".assist-source-title") !== null,
       headBox: box(node(".assist-source-head")),
       queryBox: box(node("#assist-source-query")),
       scopeBox: box(node('[data-testid="assist-source-scope"]')),
@@ -187,11 +205,12 @@ async function measure(page: Page) {
       },
       hitTests: { query: hitTest(node("#assist-source-query")), summary: hitTest(node(".agent-chat-options > summary")),
         send: hitTest(node('[data-testid="assist-send"]')), scope: hitTest(node('[data-testid="assist-source-scope"]')),
-        // 生成方式属于发送选项设置区，必须还在弹层里、但不在资料面板里。
-        skillInPanel: panel !== null && options !== null ? panel.contains(options) : null,
-        skillInPicker: node('[data-testid="assist-source-picker"]') !== null
-          && options !== null
-          && node('[data-testid="assist-source-picker"]')!.contains(options) },
+        // 发送方式属于另一屏：它仍在弹层里，但不进资料面板的 DOM。
+        modesInPanel: panel !== null && node(".agent-chat-send-modes") !== null
+          ? panel.contains(node(".agent-chat-send-modes")) : null,
+        modesInPicker: node('[data-testid="assist-source-picker"]') !== null
+          && node(".agent-chat-send-modes") !== null
+          && node('[data-testid="assist-source-picker"]')!.contains(node(".agent-chat-send-modes")) },
       pickerOverflowX: body === null ? null : (body as HTMLElement).scrollWidth - (body as HTMLElement).clientWidth,
       // 模式芯片与它的当前档文字盒（2026-10-20 用户截图「竖直重心没有在一个高度」；
       // 2026-10-22 DEV-0116 起这一档是自绘浮层，不再是原生 select）：
@@ -233,7 +252,10 @@ async function openSourcePanel(page: Page, viewport: { width: number; height: nu
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
   // 合并后这唯一一枚芯片就是资料入口：testid 仍挂在它的 summary 上（AssistView.tsx:4999）。
+  /* 2026-11-01 UI-FEAT-01-R2：检索表单收进浮层的第二层。先进浮层（发送方式那一屏），
+     再点「资料」进入资料屏——默认态不再展示整张表单，正是本轮要修的那件事。 */
   await page.getByTestId("assist-open-sources").click();
+  await page.getByTestId("assist-send-sources-toggle").click();
   await composer(page).locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
   await composer(page).locator("#assist-source-query").fill("基线");
   await composer(page).getByRole("button", { name: "查找来源" }).click();
@@ -249,23 +271,33 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       // 原始几何留在日志里作为证据（数值只反映夹具布局，不连真实 API）。
       console.log(JSON.stringify({ label, snapshot }));
       const where = `${label} · 资料面板`;
-      // 1. 内容区限高且真的在内部滚动（滚动条长在结果区，不是整块面板被推高）。
-      const body = require(where, ".assist-source-body", snapshot.bodyBox);
-      const scroll = snapshot.bodyScroll;
-      if (scroll === null) throw new Error(`${where} · 缺少内容区`);
-      expect(snapshot.bodyStyle?.overflowY, `${where} · 内容区必须纵向滚动`).toBe("auto");
-      expect(scroll.scrollHeight, `${where} · 内容区应当溢出`).toBeGreaterThan(scroll.clientHeight);
-      expect(body.height, `${where} · 内容区高度不得超过上限`).toBeLessThanOrEqual(scroll.clientHeight + 0.5);
-      const cap = snapshot.bodyStyle?.maxHeight ?? "";
-      expect(["none", ""].includes(cap), `${where} · 内容区缺少 max-height 上限`).toBe(false);
-      expect(body.height, `${where} · 内容区越过 max-height`).toBeLessThanOrEqual(
-        cap.endsWith("px") ? Number.parseFloat(cap) + 0.5 : snapshot.viewport.height * 0.3 + 0.5);
+      /* 1. 限高与滚动（2026-11-01 UI-FEAT-01-R2 换了滚动 Owner）：
+         上一轮浮层里套着「面板滚一层 + 结果区再滚一层」，320px 宽的面板里两层滚动条；
+         本轮只留一个滚动容器——内容区。判据跟着换，不降级：
+         · 浮层必须有 max-height 上限，且结果撑多时真的在内部滚动；
+         · 浮层自己不再滚（溢出由内容区吃掉），结果区也不自带独立滚动，否则就是又回到嵌套滚动。 */
+      const scroll = snapshot.contentScroll;
+      if (scroll === null) throw new Error(`${where} · 缺少内容区滚动采样`);
+      const cap = snapshot.panelStyle?.maxHeight ?? "";
+      expect(["none", ""].includes(cap), `${where} · 浮层缺少 max-height 上限`).toBe(false);
+      expect(scroll.overflowY, `${where} · 内容区必须纵向滚动`).toBe("auto");
+      expect(scroll.scrollHeight, `${where} · 结果撑高后内容区应当在内部溢出`).toBeGreaterThan(scroll.clientHeight);
+      // 浮层自己不再滚动：内容区已经把溢出吃掉，出现第二层滚动条就是回退。
+      expect(snapshot.panelScroll === null ? 0 : snapshot.panelScroll.scrollHeight,
+        `${where} · 浮层自己也滚动了（两层滚动）`)
+        .toBeLessThanOrEqual((snapshot.panelScroll?.clientHeight ?? 0) + 1);
+      expect(["auto", "scroll"].includes(snapshot.bodyStyle?.overflowY ?? ""),
+        `${where} · 结果区又自带一层滚动（嵌套滚动）`).toBe(false);
       // 内容区横向不产生第二条滚动条（长 ID 就地断行）。
       expect(snapshot.pickerOverflowX ?? 0, `${where} · 内容区横向溢出`).toBe(0);
-      // 2. 标题走面板字号档（1rem），不是整页 hero 的 1.75rem。
-      const titlePx = Number.parseFloat(snapshot.title.fontSize ?? "0");
-      expect(titlePx, `${where} · 标题应为 body 档（1rem）`).toBeCloseTo(snapshot.rootFontSize, 1);
-      expect(titlePx, `${where} · 标题仍是整页级字号`).toBeLessThan(snapshot.rootFontSize * 1.5);
+      /* 2. 资料屏的标题由「资料」展开行承担：浮层里不再有那份面板级标题
+         （CT-02 当初要反的就是那块 1.75rem 的整页级标题，现在它整块不存在），
+         而承担标题的这一行必须走 meta 字号档。 */
+      expect(snapshot.pickerTitlePresent, `${where} · 浮层里仍有面板级标题`).toBe(false);
+      const togglePx = Number.parseFloat(snapshot.sourcesToggle.fontSize ?? "0");
+      expect(togglePx, `${where} · 资料行不是 meta 字号档`).toBeLessThan(snapshot.rootFontSize * 1.2);
+      expect(snapshot.sourcesToggle.label ?? "", `${where} · 资料行没有写出已选数量`)
+        .toContain("已选");
       // 3. 关闭入口（chip/summary）、检索行与引用范围留在滚动区之外且可命中。
       insideViewport(snapshot, where, "关闭入口", require(where, "summary", snapshot.summaryBox));
       insideViewport(snapshot, where, "检索行", require(where, "query", snapshot.queryBox));
@@ -309,10 +341,10 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(snapshot.totalOptions, `${where} · 输入器里的浮层芯片不止一枚`).toBe(1);
       expect(snapshot.openOptions, `${where} · 展开的浮层不止一枚`).toBe(1);
       if (snapshot.panelSections === null) throw new Error(`${where} · 缺少面板分节采样`);
-      expect(snapshot.panelSections.skill, `${where} · 发送选项节不在合并浮层里`).toBe(true);
-      expect(snapshot.panelSections.picker, `${where} · 资料节不在合并浮层里`).toBe(true);
+      expect(snapshot.panelSections.sourcesVisible, `${where} · 资料屏没有展开`).toBe(true);
+      expect(snapshot.panelSections.modesVisible, `${where} · 资料屏里发送方式应已收起`).toBe(false);
+      expect(snapshot.panelSections.picker, `${where} · 资料选择器不在合并浮层里`).toBe(true);
       expect(snapshot.panelSections.query, `${where} · 检索行不在合并浮层里`).toBe(true);
-      expect(snapshot.panelSections.sections, `${where} · 资料节不是面板的直接子节`).toBe(1);
       // 3c. 行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
       //     计量环与模型下拉收在发送键左边，工具行左端改由「+」起头。
       //     2026-10-24 合并后「普通讨论在左、资料在右」的两端比较失去对象（只剩一枚芯片），
@@ -351,9 +383,9 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       expect(snapshot.overlaps.panelSend, `${where} · 弹层压住发送键`).toBeLessThanOrEqual(0.5);
       expect(snapshot.hitTests.send, `${where} · 发送键被面板遮挡`).toBe("self");
       expect(snapshot.horizontalOverflow, `${where} · 页面横向溢出`).toBe(0);
-      // 5. 职责分离：生成方式仍在发送选项里，但不在资料面板的 DOM 里。
-      expect(snapshot.hitTests.skillInPanel, `${where} · 生成方式应留在发送选项`).toBe(true);
-      expect(snapshot.hitTests.skillInPicker, `${where} · 生成方式不应进资料面板`).toBe(false);
+      // 5. 职责分离：发送方式仍在同一片浮层里（只是另一屏），但不在资料面板的 DOM 里。
+      expect(snapshot.hitTests.modesInPanel, `${where} · 发送方式应留在浮层里`).toBe(true);
+      expect(snapshot.hitTests.modesInPicker, `${where} · 发送方式不应进资料面板`).toBe(false);
       // 6. 开面板、检索、读结果全程零 POST：不创建执行、不发模型消息。
       expect(posts, `${where} · 面板内动作产生了写命令`).toEqual([]);
     });
@@ -367,6 +399,8 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
     await connect(page);
     await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
     await page.getByTestId("assist-open-sources").click();
+    // 2026-11-01 UI-FEAT-01-R2：检索表单在浮层第二层，先点「资料」进入。
+    await page.getByTestId("assist-send-sources-toggle").click();
     await composer(page).locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
     await composer(page).locator("#assist-source-query").fill("基线");
     await composer(page).getByRole("button", { name: "查找来源" }).click();
@@ -387,8 +421,13 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
     await expect(basis.locator("li").first()).toBeHidden();
     await expect(composer(page).getByTestId("assist-source-picker")).toBeVisible();
     await expect(page.getByTestId("assist-open-sources")).toHaveAttribute("aria-expanded", "true");
+    /* 2026-11-01 UI-FEAT-01-R2：浮层是两层视图，Esc 一次只吃一层——
+       依据 → 资料层 → 浮层，三层依次退，不会一跳到底。 */
     await page.keyboard.press("Escape");
     await expect(composer(page).getByTestId("assist-source-picker")).toBeHidden();
+    await expect(page.getByTestId("assist-open-sources"), "退回发送方式时浮层仍应开着")
+      .toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
     await expect(page.getByTestId("assist-open-sources")).toHaveAttribute("aria-expanded", "false");
     expect(posts, "开关依据与收起面板同样不能产生写命令").toEqual([]);
   });
@@ -414,6 +453,8 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
     await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
     await connect(page);
     await page.getByTestId("assist-open-sources").click();
+    // 2026-11-01 UI-FEAT-01-R2：检索表单在浮层第二层。
+    await page.getByTestId("assist-send-sources-toggle").click();
     await composer(page).locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
     // 空态：还没检索时不谎称「没有匹配」。
     await expect(composer(page).getByTestId("assist-source-empty")).toBeVisible();

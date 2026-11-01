@@ -65,7 +65,8 @@ describe("M04 第一方 Skill 与 Pack", () => {
       throw new Error(`unexpected request ${path}`);
     }));
     const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
-    expect(view.wrapper.text()).toContain("普通 Assist 仍可用");
+    // 2026-11-01 UI-FEAT-01-R2：兜底那一档改称「对话」，文案随结构一起更新。
+    expect(view.wrapper.text()).toContain("对话仍可用");
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("照常讨论");
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush();
     expect(sent).toMatchObject({ content: "照常讨论", intent: "DISCUSS" });
@@ -115,19 +116,27 @@ describe("M04 第一方 Skill 与 Pack", () => {
     /* 2026-10-18：清单按「需要的上下文」判定，不再按会话目标的 kind 过滤。这条会话挂在任务上
        且任务有 project_id，因此 PROJECT 类 project-resume 在服务端本就可调用——旧实现把它从
        选项里删掉，让用户以为不存在；现在如实列出且可选。 */
-    const resume = view.wrapper.get('[data-testid="assist-skill"] option[value="project-resume@1.0.0"]');
+    /* 2026-11-01 UI-FEAT-01-R2：「生成方式」下拉框改成发送方式单选组里的 Skill 行。
+       判据不变——可选性、能力状态与「选中后发送键与载荷跟着换」。 */
+    const resume = view.wrapper.get('input[name="assist-send-mode"][value="project-resume@1.0.0"]');
     expect(resume.attributes("disabled")).toBeUndefined();
-    expect(resume.text()).toContain("只读");
+    expect(resume.element?.closest("label")?.textContent).toContain("只读");
     // 缺能力的那一项仍然不可选，理由不变。
-    expect(view.wrapper.get('[data-testid="assist-skill"] option[value="verification-plan@1.0.0"]').attributes("disabled")).toBe("");
-    await view.wrapper.get('[data-testid="assist-skill"]').setValue("task-to-execution-contract@1.0.0");
+    expect(view.wrapper.get('input[name="assist-send-mode"][value="verification-plan@1.0.0"]')
+      .attributes("disabled")).toBe("");
+    await view.wrapper.get('input[name="assist-send-mode"][value="task-to-execution-contract@1.0.0"]')
+      .setValue(true);
     await view.wrapper.get('[data-testid="assist-skill-input"]').setValue("完成说明");
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("请建议任务定义");
-    expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe("运行 task-to-execution-contract");
+    // 发送键只留图标（UI-COMPOSER-compact-controls），文案由可访问名称承担——判据不变，载体换位。
+    expect(view.wrapper.get('[data-testid="assist-send"]').attributes("aria-label"))
+      .toBe("运行 task-to-execution-contract");
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
     await flush();
     expect(view.wrapper.text()).toContain("命令结果待核对");
-    expect(view.wrapper.get('[data-testid="assist-send"]').text()).toBe("运行 task-to-execution-contract");
+    // 发送键只留图标（UI-COMPOSER-compact-controls），文案由可访问名称承担——判据不变，载体换位。
+    expect(view.wrapper.get('[data-testid="assist-send"]').attributes("aria-label"))
+      .toBe("运行 task-to-execution-contract");
     await openUnresolvedDialog("assist-pending");
     await clickPortal("assist-pending-retry");
     await flush();
@@ -286,8 +295,9 @@ describe("M04 第一方 Skill 与 Pack", () => {
     expect(view.wrapper.text()).toContain("旧版冻结摘要");
     expect(view.wrapper.text()).toContain("f".repeat(64));
     expect(view.wrapper.text()).not.toContain("冻结 JSON 正文");
-    expect(view.wrapper.get('[data-testid="assist-skill"]').find('option[value="project-resume@0.9.0"]').exists()).toBe(false);
-    expect(view.wrapper.get('[data-testid="assist-skill"]').find('option[value="project-resume@1.0.0"]').exists()).toBe(true);
+    // 清单只列当前可调用的版本：历史版本不出现（判据从 <option> 换到 Skill 单选行）。
+    expect(view.wrapper.find('input[name="assist-send-mode"][value="project-resume@0.9.0"]').exists()).toBe(false);
+    expect(view.wrapper.find('input[name="assist-send-mode"][value="project-resume@1.0.0"]').exists()).toBe(true);
     expect(view.wrapper.findAll('[data-testid="assist-skill-output"]')).toHaveLength(1);
     // PENDING 不再标状态词（2026-10-21 用户指令），在途由正文前的三点承担；失败态仍必须显式可读。
     expect(view.wrapper.text()).not.toContain("等待生成");

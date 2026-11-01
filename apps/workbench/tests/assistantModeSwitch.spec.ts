@@ -304,7 +304,7 @@ describe("会话模式单选框", () => {
    * jsdom 看不见 CSS，但文档序就是渲染序；真实 Chromium 侧的同一条锁在 `composerSourcePanel.spec.ts` 3c。
    */
 
-  it("首条输入器：计量环与模型在发送键左边成组，其余邻接关系不变", async () => {
+  it("首条输入器：右端一组紧贴发送键左边，其余邻接关系不变", async () => {
     const options: Stub = { sessions: [], posts: [] };
     const view = await openAgent(options);
     try {
@@ -317,8 +317,11 @@ describe("会话模式单选框", () => {
       expect(order[1]).toBe("agent-chat-composer-tail");
       expect(order[2]).toBe("primary-button agent-chat-send");
       const tail = actions.children[1];
+      /* 2026-11-01 用户指令「会话欢迎页就不需要上下文圆圈」：首条输入器不再渲染计量环，
+         右端一组只剩模型。这条判据跟着现状走——成组关系（右端一组紧贴发送键左边）
+         由上面 order 三条锁住，这里锁组内还剩什么。 */
       expect(Array.from(tail.children).map((element) => element.className))
-        .toEqual(["agent-chat-usage", "model-selector"]);
+        .toEqual(["model-selector"]);
       const tools = actions.querySelector(".agent-chat-composer-tools");
       if (tools === null) throw new Error("首条输入器没有工具行");
       const toolClasses = Array.from(tools.children).map((element) => element.className.split(" "));
@@ -335,10 +338,18 @@ describe("会话模式单选框", () => {
       const optionsIndex = toolIndexOf("agent-chat-options");
       expect(optionsIndex).toBeGreaterThanOrEqual(0);
       expect(optionsIndex).toBe(toolClasses.length - 1);
-      const sourceSection = tools.children[optionsIndex].querySelector(".agent-chat-options-section");
-      expect(sourceSection).not.toBeNull();
-      expect(sourceSection!.querySelector("#assist-source-query") !== null
-        || sourceSection!.querySelector(".helper-text") !== null).toBe(true);
+      /* 2026-11-01 UI-FEAT-01-R2：资料从「浮层下半节」改成同一片浮层里的第二层视图。
+         入口仍是这枚芯片里的「资料」行，两种形态仍二选一：有项目归属＝真实检索器
+         （在隐藏的第二层里，始终挂载）；否则＝一句禁用说明。判据换成新结构，不删断言。 */
+      const optionsPopup = tools.children[optionsIndex] as HTMLElement;
+      const sourcesToggle = optionsPopup.querySelector('[data-testid="assist-first-send-sources-toggle"]');
+      const noteSection = optionsPopup.querySelector(".agent-chat-options-section");
+      expect(sourcesToggle !== null || noteSection !== null).toBe(true);
+      if (sourcesToggle !== null) {
+        const sourcesView = optionsPopup.querySelector(".agent-chat-send-sources-view");
+        expect(sourcesView).not.toBeNull();
+        expect(sourcesView!.querySelector("#assist-source-query")).not.toBeNull();
+      }
     } finally { view.unmount(); }
   });
 
@@ -450,7 +461,8 @@ describe("会话模式单选框", () => {
     await chooseMode(view, "LEARNING");
     await flush(80);
     expect(view.wrapper.get('[data-testid="learning-readonly-note"]').text()).toContain("对项目只读");
-    expect(view.wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
+    // 2026-11-01 UI-FEAT-01-R2：意图不再是下拉框，判据换成发送方式单选组的第一行。
+    expect(view.wrapper.find('[data-testid="assist-send-mode-DISCUSS"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="learning-records-panel"]').exists()).toBe(true);
     await view.wrapper.get('[data-testid="learning-message-no-record"]').setValue(true);
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("解释重复提交");
@@ -616,10 +628,12 @@ describe("会话模式单选框", () => {
   it("助手档隐藏发送选项，显示只读边界说明", async () => {
     const options: Stub = { sessions: [agentSession(), assistantSession()], posts: [] };
     const view = await openAgent(options);
-    expect(view.wrapper.find('[data-testid="assist-intent"]').exists()).toBe(true);
+    expect(view.wrapper.find('[data-testid="assist-send-mode-DISCUSS"]').exists()).toBe(true);
     await flipToAssistant(view);
-    expect(view.wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
-    expect(view.wrapper.find('[data-testid="assist-skill"]').exists()).toBe(false);
+    /* 发送方式（工作方式三行与 Skill 行同属一个单选组）在助手档整组不渲染：
+       服务端对助手档拒绝 intent 与 skill_ref，画出来只会是点了就被拒的选项。 */
+    expect(view.wrapper.find('[data-testid="assist-send-mode-DISCUSS"]').exists()).toBe(false);
+    expect(view.wrapper.find(".agent-chat-send-modes").exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="assist-readonly-note"]').text()).toContain("只读");
     view.unmount();
   });

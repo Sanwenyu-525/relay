@@ -163,7 +163,11 @@ const AssistSessionResult = Type.Object({
   project_id: Type.Union([uuid, Type.Null()]),
   task_id: Type.Union([uuid, Type.Null()]),
   title: Type.String(), status: Type.String(), revision: rev,
-  /** 0157：建会话回执里的标题来源恒为 PROVISIONAL（自动生成的起点）。 */
+  /**
+   * 0157：建会话回执里的标题来源即调用方声明的那一个——传 PROVISIONAL 得 PROVISIONAL，
+   * 不传按 USER_DEFINED（显式命名的标题受保护）。LEGACY/AI_GENERATED 只能由迁移或
+   * 后台生成产生，普通创建接口写不出来。
+   */
   title_source: Type.Union([Type.Literal('LEGACY'), Type.Literal('PROVISIONAL'),
     Type.Literal('AI_GENERATED'), Type.Literal('USER_DEFINED')]),
   conversation_mode: Type.Union([Type.Literal('AGENT'), Type.Literal('ASSISTANT'), Type.Literal('LEARNING')]),

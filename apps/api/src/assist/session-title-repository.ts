@@ -180,18 +180,28 @@ export interface ApplyTitleInput {
  * 四项都必须在同一事务内核对：请求仍由本次领取持有、会话仍 ACTIVE、
  * **标题仍等于请求时的那一份、来源也仍未变**。用户在这次外呼期间手动改名后，
  * 两个条件同时失效，结果只能停在 SKIPPED——迟到的模型结果不能覆盖用户的选择。
+ *
+ * 锁顺序固定为**先会话、后请求行**，与 `enqueueTitleGeneration` 一致。两条路径原先
+ * 相反：enqueue 持会话锁去 `update ... where session_id = ? and status in
+ * ('PENDING','CLAIMED')`（要那条 CLAIMED 行），apply 持请求行等会话锁，真实
+ * PostgreSQL 上报 40P01 并中止一侧（用户在生成中点「重新生成」即可触发）。
+ * 统一顺序后，后到者只是等待，归属判定仍靠下面逐项核对，没有放宽。
  */
 export async function applyTitleGeneration(db: DbExecutor, input: ApplyTitleInput):
 Promise<{ readonly applied: boolean; readonly reason: 'APPLIED' | 'SUPERSEDED' | 'CLAIM_LOST' }> {
+  // 先只读一次 session_id 拿到要锁的会话（不加锁），再按统一顺序取锁。
+  const target = (await sql<{ session_id: string }>`select session_id
+    from assist_title_generations where id = ${input.job.id}`.execute(db)).rows[0];
+  if (target === undefined) return { applied: false, reason: 'CLAIM_LOST' };
+  const session = (await sql<{ id: string; title: string; title_source: AssistSessionTitleSource;
+    status: 'ACTIVE' | 'ARCHIVED' }>`select id, title, title_source, status
+    from assist_sessions where id = ${target.session_id} for update`.execute(db)).rows[0];
   const job = (await sql<AssistTitleGenerationRow>`select * from assist_title_generations
     where id = ${input.job.id} for update`.execute(db)).rows[0];
   if (job === undefined || job.status !== 'CLAIMED' ||
       job.claimed_by !== input.workerId || job.attempts !== input.attemptsAtClaim) {
     return { applied: false, reason: 'CLAIM_LOST' };
   }
-  const session = (await sql<{ id: string; title: string; title_source: AssistSessionTitleSource;
-    status: 'ACTIVE' | 'ARCHIVED' }>`select id, title, title_source, status
-    from assist_sessions where id = ${job.session_id} for update`.execute(db)).rows[0];
   const stillOurs = session !== undefined && session.status === 'ACTIVE' &&
     session.title === job.base_title && session.title_source === job.base_title_source;
   if (!stillOurs) {

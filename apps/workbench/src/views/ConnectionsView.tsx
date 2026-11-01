@@ -4,7 +4,8 @@ import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayGatewayCapability,
   type RelayGatewayConnectionSettings, type RelayGatewayDecision, type RelayGatewayPolicy,
-  type RelayGatewayPolicyVersion, type RelayManagedResource, type RelayProject, type RelayProjectListItem
+  type RelayGatewayPolicyVersion, type RelayManagedResource, type RelayProject,
+  type RelayProjectListItem, type RelayProjectToolAvailability, type RelayProjectToolState
 } from "../api/relayClient";
 import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
@@ -164,37 +165,55 @@ function ReturnToConversation({ search }: { search: URLSearchParams }) {
 
 type ToolTone = "success" | "warning" | "danger" | "neutral";
 
-/** 一个工具的真实状态：连接有效性 + 是否已有非拒绝策略；两者缺一都不能读作可用。 */
-function toolStatus(snapshot: Snapshot, spec: ToolRowSpec): { readonly text: string;
-  readonly tone: ToolTone; readonly detail: string } {
-  const matching = snapshot.connections.filter((item) =>
-    item.capabilities.some((capability) => spec.capabilities.includes(capability as RelayGatewayCapability)));
-  if (matching.length === 0) return { text: "未配置", tone: "neutral", detail: spec.next };
-  const active = matching.filter((item) => item.status === "ACTIVE");
-  if (active.length === 0) {
-    return matching.some((item) => item.status === "DISABLED")
-      ? { text: "已停用", tone: "warning", detail: "连接已停用；重新启用或重新授权前不会执行。" }
-      : { text: "已撤销", tone: "danger", detail: "连接已撤销；原批准不能继续复用。" };
-  }
-  const authorized = snapshot.policies.some(({ policy, versions }) => {
-    if (policy.status !== "ACTIVE") return false;
-    const version = versions.find((item) => item.version === policy.activeVersion);
-    return version !== undefined && spec.capabilities.includes(version.capability as RelayGatewayCapability) &&
-      version.decision !== "DENY";
-  });
-  return authorized
-    ? { text: "可用", tone: "success", detail: "连接有效且已有非拒绝策略；这不代表已经执行过任何动作。" }
-    : { text: "已连接，尚未授权", tone: "warning", detail: "连接本身不是授权；默认拒绝仍然生效。" };
-}
+/**
+ * 工具状态的中文短名与色调（PLUGIN-P0-01）。
+ *
+ * 这些状态由服务端按 Gateway 同一套原语算出，界面只做映射。此前这里按「存在任意非拒绝
+ * 策略」自己拼「可用」，于是只授权了 `read_file` 的文件行也显示整行可用；那是第二套权限
+ * 引擎，而且比 Gateway 宽松。现在每一种状态都必须能对应一句可执行的话：
+ * 未配置 / 未连接 / 未授权 / 可读取 / 需审批 / 已拒绝 / 本机不可用 / 无法确认。
+ */
+const toolStateLabels: Record<RelayProjectToolState, { readonly text: string; readonly tone: ToolTone }> = {
+  READY: { text: "可用", tone: "success" },
+  NEEDS_APPROVAL: { text: "可用 · 需审批", tone: "warning" },
+  SITE_SCOPED: { text: "部分站点可用", tone: "warning" },
+  READ_ONLY: { text: "只读可用", tone: "warning" },
+  PARTIAL: { text: "部分可用", tone: "warning" },
+  NOT_AUTHORIZED: { text: "已连接，尚未授权", tone: "warning" },
+  DENIED: { text: "已拒绝", tone: "danger" },
+  NOT_CONFIGURED: { text: "未配置", tone: "neutral" },
+  DISABLED: { text: "已停用", tone: "warning" },
+  REVOKED: { text: "已撤销", tone: "danger" },
+  RUNTIME_UNAVAILABLE: { text: "本机不可用", tone: "danger" },
+  UNKNOWN: { text: "状态无法确认", tone: "neutral" },
+};
+/** 这些状态意味着「缺一步」，行内补一句去哪儿补；其余状态只解释现状，不劝配置。 */
+const gapStates: ReadonlySet<RelayProjectToolState> = new Set<RelayProjectToolState>(
+  ["NOT_CONFIGURED", "NOT_AUTHORIZED", "DISABLED", "RUNTIME_UNAVAILABLE"]);
 
 interface Snapshot {
   readonly project: RelayProject;
   readonly connections: readonly RelayGatewayConnectionSettings[];
   readonly policies: readonly PolicyRow[];
   readonly resources: readonly RelayManagedResource[];
+  /** 服务端算出的工具有效性；界面不重算，只按 tool 键取用。 */
+  readonly toolAvailability: readonly RelayProjectToolAvailability[];
 }
-interface PendingCommand {
-  readonly id: string;
+/** 一行工具的显示结论：状态、文案与说明都取自服务端投影，界面不再自行判断。 */
+function toolRowState(snapshot: Snapshot, spec: ToolRowSpec): { readonly text: string;
+  readonly tone: ToolTone; readonly detail: string } {
+  const entry = snapshot.toolAvailability.find((row) => row.tool === spec.key);
+  if (entry === undefined) {
+    // 少一行就等于「不知道」，绝不能因为缺数据而回落到可用。
+    return { text: toolStateLabels.UNKNOWN.text, tone: toolStateLabels.UNKNOWN.tone,
+      detail: "服务端没有返回这一行的状态，不推断可用。" };
+  }
+  const label = toolStateLabels[entry.state];
+  return { text: label.text, tone: label.tone,
+    detail: gapStates.has(entry.state) ? `${entry.detail} ${spec.next}` : entry.detail };
+}
+
+interface PendingCommand {  readonly id: string;
   readonly type: string;
   /** 插件启用（EnableProjectPlugin）的回执按 plugin 键核对，结果字段是计数而不是版本号。 */
   readonly resultKey: "connection_id" | "policy_id" | "resource_id" | "plugin";
@@ -239,9 +258,10 @@ function pluginEnableMessage(result: Readonly<Record<string, unknown>>, confirme
 }
 
 async function readSnapshot(client: RelayApiClient, projectId: string): Promise<Snapshot> {
-  const [project, connections, policies, resources] = await Promise.all([
+  const [project, connections, policies, resources, toolAvailability] = await Promise.all([
     client.getProject(projectId), client.getGatewayConnectionSettings(projectId),
-    client.getGatewayPolicies(projectId), client.getManagedResources(projectId)
+    client.getGatewayPolicies(projectId), client.getManagedResources(projectId),
+    client.getProjectToolAvailability(projectId)
   ]);
   if (project.id !== projectId || connections.some((item) => item.projectId !== projectId) ||
     policies.some((item) => item.projectId !== projectId) || resources.some((item) => item.projectId !== projectId)) {
@@ -250,7 +270,7 @@ async function readSnapshot(client: RelayApiClient, projectId: string): Promise<
   const withVersions = await Promise.all(policies.map(async (policy) => ({
     policy, versions: await client.getGatewayPolicyVersions(projectId, policy.id)
   })));
-  return { project, connections, policies: withVersions, resources };
+  return { project, connections, policies: withVersions, resources, toolAvailability };
 }
 
 export default function ConnectionsView() {
@@ -605,9 +625,9 @@ export function ProjectConnectionsView() {
             受管资源或 AUTO/ASK/DENY，也不需要用户先配一遍才能用文件。 */}
         <section className="surface-panel connections-tools" data-testid="connections-tools">
           <h2>可以用的工具</h2>
-          <p className="helper-text">日常使用不需要在这里逐项配置：在对话里选择目录、或直接说出要做的事即可。下面每行是服务端记录的真实状态。</p>
+          <p className="helper-text">日常使用不需要在这里逐项配置：在对话里选择目录、或直接说出要做的事即可。下面每行是服务端按当前连接、逐动作策略与目标范围算出的结论，不是界面推断。</p>
           <ul className="connections-list connections-tool-list">{toolRows.map((row) => {
-            const state = toolStatus(snapshot, row);
+            const state = toolRowState(snapshot, row);
             const runtime = row.plugin === undefined ? null
               : pluginRuntimeError !== null ? { error: pluginRuntimeError as string }
               : pluginRuntime === null ? null
@@ -640,7 +660,7 @@ export function ProjectConnectionsView() {
               </div>
             </li>;
           })}</ul>
-          <p className="field-hint">「可用」只表示连接有效且已有非拒绝策略；撤销、停用与拒绝仍然生效，不会因为这里显示可用而被覆盖。</p>
+          <p className="field-hint">「可用」表示这些动作在当前目标上能自动准入；「需审批」「只读可用」「部分可用」都是真实的收窄——写入、命令、桌面输入与表单提交按设计仍要逐次批准。撤销、停用与拒绝不会被这里的状态覆盖，最终准入仍由 Gateway 判定。</p>
         </section>
         <details className="surface-panel connections-advanced" data-testid="connections-advanced">
           <summary>高级：逐动作配置（连接、受管目录与权限策略）</summary>

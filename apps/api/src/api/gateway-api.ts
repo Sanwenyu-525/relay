@@ -17,6 +17,8 @@ import {
   testFakeGatewayConnection,
 } from '../application/gateway-queries.js';
 import { createRepositories } from '../application/unit-of-work.js';
+import { readProjectToolAvailability } from '../application/tool-availability.js';
+import { allPluginRuntimeStatuses } from '../plugins/runtime-status.js';
 import { readWorkingDirectoryWriteReadiness } from '../application/open-working-directory.js';
 import { setLocalDirectoryWriteTier } from '../application/local-directory-access.js';
 import { resourceNotFound } from '../application/domain-error.js';
@@ -43,8 +45,31 @@ const writeReadinessResponse = Type.Object({
     Type.Literal('FULL'), Type.Null()]),
   access_revision: revision,
 }, strict);
-const importParams = Type.Object({ workspace_id: uuid, import_job_id: uuid }, strict);
-const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, strict);
+/**
+ * 项目工具有效性（PLUGIN-P0-01）。
+ *
+ * 只读投影：每行一个工具，`state` 是服务端按 Gateway 同一套原语算出的结论，
+ * 界面不再自己按能力集合拼「可用」。`counts` 是逐动作的分布，用来解释结论。
+ */
+const toolCountsResponse = Type.Object({
+  total: Type.Integer(),
+  auto: Type.Integer(),
+  needs_approval: Type.Integer(),
+  site_scoped: Type.Integer(),
+  not_authorized: Type.Integer(),
+  denied: Type.Integer(),
+  unavailable: Type.Integer(),
+}, strict);
+const toolAvailabilityResponse = Type.Object({
+  project_id: uuid,
+  items: Type.Array(Type.Object({
+    tool: Type.String(),
+    state: Type.String(),
+    detail: Type.String(),
+    counts: toolCountsResponse,
+  }, strict)),
+}, strict);
+const importParams = Type.Object({ workspace_id: uuid, import_job_id: uuid }, strict);const operationParams = Type.Object({ workspace_id: uuid, operation_id: uuid }, strict);
 const capability = Type.Union([
   Type.Literal('FAKE_WRITE'),
   Type.Literal('FAKE_PUBLIC_READ'),
@@ -261,6 +286,28 @@ export function registerGatewayRoutes(app: FastifyInstance, dependencies: RouteD
     try { const p = request.params as { workspace_id: string; project_id: string; resource_id: string };
       return await readWorkingDirectoryWriteReadiness(dependencies.database.executor,
         p.workspace_id, p.project_id, p.resource_id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+  /**
+   * 项目工具有效性只读查询（PLUGIN-P0-01）：工作台「可以用的工具」按这里的结论显示，
+   * 不再由浏览器自己按能力集合拼「可用」。判定复用 Gateway 原语，本查询不创建连接、
+   * 不写策略、不放宽权限，也不代替 Gateway 的最终准入。
+   */
+  app.get('/projects/:project_id/tool-availability', {
+    schema: { params: projectParams, response: { 200: toolAvailabilityResponse } },
+  }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const p = request.params as { workspace_id: string; project_id: string };
+      const project = await createRepositories(dependencies.database.executor)
+        .projects.readProject(p.project_id);
+      if (project === undefined || project.workspace_id !== p.workspace_id) {
+        throw resourceNotFound('Project');
+      }
+      const runtime = await allPluginRuntimeStatuses(dependencies.database.executor);
+      const items = await readProjectToolAvailability(dependencies.database.executor,
+        { workspaceId: p.workspace_id, projectId: p.project_id, runtime });
+      return { project_id: p.project_id, items };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
   app.post('/projects/:project_id/managed-resources/:resource_id/disable', {

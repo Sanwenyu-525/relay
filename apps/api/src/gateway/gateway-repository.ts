@@ -200,6 +200,26 @@ export class GatewayRepository {
     return result.rows;
   }
 
+  /**
+   * 项目内全部生效策略（不按能力/动作过滤）。
+   *
+   * 只读投影要按 能力 × 动作 逐项核对同一批事实；逐项调用 `listActivePolicies` 会让一个
+   * 页面读取发出几十条查询。这里用**同一条 join 与同一个状态过滤**一次取回，选择语义与
+   * `listActivePolicies` 完全相同——两条路径因此不会给出不同的准入结论。
+   */
+  async listActivePolicyVersions(workspaceId: string, projectId: string): Promise<readonly ActivePolicy[]> {
+    const result = await sql<ActivePolicy>`
+      select p.*, v.version, v.capability_key, v.action_type, v.target_prefix, v.decision,
+        v.max_payload_bytes, v.created_at as version_created_at
+      from gateway_permission_policies p join gateway_permission_versions v
+        on v.policy_id = p.id and v.version = p.active_version
+      where p.workspace_id = ${workspaceId} and p.project_id = ${projectId}
+        and p.status = 'ACTIVE'
+      order by p.id
+    `.execute(this.db);
+    return result.rows;
+  }
+
   /** A single advisory transaction lock serializes root registration across Workspaces. */
   async lockResourceRegistry(): Promise<void> {
     await sql`select pg_advisory_xact_lock(7162, 9)`.execute(this.db);

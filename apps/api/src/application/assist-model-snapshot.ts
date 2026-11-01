@@ -307,6 +307,27 @@ export function snapshotIdentityBudget(budget: ParsedAssistModelSnapshot['budget
 }
 
 /**
+ * 路由解析在**进入模型调用之前**失败时的精确停因码（AGENT-CORE-RELIABILITY，2026-11-01）。
+ *
+ * 这三种失败都发生在 `resolveAssistModelRoute` / 快照解析阶段：快照不合法、模型配置
+ * 已变更、凭据已换。它们与 Provider 无关，也不是调用账本意义上的传输失败——折叠成
+ * 裸 `MODEL_FAILED` 后，消息行分不清「模型坏了」和「这条消息不能按当前模型身份继续」，
+ * 而后者用户重发一次就会得到按新配置的正常回复。只认精确码，不做模糊匹配；
+ * 已进入调用的路由停因（免费额度、限流、候选耗尽）保持既有口径（MODEL_FAILED +
+ * `provider_error_kind` + Provider 状态账本），不在消息行上改词表。
+ */
+const ASSIST_MODEL_ROUTE_STOP_CODES: readonly string[] = [
+  'ASSIST_MODEL_SNAPSHOT_INVALID', 'ASSIST_MODEL_CONFIG_CHANGED',
+  'ASSIST_MODEL_CREDENTIAL_CHANGED',
+];
+
+export function readAssistModelRouteStopCode(error: unknown): string | undefined {
+  return error instanceof Error &&
+    ASSIST_MODEL_ROUTE_STOP_CODES.includes(error.message)
+    ? error.message : undefined;
+}
+
+/**
  * 0135：把冻结快照的预算套到真实端口上。
  *
  * 只对 `OpenAiCompatibleModelPort` 生效：它既改记账身份，也改端口内部的实际调用闸门。

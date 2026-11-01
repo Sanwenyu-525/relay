@@ -204,7 +204,8 @@ describe("M04 Assist 真实路由与命令", () => {
     await flush();
     await view.wrapper.get('[data-testid="assist-source-picker"] input[type="checkbox"]').setValue(true);
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("请列出计划");
-    await view.wrapper.get('[data-testid="assist-intent"]').setValue("PROPOSE_TASK");
+    // 2026-11-01 UI-FEAT-01-R2：意图改为发送方式单选组的一行，不再有「意图」下拉框。
+    await view.wrapper.get('[data-testid="assist-send-mode-PROPOSE_TASK"]').setValue(true);
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
     await flush();
     expect(sentBody).toMatchObject({ intent: "PROPOSE_TASK", content: "请列出计划",
@@ -219,8 +220,9 @@ describe("M04 Assist 真实路由与命令", () => {
     await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
     await flush();
     expect(view.wrapper.text()).toContain("已生成计划");
-    // 用量标签现由消息脚注写成「上下文 / 输出」，判据仍是「读不到就显示未知，不编数字」。
-    expect(view.wrapper.text()).toContain("上下文 未知、输出 未知");
+    // 用量标签现由消息脚注承担；文案已从「上下文 未知、输出 未知」改为「本轮 Token 未上报」，
+    // 判据仍是「读不到就说没上报，不编数字」（旧文案全仓已不存在，属既有过时断言）。
+    expect(view.wrapper.text()).toContain("本轮 Token 未上报");
     expect(view.wrapper.text()).toContain("计划任务");
     await view.wrapper.get(".assist-proposal .primary-button").trigger("click");
     await flush();

@@ -1075,6 +1075,55 @@ test('assist HTTP surface: session, 202 message, status polling and proposal acc
   }
 });
 
+/**
+ * API-VERSION-SKEW 回归（2026-11-01）：桌面内置 API 仍跑旧构建时，工作台发送的
+ * `title_source: PROVISIONAL` 会被旧 Schema 按 `additionalProperties: false` 拒绝
+ * （真实报错「请求未通过服务端校验 (/title_source): must NOT have additional properties」）。
+ * 这里用**工作台的真实载荷**走 HTTP，锁定两件事：
+ *   1. 当前 Schema 接受这个字段，并保留 PROVISIONAL / USER_DEFINED 的来源语义；
+ *   2. 严格 Schema 没有被放松——未知字段和客户端不可写的 LEGACY 仍被拒绝。
+ */
+test('assist HTTP surface: 工作台建会话载荷的 title_source 被接受且严格 Schema 未放松',
+  async () => {
+    const api = await startTestApi();
+    try {
+      const { createWorkspace } = await import('./api-harness.js');
+      const workspaceId = await createWorkspace(app.db);
+      const base = workspacePath(workspaceId);
+
+      const created = await api.post(`${base}/assist-sessions`, { command_id: randomUUID(),
+        project_id: null, task_id: null, title: '聊天消息布局优化',
+        title_source: 'PROVISIONAL' });
+      assert.equal(created.status, 201, created.text);
+      const result = (created.body as { result: { title_source: string } }).result;
+      assert.equal(result.title_source, 'PROVISIONAL');
+
+      // 显式命名不传 title_source 仍按 USER_DEFINED 保护，不能借版本修复改掉来源语义。
+      const explicit = await api.post(`${base}/assist-sessions`, { command_id: randomUUID(),
+        project_id: null, task_id: null, title: '用户明确命名的讨论' });
+      assert.equal(explicit.status, 201, explicit.text);
+      assert.equal((explicit.body as { result: { title_source: string } }).result.title_source,
+        'USER_DEFINED');
+
+      // 未知字段仍按 additionalProperties=false 拒绝（只修了缺字段，没有放松 Schema）。
+      const unknown = await api.post(`${base}/assist-sessions`, { command_id: randomUUID(),
+        project_id: null, task_id: null, title: '未知字段', title_source: 'PROVISIONAL',
+        title_source_typo: 'PROVISIONAL' });
+      const problem = expectProblem(unknown, 422, 'VALIDATION_FAILED');
+      assert.ok(problem.field_errors?.some((item) =>
+        item.field === '/title_source_typo' && item.message.includes('additional properties')),
+      unknown.text);
+      assert.notEqual(problem.field_errors?.some((item) => item.field === '/title_source'), true);
+
+      // 客户端不可写 LEGACY：来源枚举仍由服务端语义约束。
+      const legacy = await api.post(`${base}/assist-sessions`, { command_id: randomUUID(),
+        project_id: null, task_id: null, title: '旧来源', title_source: 'LEGACY' });
+      expectProblem(legacy, 422, 'VALIDATION_FAILED');
+    } finally {
+      await api.stop();
+    }
+  });
+
 test('first-party registry and Packs expose only bundled, scoped, read-only versions', async () => {
   const f = await fixture('READY');
   const other = await fixture('READY');

@@ -312,6 +312,9 @@ test('主流程候选的 HTTP 只读投影保留资源、标题和目标，不�
       expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false, file_changes: [], check: null }
   })));
   const saved = result.requests[0]!;
+  // 登记本身不推进（此时 API 与 Worker 都未运行）：就绪候选停在 READY，没有任何 Task/Run。
+  assert.equal(saved.task_id, null);
+  assert.equal(saved.run_id, null);
   const api = await startTestApi();
   try {
     const response = await api.get(`${workspacePath(fx.workspaceId)}/conversation-execution-requests?session_id=${fx.sessionId}`);
@@ -321,10 +324,89 @@ test('主流程候选的 HTTP 只读投影保留资源、标题和目标，不�
     assert.equal(row.resource_id, saved.resource_id);
     assert.deepEqual(row.candidate, saved.candidate);
     assert.equal(row.candidate.title, '整理交付说明');
-    assert.equal(row.task_id, null);
-    assert.equal(row.run_id, null);
+    // AGENT-CORE-RELIABILITY（2026-11-01）：ADR-039 之后，就绪候选由常驻 API 的后台
+    // Owner（EXECUTION_AUTOSTART，HTTP §10.107.1）推进，不再是「没人推进」。HTTP GET
+    // 仍是只读投影：它自己不解释、不推进，投影必须与账本行此刻的 task/run 逐字段一致；
+    // 候选内容不被推进改写。原来的 `task_id/run_id === null` 断言把「测试里没有推进者」
+    // 这个环境事实当成了产品不变量，与 ADR-039 冲突。
+    const ledger = await createRepositories(app.db).conversationExecutions
+      .readRequest(saved.id);
+    assert.ok(ledger !== undefined, '原请求行必须仍在');
+    assert.equal(row.task_id, ledger.task_id);
+    assert.equal(row.run_id, ledger.run_id);
     assert.equal(result.interpretCalls, 0);
   } finally { await api.stop(); }
+});
+
+// ------------------------------------------------- AGENT-CORE-RELIABILITY（2026-11-01 P2-A）
+
+test('路由解析在进入调用前失败时，消息行保留精确停因码而不是裸 MODEL_FAILED', async () => {
+  // FakeModelPort 身份：model='fake-model-v1'、configFingerprint=sha256('fake-model-v1')、
+  // 无凭据身份。三个子场景各用一份新夹具，互不共享会话。
+  const fingerprint = createHash('sha256').update('fake-model-v1').digest('hex');
+  const buildSnapshot = (candidate: JsonObject): JsonObject => ({
+    version: 1, policy_version: 'route-stop-policy',
+    requirements: { tools: false, response_format: false, minimum_context_window: 1 },
+    candidates: [candidate],
+    budget: { call_reservation_tokens: 1024, scope_call_limit: 8,
+      scope_token_limit: 65536, context_budget_tokens: null },
+    max_attempts: 1,
+  });
+  const plantMessage = async (fx: Fixture, snapshot: JsonObject | null,
+    credentialFingerprint: string | null): Promise<string> => {
+    const userMessageId = randomUUID();
+    const assistantMessageId = randomUUID();
+    const seq = await createRepositories(app.db).assist.nextMessageSeq(fx.sessionId);
+    await withTransaction(app.db, async (repositories) => {
+      await repositories.assist.insertMessage({ id: userMessageId, sessionId: fx.sessionId,
+        seq, role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '推进一下',
+        sources: [] });
+      // 0098：快照与尝试状态是成对非空约束，直插行时也要成对给。
+      await repositories.assist.insertMessage({ id: assistantMessageId, sessionId: fx.sessionId,
+        seq: seq + 1n, role: 'ASSISTANT', status: 'PENDING', intent: 'DISCUSS', content: null,
+        sources: [], modelSelectionSnapshot: snapshot,
+        modelAttemptState: snapshot === null ? null : {
+          revision: '1', current_candidate_index: 0, switch_count: 0, switches: [],
+          active_call_id: null, active_candidate_index: null, active_turn_id: null,
+          completed_turn_id: null, completed_call_id: null, last_failure: null,
+          status: 'READY' },
+        modelCredentialFingerprint: credentialFingerprint });
+    });
+    return assistantMessageId;
+  };
+  const expectRouteStop = async (snapshot: JsonObject | null,
+    credentialFingerprint: string | null, errorCode: string): Promise<void> => {
+    const fx = await fixture();
+    const assistantMessageId = await plantMessage(fx, snapshot, credentialFingerprint);
+    const outcome = await runAssistGenerationTick(app.db, { workerId: `route-stop-${randomUUID()}`,
+      storage: new ManagedContentStore(dataRoot), modelPort: new FakeModelPort(),
+      leaseMs: 60_000, maxMessages: 5 });
+    assert.ok(outcome !== undefined, 'tick 应领取这条消息');
+    assert.equal(outcome.messageId, assistantMessageId);
+    assert.equal(outcome.status, 'FAILED');
+    assert.equal(outcome.errorCode, errorCode);
+    const row = await createRepositories(app.db).assist.readMessage(assistantMessageId);
+    assert.equal(row?.status, 'FAILED');
+    assert.equal(row?.error_code, errorCode);
+    assert.equal(row?.provider_error_kind ?? null, null,
+      '路由解析失败与 Provider 无关，传输层归因保持 null');
+    assert.equal(await createRepositories(app.db).modelCalls
+      .listForAssistMessage(assistantMessageId).then((rows) => rows.length), 0,
+      '调用从未发出：不产生 model_calls 行');
+  };
+
+  // 配置变更：候选型号与端口身份不一致（openai-compatible 分支先比型号）。
+  await expectRouteStop(buildSnapshot({ connection: { provider: 'openai-compatible',
+    model: 'no-longer-selected', config_fingerprint: fingerprint }, free_only: false,
+    catalog_basis: null }), null, 'ASSIST_MODEL_CONFIG_CHANGED');
+  // 凭据变更：型号与配置指纹都对上，但受理时记录的凭据身份与当前端口不同（非空 vs 空；
+  // 列 CHECK 要求 64 位十六进制，用合法形状的假指纹）。
+  await expectRouteStop(buildSnapshot({ connection: { provider: 'openai-compatible',
+    model: 'fake-model-v1', config_fingerprint: fingerprint }, free_only: false,
+    catalog_basis: null }), 'f'.repeat(64),
+    'ASSIST_MODEL_CREDENTIAL_CHANGED');
+  // 快照不合法：解析阶段直接拒绝。
+  await expectRouteStop({ version: 1 } as JsonObject, null, 'ASSIST_MODEL_SNAPSHOT_INVALID');
 });
 
 test('AM-06 原消息→请求→Task→Run 是一条链：Run 由 Run Worker 驱动，消息轮次不碰它', async () => {

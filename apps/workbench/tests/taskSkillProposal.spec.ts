@@ -209,9 +209,11 @@ describe("P12 Task Skill 合并提案", () => {
     }));
     const view = await mountWorkbench(`/tasks/${taskId}?skill=${pageKind}`);
     if (pageKind === "definition") {
-      const skillSelect = view.wrapper.get('[data-testid="assist-skill"]').element;
-      if (!(skillSelect instanceof HTMLSelectElement)) throw new Error("Skill selector is not a select");
-      expect(skillSelect.value).toBe("task-to-execution-contract@1.1.0");
+      /* 2026-11-01 UI-FEAT-01-R2：Skill 不再是原生下拉框，改成发送方式单选组里的一行；
+         判据不变——带 ?skill=definition 进入时预选的就是那条 Skill。 */
+      const checkedMode = view.wrapper.findAll('input[name="assist-send-mode"]')
+        .find((input) => (input.element as HTMLInputElement).checked);
+      expect((checkedMode?.element as HTMLInputElement | undefined)?.value).toBe("task-to-execution-contract@1.1.0");
       expect(view.wrapper.findAll("h1")).toHaveLength(1);
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("尚未发送的修改意见");
       const draftElement = view.wrapper.get('[data-testid="assist-draft"]').element;
@@ -297,9 +299,9 @@ describe("P12 Task Skill 合并提案", () => {
     }));
     const view = await mountWorkbench(`/tasks/${taskId}?skill=${pageKind}`);
     if (pageKind === "verification") {
-      const skillSelect = view.wrapper.get('[data-testid="assist-skill"]').element;
-      if (!(skillSelect instanceof HTMLSelectElement)) throw new Error("Skill selector is not a select");
-      expect(skillSelect.value).toBe("verification-plan@1.1.0");
+      const checkedMode = view.wrapper.findAll('input[name="assist-send-mode"]')
+        .find((input) => (input.element as HTMLInputElement).checked);
+      expect((checkedMode?.element as HTMLInputElement | undefined)?.value).toBe("verification-plan@1.1.0");
     }
     await view.wrapper.get('[data-testid="task-proposal-actions"] button.primary-button').trigger("click");
     await view.wrapper.get('[data-testid="task-skill-accept"]').trigger("click"); await flush();
@@ -394,10 +396,13 @@ describe("P12 Task Skill 合并提案", () => {
     expect(card.find("button.primary-button").exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("模型新增检查");
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("CHECKER_UNAVAILABLE");
-    expect(view.wrapper.get('[data-testid="assist-skill"] option[value="verification-plan@1.0.0"]').attributes("disabled")).toBe("");
-    expect(view.wrapper.get('[data-testid="assist-skill"] option[value="verification-plan@1.1.0"]').attributes("disabled")).toBeUndefined();
-    expect(view.wrapper.get('[data-testid="assist-skill"]').findAll("option").map((option) =>
-      option.attributes("value")).slice(1, 3)).toEqual([
+    expect(view.wrapper.get('input[name="assist-send-mode"][value="verification-plan@1.0.0"]')
+      .attributes("disabled")).toBe("");
+    expect(view.wrapper.get('input[name="assist-send-mode"][value="verification-plan@1.1.0"]')
+      .attributes("disabled")).toBeUndefined();
+    // 清单顺序不变：新版本在前（判据从 <option> 换到 Skill 单选行，取前两条 Skill）。
+    expect(view.wrapper.findAll('[data-testid^="assist-send-skill-"]').map((row) =>
+      row.attributes("value")).slice(0, 2)).toEqual([
       "task-to-execution-contract@1.1.0", "task-to-execution-contract@1.0.0"]);
     view.unmount();
   });

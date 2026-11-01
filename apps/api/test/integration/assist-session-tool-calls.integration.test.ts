@@ -7,14 +7,21 @@ import { sql } from 'kysely';
 import { createAssistSession, requestAssistMessage }
   from '../../src/application/assist-commands.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
+import { registerManagedResource, createGatewayPolicy }
+  from '../../src/application/gateway-configuration.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { SessionToolCallRepository } from '../../src/assist/session-tool-call-repository.js';
+import { reconcileTerminatedGenerationToolCalls, ORPHANED_SESSION_TOOL_CALL_REASON }
+  from '../../src/application/session-tool-reconcile.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
 import { readSessionToolCalls, type SessionToolCallProjection }
   from '../../src/application/session-tool-call-projection.js';
 import { createWorkspace, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
   openDatabase } from './integration-support.js';
+import { join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 /**
  * 会话工具轮次的只读投影与 HTTP 口子（工作台 §18.10「原消息下展示实际阶段」）。
@@ -150,4 +157,85 @@ test('读取不推进账本：REQUESTED 行读过之后仍是 REQUESTED，也不
     count(*) filter (where status = 'REQUESTED')::text as requested from session_tool_calls
     where message_id = ${m.messageId}`.execute(app.db)).rows[0]!;
   assert.deepEqual(after, before);
+});
+
+// ------------------------------------------------- AGENT-CORE-RELIABILITY（2026-11-01 P2-B）
+
+test('终止生成上从未准备的动作请求按原身份收口，已绑定与在途行不动', async () => {
+  const f = await workspaceFixture();
+  const repository = new SessionToolCallRepository(app.db);
+  const setStatus = (messageId: string, status: string, workerId: string | null) =>
+    sql`update assist_messages set status = ${status}, worker_id = ${workerId},
+      error_code = ${status === 'FAILED' ? 'LEASE_LOST' : null},
+      settled_at = ${status === 'RUNNING' ? null : sql`now()`}
+      where id = ${messageId}`.execute(app.db);
+
+  // ① 消息已终止（崩溃窗口：登记之后、prepare 提交之前中断）→ 收口 ABANDONED。
+  const dead = await newAssistantMessage(f.workspaceId, f.projectId, '列目录（生成已失联）');
+  const orphaned = await recordCall(dead.messageId, dead.sessionId, 0, 0, 'list_directory',
+    { path: '.' });
+  await setStatus(dead.messageId, 'FAILED', null);
+
+  // ② 消息已终止但 Operation 已按稳定身份提交（row.id）→ 不动：是否已派出去了
+  //    只能由执行活动投影按 Gateway 证据归因，账本行不在这里改写。
+  //    FILE_READ + AGENT_SESSION_READ 的约束要求绑定真实受管资源（0087），
+  //    connection/policy 走真实入口建立，满足外键。
+  const bound = await newAssistantMessage(f.workspaceId, f.projectId, '读文件（已提交动作）');
+  const boundCall = await recordCall(bound.messageId, bound.sessionId, 0, 0, 'read_file',
+    { path: 'README.md' });
+  await setStatus(bound.messageId, 'FAILED', null);
+  const boundRoot = await mkdtemp(join(tmpdir(), 'relay-tool-reconcile-'));
+  const boundResource = await registerManagedResource(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, rootPath: boundRoot });
+  const connectionId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.lockAuthority(f.workspaceId, 'update');
+    const connection = await repositories.gateway.insertConnection({ id: connectionId,
+      workspaceId: f.workspaceId, projectId: f.projectId,
+      config: { root_path: boundResource.canonicalRoot } });
+    await repositories.gateway.addConnectionCapability(connection.id, 'FILE_READ');
+    await repositories.workspaces.bumpAuthority(f.workspaceId);
+  });
+  const policy = await createGatewayPolicy(app.db, { workspaceId: f.workspaceId,
+    projectId: f.projectId, capability: 'FILE_READ', actionType: 'READ_FILE',
+    targetPrefix: boundResource.canonicalRoot, decision: 'AUTO', maxPayloadBytes: 262144 });
+  await sql`insert into logical_operations (id, workspace_id, project_id, origin, intent_key,
+    connection_id, connection_version, connection_config, policy_id, policy_version,
+    capability_key, action_type, normalized_target, params_hash, params, resource_id, status)
+    values (${boundCall}, ${f.workspaceId}, ${f.projectId}, 'AGENT_SESSION_READ',
+      ${'session-read:' + boundCall}, ${connectionId}, 1,
+      ${JSON.stringify({ root_path: boundResource.canonicalRoot })}::jsonb,
+      ${policy.policyId}, ${policy.version},
+      'FILE_READ', 'READ_FILE', ${join(boundResource.canonicalRoot, 'README.md')},
+      decode('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'hex'),
+      '{}'::jsonb, ${boundResource.resourceId}, 'PREPARED')`.execute(app.db);
+
+  // ③ 消息仍在 RUNNING → 不动：可能真的还在跑，提前收口等于替在途生成下结论。
+  const alive = await newAssistantMessage(f.workspaceId, f.projectId, '搜索（还在跑）');
+  const live = await recordCall(alive.messageId, alive.sessionId, 0, 0, 'find_paths',
+    { pattern: '*.md' });
+  await setStatus(alive.messageId, 'RUNNING', 'reconcile-live');
+
+  const closed = await reconcileTerminatedGenerationToolCalls(app.db);
+  assert.equal(closed, 1, '只有无 Operation 的终止行被收口');
+
+  const states = (await sql<{ id: string; status: string; reason: string | null;
+    detail: string | null }>`select id, status, rejection_reason as reason,
+      rejection_detail as detail from session_tool_calls
+    where id in (${orphaned}, ${boundCall}, ${live})`.execute(app.db)).rows;
+  const byId = new Map(states.map((row) => [row.id, row]));
+  assert.equal(byId.get(orphaned)!.status, 'ABANDONED');
+  assert.equal(byId.get(orphaned)!.reason, ORPHANED_SESSION_TOOL_CALL_REASON);
+  assert.ok((byId.get(orphaned)!.detail ?? '').includes('没有执行、也没有外部副作用'));
+  assert.equal(byId.get(boundCall)!.status, 'REQUESTED');
+  assert.equal(byId.get(live)!.status, 'REQUESTED');
+
+  // 幂等：重复扫描零新增收口，也不改已收口行的原因与时刻。
+  assert.equal(await reconcileTerminatedGenerationToolCalls(app.db), 0);
+  const recheck = (await sql<{ status: string; settled_at: Date | null }>`
+    select status, settled_at from session_tool_calls where id = ${orphaned}`
+    .execute(app.db)).rows[0]!;
+  assert.equal(recheck.status, 'ABANDONED');
+  assert.ok(recheck.settled_at !== null);
+  await rm(boundRoot, { recursive: true, force: true });
 });

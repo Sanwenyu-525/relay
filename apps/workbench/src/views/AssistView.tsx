@@ -36,7 +36,7 @@ import { formatAttachmentBytes, uploadCandidateFrom, uploadStagedAttachments } f
 import { useStagedAttachments } from "../components/useStagedAttachments";
 import { ComposerDraftBar, ComposerPolishButton, useComposerDraftAssist } from "../components/ComposerDraftAssist";
 import PageHeader from "../components/PageHeader";
-import AssistSourcePicker from "../components/AssistSourcePicker";
+import AssistSourcePicker, { sourceLimit as sendSourceLimit } from "../components/AssistSourcePicker";
 import ExecutionSummary from "../components/ExecutionSummary";
 import ChatModeSwitch, { ChatModeHint } from "../components/ChatModeSwitch";
 import PlanCard from "../components/PlanCard";
@@ -98,6 +98,13 @@ type PreviewReadError = { readonly message: string; readonly lastSuccessAt: stri
 const intentLabels: Record<AssistIntent, string> = {
   DISCUSS: "发送讨论", PROPOSE_CANDIDATE: "请求文档候选", PROPOSE_TASK: "请求任务提案"
 };
+/** 发送方式的短名（2026-11-01 UI-FEAT-01-R2）：芯片与选项行共用同一份。
+ *  两个提案必须分开叫——都叫「提案」时，用户无法从入口看出这条消息会产出文档还是任务定义。
+ *  内部值仍是 `DISCUSS`，只有显示名换成「对话」。 */
+const sendModeLabels: Record<AssistIntent, string> = {
+  DISCUSS: "对话", PROPOSE_CANDIDATE: "文档候选", PROPOSE_TASK: "任务提案"
+};
+/** 每次消息可选资料版本的上限：与资料选择器同一条口径（由它导出，不复制第二份数值）。 */
 /** 任务定义提案载荷的中文显示：预期产物键、产物种类与目标类型。
  *  服务端枚举开放扩展，未知值回退原枚举展示，原值经 title/small 保留供核对。 */
 const expectedOutputKeyLabels: Record<string, string> = {
@@ -1000,6 +1007,10 @@ onExecutionPrepared?: (taskId: string) => void;
   const firstOptionsRef = useRef<HTMLDetailsElement>(null);
   useDetailsMenu(firstOptionsRef);
   usePopupFlip(firstOptionsRef);
+  /* 首条消息的资料同样收成浮层里的第二层视图（2026-11-01 UI-FEAT-01-R2）：默认展开时整张检索
+     表单会把浮层撑高、盖住欢迎语与输入框。选择器始终挂载（只切换可见性），
+     进出这一层不会触发它按 projectId/client 重置的副作用，已选资料不被清空。 */
+  const [firstSourcesView, setFirstSourcesView] = useState(false);
   const restoreFirstDraftFocus = useCallback(() => {
     restoreComposerFocus(firstDraftRef.current, firstComposerBoxRef.current);
   }, []);
@@ -1905,30 +1916,85 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             onPick={(choice) => onRequestSkillTarget({ ...choice, skillId: firstSkill.id })} />}
         {modeSwitch}
         <ComposerPolishButton assist={firstAssist} />
-        {/* 首条输入器的发送选项与资料合成一颗芯片一片浮层（2026-10-24 用户指令「这两个合成
-            一个芯片就好了」）：上为默认目录说明与快捷键，下为资料选择（DEV-0100，选中项随
-            建会话载荷冻结）。此前「普通讨论」说明与资料各是一枚 chip 一片浮层（2026-10-18
-            拆分），合并后多开从构造上不可能。没有项目归属时资料节换成一句禁用说明，
-            不再摆一颗点了不亮的芯片。 */}
+        {/* 首条输入器的发送方式与资料合成一颗芯片一片浮层（2026-10-24 用户指令「这两个合成
+            一个芯片就好了」）。2026-11-01 UI-FEAT-01-R2 与已建会话对齐：芯片标签读当前选择
+            （选了 Skill 就显示 Skill 名，不再一律写「普通讨论」），资料收成浮层里的第二层，
+            删掉「Enter 发送 · Shift + Enter 换行」这类帮助文本。
+            **首条消息的真实能力**：服务端只接受 DISCUSS 与 skill_ref（见 sendFirst 的
+            `skillIntentPayload`），没有文档候选与任务提案，所以这里不摆那两行——
+            与已建会话「看起来一致」不等于把不支持的动作画出来。 */}
         {wantedMode === "AGENT" && <details className="agent-chat-options" ref={firstOptionsRef}
-          data-testid="assist-first-send-options">
-          <summary>普通讨论<ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
+          data-testid="assist-first-send-options"
+          onToggle={(event) => { if (!event.currentTarget.open) setFirstSourcesView(false); }}
+          onKeyDown={(event) => {
+            // Esc 一次只吃一层：资料层开着就先退回发送方式，再按一次才收浮层。
+            if (!firstSourcesView || event.key !== "Escape" || event.nativeEvent.isComposing ||
+              event.nativeEvent.keyCode === 229 || event.altKey || event.ctrlKey ||
+              event.metaKey || event.shiftKey) return;
+            event.preventDefault(); event.stopPropagation();
+            setFirstSourcesView(false);
+            event.currentTarget.querySelector<HTMLElement>('[data-testid="assist-first-send-sources-toggle"]')
+              ?.focus({ preventScroll: true });
+          }}>
+          <summary data-testid="assist-first-send-mode">{firstSkill?.title ?? sendModeLabels.DISCUSS}
+            <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
           <div className="agent-chat-options-panel">
           {/* 2026-10-24 用户指令：默认目录就绪时不再复述（欢迎语与目录细条已承载）；
               默认目录不可用与未选目录是用户无从预知的受阻/空态事实，保留。 */}
           {workspaceDefault?.status !== "READY" && <p className="helper-text">
             {workspaceDefault?.status === "UNAVAILABLE"
-              ? "直接发送即可开始讨论。设置里的默认目录当前不可用，读取文件前先选择文件夹。"
-              : "直接发送即可开始讨论。需要读取项目文件时，先选择文件夹。"}</p>}
-          <p className="helper-text">Enter 发送 · Shift + Enter 换行</p>
-          {firstSourcesSelectable
-            ? <div className="agent-chat-options-section">
-                <AssistSourcePicker projectId={firstScope.projectId} selectedRefs={selectedRefs}
-                  onChange={setSelectedRefs} disabled={firstBusy || creating || pendingFirst !== null} />
-              </div>
-            : firstSourcesNote !== null && <div className="agent-chat-options-section">
-                <p className="helper-text">{firstSourcesNote}</p>
-              </div>}
+              ? "设置里的默认目录当前不可用，读取文件前先选择文件夹。"
+              : "需要读取项目文件时，先选择文件夹。"}</p>}
+          <div className="agent-chat-send-modes-view" hidden={firstSourcesView}>
+          <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
+            <SendModeRow testId="assist-first-send-mode-DISCUSS" name="assist-first-send-mode" value="DISCUSS"
+              label={sendModeLabels.DISCUSS} checked={firstSkill === null}
+              disabled={firstBusy || creating || pendingFirst !== null}
+              title="普通对话：只讨论，不产出文档候选或任务提案"
+              onSelect={() => setFirstSkillKey("")} />
+            {firstSkills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
+            {firstSkills.map((skill, index) => {
+              /* 与「+」菜单同一份清单、同一处状态（`firstSkillKey`），不另立第二套选择结果。
+                 缺上下文但能在输入器里补工作对象时仍可选，补齐入口随后出现在工具行。 */
+              const blocked = !skill.callSupported || skill.missingCapabilities.length > 0;
+              const scopeLabel = skill.target === "TASK" ? "任务" : "项目";
+              const missingScope = skill.target === "TASK" ? firstScope.taskId === null
+                : firstScope.projectId === null;
+              const scopeFixed = missingScope && onRequestSkillTarget === undefined;
+              const hint = !skill.callSupported ? "仅查阅" : skill.missingCapabilities.length > 0 ? "缺能力"
+                : missingScope ? `需${scopeLabel}`
+                  : skill.availability === "CALLABLE_READ_ONLY" ? "只读" : "仅建议";
+              return <SendModeRow key={`${skill.id}@${skill.version}`} testId={`assist-first-send-skill-${index}`}
+                name="assist-first-send-mode" value={`${skill.id}@${skill.version}`} label={skill.title} hint={hint}
+                checked={firstSkillKey === `${skill.id}@${skill.version}`}
+                disabled={firstBusy || creating || pendingFirst !== null || blocked || scopeFixed}
+                title={`${skill.title} · ${skill.id} v${skill.version}${missingScope
+                  ? ` · 需要${scopeLabel}上下文${scopeFixed ? "，从对应任务或项目进入对话后可用" : "，选完后在工具行指定"}` : ""}`}
+                onSelect={() => setFirstSkillKey(`${skill.id}@${skill.version}`)} />;
+            })}
+          </div>
+          </div>
+          {/* 资料入口行：与已建会话同一条结构——第一屏是入口（计数常驻），
+              点开后替换掉发送方式那一屏（选中项随建会话载荷冻结，DEV-0100）。
+              没有项目归属时换成一句禁用说明，不摆一行点了不亮的入口。 */}
+          {firstSourcesSelectable ? <button type="button" className="agent-chat-send-sources"
+            data-testid="assist-first-send-sources-toggle" aria-expanded={firstSourcesView}
+            data-active={firstSourcesView ? "true" : undefined}
+            title={firstSourcesView ? "返回发送方式" : "选择这次消息要引用的资料版本"}
+            onClick={() => setFirstSourcesView((value) => !value)}>
+            <span className="agent-chat-send-sources-label">资料</span>
+            <span className="agent-chat-send-sources-count" data-testid="assist-first-source-count">
+              已选 {selectedRefs.length} / {sendSourceLimit} 个版本</span>
+            <ChevronRight aria-hidden="true" className="agent-chat-send-sources-chevron" />
+          </button> : firstSourcesNote !== null && <div className="agent-chat-options-section">
+            <p className="helper-text">{firstSourcesNote}</p>
+          </div>}
+          {/* 第二屏：资料选择器。始终挂载、只切换可见性（挂载会按 projectId/client 重置选中项）。 */}
+          {firstSourcesSelectable ? <div className="agent-chat-send-sources-view" hidden={!firstSourcesView}>
+            <AssistSourcePicker projectId={firstScope.projectId} selectedRefs={selectedRefs}
+              onChange={setSelectedRefs} disabled={firstBusy || creating || pendingFirst !== null}
+              hideHeading />
+          </div> : null}
           </div>
         </details>}
       </div>
@@ -2064,8 +2130,16 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       </div>
     : null;
   // 工作空间级讨论没有项目，资料选择器无从谈起：没有项目就没有可选的项目资料。
-  const sourcePicker = session?.status === "ACTIVE" && target !== null
-    ? <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`} projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs} /> : null;
+  /* 同一份选择器两种外壳（2026-11-01 UI-FEAT-01-R2）：页面顶部与嵌入态自带标题；
+     输入器浮层里由「资料」展开行承担标题与计数，不再重复一遍。
+     两处共用 `selectedRefs` / `setSelectedRefs` 这一份状态，不产生第二套选择结果；
+     浮层与顶部不会同时挂载（standalone 时顶部不渲染），因此也不会出现两份实例。 */
+  const buildSourcePicker = (hideHeading: boolean) => session?.status === "ACTIVE" && target !== null
+    ? <AssistSourcePicker key={`${connection.epoch}:${session.id}:${target.projectId ?? "none"}`}
+        projectId={target.projectId} selectedRefs={selectedRefs} onChange={setSelectedRefs}
+        hideHeading={hideHeading} /> : null;
+  const sourcePicker = buildSourcePicker(false);
+  const sourcePickerInline = buildSourcePicker(true);
   // 有会话时收成一行摘要，给消息区让出高度；无会话仍按设计系统 5.1 展开说明与新建入口。
   /* 协作页只保留一条会话控制带：不再叠「会话：标题」details +「当前会话」下拉双层壳。 */
   const sessionSwitcher = sessionControls;
@@ -2204,7 +2278,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     {session && <>{!externalReadBlockedReason && !standalone && !embedded && sourcePicker}
       <AssistSessionPanel key={`${connection.epoch}:${session.id}`} client={client} session={session} target={target} sources={selectedRefs}
         standalone={standalone} embedded={embedded} onNavigationStateChange={reportSessionNavigation}
-        sourcePicker={sourcePicker}
+        sourcePickerInline={sourcePickerInline}
         firstMessageInflight={firstBusy || creating || pendingFirst !== null}
         firstMessageTransition={firstTransition}
         firstMessagePending={firstPendingStrip}
@@ -2388,6 +2462,32 @@ function AttachRow({ testId, level, label, icon, hint, title, disabled, selected
         {disclosure !== undefined && <ChevronRight className="agent-chat-attach-item-chevron" aria-hidden="true" />}
       </span>}
   </button>;
+}
+
+/**
+ * 发送方式的一枚单选项（2026-11-01 UI-FEAT-01-R2）。
+ *
+ * 工作方式与 Skill 在协议上是**同一个选择**：`intent` 与 `skill_ref` 互斥，服务端禁止混用
+ * （见本文件 `runAction` 的 send 分支与首条消息的 `skillIntentPayload`）。因此界面上也只能
+ * 有一个选中项——两组各自维护选中态会让用户以为「任务提案 + 某个 Skill」能同时生效，
+ * 而实际发送时 intent 会被静默丢掉。这里用同名原生 radio 承载单选语义：键盘方向键、
+ * 屏幕阅读器播报和「选中即取消同组其他项」都由浏览器负责，不另写一套状态机。
+ *
+ * label 包住 radio：整行都是命中区，没有点不中的死区（web-design-guidelines：单选
+ * 与文字必须共享同一个 hit target）。
+ */
+function SendModeRow({ testId, name, value, checked, disabled, label, hint, title, onSelect }: {
+  readonly testId: string; readonly name: string; readonly value: string;
+  readonly checked: boolean;
+  readonly disabled: boolean; readonly label: string; readonly hint?: string;
+  readonly title?: string; readonly onSelect: () => void;
+}) {
+  return <label className="agent-chat-send-mode" data-selected={checked ? "true" : undefined} title={title}>
+    <input type="radio" name={name} value={value} data-testid={testId} checked={checked}
+      disabled={disabled} onChange={onSelect} />
+    <span className="agent-chat-send-mode-label">{label}</span>
+    {hint === undefined ? null : <span className="agent-chat-send-mode-hint">{hint}</span>}
+  </label>;
 }
 
 /**
@@ -4618,7 +4718,7 @@ function FirstAssistantWaitingRow({ personaLabel, submitted }: {
 
 function AssistSessionPanel({ client, session, target, sources, writeBlockedReason: inheritedWriteBlockedReason,
   refreshTarget, clearSentSources, standalone, onNavigationStateChange,
-  sourcePicker, preferredSkillId, embedded, externalReadBlockedReason, proposalActionHost,
+  sourcePickerInline, preferredSkillId, embedded, externalReadBlockedReason, proposalActionHost,
   onExecutionPrepared, initialExecution, confirmedFirstMessageCommandId,
   initialMaintenance, modeSwitch, modeHints, onInflightChange, composerHeader, composerFooter, onLearningTransfer, recordLearning = true,
   firstMessageInflight = false, firstMessageTransition = null, firstMessagePending = null, onToggleSourceRef,
@@ -4630,7 +4730,9 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   onOpenSession?: (sessionId: string) => void;
   clearSentSources: (sent: readonly RelayAssistSourceRef[]) => void;
   standalone: boolean; onNavigationStateChange: (state: AssistNavigationState) => void;
-  sourcePicker: ReactNode; preferredSkillId?: string; embedded?: boolean;
+  /** 浮层里的资料选择器（2026-11-01 UI-FEAT-01-R2）：标题由「资料」展开行承担，因此不带标题。
+   *  状态仍是外层 `selectedRefs` 那一份，面板不持有第二套选择。 */
+  sourcePickerInline?: ReactNode; preferredSkillId?: string; embedded?: boolean;
   externalReadBlockedReason: string | null; proposalActionHost?: HTMLElement | null;
   onExecutionPrepared?: ((taskId: string) => void) | undefined;
   /** 首条消息的解释结果：交给本面板既有 Owner 渲染与执行，避免出现第二套确认门。 */
@@ -6447,66 +6549,152 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     event.preventDefault(); event.stopPropagation();
     close(); event.currentTarget.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
   };
-  const summaryLabel = selectedSkill ? selectedSkill.title : intent === "DISCUSS" ? "普通讨论" : "提案";
+  /* —— 发送方式（2026-11-01 UI-FEAT-01-R2）——
+     上一轮这里并排两个原生 select：「生成方式」（Skill）与「意图」。同一件事被拆成两个控件，
+     两个都叫得像是独立的设置，而协议上 `intent` 与 `skill_ref` 互斥——选了两个只有一个生效。
+     本轮合成**一个单选组**：工作方式三行（对话 / 文档候选 / 任务提案）＋ 一段 Skill 行，
+     共用同一个 name 与同一处状态；选中任一项即取消同组其余项，不需要用户理解互斥规则。
+     入口芯片读同一份结果，所以「选了 Skill 还显示普通讨论」这类错位从构造上消失。 */
+  const sendModeLocked = pending !== null || busy;
+  const sendModeName = "assist-send-mode";
+  const pickSendMode = (next: AssistIntent) => {
+    setIntent(next);
+    // 换工作方式就是放弃 Skill：留着旧 skill_ref 会让 intent 在载荷里被静默丢弃。
+    if (selectedSkillKey !== "") { setSelectedSkillKey(""); setSkillInputText(""); }
+  };
+  const pickSendSkill = (key: string) => {
+    setSelectedSkillKey(key); setSkillInputText(""); setIntent("DISCUSS");
+  };
+  /** 工作方式一行读的是「有没有选 Skill」而不是单独的布尔：Skill 选中时三行全部不选中。 */
+  const sendModeChecked = (mode: AssistIntent) => selectedSkill === null && intent === mode;
+  const summaryLabel = selectedSkill ? selectedSkill.title : sendModeLabels[intent];
+  /* 资料是同一片浮层里的**第二层视图**（2026-11-01 UI-FEAT-01-R2）：点「资料」时用选择器替换
+     发送方式那一屏，而不是在它下面继续堆。理由是上一轮实测出来的两件事：
+       ① 全展开时浮层 469px，整张检索表单常驻，盖住半个聊天区；
+       ② 就算收成折叠区，叠在发送方式下面仍会超出一屏——于是浮层外滚一层、检索结果内再滚一层，
+          两层滚动条同时出现在 320px 宽的面板里，用户看不出自己在滚哪一层。
+     分层后同一时刻只有一屏内容、只有一个滚动容器（浮层自己）。
+     选择器始终挂载（只是被 `hidden` 隐藏），所以进出这一层不会触发它按 projectId/client
+     重置的副作用，已选资料不会被一次切换清空。 */
+  const [sendSourcesView, setSendSourcesView] = useState(false);
   const sendOptionsFields = <>
-      <label className="field"><span className="field-label">生成方式</span><select data-testid="assist-skill"
-        value={selectedSkillKey} onChange={(event) => { setSelectedSkillKey(event.target.value); setSkillInputText(""); }}
-        disabled={pending !== null || busy}>
-        <option value="">普通 Assist</option>
-        {skills.map((skill) => {
+      <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
+        <SendModeRow testId="assist-send-mode-DISCUSS" name={sendModeName} value="DISCUSS" disabled={sendModeLocked}
+          label={sendModeLabels.DISCUSS} checked={sendModeChecked("DISCUSS")}
+          title="普通对话：只讨论，不产出文档候选或任务提案"
+          onSelect={() => pickSendMode("DISCUSS")} />
+        {/* 两个提案各自的可用条件不变：文档候选要有任务目标，任务提案要有项目归属。 */}
+        {target?.kind === "TASK" ? <SendModeRow testId="assist-send-mode-PROPOSE_CANDIDATE"
+          name={sendModeName} value="PROPOSE_CANDIDATE" disabled={sendModeLocked} label={sendModeLabels.PROPOSE_CANDIDATE}
+          hint="不写入项目" checked={sendModeChecked("PROPOSE_CANDIDATE")}
+          title="让 Agent 提出一份 Markdown 文档候选；接受前不写入项目"
+          onSelect={() => pickSendMode("PROPOSE_CANDIDATE")} /> : null}
+        {session.projectId !== null ? <SendModeRow testId="assist-send-mode-PROPOSE_TASK"
+          name={sendModeName} value="PROPOSE_TASK" disabled={sendModeLocked} label={sendModeLabels.PROPOSE_TASK}
+          hint="确认后建任务" checked={sendModeChecked("PROPOSE_TASK")}
+          title="让 Agent 提出一份任务定义；明确确认后才建任务"
+          onSelect={() => pickSendMode("PROPOSE_TASK")} /> : null}
+        {/* Skill 与上面三行同一个单选组（协议上互斥），只用一条分组标签在视觉上分开。 */}
+        {skills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
+        {skills.map((skill, index) => {
           /* 清单全量：需要的上下文对不上这条会话时如实标注并不可选，不让用户选了再被服务端拒绝。 */
           const missingScope = skill.target === "TASK" ? session.taskId === null : session.projectId === null;
           const scopeLabel = skill.target === "TASK" ? "任务" : "项目";
-          return <option key={`${skill.id}@${skill.version}`} value={`${skill.id}@${skill.version}`}
-            disabled={!skill.callSupported || skill.missingCapabilities.length > 0 || missingScope}>{skill.title} v{skill.version} ·
-            {!skill.callSupported ? "历史版本，仅可查阅" : skill.missingCapabilities.length > 0 ? "缺能力，当前不可调用"
-              : missingScope ? `需${scopeLabel}上下文，本会话没有`
-              : skill.availability === "CALLABLE_READ_ONLY" ? "只读" : "仅建议"}</option>;
+          const blocked = !skill.callSupported || skill.missingCapabilities.length > 0;
+          const hint = !skill.callSupported ? "仅查阅" : skill.missingCapabilities.length > 0 ? "缺能力"
+            : missingScope ? `需${scopeLabel}` : skill.availability === "CALLABLE_READ_ONLY" ? "只读" : "仅建议";
+          return <SendModeRow key={`${skill.id}@${skill.version}`} testId={`assist-send-skill-${index}`}
+            name={sendModeName} value={`${skill.id}@${skill.version}`} label={skill.title} hint={hint}
+            checked={selectedSkillKey === `${skill.id}@${skill.version}`}
+            disabled={sendModeLocked || blocked || missingScope}
+            title={`${skill.title} · ${skill.id} v${skill.version} · ${!skill.callSupported ? "历史版本，仅可查阅"
+              : skill.missingCapabilities.length > 0 ? `缺能力：${skill.missingCapabilities.join("、")}`
+              : skill.availability === "CALLABLE_READ_ONLY" ? "只读输出" : "仅生成建议"}${
+              missingScope ? ` · 需要${scopeLabel}上下文，本会话没有` : ""}`}
+            onSelect={() => pickSendSkill(`${skill.id}@${skill.version}`)} />;
         })}
-      </select></label>
-      {/* 上下文缺口说清去哪补：会话归属建会话时冻结，本会话补不了，只能换一条从工作对象进入的会话。 */}
+      </div>
+      {/* 上下文缺口说清去哪补：会话归属建会话时冻结，本会话补不了，只能换一条从工作对象进入的会话。
+          只在真的有这类 Skill 时出现一行，不常驻。 */}
       {skills.some((skill) => skill.target === "TASK" ? session.taskId === null : session.projectId === null) &&
-        <p className="helper-text">带「需任务 / 需项目上下文」的 Skill 要回到对应任务或项目开始对话；这条会话的归属已在建立时固定。</p>}
+        <p className="helper-text">带「需任务 / 需项目」的 Skill 要回到对应任务或项目开始对话；这条会话的归属已在建立时固定。</p>}
+      {/* 读不到 Skill 清单是错误事实，必须留在明面上（不塞进「详情」）。 */}
       {skillError && <p className="action-error" role="alert">Skill 清单暂不可读：{skillError}。
-        普通 Assist 仍可用。<button className="text-link" type="button" onClick={() => void loadSkills()}>重读 Skill</button></p>}
+        对话仍可用。<button className="text-link" type="button" onClick={() => void loadSkills()}>重读 Skill</button></p>}
       {selectedSkill ? <>
-        <p className="helper-text">{selectedSkill.title} · {selectedSkill.id} v{selectedSkill.version} ·
-          定义摘要 {selectedSkill.sha256} ·
-          {selectedSkill.availability === "CALLABLE_READ_ONLY" ? "只读输出" : "仅生成建议"}。
-          依赖：{selectedSkill.dependencies.map((dep) => `${dep.kind} ${dep.id}@${dep.version} (${dep.sha256})`).join("；")}。
-          {selectedSkill.requiredCapabilities.length ? `需要能力：${selectedSkill.requiredCapabilities.join("、")}。` : "无额外 Connector 能力要求；模型服务仍须另行可用。"}
-          {selectedSkill.missingCapabilities.length ? ` 缺少能力：${selectedSkill.missingCapabilities.join("、")}。` : ""}
-          模型输出本身只读；可接受的 Task Skill 会另给服务端合并提案，需明确确认。</p>
         <label className="field"><span className="field-label">{selectedSkill.id === "task-to-execution-contract"
           ? "期望结果（可选）" : selectedSkill.id === "project-resume" ? "关注点（可选）" : "风险重点（可选）"}</span>
           <textarea data-testid="assist-skill-input" value={skillInputText}
             onChange={(event) => setSkillInputText(event.target.value)} maxLength={2000} rows={2}
-            disabled={pending !== null || busy} /></label>
-      </> : <label className="field"><span className="field-label">意图</span><select data-testid="assist-intent"
-        value={intent} onChange={(event) => setIntent(event.target.value as AssistIntent)} disabled={pending !== null || busy}>
-        <option value="DISCUSS">讨论</option>{target?.kind === "TASK" && <option value="PROPOSE_CANDIDATE">提出 Markdown 候选</option>}
-        {session.projectId !== null && <option value="PROPOSE_TASK">提出任务定义</option>}
-      </select></label>}
-      <p className="helper-text">本次发送冻结已选的 {sources.length} 个资料版本。</p></>;
-  /* 独立态一枚合体浮层（2026-10-24 用户指令「这两个合成一个芯片就好了」）：发送选项与资料
-     合成一颗芯片（标签＝当前意图）一片浮层，上节发送选项、下节资料。此前是两颗芯片两片
-     浮层（2026-10-18 按用户指令「两个弹窗怎么是一样的」拆分）；合并后多开从构造上不可能——
-     一片浮层一个入口，互斥注册表仍旧挂着（与「+」、模式、档位、模型等照旧互斥）。
+            disabled={sendModeLocked} /></label>
+        {/* 定义摘要、依赖与能力要求是「要查的时候才查」的核对材料，不是每次发送都要读一遍的正文。
+            上一轮它是一段铺满浮层的技术长文（sha256 直接换行成六行）；现在收进一层。
+            权限结论本身（只读 / 仅建议 / 缺能力）留在选中行上，收起也不丢。 */}
+        <details className="agent-chat-send-detail" data-testid="assist-skill-detail">
+          <summary>Skill 详情</summary>
+          <p>{selectedSkill.id} v{selectedSkill.version} · 定义摘要 {selectedSkill.sha256}</p>
+          <p>依赖：{selectedSkill.dependencies.length === 0 ? "无"
+            : selectedSkill.dependencies.map((dep) => `${dep.kind} ${dep.id}@${dep.version}`).join("；")}</p>
+          <p>{selectedSkill.requiredCapabilities.length
+            ? `需要能力：${selectedSkill.requiredCapabilities.join("、")}。`
+            : "无额外 Connector 能力要求；模型服务仍须另行可用。"}
+            {selectedSkill.missingCapabilities.length
+              ? ` 缺少能力：${selectedSkill.missingCapabilities.join("、")}。` : ""}</p>
+          <p>模型输出本身只读；可接受的 Task Skill 会另给服务端合并提案，需明确确认。</p>
+        </details>
+      </> : null}</>;
+  /* 独立态一枚合体浮层（2026-10-24 用户指令「这两个合成一个芯片就好了」）：发送方式与资料
+     合成一颗芯片（标签＝当前发送方式）一片浮层。此前是两颗芯片两片浮层（2026-10-18 按用户
+     指令「两个弹窗怎么是一样的」拆分）；合并后多开从构造上不可能——一片浮层一个入口，
+     互斥注册表仍旧挂着（与「+」、模式、档位、模型等照旧互斥）。
      资料入口的 data-testid 与 aria-expanded 留在 summary 上，既有断言与 Playwright 直点不换 Owner。 */
   const sendOptionsPopup = standalone ? <details ref={sendOptionsRef}
     className="agent-chat-options agent-chat-send-options" open={sendOptionsOpen}
-    onKeyDown={popoverEscape(sendOptionsOpen, () => setSendOptionsOpen(false))}
-    onToggle={(event) => { if (event.currentTarget.open !== sendOptionsOpen) setSendOptionsOpen(event.currentTarget.open); }}>
+    onKeyDown={(event) => {
+      /* Esc 一次只吃一层：资料层开着就先退回发送方式，再按一次才收浮层。
+         焦点留在触发它的那枚「资料」行上（该行两屏都在，不随切换卸载）。 */
+      if (sendSourcesView && event.key === "Escape" && !event.nativeEvent.isComposing &&
+        event.nativeEvent.keyCode !== 229 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault(); event.stopPropagation();
+        setSendSourcesView(false);
+        event.currentTarget.querySelector<HTMLElement>('[data-testid="assist-send-sources-toggle"]')
+          ?.focus({ preventScroll: true });
+        return;
+      }
+      popoverEscape(sendOptionsOpen, () => { setSendSourcesView(false); setSendOptionsOpen(false); })(event);
+    }}
+    onToggle={(event) => {
+      if (event.currentTarget.open === sendOptionsOpen) return;
+      setSendOptionsOpen(event.currentTarget.open);
+      // 收浮层时退回第一屏：下次打开仍从发送方式开始，不记忆上一次停在资料层。
+      if (!event.currentTarget.open) setSendSourcesView(false);
+    }}>
     <summary data-testid="assist-open-sources" aria-expanded={sendOptionsOpen}
-      title={`这条消息的发送选项与资料 · 已选 ${sources.length} 个资料版本`}>
+      title={`这条消息的发送方式与资料 · 已选 ${sources.length} 个资料版本`}>
       {summaryLabel}<ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
     <div className="agent-chat-options-panel">
-      {sendOptionsFields}
-      <div className="agent-chat-options-section">{sourcePicker}</div>
+      {/* 第一屏：发送方式。资料层打开时隐藏（不卸载），两屏共用浮层这一处滚动。 */}
+      <div className="agent-chat-send-modes-view" hidden={sendSourcesView}>{sendOptionsFields}</div>
+      {/* 资料入口行：两屏都在。第一屏是「去选资料」的入口（计数常驻，收起也知道带几个版本），
+          资料层里它变成这一层的标题行（箭头翻向、再点一次退回发送方式）。 */}
+      <button type="button" className="agent-chat-send-sources" data-testid="assist-send-sources-toggle"
+        aria-expanded={sendSourcesView} data-active={sendSourcesView ? "true" : undefined}
+        title={sendSourcesView ? "返回发送方式" : "选择这次消息要引用的资料版本"}
+        onClick={() => setSendSourcesView((value) => !value)}>
+        <span className="agent-chat-send-sources-label">资料</span>
+        <span className="agent-chat-send-sources-count" data-testid="assist-source-count">
+          已选 {sources.length} / {sendSourceLimit} 个版本</span>
+        <ChevronRight aria-hidden="true" className="agent-chat-send-sources-chevron" />
+      </button>
+      {/* 第二屏：资料选择器。始终挂载、只切换可见性——选择器挂载时会按 projectId/client
+          重置选中项，若按需挂载，进出这一层就会把用户已选的资料清空。 */}
+      <div className="agent-chat-send-sources-view" hidden={!sendSourcesView}>
+        {sourcePickerInline ?? null}
+      </div>
     </div></details> : null;
-  /* 非独立态：常驻展开面板（内嵌）或面板上方静态块，两段内容同屏，不参与浮层拆分。 */
+  /* 非独立态：常驻展开面板（内嵌）或面板上方静态块，只承载发送方式，资料由页面上方那份承担。 */
   const sendOptionsExpanded = standalone ? null : <details className="assist-options-expanded" open>
-    <summary>发送选项 · {summaryLabel}</summary>{sendOptionsFields}</details>;
+    <summary>发送方式 · {summaryLabel}</summary>{sendOptionsFields}</details>;
 
   /* 队列候选：所有 PENDING。是否真的构成队列取决于 runningMessage，见下。 */
   const pendingMessages = useMemo(() => messages?.filter((item) =>

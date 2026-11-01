@@ -619,3 +619,16 @@ POST /api/v1/workspaces/{workspace_id}/assist-sessions/{id}/title/generate
 Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调用方保留原行为）。语义变化：工作台提交占位标题时传入 `title_source='PROVISIONAL'`，其未关联目标的临时标题由服务端结构化；旧会话一律 `LEGACY`，迁移不批量改名。
 
 **证据。** 单元 `session-title` **9/9**（分类、临时标题、任务名检查、长输入收口、模型信封、恶意结构拒绝）；真实 PG/HTTP `assist-session-title.integration.test` **8/8**（结构化临时标题、模型落库与 TITLE 不抢 PRIMARY 读数、手动改名后迟到结果 SKIPPED、显式重新生成的幂等与 CAS、无模型/非法输出降级、LEGACY 保护与归档拒绝、无模型重生成失败保留原标题、删除级联）；组件 `sessionRowMenu` **39/39**；真实 Chromium `sessionTitleRegeneration` **3/3**。规则归[ADR-040](../../decisions/ADR-040-session-title-ownership.md)、[工作台 §28.3](../../frontend/workbench-design/part-09.md#283-会话标题的系统命名与重新生成2026-11-01)、[生成生命周期](../../development/agent-generation-lifecycle.md#会话标题的后台生成接缝2026-11-01)。
+
+### 10.133 项目工具有效性只读投影（2026-11-01 源码实现，PLUGIN-P0-01）
+
+**Breaking Change: No（新增只读端点）。** `GET /projects/{project_id}/tool-availability`（Workspace 作用域，`Cache-Control: no-store`）。
+
+- **回答什么**：工作台「可以用的工具」那七行（`files` / `git` / `web` / `cli` / `computer` / `browser` / `github`）各自的**合成状态**：`READY`（可自动准入）、`NEEDS_APPROVAL`（需逐次批准）、`SITE_SCOPED`（仅部分站点）、`READ_ONLY`（只有读取类动作）、`PARTIAL`（部分动作）、`NOT_AUTHORIZED`（有连接无策略）、`DENIED`（命中拒绝）、`NOT_CONFIGURED`（无连接）、`DISABLED` / `REVOKED`（连接停用/撤销）、`RUNTIME_UNAVAILABLE`（本机运行时不可用）、`UNKNOWN`（事实读不全）。附 `detail` 与逐动作分布 `counts`。
+- **为什么搬回服务端**：此前工作台在浏览器里用「存在任意一条非拒绝策略」拼「可用」，于是只授权了 `read_file` 的文件行也显示整行可用、`gh` 没装也显示可用、策略 `target_prefix` 不覆盖本项目目录也显示可用——那是第二套权限引擎，而且比 Gateway 宽松。现在判定复用 Gateway 自己的原语（`capabilityFor` / `targetMatches` / `rankActivePolicies` / `ADAPTER_DESCRIPTORS`），界面只做映射。
+- **判定口径**（逐动作）：连接必须 `ACTIVE` 且具备该能力，目录类能力还要求连接的 `root_path` 覆盖某个 ACTIVE 受管根；目标按能力族取（文件/Git/CLI/GitHub 取受管根，电脑取 `computer://desktop`，浏览器取 `browser://`，网页抓取取连接的 `allowed_host`）；策略按 `能力 × 动作 × 目标前缀` 命中后取最严格者。命中 `AUTO` 但适配器 `approvalPassthrough=false`（FILE_WRITE / GIT_WRITE / CLI_RUN / COMPUTER_INPUT / BROWSER_ACTION / BROWSER_COMMIT）时降级为 `NEEDS_APPROVAL`——授权不等于自动可执行。
+- **不回答什么**：不做准入。本查询不创建连接、不写策略、不放宽任何权限，也不代替 Gateway 的派发前判定；界面显示可用不会让任何动作跳过 Gateway。
+- **运行时**：`computer` / `browser` / `github` 三行结合 `/plugins/status` 同一份安装级探测；运行时明确不可用时整行是 `RUNTIME_UNAVAILABLE`，即使连接与策略齐备。
+- **无法确认不推断**：`ACTIVE` 策略却读不到生效版本、或某行缺少服务端结论时，状态是 `UNKNOWN`，界面不回落到可用。
+
+**证据。** 单元 `tool-availability` **14/14**（只授权 read_file 时只读可用、只授权截图时电脑行只读、授权齐全但写入仍需审批、停用/撤销、DENY 不被其它策略掩盖、目标前缀不匹配、连接目录边界不覆盖、运行时不可用、策略版本缺失、未配置、仅站点授权、网页主机不一致、载荷上限过小）；真实 PG/HTTP `tool-availability.integration.test`（空项目全部未配置、只有连接时未授权、只授权 read_file 时只读可用、停用连接后立即变已停用、撤销策略后仍按连接状态、不存在项目 404）；组件 `connectionsSettings` **37/37**。

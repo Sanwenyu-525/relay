@@ -3,8 +3,9 @@ import type { RelayAssistSourceRef, RelaySearchItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 
-/** 每次消息可选资料版本的上限：沿用既有约束（「+」二级菜单同一条口径），不另立第二套。 */
-const sourceLimit = 10;
+/** 每次消息可选资料版本的上限：沿用既有约束（「+」二级菜单同一条口径），不另立第二套。
+ *  导出给输入器芯片上的「已选 N / 上限」摘要读同一份数值。 */
+export const sourceLimit = 10;
 
 /**
  * 资料面板（点击穿透任务书 CT-02）。
@@ -18,8 +19,12 @@ const sourceLimit = 10;
  *
  * 勾选或移除只是编辑本次候选输入：不发送消息、不建执行、不申请权限；本地文件仍未接入，
  * 由「+」二级菜单如实禁用并说明接入点，这里不假装可用。
+ *
+ * `hideHeading`（2026-11-01 UI-FEAT-01-R2）：嵌进输入器浮层、由外层「资料」展开行承担标题时，
+ * 这里不再重复一遍「本次显式选择的资料」——同一件事在一屏里写两次正是上一轮被指认的冗余。
+ * 组件本身仍是同一份实例与同一份选中状态，不因为收标题而另建一套。
  */
-export default function AssistSourcePicker({ projectId, selectedRefs, onChange, disabled = false }: { projectId: string | null; selectedRefs: readonly RelayAssistSourceRef[]; onChange: (refs: readonly RelayAssistSourceRef[]) => void; disabled?: boolean }) {
+export default function AssistSourcePicker({ projectId, selectedRefs, onChange, disabled = false, hideHeading = false }: { projectId: string | null; selectedRefs: readonly RelayAssistSourceRef[]; onChange: (refs: readonly RelayAssistSourceRef[]) => void; disabled?: boolean; hideHeading?: boolean }) {
   const connection = useRelayConnection();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<readonly RelaySearchItem[]>([]);
@@ -79,11 +84,13 @@ export default function AssistSourcePicker({ projectId, selectedRefs, onChange, 
     event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false;
   }
 
-  return <section className="surface-panel assist-source-panel" data-testid="assist-source-picker" aria-labelledby="assist-source-title">
-    <header className="assist-source-head">
+  return <section className="surface-panel assist-source-panel" data-testid="assist-source-picker"
+    aria-labelledby={hideHeading ? undefined : "assist-source-title"}
+    aria-label={hideHeading ? "资料选择" : undefined}>
+    {hideHeading ? null : <header className="assist-source-head">
       <h2 id="assist-source-title" className="assist-source-title">本次显式选择的资料</h2>
       <p className="assist-source-count" data-testid="assist-source-count">已选 {selectedRefs.length} / {sourceLimit} 个版本</p>
-    </header>
+    </header>}
     <form className="form-actions" onSubmit={(event) => void search(event)}>
       <label className="field" htmlFor="assist-source-query"><span className="field-label">检索词</span><input id="assist-source-query" value={query} onChange={(event) => changeQuery(event.target.value)} type="search" maxLength={200} autoComplete="off" disabled={disabled} /></label>
       <button className="secondary-button" type="submit" disabled={disabled || loading || connection.mode !== "live"}>查找来源</button>

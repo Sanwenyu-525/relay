@@ -2094,7 +2094,21 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
    一整片。内边距同步降一档（space.4 → space.3），长 token（sha256、UUID）在封顶
    宽度内断行，不产生横向滚动。 */
 .agent-chat-options { position: relative; }
-.agent-chat-options[open] > .agent-chat-options-panel { position: absolute; bottom: calc(100% + var(--relay-space-2)); left: 0; z-index: var(--relay-zIndex-popover); width: max-content; min-width: 100%; max-width: min(20rem, calc(100vw - var(--relay-space-6))); max-height: min(60dvh, var(--relay-layout-workspace-sideWidth)); overflow-y: auto; overflow-wrap: anywhere; padding: var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); }
+/* 浮层高度（2026-11-01 UI-FEAT-01-R2）：上一轮上下两节全展开时实测 469px（60dvh），
+   盖住半个聊天区。本轮默认只渲染「发送方式」与一行「资料」，常见内容（三种工作方式 +
+   几条 Skill + 资料行）约 340px，封顶取 22rem / 48dvh 让它完整露出；Skill 更多、
+   检索结果更长时在浮层内部滚动，不外扩。宽度封顶仍是 20rem，浮层接近方形，
+   读起来是一枚菜单而不是一片面板。 */
+.agent-chat-options[open] > .agent-chat-options-panel { position: absolute; bottom: calc(100% + var(--relay-space-2)); left: 0; z-index: var(--relay-zIndex-popover); width: min(20rem, calc(100vw - var(--relay-space-6))); min-width: 100%; max-height: min(22rem, 48dvh); overflow: hidden; overflow-wrap: anywhere; padding: var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); box-shadow: var(--relay-shadow-floating); display: flex; flex-direction: column; }
+/* 滚动 Owner 是**内容区**而不是整片面板（2026-11-01 UI-FEAT-01-R2）：选中 Skill 后
+   「关注点」输入框会把内容撑过封顶高度，若整片面板滚动，「资料」入口行会被挤到折叠线以下——
+   一个入口不该需要先滚动才能看见。改成列布局：入口行常驻，只有内容区滚。
+   内容区仍是唯一的滚动容器，所以「一层浮层一层滚动」没有被破坏。 */
+.agent-chat-options-panel > .agent-chat-send-modes-view,
+.agent-chat-options-panel > .agent-chat-send-sources-view { min-height: 0; overflow-y: auto; }
+/* 浮层里的其它常驻件（首条输入器的目录说明、资料入口行）不参与压缩。 */
+.agent-chat-options-panel > .helper-text,
+.agent-chat-options-panel > .agent-chat-options-section { flex: none; }
 /* 浮层里的资料面板不再自带卡片外壳（2026-10-24 收窄同轮）：popup 自己就是浮层，
    AssistSourcePicker 根上的 .surface-panel 会画出卡片套卡片——双层描边、双层阴影、
    水平内边距 16+24px，在 20rem 的浮层里尤其挤。嵌入态与 TaskDelegatePanel 里的
@@ -2117,6 +2131,116 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
    用一条分隔线分开，不再套第二层卡片——CT-02 反「一大片全铺开」的结论仍在：两节各自
    限高，资料结果区在自己的 30dvh 里内部滚动，检索行不随长结果被推走。 */
 .agent-chat-options-panel > .agent-chat-options-section { margin-top: var(--relay-space-3); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+
+/* —— 发送方式：一个单选组（2026-11-01 UI-FEAT-01-R2）——
+   上一轮这里是两个并排的原生 select（「生成方式」＋「意图」），各带一个 field-label，
+   两套状态实际互斥（协议禁止 intent 与 skill_ref 混用），却看不出只能选一个。
+   本轮换成一组 radio 行：行高取 compact 档，行距 space.1，选中态只改文字颜色与字重，
+   不加底色块、不加描边——切换时不会整列跳动，也不会在浮层里再套一层卡片。
+   radio 与文字同在一个 label 里，整行都是命中区（没有点不中的死区）。 */
+.agent-chat-send-modes { display: grid; gap: var(--relay-space-0-5); }
+.agent-chat-send-mode {
+  display: flex; align-items: center; gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-send-mode:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.agent-chat-send-mode input { margin: 0; flex: none; accent-color: var(--relay-color-accent); cursor: pointer; }
+.agent-chat-send-mode input:disabled { cursor: not-allowed; }
+/* 长 Skill 名在封顶宽度里省略，不撑破浮层；完整名字仍在 title 上。 */
+.agent-chat-send-mode-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 状态位（只读 / 仅建议 / 缺能力 / 需任务）右对齐：这些是权限与能力事实，
+   收起「详情」也必须看得见，因此常驻在行上，不塞进折叠区。 */
+.agent-chat-send-mode-hint {
+  margin-inline-start: auto; flex: none;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+.agent-chat-send-mode[data-selected="true"] { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-semibold); }
+.agent-chat-send-mode:has(input:disabled) { opacity: 0.7; cursor: not-allowed; }
+/* 工作方式与 Skill 之间只用一条分组标签分开：两者是同一个单选组，不能再写成两个小节标题。 */
+.agent-chat-send-section {
+  margin: var(--relay-space-2) 0 var(--relay-space-0-5);
+  padding-top: var(--relay-space-2);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+/* Skill 详情：sha256、依赖与能力要求是核对材料，不是每次发送都要读的正文。
+   上一轮它是一段直接铺开的技术长文（sha256 断成六行，浮层被推到 469px），
+   现在收成一层折叠，默认只留选中行上的权限结论。 */
+.agent-chat-send-detail { margin-top: var(--relay-space-2); }
+.agent-chat-send-detail > summary {
+  display: inline-flex; align-items: center;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  list-style: none;
+  cursor: pointer;
+}
+.agent-chat-send-detail > summary::-webkit-details-marker { display: none; }
+.agent-chat-send-detail > summary:hover { color: var(--relay-color-text-primary); }
+.agent-chat-send-detail > p {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-body);
+  overflow-wrap: anywhere;
+}
+/* 资料：同一片浮层里的第二层（2026-11-01 UI-FEAT-01-R2）。
+   第一屏只有这一行入口（计数常驻，收起也知道这次带几个版本）；点开后用选择器替换发送方式那一屏，
+   不是继续往下堆——堆叠会让 320px 宽的面板里同时出现两层滚动条。
+   两屏共用浮层这一处滚动容器：面板内的检索结果区不再自己限高，避免嵌套滚动。 */
+.agent-chat-send-sources {
+  display: flex; align-items: center; gap: var(--relay-space-2);
+  flex: none;
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  margin-top: var(--relay-space-2);
+  padding: 0 var(--relay-space-1);
+  background: transparent;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+/* 第一屏里它是「往下钻」的入口，上方用分隔线与发送方式分开；进入资料层后它就是这一屏的标题，
+   分隔线撤掉，箭头改由 chevron 翻向表达。 */
+.agent-chat-send-sources:not([data-active="true"]) { margin-top: var(--relay-space-3); padding-top: var(--relay-space-1); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.agent-chat-send-sources[data-active="true"] { margin-top: 0; color: var(--relay-color-text-primary); }
+.agent-chat-send-sources:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.agent-chat-send-sources-label { font-weight: var(--relay-font-weight-medium); }
+.agent-chat-send-sources-count { margin-inline-start: auto; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); font-variant-numeric: tabular-nums; }
+/* 自己一枚 chevron（不借用 .agent-chat-chip-chevron）：那条类名带「浮层展开即翻 180°」的规则，
+   会把这枚二层箭头的方向绑到外层开合上。宽度写死，避免被全局 svg 的 20px 顶掉。 */
+.agent-chat-send-sources-chevron {
+  width: var(--relay-font-size-meta); height: var(--relay-font-size-meta);
+  flex: none;
+  transition: rotate var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-send-sources[data-active="true"] .agent-chat-send-sources-chevron { rotate: 90deg; }
+/* `hidden` 必须压得住子元素自己的 display（如 .agent-chat-send-modes 的 grid）：
+   UA 的 [hidden] 规则权重太低，这里显式声明一次，两层视图才真的互斥。 */
+.agent-chat-options-panel [hidden] { display: none; }
+.agent-chat-send-sources-view > .agent-chat-options-section { margin-top: 0; padding-top: var(--relay-space-2); border-top: 0; }
+/* 单一滚动容器：浮层自己滚，检索结果区不再叠一层内部滚动条（上一轮 30dvh 的独立滚动在这里撤掉，
+   独立使用 AssistSourcePicker 的页面不受影响——这条只命中浮层内部）。 */
+.agent-chat-options-panel .assist-source-body { max-height: none; overflow: visible; }
 .agent-chat-proposals { margin-top: var(--relay-space-4); }
 .agent-chat-proposals .assist-proposal-payload { max-height: none; overflow: visible; }
 .agent-chat-proposal-card { margin-top: var(--relay-space-3); font-size: var(--relay-font-size-body); }

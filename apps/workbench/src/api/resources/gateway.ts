@@ -1,10 +1,10 @@
 import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
-import { decimal, directList, integer, nullableString, nullableStringArray, object, string, stringArray } from "../core/primitives";
-import { gatewayConnectionSettingsFrom, managedFileReadOutcomeFrom, managedGitReadOutcomeFrom, managedResourceFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
+import { array, decimal, directList, integer, nullableString, nullableStringArray, object, string, stringArray } from "../core/primitives";
+import { gatewayConnectionSettingsFrom, managedFileReadOutcomeFrom, managedGitReadOutcomeFrom, managedResourceFrom, projectToolAvailabilityFrom, webImportJobFrom, webImportOperationFrom, webImportSubmissionFrom, writeReadinessFrom } from "../parse/gateway";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
+import type { RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayConnection, RelayMockManagedResource, RelayProjectToolAvailability, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "../dtos/gateway";
 import type { RelayWriteReadiness, RelayWriteTier } from "../dtos/gateway";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
@@ -212,4 +212,19 @@ export async function getMockManagedResources(http: RelayHttp, projectId: string
       canonicalRoot: string(row, "canonical_root", "Mock resource"),
       status: string(row, "status", "Mock resource") };
   });
+}
+
+/**
+ * 项目工具有效性（PLUGIN-P0-01）：只读查询，不创建连接、不写策略、不放宽权限。
+ *
+ * 结论由服务端按 Gateway 同一套原语算出；界面只负责呈现，不再自己判断「可用」。
+ */
+export async function getProjectToolAvailability(http: RelayHttp,
+  projectId: string): Promise<readonly RelayProjectToolAvailability[]> {
+  const body = object(await http.request(http.workspacePath(
+    `/projects/${encodeURIComponent(projectId)}/tool-availability`)), "tool availability");
+  if (string(body, "project_id", "tool availability") !== projectId) {
+    throw new RelayTransportError("工具有效性查询返回了其他项目的数据。");
+  }
+  return array(body, "items", "tool availability").map(projectToolAvailabilityFrom);
 }

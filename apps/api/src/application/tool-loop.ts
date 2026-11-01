@@ -626,7 +626,10 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
   // 0103: GitHub 只读。逐动作白名单转发，与 Computer 同一纪律——模型多带的字段不会
   // 变成 Gateway 参数，缺必填参数交给 prepare 以类型化校验拒掉。
   if (definition.actionType === 'GITHUB_REPO_VIEW') return {};
-  if (definition.actionType === 'GITHUB_PR_VIEW') {
+  // PR 与 Issue 详情同形：都以正整数 number 指认对象。两分支必须分开写全，
+  // 漏一个就会让该工具「声明可用、每次必失败」——适配器的 githubParamsForAction
+  // 对缺失 number 是硬拒绝，兜底的 `return {}` 不会替它补上。
+  if (definition.actionType === 'GITHUB_PR_VIEW' || definition.actionType === 'GITHUB_ISSUE_VIEW') {
     return Number.isInteger(args.number) ? { number: args.number as number } : {};
   }
   if (definition.actionType === 'GITHUB_PR_LIST' || definition.actionType === 'GITHUB_ISSUE_LIST') {

@@ -31,6 +31,7 @@ function baseGet(path: string, state: {
   connections: Record<string, unknown>[]; policies: Record<string, unknown>[];
   resources: Record<string, unknown>[]; versions: Record<string, unknown>[];
   archivedAt: string | null; pluginStatus: Record<string, unknown>[];
+  toolAvailability: Record<string, unknown>[];
 }): Response | null {
   if (path === `/projects/${projectId}`) return response(200, { id: projectId, title: "真实项目", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: state.archivedAt });
   if (path === `/projects/${projectId}/view-configuration`) return response(200, { project_id: projectId,
@@ -41,6 +42,9 @@ function baseGet(path: string, state: {
   if (path === `/projects/${projectId}/permission-policies`) return response(200, state.policies);
   if (path === `/projects/${projectId}/managed-resources`) return response(200, state.resources);
   if (path === `/projects/${projectId}/permission-policies/${policyId}/versions`) return response(200, state.versions);
+  if (path === `/projects/${projectId}/tool-availability`) return response(200, {
+    project_id: projectId,
+    items: state.toolAvailability.length > 0 ? state.toolAvailability : availability() });
   if (path === "/plugins/status") return response(200, {
     items: state.pluginStatus.length > 0 ? state.pluginStatus : [
       { plugin: "computer", state: "READY", detail: "电脑运行时已就位，可执行截图与输入。", remediation: null },
@@ -50,10 +54,34 @@ function baseGet(path: string, state: {
     ] });
   return null;
 }
+/**
+ * 工具有效性投影的夹具（PLUGIN-P0-01）。
+ *
+ * 这些行是**服务端**给出的结论，界面只做映射，所以用例要按服务端真实口径来写：
+ * 例如「只授权了 read_file」对应的就是 READ_ONLY，而不是「可用」。
+ */
+function availability(overrides: Record<string, { state: string; detail?: string }> = {}) {
+  const defaults: Record<string, string> = {
+    files: "本项目还没有登记这项能力的连接。",
+    git: "本项目还没有登记这项能力的连接。",
+    web: "本项目还没有登记这项能力的连接。",
+    cli: "本项目还没有登记这项能力的连接。",
+    computer: "本项目还没有登记这项能力的连接。",
+    browser: "本项目还没有登记这项能力的连接。",
+    github: "本项目还没有登记这项能力的连接。",
+  };
+  return Object.keys(defaults).map((tool) => ({
+    tool, state: overrides[tool]?.state ?? "NOT_CONFIGURED",
+    detail: overrides[tool]?.detail ?? defaults[tool],
+    counts: { total: 1, auto: 0, needs_approval: 0, site_scoped: 0, not_authorized: 0,
+      denied: 0, unavailable: 1 },
+  }));
+}
 function state() { return { connections: [] as Record<string, unknown>[], policies: [] as Record<string, unknown>[],
   resources: [] as Record<string, unknown>[], versions: [] as Record<string, unknown>[],
   archivedAt: null as string | null,
-  pluginStatus: [] as Record<string, unknown>[] }; }
+  pluginStatus: [] as Record<string, unknown>[],
+  toolAvailability: [] as Record<string, unknown>[] }; }
 
 describe("项目连接与 Permission 设置", () => {
   it("日常区按工具给出真实状态，逐动作表单默认收在高级区", async () => {
@@ -64,18 +92,60 @@ describe("项目连接与 Permission 设置", () => {
       revision: "1", created_at: created }];
     data.versions = [{ version: "1", capability: "FILE_READ", action_type: "READ_FILE",
       target_prefix: "D:\\Workspace\\query", decision: "AUTO", max_payload_bytes: 2, created_at: created }];
+    // 只授权了 read_file：服务端结论是「只读可用」，不是「可用」——整行还包含写入。
+    data.toolAvailability = availability({ files: { state: "READ_ONLY",
+      detail: "只有读取类动作已授权，操作类动作未授权（1/7 个动作已授权）。" } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
       baseGet(String(input).slice(root.length), data) ?? response(404, {}));
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
-    // 「已连接」与「已授权」分开：有 ACTIVE 连接 + 非拒绝策略才算可用。
-    expect(mounted.wrapper.get('[data-testid="connections-tool-files"]').text()).toContain("可用");
+    // 「已连接」「已授权」「能做什么」是三件事：界面只呈现服务端给出的那一个结论。
+    expect(mounted.wrapper.get('[data-testid="connections-tool-files"]').text()).toContain("只读可用");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-files"]').text())
+      .toContain("只有读取类动作已授权");
     expect(mounted.wrapper.get('[data-testid="connections-tool-github"]').text()).toContain("未配置");
     expect(mounted.wrapper.get('[data-testid="connections-tool-git"]').text()).toContain("打开 Git 仓库根目录");
     // 逐动作配置仍在页面上（可检查配置与撤销状态），但默认收起。
     expect(mounted.wrapper.find('[data-testid="connections-advanced"]').exists()).toBe(true);
     expect(mounted.wrapper.get('[data-testid="connections-advanced"]').attributes("open")).toBeUndefined();
     expect(mounted.wrapper.find('[data-testid="policy-form"]').exists()).toBe(true);
+  });
+
+  it("界面不再自己判断可用：服务端说未授权时，即使连接与策略都在也不显示可用", async () => {
+    // 这是 PLUGIN-P0-01 的核心回归：旧实现只要「有 ACTIVE 连接 + 任意非拒绝策略」就写「可用」，
+    // 完全不看目标前缀、动作、运行时与审批语义。现在结论来自服务端，界面必须原样呈现。
+    connect(); const data = state();
+    data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+      capabilities: ["FILE_READ"], allowed_host: null, created_at: created }];
+    data.policies = [{ id: policyId, project_id: projectId, status: "ACTIVE", active_version: "1",
+      revision: "1", created_at: created }];
+    data.versions = [{ version: "1", capability: "FILE_READ", action_type: "READ_FILE",
+      target_prefix: "D:\\Other\\project", decision: "AUTO", max_payload_bytes: 2, created_at: created }];
+    data.toolAvailability = availability({ files: { state: "NOT_AUTHORIZED",
+      detail: "连接有效，但没有任何匹配当前目标的生效策略；默认拒绝仍然生效。" } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      baseGet(String(input).slice(root.length), data) ?? response(404, {})));
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    const row = mounted.wrapper.get('[data-testid="connections-tool-files"]').text();
+    expect(row).toContain("已连接，尚未授权");
+    expect(row).not.toContain("可用");
+  });
+
+  it("本机运行时不可用时显示「本机不可用」，不被授权状态掩盖", async () => {
+    connect(); const data = state();
+    data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
+      capabilities: ["GITHUB_READ"], allowed_host: null, created_at: created }];
+    data.toolAvailability = availability({ github: { state: "RUNTIME_UNAVAILABLE",
+      detail: "本机运行时不可用：没有找到可执行的 GitHub CLI（gh）。" } });
+    data.pluginStatus = [{ plugin: "github", state: "NOT_INSTALLED",
+      detail: "没有找到可执行的 GitHub CLI（gh）。", remediation: "安装 gh 后重试。" }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      baseGet(String(input).slice(root.length), data) ?? response(404, {})));
+    const mounted = await mountWorkbench(`/projects/${projectId}/connections`); unmount = mounted.unmount;
+    const row = mounted.wrapper.get('[data-testid="connections-tool-github"]').text();
+    expect(row).toContain("本机不可用");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-runtime-github"]').text())
+      .toContain("未安装");
   });
 
   it("目录检索连接可从页面配置且仍不自动授权", async () => {
@@ -750,6 +820,10 @@ describe("从会话插件面板跳进来的定位与返回", () => {
       expect(body).toEqual({ command_id: expect.any(String) });
       data.connections = [{ id: connectionId, project_id: projectId, status: "ACTIVE", version: "1",
         capabilities: ["COMPUTER_READ", "COMPUTER_INPUT"], allowed_host: null, created_at: created }];
+      // 一键启用补齐的是「连接 + 逐动作策略」：读取类 AUTO、操作类 ASK。服务端因此给出
+      // 「可用 · 需审批」，而不是笼统的「可用」——桌面输入按设计仍要逐次批准。
+      data.toolAvailability = availability({ computer: { state: "NEEDS_APPROVAL",
+        detail: "动作已授权，但每次执行前需要批准（11/11 个动作已授权）。" } });
       return response(201, receipt(String(body.command_id), { project_id: projectId, plugin: "computer",
         created_connections: "1", created_policies: "11", blocked_disabled_connections: "0",
         blocked_revoked_policies: "0", skipped_no_resource: "0" }));
@@ -762,7 +836,7 @@ describe("从会话插件面板跳进来的定位与返回", () => {
     expect(mounted.wrapper.text()).toContain("已新建连接 1 条、策略 11 条");
     expect(mounted.wrapper.text()).toContain("操作类每次执行前需要批准");
     expect(mounted.wrapper.text()).toContain("已由服务端回执和最新项目查询确认");
-    expect(mounted.wrapper.get('[data-testid="connections-tool-computer"]').text()).toContain("已连接");
+    expect(mounted.wrapper.get('[data-testid="connections-tool-computer"]').text()).toContain("需审批");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 

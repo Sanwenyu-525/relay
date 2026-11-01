@@ -177,7 +177,7 @@ describe("CT-02 资料面板的职责、状态与副作用边界", () => {
     vi.unstubAllGlobals();
   });
 
-  it("面板只承载资料职责：标题、已选数量、已选项、引用范围按序分组且不含生成方式与意图", async () => {
+  it("面板只承载资料职责：标题、已选数量、已选项、引用范围按序分组且不含发送方式", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     stubSearch(() => ({ items: [searchItem("33333333-3333-4333-8333-333333333333", "候选资料")], next_cursor: null }));
     const wrapper = await mount({ projectId, selectedRefs: [ref("aaaaaaa1-1111-4111-8111-111111111111"), ref("aaaaaaa2-1111-4111-8111-111111111111")] });
@@ -199,10 +199,14 @@ describe("CT-02 资料面板的职责、状态与副作用边界", () => {
       expect(wrapper.get('[data-testid="assist-source-count"]').text()).toContain("已选 2 / 10");
       const text = wrapper.text();
       expect(text).toContain("引用范围");
-      expect(text).not.toContain("生成方式");
-      expect(text).not.toContain("意图");
-      expect(wrapper.find('[data-testid="assist-skill"]').exists()).toBe(false);
-      expect(wrapper.find('[data-testid="assist-intent"]').exists()).toBe(false);
+      /* 职责分离的判据跟着结构走（2026-11-01 UI-FEAT-01-R2）：「生成方式 / 意图」两个下拉框
+         已合成发送方式单选组，旧的两个 testid 全仓不再存在，因此这里改为直接核对
+         新的单选组没有混进资料面板——不是把这条断言删掉。 */
+      expect(wrapper.find(".agent-chat-send-modes").exists()).toBe(false);
+      expect(wrapper.find('[data-testid="assist-send-mode-DISCUSS"]').exists()).toBe(false);
+      expect(text).not.toContain("发送方式");
+      expect(text).not.toContain("文档候选");
+      expect(text).not.toContain("任务提案");
     } finally { wrapper.unmount(); }
   });
 

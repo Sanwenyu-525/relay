@@ -24,7 +24,10 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+// 与 playwright.config.ts 的 RELAY_E2E_PORT 同源：4173 被别的预览服务占用时，
+// CORS 头必须跟着实际端口走，否则浏览器会把伪造响应拦在跨域检查上（连接永远停在「未连接」）。
+const port = process.env.RELAY_E2E_PORT ?? "4173";
+const origin = `http://127.0.0.1:${port}`;
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin, "access-control-allow-headers": "Authorization, Content-Type" };
@@ -127,18 +130,21 @@ async function measurePopup(page: Page, detailsSelector: string): Promise<PopupS
   }, detailsSelector);
 }
 
-/** 浮层里的分节：合并后一片浮层同时承载发送选项（说明/生成方式）与资料选择器。 */
+/** 浮层里的两层视图（2026-11-01 UI-FEAT-01-R2）：第一屏发送方式，第二屏资料选择器。
+ *  `modesVisible` / `sourcesVisible` 量的是**真实可见性**（offsetParent），
+ *  两层同时挂载、只切换可见性，因此 DOM 里两屏都在——只数元素存在会把「切换」读成「并存」。 */
 async function panelSections(page: Page, panelSelector: string): Promise<{
-  skill: boolean; intent: boolean; picker: boolean; query: boolean; sections: number } | null> {
+  modes: boolean; picker: boolean; query: boolean;
+  modesVisible: boolean; sourcesVisible: boolean } | null> {
   return page.evaluate((selector) => {
     const panel = document.querySelector(selector);
     if (panel === null) return null;
-    return {
-      skill: panel.querySelector('[data-testid="assist-skill"]') !== null,
-      intent: panel.querySelector('[data-testid="assist-intent"]') !== null,
-      picker: panel.querySelector('[data-testid="assist-source-picker"]') !== null,
-      query: panel.querySelector("#assist-source-query") !== null,
-      sections: panel.querySelectorAll(":scope > .agent-chat-options-section").length };
+    const modes = panel.querySelector(".agent-chat-send-modes");
+    const picker = panel.querySelector('[data-testid="assist-source-picker"]');
+    const query = panel.querySelector("#assist-source-query");
+    const visible = (target: Element | null) => target instanceof HTMLElement && target.offsetParent !== null;
+    return { modes: modes !== null, picker: picker !== null, query: query !== null,
+      modesVisible: visible(modes), sourcesVisible: visible(picker) };
   }, panelSelector);
 }
 
@@ -152,24 +158,32 @@ for (const viewport of [{ width: 1162, height: 782 }, { width: 1000, height: 800
     const composer = page.getByTestId("assist-composer");
     await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
 
-    // 会话输入器只有这一枚浮层芯片，资料入口的 testid 仍挂在它的 summary 上（AssistView.tsx:4999）。
+    const panelSelector = '[data-testid="assist-composer"] .agent-chat-send-options > .agent-chat-options-panel';
+    // 会话输入器只有这一枚浮层芯片，资料入口的 testid 仍挂在它的 summary 上。
     await page.getByTestId("assist-open-sources").click();
+    await composer.locator(".agent-chat-send-options > .agent-chat-options-panel").waitFor({ state: "visible", timeout: 20_000 });
+    /* 2026-11-01 UI-FEAT-01-R2：浮层是两层视图，默认停在发送方式那一屏。
+       默认态不再展示整张检索表单，所以这里先量第一屏，再点「资料」进第二屏。 */
+    const firstScreen = await panelSections(page, panelSelector);
+    if (firstScreen === null) throw new Error(`${label} · 缺少第一屏的分节采样`);
+    expect(firstScreen.modesVisible, `${label} · 第一屏不是发送方式`).toBe(true);
+    expect(firstScreen.sourcesVisible, `${label} · 第一屏不该展开检索表单`).toBe(false);
+    await page.getByTestId("assist-send-sources-toggle").click();
     await composer.locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
     const merged = await measurePopup(page, ".agent-chat-send-options");
-    const sections = await panelSections(page,
-      '[data-testid="assist-composer"] .agent-chat-send-options > .agent-chat-options-panel');
+    const sections = await panelSections(page, panelSelector);
     await page.getByTestId("assist-open-sources").click();
     await expect(composer.locator(".agent-chat-send-options > .agent-chat-options-panel")).toBeHidden();
 
     // 原始几何留在日志里作为证据（数值只反映夹具布局，不连真实 API）。
-    console.log(JSON.stringify({ label, merged, sections }));
+    console.log(JSON.stringify({ label, merged, firstScreen, sections }));
 
-    // 1. 一片浮层两节同场：发送选项（生成方式/意图）与资料节（选择器 + 检索行）。
+    // 1. 两层视图互斥：进入资料屏后发送方式收起，检索行与选择器可见（同一片浮层，不另开浮层）。
     if (sections === null) throw new Error(`${label} · 缺少合体浮层的分节采样`);
-    expect(sections.skill || sections.intent, `${label} · 发送选项节不在合体浮层里`).toBe(true);
-    expect(sections.picker, `${label} · 资料节不在合体浮层里`).toBe(true);
+    expect(sections.sourcesVisible, `${label} · 资料屏没有展开`).toBe(true);
+    expect(sections.modesVisible, `${label} · 资料屏里发送方式应已收起`).toBe(false);
+    expect(sections.picker, `${label} · 资料选择器不在合体浮层里`).toBe(true);
     expect(sections.query, `${label} · 检索行不在合体浮层里`).toBe(true);
-    expect(sections.sections, `${label} · 资料节不是面板的直接子节`).toBe(1);
 
     // 2. 几何：贴芯片、紧凑宽、待在输入卡内、不越视口、页面不横向溢出、不压发送键。
     const { chip, panel, card, draft, send: sendBox, pageOverflowX, viewport: vp } = merged;
@@ -207,6 +221,8 @@ test("在途态（data-inflight）：资料浮层不被输入卡裁掉，检索�
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
   await expect(composer).toHaveAttribute("data-inflight", "true", { timeout: 20_000 });
   await page.getByTestId("assist-open-sources").click();
+  // 2026-11-01 UI-FEAT-01-R2：检索表单在浮层的第二层，先点「资料」进入。
+  await page.getByTestId("assist-send-sources-toggle").click();
   await composer.locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
   // 检索行必须真的可命中：输入卡在途不再 overflow:hidden（收边移到光点裁剪壳）。
   const hit = await page.evaluate(() => {
@@ -266,9 +282,18 @@ test("单枚浮层：合体芯片与模式/「+」互斥、点外面可收、开
   const firstSections = await panelSections(page,
     '[data-testid="assist-first-send-options"] > .agent-chat-options-panel');
   if (firstSections === null) throw new Error("缺少首条输入器合体浮层的分节采样");
-  expect(firstSections.query, "首条合体浮层应含资料节（检索行）").toBe(true);
+  /* 首条输入器与已建会话同一套两层结构：默认停在发送方式，资料选择器已在 DOM 里
+     （始终挂载，进出不重置选中项）但不可见；点「资料」才展开。 */
+  expect(firstSections.modesVisible, "首条合体浮层第一屏应是发送方式").toBe(true);
+  expect(firstSections.query, "首条合体浮层应含资料检索行（第二层，已挂载）").toBe(true);
   expect(firstSections.picker, "首条合体浮层应含资料选择器").toBe(true);
-  expect(firstSections.sections, "首条合体浮层的资料节应是面板的直接子节").toBe(1);
+  expect(firstSections.sourcesVisible, "首条合体浮层默认不该展开检索表单").toBe(false);
+  await page.getByTestId("assist-first-send-sources-toggle").click();
+  const firstSources = await panelSections(page,
+    '[data-testid="assist-first-send-options"] > .agent-chat-options-panel');
+  expect(firstSources?.sourcesVisible, "点「资料」后应展开检索表单").toBe(true);
+  expect(firstSources?.modesVisible, "资料屏里发送方式应已收起").toBe(false);
+  await page.getByTestId("assist-first-send-sources-toggle").click();
   // 2. 开合不改几何：浮层是浮层，草稿与发送键的矩形不因展开而移动。
   expect(opened.draft, "展开浮层后草稿几何变了").toEqual(before.draft);
   expect(opened.send, "展开浮层后发送键几何变了").toEqual(before.send);
@@ -301,6 +326,8 @@ test("单枚浮层：合体芯片与模式/「+」互斥、点外面可收、开
   const sessionBefore = await openState("session");
   expect(sessionBefore.chips, "合并后会话输入器只应有一枚浮层芯片").toBe(1);
   await page.getByTestId("assist-open-sources").click();
+  // 2026-11-01 UI-FEAT-01-R2：检索表单在浮层第二层，先点「资料」再量（这一屏最高，几何判据取它）。
+  await page.getByTestId("assist-send-sources-toggle").click();
   await page.getByTestId("assist-composer").locator("#assist-source-query").waitFor({ state: "visible", timeout: 20_000 });
   const sessionOpen = await openState("session");
   expect(sessionOpen.options, "会话内同一时刻只应有一枚输入器浮层开着").toBe(1);

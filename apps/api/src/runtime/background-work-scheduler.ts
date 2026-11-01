@@ -94,7 +94,21 @@ export function registerBackgroundWorkScheduler(
         workerId, modelPort: titleModelPort, signal: controller.signal,
       }));
     } finally {
-      if (active) { timer = setTimeout(() => { inFlight = tick(); }, TICK_INTERVAL_MS); timer.unref(); }
+      if (active) {
+        timer = setTimeout(() => {
+          // 两次 tick 之间没有任何调用方 await inFlight：runStage 只包住各阶段，
+          // 若 readiness 探针本身抛出意外错误，被替换前的 rejected promise 会成为
+          // unhandledRejection 并按 Node 默认行为终止整个 API 进程。这里显式收口，
+          // 记录后由下一轮继续调度；阶段失败仍由 runStage 记日志，不在此掩盖。
+          inFlight = tick().catch((error: unknown) => {
+            app.log.error({ code: 'BACKGROUND_WORK_TICK_CRASHED', error_name:
+              error instanceof Error ? error.name : typeof error,
+              error_message: error instanceof Error ? error.message : String(error) },
+              'background_work_tick_unexpected_failure');
+          });
+        }, TICK_INTERVAL_MS);
+        timer.unref();
+      }
     }
   };
 

@@ -244,3 +244,32 @@ export interface RelayMockManagedResource {
   readonly canonicalRoot: string;
   readonly status: string;
 }
+
+/**
+ * 项目工具有效性（PLUGIN-P0-01，HTTP §10.105）。
+ *
+ * 结论由服务端按 Gateway 同一套原语算出：`state` 是这一行工具当前的合成状态，
+ * `detail` 说明为什么是这个状态，`counts` 是逐动作分布（用来解释结论，不用来重新判断）。
+ * 界面不再自己按能力集合拼「可用」。
+ */
+export type RelayProjectToolState =
+  | "READY" | "NEEDS_APPROVAL" | "SITE_SCOPED" | "READ_ONLY" | "PARTIAL"
+  | "NOT_AUTHORIZED" | "DENIED" | "NOT_CONFIGURED" | "DISABLED" | "REVOKED"
+  | "RUNTIME_UNAVAILABLE" | "UNKNOWN";
+
+export interface RelayProjectToolCounts {
+  readonly total: number;
+  readonly auto: number;
+  readonly needsApproval: number;
+  readonly siteScoped: number;
+  readonly notAuthorized: number;
+  readonly denied: number;
+  readonly unavailable: number;
+}
+
+export interface RelayProjectToolAvailability {
+  readonly tool: string;
+  readonly state: RelayProjectToolState;
+  readonly detail: string;
+  readonly counts: RelayProjectToolCounts;
+}
