@@ -57,6 +57,21 @@ it("工作区操作只回退应用内路由，搜索复用入口，新建任务�
   expect(`${router.state.location.pathname}${router.state.location.search}`).toBe("/tasks?view=create&project=project-hci");
 });
 
+it("桌面标题栏不提供手动 API 连接入口：数据来源由宿主 bootstrap 决定", async () => {
+  const router = createMemoryRouter([{ path: "*", element: createElement(DesktopTitleBar, { available: true, onSearch: vi.fn() }) }], { initialEntries: ["/today"] });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  cleanup = () => { act(() => root.unmount()); container.remove(); };
+  await act(async () => { root.render(createElement(RouterProvider, { router })); });
+
+  // 入口整颗键不存在：没有按钮就没有 hover、focus 与 tooltip，相邻的收件箱与窗口控制照常渲染。
+  expect(container.querySelector('[data-testid="relay-connection-open"]')).toBeNull();
+  expect(container.textContent).not.toContain("打开连接设置");
+  expect(container.querySelector('[data-testid="inbox-open"]')).not.toBeNull();
+  expect(container.querySelectorAll(".desktop-titlebar__controls .desktop-titlebar__button")).toHaveLength(3);
+});
+
 it("服务未就绪时不挂载业务操作，窗口拖动仍可用", async () => {
   const router = createMemoryRouter([{ path: "*", element: createElement(DesktopTitleBar, { available: false, onSearch: vi.fn() }) }], { initialEntries: ["/today"] });
   const container = document.createElement("div");

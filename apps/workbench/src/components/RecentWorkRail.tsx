@@ -2,8 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Pointer
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Folder, Search, SquarePen, Target } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistSession, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
-import { useActiveConversation } from "../lib/activeConversation";
-import { describeLiveError } from "../lib/liveErrors";
+import { readActiveConversation, useActiveConversation } from "../lib/activeConversation";
+import { deleteBlockerAdvice, describeLiveError } from "../lib/liveErrors";
+import { copyText, deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelete";
 import { resolveMotionPreference } from "../lib/motionPreference";
 import { railGroupKey, readCollapsedRailGroups, writeCollapsedRailGroups } from "../lib/railGroupPreferences";
 import { readRailSessionOrder, writeRailSessionOrder } from "../lib/railSessionOrder";
@@ -13,6 +14,65 @@ import { resolvedTokenValue } from "../lib/tokens";
 import EmptyState from "./EmptyState";
 import RecentWorkRow from "./RecentWorkRow";
 import type { SessionRowPatch } from "./SessionRowMenu";
+
+/**
+ * 批量删除的结果报告（2026-10-31）。
+ *
+ * 三类分开记，不再揉成一段红字：
+ *   * `deleted`    —— 已删的标题（行当场消失，这里只是留个说法）。
+ *   * `blocked`    —— 被别的对象引用而删不掉的：按**同一组原因**归并，原因只写一次。
+ *   * `failed`     —— 明确失败（修订冲突等）：行还在，各自一条。
+ *   * `unresolved` —— 是否生效未知：只能按原 command_id 核对回执。
+ */
+interface BatchDeleteReport {
+  readonly deleted: readonly string[];
+  readonly blocked: readonly {
+    readonly titles: readonly string[];
+    readonly reasons: readonly string[];
+    readonly reasonCodes: readonly string[];
+  }[];
+  readonly failed: readonly { readonly title: string; readonly message: string }[];
+  readonly unresolved: readonly {
+    readonly sessionId: string;
+    readonly title: string;
+    readonly message: string;
+    readonly requestId: string | null;
+    readonly commandId: string;
+  }[];
+}
+
+/**
+ * 顶层结论：一行说清成功几段、没删掉几段、待核实几段。
+ *
+ * 计数而不是长句：这一列只有 160px 内容盒，一句话读不完还要滚动；被撑开的侧栏里
+ * 读者也只会看到第一行（2026-10-31 用户指认）。
+ */
+function batchSummary(report: BatchDeleteReport): string {
+  const notDeleted = report.blocked.reduce((sum, group) => sum + group.titles.length, 0)
+    + report.failed.length;
+  const parts = [`已删除 ${report.deleted.length} 段`];
+  if (notDeleted > 0) parts.push(`${notDeleted} 段未删除`);
+  if (report.unresolved.length > 0) parts.push(`${report.unresolved.length} 段待核实`);
+  return parts.join("，");
+}
+
+/**
+ * 被阻止的那几段怎么点名：同名会话不重复念标题，三条「关于Relay-Agent」写成
+ * 「「关于Relay-Agent」等 3 段」（2026-10-20 用户截图指认的那三遍红字就是从这儿来的）。
+ */
+function blockedWho(titles: readonly string[]): string {
+  const unique = [...new Set(titles)];
+  if (unique.length === 1) {
+    return `「${unique[0]}」${titles.length > 1 ? `等 ${titles.length} 段` : "这条讨论"}`;
+  }
+  return `${unique.map((title) => `「${title}」`).join("")}这 ${titles.length} 段`;
+}
+
+/** 每一类阻断对应的可执行动作；同一组原因只写一次。 */
+function blockedAdvice(codes: readonly string[]): string {
+  const advices = [...new Set(codes.map((code) => deleteBlockerAdvice(code)))];
+  return advices.length === 0 ? "改为归档，或在原对象解除引用后再删除" : `${advices.join("；")}。`;
+}
 
 interface Loaded {
   readonly tasks: readonly RelayTaskSummary[];
@@ -88,6 +148,20 @@ const FLIP_EASING = resolvedTokenValue("motion.easing.standard");
 const DROPPED_MS = Number.parseFloat(resolvedTokenValue("motion.duration.emphasis")) * 1000;
 
 /**
+ * 一份服务端快照写进这一列之前的统一闸门：本机已经由服务端确认删除的那几条不再回来。
+ *
+ * 要挡的只有一类情况——删除**之前**发出、删除**之后**才落地的旧读数（整列读取、运行态轮询、
+ * 当前会话定向重读都是这一类），它拿的是删除之前的那一份，落地时不能把已经确认没了的行、
+ * 分组副本和勾选一起带回来（2026-11-01 UI-SESSION-DELETE-ACTIVE）。
+ * 这一份集合只存在本次挂载里，既不持久化也不参与「删的是谁」的判断：刷新之后列表仍以服务端
+ * 读数为准，不是第二套业务事实。
+ */
+function withoutConfirmedDeletes<T extends { readonly id: string }>(
+  items: readonly T[], confirmed: ReadonlySet<string>): T[] {
+  return confirmed.size === 0 ? [...items] : items.filter((item) => !confirmed.has(item.id));
+}
+
+/**
  * 左栏的「近期工作」分组（协作页 §3.1 重塑）。
  *
  * 范围仍是「当前工作空间已加载的任务与会话」，排序仍是服务端时间倒序：
@@ -136,12 +210,20 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    * 像在要求用户再确认一遍一件刚被拒绝的事（DEV-0098，2026-10-21 用户截图指认）。
    */
   const [batch, setBatch] = useState<"idle" | "confirm" | "busy" | "result">("idle");
-  /** 批量删除的结果说明：部分成功、被引用阻止、结果不明都写在这里，不吞成一句「删除失败」。 */
-  const [batchError, setBatchError] = useState<string | null>(null);
-  /** 有哪一条的删除回执对不上：结果未定，确认键锁死，只能由「取消」退出。 */
+  /**
+   * 批量删除的结果（2026-10-31）。
+   *
+   * 不再是一整段红字：顶层只留一行结论（「已删除 X 段，Y 段未删除，Z 段待核实」），
+   * 每类原因只写一次，逐条会话与技术细节收进可展开的详情区。这样左栏不会被一段
+   * 重复的诊断文字撑成长页面（2026-10-31 用户指认）。
+   */
+  const [batchResult, setBatchResult] = useState<BatchDeleteReport | null>(null);
+  /** 结果未知的那几条：只能按原 command_id 核对回执，确认键不重发。 */
   const [batchUncertain, setBatchUncertain] = useState(false);
   const request = useRef(0);
   const archivedRequest = useRef(0);
+  /** 本次挂载里已由服务端确认删除的会话身份，只用于挡住删除之前发出的旧读数（见 withoutConfirmedDeletes）。 */
+  const confirmedDeleted = useRef(new Set<string>());
   /** 拖拽松手那一拍：浏览器补发的 click 不当作「打开会话」。 */
   const clickGuard = useRef(false);
   /** 整栏根节点：改序前按它量一遍所有行的当前顶边（FLIP 的 First）。 */
@@ -176,8 +258,9 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         if (b.updatedAt === null) return -1;
         return b.updatedAt.localeCompare(a.updatedAt);
       });
-      const workspaceSessions = sessionResult.items.filter((session) => session.taskId === null)
-        .sort(compareSessions);
+      const workspaceSessions = withoutConfirmedDeletes(
+        sessionResult.items.filter((session) => session.taskId === null),
+        confirmedDeleted.current).sort(compareSessions);
       setLoaded((current) => ({
         tasks: cursor === null ? sorted : [...new Map([...(current?.tasks ?? []), ...sorted].map((task) => [task.id, task])).values()],
         // 续页时若会话这次没读到，保留上一次的结果，不用一次失败把已有行清掉。
@@ -222,7 +305,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     try {
       const items = await client.getAssistSessions({ status: "ARCHIVED" });
       if (version !== archivedRequest.current) return;
-      setArchived(items.filter((session) => session.taskId === null).sort(compareSessions));
+      setArchived(withoutConfirmedDeletes(items.filter((session) => session.taskId === null),
+        confirmedDeleted.current).sort(compareSessions));
     } catch (caught) {
       if (version !== archivedRequest.current) return;
       setArchivedError(describeLiveError(caught).message);
@@ -238,9 +322,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
    * 归档的那条从活跃列表挪进归档区，重开的反向；读不回来时保留当前行，交给整列读取收敛。
    */
   const refreshSession = useCallback(async (sessionId: string) => {
+    if (confirmedDeleted.current.has(sessionId)) return;
     let session: RelayAssistSession;
     try { session = await client.getAssistSession(sessionId, true); }
     catch { return; }
+    // 重读在途时这一条可能刚被确认删除（改名撞删除是同一拍）：落地前再认一次身份，
+    // 不能让删除之前发出的那一发读数把已确认删除的行重新插回列表。
+    if (confirmedDeleted.current.has(sessionId)) return;
     const movable = session.taskId === null;
     setLoaded((previous) => previous === null ? previous : { ...previous,
       sessions: movable && session.status === "ACTIVE"
@@ -252,17 +340,42 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         : previous.filter((item) => item.id !== sessionId));
   }, [client]);
 
+  /**
+   * 服务端**确认删除**之后这一列唯一的收尾（单条、批量、按原 command_id 核对回执三条路径共用）。
+   *
+   * 三件事按确切 sessionId 一次做完：
+   * 1. 记下这些身份，让删除之前发出的旧读数不能再把行带回列表（见 `withoutConfirmedDeletes`）；
+   * 2. 从活跃投影、归档投影与勾选集同时摘掉——分组副本都是从这两份列表派生的，只改统计不算收干净；
+   * 3. 只有「删的正是当前在看的那一条」才收尾，且收尾只做一件事：发出既有的「新对话」路由意图。
+   *    会话身份与聊天区的 Owner 是协作页，它按 `?new=` 清掉 `sessionId`、重挂空白输入器；
+   *    左栏既不登记第二份「已删除」状态，也不自己清高亮——跳转之后由协作页重新发布身份。
+   *    删的是别的会话时这里一个字都不动：当前会话的 sessionId、路由与侧栏高亮必须原样保留。
+   */
+  function settleConfirmedDeletes(removedIds: readonly string[]) {
+    const gone = new Set(removedIds.filter((sessionId) => sessionId !== ""));
+    if (gone.size === 0) return;
+    for (const sessionId of gone) confirmedDeleted.current.add(sessionId);
+    setLoaded((previous) => previous === null ? previous : { ...previous,
+      sessions: previous.sessions.filter((item) => !gone.has(item.id)) });
+    setArchived((previous) => previous === null ? previous
+      : previous.filter((item) => !gone.has(item.id)));
+    setSelected((current) => current.length === 0 ? current
+      : current.filter((sessionId) => !gone.has(sessionId)));
+    // 批量要串行跑好几秒，渲染闭包里的 `active` 还停在起手那一拍；身份在这里现读，
+    // 不能拿旧闭包判断「删的是不是当前在看的那一条」。读的是同一个 store 的同一份值。
+    const activeId = readActiveConversation().sessionId;
+    if (activeId === null || !gone.has(activeId)) return;
+    // 刻意不带 `source_session`：左栏「新对话」用它是为了继承当前会话的上下文档位，而这一条
+    // 此刻在服务端已经不存在——把已删身份当来源等于让协作页去读一条查不到的会话。
+    void navigate(`/agent?new=${encodeURIComponent(createCommandId())}`);
+    onOpen?.();
+  }
+
   function onRowChanged(sessionId: string, patch: SessionRowPatch) {
     // 分叉不改这一行：源会话一行都没动，要读回来的是那次新建的子会话（0113）。
     if (patch.kind === "fork") { void refreshSession(patch.forkedSessionId); return; }
-    // 删除后这条会话不再存在（ADR-027）：重读只会 404，直接从两个分区同时摘掉。
-    if (patch.kind === "delete") {
-      setLoaded((previous) => previous === null ? previous : { ...previous,
-        sessions: previous.sessions.filter((item) => item.id !== sessionId) });
-      setArchived((previous) => previous === null ? previous
-        : previous.filter((item) => item.id !== sessionId));
-      return;
-    }
+    // 删除后这条会话不再存在（ADR-027）：重读只会 404，走统一的确认删除收尾。
+    if (patch.kind === "delete") { settleConfirmedDeletes([sessionId]); return; }
     void refreshSession(sessionId);
     // 归档/重开会让这一条换列表，其余只改这一行自身；都只重读这一条，不重置任务分页。
     if (patch.kind !== "archive" && patch.kind !== "reopen") return;
@@ -278,89 +391,115 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   }
 
   function clearSelection() {
-    setSelected([]); setBatch("idle"); setBatchError(null); setBatchUncertain(false);
+    setSelected([]); setBatch("idle"); setBatchResult(null); setBatchUncertain(false);
   }
 
   /**
    * 批量删除：一段讨论一条命令，各自取新的 `command_id`、各自带**读回来的**修订。
    *
-   * 四条口径：
+   * 五条口径：
    * 1. **不合并成一次请求。** 服务端只有逐条删除命令（ADR-027），客户端也不假装原子：
    *    每一条的结果单独核对，成功几条、失败几条分别如实报告。
    * 2. **串行发、逐条等回执。** 并发只会让「哪条成了、哪条没成」更难读；一条失败也不影响
    *    其余几条的判断。
-   * 3. **结果不明不重发。** 响应丢失（`RelayTransportError`）意味着这一条是否已删尚未确定，
-   *    按契约不得换 `command_id` 重试：勾选保留、确认键锁死，说明未定并让人自己核对列表
-   *    （与 ⋯ 面板里那条单条删除同一读法：不替用户猜，也不替他重发）。
+   * 3. **结果未知不重发。** 5xx 或响应丢失意味着这一条是否已删尚未确定：先按**原 command_id**
+   *    核对一次回执，核对到就算已删；核对不到就留在「待核实」，换 `command_id` 重试违反契约。
    * 4. **被引用阻止不是失败。** `SESSION_DELETE_BLOCKED` 是业务拒绝（行还在），说明里给出
-   *    阻止项并指向归档；结果停在结果态，读完原因点「关闭」即结束这一轮。要再试时重新勾选，
-   *    不在同一张卡片里反复 offer 同一个必然被拒绝的删除（DEV-0098）。
+   *    阻止项与**真正能做的动作**；结果停在终态，读完原因点「关闭」即结束这一轮。
    * 5. **同一原因只说一次。** 被阻止的讨论按阻断原因聚合：原因写一次、标题并列（同名去重后
-   *    仍读得出几条），「先改为归档…」那句建议也只出现一次——三行同因各写一遍整句，会把
-   *    这块窄卡片铺满红字（2026-10-20 用户截图指认）。
+   *    仍读得出几条）。逐条会话与技术细节收进详情区，主区只留一行结论——一段重复的诊断
+   *    文字会把这一窄列撑成长页面（2026-10-31 用户指认）。
    */
   async function deleteSelected() {
     const targets = selectedSessions;
     if (targets.length === 0) { clearSelection(); return; }
-    setBatch("busy"); setBatchError(null); setBatchUncertain(false);
+    setBatch("busy"); setBatchResult(null); setBatchUncertain(false);
     const removed: string[] = [];
     /** 阻断原因 → 被它挡住的标题（按发送顺序累积）。 */
-    const blockedByReason = new Map<string, string[]>();
+    const blockedByReason = new Map<string, { titles: string[]; reasons: readonly string[];
+      reasonCodes: readonly string[] }>();
     /** 不属阻断的失败（冲突、校验等）：各有自己的说明，逐条列出。 */
-    const failed: string[] = [];
-    const uncertain: string[] = [];
+    const failed: { title: string; message: string }[] = [];
+    const unresolved: { sessionId: string; title: string; message: string;
+      requestId: string | null; commandId: string }[] = [];
     for (const session of targets) {
-      try {
-        await client.deleteAssistSession({ sessionId: session.id, commandId: createCommandId(),
-          expectedRevision: session.revision });
+      const commandId = createCommandId();
+      const outcome = await deleteSessionAndVerify(client, session, commandId);
+      if (outcome.state === "deleted") {
         removed.push(session.id);
-      } catch (caught) {
-        const described = describeLiveError(caught);
-        if (described.kind === "transport") { uncertain.push(`「${session.title}」`); continue; }
-        if (described.blockedReasons !== undefined && described.blockedReasons.length > 0) {
-          const key = described.blockedReasons.join("、");
-          blockedByReason.set(key, [...(blockedByReason.get(key) ?? []), session.title]);
-          continue;
-        }
-        failed.push(`「${session.title}」${described.kind === "conflict"
-          ? "刚被别处改过，已重新读取，请核对后再删。" : described.message}`);
-        if (described.kind === "conflict") void refreshSession(session.id);
+        continue;
       }
+      if (outcome.state === "blocked") {
+        const key = outcome.reasons.join("、");
+        const existing = blockedByReason.get(key);
+        blockedByReason.set(key, existing === undefined
+          ? { titles: [session.title], reasons: outcome.reasons, reasonCodes: outcome.reasonCodes }
+          : { ...existing, titles: [...existing.titles, session.title] });
+        continue;
+      }
+      if (outcome.state === "failed") {
+        failed.push({ title: session.title, message: outcome.message });
+        if (outcome.conflict) void refreshSession(session.id);
+        continue;
+      }
+      unresolved.push({ sessionId: session.id, title: session.title, message: outcome.message,
+        requestId: outcome.requestId, commandId });
     }
-    if (removed.length > 0) {
-      const gone = new Set(removed);
-      setLoaded((previous) => previous === null ? previous : { ...previous,
-        sessions: previous.sessions.filter((item) => !gone.has(item.id)) });
-      setArchived((previous) => previous === null ? previous
-        : previous.filter((item) => !gone.has(item.id)));
-      setSelected((current) => current.filter((sessionId) => !gone.has(sessionId)));
-    }
-    const sentences: string[] = [...failed];
-    if (blockedByReason.size > 0) {
-      const blockedNotes = [...blockedByReason].map(([reason, titles]) => {
-        // 同名会话不重复念标题：三条「关于Relay-Agent」写成「「关于Relay-Agent」等 3 段」。
-        const unique = [...new Set(titles)];
-        const who = unique.length === 1
-          ? `「${unique[0]}」${titles.length > 1 ? `等 ${titles.length} 段` : "这条讨论"}`
-          : `${unique.map((title) => `「${title}」`).join("")}这 ${titles.length} 段`;
-        return `${who}还不能删除（${reason}）。`;
-      });
-      sentences.push(`${blockedNotes.join("")}先改为归档，或在原对象解除引用后再删除。`);
-    }
-    if (uncertain.length > 0) {
-      sentences.push(`${uncertain.join("、")}的删除结果不明（响应丢失），本次是否已删除尚未确定；请核对列表后再决定，不要重复删除。`);
-    }
+    // 确认删掉的那几条走同一个收尾：行、分组副本、勾选，以及「删的正是当前会话」时的路由意图。
+    settleConfirmedDeletes(removed);
+    setBatchUncertain(unresolved.length > 0);
+    const report: BatchDeleteReport = {
+      deleted: removed.map((sessionId) => targets.find((session) => session.id === sessionId)?.title ?? ""),
+      blocked: [...blockedByReason.values()],
+      failed,
+      unresolved
+    };
+    const hasProblem = report.blocked.length > 0 || report.failed.length > 0
+      || report.unresolved.length > 0;
     // 全部成功时不留提示：行当场消失就是回执，删除不可撤销、也不需要撤销条。
-    setBatchUncertain(uncertain.length > 0);
-    if (sentences.length === 0) {
+    if (!hasProblem) {
       setBatch("idle");
-      setBatchError(null);
+      setBatchResult(null);
       return;
     }
-    // 有失败就停在结果态（DEV-0098）：同一张确认卡片里读完原因后「关闭」，
+    // 有失败就停在终态（DEV-0098）：同一张卡片里读完原因后「关闭」，
     // 不退回带「删除」按钮的第三次确认。
     setBatch("result");
-    setBatchError(`已删除 ${removed.length} 段讨论；${sentences.join(" ")}`);
+    setBatchResult(report);
+  }
+
+  /**
+   * 按原 command_id 核对那些「结果未知」的会话（2026-11-01 修正）。
+   *
+   * 核对到回执就算已删：行从列表消失、计数跟着变；核对不到仍是未知，措辞不变——
+   * 不改成「删除失败」，也不换 command_id 再发一次。
+   *
+   * 移除必须按**确切 sessionId** 同时打在活跃投影与归档投影上：这一列的分组副本、勾选集
+   * 都是从这两份列表派生的，只改结果统计会让刚确认已删的那段讨论继续留在行里（独立验收
+   * 发现的 P1）。仍未知的那几条一行都不动——本次是否删掉还没确定，界面不替用户猜。
+   */
+  async function recheckUnresolved() {
+    if (batchResult === null || batchResult.unresolved.length === 0) return;
+    setBatch("busy");
+    const gone = new Set<string>();
+    const stillUnknown: { sessionId: string; title: string; message: string;
+      requestId: string | null; commandId: string }[] = [];
+    const goneTitles: string[] = [];
+    for (const item of batchResult.unresolved) {
+      const verdict = await verifyDeleteReceipt(client, item.commandId);
+      if (verdict === "deleted") { gone.add(item.sessionId); goneTitles.push(item.title); }
+      else stillUnknown.push(item);
+    }
+    if (gone.size > 0) {
+      setBatchResult((previous) => previous === null ? previous : { ...previous,
+        deleted: [...previous.deleted, ...goneTitles],
+        unresolved: stillUnknown });
+      setBatchUncertain(stillUnknown.length > 0);
+      // 已被服务端确认删除的那几条：走与单条/批量完全相同的收尾（行、勾选、旧读数闸门、
+      // 以及删的正是当前会话时的路由意图），三条确认删除路径不留两套写法。
+      settleConfirmedDeletes([...gone]);
+    }
+    setBatch("result");
   }
 
   /**
@@ -381,6 +520,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
     let current = true;
     void client.getAssistSession(sessionId, true).then((session) => {
       if (!current || session.id !== sessionId || session.taskId !== null) return;
+      // 这一发是在删除确认之前发出的：本地已认定这条不存在，旧读数不能再把它插回列里。
+      if (confirmedDeleted.current.has(sessionId)) return;
       setLoaded((previous) => {
         if (previous === null) return previous;
         const replaced = previous.sessions.some((item) => item.id === session.id)
@@ -442,7 +583,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         if (stopped) return;
         failures = 0;
         if (version !== request.current) { schedule(RUN_POLL_BASE_MS); return; }
-        const next = items.filter((session) => session.taskId === null).sort(compareSessions);
+        const next = withoutConfirmedDeletes(items.filter((session) => session.taskId === null),
+          confirmedDeleted.current).sort(compareSessions);
         setLoaded((previous) => previous === null ? previous : { ...previous, sessions: next });
       } catch {
         if (stopped) return;
@@ -517,17 +659,61 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         : batch === "result" ? "删除结果" : `删除这 ${selectedSessions.length} 段讨论？`}</p>
     {(batch === "confirm" || batch === "busy") && <p className="recent-work-selection-note">
       消息、附件与工具调用记录将永久移除，无法恢复。</p>}
-    {batchError !== null && <p className="recent-work-row-error" role="alert"
-      data-testid="recent-work-batch-error">{batchError}</p>}
+    {batch === "result" && batchResult !== null && (
+      <div className="recent-work-batch-report" data-testid="recent-work-batch-error" role="alert">
+        {/* 顶层只有一行结论：成功几段、没删掉几段、待核实几段。 */}
+        <p className="recent-work-batch-summary" data-testid="recent-work-batch-summary">
+          {batchSummary(batchResult)}
+        </p>
+        {/* 每类原因只写一次；同一组原因合并成一条，标题并列。 */}
+        {batchResult.blocked.map((group) => (
+          <p key={group.reasons.join("、")} className="recent-work-batch-line">
+            {blockedWho(group.titles)}还不能删除：{group.reasons.join("、")}。{blockedAdvice(group.reasonCodes)}
+          </p>
+        ))}
+        {batchResult.failed.map((item) => (
+          <p key={item.title} className="recent-work-batch-line">
+            「{item.title}」{item.message}
+          </p>
+        ))}
+        {batchResult.unresolved.map((item) => (
+          <p key={item.sessionId} className="recent-work-batch-line">
+            「{item.title}」{item.message}
+          </p>
+        ))}
+        {/* 技术细节只在需要时展开：原始 command_id 与 request_id 可复制，不进主提示句。 */}
+        {batchResult.unresolved.length > 0 && (
+          <details className="recent-work-batch-detail">
+            <summary>技术详情</summary>
+            <ul>
+              {batchResult.unresolved.map((item) => (
+                <li key={item.sessionId}>
+                  <span className="recent-work-batch-detail-line">
+                    {item.title} · 命令 {item.commandId}
+                    {item.requestId === null ? "" : ` · 请求 ${item.requestId}`}
+                  </span>
+                  <button type="button" className="text-button" data-testid="recent-work-batch-copy"
+                    onClick={() => void copyText(item.requestId ?? item.commandId)}>复制</button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+    )}
     <div className="recent-work-confirm-actions">
       {batch === "idle" ? <>
         <button type="button" className="text-button recent-work-selection-danger"
           data-testid="recent-work-batch-delete"
-          onClick={() => { setBatchError(null); setBatch("confirm"); }}>删除</button>
+          onClick={() => { setBatchResult(null); setBatch("confirm"); }}>删除</button>
         <button type="button" className="text-button" data-testid="recent-work-selection-clear"
           onClick={clearSelection}>取消</button>
       </> : batch === "result" ? <>
-        {/* 结果态只留关闭：业务拒绝（被引用/有执行请求）不让删除，再摆一颗「删除」只会重演同一次拒绝。 */}
+        {/* 结果态只留关闭：业务拒绝（被引用/有学习记录）不让删除，再摆一颗「删除」只会重演同一次拒绝。 */}
+        {batchResult !== null && batchResult.unresolved.length > 0 && (
+          <button type="button" className="secondary-button" data-testid="recent-work-batch-recheck"
+            onClick={() => void recheckUnresolved()}>核对回执</button>
+        )}
         <button type="button" className="secondary-button" data-testid="recent-work-batch-result-close"
           onClick={clearSelection}>关闭</button>
       </> : <>

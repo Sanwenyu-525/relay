@@ -22,6 +22,12 @@ export interface RelayProblem {
    * `RECALL_PREFLIGHT_BLOCKED` 等 409 里出现；界面原样列出，不重新解释。
    */
   readonly recallPaths?: readonly string[];
+  /**
+   * 服务端为这次请求分配的追溯号（problem 体的 `request_id`）。
+   * 只在「需要对照本机日志」的场景（5xx 等）里由界面放进详情区展示与复制，
+   * 不当作业务事实，也不放进主提示句。
+   */
+  readonly requestId?: string | null;
 }
 
 export class RelayApiError extends Error {

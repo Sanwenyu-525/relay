@@ -319,17 +319,24 @@ export function changesetContainsDelete(params: JsonObject): boolean {
 }
 
 /**
- * 本目录档位是否为「完全访问」。
+ * 当前目录授权是否覆盖这一次文件动作。
  *
  * FULL 与 AUTO 在策略行上不可区分——GatewayDecision 没有第四值，档位差别只记在
  * local_directory_access.write_tier，所以每次判定都要现读那一行。prepare 与 admit 调用
  * 同一个函数，结论必然一致；期间档位被收紧时本就该重新判定并退回人工批准。
+ * AUTO 只覆盖会话来源的无删除变更集，FULL 保留原有目录级覆盖范围。
  * 只认 FILE_WRITE：Git、CLI、浏览器与电脑各有自己的策略，不因目录档位放宽。
  */
-async function directoryHasFullAccess(repositories: Repositories, capability: GatewayCapability,
-  resourceId: string | null | undefined): Promise<boolean> {
+async function directoryCoversFileAction(repositories: Repositories, capability: GatewayCapability,
+  resourceId: string | null | undefined, action: {
+    readonly origin: string; readonly actionType: string; readonly params: JsonObject;
+  }): Promise<boolean> {
   if (capability !== 'FILE_WRITE' || resourceId === undefined || resourceId === null) return false;
-  return (await repositories.gateway.readLocalDirectoryAccess(resourceId))?.write_tier === 'FULL';
+  const tier = (await repositories.gateway.readLocalDirectoryAccess(resourceId))?.write_tier;
+  // SESSION_AUTO_WRITE_GRANT：目录 AUTO 仅覆盖会话变更集的普通新建/修改。
+  // Run、直接全文写入、删除及其他能力不能借用这条会话授权。
+  return tier === 'FULL' || tier === 'AUTO' && action.origin === 'AGENT_SESSION_WRITE' &&
+    action.actionType === 'APPLY_CHANGESET' && !changesetContainsDelete(action.params);
 }
 
 export interface PreparedGatewayAction {
@@ -1191,15 +1198,24 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       await assertResourceNotOccupied(repositories, resource);
     }
 
+    // SESSION_OPERATION_REPLAY：会话动作没有 Run/Import 身份，按原 operation_id 查回。
+    const sessionOrigin = isSessionReadOrigin(input.origin) || isSessionWriteOrigin(input.origin);
     const existing = input.origin.kind === 'RUN'
       ? await repositories.gateway.findOperationByIntent(
           { runId: input.origin.runId, stepId: input.origin.stepId, intentKey: input.intentKey })
       : input.origin.kind === 'USER_IMPORT'
         ? await repositories.gateway.findOperationByIntent(
             { importJobId: input.origin.importJobId, intentKey: input.intentKey })
+        : sessionOrigin ? await repositories.gateway.readOperation(input.operationId)
         : await repositories.gateway.findUserActionOperation(input.intentKey);
     if (existing !== undefined) {
-      if (!sameOperation(existing, input, target, hash)) throw gatewayDenied('GATEWAY_INTENT_CONFLICT', '同一 intent_key 已绑定其他最终动作。');
+      if (!sameOperation(existing, input, target, hash) || sessionOrigin &&
+          (existing.intent_key !== input.intentKey || existing.workspace_id !== input.workspaceId ||
+           existing.project_id !== projectId || existing.resource_id !== resource?.id)) {
+        throw gatewayDenied('GATEWAY_INTENT_CONFLICT', sessionOrigin
+          ? '同一动作身份已绑定其他来源、意图或最终动作。'
+          : '同一 intent_key 已绑定其他最终动作。');
+      }
       return { operation_id: existing.id, status: existing.status,
         invocation_id: (await repositories.gateway.lastInvocation(existing.id))?.id ?? null,
         review_id: (await repositories.reviews.readByOperationId(existing.id))?.id ?? null };
@@ -1257,9 +1273,11 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         ...(await observedCheckTrustDigest(resource.canonical_root, input.scopeCheck)),
       });
     // 「完全访问」是目录级豁免，与 Run 范围授权是两条独立理由：范围授权永远覆盖不到删除，
-    // 而 FULL 目录内的删除由用户显式选择档位免掉逐次确认。DENY/ASK 策略走不进这条豁免。
-    const fullAccess = await directoryHasFullAccess(repositories, capability, resource?.id);
-    const scopeCovered = policy.decision === 'AUTO' && (scopeDecision?.covered === true || fullAccess);
+    // 而 FULL 目录内的删除由用户显式选择档位免掉逐次确认。AUTO 只覆盖会话普通变更集。
+    // DENY/ASK 策略走不进这条豁免。
+    const directoryCovered = await directoryCoversFileAction(repositories, capability, resource?.id,
+      { origin: input.origin.kind, actionType: input.actionType, params: input.params });
+    const scopeCovered = policy.decision === 'AUTO' && (scopeDecision?.covered === true || directoryCovered);
     let effectiveDecision: GatewayDecision =
       !descriptor.approvalPassthrough && policy.decision === 'AUTO' && !scopeCovered
         ? 'ASK' : policy.decision;
@@ -1277,6 +1295,13 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
       ? await browserClickApprovalRisk(input.origin, input.params)
       : null;
     if (browserRiskReason !== null) effectiveDecision = 'ASK';
+
+    // SESSION_ASK_REQUIRES_RUN：会话没有审批推进 Owner，新动作必须先走可恢复的 Run。
+    // 既有 operation_id 的重放已在前面返回原事实，不借此创建替代动作。
+    if (input.origin.kind === 'AGENT_SESSION_WRITE' && effectiveDecision === 'ASK') {
+      throw gatewayDenied('SESSION_WRITE_REQUIRES_RUN',
+        '当前策略要求对确切写入审批；未创建会话写动作，请把尚未执行的变更作为 execution 候选交给原 Run 入口。');
+    }
 
     const op = await repositories.gateway.insertOperation({ id: input.operationId,
       workspace_id: input.workspaceId, project_id: projectId, origin: input.origin.kind,
@@ -1600,12 +1625,13 @@ async function requireCurrentGatewayGrant(repositories: Repositories, op: Logica
   // writes (FILE_WRITE / GIT_WRITE / CLI_RUN) would be rejected as GATEWAY_APPROVAL_STALE.
   // The scope grant exemption must be mirrored identically: an operation prepared
   // under a live grant stays executable, while a revoked/expired grant falls back to
-  // requiring the single-action approval again. The directory FULL exemption is
+  // requiring the single-action approval again. The directory authorization is
   // re-read from the same function, so prepare and admit cannot disagree.
-  const fullAccess = await directoryHasFullAccess(repositories, op.capability_key, op.resource_id);
+  const directoryCovered = await directoryCoversFileAction(repositories, op.capability_key, op.resource_id,
+    { origin: op.origin, actionType: op.action_type, params: op.params });
   const effectiveDecision: GatewayDecision =
     !getAdapterDescriptor(op.capability_key).approvalPassthrough &&
-      selected.decision === 'AUTO' && scopeDecision?.covered !== true && !fullAccess
+      selected.decision === 'AUTO' && scopeDecision?.covered !== true && !directoryCovered
       ? 'ASK' : selected.decision;
   if (effectiveDecision === 'ASK') {
     if (review === undefined || !reviewMatchesGatewayOperation(review, op) || review.status !== 'DECIDED' ||
@@ -2568,15 +2594,25 @@ export async function fileReadExecute(op: LogicalOperationRow, invocation: Invoc
     return { outcome: 'FAILED', result: { reason: 'FILE_BINARY_UNSUPPORTED',
       target: op.normalized_target, size: stat.size } };
   }
-  // P1-D：受控读取也报读数。预算取本次 Run 冻结的单次预留（与预发送审计同源）；
+  // P1-D / P1-3（2026-10-31）：受控读取也报读数。预算取本次 Run 冻结的单次预留（与预发送审计同源）；
   // 没有预算就不写 context_risk，不编一个分母。
+  //
+  // 产品边界（P1-3 明确口径）：这是**读取时**的判定，不是「读取前拦住用户」的确认——
+  // `stat` 在 `readFile` 之前，风险读数在正文进上下文之前就算得出来，但它只能随结果一起
+  // 交给模型与轨迹面板；准入（能不能读、要不要批准）仍由 Gateway 与审批决定，本函数不改这个结果。
+  // 「发送前提醒」由 `required-context-files` 的必读文件审计承担；两者共享同一套阈值
+  // （`assessReadRisk`），因此不会出现「审计说严重、读取说正常」的两套结论。
   const readRisk = typeof contextBudgetTokens === 'number' && contextBudgetTokens > 0
     ? assessReadRisk({ bytes: stat.size, effectiveInputTokens: contextBudgetTokens }) : null;
   return { outcome: 'SUCCEEDED', result: { target: op.normalized_target, size: stat.size,
     sha256: createHash('sha256').update(bytes).digest('hex'), truncated: false,
     content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id,
     ...(readRisk === null ? {} : { context_risk: { severity: readRisk.severity,
-      ratio: readRisk.ratio, tokens: readRisk.tokens, budget_tokens: contextBudgetTokens ?? null } }) } };
+      ratio: readRisk.ratio, tokens: readRisk.tokens, budget_tokens: contextBudgetTokens ?? null,
+      // 一句话读数：高/严重时把「这次读取本身有多贵」说清楚，免得只剩一个百分比。
+      ...(readRisk.severity !== 'HIGH' && readRisk.severity !== 'SEVERE' ? {}
+        : { notice: `这次读取约占本轮有效输入预算的 ${String(Math.round((readRisk.ratio ?? 0) * 100))}%，` +
+          '正文已进入上下文。' }) } }) } };
 }
 
 /**

@@ -9,7 +9,7 @@ const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,

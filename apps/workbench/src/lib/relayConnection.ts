@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { RelayApiClient, type RelayApiConnection } from "../api/relayClient";
 import { clearSessionArtifacts } from "./sessionArtifacts";
 
@@ -35,7 +36,13 @@ export function activateRelayConnection(input: RelayApiConnection): void {
   publish({ mode: "live", client: new RelayApiClient(input), baseUrl: input.baseUrl });
 }
 
+/**
+ * 桌面版的数据来源只由宿主 `desktop_bootstrap` 决定：已经拿到 live 之后，任何调用方都不能
+ * 把它降回示例数据，否则用户会在真实工作空间和假数据之间无声切换。
+ * 浏览器开发预览不受此限制，仍可靠此退回 fixture。
+ */
 export function useFixtureData(): void {
+  if (isTauri() && relayConnection.mode === "live") return;
   publish({ mode: "fixture", client: null, baseUrl: null });
 }
 
@@ -43,6 +50,7 @@ export function liveClient(): RelayApiClient | null {
   return relayConnection.mode === "live" ? relayConnection.client : null;
 }
 
+/** 测试夹具用的强制重置：它要能清掉桌面用例留下的 live，因此不走上面的宿主限制。 */
 export function resetRelayConnectionForTest(): void {
-  useFixtureData();
+  publish({ mode: "fixture", client: null, baseUrl: null });
 }

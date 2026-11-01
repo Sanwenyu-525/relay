@@ -8,12 +8,12 @@ import { sql } from 'kysely';
 import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { archiveAssistSession } from '../../src/application/assist-session-controls.js';
-import { loadAssistSourceContent } from '../../src/application/assist-source-content.js';
+import { loadAssistSourceContent, recheckAssistSources } from '../../src/application/assist-source-content.js';
 import { selectSessionModel } from '../../src/application/select-session-model.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { captureMemoriesForTurn } from '../../src/application/memory-auto-capture.js';
 import { readAutoCaptures, recordAutoCapture } from '../../src/application/memory-captures.js';
-import { restoreInformation, retireInformation } from '../../src/application/information-commands.js';
+import { restoreInformation, retireInformation, createMemory } from '../../src/application/information-commands.js';
 import { listInformation } from '../../src/application/information-queries.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -592,4 +592,98 @@ test('OpenRouter 会话的自动提取使用消息冻结的模型路由并独立
   assert.equal(extractionCall.usage_output_tokens, 3);
   assert.equal(extractionCall.budget_reserved_tokens, snapshot.budget.call_reservation_tokens,
     '记账预算取消息冻结快照，不是进程默认值');
+});
+
+/**
+ * P1（BUG-CHAT-CONTEXT-CROSS-TALK）：消息来源记录必须携带真实来源类别。
+ *
+ * 旧实现在自动召回装配时只写 selection/selection_basis，丢掉了 origin 与 source_kind；
+ * 读取侧又把缺失 origin 默认成「人工确认」。这里一次覆盖四种组合：
+ *   AUTO_CAPTURE + USER_STATEMENT、AUTO_CAPTURE + MODEL_OBSERVATION（自动召回）；
+ *   HUMAN_CONFIRMED + MANUAL（本轮手选资料）；
+ * 并验证旧记录缺字段时读取为「未标注」，不会被升级成人工确认。
+ */
+test('消息来源记录保留真实 origin/source_kind/selection/selection_basis；旧记录缺失不冒充人工确认', async () => {
+  const f = await fixture();
+  // 第一轮真实聊天：自动捕获一条用户原话、一条模型观察。
+  await runChatTurn(f, EXTRACTION);
+  const items = await listInformation(app.db, 'memory', f.workspaceId, f.projectId);
+  const autoUser = items.find((item) => String(item.title) === '数据库选型');
+  const autoObservation = items.find((item) => String(item.title) === '包管理器');
+  assert.ok(autoUser !== undefined && autoObservation !== undefined);
+  assert.equal(autoUser.origin, 'AUTO_CAPTURE');
+  assert.equal(autoUser.source_kind, 'USER_STATEMENT');
+  assert.equal(autoObservation.origin, 'AUTO_CAPTURE');
+  assert.equal(autoObservation.source_kind, 'MODEL_OBSERVATION');
+
+  // 人工保存的记忆作为本轮显式手选资料，验证手选路径同样带真实来源类别。
+  const manual = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    commandId: randomUUID(), title: '发布窗口', text: '每周五发布。', confirmed: true });
+  const manualId = manual.result.memory_id!;
+
+  // 第二轮：同一条消息字面命中三条记忆；手选的那条走冻结来源，另两条自动召回。
+  const sent = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: f.sessionId, commandId: randomUUID(),
+    content: '数据库选型、包管理器和发布窗口分别是什么？',
+    sourceRefs: [{ kind: 'MEMORY', root_id: manualId, version: '1' }] });
+  const requests: AssistRequest[] = [];
+  const port = new FakeModelPort();
+  port.assist = async (request) => {
+    requests.push(request);
+    return isExtraction(request)
+      ? { kind: 'CONTENT', content: EMPTY_EXTRACTION, providerRequestId: randomUUID(),
+        usage: { inputTokens: 1, outputTokens: 1 } }
+      : { kind: 'CONTENT', content: REPLY_TEXT, providerRequestId: randomUUID(),
+        usage: { inputTokens: 9, outputTokens: 4 } };
+  };
+  const ticked = await runAssistGenerationTick(app.db, { workerId: randomUUID(),
+    storage: new ManagedContentStore(dataRoot), modelPort: port, leaseMs: 60_000 });
+  assert.equal(ticked?.status, 'COMPLETED', JSON.stringify(ticked));
+  assert.equal(ticked?.messageId, sent.result.assistant_message_id);
+
+  // 模型侧也要能读到同一份类别：自动召回段与手选段分别标注。
+  const prompt = requests.find((request) => !isExtraction(request))?.turns[0]?.content ?? '';
+  assert.match(prompt, /显式选中资料：1 条/u);
+  assert.match(prompt, /自动召回长期记忆：2 条/u);
+  assert.match(prompt, /来源类别 用户原话/u);
+  assert.match(prompt, /来源类别 模型观察/u);
+  assert.match(prompt, /来源类别 人工保存/u);
+
+  const message = await createRepositories(app.db).assist.readMessage(sent.result.assistant_message_id);
+  const sources = message?.sources as readonly Record<string, unknown>[] | undefined;
+  assert.ok(sources !== undefined);
+  const byRoot = new Map(sources.map((source) => [source.root_id, source]));
+  const autoUserSource = byRoot.get(autoUser.id);
+  const observationSource = byRoot.get(autoObservation.id);
+  const manualSource = byRoot.get(manualId);
+  assert.ok(autoUserSource !== undefined && observationSource !== undefined && manualSource !== undefined);
+  assert.deepEqual({
+    origin: autoUserSource?.origin, source_kind: autoUserSource?.source_kind,
+    selection: autoUserSource?.selection, selection_basis: autoUserSource?.selection_basis },
+  { origin: 'AUTO_CAPTURE', source_kind: 'USER_STATEMENT',
+    selection: 'AUTO_MEMORY', selection_basis: 'LITERAL_MATCH' });
+  assert.deepEqual({
+    origin: observationSource?.origin, source_kind: observationSource?.source_kind,
+    selection: observationSource?.selection, selection_basis: observationSource?.selection_basis },
+  { origin: 'AUTO_CAPTURE', source_kind: 'MODEL_OBSERVATION',
+    selection: 'AUTO_MEMORY', selection_basis: 'LITERAL_MATCH' });
+  assert.deepEqual({
+    origin: manualSource?.origin, source_kind: manualSource?.source_kind,
+    selection: manualSource?.selection },
+  { origin: 'HUMAN_CONFIRMED', source_kind: 'MANUAL', selection: undefined });
+
+  // 读取侧兼容：把自动来源改写成旧形状（缺 origin/source_kind），重检不得补成人工确认。
+  const legacy = [autoUserSource, observationSource].map((source) => ({
+    kind: 'MEMORY', root_id: source.root_id, version: source.version,
+    source_ref: source.source_ref, status: 'SENT',
+    selection: 'AUTO_MEMORY', selection_basis: source.selection_basis }));
+  const session = await createRepositories(app.db).assist.readSession(f.sessionId);
+  assert.ok(session !== undefined);
+  const checked = await recheckAssistSources(createRepositories(app.db),
+    new ManagedContentStore(dataRoot), session, legacy);
+  assert.equal(checked.available, true);
+  for (const source of checked.safeSources) {
+    assert.equal(source.origin, null, '旧记录缺失 origin 不得冒充人工确认');
+    assert.equal(source.source_kind, 'UNKNOWN');
+  }
 });

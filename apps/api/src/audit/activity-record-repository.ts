@@ -66,6 +66,19 @@ export class ActivityRecordRepository {
     return requireRow(result.rows, 'insert into activity_records');
   }
 
+  /** 同一 Run 与 Worker 的滞留通知只留一条；重复的并发插入无害但不作为幂等依据。 */
+  async hasRunRecoveryRequiredNotice(runId: string, workerId: string): Promise<boolean> {
+    const result = await sql<{ present: boolean }>`
+      select exists (
+        select 1 from activity_records
+        where event_type = 'RUN_RECOVERY_REQUIRED'
+          and fact_refs ->> 'run_id' = ${runId}
+          and fact_refs ->> 'worker_id' = ${workerId}
+      ) as present
+    `.execute(this.db);
+    return result.rows[0]?.present ?? false;
+  }
+
   async listActivityRecordsByCommand(commandId: string): Promise<readonly ActivityRecordRow[]> {
     const result = await sql<ActivityRecordRow>`
       select id, workspace_id, actor_kind, actor_ref, command_id, project_id, task_id,

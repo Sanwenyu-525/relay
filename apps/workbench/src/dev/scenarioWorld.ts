@@ -1,5 +1,5 @@
 import type {
-  RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageRecall,
+  RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageRecall, RelayAssistProposal,
   RelayRunToolCallPreview, RelayRunToolCalls, RelaySessionToolCalls,
 } from "../api/dtos/assist";
 import type { RelayFileWriteChangeSet, RelayFileWriteFrozenDiff } from "../api/dtos/artifacts";
@@ -63,6 +63,13 @@ export interface ScenarioWorld {
   readonly host: LabHost;
   /** 会话侧消息行（用户 + 助手）。SESSION 宿主逐条渲染。 */
   readonly messages: readonly RelayAssistMessage[];
+  /**
+   * 这个会话里读回的提案（候选成果、状态维护建议等）。
+   *
+   * 实验室只供给数据，不决定哪一条消息挂哪张卡——挂载条件由产品的 `candidateProposalsFor`
+   * 现算，因此「候选卡在什么状态下出现」在两边是同一份规则，而不是实验室写死一个空数组。
+   */
+  readonly proposals: readonly RelayAssistProposal[];
   /** 助手消息的实时预览（流式草稿）。 */
   readonly preview: RelayAssistLivePreview | null;
   readonly previewError: PreviewReadError | null;
@@ -194,6 +201,7 @@ export function emptyWorld(host: LabHost): ScenarioWorld {
   return {
     host,
     messages: [],
+    proposals: [],
     preview: null,
     previewError: null,
     settling: null,
@@ -305,6 +313,19 @@ export class ScenarioRunner {
   reset(): void {
     this.indexValue = 0;
     this.apply(0);
+  }
+
+  /**
+   * 重读当前帧：不推进帧、不改世界，只让订阅方重新取一次数。
+   *
+   * 产品里「重新读取预览」「重读最终回复」是真实的重新取数，实验室不能拿一个空回调顶上：
+   * 空回调点下去什么都不发生，界面却摆着一个可用操作的假象。这里给的是同一个语义的
+   * 安全版本——读的仍是这份模拟世界，不发请求、不写库、不调模型。
+   */
+  refresh(): void {
+    this.seqValue += 1;
+    this.settleHeldReads();
+    for (const listener of [...this.listeners]) listener();
   }
 
   /** 等待下一次状态推进（fake client 的长轮询出口）。 */

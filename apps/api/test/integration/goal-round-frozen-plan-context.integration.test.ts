@@ -66,7 +66,7 @@ function capturingPort(envelopes: readonly string[]): { readonly port: AssistMod
     identity: new FakeModelPort().identity,
     assist: async (request) => {
       captured.push(JSON.stringify({ system: request.system, turns: request.turns,
-        tools: request.tools }));
+        tools: request.tools, responseFormat: request.responseFormat }));
       const content = envelopes[Math.min(round, envelopes.length - 1)]!;
       round += 1;
       const result: AssistResult = { kind: 'CONTENT', content,
@@ -177,6 +177,12 @@ test('按计划执行：选定版本的范围/步骤细节/验证方式/待定�
   const tick2 = await runAssistGoalTick(app.db, { workerId: `tick-${randomUUID()}` });
   assert.equal(tick2.advanced.length, 1);
   const round2 = await settleMessage(tick2.advanced[0]!.messageId, port, captured);
+  const round2Request = JSON.parse(round2) as { turns: { role: string; content: string }[];
+    responseFormat?: string };
+  assert.equal(round2Request.responseFormat, 'json_object');
+  assert.equal(round2Request.turns.at(-1)?.role, 'user',
+    '自动续轮必须有明确的当前推进请求，不能只让模型接写上一轮助手回复');
+  assert.ok(round2Request.turns.at(-1)?.content.includes('GOAL_ROUND_CONTINUATION_V1'));
   assert.ok(round2.includes(v1Markers.scope), '第 2 轮仍带出冻结范围');
   assert.ok(round2.includes(v1Markers.detail), '第 2 轮仍带出冻结步骤细节');
   assert.ok(round2.includes(v1Markers.method), '第 2 轮仍带出冻结验证方式');

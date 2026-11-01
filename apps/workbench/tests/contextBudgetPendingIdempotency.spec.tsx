@@ -5,11 +5,12 @@ import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
 
 /**
- * 档位保存幂等性与草稿收敛的验收用例（2026-10-30 复审）。八类场景：
- * ① 丢响应后重复点保存仍只有原命令；② 按原命令重试逐字复用 ID 与载荷；
+ * 档位保存幂等性与显示态收敛的验收用例（2026-10-30 复审；2026-10-31 改为档位点击即写）。
+ * 八类场景：
+ * ① 丢响应后重复点档位仍只有原命令；② 按原命令重试逐字复用 ID 与载荷；
  * ③ 原命令其实已提交 → 查回执确认；④ 409 不留待核对、换基线再写；
  * ⑤ 明确失败收口后可重新开始；⑥ A 在途时切到 B，迟到结果不写进 B；
- * ⑦ 回执对不上不算生效；⑧ 投影追上清草稿、外部改动必须显示出来。
+ * ⑦ 回执对不上不算生效；⑧ 投影追上让位覆盖层、外部改动必须显示出来。
  */
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -30,7 +31,9 @@ function json(body: unknown, status = 200): Response {
 
 function usage(id: string, tokens: 262_144 | 524_288 | 1_048_576,
   revision: string): RelaySessionContextUsage {
-  return { sessionId: id, budget: { tokens, revision }, lastCall: null };
+  return { sessionId: id, budget: { tokens, revision },
+    nextCall: { reservationTokens: tokens, contextBudgetTokens: tokens,
+      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null };
 }
 
 function receipt(commandId: string, id: string, tokens: number, revision: string): Response {
@@ -79,12 +82,8 @@ async function resync(id: string, data: RelaySessionContextUsage | null) {
 }
 
 async function pick(tokens: 262_144 | 524_288 | 1_048_576) {
+  // 点档位就是一次写：没有第二枚「保存」按钮。
   await mounted!.wrapper.get(`[data-testid="context-budget-option-${tokens}"]`).setValue(true);
-  await flush();
-}
-
-async function save() {
-  await mounted!.wrapper.get('[data-testid="context-budget-save"]').trigger("click");
   await flush();
 }
 
@@ -103,22 +102,21 @@ function has(testid: string): boolean {
 }
 
 describe("P0 幂等性：一次只允许一条未确认的写", () => {
-  it("丢响应后重复点保存：账上仍只有原命令，档位与保存键都锁住", async () => {
+  it("丢响应后重复点档位：账上仍只有原命令，选择器锁住", async () => {
     const writes = stubFetch((_url, method) => {
       if (method === "POST") throw new TypeError("Failed to fetch");
       return json({});
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     expect(writes).toHaveLength(1);
     const commandId = String(writes[0]!.command_id);
     expect(textOf("context-budget-pending")).toContain(commandId);
-    await save();
+    // 待核对期间单选组禁用：再点另一档不会发出第二条写命令。
+    await pick(262_144);
     expect(writes, "待核对期间不得生成新命令").toHaveLength(1);
     expect(mounted!.wrapper.get('[data-testid="context-budget-option-262144"]')
-      .attributes("disabled")).toBeDefined();
-    expect(mounted!.wrapper.get('[data-testid="context-budget-save"]')
       .attributes("disabled")).toBeDefined();
   });
 
@@ -131,7 +129,7 @@ describe("P0 幂等性：一次只允许一条未确认的写", () => {
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     down = false;
     await click("context-budget-retry");
     expect(writes).toHaveLength(2);
@@ -148,7 +146,7 @@ describe("P0 幂等性：一次只允许一条未确认的写", () => {
     const onSaved = vi.fn();
     await open(A, usage(A, 524_288, "3"), { onSaved });
     await pick(1_048_576);
-    await save();
+    await flush();
     await click("context-budget-receipt");
     expect(textOf("context-budget-notice")).toContain("回执已核对");
     expect(has("context-budget-pending")).toBe(false);
@@ -167,13 +165,13 @@ describe("P0 幂等性：一次只允许一条未确认的写", () => {
     const onReload = vi.fn();
     await open(A, usage(A, 524_288, "3"), { onReload });
     await pick(1_048_576);
-    await save();
+    await flush();
     expect(textOf("context-budget-conflict")).toContain("已被其他操作改动");
     expect(has("context-budget-pending"), "409 不留待核对").toBe(false);
     expect(onReload).toHaveBeenCalledTimes(1);
     await resync(A, usage(A, 262_144, "7"));
     await pick(1_048_576);
-    await save();
+    await flush();
     expect(writes).toHaveLength(2);
     expect(writes[1], "409 之后是新的一次写，不是重放").not.toEqual(writes[0]);
     expect(textOf("context-budget-notice")).toContain("已保存");
@@ -186,11 +184,12 @@ describe("P0 幂等性：一次只允许一条未确认的写", () => {
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     expect(textOf("context-usage-action-error").length).toBeGreaterThan(0);
     expect(has("context-budget-pending")).toBe(false);
     expect(writes).toHaveLength(1);
-    await save();
+    // 失败后选择退回生效值，所以再点同一档仍然是一次新的写。
+    await pick(1_048_576);
     expect(writes, "收口之后是新的一次写").toHaveLength(2);
   });
 });
@@ -205,7 +204,7 @@ describe("P0 显示态按会话归属", () => {
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     expect(writes).toHaveLength(1);
     await resync(B, usage(B, 262_144, "11"));
     gate.release?.();
@@ -213,7 +212,9 @@ describe("P0 显示态按会话归属", () => {
     await flush();
     expect(has("context-budget-notice"), "A 的回执不得出现在 B").toBe(false);
     expect(has("context-budget-pending")).toBe(false);
-    expect(textOf("context-usage-tier-state")).toContain("256K");
+    // B 的单选态仍按 B 自己的服务端档位（256K）；A 的待核对选择不得画过来。
+    expect((mounted!.wrapper.get('[data-testid="context-budget-option-262144"]')
+      .element as HTMLInputElement).checked).toBe(true);
     await resync(A, usage(A, 524_288, "3"));
     expect(textOf("context-budget-notice")).toContain("已保存");
   });
@@ -227,7 +228,7 @@ describe("P0 回执核对要与命令逐字对上", () => {
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     await click("context-budget-receipt");
     expect(textOf("context-usage-action-error")).toContain("对不上");
     expect(has("context-budget-pending"), "核对不上就继续待核对").toBe(true);
@@ -241,7 +242,7 @@ describe("P0 回执核对要与命令逐字对上", () => {
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     await click("context-budget-receipt");
     expect(textOf("context-usage-action-error")).toContain("对不上");
     expect(has("context-budget-pending")).toBe(true);
@@ -249,43 +250,44 @@ describe("P0 回执核对要与命令逐字对上", () => {
   });
 });
 
-describe("P1 草稿收敛", () => {
+describe("P1 显示态收敛", () => {
   const okSave = (_url: string, method: string, body: Record<string, unknown>) =>
     method === "POST" ? receipt(String(body.command_id), A, 1_048_576, "4") : json({});
 
-  it("投影追上：草稿兑现并清空，显示服务端值", async () => {
+  it("投影追上：覆盖层让位，显示服务端值", async () => {
     stubFetch(okSave);
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     await resync(A, usage(A, 1_048_576, "4"));
-    expect(textOf("context-usage-tier-state")).toContain("1024K");
-    expect(has("context-usage-baseline-moved")).toBe(false);
+    expect((mounted!.wrapper.get('[data-testid="context-budget-option-1048576"]')
+      .element as HTMLInputElement).checked).toBe(true);
   });
 
   it("外部改动必须显示出来：修订推进但值被别人写走，界面不顶旧值", async () => {
     stubFetch(okSave);
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     await resync(A, usage(A, 262_144, "4"));
-    expect(textOf("context-usage-tier-state")).toContain("256K");
-    expect(has("context-usage-baseline-moved")).toBe(false);
+    expect((mounted!.wrapper.get('[data-testid="context-budget-option-262144"]')
+      .element as HTMLInputElement).checked).toBe(true);
   });
 
-  it("还有未保存的选择时外部改动：草稿保留，并说明基线已变", async () => {
+  it("待核对期间外部改动：选择器停在待核对档位，但状态行只承认最后确认生效的值", async () => {
     const writes = stubFetch((_url, method) => {
       if (method === "POST") throw new TypeError("Failed to fetch");
       return json({});
     });
     await open(A, usage(A, 524_288, "3"));
     await pick(1_048_576);
-    await save();
+    await flush();
     await resync(A, usage(A, 262_144, "7"));
-    const note = textOf("context-usage-baseline-moved");
-    expect(note).toContain("基线已变");
-    expect(note).toContain("256K");
-    expect(note).toContain("1024K");
+    expect(has("context-budget-pending"), "结果未决仍待核对").toBe(true);
+    expect(textOf("context-usage-tier-state")).toContain("最后一次确认生效：256K");
+    expect(textOf("context-usage-tier-state")).not.toContain("1024K");
+    expect((mounted!.wrapper.get('[data-testid="context-budget-option-1048576"]')
+      .element as HTMLInputElement).checked).toBe(true);
     expect(writes).toHaveLength(1);
   });
 });

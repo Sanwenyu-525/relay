@@ -363,10 +363,21 @@ Breaking Change: **Yes（语义）**——上下文档位从「工作区默认�
 **用量投影（`GET /assist-sessions/{id}/context-usage`，只读、无回执）**
 
 - `budget{tokens, revision}`：会话**当前**档位。
-- `last_call`：最近一次**已结算且带用量**的 `kind='ASSIST'` 模型调用（`status <> 'STARTED'`
-  且 `usage_input_tokens`／`usage_output_tokens` 至少一个非空；按 `settled_at` → `started_at` → `id`
-  倒序取一行）。在途（STARTED）行没有用量、失败行可能只有半截读数，用它们覆盖「最近一次有效
-  统计」会让圆环在生成进行中突然变成未知或半截数字。字段
+- `next_call{reservation_tokens, context_budget_tokens, provider_window_tokens, window_source}`：
+  **下一次调用会申请的预算**（2026-10-31 新增）。它由服务端用与冻结完全相同的
+  `planAssistModelBudget` 计算，前端不自己取 min、也不拿历史值冒充。
+  `reservation_tokens` = 按当前档位、且按已知 Provider 窗口截断后的申请值；
+  `provider_window_tokens` 为 `null` 时 `window_source='UNKNOWN'`——默认连接没有模型窗口事实，
+  此时 `reservation_tokens` 只表示「会按档位申请」，**不表示 Provider 一定装得下**。
+  免费模型按 Provider 目录里声明的 `context_window` 截断（`window_source='MODEL_CATALOG'`）。
+  模型选择不可用（配置读不到、目录里没有该模型）时整段为 `null`。
+- `last_call`：最近一次**已结算且带用量**的 `kind='ASSIST'` 且 `purpose='PRIMARY'` 的模型调用
+  （`status <> 'STARTED'` 且 `usage_input_tokens`／`usage_output_tokens` 至少一个非空；
+  按 `settled_at` → `started_at` → `id` 倒序取一行）。在途（STARTED）行没有用量、失败行可能只有
+  半截读数，用它们覆盖「最近一次有效统计」会让圆环在生成进行中突然变成未知或半截数字。
+  **`purpose` 过滤（迁移 0153）是必需的**：记忆提取与记忆压缩这两类辅助外呼复用主对话的
+  冻结预算、挂在同一条助手消息上，不排除它们会让「最近一次调用」变成一次 512 tokens 的后台
+  提取调用。字段
   `source`（`MODEL_CALL`／`MESSAGE`）、`call_id`、`message_id`、`provider`、`model`、`status`、
   `input_tokens`、`output_tokens`、`cache_read_tokens`、`cache_creation_tokens`、
   `reserved_tokens`（那次调用冻结的单次预算）、`settled_at`、`breakdown`。
@@ -432,3 +443,122 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
   任一项不同即 `TODO_TOOL_CALL_CONFLICT`。
 - **结算事实**：清单已保存但工具账本未结算时不会被当成完成，接口层面仍返回本次快照，
   账本行保留 `REQUESTED` 由恢复路径重结算。
+### 10.128 会话列表状态只读投影 `list_state`（2026-10-30 源码实现）
+
+**Breaking Change: No。** 没有新命令、没有新端点、没有迁移：给既有会话投影再加一个只读字段 `list_state`，`run_state` 原样保留。
+
+| 端点 | 变化 | 说明 |
+|---|---|---|
+| `GET /assist-sessions` | 投影新增只读字段 `list_state` | 一次列表读取里逐行派生，八态或 `null` |
+| `GET /assist-sessions/{session_id}` | 同上，**同一口径** | 左栏切会话后按身份重读那一行，两处不一致就会出现「切走变、切回变」 |
+| 其余会话命令回执 | 无 | 不带 `list_state`，与 `run_state` 同一条边界 |
+
+**取值与依据。** `list_state` 是**读时派生**的展示事实，不是 `assist_sessions` 的列，也没有新增写入 Owner。八个值各自对应一条既有事实：
+
+| 值 | 依据 |
+|---|---|
+| `RUNNING` / `PENDING` | `assist_messages` 里有 `RUNNING` / `PENDING` 行（与 `run_state` 同一子查询） |
+| `WAITING_APPROVAL` | `assist_proposals` 里有 `status='PENDING'` 的提案——这是仓库里唯一会话级的「等人决定」事实 |
+| `COMPLETED` / `FAILED` / `CANCELLED` | 该会话**最后一轮** `role='ASSISTANT'` 行的 `status`（按 `seq desc limit 1`） |
+| `NOT_STARTED` | 会话里一条 `assist_messages` 都没有 |
+| `ARCHIVED` | `assist_sessions.status='ARCHIVED'` |
+| `null` | 有消息但读不出最后一轮助手行，或该行状态落在在途档却与 `run_state` 不一致——**不知道就说不知道** |
+
+**优先级只有一条链**（`deriveListState`，列表与单条读取共用）：在途 → `WAITING_APPROVAL` → `ARCHIVED` → `NOT_STARTED` → 最后一轮终态 → `null`。
+
+- **`run_state` 与它的关系**：`run_state` 是 `list_state` 的在途子集，继续保留——轮询与「此刻有没有在跑」需要窄口径。两者不是两套判定，`list_state` 是唯一派生结果。
+- **`null` 不是完成**：`run_state` 的 `null` 只说明「没有在途的一轮」，空会话与结算会话在它眼里一样；正是这一点让旧投影不能直接当展示态用。
+- **不看消息正文、不看时间、不看工具调用**：审批态只认提案行，不从内容或时间推断「大概在等人」。
+- 成本：列表仍是一句 SQL——`has_messages`、在途、最后一轮助手行、待确认提案共四个相关子查询（`assist_messages(session_id, seq)` 与 `assist_proposals(session_id)` 均有索引）；单条读取合并成一次往返。**不改变排序键、`revision` 与 `updated_at`**。
+
+**兼容。** 旧客户端忽略新字段不受影响；新客户端读旧服务端时 `list_state` 缺失，按 `run_state` 兜底一次（在途仍画对），其余回退类型图标；读到词表之外的值**不**整条失败，而是读成 `null`——这一枚是导航列的展示图标，任何一个新词都不该让整列列表读失败。
+
+**验证。** 派生链单元测试 `test/unit/session-list-state.test.ts` 5/5（逐档钉优先级与 `null`）；真实 PG/HTTP `test/integration/assist-run-state.integration.test.ts` 扩到 8 项（空会话 `NOT_STARTED`、结算后 `COMPLETED`、失败/取消各自成态、归档 `ARCHIVED`、待确认提案 `WAITING_APPROVAL` 且撤销后回落到 `COMPLETED`）。**本轮本机无 PostgreSQL，集成套件未运行**，见验收表对应行的未验边界。
+
+### 10.129 会话诊断导出 `GET /assist-sessions/{id}/export`（2026-11-01 源码实现，只读端点）
+
+**Breaking Change: No。** 新增一条只读端点：没有命令、没有 `command_id`、没有迁移、不写任何账本。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /assist-sessions/{id}/export` | 返回一份 `relay-session-export` 文档，`Cache-Control: no-store`，`format='relay-session-export'`、`schema_version='1.0'` |
+
+- **归属与 404**：跨 Workspace、不存在的会话与无凭据按既有会话读取的同一口径拒绝（404），不返回部分可信内容。
+- **一致性**：事务外先确认会话可见，整份读取放进 `READ ONLY` + `REPEATABLE READ` 事务——消息、工具账本、清单快照与执行请求描述的是同一时刻，而不是各自读一次再拼。只读事务不加行锁，不挡正在生成的那一轮。
+- **不声明 response schema**（有意）：字段随各投影走；这里声明 TypeBox 会把没列出的列静默裁掉，正与「不静默残缺」冲突。
+- **顶层键固定**（EX-10 逐字核对）：`format`／`schema_version`／`exported_at`／`relay`／`snapshot`／`workspace`／`session`／`scope`／`model`／`context_usage`／`messages`／`tool_calls`／`model_calls`／`todos`／`executions`／`operations`／`file_changes`／`completeness`／`privacy`。bigint 一律转十进制字符串（`revision`、`seq` 等整型列都按这个收口走），JSON 里出现 number 就意味着精度可能已丢。
+- **上限与部分导出**：消息上限 2000 条（沿用读消息的 200 条分页口径会丢历史，导出不沿用）；工具调用、模型调用、执行请求、动作各上限 500 条。超过即部分导出，`completeness.<集合>.{total,exported,limit,truncated,reason}` 自述；账本里挂着但本文件未导出消息的轮次以 `completeness.tool_calls_without_message` 点出。
+- **没有的事实不补**：工具结果正文（`session_tool_calls` 只存 `result_digest`）、Todo 变更历史（`assist_session_todo_events` 无面向界面的合法读口）、模型私有推理与应用版本分别写 `null` 或 `completeness.missing_evidence`；`relay.version_source='NOT_EXPOSED_BY_API'`，不从别处猜一个版本号。
+- **脱敏口径**：结构化字段按凭据键名与凭据值形态替换为 `[REDACTED:*]`，单字符串上限 32,768 字符（先脱敏再截断）；用户与 AI 的消息正文逐字保留，`privacy.message_content` 当面声明文件里可能含用户自己的资料；附件只导元数据，不内嵌二进制；接入配置与动作参数不进文件，动作只交 `params_sha256`。
+- **不推进任何事实**：不写回执、不结算、不推进 `revision`；`snapshot` 说明导出时刻会话是否在生成中，在途回复只带已落盘的即时草稿（`messages[].live_preview`），不把 PG 里不存在的「完整中间稿」补出来。
+
+**验证。** 真实 PG/HTTP `test/integration/session-export.integration.test.ts` **12/12**（EX-01–EX-12：正常会话证据齐全、归档可导、空会话不造占位、四态与拒绝原文、260 条长会话不被分页上限截断、520 条工具调用部分导出自述、生成中快照、跨 Workspace 404、凭据脱敏、顶层结构与十进制字符串、只读前后一致、代表性会话的动作身份与清单快照）。浏览器落盘与界面口径归[工作台 §28.1](../../frontend/workbench-design/part-09.md#281-左栏recentworkrail)。
+
+### 10.130 会话回复的实时 Token 读数（2026-11-01 源码实现，迁移 0155）
+
+**Breaking Change: No。** 没有新命令、没有新端点、没有新账本；只给三个既有读投影增加可选字段，旧客户端忽略即行为不变。
+
+| 端点 | 新增只读字段 |
+|---|---|
+| `GET /assist-sessions/{id}/messages` | 每条消息 `usage_summary`：本轮 `PRIMARY` 模型调用（含工具续轮）的账本汇总 |
+| `GET /assist-sessions/{id}/messages/{message_id}/live-preview` | `usage`：已结算调用 + 当前在途调用的可丢弃估算；终态或不可见时为 `null` |
+| `GET /assist-sessions/{id}/messages/{message_id}/live-preview/events` | 帧体与上面的 GET 同形，`usage` 随帧更新（仅用量变化也会推进 `preview_revision`） |
+
+**读数形状。** `{ state, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, settled_calls, pending_calls, missing_usage_calls }`。`state ∈ ESTIMATED | PARTIAL | CONFIRMED | UNKNOWN`；所有 token 字段是原始整数或 `null`，`null` 表示 Provider 未上报，**不是 0**。
+
+**事实来源（唯一账本 + 可丢弃估算）。**
+- 真实用量只来自 `model_calls`：按 `assist_message_id`、`kind='ASSIST'`、`purpose='PRIMARY'` 汇总已结算行。记忆提取/压缩等辅助外呼虽然挂同一条消息，但不是用户这一轮的消耗，按 `purpose` 排除。
+- 在途调用的估算只写在 `assist_message_previews.usage`（迁移 0155，随预览行一起删除）：`call_id` + `input/output_tokens_estimate` + Provider 已上报字段。估算用 UTF-8 字节 / 3，与端口外呼前的预算检查、上下文构成快照同一换算。
+- **按 `call_id` 去重**：估算只在对应调用仍为 `STARTED` 时参与；该行结算后账本优先，估算被忽略，不重复累计。写入与文本预览共用同一所有者 CAS，结算/取消/换 Worker 后迟到帧写不进去。
+- 不建立第二套计量账本，不为每个 Token 写 PostgreSQL：估算约 500ms 一档节流写入，界面按 SSE 帧更新。
+
+**状态口径。**
+
+| 状态 | 依据 | 界面 |
+|---|---|---|
+| `ESTIMATED` | 只有当前在途调用的估算，尚无结算读数 | `本轮 ≈ N tokens` |
+| `PARTIAL` | 有已确认调用，但仍有在途调用或已结算调用缺用量 | `本轮 ≥ N tokens · 部分用量未知` |
+| `CONFIRMED` | 全部调用已结算且都有输入与输出 | `本轮 N tokens` |
+| `UNKNOWN` | 没有足够数据 | 生成中「Token 统计中」；完成态「本轮 Token 未上报」 |
+
+**完成态校准。** 消息结算的同一事务删除预览行，随后 `GET messages` 的 `usage_summary` 成为唯一读数来源；失败与取消保留已结算部分的真实用量，界面不归零、不回跳。上下文圆环仍读 `GET /assist-sessions/{id}/context-usage` 的单次调用口径，两者不共用分母。
+
+**验证。** 单元 `assist-usage-projection`（多轮累计、估算与账本去重、缺字段不补零、状态推导）与 `assist-live-preview`（发布器节流与失权）、`openai-compatible-model-port`（进度帧携带估算与 Provider 已上报值）；真实 PG/HTTP `assist-live-preview.integration.test.ts` 覆盖生成中估算可见、结算校准、Provider 不上报、辅助外呼排除、多轮累计与迟到帧拒写、首帧只带用量。前端口径归[工作台 §28.10](../../frontend/workbench-design/part-10.md#2810-agent-回复的实时-token-读数2026-11-01)。
+
+### 10.131 会话消息的在途执行阶段投影（2026-11-01 源码实现，AGENT_STREAM_VISIBILITY）
+
+**端点不变，消息 DTO 追加只读字段。** `GET /assist-sessions/{id}/messages` 的每条 `ASSISTANT` 消息在 `status='RUNNING'` 时多一个 `generation_progress`；`PENDING`、终态与非助手消息为 `null`。这是一个**读时派生投影**，不新建表、不新增迁移、不写任何业务状态。
+
+**形状。**
+```json
+{
+  "phase": "PREPARING_CONTEXT | WAITING_MODEL | MODEL_STREAMING | MODEL_OUTPUT | PROCESSING",
+  "call_count": 1,
+  "latest_call": {
+    "status": "STARTED | COMPLETED | FAILED | CANCELLED",
+    "started_at": "…",
+    "first_stream_event_at": "… | null",
+    "first_text_delta_at": "… | null",
+    "first_preview_persisted_at": "… | null",
+    "settled_at": "… | null"
+  }
+}
+```
+`latest_call` 在没有 PRIMARY 调用行时为 `null`；`call_count` 是该消息已登记的 PRIMARY 调用次数（工具续轮各算一次）。辅助外呼（`purpose='MEMORY_CAPTURE'|'MEMORY_COMPACT'`）按既有记账口径排除，不冒充本轮回复。
+
+**阶段规则（全部由既有事实派生）。**
+- 消息已 `RUNNING`、还没有 PRIMARY 调用行 → `PREPARING_CONTEXT`：Worker 已领取，上下文/记忆准备尚未登记模型请求。`PENDING` 不属于这个阶段——它由消息状态表达「等待处理」。
+- 最新调用 `STARTED`，`first_stream_event_at` 为 null → `WAITING_MODEL`：请求行在调用前提交，**不代表 Provider 已接收**。
+- 最新调用 `STARTED`，有首流事件、无首文字增量 → `MODEL_STREAMING`：可能只是 reasoning 或工具参数，因此界面只能说「模型已响应，等待正文」，不得展示推理正文或声称正在写正文。
+- 最新调用 `STARTED`，有首文字增量 → `MODEL_OUTPUT`：结构化信封可能仍在等待安全投影，界面只说「已收到模型输出」，不提前形成业务结论。
+- 最新调用已结算而消息仍 `RUNNING` → `PROCESSING`：正在派发工具或准备续轮；工具成败仍只由 `session_tool_calls`/Gateway 账本说话。
+
+**首流事件接线。** 默认兼容端口的 A 档、普通主循环、工具续轮、人设助手只读轮次（B 档）、子 Agent 与学习轮次现在每次真实调用都传 `onStreamEvent`，写 `first_stream_event_at`；B 档同时补 `model_calls` 行（此前默认端口直接调用 `modelPort.assist`，没有调用计量）。免费路由已有自己的包装，重复观测因 `first_stream_event_at is null` 的条件 UPDATE 成为空操作。证据写入失败只丢这一枚时间，不把成功调用改判为失败，也不吞掉业务异常。
+
+**诊断口径。** 客户端在阶段行下就地展开只读读数：提交→模型请求登记（含排队与上下文准备）、请求→首流、首流→首正文、首正文→预览可见、请求→调用结算；Worker 领取时刻为「未记录（排队与上下文准备合并计算）」，前端首次绘制为「本机未观测」。**不得把消息总耗时当作模型推理耗时**，也不混算服务端与本机时钟。
+
+**不泄露。** 响应不含提示词、上下文正文、reasoning、工具参数或凭据；`call_count` 与时间戳只用于诊断。
+
+Breaking Change: **No**——纯追加可选只读字段；旧客户端忽略即可，命令、表、权限、结算与恢复语义均不变。
+
+**证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` 追加的流式观测用例 **1/1**（`run-integration.ps1 -TestFile assist -TestNamePattern "stream observation times"`，临时集群 PASSED 并清理）核对首流、首文本、首预览、结算四枚时间落库且辅助外呼不混入；组件 `generationStage` **8/8**、`assistStage` **3/3**（阶段文案、诊断、PENDING、草稿接管、取消）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、诊断展开、窄窗无溢出、减少动效三点静止）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。

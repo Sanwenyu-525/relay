@@ -65,12 +65,13 @@ export function memorySourceRefFrom(value: unknown): RelayMemorySourceRef {
   const selectionBasis = row.selection_basis === undefined || row.selection_basis === null ? null
     : enumeration(row, "selection_basis", "memory source", selectionBases);
   const kind = enumeration(row, "kind", "memory source", sourceKinds);
-  // 0125：只有记忆有 origin；旧来源缺字段按人工确认读，非记忆来源保持 null。
+  // 0125：只有记忆有 origin。2026-11-01：缺字段读成 null（未标注），不再默认成
+  // 人工确认——旧来源记录没写下来源类别，不等于它是人工确认。
   const origin = kind !== "MEMORY" ? null
     : row.origin === "AUTO_CAPTURE" ? "AUTO_CAPTURE" as const
-      : row.origin === "HUMAN_CONFIRMED" || row.origin === undefined || row.origin === null
-        ? "HUMAN_CONFIRMED" as const
-        : (() => { throw new RelayContractError("memory source.origin 包含未知取值。"); })();
+      : row.origin === "HUMAN_CONFIRMED" ? "HUMAN_CONFIRMED" as const
+        : row.origin === undefined || row.origin === null ? null
+          : (() => { throw new RelayContractError("memory source.origin 包含未知取值。"); })();
   // DEV-0042：来源类别同样只属于记忆；旧来源缺字段按 UNKNOWN 读，不当成用户原话。
   const sourceKind = kind !== "MEMORY" ? null
     : row.source_kind === "MANUAL" || row.source_kind === "USER_STATEMENT" ||

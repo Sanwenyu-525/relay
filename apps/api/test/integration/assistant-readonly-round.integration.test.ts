@@ -343,3 +343,31 @@ test('受管根缺失时以类型化原因拒掉，不伪造连接', async () =>
     storage, modelPort: new FakeModelPort(), leaseMs: 60_000, maxMessages: 1 });
   assert.equal(outcome?.status, 'COMPLETED');
 });
+
+/**
+ * AGENT_STREAM_VISIBILITY（2026-11-01）：B 档默认兼容端口此前绕过 `model_calls`，
+ * 因此既没有调用计量，也没有首流事件。这里用真实 PG 核对补账本后每次调用都有一行，
+ * 且 `onStreamEvent` 确实写进 `first_stream_event_at`；回复正文仍由 Fake 端口给出。
+ */
+test('B path records a PRIMARY call and first stream evidence', async () => {
+  const fx = await fixture();
+  const streaming = new FakeModelPort();
+  const original = streaming.assist.bind(streaming);
+  streaming.assist = async (request) => {
+    await request.onStreamEvent?.();
+    return original(request);
+  };
+  const result = await ask(fx, '用一句话回答', streaming);
+  assert.equal(result.status, 'COMPLETED');
+  const calls = await sql<{ status: string; first_stream_event_at: Date | null;
+    purpose: string }>`
+    select c.status, c.first_stream_event_at, c.purpose
+    from model_calls c join assist_messages m on m.id = c.assist_message_id
+    where m.session_id = ${fx.sessionId} and c.kind = 'ASSIST'
+    order by c.started_at, c.id`.execute(app.db);
+  assert.equal(calls.rows.length, 1, 'B 档默认端口每次调用都应有一行调用账本');
+  assert.equal(calls.rows[0]?.status, 'COMPLETED');
+  assert.equal(calls.rows[0]?.purpose, 'PRIMARY');
+  assert.ok(calls.rows[0]?.first_stream_event_at instanceof Date,
+    '首流观测必须写进调用账本');
+});

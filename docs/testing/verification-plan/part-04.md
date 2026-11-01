@@ -81,6 +81,7 @@ SW-03 的判据是行数与轮次：若历史没有从已落库行重建，Fake 
 | CR-04 | 检查 ID 来自同 Run 冻结清单，任务不提供 ID 或修复值；生产 `runOneCommand` 领取目标 Run，真实 Provider 据失败输出中的随机值读取、修改、复检；官方 Saver 保存失败后继与 HUMAN 门，基线/实际 SHA、request id/用量、重放计数可核对 | `real-model-tool-loop.integration.test.ts` opt-in 修复探针；默认未配置时跳过 |
 | CR-05 | 失权后的真实检查结果为 UNKNOWN，工具行保持 PREPARED，不进入模型历史；旧 SETTLED＋UNKNOWN 同样被权威 Operation 阻挡 | `tool-loop.integration.test.ts` 未知结果与旧数据反例 |
 | CR-06 | 超时结算后重放仍是 FAILED，原 claim QUARANTINED，不新增 Invocation、不因 SETTLED 走成功路由 | 同上超时回放反例 |
+| CR-07 | 生产图真实检查退出 1→按基线修正→同一检查退出 0 后，原会话只读事实携带两次确切回执与退出码，不注入原始日志、不重放动作；旧 SETTLED 的 Operation 变为 UNKNOWN 时隐藏旧退出码，不能冒充业务验收通过 | `agent-check-graph.integration.test.ts`；关联原消息由测试受控登记，修正仍走生产图与真实 CLI/磁盘 |
 
 2026-10-13 顺序接续：`run-prompts.test.ts` 约束工具 DRAFT 不用固定的读取顺序覆盖冻结任务的检查优先要求，并保持读写能力和外部数据边界；两条工具路由模板版本为 `1.0.1`。CR-04 的原顺序、真实退出码/输出、磁盘保留、HUMAN、Saver 与重放断言不降低；检查清单预期在委托前独立实测入口程序/脚本，校验其实际 SHA 后纳入完整 `trust_basis` 比较，以匹配当前检查信任协议。基础复跑只取正常功能与失败修正路径，不增加压力或复杂竞态用例。
 

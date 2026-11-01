@@ -1241,7 +1241,7 @@ export const AvailableConversationDiffSchema = Type.Object({
 export const UnavailableConversationDiffSchema = Type.Object({
   available: Type.Literal(false),
   reason: Type.Union([
-    Type.Literal('NO_RESOURCE'), Type.Literal('NO_BASELINE'),
+    Type.Literal('NO_RESOURCE'), Type.Literal('NO_BASELINE'), Type.Literal('NO_SESSION_WRITES'),
     Type.Literal('ROOT_NOT_GIT'), Type.Literal('RESOURCE_UNAVAILABLE'),
   ]),
 }, strict);

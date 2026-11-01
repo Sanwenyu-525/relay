@@ -14,7 +14,7 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -410,9 +410,10 @@ test.describe("会话顶栏单行密度", () => {
     await expect(page.getByTestId("collab-conversation-inspector-toggle")).toHaveAttribute("aria-label", "展开工作详情");
   });
 
-  // 2026-10-17 用户指令「文字被顶栏遮盖的时候要有渐变效果」+ 接续「被未选择目录这一行遮盖时也要有」：
-  // 上下两条边同一套处理，都只在真的有内容被切走时存在；顺带锁住回到最新键是整圆而不是竖胶囊。
-  test("正文滚过顶栏下缘时渐隐，停在顶部时不绘制；底缘同一套，回底键是圆", async ({ page }) => {
+  // 2026-10-31 UI-08 用户指令：聊天区不再有横穿阅读区域的阴影/渐变带。
+  // 这里锁住三件事：上下缘的 ::before/::after 不再绘制任何内容与渐变；外壳自身没有投影；
+  // 「回到最新」键仍在、仍是整圆，滚动位置变化不依赖任何视觉特效。
+  test("聊天区没有上下渐隐带与外壳投影；回到最新键仍是整圆", async ({ page }) => {
     await installRoutes(page, 12);
     await page.goto(`/agent?session=${sessionId}`);
     await connect(page);
@@ -420,54 +421,54 @@ test.describe("会话顶栏单行密度", () => {
     await expect(toolbar).toBeVisible({ timeout: 20_000 });
     const transcript = page.locator(".agent-chat-transcript");
     await expect(transcript).toBeVisible();
-    const fadeOpacity = () => page.evaluate(() => {
+    const chrome = () => page.evaluate(() => {
       const shell = document.querySelector<HTMLElement>(".agent-chat-transcript-shell")!;
       const top = getComputedStyle(shell, "::before");
       const bottom = getComputedStyle(shell, "::after");
       const latest = document.querySelector<HTMLElement>('[data-testid="assist-latest"]');
       const box = latest?.getBoundingClientRect();
-      return { opacity: Number.parseFloat(top.opacity), height: top.height,
-        pointerEvents: top.pointerEvents, attr: shell.getAttribute("data-top-fade"),
-        bottomOpacity: Number.parseFloat(bottom.opacity), bottomHeight: bottom.height,
-        bottomPointerEvents: bottom.pointerEvents, bottomAttr: shell.getAttribute("data-bottom-fade"),
+      return { topContent: top.content, topBackground: top.backgroundImage,
+        bottomContent: bottom.content, bottomBackground: bottom.backgroundImage,
+        shellShadow: getComputedStyle(shell).boxShadow,
+        attr: shell.getAttribute("data-top-fade"), bottomAttr: shell.getAttribute("data-bottom-fade"),
+        latestVisible: latest !== null && !latest.hidden,
         latestWidth: box?.width ?? null, latestHeight: box?.height ?? null,
         latestRadius: latest === null ? null : Number.parseFloat(getComputedStyle(latest).borderTopLeftRadius),
-        // 渐隐带不得把中栏变成第二个滚动容器（工作台 §31.1 单一滚动 Owner）。
+        // 聊天区仍只有一个滚动 Owner（工作台 §31.1）。
         centerScrolls: (() => {
           const center = document.querySelector<HTMLElement>(".collab-center")!;
           return center.scrollHeight > center.clientHeight + 1;
         })() };
     });
-    // 长会话打开即停在最新消息（应用自动跟随），顶部必然有正文被上缘切走 → 遮罩在。
-    await expect.poll(async () => (await fadeOpacity()).opacity, { timeout: 5_000 }).toBe(1);
-    expect((await fadeOpacity()).attr).toBe("on");
-    // 停在底部时下缘没有内容被切走：底缘遮罩不画，否则最后一条消息永久压着一层渐变。
-    const atLatest = await fadeOpacity();
-    expect(atLatest.bottomOpacity).toBe(0);
-    expect(atLatest.bottomAttr).toBeNull();
-    await page.locator(".collab-center").screenshot({ path: "results/conversation-toolbar-fade.png" });
-    // 滚回最顶：第一条消息之上没有内容，遮罩撤掉，否则它读起来像渲染坏了。
+    const atOpen = await chrome();
+    // 渐隐带已移除：伪元素没有内容，也没有任何渐变背景；外壳不画投影。
+    expect(atOpen.topContent).toBe("none");
+    expect(atOpen.topBackground).toBe("none");
+    expect(atOpen.bottomContent).toBe("none");
+    expect(atOpen.bottomBackground).toBe("none");
+    expect(atOpen.shellShadow).toBe("none");
+    expect(atOpen.attr).toBeNull();
+    expect(atOpen.bottomAttr).toBeNull();
+    expect(atOpen.centerScrolls).toBe(false);
+    await page.locator(".collab-center").screenshot({ path: "results/conversation-chat-flat.png" });
+    // 滚回最顶：离开最新位置就出现「回到最新」键；起身不得依赖任何遮罩才能看见。
     await transcript.evaluate((element) => { element.scrollTop = 0; });
-    await expect.poll(async () => (await fadeOpacity()).opacity, { timeout: 5_000 }).toBe(0);
-    const top = await fadeOpacity();
-    expect(top.attr).toBeNull();
-    expect(top.height).toBe("32px");
-    // 遮罩不吃指针：它盖在滚动视口上缘，不能挡住下面的消息与时间线轨道。
-    expect(top.pointerEvents).toBe("none");
-    // 中栏自己仍不滚动：渐变不给它添第二个滚动 Owner（工作台 §31.1）。
-    expect(top.centerScrolls).toBe(false);
-    // 底缘同一档：最顶时正文一定被输入区上方那行目录细条切走 → 遮罩在、高度与上缘同源、同样不吃指针。
-    expect(top.bottomAttr).toBe("on");
-    expect(top.bottomOpacity).toBe(1);
-    expect(top.bottomHeight).toBe(top.height);
-    expect(top.bottomPointerEvents).toBe("none");
+    await expect(page.getByTestId("assist-latest")).toBeVisible({ timeout: 5_000 });
+    const away = await chrome();
+    expect(away.attr).toBeNull();
+    expect(away.bottomAttr).toBeNull();
+    expect(away.topContent).toBe("none");
     // 回到最新键：宽高同源才是整圆（此前只写 min-height，全局 .icon-button 的 40px 高度仍在，读成竖胶囊）。
-    expect(top.latestWidth).not.toBeNull();
-    expect(top.latestHeight).toBe(top.latestWidth);
-    expect(top.latestRadius!).toBeGreaterThanOrEqual(top.latestWidth! / 2);
-    await page.locator(".collab-center").screenshot({ path: "results/conversation-toolbar-top.png" });
-    await transcript.evaluate((element) => { element.scrollTop = 320; });
-    await expect.poll(async () => (await fadeOpacity()).opacity, { timeout: 5_000 }).toBe(1);
+    expect(away.latestWidth).not.toBeNull();
+    expect(away.latestHeight).toBe(away.latestWidth);
+    expect(away.latestRadius!).toBeGreaterThanOrEqual(away.latestWidth! / 2);
+    // 点一下回到最新：键收起，滚动位置在底部。
+    await page.getByTestId("assist-latest").click();
+    await expect(page.getByTestId("assist-latest")).toHaveCount(0);
+    const remaining = await transcript.evaluate((element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight);
+    expect(remaining).toBeLessThan(32);
+    await page.locator(".collab-center").screenshot({ path: "results/conversation-chat-flat-latest.png" });
   });
 
   // 2026-10-18 用户指令：顶栏右翼不再有「新建会话」，任务归属也一样。

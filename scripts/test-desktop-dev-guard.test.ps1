@@ -51,8 +51,7 @@ try {
   $function = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq 'Invoke-Pnpm' },$true)
   . ([scriptblock]::Create($function.Extent.Text))
   function Invoke-TestPnpmExit { $global:LASTEXITCODE = $script:mockExitCode }
-  $node = 'Invoke-TestPnpmExit'
-  $corepack = 'fixture-corepack'
+  $pnpmRunner = @{ File = 'Invoke-TestPnpmExit'; Prefix = @('fixture-corepack') }
   $originalDirectory = (Get-Location).Path
   foreach ($code in @(23, 7)) {
     $script:mockExitCode = $code

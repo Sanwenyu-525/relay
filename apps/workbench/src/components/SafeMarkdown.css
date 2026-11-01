@@ -6,19 +6,32 @@
   overflow-x: auto;
   overscroll-behavior-inline: contain;
 }
+/* 2026-11-01 E2E-ALL-01（用户实机截图：表格把 list_directory、SESSION_TOOL_BUDGET_EXHAUSTED
+   这类标识符从单词中间劈成两行）。两处同时改，缺一不可：
+   1) overflow-wrap: anywhere 会把「最小可容纳宽度」算到单个字符，于是表格永远认为自己
+      挤得进任意窄列，被 width: 100% 压扁后只能从标识符中间断行。break-word 不参与内在宽度
+      计算：长标识符按整体计入，单元格撑不开时是表格变宽，而不是字变碎。
+   2) 因此表格宽度改成「至少铺满阅读列，按需变宽」，多出来的宽度交给下面那层
+      overflow-x: auto，横向滚动只发生在这一张表内，不外溢到页面。
+   中文换行不受影响：CJK 的断行由 line-break 规则决定，与 overflow-wrap 无关，
+   所以不加 white-space: nowrap，也不降任何字号。 */
 .markdown-preview__table {
-  width: 100%;
+  width: auto;
+  min-width: 100%;
   border-collapse: collapse;
   font: inherit;
   line-height: var(--relay-font-lineHeight-ui);
 }
 .markdown-preview__table th,
 .markdown-preview__table td {
-  min-width: calc(6 * var(--relay-font-size-body));
+  /* 单元格下限从 6 个正文字符提到 12 个：表格一旦需要横向滚动，每一列都会退到自己的
+     最小宽度，6 字宽的「说明」列会被压成一条竖排丝带（一行两三个汉字，行高被撑到几百像素）。
+     12 字是中文还能成句读完的最短一栏；不滚动时表格本来就铺满阅读列，这条下限不参与排版。 */
+  min-width: calc(12 * var(--relay-font-size-body));
   padding: var(--relay-space-3) var(--relay-space-4);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .markdown-preview__table th {
   font-weight: var(--relay-font-weight-semibold);

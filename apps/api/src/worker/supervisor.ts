@@ -53,6 +53,27 @@ export async function recoverStoppedDesktopLaunch(input: {
   return { requeuedRunIds, blockedRunIds };
 }
 
+/**
+ * 常驻 Supervisor 看到过期领取时的唯一重入入口：只有 `run_worker_fences` 中的持久事实
+ * 才能证明旧 Worker 已停止（例如上一次恢复已提交 fence、但在重投之前退出）。
+ * 租约到期或 Supervisor 自身重启都不是停机证明，这两者只能产生人可见的滞留通知。
+ */
+export async function recoverStrandedFencedClaim(input: {
+  db: DbExecutor; dataRoot: string; runId: string; workerId: string | null;
+}): Promise<'REQUEUED' | 'BLOCKED' | 'SKIPPED' | 'NO_STOP_EVIDENCE'> {
+  if (input.workerId === null) return 'NO_STOP_EVIDENCE';
+  const repositories = createRepositories(input.db);
+  const run = await repositories.runs.readRun(input.runId);
+  // worker_id 非空说明当前 Run 仍归某个 Worker（可能就是旧进程本人），不能按租约抢占。
+  if (run === undefined || run.worker_id !== null) return 'NO_STOP_EVIDENCE';
+  const evidence = await repositories.recovery
+    .readWorkerFenceEvidence(run.id, input.workerId, run.worker_epoch);
+  if (evidence === undefined) return 'NO_STOP_EVIDENCE';
+  const invocation = await repositories.dispatch.readInvocation(run.id);
+  if (invocation === undefined) return 'NO_STOP_EVIDENCE';
+  return recoverStoppedClaim(input.db, input.dataRoot, invocation, evidence);
+}
+
 async function recoverStoppedClaim(db: DbExecutor, dataRoot: string, claim: RunInvocationRow,
   evidence: string, desktop?: { launchId: string; stopEvidence: DesktopStopEvidence },
 ): Promise<'REQUEUED' | 'BLOCKED' | 'SKIPPED'> {

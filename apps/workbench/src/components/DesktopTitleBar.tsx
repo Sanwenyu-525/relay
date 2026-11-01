@@ -64,7 +64,7 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
   const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
 
   return <>
-    <div className="desktop-titlebar" data-testid="desktop-titlebar">
+    <div className="desktop-titlebar" data-testid="desktop-titlebar" data-source-mode={connection.mode}>
       {/* 常用操作回到标题带左侧：这一组属于常驻窗口外壳，应用顶栏不再重复承载。
           连接中与服务失败页没有可用的应用内路由与命令面板，因此不渲染。 */}
       {available && <WorkbenchActions onSearch={onSearch} />}
@@ -76,10 +76,12 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
         <time className="desktop-titlebar__date" dateTime={date} title={`界面时区：${timeZone}`}>{date}　{weekday}</time>
         <Link className="icon-button" to="/inbox" aria-label="打开任务收件箱" title="任务收件箱"
           data-testid="inbox-open"><Inbox aria-hidden="true" /></Link>
-        <button className={`data-source-button${connection.mode === "live" ? " data-source-button--live" : ""}`} type="button"
+        {/* 桌面版的数据来源由宿主的 desktop_bootstrap 决定，没有供用户填写的地址、Workspace 或令牌，
+            因此不渲染手动连接入口（含其 hover/focus/tooltip）；浏览器开发预览仍需要它。 */}
+        {!desktop && <button className={`data-source-button${connection.mode === "live" ? " data-source-button--live" : ""}`} type="button"
           data-testid="relay-connection-open" aria-label={`数据来源：${dataSourceLabel}，打开连接设置`} onClick={() => setConnectionOpen(true)}>
           <Link2 aria-hidden="true" /><span className="visually-hidden">{dataSourceLabel}</span>
-        </button>
+        </button>}
         {connection.mode === "live" && connection.client && <InterventionNotifications
           key={connection.epoch} client={connection.client} />}
       </div>}
@@ -91,6 +93,6 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
         <button className="desktop-titlebar__button desktop-titlebar__button--close" type="button" aria-label="关闭窗口" onClick={() => void run(() => current.close())}><X aria-hidden="true" /></button>
       </div>}
     </div>
-    <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />
+    {!desktop && <RelayConnectionDialog open={connectionOpen} onClose={() => setConnectionOpen(false)} />}
   </>;
 }

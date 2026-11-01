@@ -56,6 +56,28 @@ export function todoScopeKey(userMessageId: string | null | undefined): string {
     ? TODO_SCOPE_FALLBACK : `turn:${userMessageId}`;
 }
 
+/**
+ * 「换任务」的显式声明（ADR-038，2026-10-31 第六轮）。
+ *
+ * 归属不再由「上一份清单是否完成」推断，因此**必须**有一种用户能说清楚的换任务方式。
+ * 两种写法解析到同一件事：
+ *   * 正文前缀 `新任务：` / `新任务:`（纯文本，任何时候都能用，不经过命令解析）；
+ *   * 行首命令 `/newtask`（与 `/plan`、`/goal` 同一形态：命令决定这一轮怎么受理，
+ *     正文是命令后面的内容）。
+ *
+ * 后者必须在消息准入里先剥掉再进命令解析——`/newtask` 不是登记过的系统命令，
+ * 不剥会被当成未知命令拒掉（2026-10-31 实测：注释里写了这个前缀，但它从来没生效）。
+ * 剥掉后正文里只剩用户真正要说的话，服务端因此按「换任务」受理，而不是把命令当正文发给模型。
+ */
+export const NEW_TASK_TEXT_PREFIX = /^\s*新任务[:：]/iu;
+
+export function parseNewTaskPrefix(content: string): { readonly rest: string } | null {
+  const trimmed = content.trim();
+  const match = /^\/newtask(?=\s|$)/iu.exec(trimmed);
+  if (match === null) return null;
+  return { rest: trimmed.slice(match[0].length).trim() };
+}
+
 export interface TodoSnapshot {
   readonly sessionId: string;
   /** 这份清单属于哪个工作轮次；读错轮次不等于「没有清单」以外的任何事实。 */

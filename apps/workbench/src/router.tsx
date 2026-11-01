@@ -45,6 +45,15 @@ const ScenarioLabView: ComponentType = import.meta.env.DEV
   ? lazy(() => import("./dev/ScenarioLabView"))
   : () => null;
 
+/**
+ * Aurora Glass 液态玻璃主题原型（UI-AURORA-01）：与场景实验室同一条构建期隔离，
+ * 同样不把 `lazy()` 提成条件外的顶层常量。它只在开发路由里可达，不接入正式主题、
+ * 不进入正式设置的外观选项，也不写任何展示偏好。
+ */
+const AuroraGlassLabView: ComponentType = import.meta.env.DEV
+  ? lazy(() => import("./dev/AuroraGlassLabView"))
+  : () => null;
+
 /** 与归档 Vue router.ts 的 11 条记录一一对应，query 子页由对应组件处理。 */
 export const workbenchRoutes: RouteObject[] = [{
   path: "/",
@@ -85,7 +94,10 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "tasks/:id", element: <TaskSkillView /> },
     ...(import.meta.env.DEV ? [{ path: "__dev/assist-scenarios", element: <Suspense
       fallback={createElement("p", { className: "loading-text", role: "status" }, "正在载入场景实验室…")}>
-      <ScenarioLabView /></Suspense> }] : []),
+      <ScenarioLabView /></Suspense> },
+      { path: "__dev/aurora-glass", element: <Suspense
+        fallback={createElement("p", { className: "loading-text", role: "status" }, "正在载入 Aurora Glass 原型…")}>
+        <AuroraGlassLabView /></Suspense> }] : []),
     { path: "*", element: <UnsupportedView /> }
   ]
 }];

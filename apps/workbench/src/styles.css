@@ -1167,6 +1167,50 @@ html[data-motion="off"] .recent-work-selection { animation: none; }
 }
 .text-button.recent-work-selection-danger { color: var(--relay-color-status-danger-text); }
 
+/* 批量删除的结果区（2026-10-31）：顶层一行结论，每类原因只写一次，
+   逐条会话与技术细节收进详情区。整块限高并内部滚动——一段重复的诊断文字
+   会把这一窄列撑成长页面（2026-10-31 用户指认「侧栏被错误文字撑开」）。 */
+.recent-work-batch-report {
+  display: grid;
+  gap: var(--relay-space-1);
+  max-height: 11rem;
+  overflow-y: auto;
+}
+.recent-work-batch-summary {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  color: var(--relay-color-text-primary);
+}
+.recent-work-batch-line {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-status-danger-text);
+}
+.recent-work-batch-detail {
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.recent-work-batch-detail > summary { cursor: pointer; }
+.recent-work-batch-detail > ul {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: var(--relay-space-1) 0 0;
+  padding-inline-start: var(--relay-space-3);
+  max-height: 6rem;
+  overflow-y: auto;
+}
+.recent-work-batch-detail > ul > li {
+  display: flex;
+  gap: var(--relay-space-1);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.recent-work-batch-detail-line {
+  word-break: break-all;
+}
+
 /* 会话行拖拽改序（2026-10-17，工作台 §28.1）：只有「目标」「工作区（目录）」里未归档的会话行可拖。
    落位横线绝对定位在这一列的 padding box 上（.recent-work-list 因此是它的定位上下文），
    画在行与行之间那道 space.0.5 的缝里且高度同档；它不占网格轨道，所以松手之前整列不会
@@ -1359,7 +1403,7 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   text-align: start;
 }
 .recent-work-row-action > svg { flex: none; width: var(--relay-font-size-body); height: var(--relay-font-size-body); }
-.recent-work-row-action:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
+.recent-work-row-action:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--relay-color-selection-hover); }
 /* 左对齐与黑色文字必须抬到 (0,2,0) 才落地（2026-10-17 用户指认「选项文字居中、发绿」）：
    共享基座 `.text-button` 把 `justify-content: center` 与 `color: color.action.text`（森林绿）
    排在本文件**之后**、与单类同为 (0,1,0)，上面那条单类的 flex-start 因此从未生效
@@ -1373,7 +1417,8 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 /* 归档是唯一带不可逆读感的动作，用状态色而不是强调色标出，但仍不做大红按钮。
    (0,3,0) 压得过上面的基础色；禁用态单独收回 disabled 色，提交中的归档不会读成红色可点。 */
 .text-button.recent-work-row-action.recent-work-row-action--danger { color: var(--relay-color-status-danger-text); }
-.text-button.recent-work-row-action:disabled { color: var(--relay-color-disabled-text); }
+.text-button.recent-work-row-action:disabled,
+.text-button.recent-work-row-action[aria-disabled="true"] { color: var(--relay-color-disabled-text); }
 /* 分组细线：置顶/重命名与归档之间一刀切开（参考菜单的两组读法）。与浮层边框同色，
    上下各让一档 space.1——面板 gap 之外再给一刀，组间才读得出「两组」而不是「一排」。
    它是 div 而不是 <button>：不吃焦点、不参与命令，只作视觉分隔。 */
@@ -1468,6 +1513,31 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   min-height: var(--relay-control-height-compact);
   padding: 0 var(--relay-space-2);
   font-size: var(--relay-font-size-meta);
+}
+
+/* 删除结果（2026-10-31）：确认之后只有终态。
+   阻断原因逐条列出，每条配一句真正能做的动作；技术细节收进 <details>，
+   原始 request_id 只在展开后可见、可复制，不进主提示句。 */
+.recent-work-delete-result {
+  display: grid;
+  gap: var(--relay-space-1);
+  max-height: 9rem;
+  overflow-y: auto;
+}
+.recent-work-delete-result .recent-work-confirm-text {
+  color: var(--relay-color-text-secondary);
+}
+.recent-work-delete-detail {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.recent-work-delete-detail > summary {
+  cursor: pointer;
+}
+.recent-work-delete-detail > p {
+  margin: var(--relay-space-1) 0 0;
+  word-break: break-all;
 }
 
 .mobile-navigation { display: grid; gap: var(--relay-space-4); min-height: 0; }

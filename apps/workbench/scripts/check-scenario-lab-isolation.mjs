@@ -14,6 +14,10 @@ import { fileURLToPath } from "node:url";
  *
  * 用法：`node scripts/check-scenario-lab-isolation.mjs`（会自己起两次 vite 构建，几分钟）。
  * 退出码非 0 表示隔离不成立；证据落在 `results/scenario-lab/isolation.json`。
+ *
+ * 覆盖两个开发期表面：AI 回复场景实验室，以及 Aurora Glass 液态玻璃原型（UI-AURORA-01）。
+ * 两者用的是同一条构建期隔离（DEV 条件里的 `lazy()`），所以一对构建足够同时咬住正反两面；
+ * 命中按 `surface` 分开记账，任一表面在生产产物里出现都是失败。
  */
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,6 +28,14 @@ const evidenceDir = join(appDir, "results", "scenario-lab");
 /** 只允许出现在开发产物里的串：路径、组件、外壳类名、控制器入口、预览挂载点。 */
 const LAB_MARKERS = ["assist-scenarios", "ScenarioLabView", "scenario-lab", "scenario-run-all",
   "data-scenario-preview", "AI 回复场景实验室", "ScenarioRunner"];
+
+/**
+ * Aurora Glass 液态玻璃原型（UI-AURORA-01）走的是同一条构建期隔离，因此复用这一对构建来验。
+ * 单独再跑一支脚本要多起两次完整构建（几分钟 + 两份 dist），而这里的正负对照完全同形：
+ * 开发产物必须命中，生产产物必须一个字都没有。命中项按 `surface` 分开记账，不混成一批。
+ */
+const AURORA_MARKERS = ["aurora-glass", "AuroraGlassLabView", "aurora-lab",
+  "data-aurora-preview", "data-aurora-skin", "aurora-ambient"];
 
 /** 产品自己的串：两次构建都必须有，用来确认扫到的不是空产物。 */
 const PRODUCT_MARKER = "relay.workbench.activityDensity";
@@ -47,8 +59,10 @@ function scan(dir) {
   let productFound = false;
   for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
-    for (const marker of LAB_MARKERS) {
-      if (text.includes(marker)) hits.push({ marker, file: relative(appDir, file) });
+    for (const [surface, markers] of [["scenario-lab", LAB_MARKERS], ["aurora-glass", AURORA_MARKERS]]) {
+      for (const marker of markers) {
+        if (text.includes(marker)) hits.push({ surface, marker, file: relative(appDir, file) });
+      }
     }
     if (text.includes(PRODUCT_MARKER)) productFound = true;
   }
@@ -88,19 +102,25 @@ if (!dev.productFound) problems.push("开发产物里连产品自己的串都没
 if (!dev.hits.some((hit) => hit.marker === "assist-scenarios")) {
   problems.push("开发产物里搜不到 `assist-scenarios` 这条路由：开发构建没真的带上实验室，反向对照是空的，生产「搜不到」不能算结论");
 }
+if (!dev.hits.some((hit) => hit.marker === "aurora-glass")) {
+  problems.push("开发产物里搜不到 `aurora-glass` 这条路由：Aurora 原型的反向对照是空的，生产「搜不到」不能算结论");
+}
 if (!prod.productFound) problems.push("生产产物里找不到产品自己的串，说明这份产物本身不完整");
-for (const hit of prod.hits) problems.push(`生产产物仍然带着实验室入口：${hit.marker} ← ${hit.file}`);
+for (const hit of prod.hits) {
+  problems.push(`生产产物仍然带着开发工具入口：${hit.marker} ← ${hit.file}`);
+}
 
 const evidence = { checkedAt: new Date().toISOString(), productMarker: PRODUCT_MARKER,
-  labMarkers: LAB_MARKERS, dev, prod, problems };
+  labMarkers: LAB_MARKERS, auroraMarkers: AURORA_MARKERS, dev, prod, problems };
 fs.mkdirSync(evidenceDir, { recursive: true });
 fs.writeFileSync(join(evidenceDir, "isolation.json"), JSON.stringify(evidence, null, 2), "utf8");
 
-console.log(`[isolation] 开发构建 ${dev.fileCount} 个文件，命中实验室串 ${dev.hits.length} 处`);
-console.log(`[isolation] 生产构建 ${prod.fileCount} 个文件，命中实验室串 ${prod.hits.length} 处`);
+const count = (build, surface) => build.hits.filter((hit) => hit.surface === surface).length;
+console.log(`[isolation] 开发构建 ${dev.fileCount} 个文件，命中实验室串 ${count(dev, "scenario-lab")} 处、Aurora 原型串 ${count(dev, "aurora-glass")} 处`);
+console.log(`[isolation] 生产构建 ${prod.fileCount} 个文件，命中实验室串 ${count(prod, "scenario-lab")} 处、Aurora 原型串 ${count(prod, "aurora-glass")} 处`);
 if (problems.length > 0) {
   for (const problem of problems) console.error(`[isolation] ${problem}`);
   console.error(`[isolation] 隔离不成立。证据：${join(evidenceDir, "isolation.json")}`);
   process.exit(1);
 }
-console.log(`[isolation] 隔离成立：实验室只存在于开发构建。证据：${join(evidenceDir, "isolation.json")}`);
+console.log(`[isolation] 隔离成立：场景实验室与 Aurora Glass 原型都只存在于开发构建。证据：${join(evidenceDir, "isolation.json")}`);

@@ -617,6 +617,12 @@ test('G04: supervisor crash does not forge stop evidence or reclaim its former c
     `.execute(app.db);
     assert.deepEqual(rows.rows[0], { outbox_status: 'CLAIMED',
       invocation_status: 'ACTIVE', epoch: 1n, stop_evidence: null });
+    // 常驻 Supervisor 把滞留领取写成一条人可见事实；重启后的再次扫描不重复写入。
+    const notices = await sql<{ count: bigint }>`
+      select count(*)::bigint as count from activity_records
+      where event_type = 'RUN_RECOVERY_REQUIRED' and fact_refs ->> 'run_id' = ${runId}
+    `.execute(app.db);
+    assert.equal(notices.rows[0]?.count, 1n);
   } finally {
     first.kill('SIGKILL');
     if (workerPid !== undefined) {

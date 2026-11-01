@@ -11,10 +11,10 @@ import { RelayApiError, type RelayApiClient, type RelayConversationDiff, type Re
  * 其他程序、其他会话的同期修改不计入这条入口（目录级总变化是另一件事，不在这里冒充）。
  * 生成中的预览不进这里。
  *
- * 状态必须彼此可辨（CD-17）：统计中 / 空净变化 / 非 Git 根 / 缺基线 / 目录不可读（失权）/
- * 部分不可统计 / 刷新失败。刷新失败保留上次可信值并标「截至…」，未知一律不显示成 `+0 −0`。
- * 「完整且空」与「读取中」不再占位：入口整行不出现（2026-10-24 用户指令「没有 git diff 的时候
- * 不显示这个红框部分」），其余状态照旧可见——不可用与失败本身就是要说的事，不能靠消失交代。
+ * 状态必须彼此可辨（CD-17）：统计中 / 空净变化 / 非 Git 根 / 缺基线 / 本会话没写过文件 /
+ * 目录不可读（失权）/ 部分不可统计 / 刷新失败。刷新失败保留上次可信值并标「截至…」，未知一律不显示成 `+0 −0`。
+ * 「完整且空」「本会话没写过文件」与「读取中」都不占位：入口整行不出现（2026-10-24 与 2026-11-01 用户指令），
+ * 其余状态照旧可见——不可用与失败本身就是要说的事，不能靠消失交代。
  * 「部分不可统计」必须当场说清是哪一类不完整（扫描覆盖不足 vs 已发现文件读不出行数）以及条数，
  * 入口行给成因短语、展开面板逐条解释，不靠隐藏提示交代（2026-10-18 用户指令）。
  * 展开的列表与正文都取自同一份可信读取（CD-15/CD-18）：统计每次成功刷新都让已展开
@@ -25,6 +25,9 @@ import { RelayApiError, type RelayApiClient, type RelayConversationDiff, type Re
 const UNAVAILABLE_TEXT: Record<string, string> = {
   NO_RESOURCE: "本次对话 · 未绑定工作目录，暂不统计",
   NO_BASELINE: "本次对话 · 缺少会话起点",
+  // 会话写过零个文件：没有需要起点来核对的东西，因此这一行不占位（P1-3）。
+  // 文案只在专门看统计的内联形态里才可能露面。
+  NO_SESSION_WRITES: "本次对话 · 这个会话没有写入过文件",
   ROOT_NOT_GIT: "本次对话 · 该目录不是 Git 根，首版不统计",
   RESOURCE_UNAVAILABLE: "本次对话 · 目录当前不可读（权限或位置变化）",
 };
@@ -231,11 +234,18 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
   /* 没有 git diff 时这一行整块不出现（2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」）：
      完整且空的净变化没有内容可说，展开也只有一句「暂无文件变化」，留着只是输入卡上方的占位噪声。
      读取中也先不占位——否则每打开一次会话都会先闪一句「正在统计…」再消失，输入卡跟着上下跳一次。
-     有变化、有不可用成因（缺起点／非 Git 根／失权）、读取失败仍然出现：那些状态本身就是信息，
+     「缺少会话起点」现在也只有写过文件才说（2026-11-01 P1-3 用户指令）：服务端把「本会话有写入但起点
+     没建立」（NO_BASELINE，是真缺口，给恢复入口）和「本会话一个文件都没写过」（NO_SESSION_WRITES，
+     没有任何可核对的东西）分成两个原因，后者按空净变化一样不占位。
+     有变化、有其它不可用成因（缺起点／非 Git 根／失权）、读取失败仍然出现：那些状态本身就是信息，
      不能靠「消失」交代（CD-17）。内联形态（工作详情「变更」页签）是专门来看统计的地方，不适用。 */
+  const noWritesToReport = diff !== null && diff.available === false
+    && diff.reason === "NO_SESSION_WRITES";
   const nothingToReport = !inline && (diff === null
     ? error === null
-    : changed !== null && changed.totalFiles === 0 && !incomplete);
+    : changed !== null
+      ? changed.totalFiles === 0 && !incomplete
+      : noWritesToReport);
   if (nothingToReport) return null;
 
   let line: string;

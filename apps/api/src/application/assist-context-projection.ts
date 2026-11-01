@@ -1,9 +1,13 @@
 import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import { createRepositories } from './unit-of-work.js';
+import { createRepositories, type Repositories } from './unit-of-work.js';
 import { readContextUsageSnapshot, type ContextUsageSnapshot } from './assist-context-usage.js';
+import { planAssistModelBudget } from './assist-model-snapshot.js';
+import { readModelPortConfig, readOpenRouterModelPortConfig } from
+  '../workflow/model-port-config.js';
 import type { AssistContextUsageCallRow } from '../assist/assist-repository.js';
+import type { AssistSessionRow } from '../infrastructure/database-schema.js';
 import { resourceNotFound } from './domain-error.js';
 
 /**
@@ -25,6 +29,20 @@ import { resourceNotFound } from './domain-error.js';
 export interface SessionContextUsageProjection {
   readonly session_id: string;
   readonly budget: { readonly tokens: number; readonly revision: string };
+  /**
+   * 下一次真实调用会**申请**多少预算（2026-10-31）。
+   *
+   * 它与「当前档位」不是同一个数：冻结时还要按已知的 Provider 窗口截断。这里用与
+   * 冻结完全相同的 `planAssistModelBudget` 计算，前端不自己取 min，也不拿历史值冒充。
+   * 窗口未知时如实给出 `window_source: 'UNKNOWN'`——那表示「会按档位申请」，不表示
+   * Provider 一定装得下。模型选择不可用（配置读不到、目录里没有这个模型）时为 null。
+   */
+  readonly next_call: {
+    readonly reservation_tokens: number;
+    readonly context_budget_tokens: number;
+    readonly provider_window_tokens: number | null;
+    readonly window_source: 'MODEL_CATALOG' | 'UNKNOWN';
+  } | null;
   readonly last_call: {
     /** 这份读数属于哪一次调用；`MESSAGE` 表示退回消息行上的用量（旧数据没有调用行）。 */
     readonly source: 'MODEL_CALL' | 'MESSAGE';
@@ -46,7 +64,7 @@ export interface SessionContextUsageProjection {
 }
 
 export async function readSessionContextUsage(db: DbExecutor, workspaceId: string,
-  sessionId: string): Promise<SessionContextUsageProjection> {
+  sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<SessionContextUsageProjection> {
   const r = createRepositories(db);
   const session = await r.assist.readSession(sessionId);
   if (session?.workspace_id !== workspaceId) throw resourceNotFound('Assist session');
@@ -55,7 +73,35 @@ export async function readSessionContextUsage(db: DbExecutor, workspaceId: strin
   return { session_id: session.id,
     budget: { tokens: session.context_budget_tokens,
       revision: session.context_budget_revision.toString() },
+    next_call: await readNextCallBudget(r, session, env),
     last_call: lastCall };
+}
+
+/**
+ * 下一次调用的申请预算。
+ *
+ * 只读，不触发目录同步：下次调用真能不能成立由冻结那一刻决定，这里只回答「按现在的
+ * 档位与已知窗口，会申请多少」。读不到配置或模型目录里没有这一条时返回 null——不拿
+ * 档位冒充一个可执行的结果。
+ */
+async function readNextCallBudget(r: Repositories, session: AssistSessionRow,
+  env: NodeJS.ProcessEnv): Promise<SessionContextUsageProjection['next_call']> {
+  const tokens = session.context_budget_tokens;
+  const selection = await r.modelSelection.readForSession(session.id);
+  const base = (reservation: number, window: number | null) => ({
+    reservation_tokens: reservation, context_budget_tokens: tokens,
+    provider_window_tokens: window,
+    window_source: window === null ? 'UNKNOWN' as const : 'MODEL_CATALOG' as const });
+  if (selection === undefined || selection.connection === 'default') {
+    const config = readModelPortConfig(env);
+    if (config === undefined) return null;
+    return base(planAssistModelBudget(config, tokens, null).callReservationTokens, null);
+  }
+  const entry = await r.modelCatalog.readEntryBySourceModelId(selection.model);
+  if (entry === undefined) return null;
+  const config = readOpenRouterModelPortConfig(env, selection.model);
+  return base(planAssistModelBudget(config, tokens, entry.context_window).callReservationTokens,
+    entry.context_window);
 }
 
 function callProjection(row: AssistContextUsageCallRow): SessionContextUsageProjection['last_call'] {

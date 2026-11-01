@@ -102,7 +102,8 @@ describe("草稿到最终正文的交接", () => {
 
     stream!.enqueue(frame("RUNNING", "草稿：先写了一段还没结束的话"));
     await flush(60);
-    expect(view.wrapper.text()).toContain("生成中草稿");
+    // 2026-10-31 UI-08：草稿只留一句状态词；技术解释收进「预览详情」。
+    expect(view.wrapper.text()).toContain("正在生成");
     expect(view.wrapper.text()).toContain("草稿：先写了一段还没结束的话");
     expect(view.wrapper.find(".assist-inflight-dots").exists()).toBe(true);
 

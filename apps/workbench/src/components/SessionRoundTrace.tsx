@@ -4,8 +4,8 @@ import {
 } from "lucide-react";
 import type { RelayApiClient, RelayAssistMessage, RelaySessionToolCalls } from "../api/relayClient";
 import {
-  activityHeaderState, activitySpanMs, formatSpan, sessionActivityRounds, summarizeActivity,
-  type ActivityItem, type ActivityPhaseTone,
+  activityHeaderState, activityReasonNote, activitySpanMs, formatSpan,
+  sessionActivityRounds, summarizeActivity, type ActivityItem, type ActivityPhaseTone,
 } from "../lib/activityPresentation";
 import {
   ACTIVITY_DENSITY_LABEL, detailOpenByDefault, mustShowActivity, useActivityDensity,
@@ -17,7 +17,7 @@ import ActivityRow from "./ActivityRow";
 import "./SessionRoundTrace.css";
 
 /**
- * 执行过程（docs/frontend/workbench-design.md §18.10；2026-10-29 V3 重构）。
+ * 工具活动（docs/frontend/workbench-design.md §18.10；2026-10-29 V3 重构，2026-10-31 UI-08 收口）。
  *
  * 这一块只呈现**已落账的工具事实**：模型请求了什么、被准入拒绝还是结算、结果是否未知。
  * 它不是模型的私有推理——`session_tool_calls` 没有那一列，因此这里也不会凭工具名、
@@ -36,6 +36,8 @@ import "./SessionRoundTrace.css";
  *    现在入口对每条 AI 消息恒在：读到零条就显示「本轮没有调用工具」的空状态，
  *    读取失败显示错误与重读，身份不符显示拒绝原因——点击一定有确定的反馈。
  *    这条由 `tests/sessionRoundTrace.spec.tsx` 的永久回归用例钉住。
+ *    2026-10-31 UI-08 收窄了它：零记录不再默认占位，只有「用户主动展开过」的那一个
+ *    入口在读完零条后继续留着；见下文第 4 条。
  *
  * 2. **标题行按效果图重做**：`[箭头] [状态图标] 执行过程 [规模 · 状态] [耗时]`。
  *    文案由 `activityHeaderState()` 从可验证的聚合状态派生——不知道总数就不报 `2/5`，
@@ -43,6 +45,10 @@ import "./SessionRoundTrace.css";
  *
  * 3. **长轮次收敛**：单轮超过阈值时先显示前若干项 + 全部例外项，其余折叠为
  *    「展开其余 N 项」。例外（待核对、未执行、失败）在任何档位、任何折叠下都可见。
+ *
+ * 4. **出场条件按事实收紧（2026-10-31 UI-08）**：这一块只呈现**真实工具记录**。
+ *    在途零记录与终态零记录都不再占位（等待归正文三点），读取失败与历史未读取仍保留入口；
+ *    同一时刻只有一个主进度动效——本块一旦接手（在途 + 有记录），外层就不再渲染三点。
  */
 
 const POLL_MS = 2_000;
@@ -55,9 +61,8 @@ const COLLAPSE_THRESHOLD = 10;
 const COLLAPSED_HEAD = 6;
 
 function noteOf(item: ActivityItem): string {
-  const { rejectionReason, rejectionDetail } = item.detail;
-  if (rejectionReason === null) return "";
-  return rejectionDetail === null ? rejectionReason : `${rejectionReason} · ${rejectionDetail}`;
+  // 认得的码在这里退成一句人话，机器码留在第三层（activityReasonNote 说明为什么这样分）。
+  return activityReasonNote(item.detail.rejectionReason, item.detail.rejectionDetail);
 }
 
 /** 标题行状态图标：与行内同一套形状语言，尺寸更大一档。 */
@@ -75,10 +80,19 @@ function HeaderIcon({ tone, live }: { readonly tone: ActivityPhaseTone; readonly
   return <Info aria-hidden="true" />;
 }
 
-export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }: {
+export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
+  onProgressOwnerChange }: {
   readonly client: RelayApiClient; readonly message: RelayAssistMessage;
   /** 生产用 2 秒；用例据此把轮询压到几毫秒，不必等真实时间。 */
   readonly pollIntervalMs?: number;
+  /**
+   * 本组件是否接手了这条消息的「主进度动效」（2026-10-31 UI-08）。
+   *
+   * 唯一由本组件接手的情形是「在途且确实读到真实工具记录」：此时行内旋转图标
+   * 就是那条消息里唯一在动的东西。外层据此 **不渲染** 正文三点（不是停转、
+   * 不是 display:none 遮盖），保证同一事实只有一个动画 Owner。
+   */
+  readonly onProgressOwnerChange?: (owns: boolean) => void;
 }) {
   const active = ACTIVE_STATUSES.includes(message.status);
   const [trace, setTrace] = useState<RelaySessionToolCalls | null>(null);
@@ -150,6 +164,14 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
     });
   }, [density, items]);
 
+  /**
+   * 主进度动效的唯一 Owner 判定（2026-10-31 UI-08）。
+   * 只有「在途 + 确有真实工具记录」才接手；等待阶段（PENDING / RUNNING 零记录）
+   * 本组件整块不渲染，三点是那一段唯一的进度信号。
+   */
+  const ownsProgress = active && items.length > 0;
+  useEffect(() => { onProgressOwnerChange?.(ownsProgress); }, [ownsProgress, onProgressOwnerChange]);
+
   if (message.role !== "ASSISTANT") return null;
 
   const summary = summarizeActivity(items);
@@ -160,6 +182,22 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
   const span = active || !loaded ? "" : formatSpan(activitySpanMs(items));
   // 标题图标转动的条件：确实在跑、且列表里没有哪一行正在转（一行都不转时才轮到它）。
   const headerLive = active && current === null;
+  /**
+   * 这一块的出场条件（2026-10-31 UI-08）。
+   *
+   * 它只负责**已落账的工具事实**，因此不再对每条 AI 消息恒常占位：
+   *
+   *   ① 在途、没有真实记录、读取也没失败 → 整块不渲染。此刻「还没开始调工具」
+   *      不是一条业务事实，等待由正文三点独立表达；再画一条「工具活动 · 等待处理」
+   *      就是把同一件事说两遍，还会与第二组动画抢注意力。
+   *   ② 终态、确实读回零条、读取没失败、用户也没主动展开过 → 不制造空的过程区域。
+   *   ③ 读取失败 → 必须渲染：它带着确切原因与「重新读取」，读取失败不等于「没有调用工具」。
+   *   ④ 终态且**尚未读取**（历史消息）→ 保留「展开查看」入口，不为了判断有没有工具
+   *      而预取整段历史（V3 口径不变）。
+   *   ⑤ 用户主动展开过 → 保留；他点开的就是这个入口，读了零条也要给一句结论。
+   */
+  if (active && !ownsProgress && error === null) return null;
+  if (!active && loaded && error === null && items.length === 0 && !touched.current) return null;
 
   return <details className="activity-panel" open={open}
     data-testid={`session-round-trace-${message.id}`}
@@ -206,13 +244,15 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
     {/* 空状态（V3 新增）：入口已经点开了，就必须给一个确定的答案。
         这一轮确实没有工具调用——不制造空的技术时间线，也不补虚假的思考步骤。
         **只在 EMPTY 相位显示**：在途且零记录是 RUNNING_NO_TOOLS，此刻说「没有调用工具」
-        就是替模型提前下结论（它随时可能开始调用）。 */}
+        就是替模型提前下结论（它随时可能开始调用）。
+        2026-10-31 UI-08：从一块带底色的说明块收成一行 caption——「没有调用工具」是结论，
+        不是需要一篇解释的技术说明。
+        2026-11-01 P1-1：这一行不再重复标题行那句「本轮没有调用工具」——同一块里同一事实
+        说两遍，第二遍只会让读者找差别。展开体只补标题行没说的那半件：这次到底动没动东西。 */}
     {header.phase === "EMPTY" &&
-      <div className="activity-panel-notice" data-tone="neutral"
-        data-testid={`session-round-trace-empty-${message.id}`}>
-        <p className="activity-panel-notice-title"><Info aria-hidden="true" />本轮没有调用工具</p>
-        <p>本次回复仅基于已有信息与上下文生成，没有读取文件、执行命令或修改内容。</p>
-      </div>}
+      <p className="activity-panel-empty" data-testid={`session-round-trace-empty-${message.id}`}>
+        <Info aria-hidden="true" />本次回复没有读取文件，也没有执行任何命令。
+      </p>}
 
     {items.length > 0 && <>
       {/* 阅读密度只改视图：三个档位共享同一份事实，任何档位都不隐藏审批、被拒与未知。 */}
@@ -243,8 +283,17 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
           const hidden = scoped.length - shown.length;
           // 组标题只报真实数量与真实状态，不给阶段编名字（后端没有阶段字段）。
           const roundSummary = summarizeActivity(scoped);
+          /**
+           * 只有一轮时**不画组标题**（2026-11-01 P1-1）。
+           *
+           * 「第 1 轮 · 2 项 · 1 项未执行」与标题行「工具活动 · 2 项操作 · 1 项未执行」
+           * 是同一份聚合读两遍，而「第 1 轮」在只有一轮时不携带任何信息；例外在行内
+           * （状态词 + 常显原因句）本来就可读。多轮才需要组标题：那时每一轮的数字
+           * 不等于整条消息的数字，分组才在回答问题。
+           */
+          const grouped = (trace?.rounds.length ?? 0) > 1;
           return <li key={round.round} className="activity-panel-round" data-testid={`session-round-${round.round}`}>
-            <p className="activity-panel-round-title">
+            {grouped && <p className="activity-panel-round-title">
               <span>第 {round.round + 1} 轮</span>
               <span className="activity-panel-round-count">{roundSummary.total} 项</span>
               {roundSummary.failed > 0 && <span className="activity-panel-round-flag" data-tone="danger">
@@ -253,7 +302,7 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS }:
                 {roundSummary.rejected} 项未执行</span>}
               {roundSummary.unknown > 0 && <span className="activity-panel-round-flag" data-tone="attention">
                 {roundSummary.unknown} 项待核对</span>}
-            </p>
+            </p>}
             <ul className="activity-panel-list">
               {shown.map((item) => {
                 const note = noteOf(item);

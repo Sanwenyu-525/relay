@@ -22,6 +22,18 @@ test('没有目录时说明缺的是目录，而不是笼统的「没有访问�
   assert.match(text, /本轮没有这些能力：读取文件/u);
 });
 
+test('没绑目录但本轮确实有文件工具时，说成推断的作用域而不是「工具不可用」', () => {
+  // 人设助手／学习档按项目取唯一 ACTIVE 受管根，这类会话没绑目录也能读文件。
+  const text = formatSessionCapabilities({ hasProject: true, workingRoot: null, writeTier: null,
+    tools: [...READ_TOOLS], allowWrite: false, computerPlugin: false, browserPlugin: false });
+  assert.match(text, /还没有选定工作目录/u);
+  assert.match(text, /系统推断的作用域，不是用户指定的绑定/u);
+  assert.doesNotMatch(text, /因此文件类工具不可用/u);
+  // 读得到就不该再列读取族的缺口，否则同一段事实块前后矛盾。
+  const gapLine = text.split('\n').find((line) => line.startsWith('本轮没有这些能力')) ?? '';
+  assert.doesNotMatch(gapLine, /读取文件/u);
+});
+
 test('有目录但档位只读时，写入口的缺口指向档位而不是连接', () => {
   const text = formatSessionCapabilities({ hasProject: true, workingRoot: 'D:\\proj\\demo',
     writeTier: 'READ_ONLY', tools: [...READ_TOOLS, 'git_status'], allowWrite: false,

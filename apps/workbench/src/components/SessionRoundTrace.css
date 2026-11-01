@@ -10,47 +10,48 @@
   display: block;
   margin: var(--relay-space-2) 0;
   min-width: 0;
+  /* 首次出现：第一件真实工具活动到达时这一块才挂载。120ms 淡入 + 2px 上浮，
+     只动 opacity / transform（GPU 属性），目的只是「这里刚多出一条记录」，不是装饰。 */
+  transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+@starting-style {
+  .activity-panel { opacity: 0; transform: translateY(2px); }
 }
 
 /* ── 标题行 ─────────────────────────────────────────────────────────────
    整行可点：箭头 · 状态图标 · 标题 · 规模与状态 ·（右）耗时。
-   轻底色而不是卡片边框——它在消息列里是一层「带子」，不是一块面板。 */
+   2026-10-31 UI-08：不再是一层「带子」。无底色、无边框、无阴影、无横向灰条，
+   层级只由图标、字号、字重与间距表达。理由：这条入口在有工具记录的回复下都会出现，
+   一条铺满整行的灰底会把正文切成两段，也让「过程」看起来比「结论」更重。
+   可点与可聚焦改由箭头、cursor 与 focus ring 承担。 */
 .activity-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--relay-space-1) var(--relay-space-2);
   min-height: var(--relay-control-compact);
-  padding: 0 var(--relay-space-2);
-  border: var(--relay-border-width) solid transparent;
-  border-radius: var(--relay-radius-control);
-  background: var(--relay-color-bg-subtle);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-ui);
   cursor: pointer;
   list-style: none;
-  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 /* 原生 disclosure 三角去掉：箭头由下面这枚 svg 承担，位置与旋转都可控。 */
 .activity-header::-webkit-details-marker { display: none; }
-.activity-header:hover { background: var(--relay-color-selection-bg); }
+/* 悬停只提一级箭头颜色：整行不再有可着色的底，行宽也不会随状态抽动。 */
+.activity-header:hover .activity-header-chevron { color: var(--relay-color-text-primary); }
 .activity-header:focus-visible {
   outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
   outline-offset: 2px;
 }
-/* 运行中：整条带子换成极浅蓝并加一道细边，与「已结束」的中性带子区分开。
-   这是唯一允许整行变色的状态。 */
-.activity-panel[data-phase="RUNNING"] > .activity-header,
-.activity-panel[data-phase="WAITING"] > .activity-header {
-  background: var(--relay-color-status-running-bg);
-  border-color: var(--relay-color-status-running-line);
-}
-.activity-panel[data-phase="WAITING"] > .activity-header {
-  background: var(--relay-color-status-warning-bg);
-  border-color: var(--relay-color-status-warning-text);
-}
+/* 状态不再靠整行染色（2026-10-31 UI-08）。RUNNING / WAITING / FAILED / UNKNOWN
+   的区别由状态图标（形状 + 语义色）与右侧状态词表达；整行染色与「轻量化」互斥，
+   一屏多条回复时还会变成几块彩色横条。失败、拒绝、未知、审批的语义一个不少，
+   只是不再用底色叫。 */
 
 .activity-header-chevron {
   flex: none;
@@ -135,6 +136,20 @@
   color: var(--relay-color-status-danger-text);
 }
 .activity-panel-notice .secondary-button { justify-self: start; }
+
+/* 空状态（2026-10-31 UI-08）：一行 caption，不再是一块带底色的说明卡。
+   「本轮没有调用工具」是结论，不需要第二段技术解释。 */
+.activity-panel-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  margin: var(--relay-space-1) 0 0;
+  padding: 0 var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+.activity-panel-empty > svg { flex: none; width: 1rem; height: 1rem; }
 
 .activity-panel-loading { margin: var(--relay-space-1) 0 0; }
 
@@ -229,7 +244,9 @@
 @media (prefers-reduced-motion: reduce) {
   .activity-header-spin { animation: none; }
   .activity-header-chevron { transition: none; }
+  /* 减动效只去掉位移，保留透明度渐变：入场仍然可读，只是不再抽动。 */
+  .activity-panel { transform: none; }
 }
 html[data-motion="off"] .activity-header-spin { animation: none; }
 html[data-motion="off"] .activity-header-chevron { transition: none; }
-html[data-motion="off"] .activity-header { transition: none; }
+html[data-motion="off"] .activity-panel { transition: none; transform: none; }

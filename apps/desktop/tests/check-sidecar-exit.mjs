@@ -27,7 +27,10 @@ try {
     try { await window.__TAURI_INTERNALS__.invoke('desktop_bootstrap'); return false; }
     catch (error) { return String(error).includes('no longer running'); }
   });
-  if (!rejected || await page.locator('[data-testid="relay-connection-open"], [data-testid="project-create-open"]').count() !== 0 ||
+  // 桌面没有手动连接入口了，所以这里核对的是引导结果本身：数据来源不能是 live，业务入口不能出现。
+  const dataSourceMode = await page.locator('[data-testid="desktop-titlebar"]').getAttribute('data-source-mode');
+  if (!rejected || dataSourceMode === 'live' ||
+      await page.locator('[data-testid="project-create-open"]').count() !== 0 ||
       (await page.locator('body').innerText()).includes('示例数据')) {
     throw new Error('Dead sidecar returned bootstrap or exposed the fixture workbench');
   }

@@ -244,6 +244,8 @@ describe("本目录写入档位", () => {
     try {
       expect(vi.mocked(client.getWorkspaceDefaultDirectory)).not.toHaveBeenCalled();
       expect(chip()?.textContent).toContain("请求批准");
+      // 「默认」只属于没有目录的那一处：目录已绑定时芯片读的是这条会话的真实档位，
+      // 加上限定词反而会把已生效的权限说成还没生效（E2E-ALL-01 同一处的另一半）。
       expect(chip()?.textContent).not.toContain("默认");
     } finally { mounted.unmount(); }
   });
@@ -263,7 +265,9 @@ describe("本目录写入档位", () => {
       // 没有只凭自己发出的命令宣布成功：第二次投影读回 ASK 才把芯片换成那一档。
       expect(vi.mocked(client.getWorkspaceDefaultDirectory)).toHaveBeenCalledTimes(2);
       expect(chip()?.textContent).toContain("请求批准");
-      expect(chip()?.textContent).not.toContain("默认");
+      // 2026-11-01 E2E-ALL-01：没有目录时芯片必须带上「默认」这个作用域限定词，
+      // 否则「以后新开的目录按这一档起步」会被读成「这条会话现在能写」。
+      expect(chip()?.textContent).toContain("默认·请求批准");
       // 此刻仍没有目录可写：芯片文字与档位名相同，data-tier 仍是 unbound。
       expect(chip()?.getAttribute("data-tier")).toBe("unbound");
       expect(chip()?.getAttribute("data-default-tier")).toBe("ask");

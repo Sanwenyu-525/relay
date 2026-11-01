@@ -98,7 +98,7 @@ describe("SessionTodoList", () => {
   });
 });
 describe("SessionTodoList 停止态与迟到响应", () => {
-  it("生成已结束时进行中项不再转圈，并说明这一步未收尾", async () => {
+  it("本轮停止时进行中项不再转圈，并给出「怎么接着跑」而不是一条死路", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(3, threeItems))));
     const mounted = await mountReact(
       <SessionTodoList client={client} sessionId={sessionId} active={false} />);
@@ -106,11 +106,29 @@ describe("SessionTodoList 停止态与迟到响应", () => {
     await flush();
     const wrapper = mounted.wrapper;
     expect(wrapper.find(".session-todos-icon-active").exists()).toBe(false);
-    expect(wrapper.get('[data-testid="session-todo-stalled"]').text()).toContain("生成已结束");
+    expect(wrapper.get('[data-testid="session-todo-stalled"]').text())
+      .toContain("本轮停止，这一步未收尾");
     wrapper.get('[data-testid="session-todo-list"]').element?.setAttribute("open", "");
     const statuses = wrapper.findAll("[data-testid='session-todo-item']")
       .map((item) => item.get(".session-todos-status").text());
     expect(statuses).toContain("进行中·已停止");
+    // 「没做完」必须和「怎么继续」同屏出现（2026-11-01 E2E-ALL-01）：只报未收尾，
+    // 用户读到的是失败；说清清单会延续、已完成的步骤不重做，才是可执行的事实。
+    const resume = wrapper.get('[data-testid="session-todo-resume-hint"]').text();
+    expect(resume).toContain("这 2 项");
+    expect(resume).toContain("延续");
+    expect(resume).toContain("不会重做");
+  });
+
+  it("仍在生成时不出现「接着跑」那条提示：这一轮还没结束，不提前下结论", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(3, threeItems))));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active />);
+    unmount = mounted.unmount;
+    await flush();
+    const wrapper = mounted.wrapper;
+    wrapper.get('[data-testid="session-todo-list"]').element?.setAttribute("open", "");
+    expect(wrapper.find('[data-testid="session-todo-resume-hint"]').exists()).toBe(false);
   });
 
   it("迟到的旧版本不回退视图，换轮次时接受重置后的版本", () => {
@@ -123,6 +141,102 @@ describe("SessionTodoList 停止态与迟到响应", () => {
     expect(shouldAccept(null, older)).toBe(true);
   });
 });
+describe("SessionTodoList 请求身份的生命周期（2026-10-31 P0）", () => {
+  /**
+   * 复现并钉住 P0 缺陷：`applied` 是组件级 ref，而 `issued` 曾经是 Effect 内的局部变量。
+   * Effect 因 active / refreshKey 重建后 `issued` 从 1 重新数，`applied` 却停在上一轮的
+   * 较大值，重建后的响应因此全部被挡掉——生成结束那一刻的最终读取永远落不了地。
+   * 这些用例只在轮询间隔被压到 5ms 时成立，不改变生产时序。
+   */
+  const fastPoll = { pollIntervalMs: 5 } as const;
+
+  it("三次成功轮询后生成结束：最后一次读取仍然更新视图", async () => {
+    let call = 0;
+    // 版本随调用递增：每次读取都比上一次新，视图必须一路跟到最新一版。
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      return json(snapshot(call, [{ content: `第 ${call} 版步骤`, status: "in_progress" }]));
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active {...fastPoll} />);
+    unmount = mounted.unmount;
+    await flush(60);
+    expect(call).toBeGreaterThanOrEqual(3);
+    const polled = mounted.wrapper.get('[data-testid="session-todo-list"]')
+      .attributes("data-session-todo-version");
+    expect(Number(polled)).toBe(call);
+
+    // 生成结束：Effect 重建并做最后一次读取。此时序号必须继续递增，
+    // 否则（修复前）这一次响应会被先前发出的序号挡掉，界面停在停止前那一版。
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} active={false} {...fastPoll} />);
+    await flush(30);
+    const finalVersion = mounted.wrapper.get('[data-testid="session-todo-list"]')
+      .attributes("data-session-todo-version");
+    expect(Number(finalVersion)).toBe(call);
+    expect(Number(finalVersion)).toBeGreaterThan(Number(polled) - 1);
+    expect(mounted.wrapper.text()).toContain(`第 ${call} 版步骤`);
+  });
+
+  it("轮询已经发出多次后 refreshKey 改变：新结果仍然更新视图", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      call += 1;
+      return json(snapshot(call, [{ content: `第 ${call} 版步骤`, status: "pending" }]));
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active refreshKey="1" {...fastPoll} />);
+    unmount = mounted.unmount;
+    await flush(60);
+    expect(call).toBeGreaterThanOrEqual(3);
+
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} active={false} refreshKey="2" {...fastPoll} />);
+    await flush(30);
+    expect(mounted.wrapper.get('[data-testid="session-todo-list"]')
+      .attributes("data-session-todo-version")).toBe(String(call));
+  });
+
+  it("上一轮读取迟到：旧快照不覆盖已经落地的新快照", async () => {
+    const slow: { resolve?: (value: Response) => void } = {};
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      call += 1;
+      if (call === 1) return new Promise<Response>((resolve) => { slow.resolve = resolve; });
+      return Promise.resolve(json(snapshot(9, [{ content: "新快照的步骤", status: "in_progress" }])));
+    }));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active refreshKey="1" {...fastPoll} />);
+    unmount = mounted.unmount;
+    // 第一次读取还没回来，外部事实变化触发重读：第二次直接拿到 v9。
+    await mounted.rerender(
+      <SessionTodoList client={client} sessionId={sessionId} active refreshKey="2" {...fastPoll} />);
+    await flush(30);
+    expect(mounted.wrapper.get('[data-testid="session-todo-list"]')
+      .attributes("data-session-todo-version")).toBe("9");
+
+    // 上一轮那次读取此刻才到（v7）：序号更早、版本更旧，两条闸门都不得放它进来。
+    slow.resolve?.(json(snapshot(7, [{ content: "旧快照的步骤", status: "pending" }])));
+    await flush(30);
+    expect(mounted.wrapper.get('[data-testid="session-todo-list"]')
+      .attributes("data-session-todo-version")).toBe("9");
+    expect(mounted.wrapper.text()).toContain("新快照的步骤");
+    expect(mounted.wrapper.text()).not.toContain("旧快照的步骤");
+  });
+
+  it("卸载后到达的响应不再改视图", async () => {
+    const slow: { resolve?: (value: Response) => void } = {};
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { slow.resolve = resolve; })));
+    const mounted = await mountReact(
+      <SessionTodoList client={client} sessionId={sessionId} active {...fastPoll} />);
+    await flush(20);
+    mounted.unmount();
+    slow.resolve?.(json(snapshot(3, threeItems)));
+    // 卸载后不得再有渲染；能走到这里说明没有未捕获异常。
+    expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(false);
+  });
+});
+
 describe("SessionTodoList 轮次切换与迟到响应", () => {
   it("切到新任务、服务端返回空快照时，上一轮清单从视图消失", async () => {
     let call = 0;
@@ -182,5 +296,46 @@ describe("SessionTodoList 轮次切换与迟到响应", () => {
     slow.resolve?.(json(snapshot(7, threeItems)));
     await flush();
     expect(mounted.wrapper.find('[data-testid="session-todo-list"]').exists()).toBe(false);
+  });
+});
+describe("SessionTodoList 完成度条与脚注层级（2026-10-31 UI 收口）", () => {
+  it("完成度条按已完成比例给宽度，并随快照更新", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(2, threeItems))));
+    const wrapper = await mount();
+    const bar = wrapper.get(".session-todos-progress");
+    // threeItems：1 完成 / 3 项 → 33%。它只描述进度，所以不带文字与图例。
+    expect((bar.element as HTMLElement).style.getPropertyValue("--session-todos-ratio"))
+      .toBe("33%");
+    expect(bar.text()).toBe("");
+    expect(bar.attributes("aria-hidden")).toBe("true");
+  });
+
+  it("全部完成时条满格；没有快照时整块不渲染，也不留空条", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(3, [
+      { content: "第一步", status: "completed" },
+      { content: "第二步", status: "completed" },
+    ]))));
+    const wrapper = await mount();
+    expect((wrapper.get(".session-todos-progress").element as HTMLElement)
+      .style.getPropertyValue("--session-todos-ratio")).toBe("100%");
+  });
+
+  it("没有清单时既不留面板也不留完成度条", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ snapshot: null })));
+    const wrapper = await mount();
+    expect(wrapper.find(".session-todos-progress").exists()).toBe(false);
+  });
+
+  it("脚注分两层：版本与免责一行、换任务写法一行，写法用行内代码", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot(7, threeItems))));
+    const wrapper = await mount();
+    const version = wrapper.get('[data-testid="session-todo-version-note"]');
+    expect(version.text()).toContain("第 7 版");
+    expect(version.text()).toContain("不代表执行结果或验收结论");
+    const hint = wrapper.get('[data-testid="session-todo-new-task-hint"]');
+    expect(hint.text()).toContain("换新任务时");
+    // 要照抄的写法必须能一眼认出来：两枚行内代码，而不是埋在句子里。
+    const codes = hint.findAll("code");
+    expect(codes.map((code) => code.text())).toEqual(["新任务：", "/newtask"]);
   });
 });

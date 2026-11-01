@@ -72,6 +72,8 @@ interface ListedSession {
   id: string;
   has_messages: boolean;
   run_state: 'RUNNING' | 'PENDING' | null;
+  list_state: 'RUNNING' | 'PENDING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'FAILED'
+    | 'CANCELLED' | 'NOT_STARTED' | 'ARCHIVED' | null;
   revision: string;
   updated_at: string;
 }
@@ -80,6 +82,12 @@ const listPath = (workspaceId: string) => workspacePath(workspaceId, '/assist-se
 
 async function listed(workspaceId: string): Promise<readonly ListedSession[]> {
   const response = await api.get(listPath(workspaceId));
+  assert.equal(response.status, 200);
+  return (response.body as { items: ListedSession[] }).items;
+}
+
+async function listedWithStatus(workspaceId: string, status: 'ALL' | 'ARCHIVED'): Promise<readonly ListedSession[]> {
+  const response = await api.get(`${listPath(workspaceId)}?status=${status}`);
   assert.equal(response.status, 200);
   return (response.body as { items: ListedSession[] }).items;
 }
@@ -106,6 +114,11 @@ test('没有消息与只有终态消息都读成 null：不另立「空闲」这
   // 派生列不影响本来就有的那枚事实：「有没有消息」仍按消息表给出。
   assert.equal(byId.get(empty)?.has_messages, false);
   assert.equal(byId.get(settled)?.has_messages, true);
+  // 2026-10-30：`run_state` 只说「没有在途」，展示态要另外读最后一轮——空会话是未开始，
+  // 结算过的是完成。这里正是「不能把 null 直接解释成 COMPLETED」的那条边界。
+  assert.equal(byId.get(empty)?.list_state, 'NOT_STARTED');
+  assert.equal(byId.get(settled)?.list_state, 'COMPLETED');
+  assert.equal((await single(workspaceId, settled)).list_state, 'COMPLETED');
 });
 
 test('预插的 ASSISTANT 行读成 PENDING，Worker 认领后读成 RUNNING，结算后回到 null', async () => {
@@ -116,17 +129,21 @@ test('预插的 ASSISTANT 行读成 PENDING，Worker 认领后读成 RUNNING，�
 
   assert.equal((await single(workspaceId, sessionId)).run_state, 'PENDING');
   assert.equal((await listed(workspaceId)).find((item) => item.id === sessionId)?.run_state, 'PENDING');
+  assert.equal((await single(workspaceId, sessionId)).list_state, 'PENDING');
 
   await sql`update assist_messages set status = 'RUNNING', worker_id = 'worker-run-state'
     where id = ${assistant}`.execute(app.db);
   assert.equal((await single(workspaceId, sessionId)).run_state, 'RUNNING');
   assert.equal((await listed(workspaceId)).find((item) => item.id === sessionId)?.run_state, 'RUNNING');
+  assert.equal((await single(workspaceId, sessionId)).list_state, 'RUNNING');
 
-  // 结算成 COMPLETED：没有在途行，运行态消失。
+  // 结算成 COMPLETED：没有在途行，运行态消失，展示态换成完成。
   await sql`update assist_messages set status = 'COMPLETED', content = '做完了'
     where id = ${assistant}`.execute(app.db);
   assert.equal((await single(workspaceId, sessionId)).run_state, null);
   assert.equal((await listed(workspaceId)).find((item) => item.id === sessionId)?.run_state, null);
+  assert.equal((await single(workspaceId, sessionId)).list_state, 'COMPLETED');
+  assert.equal((await listed(workspaceId)).find((item) => item.id === sessionId)?.list_state, 'COMPLETED');
 });
 
 test('失败与取消同样是终态：都不能留在 RUNNING 上', async () => {
@@ -145,6 +162,49 @@ test('失败与取消同样是终态：都不能留在 RUNNING 上', async () =>
   const items = await listed(workspaceId);
   assert.equal(items.find((item) => item.id === failedSession)?.run_state, null);
   assert.equal(items.find((item) => item.id === cancelledSession)?.run_state, null);
+  // 终态不是「没有状态」：失败与取消各自是展示态，不能都退成同一个中性图标。
+  assert.equal(items.find((item) => item.id === failedSession)?.list_state, 'FAILED');
+  assert.equal(items.find((item) => item.id === cancelledSession)?.list_state, 'CANCELLED');
+});
+
+test('归档与待确认提案各自成态：都按已有事实判定，不新增写入 Owner', async () => {
+  const workspaceId = await newWorkspace('archive-approval');
+  const archived = await newSession(workspaceId, '早先归档的讨论');
+  await seedMessage(archived, 'ASSISTANT', 'COMPLETED');
+  await sql`update assist_sessions set status = 'ARCHIVED' where id = ${archived}`.execute(app.db);
+
+  const projectId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    await r.projects.insertProject({ id: projectId, workspaceId, title: '状态图标项目',
+      projectType: 'GENERAL' });
+    await r.projects.insertProjectState(projectId, 'PLANNING');
+  });
+  const created = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+    projectId, title: '等你确认的讨论' });
+  const approving = created.result.session_id;
+  const messageId = await seedMessage(approving, 'ASSISTANT', 'COMPLETED');
+  await withTransaction(app.db, async (r) => {
+    await r.assist.insertProposal({ id: randomUUID(), workspaceId, sessionId: approving,
+      messageId, kind: 'TASK_DEFINITION', projectId, taskId: null, targetType: 'PROJECT',
+      targetId: projectId, baseRevision: 1n, payload: {}, payloadHash: 'a'.repeat(64) });
+  });
+
+  // 待确认提案是会话级「等人决定」的唯一权威事实：它压过最后一轮的 COMPLETED。
+  const active = await listed(workspaceId);
+  const approvingRow = active.find((item) => item.id === approving);
+  assert.equal(approvingRow?.list_state, 'WAITING_APPROVAL');
+  assert.equal(approvingRow?.run_state, null);
+  // 归档行默认不在活跃清单里；按 ALL 读回来时是 ARCHIVED，不是 COMPLETED。
+  assert.equal(active.some((item) => item.id === archived), false);
+  assert.equal((await listedWithStatus(workspaceId, 'ALL'))
+    .find((item) => item.id === archived)?.list_state, 'ARCHIVED');
+  assert.equal((await listedWithStatus(workspaceId, 'ARCHIVED'))
+    .find((item) => item.id === archived)?.list_state, 'ARCHIVED');
+
+  // 提案被拒之后这一行退回最后一轮的终态，不需要任何额外写入。
+  await sql`update assist_proposals set status = 'REJECTED', decided_at = now()
+    where session_id = ${approving}`.execute(app.db);
+  assert.equal((await single(workspaceId, approving)).list_state, 'COMPLETED');
 });
 
 test('RUNNING 压过 PENDING：真在生成的那一轮决定这一行显示什么', async () => {

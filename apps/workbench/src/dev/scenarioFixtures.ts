@@ -1,7 +1,7 @@
 import type {
   RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageRecall,
-  RelayAssistMessageRecallSummary, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview,
-  RelayRunToolCallPreviewFile, RelayRunToolCalls,
+  RelayAssistMessageRecallSummary, RelayAssistProposal, RelayRunToolCall, RelayRunToolCallFileChange,
+  RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCalls,
   RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls,
 } from "../api/dtos/assist";
 import type { RelayFileWriteChangeSet, RelayFileWriteFrozenDiff } from "../api/dtos/artifacts";
@@ -64,6 +64,8 @@ function assistantOrUser(role: "USER" | "ASSISTANT", patch: MessagePatch): Relay
     skillInput: null,
     skillOutput: null,
     usage: { inputTokens: 12480, outputTokens: 316, cacheReadTokens: null, cacheCreationTokens: null },
+    // 实验室夹具没有真实账本：留空让消息行按 `usage` 回退，不编造调用次数。
+    usageSummary: null,
     cancelRequested: false,
     steerRequested: false,
     attachments: [],
@@ -88,6 +90,7 @@ export function livePreview(patch: Partial<RelayAssistLivePreview> = {}): RelayA
     previewText: null,
     previewTruncated: false,
     previewAvailable: false,
+    usage: null,
     ...patch
   };
 }
@@ -280,7 +283,26 @@ export function changeSets(operationId: string, relativePath: string,
 /** 消息来源条目：`origin` 是记忆来源才有的字段，其余来源为 null。 */
 export function sourceOf(sourceRef: string, status = "AVAILABLE",
   reason: string | null = null): RelayAssistMessage["sources"][number] {
-  return { sourceRef, kind: null, rootId: null, version: null, status, reason, origin: null };
+  return { sourceRef, kind: null, rootId: null, version: null, status, reason, origin: null,
+    // 实验室夹具默认是手选资料；自动召回的记忆需要显式构造，不在这里补造来源类别。
+    sourceKind: null, selection: null, selectionBasis: null };
+}
+
+/**
+ * 候选成果提案（`CANDIDATE_MARKDOWN`）。
+ *
+ * 实验室过去把消息行的候选固定成空数组，因此这一族 UI 从来没有在实验室里出现过；
+ * 现在它和其他数据一样是**世界里的数据**，挂载条件仍由产品的 `candidateProposalsFor` 现算。
+ */
+export function candidateProposal(patch: Partial<RelayAssistProposal> = {}): RelayAssistProposal {
+  return {
+    id: "mock-proposal-1", sessionId: MOCK.sessionId, messageId: MOCK.assistantMessageId,
+    targetId: MOCK.taskId, baseRevision: "3", payloadHash: "f".repeat(64),
+    payloadAvailable: true, status: "PENDING", kind: "CANDIDATE_MARKDOWN", targetType: "TASK",
+    payload: { title: "本轮改动说明", mediaType: "text/markdown",
+      markdown: "## 本轮改动\n\n- 读取三处配置\n- 修改一个文件" },
+    ...patch
+  } as RelayAssistProposal;
 }
 
 /** 消息上随列表读回的撤回摘要（逐文件回执另按需要读）。 */

@@ -112,9 +112,14 @@ export async function settleTodoWriteCall(db: DbExecutor, input: {
 export interface TodoWriteReconciliation {
   /** 本次按原调用身份补结算成功的账本行 id。 */
   readonly settled: readonly string[];
-  /** 无法确认的调用数：事件不存在（写入事务没提交过）或核对失败，保持 REQUESTED 可诊断。 */
+  /** 本批次核对失败的调用数，保持 REQUESTED 可诊断；无事件的调用不进入本批次。 */
   readonly unconfirmed: number;
+  /** 本次收口为「未执行」的账本行 id（无持久事件且消息已终止）。 */
+  readonly abandoned: readonly string[];
 }
+
+/** 未执行收口的原因码：进账本 rejection_reason，供界面与审计区分「放弃」的具体含义。 */
+export const TODO_NOT_EXECUTED = 'TODO_NOT_EXECUTED';
 
 /**
  * `todo_write` 账本的崩溃恢复（ADR-038，2026-10-30 四轮）。
@@ -124,20 +129,27 @@ export interface TodoWriteReconciliation {
  * 那条 REQUESTED 行在 TL-12 里靠「同身份再调一次」恢复，但生产里没人负责再调——
  * 本用例就是这个恢复路径：每次生成 tick 的租约清扫之后跑一遍有界扫描。
  *
- * 三条纪律（与写入侧的幂等语义一致）：
+ * 五条纪律（与写入侧的幂等语义一致）：
  *   1. **只核对、不重做。** 事件表里已有 `(session_id, tool_call_id)` 的调用走原身份
  *      重放（`write()` 的幂等路径），拿回当初那一版，不新增事件、不递增版本；
- *   2. **事件不存在的调用保持 REQUESTED。** 说明写入事务从未提交过，没有任何已成功的
+ *   2. **事件不存在的调用不重跑。** 说明写入事务从未提交过，没有任何已成功的
  *      写入可恢复——重新执行它等于替一条已经失败（LEASE_LOST）的生成伪造进度；
  *   3. **核对失败的调用保持 REQUESTED。** 同身份异载荷（`TODO_TOOL_CALL_CONFLICT`）是
- *      需要人工核对的异常，不吞掉、不伪装成结算成功，由下一轮继续可见。
+ *      需要人工核对的异常，不吞掉、不伪装成结算成功，由下一轮继续可见；
+ *   4. **事件不存在 + 消息已终止 → 收口成「未执行」（第六轮）。** 这类行永远不会再被
+ *      结算，却一直显示「已请求，尚未结算」，把「根本没跑」说成「可能还在跑」。
+ *      收口只改状态与原因：不写快照、不写事件、不递增版本；
+ *   5. **消息仍在 PENDING / RUNNING 的行不收口。** 它可能真的还在途中，提前下结论
+ *      就是替一次进行中的生成宣布结果。
  */
 export async function reconcileTodoWriteSettlements(db: DbExecutor,
   options?: { readonly limit?: number }): Promise<TodoWriteReconciliation> {
   const repository = new SessionToolCallRepository(db);
-  // 有界扫描：单用户规模下 REQUESTED 积压很少；上限只是防御 tick 被异常积压拖长。
+  // TODO_RECOVERY_COMMITTED_BATCH：先筛选已提交事件，再截取有界批次。
+  // 未提交记录永久保留 REQUESTED，但不能占满名额、饿死后续真正可补结算的调用。
   const pending = await repository.listPendingTodoWrites(options?.limit ?? 200);
-  if (pending.length === 0) return { settled: [], unconfirmed: 0 };
+  const abandoned = await finalizeOrphanedTodoWrites(repository, options?.limit ?? 200);
+  if (pending.length === 0) return { settled: [], unconfirmed: 0, abandoned };
   const todos = new SessionTodoRepository(db);
   const settled: string[] = [];
   let unconfirmed = 0;
@@ -166,5 +178,24 @@ export async function reconcileTodoWriteSettlements(db: DbExecutor,
       unconfirmed += 1;
     }
   }
-  return { settled, unconfirmed };
+  return { settled, unconfirmed, abandoned };
+}
+
+/**
+ * 把「无持久事件 + 消息已终止」的 `todo_write` 请求收口成未执行终态。
+ *
+ * 只动账本行：不写快照、不写事件、不递增版本，因此不可能被读成一次成功的清单写入。
+ * 收口失败的行原样留在 REQUESTED，下一 tick 会再试——一次失败不该让行永久悬挂。
+ */
+async function finalizeOrphanedTodoWrites(repository: SessionToolCallRepository,
+  limit: number): Promise<readonly string[]> {
+  const orphans = await repository.listOrphanedTodoWrites(limit);
+  const done: string[] = [];
+  for (const row of orphans) {
+    if (await repository.abandonTodoWrite(row.id, TODO_NOT_EXECUTED,
+      '这次调用没有写入任何清单，所属回复已结束；结果记为未执行，不会重跑。')) {
+      done.push(row.id);
+    }
+  }
+  return done;
 }

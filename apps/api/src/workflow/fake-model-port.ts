@@ -25,6 +25,22 @@ export interface ModelUsage {
   readonly cacheCreationTokens?: number | null;
 }
 
+/**
+ * 生成中的用量进度（可丢弃估算，2026-11-01 AGENT-LIVE-TOKEN-USAGE）。
+ *
+ * 不是账本：一次调用的真实用量仍只在结算时写入 `model_calls`。这里只服务界面在生成
+ * 过程中读到持续变化的读数，因此估算必须与已确认用量分开标识：
+ *   * `inputTokensEstimate` / `outputTokensEstimate` 用 UTF-8 字节 / 3 换算，
+ *     与端口的外呼前预算检查、上下文构成快照同一口径（`precision: ESTIMATED`）；
+ *   * `providerUsage` 是本次流中 Provider 已经上报的部分（字段可为 null）；
+ *   * 输出估算包含正文、推理与工具参数，但不等同于 Provider 的分词与计费口径。
+ */
+export interface ModelUsageProgress {
+  readonly inputTokensEstimate: number;
+  readonly outputTokensEstimate: number;
+  readonly providerUsage: ModelUsage;
+}
+
 export interface ModelIdentity {
   readonly provider: string;
   readonly model: string;
@@ -187,6 +203,8 @@ export interface AssistRequest {
   readonly intent: AssistIntent;
   readonly system: string;
   readonly turns: readonly AssistTurn[];
+  /** 应用已选定的结构化回复协议；不从提示词内容猜测。 */
+  readonly responseFormat?: 'json_object' | undefined;
   /** Structured first-party test input; the real provider consumes the rendered user turn. */
   readonly skill?: { readonly id: string; readonly version: string;
     readonly facts: JsonObject; readonly input?: JsonObject } | undefined;
@@ -197,6 +215,11 @@ export interface AssistRequest {
   readonly onToolArgumentsDelta?: ModelToolArgumentsDeltaHandler | undefined;
   /** Internal durable signal that a provider stream emitted any first chunk. */
   readonly onStreamEvent?: (() => Promise<void>) | undefined;
+  /**
+   * 生成中的用量进度（可丢弃估算）；缺省表示不采集，既有调用方行为逐字不变。
+   * 消费方只能把它当临时投影：真实用量仍以调用结算写入 `model_calls` 为准。
+   */
+  readonly onUsageProgress?: ((progress: ModelUsageProgress) => Promise<void>) | undefined;
   /**
    * 缺省表示本次不允许任何工具请求：既有 A 档 DISCUSS 与提案行为不变。
    * 只有 B 档人设会话会传入只读词表。

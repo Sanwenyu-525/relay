@@ -29,6 +29,8 @@ function json(body: unknown, status = 200): Response {
 
 function usage(overrides: Partial<RelaySessionContextUsage> = {}): RelaySessionContextUsage {
   return { sessionId, budget: { tokens: 524288, revision: "3" },
+    nextCall: { reservationTokens: 524288, contextBudgetTokens: 524288,
+      providerWindowTokens: null, windowSource: "UNKNOWN" },
     lastCall: { source: "MODEL_CALL", callId: "33333333-3333-4333-8333-333333333333",
       messageId: null, provider: "openai-compatible", model: "fixture-model",
       status: "COMPLETED", inputTokens: 10_607, outputTokens: 646,
@@ -74,16 +76,19 @@ describe("上下文用量浮层", () => {
     expect(wrapper.text()).not.toContain("跟随应用默认");
     expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
       .toBe(true);
-    expect(wrapper.text()).toContain("本会话独立保存，新会话继承上一会话的选择。");
+    // 2026-11-01 用户指令：删掉「当前档位 256K」标题行——当前值只看单选态，不再重复一遍。
+    expect(wrapper.text()).not.toContain("当前档位");
   });
 
-  it("选档与保存分开：单选组只改已选值，「保存档位」才写服务端", async () => {
+  it("档位就是写入口：没有「保存 / 重新读取」两枚按钮，未点之前只显示服务端已保存的单选态", async () => {
     const wrapper = await mount(usage());
-    expect(wrapper.find('[data-testid="context-budget-save"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="context-budget-reload"]').exists()).toBe(true);
-    // 没动过选择时：状态行说的是服务端已保存的档位，而不是某一枚按钮。
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text())
-      .toContain("当前生效：512K");
+    expect(wrapper.find('[data-testid="context-budget-save"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="context-budget-reload"]').exists()).toBe(false);
+    expect(wrapper.find(".context-usage-tier-actions").exists()).toBe(false);
+    // 正常状态不再常驻说明行：三档的单选态已经说完了。
+    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text()).toBe("");
+    expect((wrapper.get('[data-testid="context-budget-option-524288"]').element as HTMLInputElement).checked)
+      .toBe(true);
   });
 
   it("点档位立刻写服务端：带该会话的档位修订与所选档位，成功后回执确认", async () => {
@@ -97,15 +102,68 @@ describe("上下文用量浮层", () => {
     const wrapper = await mount(usage(), { onSaved });
     await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
-    // 只选不保存：一个写请求都不发，界面也不宣称已经切换。
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text())
-      .toContain("尚未保存；现在生效的是 512K");
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
-    await flush();
+    // 点下去就是一次写，不需要第二枚「保存」按钮。
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(wrapper.get('[data-testid="context-budget-notice"]').text()).toContain("1,048,576");
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("连点两档只发出一条写：第二条不生成新命令", async () => {
+    const fetchMock = stubSequence([(_url, init) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return json({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
+        result: { session_id: sessionId, context_budget_tokens: body.context_budget_tokens,
+          revision: "4" } });
+    }]);
+    const wrapper = await mount(usage());
+    const first = wrapper.get('[data-testid="context-budget-option-262144"]')
+      .element as HTMLInputElement;
+    const second = wrapper.get('[data-testid="context-budget-option-1048576"]')
+      .element as HTMLInputElement;
+    // 两次点击落在同一帧：闸门必须是同步可见的 ref，不能只看渲染后的 disabled。
+    first.click();
+    second.click();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("历史调用与当前档位分开：历史按那次冻结的预算解释，档位另说", async () => {
+    const wrapper = await mount(usage({
+      budget: { tokens: 1_048_576, revision: "4" },
+      nextCall: { reservationTokens: 1_048_576, contextBudgetTokens: 1_048_576,
+        providerWindowTokens: null, windowSource: "UNKNOWN" },
+    }));
+    // 历史占比仍按那次调用冻结的 65,536 算，不拿当前 1024K 去除。
+    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("16%");
+    expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
+      .toBe(true);
+    expect(wrapper.find('[data-testid="context-usage-history"]').exists()).toBe(true);
+  });
+
+  it("档位区只留三档：不再渲染「当前档位」标题行与「下次调用申请」行", async () => {
+    const wrapper = await mount(usage());
+    expect(wrapper.text()).not.toContain("当前档位");
+    expect(wrapper.text()).not.toContain("下次调用申请");
+    expect(wrapper.find('[data-testid="context-budget-current"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="context-budget-next"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="context-usage-tiers"]').findAll("input[type=radio]")).toHaveLength(3);
+  });
+
+  it("读序是最近一次模型调用 → 上下文构成 → 上下文档位，档位排在菜单最底部的停靠区", async () => {
+    const wrapper = await mount(usage());
+    const order = ["context-usage-history", "context-usage-breakdown", "context-budget-inline"]
+      .map((id) => wrapper.get(`[data-testid="${id}"]`).element as HTMLElement);
+    for (let i = 1; i < order.length; i += 1) {
+      // compareDocumentPosition 的 FOLLOWING 位为真：DOM 顺序就是用户要的阅读顺序。
+      expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy();
+    }
+    // 停靠区是布局的参与者而不是覆盖层：档位区在滚动区之后，自己那一段里没有分项与错误提示。
+    const dock = wrapper.get(".context-usage-dock").element as HTMLElement;
+    const scroll = wrapper.get(".context-usage-scroll").element as HTMLElement;
+    expect(dock.contains(wrapper.get('[data-testid="context-usage-tiers"]').element as Node)).toBe(true);
+    expect(dock.contains(wrapper.get('[data-testid="context-usage-breakdown"]').element as Node)).toBe(false);
+    expect(scroll.contains(dock)).toBe(false);
   });
 
   it("占比按那次调用冻结的预算解释；冻结预算缺失时写「预算未知」且不给百分比", async () => {
@@ -135,7 +193,7 @@ describe("上下文用量浮层", () => {
     unmount?.(); unmount = null;
     const legacy = await mount(usage({ lastCall: { ...usage().lastCall!, breakdown: null } }));
     expect(legacy.get('[data-testid="context-usage-breakdown-empty"]').text())
-      .toContain("暂无分项统计");
+      .toContain("当前记录没有分项统计");
     expect(legacy.findAll('[data-testid^="context-usage-row-"]')).toHaveLength(0);
     // 旧数据没有分项，但总用量照常可读。
     expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("16%");
@@ -149,8 +207,6 @@ describe("上下文用量浮层", () => {
     ]);
     const wrapper = await mount(usage(), { onReload });
     await wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
     await flush();
     expect(wrapper.get('[data-testid="context-budget-conflict"]').text()).toContain("档位已被其他操作改动");
     expect(onReload).toHaveBeenCalledTimes(1);
@@ -177,8 +233,6 @@ describe("上下文用量浮层", () => {
     ]);
     const wrapper = await mount(usage());
     await wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
     await flush();
     const pending = wrapper.get('[data-testid="context-budget-pending"]').text();
     expect(pending).toContain("保存结果待核对");

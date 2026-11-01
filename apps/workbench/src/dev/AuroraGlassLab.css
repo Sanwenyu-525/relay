@@ -1,0 +1,539 @@
+/*
+ * Aurora Glass 液态玻璃主题原型（仅开发构建，UI-AURORA-01）。
+ *
+ * 隔离边界，按行读：
+ *   * 所有材质规则都以 `[data-aurora-preview]` 开头。`:root`、`body`、`.app-frame` 这类全局选择器
+ *     一条都不出现，因此正式界面拿不到这里的任何声明。
+ *   * 材质变量定义在预览容器自己身上（`[data-aurora-preview]`），不是 `:root`：控制器改参数
+ *     只改这一颗元素上的自定义属性，离开原型即消失，不进 localStorage。
+ *   * 不复制一套正式 Token。玻璃层只新增「材质」这一类量（模糊半径、表面不透明度、色调、
+ *     边缘高光、层级），颜色一律引用 design-tokens.json 注入的 `--relay-*`；
+ *     字号、圆角、间距、控件高度、动效时长与缓动全部沿用既有 token，不写第二份数值。
+ *
+ * 材质分档是本主题的核心决定，而不是给每块区域贴同一种玻璃：
+ *   bar    标题带 —— 最实，常驻窗口边缘，读起来是「金属边框」而不是「玻璃片」
+ *   rail   图标导航 / 近期工作栏 —— 标准档，20px / 80%
+ *   sheet  输入器外框 —— 标准档 + 一层极轻投影，因为它离正文最近，需要「浮在纸面上」
+ *   float  菜单 / 浮层 / 抽屉 —— 最透、模糊最强，因为它盖住的是别人的内容
+ *   paper  正文、表格、代码、Diff、错误详情、审批内容 —— 不透明，永远是纸
+ *
+ * 「经典 / Aurora」A/B 靠 `[data-aurora-skin]` 切换：classic 档下本文件不产生任何一条命中，
+ * 界面就是产品现在这个样子，不需要另写一份经典皮肤。
+ */
+
+/* ===== 预览容器与参数 ===== */
+
+[data-aurora-preview] {
+  /* 用户指定的三个默认值，写死在这里；控制器的微调只覆盖本元素的这三个属性。 */
+  --aurora-blur: 20px;
+  --aurora-alpha: 0.80;
+  /* 分档透明度：float 最透（盖住的是别人的内容），drawer 居中，其余档共用 --aurora-alpha。
+     降级只需要把这三个顶成 1，五档同时收回复色，不必逐条抄选择器。 */
+  --aurora-alpha-float: 0.72;
+  --aurora-alpha-drawer: 0.86;
+  --aurora-tint: 245 251 247;
+  /* 色调档位：sage 是默认冷绿，mist 偏一点点天蓝，moss 偏一点点叶绿。全部留在既有
+     paper/sage/sidebar 那一族里，不引入 tokens 之外的新色相。 */
+  --aurora-edge: rgb(255 255 255 / 0.62);
+  --aurora-edge-low: rgb(32 93 71 / 0.10);
+  --aurora-surface: rgb(var(--aurora-tint) / var(--aurora-alpha));
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  border-radius: var(--relay-radius-panel);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-canvas);
+  /* 环境场的深色下限：控制器换色调档时一起换，测试拿它算最坏情况的对比度。 */
+  --aurora-ambient-deep: #E7F0E9;
+}
+
+[data-aurora-preview][data-aurora-tint="mist"] { --aurora-tint: 246 250 252; --aurora-ambient-deep: #E6EEF4; }
+[data-aurora-preview][data-aurora-tint="moss"] { --aurora-tint: 243 250 245; --aurora-ambient-deep: #E4F0E7; }
+
+/* 环境场：非常低对比度的冷绿光带。它就是玻璃要模糊的那个「背后」。
+   极光光带是这个主题的名字来源，也是唯一能让 20px 模糊真的看得出来的结构；
+   强度压在纸面色与最深场色之间约一档，正文不在它上面排。 */
+.aurora-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--relay-color-bg-canvas);
+}
+
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-ambient {
+  background-image:
+    radial-gradient(78% 62% at 12% 6%, rgb(50 124 78 / 0.16), transparent 68%),
+    radial-gradient(64% 58% at 88% 14%, rgb(47 109 181 / 0.10), transparent 66%),
+    radial-gradient(92% 70% at 52% 104%, rgb(46 125 117 / 0.12), transparent 70%),
+    linear-gradient(104deg,
+      var(--relay-color-bg-canvas) 0%,
+      var(--aurora-ambient-deep) 26%,
+      var(--relay-color-bg-canvas) 47%,
+      var(--aurora-ambient-deep) 69%,
+      var(--relay-color-bg-canvas) 100%);
+}
+
+/* 诊断用的条纹底：只在 `data-aurora-probe="on"` 时出现，用来把「模糊确实在改像素」
+   变成可测的事实。默认关闭，正常截图与视觉验收里都看不到它。 */
+[data-aurora-preview][data-aurora-probe="on"] .aurora-ambient {
+  background-image: repeating-linear-gradient(90deg,
+    #1F3A2C 0 6px, #F6FBF7 6px 12px);
+}
+
+/* ===== 外壳：壳身在环境场之上， chrome 是玻璃，内容是纸 ===== */
+
+.aurora-frame {
+  position: relative;
+  z-index: 1;
+  container-name: aurora-stage;
+  container-type: inline-size;
+}
+
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-frame,
+[data-aurora-preview][data-aurora-skin="aurora"] .app-content {
+  background: transparent;
+}
+
+/* 主区是纸：正文、表格、代码、Diff 的可读性不靠玻璃赌运气，直接给它不透白的底。 */
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-paper-host {
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgb(237 245 239 / 0.55), transparent 60%),
+    var(--relay-color-bg-surface);
+  border-radius: var(--relay-radius-panel);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  /* 输入卡与正文之间不再各浮一层：整块主区是一张纸，层级靠材质差异说清楚。 */
+  box-shadow: var(--relay-shadow-card);
+}
+
+/* 主区几何与皮肤无关：A/B 只差材质，不许差版式。阅读列仍由产品自己的 `--chat-measure`
+   （挂在 `.embedded-assist` 上）决定，这里不写第二份 max-width。
+   刻意不 `overflow: clip`：输入卡上方的浮层要能越出纸面，裁剪会把菜单切掉。 */
+.aurora-paper-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: var(--relay-space-3) var(--relay-space-4) var(--relay-space-4);
+}
+.aurora-paper-host > .scenario-shell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.aurora-paper-host .agent-chat-conversation { flex: 1 1 auto; min-height: 0; }
+
+/* 降级：玻璃只由下面 bar / rail / sheet / float 那几节按产品类名逐档声明，没有「基座类」。
+   透明度降级与「不支持 backdrop-filter」两条覆写统一写在 sheet 之后，见 §降级覆写。 */
+
+/* ===== bar：标题带 ===== */
+
+[data-aurora-preview][data-aurora-skin="aurora"] .desktop-titlebar {
+  background: rgb(var(--aurora-tint) / calc(var(--aurora-alpha) + 0.14));
+  -webkit-backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  border-bottom-color: var(--aurora-edge-low);
+  box-shadow: inset 0 1px 0 var(--aurora-edge);
+}
+
+/* ===== rail / sheet：导航、近期工作栏、顶栏 ===== */
+
+[data-aurora-preview][data-aurora-skin="aurora"] .app-navrail,
+[data-aurora-preview][data-aurora-skin="aurora"] .app-context-rail,
+[data-aurora-preview][data-aurora-skin="aurora"] .app-topbar {
+  background: var(--aurora-surface);
+  -webkit-backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  box-shadow: inset 1px 0 0 var(--aurora-edge);
+}
+
+[data-aurora-preview][data-aurora-skin="aurora"] .app-navrail { box-shadow: inset 0 1px 0 var(--aurora-edge); }
+[data-aurora-preview][data-aurora-skin="aurora"] .app-context-rail { border-inline-end: var(--relay-border-width) solid var(--aurora-edge-low); }
+
+/* 悬停只改边缘高光，不做整块变亮：这是本主题唯一的 hover 材质语言。 */
+@media (hover: hover) and (pointer: fine) {
+  [data-aurora-preview][data-aurora-skin="aurora"] .navigation-item:hover,
+  [data-aurora-preview][data-aurora-skin="aurora"] .recent-work-item:hover {
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5);
+  }
+}
+
+/* ===== sheet：输入器外框 ===== */
+
+[data-aurora-preview][data-aurora-skin="aurora"] .agent-chat-composer:not(.create-form) {
+  background: var(--aurora-surface);
+  -webkit-backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  border-color: var(--aurora-edge-low);
+  box-shadow: inset 0 1px 0 var(--aurora-edge), var(--relay-shadow-card);
+}
+
+/* 卡内的编辑面保持实色白：玻璃只做外框，正在输入的文字底下不能是半透明。
+   内衬几何两种皮肤一致（A/B 只差材质），差异只有那一层实色底。 */
+[data-aurora-preview] .aurora-composer-field {
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border-radius: var(--relay-radius-control);
+}
+
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-composer-field {
+  background: var(--relay-color-bg-surface);
+}
+
+/* ===== 降级覆写 ===== */
+
+/* 两条降级都不依赖源码顺序：材质只从这三档 alpha 自定义属性取值，降级把它们一起顶成
+   完全不透明，bar / rail / sheet / float / drawer 五档就同时收色，不用逐条抄选择器。
+   之前这类覆写挂在 `.aurora-glass` 这个「基座类」上，而原型渲染的是产品类名，
+   结果降级档看着是收色了、其实还在模糊——所以只按真实出现在 DOM 里的选择器写。 */
+
+/* 显式透明度降级档：材质差异改由描边、色阶与阴影承担。
+   这是「信息优先」那一档，不是关掉主题——版式、层级、控件都还在。 */
+[data-aurora-preview][data-aurora-transparency="reduced"] {
+  --aurora-alpha: 1;
+  --aurora-alpha-float: 1;
+  --aurora-alpha-drawer: 1;
+}
+
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .desktop-titlebar,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-navrail,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-context-rail,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-topbar,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .agent-chat-composer:not(.create-form),
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .aurora-popover-panel,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .agent-chat-options-panel,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .aurora-drawer {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .desktop-titlebar,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-navrail,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-context-rail,
+[data-aurora-preview][data-aurora-transparency="reduced"][data-aurora-skin="aurora"] .app-topbar {
+  border-color: var(--relay-color-border-separator);
+  box-shadow: none;
+}
+
+[data-aurora-preview][data-aurora-transparency="reduced"] .aurora-ambient { background-image: none; }
+
+/* 不支持 backdrop-filter 的 WebView（部分旧 WebView2）：半透明但没有模糊会糊成一片，
+   因此整档退回实色，由描边和阴影表达层级。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-aurora-preview] {
+    --aurora-alpha: 1;
+    --aurora-alpha-float: 1;
+    --aurora-alpha-drawer: 1;
+  }
+}
+
+/* 原型替身控件（模型选择器、上下文入口、「+」工具菜单）：产品里这些位置的真组件
+   要读真实目录与会话账本，隔离原型不碰 API，因此用同尺寸的空壳顶上。
+   `data-aurora-local` 让验收时一眼分清「真组件」与「替身壳」，不假装是产品实现。 */
+.aurora-titlebar-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--relay-space-1);
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+
+.aurora-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+}
+
+.aurora-chip svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
+
+/* ===== float：菜单、浮层、抽屉 ===== */
+
+/* 浮层的几何两种皮肤都一样：位置、尺寸、内边距属于版式，只有材质归 Aurora。
+   面板向上浮出（锚点在输入器工具行），沿用产品「卡片不建裁剪上下文」的那条约束。 */
+.aurora-popover { position: relative; }
+
+.aurora-popover-panel {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: calc(100% + var(--relay-space-2));
+  z-index: var(--relay-zIndex-popover);
+  min-width: 13rem;
+  max-width: min(20rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-2);
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  box-shadow: var(--relay-shadow-card);
+  color: var(--relay-color-text-primary);
+}
+
+.aurora-popover-panel p { margin: 0; }
+.aurora-popover-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-0-5); }
+.aurora-popover-item {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  text-align: start;
+  cursor: pointer;
+}
+
+.aurora-popover-marker { margin-inline-start: auto; color: var(--relay-color-action-primary); }
+
+/* 材质档：最透、模糊最强，因为它盖住的是别人的内容。 */
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-popover-panel,
+[data-aurora-preview][data-aurora-skin="aurora"] .agent-chat-options-panel {
+  background: rgb(var(--aurora-tint) / var(--aurora-alpha-float));
+  -webkit-backdrop-filter: blur(calc(var(--aurora-blur) * 1.5)) saturate(1.12);
+  backdrop-filter: blur(calc(var(--aurora-blur) * 1.5)) saturate(1.12);
+  border-color: var(--aurora-edge-low);
+  box-shadow: inset 0 1px 0 var(--aurora-edge), var(--relay-shadow-card);
+}
+
+.aurora-popover-panel {
+  transform-origin: var(--aurora-popover-origin, right bottom);
+  transition:
+    opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    visibility var(--relay-motion-duration-fast) linear;
+}
+
+/* 开合状态记在容器上（`data-open`），`aria-expanded` 只留在触发键上：
+   一个是视觉事实，一个是辅助技术事实，不该由同一颗属性兼任。 */
+.aurora-popover[data-open="true"] .aurora-popover-panel { opacity: 1; transform: translate3d(0, 0, 1px) scale(1); visibility: visible; }
+.aurora-popover[data-open="false"] .aurora-popover-panel { opacity: 0; transform: translate3d(0, -3px, 1px) scale(0.985); visibility: hidden; }
+
+[data-aurora-preview][data-aurora-motion="off"] .aurora-popover-panel,
+[data-aurora-preview][data-aurora-motion="off"] .desktop-titlebar,
+[data-aurora-preview][data-aurora-motion="off"] .app-navrail,
+[data-aurora-preview][data-aurora-motion="off"] .app-context-rail,
+[data-aurora-preview][data-aurora-motion="off"] .app-topbar,
+[data-aurora-preview][data-aurora-motion="off"] .agent-chat-composer,
+[data-aurora-preview][data-aurora-motion="off"] .aurora-paper-host,
+[data-aurora-preview][data-aurora-motion="off"] .aurora-ambient { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-aurora-preview] .aurora-popover-panel {
+    transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+    transform: none;
+  }
+}
+
+/* 主题 A/B 切换时的唯一一次整体过渡：面板底色与描边交叉，不逐卡错开。 */
+[data-aurora-preview] .desktop-titlebar,
+[data-aurora-preview] .app-navrail,
+[data-aurora-preview] .app-context-rail,
+[data-aurora-preview] .app-topbar,
+[data-aurora-preview] .agent-chat-composer,
+[data-aurora-preview] .aurora-paper-host,
+[data-aurora-preview] .aurora-ambient {
+  transition:
+    background-color var(--relay-motion-duration-panel) var(--relay-motion-easing-standard),
+    border-color var(--relay-motion-duration-panel) var(--relay-motion-easing-standard),
+    box-shadow var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+
+/* ===== paper：明确不玻璃化的区域 ===== */
+
+/* 长正文、表格、代码、Diff、错误详情、审批内容一律留在纸上。
+   这里刻意「什么都不做」：不加 backdrop-filter、不加半透明、不加阴影。
+   唯一动作是把产品自带的白底显式写成不透明，防止上游哪天改成半透明把阅读面带偏。 */
+[data-aurora-preview][data-aurora-skin="aurora"] .agent-message-list,
+[data-aurora-preview][data-aurora-skin="aurora"] .markdown-body,
+[data-aurora-preview][data-aurora-skin="aurora"] table,
+[data-aurora-preview][data-aurora-skin="aurora"] pre,
+[data-aurora-preview][data-aurora-skin="aurora"] code,
+[data-aurora-preview][data-aurora-skin="aurora"] .action-error,
+[data-aurora-preview][data-aurora-skin="aurora"] .warning-callout {
+  background-color: var(--relay-color-bg-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* 聊天区禁止任何横贯页面的装饰阴影（产品已有 assistReplyNoShadow 这条约束，本主题不解除）。 */
+[data-aurora-preview][data-aurora-skin="aurora"] .agent-message-slot,
+[data-aurora-preview][data-aurora-skin="aurora"] .agent-message-list > *,
+[data-aurora-preview][data-aurora-skin="aurora"] .reply-block { box-shadow: none; }
+
+/* 玻璃化的只是外壳，列表项不逐条变成独立玻璃卡。
+   这里只收掉「每条都有的底」，`--active` 那条排除在外：选中态仍由产品原有的色块表达，
+   不能被这条顺手抹平（否则「哪条是当前会话」在玻璃上就读不出来了）。 */
+[data-aurora-preview][data-aurora-skin="aurora"]
+  .recent-work-item:not(.recent-work-item--active) { background: transparent; }
+
+/* ===== 抽屉（窄窗）与滚动 ===== */
+
+/* 抽屉的几何两档共用；材质（半透 + 模糊 + 内高光）只在 Aurora 档出现。
+   层级：遮罩 overlay，抽屉压过遮罩一档，仍在 Toast 与对话框之下。 */
+.aurora-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: var(--relay-zIndex-overlay);
+  border: 0;
+  padding: 0;
+  background: rgb(32 51 41 / 0.24);
+}
+
+.aurora-drawer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: calc(var(--relay-zIndex-overlay) + 1);
+  width: min(20rem, 84%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+  overflow-y: auto;
+  color: var(--relay-color-text-primary);
+  background: var(--relay-color-bg-surface);
+  border-inline-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-drawer {
+  background: rgb(var(--aurora-tint) / var(--aurora-alpha-drawer));
+  -webkit-backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--aurora-blur)) saturate(1.08);
+  border-inline-end-color: var(--aurora-edge-low);
+  box-shadow: inset 1px 0 0 var(--aurora-edge);
+}
+
+/* 玻璃面上滚动条要跟着材质走，不然右侧露出一条系统灰槽，读成「窗口坏了」。 */
+[data-aurora-preview][data-aurora-skin="aurora"] .app-navrail,
+[data-aurora-preview][data-aurora-skin="aurora"] .app-context-rail,
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-drawer,
+[data-aurora-preview][data-aurora-skin="aurora"] .aurora-paper-host {
+  scrollbar-color: rgb(32 93 71 / 0.28) transparent;
+}
+
+/* 选中文字与光标跟着冷绿语言走：玻璃主题里这两处最容易被忘记收进设计。 */
+[data-aurora-preview][data-aurora-skin="aurora"] ::selection {
+  background: rgb(46 125 117 / 0.22);
+  color: var(--relay-color-text-primary);
+}
+
+/* 焦点：玻璃上不能用产品默认的暗色 outline（在玻璃上对比不够），改成双层环。
+   只做可见性增强，不缩小命中区，也不移除 outline。 */
+[data-aurora-preview][data-aurora-skin="aurora"] :focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: var(--relay-focus-offset);
+  box-shadow: 0 0 0 calc(var(--relay-focus-width) + var(--relay-focus-offset)) rgb(255 255 255 / 0.75);
+}
+
+/* ===== 窄窗自适应（容器查询） ===== */
+
+/* 产品外壳的折叠点是视口 width < 48rem（styles.css）。原型是嵌在开发路由里的一块预览，
+   视口不会跟着「窄窗口预览」变，所以这一档用容器查询在同一颗壳上复刻同一条规则：
+   列收成一条、两栏隐藏、☰ 出现。集成到正式主题时应交回产品自己的媒体查询。 */
+@container aurora-stage (width < 48rem) {
+  .aurora-frame > .app-frame { grid-template-columns: minmax(0, 1fr); }
+  .aurora-frame .app-navrail,
+  .aurora-frame .app-context-rail,
+  .aurora-frame .sidebar-resize-handle { display: none; }
+  /* 选择器多带一层 `.app-topbar`：产品把 ☰ 的基线写成 `display:none`，
+     同特异度下后加载的表会赢，必须比它多一级才压得回来。 */
+  .aurora-frame .app-topbar .mobile-menu-button { display: inline-flex; }
+}
+
+@container aurora-stage (width >= 48rem) {
+  .aurora-frame .app-topbar .mobile-menu-button { display: none; }
+}
+
+/* ===== 原型自己的控制区（不属于产品皮肤） ===== */
+
+.aurora-lab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-3);
+  padding: var(--relay-space-4) var(--relay-space-6) var(--relay-space-8);
+}
+
+.aurora-lab__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-3); }
+.aurora-lab__head h1 { margin: 0; font-size: var(--relay-font-size-compactPage); }
+.aurora-lab__head p { margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+
+.aurora-lab__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--relay-space-3) var(--relay-space-4);
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+}
+
+.aurora-lab__group { display: flex; flex-direction: column; gap: var(--relay-space-1); min-width: 0; }
+.aurora-lab__group > span { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+.aurora-lab__row { display: flex; flex-wrap: wrap; gap: var(--relay-space-1); }
+.aurora-lab__note { margin: 0; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
+
+.aurora-lab__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
+    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.aurora-lab__chip:hover { background: var(--relay-color-selection-hover); }
+.aurora-lab__chip[aria-pressed="true"],
+.aurora-lab__chip[aria-checked="true"] {
+  background: var(--relay-color-selection-bg);
+  border-color: var(--relay-color-action-primary);
+  color: var(--relay-color-action-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.aurora-lab__param input[type="range"] { width: 8.5rem; accent-color: var(--relay-color-action-primary); }
+.aurora-lab__param input[type="range"]:disabled { opacity: 0.5; }
+.aurora-lab__param input[type="range"]:disabled { opacity: 0.5; }
+
+.aurora-lab__param { display: flex; align-items: center; gap: var(--relay-space-2); font-size: var(--relay-font-size-meta); }
+.aurora-lab__param output { font-variant-numeric: tabular-nums; color: var(--relay-color-text-primary); }
+
+.aurora-lab__stage { display: flex; justify-content: center; }
+.aurora-lab__stage > [data-aurora-preview] { width: 100%; height: min(56rem, 82vh); }
+.aurora-lab__stage[data-aurora-width="narrow"] > [data-aurora-preview] { width: min(44rem, 100%); }
+
+/* 预览里的整块壳是等比复刻的真实窗口，高度由预览格给，不让 100vh 穿透到原型外面。 */
+.aurora-frame.desktop-window { height: 100%; }
+.aurora-frame .app-frame { min-height: 0; height: 100%; }
+
+.aurora-lab__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2) var(--relay-space-4);
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+
+.aurora-lab__legend > div { display: flex; flex-direction: column; gap: var(--relay-space-0-5); max-width: 22rem; }
+.aurora-lab__legend dt { font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-secondary); }
+.aurora-lab__legend dd { margin: 0; }
+
+/* 顶栏右端这一档读数：材质参数是原型事实，不属于产品顶栏，因此标注为本地元素。 */
+.aurora-topbar-hint { margin-inline-start: auto; white-space: nowrap; }

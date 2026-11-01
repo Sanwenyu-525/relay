@@ -40,6 +40,62 @@ export function gatewayCapabilityLabel(capability: string): string {
   return gatewayCapabilityLabelsKnown[capability] ?? capability;
 }
 
+/**
+ * 一条回复失败的原因（`assist_messages.error_code`）。
+ *
+ * 这一列原先只把机器码摊在聊天里（「生成失败：MODEL_EMPTY_REPLY」），用户读到的是一个
+ * 枚举名，不是一件可处理的事实。这里按服务端**确实写入**的码逐条说清「哪一步没成、
+ * 什么还留着、下一步做什么」；恢复动作只在后端真有入口时才说（重发走输入栏，
+ * 清除工作窗口走上下文面板），不在此处承诺界面没有的能力。
+ * 认不出的码原样带出，不套一句「未知错误」把真实失败糊掉。
+ */
+const assistFailureRecords: Record<string, string> = {
+  MODEL_EMPTY_REPLY: "模型这一轮结束时没有给出正文：已要求它用现有结果收尾一次，仍然返回空。"
+    + "工具记录与已读取资料保留，可再问一次。",
+  MODEL_FAILED: "模型调用失败，这条回复没有正文。已读取资料与工具记录保留，可再问一次。",
+  MODEL_TIMEOUT: "模型响应超时，这条回复没有正文。已读取资料与工具记录保留，可再问一次。",
+  MODEL_TOOL_OUTPUT_INVALID: "模型返回的工具调用不符合约定格式，这一轮没有采纳结果。已读取资料与工具记录保留。",
+  MODEL_BUDGET_EXHAUSTED: "这条会话的模型用量已达上限，回复提前结束。已读取资料与工具记录保留。",
+  MEMORY_CONTEXT_TOO_LARGE: "工作上下文超过容量上限，这条回复没有生成。原文与已有摘要都保留，"
+    + "可在上下文面板里清除工作窗口后重试。",
+  SESSION_TOOL_ROUNDS_EXHAUSTED: "工具轮次预算已用尽，回复在收尾前结束。已完成的工具结果保留。",
+  LEARNING_TOOL_ROUNDS_EXHAUSTED: "整理用的工具轮次已用尽，本次整理没有完成。",
+  TOOL_CALLS_WITHOUT_DECLARED_TOOLS: "模型请求了没有向它声明的工具，本次结果没有被采纳。已落账的工具记录保留。",
+  OUTPUT_SCHEMA_INVALID: "结构化输出不符合约定格式，本次结果没有被采纳。",
+  SKILL_DEFINITION_UNAVAILABLE: "这条 Skill 的定义当前不可读取，本次没有产出回复。",
+  SKILL_SOURCE_UNAVAILABLE: "这条 Skill 引用的来源当前不可读取，本次没有产出回复。",
+  METHOD_DEFINITION_UNAVAILABLE: "这条方法的定义当前不可读取，本次没有产出回复。",
+  SUBAGENT_CANCELLED: "子任务被取消，父会话没有收到它的结果。",
+  SUBAGENT_MESSAGE_CLAIM_LOST: "子任务的执行凭据失效，它的结果没有被采纳。",
+  SUBAGENT_MESSAGE_MISSING: "子任务的消息记录缺失，它的结果没有被采纳。",
+  SESSION_MISSING: "这条会话已不在服务端记录里，本次执行没有写入任何结果。",
+  ASSISTANT_SESSION_IDENTITY_MISSING: "服务端没能把这条回复对应到会话身份，本次没有写入结果。",
+  AGENT_SESSION_IDENTITY_MISSING: "服务端没能把这次执行对应到会话身份，本次没有写入结果。",
+  ATTEMPT_LEASE_LOST: "这次执行的租约已失效，结果按未完成保留，没有写入业务事实。"
+};
+
+export function assistFailureLabel(code: string): string {
+  const known = assistFailureRecords[code];
+  return known === undefined ? `这条回复生成失败（${code}）。已读取资料与工具记录保留。` : known;
+}
+
+/**
+ * Provider 分类行已经把原因说过一次时的主行读法（2026-11-01 P1-1）。
+ *
+ * 模型侧的超时与失败同时带 `provider_error_kind` 时，下方那行「模型服务：…」给的是
+ * 确切原因与恢复动作（限流、断流、认证、超时）；主行再复述一遍同一个原因，两行就是
+ * 同一件事说两遍。因此只有这两条例外走「只报结果与保留」的读法，其余码的含义
+ * （空正文、预算、格式、Skill 来源）分类行说不出来，主行照旧逐条说。
+ */
+export const assistModelFailureNote = "模型这一轮没有产出回复。已读取资料与工具记录保留，可再问一次。";
+
+const PROVIDER_KIND_COVERS_REASON: ReadonlySet<string> = new Set(["MODEL_TIMEOUT", "MODEL_FAILED"]);
+
+export function assistFailureText(code: string, providerErrorKind: string | null): string {
+  if (providerErrorKind !== null && PROVIDER_KIND_COVERS_REASON.has(code)) return assistModelFailureNote;
+  return assistFailureLabel(code);
+}
+
 export const reviewKindLabels: Record<RelayReview["kind"], string> = {
   CRITERION: "人工验收",
   RETRY_BUDGET: "修正预算",
@@ -300,6 +356,7 @@ const activityEventTypeLabels: Record<string, string> = {
   SCHEDULED_TASK_OCCURRENCE_RESOLVED: "处理定时任务这一次执行",
   DELEGATION_CREATED: "委托 AI 执行", RUN_CREATED: "创建 Run", RUN_FINISHED: "Run 结束", RUN_FAILED: "运行失败",
   RUN_WAITING_TOOL_LOOP: "Run 等待工具结果", RUN_WORKER_FENCED: "Run 被 fencing 拦下", RUN_OWNERSHIP_MISMATCH: "Run 归属不符",
+  RUN_RECOVERY_REQUIRED: "Run 等待恢复核对",
   RUN_GRAPH_LAYOUT_REBUILT: "重排 Run 图", STEP_ATTEMPT_RESULT_REJECTED_STALE: "丢弃过期的步骤结果",
   ARTIFACT_VERSION_SAVED: "保存产物版本", ARTIFACT_VERSION_SELECTED: "选用产物版本",
   ACCEPTANCE_COMPARISON_FROZEN: "冻结验收比对", FILE_WRITE_MANUALLY_CLOSED: "手动结束文件写入",

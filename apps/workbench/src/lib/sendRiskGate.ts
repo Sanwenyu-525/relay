@@ -12,8 +12,15 @@ import { chatModeCommandFromText } from "./chatModeCommand";
  * 没有风险、确认期间换了模型或改了正文却沿用旧确认。只有纯函数才能用单测钉住。
  */
 
-/** 审计没能给出结论的原因：界面据此说「未知」，不说成「没有风险」。 */
-export type RiskAuditFailureCode = "TIMEOUT" | "NO_FILE_ACCESS" | "SCAN_UNAVAILABLE" | "AUDIT_FAILED";
+/**
+ * 审计没能给出结论的原因：界面据此说「未知」，不说成「没有风险」。
+ *
+ * `STATE_CHANGED` 与 `SCOPE_UNKNOWN` 是 2026-10-31（P0-2）新增的两种：
+ *   · 前者是「检查期间要发的东西变了」——旧读数不再代表这一次发送，放弃并重新核验；
+ *   · 后者是「作用域本身无法确定」——例如默认工作目录不可用，连该扫哪个目录都说不准。
+ */
+export type RiskAuditFailureCode = "TIMEOUT" | "NO_FILE_ACCESS" | "SCAN_UNAVAILABLE" | "AUDIT_FAILED" |
+  "STATE_CHANGED" | "SCOPE_UNKNOWN";
 
 /** 一次预检的作用域：模型、目录、会话、档位任一变化都必须重新检查。 */
 export interface RiskSendScope {
@@ -35,10 +42,38 @@ export type RiskAuditOutcome =
   | { readonly kind: "CONFIRM"; readonly audit: RequiredContextAudit }
   | { readonly kind: "UNKNOWN"; readonly code: RiskAuditFailureCode; readonly message: string };
 
-/** 一次发送意图：正文与 `/plan`、`/goal` 解析出的模式，在预检之前就固定。 */
+/**
+ * 一次发送意图：正文、`/plan`、`/goal` 解析出的模式，以及随命令一起提交的其它载荷。
+ *
+ * 2026-10-31（P0-2）：附件、Skill、资料与会话身份也进指纹。此前只比正文与模式，
+ * 于是「预检期间把附件删掉」「换了一个 Skill」都能沿用旧读数——实际提交的内容已经
+ * 不是被检查过的那一份了。
+ */
 export interface SendIntent {
   readonly content: string;
   readonly chatMode: RelayChatMode | null;
+  /** 附件指纹（名称/大小/类型），由调用方按自己的暂存项生成。 */
+  readonly attachments?: readonly string[] | null;
+  /** Skill 身份 `id@version`：换 Skill 会换工具定义与输入。 */
+  readonly skill?: string | null;
+  /** 资料引用 `kind:rootId@version`：这些内容直接进上下文。 */
+  readonly sources?: readonly string[] | null;
+  /** 会话身份（档位 + 助手 id）：换档就是另一条会话，不能在旧预检下建出来。 */
+  readonly identity?: string | null;
+}
+
+/**
+ * 一次预检的完整快照（P0-2）。
+ *
+ * 预检的输入与它要保护的对象必须是同一份事实：作用域（目录/会话/模型/档位）、待发载荷
+ * （正文/模式/附件/Skill/资料/会话身份），以及「作用域本身就无法确定」的原因。
+ * 任何一项在检查期间变化，旧结论即作废——不是「再判一次」，而是直接换一份快照重查。
+ */
+export interface SendSnapshot {
+  readonly scope: RiskSendScope;
+  readonly intent: SendIntent;
+  /** 有值时不做审计：连该扫哪个目录都确定不了，结论只能是风险未知。 */
+  readonly unknownReason?: string | null;
 }
 
 /** 屏上那一条风险确认：只记数据不记闭包，确认时由界面重算当前状态再核对。 */
@@ -65,6 +100,8 @@ const UNKNOWN_TEXT: Record<RiskAuditFailureCode, string> = {
   NO_FILE_ACCESS: "这个目录的必读文件读不到（没有读取权限），风险未知。",
   SCAN_UNAVAILABLE: "现在无法扫描必读文件，风险未知。",
   AUDIT_FAILED: "风险检查没有完成，风险未知。",
+  STATE_CHANGED: "检查期间目录、模型、档位、正文、附件或 Skill 发生了变化，上一次检查结果不适用。",
+  SCOPE_UNKNOWN: "无法确定这次会话实际会绑定哪个目录。",
 };
 
 /**
@@ -111,9 +148,34 @@ export function payloadSignature(content: string): string {
   return `${content.length}:${hash.toString(16)}`;
 }
 
-/** 意图指纹：模式也算在内——同一段正文换了模式就是另一次发送。 */
+/**
+ * 意图指纹：模式、正文与随命令提交的其它载荷一起算。
+ *
+ * 附件顺序由调用方决定（界面上就是暂存顺序）；任何一项增删改都换指纹，
+ * 因此「预检期间删掉一张图」不会被当成同一次发送。
+ */
 export function intentSignature(intent: SendIntent): string {
-  return payloadSignature(`${intent.chatMode ?? "-"}\u0000${intent.content}`);
+  const list = (values: readonly string[] | null | undefined): string =>
+    values === null || values === undefined || values.length === 0 ? "-" : values.join(",");
+  return payloadSignature([intent.chatMode ?? "-", list(intent.attachments),
+    intent.skill ?? "-", list(intent.sources), intent.identity ?? "-", intent.content].join("\u0000"));
+}
+
+/**
+ * 整份快照的指纹（P0-2）：作用域 + 待发载荷 + 「作用域无法确定」的原因。
+ *
+ * 预检开始时取一次，审计返回后再取一次；两次不同就说明这次检查的结果已经不对应
+ * 用户此刻要发的东西，必须作废重查，而不是拿旧读数放行。
+ */
+export function snapshotSignature(snapshot: SendSnapshot): string {
+  return [riskScopeSignature(snapshot.scope), intentSignature(snapshot.intent),
+    snapshot.unknownReason ?? "-"].join("|");
+}
+
+/** 「未知」这句话只在这里拼：界面与日志用同一份措辞，不各写一套。 */
+export function riskUnknownMessage(code: RiskAuditFailureCode, detail?: string | null): string {
+  const suffix = detail === null || detail === undefined || detail.trim() === "" ? "" : `（${detail}）`;
+  return `${UNKNOWN_TEXT[code]}${suffix}`;
 }
 
 /** 同一指纹、同一作用域才算「这次已经确认过」；换了模型或目录必须重新问一次。 */

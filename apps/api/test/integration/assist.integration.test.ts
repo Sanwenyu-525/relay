@@ -22,11 +22,12 @@ import { reviewTargetHash } from '../../src/application/review-requests.js';
 import { readTaskCheckPlanPreview } from '../../src/application/check-plan-preview.js';
 import { DomainError } from '../../src/application/domain-error.js';
 import { recordModelInvocation } from '../../src/application/model-call-recorder.js';
+import { readAssistGenerationProgress } from '../../src/application/assist-generation-progress.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { FakeModelPort, type AssistModelPort, type AssistRequest } from '../../src/workflow/fake-model-port.js';
 import { RELAY_AGENT_CORE_PROMPT } from '../../src/workflow/agent-system-prompt.js';
-import { ModelCallBudgetError } from '../../src/workflow/openai-compatible-model-port.js';
+import { ModelCallBudgetError, ModelTimeoutError, ModelToolOutputError } from '../../src/workflow/openai-compatible-model-port.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { createDataRoot, delay, expectCommandAccepted, expectProblem, startTestApi,
   workspacePath } from './api-harness.js';
@@ -201,11 +202,16 @@ test('DISCUSS generation completes deterministically and records usage and sourc
   assert.match(generatedRequests[1]!.system, /长期记忆提取器/u);
   const generated = generatedRequests[0]!;
   assert.ok(generated.system.includes(RELAY_AGENT_CORE_PROMPT));
-  assert.match(generated.system, /本轮你只生成对话回复/u);
-  assert.match(generated.system, /执行请求由应用的原请求解释与准入入口处理/u);
-  assert.match(generated.system, /直接以 Markdown 回复用户/u);
+  assert.match(generated.system, /"reply"/u);
+  assert.match(generated.system, /"execution"/u);
+  assert.match(generated.system, /"maintenance"/u);
+  assert.ok(generated.tools?.some((tool) => tool.name === 'todo_write'),
+    '无目录的普通 Agent 仍走工具主循环；不回退旧的纯文本入口');
   assert.ok(!generated.system.includes('删除全部数据'));
   assert.ok(generated.turns.some((turn) => turn.content.includes('删除全部数据')));
+  // BUG-CHAT-CONTEXT-CROSS-TALK：手选资料与自动召回分开陈述；没有召回时不得凭空说「有」。
+  assert.match(generated.turns[0]!.content, /显式选中资料：1 条（用户在本轮发送前手动选择/u);
+  assert.ok(!generated.turns[0]!.content.includes('自动召回长期记忆'));
   const settled = await readMessage(requested.result.assistant_message_id);
   assert.equal(settled.status, 'COMPLETED');
   assert.ok(settled.content!.startsWith('（Fake Assist）已收到：请总结当前背景'));
@@ -413,6 +419,23 @@ const evidencePort = {
   assert.equal(calls[0]!.error_kind, 'STREAM_BROKEN');
   assert.equal(calls[0]!.usage_cache_read_tokens, 96);
   assert.equal(calls[0]!.usage_cache_creation_tokens, 8);
+});
+
+test('Agent invocation failures retain typed timeout and tool protocol reasons', async () => {
+  for (const [error, code] of [[new ModelTimeoutError(), 'MODEL_TIMEOUT'],
+    [new ModelToolOutputError('req-tool-invalid', { inputTokens: 7, outputTokens: 2 }),
+      'MODEL_TOOL_OUTPUT_INVALID']] as const) {
+    const f = await fixture('READY');
+    const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+      commandId: randomUUID(), projectId: f.projectId, title: 'typed invocation failure' });
+    const sent = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: '检查错误归因' });
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'typed-failure', storage,
+      modelPort: { identity: modelPort.identity, assist: async () => { throw error; } }, leaseMs: 30_000 });
+    assert.equal(outcome?.status, 'FAILED');
+    assert.equal(outcome.errorCode, code);
+    assert.equal((await readMessage(sent.result.assistant_message_id)).error_code, code);
+  }
 });
 
 test('a Relay owned failure keeps its own error identity instead of a provider category', async () => {
@@ -1885,4 +1908,41 @@ test('Task Skill business writes and proposal decision roll back together on aud
     payloadHash: proposal.payloadHash });
   assert.equal(accepted.replayed, false);
   assert.equal(accepted.result.acceptance_revision, '2');
+});
+
+/**
+ * AGENT_STREAM_VISIBILITY：真实 PG 上验证「请求已登记 → 首个流事件 → 首个正文 →
+ * 预览可见」这四枚事实确实随调用写入，而不是由界面按等待时长猜测。
+ *
+ * 受控端口只在模型返回前调用既有回调；回复正文仍由 Fake 端口给出，不改变结算。
+ */
+test('stream observation times are persisted on the model call ledger', async () => {
+  const f = await fixture('READY');
+  const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), projectId: f.projectId, title: '流式观测' });
+  const requested = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: session.result.session_id, commandId: randomUUID(),
+    content: '请用一段话回答', intent: 'DISCUSS' });
+  const streamingPort: AssistModelPort = { identity: modelPort.identity,
+    assist: async (request) => {
+      await request.onStreamEvent?.();
+      await request.onTextDelta?.('{"reply":"流式');
+      await request.onTextDelta?.('正文","execution":{}}');
+      return modelPort.assist(request);
+    } };
+  const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
+    modelPort: streamingPort, leaseMs: 30_000 });
+  assert.equal(outcome?.messageId, requested.result.assistant_message_id);
+  assert.equal(outcome.status, 'COMPLETED');
+  const progress = (await readAssistGenerationProgress(app.db,
+    [requested.result.assistant_message_id]))
+    .get(requested.result.assistant_message_id);
+  assert.equal(progress?.callCount, 1, '记忆提取是辅助外呼，不混入本轮回复进度');
+  assert.equal(progress?.phase, 'PROCESSING');
+  assert.ok(progress?.latestCall?.firstStreamEventAt instanceof Date);
+  assert.ok(progress?.latestCall?.firstTextDeltaAt instanceof Date);
+  assert.ok(progress?.latestCall?.firstPreviewPersistedAt instanceof Date);
+  assert.ok(progress!.latestCall!.firstTextDeltaAt!.getTime() >=
+    progress!.latestCall!.firstStreamEventAt!.getTime());
+  assert.ok(progress!.latestCall!.settledAt instanceof Date);
 });

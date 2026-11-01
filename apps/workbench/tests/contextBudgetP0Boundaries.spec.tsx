@@ -10,7 +10,8 @@ import { flush, mountReact } from "./mountApp";
  * 三条边界的共同点：界面不得替服务端先说话。
  *   P0-A 空白新会话：显示**来源会话那一行**的档位；读不到就说待确认，不拿 256K 冒充继承；
  *   P0-B 空白新会话的草稿按会话分开（导航链路用例在 contextBudgetInheritance.spec.tsx）；
- *   P0-C 选档与保存分开：只有服务端回执才能让界面宣称「已生效」。
+ *   P0-C 档位点击就是一次写（2026-10-31 用户指令删掉「保存 / 重新读取」两枚按钮）：
+ *        只有服务端回执才能让界面宣称「已生效」，在途时只说明仍按旧档位生效。
  */
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -27,7 +28,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 function usage(tokens: 262_144 | 524_288 | 1_048_576 = 524_288): RelaySessionContextUsage {
-  return { sessionId, budget: { tokens, revision: "3" }, lastCall: null };
+  return { sessionId, budget: { tokens, revision: "3" },
+    nextCall: { reservationTokens: tokens, contextBudgetTokens: tokens,
+      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null };
 }
 
 async function mountPanel(data: RelaySessionContextUsage | null, handlers: {
@@ -76,14 +79,14 @@ describe("P0-A 空白新会话显示它真正会继承到的档位", () => {
   it("来源会话是 512K：浮层选中的就是 512K，不是缺省的 256K", async () => {
     const wrapper = await mountBlank({ draftTier: null, inheritedTier: 524_288, inheritState: "ready" });
     expect(checkedTiers(wrapper)).toEqual(["524288"]);
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text())
+    expect(wrapper.get('[data-testid="context-usage-first-tier-state"]').text())
       .toContain("继承来源会话：512K");
   });
 
   it("读来源途中或读失败：一枚档位也不预选，失败给重读入口", async () => {
     const loading = await mountBlank({ draftTier: null, inheritedTier: null, inheritState: "loading" });
     expect(checkedTiers(loading)).toEqual([]);
-    expect(loading.get('[data-testid="context-usage-tier-state"]').text())
+    expect(loading.get('[data-testid="context-usage-first-tier-state"]').text())
       .toContain("正在读取来源会话的档位");
     unmount?.(); unmount = null;
 
@@ -91,7 +94,7 @@ describe("P0-A 空白新会话显示它真正会继承到的档位", () => {
     const failed = await mountBlank({ draftTier: null, inheritedTier: null, inheritState: "failed",
       onRetryInherit });
     expect(checkedTiers(failed)).toEqual([]);
-    expect(failed.get('[data-testid="context-usage-tier-state"]').text())
+    expect(failed.get('[data-testid="context-usage-first-tier-state"]').text())
       .toContain("读不到来源会话的档位");
     await failed.get('[data-testid="context-usage-inherit-retry"]').trigger("click");
     expect(onRetryInherit).toHaveBeenCalledTimes(1);
@@ -111,15 +114,13 @@ describe("P0-C 只有回执才能说「已生效」", () => {
     const wrapper = await mountPanel(usage(), { onSaved });
     await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
-    await flush();
     expect(wrapper.get('[data-testid="context-usage-tier-state"]').text())
       .toContain("正在保存 1024K；确认之前仍按 512K 生效");
     expect(onSaved).not.toHaveBeenCalled();
     gate.release?.();
     await flush();
     await flush();
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text()).toContain("当前生效：1024K");
+    expect(checkedTiers(wrapper)).toEqual(["1048576"]);
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -131,12 +132,10 @@ describe("P0-C 只有回执才能说「已生效」", () => {
     const wrapper = await mountPanel(usage(), { onReload });
     await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
-    await flush();
     expect(wrapper.get('[data-testid="context-budget-conflict"]').text()).toContain("档位已被其他操作改动");
     expect(onReload).toHaveBeenCalledTimes(1);
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text())
-      .toContain("现在生效的是 512K");
+    // 冲突之后选择退回生效值：单选组不会停在没写成功的 1024K 上。
+    expect(checkedTiers(wrapper)).toEqual(["524288"]);
     expect(writes, "冲突不自动重试写").toBe(1);
   });
 
@@ -152,11 +151,10 @@ describe("P0-C 只有回执才能说「已生效」", () => {
     const wrapper = await mountPanel(usage());
     await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
-    await flush();
+    // 在途时整组禁用：再点别的档位既不换选中值，也不生成第二条写命令。
     expect((wrapper.get('[data-testid="context-budget-option-262144"]').element as HTMLInputElement).disabled)
       .toBe(true);
-    await wrapper.get('[data-testid="context-budget-save"]').trigger("click");
+    await wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     gate.release?.();

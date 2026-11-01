@@ -868,9 +868,15 @@ export async function auditRequiredContext(db: DbExecutor,
     ...assessed.files.map((file) => `${file.path}:${String(file.bytes)}:${file.modified_at}`)]
     .join('\n'), 'utf8').digest('hex').slice(0, 32);
 
+  // P1-2：「已计入预计加载量」只数始终适用的那部分；子目录规则文件另计，不当成首轮就会读。
+  const applicableCount = assessed.files.filter((file) => file.scope !== 'NESTED').length;
+  const nestedCount = assessed.files.length - applicableCount;
   return { ...base, state: 'OK',
-    detail: assessed.files.length === 0 ? '没有发现会进上下文的必读文件。'
-      : `${String(assessed.files.length)} 份必读文件已计入预计加载量。`,
+    detail: applicableCount === 0
+      ? (nestedCount === 0 ? '没有发现会进上下文的必读文件。'
+        : `${String(nestedCount)} 份子目录规则文件只在进入对应子树时才读取。`)
+      : `${String(applicableCount)} 份必读文件已计入预计加载量` +
+        (nestedCount === 0 ? '。' : `；另有 ${String(nestedCount)} 份子目录规则文件按子树适用。`),
     root, scanned_at: scannedAt, fingerprint, severity: assessed.severity,
     files: assessed.files, budget: assessed.budget, reasons: assessed.reasons,
     suggestions: assessed.suggestions,
@@ -894,7 +900,13 @@ export interface RequiredContextAssessment {
  *
  * 判定顺序固定：先单文件，再累计，再看总输入是否超预算，最后按窗口是否已知降级说明。
  * 分母是**有效输入预算**（不是模型窗口、不是文件字节数）——只比字节数会在 32K 窗口的
- * 小模型上漏报，在 1M 窗口的大模型上误报。
+ * 小模型上漏报，在 1M 窗口的大模型上报得虚高。
+ *
+ * 2026-10-31（P1-2）按真实适用范围分级：
+ *   · `ROOT` / `DECLARED`——会话一开始就会进上下文（入口文件与项目显式声明），计入合计与档位；
+ *   · `NESTED`——子目录里的同名规则文件只在该子树内工作时才按继承链读入，
+ *     全部算进"首轮预计加载量"会把别的子树的选择抬成本会话的风险（误报）。
+ *     它们仍逐条列出体积与各自占比供参考，但不进合计、不抬高整体档位，另给一条说明。
  */
 export function assessRequiredContextFiles(
   input: readonly { readonly path: string; readonly category: RequiredContextCategory;
@@ -902,7 +914,9 @@ export function assessRequiredContextFiles(
     readonly mtimeMs: number }[],
   budgetInput: BudgetInput): RequiredContextAssessment {
   const sorted = [...input].sort((left, right) => right.bytes - left.bytes);
-  const requiredTokens = sorted.reduce((sum, file) => sum + estimateTokens(file.bytes), 0);
+  // 始终适用的部分：入口文件 + 项目声明。NESTED 是条件适用，见上面的说明。
+  const applicable = sorted.filter((file) => file.scope !== "NESTED");
+  const requiredTokens = applicable.reduce((sum, file) => sum + estimateTokens(file.bytes), 0);
   const budget = computeBudget(budgetInput, requiredTokens);
   const denominator = budget.effective_input_tokens;
   const files: RequiredContextFile[] = sorted.map((file) => {
@@ -916,6 +930,7 @@ export function assessRequiredContextFiles(
   const reasons: RequiredContextReason[] = [];
   let severity: RequiredContextSeverity = 'NONE';
   for (const file of files) {
+    if (file.scope === 'NESTED') continue;
     if (file.share === null) continue;
     const level = singleFileSeverity(file.share);
     if (level === 'NONE') continue;
@@ -923,13 +938,18 @@ export function assessRequiredContextFiles(
     reasons.push({ code: `SINGLE_FILE_${level}`, path: file.path, ratio: file.share,
       text: `${file.path} 预计占有效输入预算的 ${percentText(file.share)}` });
   }
-  if (budget.required_total_share !== null && files.length > 1) {
+  const nestedCount = files.length - applicable.length;
+  if (budget.required_total_share !== null && applicable.length > 1) {
     const level = totalFilesSeverity(budget.required_total_share);
     if (level !== 'NONE') {
       severity = worst(severity, level);
       reasons.push({ code: `TOTAL_FILES_${level}`, path: null, ratio: budget.required_total_share,
-        text: `${String(files.length)} 份必读文件累计预计占 ${percentText(budget.required_total_share)}` });
+        text: `${String(applicable.length)} 份必读文件累计预计占 ${percentText(budget.required_total_share)}` });
     }
+  }
+  if (nestedCount > 0) {
+    reasons.push({ code: 'NESTED_CONDITIONAL', path: null, ratio: null,
+      text: `${String(nestedCount)} 份子目录规则文件只在进入对应子树时才会读取，未计入本次预计加载量` });
   }
   if (budget.estimated_total_input_tokens !== null &&
       budget.estimated_total_input_tokens > ceilingOf(budgetInput)) {
@@ -953,7 +973,7 @@ export function assessRequiredContextFiles(
   if (severity !== 'NONE') {
     suggestions.push({ code: 'SPLIT_ENTRY', text: SUGGESTIONS.SPLIT_ENTRY });
     suggestions.push({ code: 'MOVE_REFERENCE', text: SUGGESTIONS.MOVE_REFERENCE });
-    if (files.length > 1) suggestions.push({ code: 'DEDUPLICATE', text: SUGGESTIONS.DEDUPLICATE });
+    if (applicable.length > 1) suggestions.push({ code: 'DEDUPLICATE', text: SUGGESTIONS.DEDUPLICATE });
     if (budget.provider_window_tokens !== null &&
         budget.call_budget_tokens > budget.provider_window_tokens) {
       suggestions.push({ code: 'TRIM_WINDOW', text: SUGGESTIONS.TRIM_WINDOW });

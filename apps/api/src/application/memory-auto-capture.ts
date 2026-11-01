@@ -248,7 +248,9 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   try {
     const captureModel = await resolveCaptureModel(message, input);
     result = (await recordModelInvocation<AssistResult>(db, {
-      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+      // 0153：辅助外呼——进账本与预算闸门，但不抢「最近一次调用」的读数，也不采对话分项。
+      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id,
+        purpose: 'MEMORY_CAPTURE' },
       identity: captureModel.identity,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       invoke: async () => captureModel.port.assist({ intent: 'DISCUSS', system: EXTRACTION_SYSTEM,

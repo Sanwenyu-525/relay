@@ -4,6 +4,7 @@ import { sql } from 'kysely';
 import type { DbExecutor } from '../infrastructure/database.js';
 import {
   buildTodoContextBlock,
+  NEW_TASK_TEXT_PREFIX,
   normalizeTodoItems,
   parseTodoItems,
   projectTodoSnapshot,
@@ -78,17 +79,22 @@ interface TurnRow {
 }
 
 /**
- * 轮次归属的判定依据（2026-10-30 第五轮，迁移 0151）。
+ * 轮次归属的判定依据（2026-10-30 第五轮，迁移 0151；2026-10-31 第六轮补 CONTINUED_COMPLETED）。
  *
  * 归属在**首次判定时冻结**成持久事实（`assist_session_todo_turn_scopes`），此后重启、
  * 插话、迟到写入都读冻结值，不再按当时的快照状态重算：
  *   * `OPENED`：这一轮开启了自己的工作作用域（含上一轮收尾后开新工作）；
  *   * `CONTINUED_UNFINISHED`：上一轮清单仍有未完成项，这一轮延续同一作用域；
+ *   * `CONTINUED_COMPLETED`：上一轮清单已全部收尾，用户也没有声明新任务——
+ *     这多半是「已完成但这里不对」的纠错，仍然属于同一件工作，清单必须继续可见；
  *   * `FORCED_NEW_PREFIX`：用户写明「新任务：」或 /newtask，即使上一轮未完成也开新作用域。
- * 三个依据都来自服务端可核对的事实（用户消息原文、当前快照状态）；模型写入不改变归属，
- * 也就不能靠猜静默切换作用域。历史重放不依赖归属行（走事件表），恢复重放因此不受影响。
+ *
+ * 第六轮的核心修正：**归属不再由「清单是否完成」单独决定**。判定只看一条服务端可核对
+ * 的事实——用户有没有明确声明换任务；没声明就延续当前工作，声明了才换。否则「完成了」
+ * 会被读成「换工作了」，纠错的那一轮丢掉上一份清单，模型只能从正文里重猜进度。
  */
-type TurnScopeBasis = 'OPENED' | 'CONTINUED_UNFINISHED' | 'FORCED_NEW_PREFIX';
+type TurnScopeBasis = 'OPENED' | 'CONTINUED_UNFINISHED' | 'CONTINUED_COMPLETED'
+  | 'FORCED_NEW_PREFIX';
 
 interface TurnScopeRow {
   readonly message_id: string;
@@ -100,7 +106,7 @@ const SNAPSHOT_COLUMNS = sql.raw('session_id, scope_key, scope_seq, version, ite
   'in_progress_limit, updated_at, last_tool_call_id');
 
 /** 明确要求开新任务的前缀：写了它就是新作用域，不靠模型猜。 */
-const NEW_TASK_PREFIX = /^\s*(\/newtask\b|新任务[:：])/iu;
+const NEW_TASK_PREFIX = NEW_TASK_TEXT_PREFIX;
 
 function pgErrorCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
@@ -159,77 +165,118 @@ export class SessionTodoRepository {
   constructor(private readonly db: DbExecutor) {}
 
   /**
-   * 这一轮属于哪个工作轮次。
+   * 这一轮属于哪个工作轮次——**只读**。
    *
-   * 基本规则：给 messageId 就找它之前最近的一条用户消息，否则找会话里最近的一条。
+   * 有冻结归属就返回冻结值；没有就按现行规则算一份**不落库**的答案。读取接口
+   * （`GET /assist-sessions/:id/todos`）只走这一条：翻一次页面不能变成一次写入。
    *
-   * 工作连续性（2026-10-30 第三轮）：只有**最新一轮**才做延续判断。上一轮清单仍有
-   * 未完成项时，新一条用户消息（「继续」「补充」「这里不对」）延续同一工作作用域，
-   * 不因为一句话就重置。历史轮次的写入不适用延续——它们必须落回自己那一轮，
-   * 然后被轮次顺序闸门拦下。用户写了明确的「新任务」前缀才强制开新作用域。
+   * 工作连续性（2026-10-30 第三轮，2026-10-31 第六轮修正）：只有**最新一轮**才做延续判断。
+   * 用户没有明确声明换任务时，这一轮延续当前工作作用域——上一轮清单未完成是这样，
+   * 已经全部收尾后回来纠错也是这样。开新作用域只由用户的明确声明触发
+   * （`新任务：` / `/newtask` 前缀，或客户端显式标志）。
    *
    * 第五轮（迁移 0151）：归属在首次判定时**冻结**。这堵住两个现算口径的洞：
    *   * 插话会改变「最新一轮」的判定——同一轮里插话前的写入延续旧作用域、插话后的
    *     写入却落进自己的 turn 键，一次生成中途清单身份被静默换掉；
    *   * 崩溃恢复重算时，延续轮次的调用会被判回它自己的 turn 键、被顺序闸门误拒。
    * 冻结后读写共用同一归属：注入给模型的作用域与写入落地的作用域必然一致。
+   *
+   * 第六轮（2026-10-31）：冻结动作从这条读路径搬到消息准入与执行准入
+   * （`freezeTurnScope`）。此前的实现是「读一次顺手插一行」，GET 因此带写副作用，
+   * 界面轮询能凭空造出归属行，谁先读谁就替这一轮定了身份。
    */
   async resolveScopeKey(sessionId: string, messageId?: string): Promise<string> {
-    const turn = await this.latestUserTurn(sessionId, messageId);
+    const turn = await this.latestUserTurn(this.db, sessionId, messageId);
     if (turn === undefined) return todoScopeKey(undefined);
-    const frozen = await this.readTurnScope(sessionId, turn.id);
+    const frozen = await this.readTurnScope(this.db, sessionId, turn.id);
     if (frozen !== undefined) return frozen.scope_key;
-    return this.attributeTurn(sessionId, turn);
-  }
-
-  /** 冻结的轮次归属；没有归属行 = 还没判定过。 */
-  private async readTurnScope(sessionId: string, messageId: string): Promise<TurnScopeRow | undefined> {
-    return (await sql<TurnScopeRow>`select message_id, scope_key, basis
-      from assist_session_todo_turn_scopes
-      where session_id = ${sessionId} and message_id = ${messageId}`.execute(this.db)).rows[0];
+    return (await this.attributeTurn(this.db, sessionId, turn, false)).scopeKey;
   }
 
   /**
-   * 首次判定并冻结这一轮的工作身份。
+   * 首次判定并冻结这一轮的工作身份——幂等，唯一允许写归属行的入口。
    *
-   * 判定规则与第三轮一致，只是结果从此持久化；并发下两个判定者可能算出不同依据
-   * （快照在两次计算之间变了），`on conflict do nothing` 让先到者定案，后到者读回
-   * 已冻结的事实——同一轮次永远只有一个归属，不随观察顺序漂移。
+   * 调用点只有两处，都在「这一轮真的要开始工作」的路径上：
+   *   1. 消息准入（`RequestAssistMessage`）：用户消息落库的同一事务里，归属与消息同生共死；
+   *   2. 执行准入（只读轮次开跑前）：兜住不经该命令创建的轮次（委派子会话、补充消息等）。
+   *
+   * 并发边界：`on conflict (session_id, message_id) do nothing` 让先到者定案，后到者
+   * 回读已冻结的事实——同一轮次永远只有一个归属，不随观察顺序漂移。两条路径都可能
+   * 先到，因此这里不做任何「谁该先」的假设。
    */
-  private async attributeTurn(sessionId: string, turn: TurnRow): Promise<string> {
+  async freezeTurnScope(sessionId: string, messageId?: string,
+    options?: { readonly startsNewTask?: boolean }): Promise<string> {
+    return this.freezeTurnScopeWith(this.db, sessionId, messageId, options);
+  }
+
+  private async freezeTurnScopeWith(executor: DbExecutor, sessionId: string, messageId?: string,
+    options?: { readonly startsNewTask?: boolean }): Promise<string> {
+    const turn = await this.latestUserTurn(executor, sessionId, messageId);
+    if (turn === undefined) return todoScopeKey(undefined);
+    const frozen = await this.readTurnScope(executor, sessionId, turn.id);
+    if (frozen !== undefined) return frozen.scope_key;
+    return (await this.attributeTurn(executor, sessionId, turn, true,
+      options?.startsNewTask ?? false)).scopeKey;
+  }
+
+  /** 冻结的轮次归属；没有归属行 = 还没判定过。 */
+  private async readTurnScope(executor: DbExecutor, sessionId: string,
+    messageId: string): Promise<TurnScopeRow | undefined> {
+    return (await sql<TurnScopeRow>`select message_id, scope_key, basis
+      from assist_session_todo_turn_scopes
+      where session_id = ${sessionId} and message_id = ${messageId}`.execute(executor)).rows[0];
+  }
+
+  /**
+   * 判定这一轮的工作身份；`persist` 为真时把结果冻结成持久事实。
+   *
+   * 判定规则与第三轮一致，第六轮只改一处：延续不再以「清单未完成」为前提，
+   * 而是以「用户没有声明新任务」为前提，`basis` 记录当时看到的清单状态。
+   *
+   * `startsNewTask` 是消息准入已经解析出来的显式声明（`/newtask` 那一支的正文里
+   * 已经没有命令字样，事后无法从库里再认出来），因此由调用方直接告知；纯文本前缀
+   * `新任务：` 仍从正文判定——两条路径都落到同一个 `FORCED_NEW_PREFIX`。
+   */
+  private async attributeTurn(executor: DbExecutor, sessionId: string, turn: TurnRow,
+    persist: boolean, startsNewTask = false):
+  Promise<{ readonly scopeKey: string; readonly basis: TurnScopeBasis }> {
     const candidate = todoScopeKey(turn.id);
-    const latest = await this.latestUserTurn(sessionId);
+    const latest = await this.latestUserTurn(executor, sessionId);
     const isLatest = latest !== undefined && latest.id === turn.id;
     let basis: TurnScopeBasis = 'OPENED';
     let scopeKey = candidate;
-    if (NEW_TASK_PREFIX.test(turn.content ?? '')) {
-      // 前缀只在它是最新一轮时才强制开新作用域；历史轮次落回自己的 turn 键，由顺序闸门拦。
+    if (startsNewTask || NEW_TASK_PREFIX.test(turn.content ?? '')) {
+      // 声明只在它是最新一轮时才强制开新作用域；历史轮次落回自己的 turn 键，由顺序闸门拦。
       if (isLatest) basis = 'FORCED_NEW_PREFIX';
     } else if (isLatest) {
-      const current = await this.readSnapshotRow(this.db, sessionId);
-      if (current !== undefined && current.scope_key !== candidate &&
-          unfinished(parseTodoItems(current.items))) {
-        basis = 'CONTINUED_UNFINISHED';
+      const current = await this.readSnapshotRow(executor, sessionId);
+      // 快照属于别的轮次 = 当前有一份正在进行或刚收尾的工作：没有声明换任务就接着做。
+      if (current !== undefined && current.scope_key !== candidate) {
+        basis = unfinished(parseTodoItems(current.items)) ? 'CONTINUED_UNFINISHED'
+          : 'CONTINUED_COMPLETED';
         scopeKey = current.scope_key;
       }
     }
+    if (!persist) return { scopeKey, basis };
     await sql`insert into assist_session_todo_turn_scopes (session_id, message_id, scope_key, basis)
       values (${sessionId}, ${turn.id}, ${scopeKey}, ${basis})
-      on conflict (session_id, message_id) do nothing`.execute(this.db);
-    const frozen = await this.readTurnScope(sessionId, turn.id);
-    return frozen?.scope_key ?? scopeKey;
+      on conflict (session_id, message_id) do nothing`.execute(executor);
+    const frozen = await this.readTurnScope(executor, sessionId, turn.id);
+    return frozen === undefined ? { scopeKey, basis }
+      : { scopeKey: frozen.scope_key, basis: frozen.basis };
   }
 
-  private async latestUserTurn(sessionId: string, messageId?: string): Promise<TurnRow | undefined> {
+  private async latestUserTurn(executor: DbExecutor, sessionId: string,
+    messageId?: string): Promise<TurnRow | undefined> {
     const rows = messageId === undefined
       ? (await sql<TurnRow>`select id, seq, content from assist_messages
           where session_id = ${sessionId} and role = 'USER'
-          order by seq desc limit 1`.execute(this.db)).rows
+          order by seq desc limit 1`.execute(executor)).rows
       : (await sql<TurnRow>`select id, seq, content from assist_messages
           where session_id = ${sessionId} and role = 'USER'
             and seq <= (select seq from assist_messages where id = ${messageId}
               and session_id = ${sessionId})
-          order by seq desc limit 1`.execute(this.db)).rows;
+          order by seq desc limit 1`.execute(executor)).rows;
     return rows[0];
   }
 
@@ -250,6 +297,18 @@ export class SessionTodoRepository {
     const row = await this.readSnapshotRow(this.db, sessionId);
     if (row === undefined || row.scope_key !== scopeKey) return undefined;
     return projectTodoSnapshot(row);
+  }
+
+  /**
+   * 当前生效的那份投影本身，不预设它属于哪一轮（0155 会话导出）。
+   *
+   * `read()` 问的是「最新用户轮次有没有属于自己的清单」，跨轮延续时答案是「没有」；
+   * 导出要陈述的是界面上此刻挂着的那份清单，因此直接取快照行，并把它自带的 `scope_key`
+   * 一起交出去——读的人因此能自己看出这份清单其实属于更早的那一轮。
+   */
+  async readCurrent(sessionId: string): Promise<TodoSnapshot | undefined> {
+    const row = await this.readSnapshotRow(this.db, sessionId);
+    return row === undefined ? undefined : projectTodoSnapshot(row);
   }
 
   /**
@@ -326,15 +385,27 @@ export class SessionTodoRepository {
 
   /**
    * 全量复写一次清单。失败关闭：任何一条校验不通过都整次拒绝，不留半版事件。
+   *
+   * 归属解析放在**同一事务内**（2026-10-31 第六轮）：写入准入也算执行准入的一处，
+   * 它需要把归属冻结成事实；放进事务里意味着「冻结 + 事件 + 快照」要么一起成立，
+   * 要么一起不成立，不会留下一条没有写入发生的归属行。
+   *
+   * 顺序上先认原调用身份（2026-10-31 六轮复核）：重放是「回答当初那一版」，不是一次新的
+   * 准入——它不该顺手替一个历史轮次补算并冻结归属（那等于用恢复时刻的清单状态重定身份，
+   * 正是第五轮修掉的缺陷）。只有真的要写新事件时才冻结。
    */
   async write(input: TodoWriteInput): Promise<TodoWriteOutcome> {
     if (!Array.isArray(input.items)) {
       throw new TodoRequestRejected('TODO_ITEMS_INVALID', 'items 必须是数组，且表示这一版的完整清单。');
     }
-    const scopeKey = input.scopeKey ?? await this.resolveScopeKey(input.sessionId, input.messageId);
     try {
-      return await this.db.transaction()
-        .execute((trx) => this.writeInTransaction(trx, input, scopeKey));
+      return await this.db.transaction().execute(async (trx) => {
+        const replay = await this.readEventByToolCall(input.sessionId, input.toolCallId, trx);
+        if (replay !== undefined) return this.replay(replay, input);
+        const scopeKey = input.scopeKey
+          ?? await this.freezeTurnScopeWith(trx, input.sessionId, input.messageId);
+        return this.writeInTransaction(trx, input, scopeKey);
+      });
     } catch (error) {
       // 并发下同身份或同版本被另一个写者抢先：回到已提交的事实上重新判定，不盲重试。
       if (pgErrorCode(error) !== '23505') throw error;

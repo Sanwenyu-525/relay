@@ -8,11 +8,35 @@
 
 ### 2.7 普通 Agent 的连续工作轮次（2026-10-15，已确认、待重构）
 
+2026-10-31 执行事实回流接续：普通 Agent 每轮装配上下文时，经原会话执行请求关联
+重读最多五条 Run/Task 当前状态与 revision，携带原用户消息、请求、Task、Run 身份。
+只读取当前轮次之前且未撤回的来源，不混入其他会话/Workspace，也不从旧回复推断结果。
+同一只读装配还经原 Verification/Artifact Repository 读取该 Run 的最近验证：确切验证身份、
+受验版本与摘要、每项最新检查尝试，以及验收版本是否匹配和适用性是否已撤销。每条最多
+五个受验版本、十项检查，省略数明确列出；不混入其他 Task/Workspace 的产物，不注入原始
+日志或证据正文。没有验证记录时明确尚未登记。旧结果不继承到新版，ERROR/NOT_RUN 不作 PASS。
+这是只读事实，不是执行权、当前有效性的完整裁决或文件内容证明；Run 成功不等于业务验收
+完成。更完整的工具/检查证据仍由原 Owner 提供，不由该摘要伪造，也不驱动重试或完成提交。
+
+检查命令另投影最近五条 `run_check` 回执：原 tool_call_id/check_id、工具状态、权威 Operation
+状态、已知 outcome 与退出码，明确省略数；按调用时间排序，不注入命令参数、stdout/stderr。
+读取时重查 Operation 的 Workspace/Task/Run 归属和状态；UNKNOWN/未结算不借旧 SETTLED 行的
+退出码冒充成功。命令退出 0 不等于受验产物或业务验收通过，聊天读取不重放检查。
+
 目标不再固定运行“无工具聊天 + 执行解释 + 状态维护解释”三条模型分支。沿一次原用户消息形成连续轮次，必要读取返回原模型上下文，必要业务动作经原应用入口派生；完整 Owner、事务与兼容规则归[领域模型 §12.6](../domain-model/part-02.md#126-普通-agent-主流程的应用边界)，模板选择与工作编排的区别归[提示词设计 §2.4](../agent-prompt-design.md#24-普通-agent-主流程与模板选择的区别)。
 
 **当前实现边界（2026-10-18，阶段 A/B/C 已实施，原消息 Run 摘要已回填）**：§2.7.1 的持久协议、**会话读取轮次**（来源 `AGENT_SESSION_READ`、目录取自 `assist_sessions.working_resource_id`、路由 `AGENT_MAIN_LOOP`）、**执行候选提交**、**状态维护提交**与**会话内 Run 排他**已落地——主流程收尾的那一次模型输出同时给出回复、可选的执行候选与可选的状态维护候选，两者都经既有确定性校验后落进**原**请求行，因此每条消息不再需要两次额外的解释模型调用。状态维护的基线在**这次模型请求之前**就由 `freezeStateInterpretationBaseline()` 冻结并原样传下去，模型在途期间的人工修改不会被吸收成原基线（R3）。**同一会话不并行推进两条执行链**：`applyConversationExecution()` 在建 Task 之前按 `findLiveRunForSession()` 问「这条会话上是否已有别的请求到了 DELEGATED、且那个 Run 还没收口」，有则按类型化 `EXECUTOR_CONFLICT` 拒绝并指回原 Run；活动状态集与 Task 级 `findLiveRunForTask()` 逐字一致，原 Run 收口后同一会话可再发起执行。Apply 后原用户消息现可读取同一 `request_id`/Task/Run 的摘要投影；更完整的 Run 详情继续由原 Run Owner 提供。旧状态维护解释仍使用独立请求 Owner，相关 UI/窗口及 Provider 范围见统一功能验收表。§2.6 中 A 档无工具/B 档只读的描述保留为当前实现事实。
 
 **会话读取轮次的预算收尾（2026-10-19，真实模型跑通普通会话文件修改时补）**：`runSessionReadonlyRounds()` 在**最后一次轮次**或**工具调用预算已用尽**时，本轮不再向模型声明任何工具，并追加一条收尾指令要求用已有结果作答。此前只靠轮次计数在循环结束后返回 `SESSION_TOOL_ROUNDS_EXHAUSTED`：真实 Provider 会反复 find/list/read（同一文件连读两次），提示它收尾时仍会再请求一次工具，整条消息于是以失败收场，用户看到的是一次报错而不是答复。「不声明工具」是机制而不是劝导——模型没有可调用的工具，只能输出正文。同一轮把模型异常按 `MODEL_TIMEOUT`／`MODEL_TOOL_OUTPUT_INVALID`／`MODEL_BUDGET_EXHAUSTED`／`MODEL_FAILED` 分类，不再一律折叠成 `MODEL_FAILED`：只保留类别，不复制 provider 正文或凭据。
+
+**预算的口径与「说得出为什么停」（2026-11-01 全链路测试整改）**：
+
+- **额度只按这条助手消息计**，`usedCalls` / `round` 在 `runSessionReadonlyRounds()` 内部累加，读取、Git、委派、待办共用同一把尺；同一条响应里并行声明的每个工具请求各占一次额度，**被拒掉的请求同样已经计入**（`NOT_EXECUTED` 那一条不占）。会话默认 `DEFAULT_MAX_ROUNDS = 6` / `DEFAULT_MAX_TOOL_CALLS = 12`，与对话内工具循环（`CONVERSATION_TOOL_LOOP_*`，同为 6/12）取同一产品默认；契约上限 `TOOL_LOOP_MAX_ROUNDS = 12` / `TOOL_LOOP_MAX_TOOL_CALLS = 48` 仍是天花板，单测锁住「默认值不得越过契约、会话与对话两处不得各说一套」。额度是**次**不是 token：上下文用量（ADR-037）与它是两条独立轴，所以会出现「用量 7%、额度已尽」。
+- **每轮把额度事实注入 system**（`toolBudgetNotice()`）：第几轮／共几轮、已用几次／上限几次、还剩几次、并行声明各占一次、被拒也计入、`todo_write` 不占读取额度。此前模型从未被告知额度，只能在烧完之后从一句「预算已用尽」里猜自己踩了哪条墙。
+- **收尾答复必须是三段事实**：已经执行了哪些步骤及其结果、因额度用尽而**逐项点名**没有执行的步骤、用户可以怎么继续。把「生成了一条最终回复」当成「任务完成」，或把没执行的步骤写成已完成，都是这条指令明确禁止的错误陈述。
+- **额度耗尽后仍留一个有界的清单收尾窗口**：`todo_write` 是应用内动作，不读目录也不走 Gateway，因此在这一窗口里豁免读取额度，但自身另有 `MAX_TODO_SETTLEMENT_CALLS = 6` 的上限，且**最后一轮、结构化协议（PLAN／GOAL_ROUND）与上下文压力收尾都不开放**——最后一条模型请求仍然不声明任何工具，循环的终止保证没有被削弱（集成用例 TL-51 锁住这一点）。此前收尾轮一律 `tools: []`，模型连「把没做完的那几步如实标成未完成」都做不到，清单永远停在创建时那一版，这正是「已完成 0/10 + 生成已结束」的成因。
+- **拒因带上数字**：`SESSION_TOOL_BUDGET_EXHAUSTED` / `SESSION_TOOL_ROUNDS_EXHAUSTED` 的 detail 现在写明上限与实际轮次，`TODO_SETTLEMENT_BUDGET_EXHAUSTED` 说清是清单写回次数用完，前端 `activityReasonLabel` 逐条有中文名，机器码仍留在第三层核对。
+- **词表与实际准入必须同源**（同轮整改）：普通 Agent 会话没有持久绑定目录时，`assist-read-tools.ts` 不再按项目猜那唯一一份受管资源——猜中会把 `read_file` 声明给模型，而 `agentSessionReadOrigin()` 每次都拒，拒掉的调用照烧额度。人设助手与学习档仍按项目取唯一 ACTIVE 资源（它们的来源解析本来就这么判）。能力事实块同步：没绑目录但本轮确有文件工具时，说成「系统推断的作用域，不是用户指定的绑定」，不再写「因此文件类工具不可用」。
 
 **执行候选的交付种类归一（2026-10-19）**：`expected_outputs.kind` 描述的是本次**可审查的交付说明**，不是被改动的文件。真实模型面对「把 greet 改成 X」会合理写成 `CODE_FILE`，而 `validateConversationCandidate()` 原来只认 `MARKDOWN_DOCUMENT`，整条执行请求因此被判成澄清，文件修改永远到不了 Run。现按同义表归一到当前工作流唯一可判定的种类，未知值仍然拒绝；`file_changes` 才是「改哪些文件」的唯一声明位置。提示词两处（主流程与独立解释模板）同步写清这条语义。
 
@@ -128,7 +152,7 @@
 |---|---|---|
 | 查看文件、目录与已连接工具的只读状态 | 同一消息连续工具循环 | 无额外“开始读取”确认 |
 | AUTO/FULL 目录的普通文件修改，包括明确 MODIFY 方法 | 同一循环直接写，保留基线与动作账本 | 不创建 Task/Run，不要求正式任务验收 |
-| ASK 写入、AUTO 删除 | 原消息候选 → 已有自动启动 → Run/Gateway | 在确切动作处审批；不要求重述目标或手工建任务 |
+| ASK 写入、AUTO 删除、会话直写遇自定义 ASK 策略 | 创建会话 Operation 前转原消息候选 → 已有自动启动 → Run/Gateway | 在确切动作处审批；不要求重述目标或手工建任务；旧待审批动作按原身份核对 |
 | 修改后的检查 | 仅剩余检查进入 Run，已成功修改不再重复执行 | CLI 允许清单与冻结程序摘要仍有效 |
 | 浏览器、电脑操作 | 候选 `interaction=BROWSER|COMPUTER` → 原 Run 工具循环 | 仅解析本项目 ACTIVE 连接；不因工具需求自动新增范围授权；提交与外部副作用仍按原审批 |
 | 正式任务交付 | Artifact → Verification / Human Acceptance → Business Commit | 绑定确切版本；普通工具成功不等于业务完成 |
@@ -263,7 +287,7 @@ Worker」：`--once` 只领 Run 命令，`--assist-once` 只做会话生成，�
 | 机制 | 本项目事实 | 标签 |
 |---|---|---|
 | 崩溃后接续原领取 | 成员唤醒：`team/member-conversation-repository.ts` 的 `sweepExpiredWakeup` 在上限内回到 RECORDED、超上限 `WAKEUP_ATTEMPTS_EXHAUSTED`；会话生成：`assist/assist-repository.ts:1188-1191` 过期 RUNNING 记 `FAILED`+`LEASE_LOST`（**只标记不重投**） | 已实现（收口强度不一致） |
-| 孤儿 claim 收敛 | `application/recover-run.ts:13` `scanRecoveryCandidates` **没有任何生产调用者**（只有集成测试子进程 `test/integration/recovery-worker-child.ts:21`）；Supervisor 检出过期 invocation 后只上报一帧 `worker_recovery_required`（`worker/supervisor-main.ts:228-240`，注释「Surface the stranded claim without making it executable」），桌面宿主解析该帧后与 `WorkerStarted`/`WorkerExit` 一起**故意丢弃**（`apps/desktop/src-tauri/src/lib.rs:629-632`）。实机后果已记录：Run `8d19e398` 卡 RUNNING ＋ 孤儿 ACTIVE claim，每轮启动报 `worker_recovery_required`、`retainedClaims=0`，并阻挡该项目归档（[验收详情 条目 327](../../testing/acceptance-details/part-17.md#条目-327)） | 部分实现（检测有、收口无、无人可见） |
+| 孤儿 claim 收敛 | **2026-11-01 P1 已接上证据约束的收口与可见化**：常驻 Supervisor 对过期 invocation 先调 `recoverStrandedFencedClaim`（`worker/supervisor.ts:56-75`），只有 `run_worker_fences` 的持久停机依据允许重入，且 `run.worker_id` 非空立即退出；无证据或受阻时 `noteStrandedWorker`（`application/recover-run.ts:20-44`）写一条 SYSTEM 事实 `RUN_RECOVERY_REQUIRED`（同 Run+Worker 只留一条，活动流可见），不再依赖被宿主丢弃的 `worker_recovery_required` 帧。Run 级租约过期不告警：单步可超过 30s，只有领取心跳（`run_invocations`）可靠，因此 `scanRecoveryCandidates` 仍不用于滞留判定。桌面宿主协议与「运行事件启动后丢弃」未改。实机受害 Run `8d19e398` 这类无 fence 的领取仍不能被自动收口（[验收详情 条目 327](../../testing/acceptance-details/part-17.md#条目-327)、[条目 348](../../testing/acceptance-details/part-19.md#条目-348)） | 部分实现（证据约束下可自动重入＋人可见事实；无停机证据仍需人工/OS 证据） |
 | 人工等待过期 | `review/review-repository.ts:98,107` 的过期只在读取与决策时惰性执行，`api/routes.ts` 未注册相关巡检 | 部分实现（未被查看的 Review 长期 `OPEN`） |
 | Gateway 结果歧义核对 | `application/gateway-reconcile.ts:21` 仅由 `worker/supervisor.ts:121-136` 的停止核对与人工 POST 触发，没有周期 reconciler；UNKNOWN 保持原 `operation_id` 不重发 | 已实现（符合「不盲重试」约束） |
 | 第二层语义诊断（判断“进度是否合理”而非“租约是否过期”） | 完全没有；也不该由进程自己判断业务完成 | 新增未确认建议 |
@@ -276,9 +300,11 @@ Watchdog 的不可越界约束（本轮核定为边界，不是待议项）：�
 
 **本轮结论**
 
-- 需要授权才能推进的结构性缺口只有一个：孤儿 claim 的收口与可见性（E 的第二行）。它跨
-  `apps/api` 与 Rust 宿主两侧，且实机已有受害 Run，建议按 P1 立项、P0 修最小收口（见
-  [CODEX_NEXT_STEP](../../../CODEX_NEXT_STEP.md)）。
+- 孤儿 claim 的收口与可见性（E 的第二行）已按 P1 最小收口：Supervisor 复用既有恢复 Owner，
+  在持久 fence 且 Run 无归属时自动重入；没有停机证据时只写一条人可见事实，不按租约或重启
+  抢夺执行权。Rust 宿主协议与「运行事件启动后丢弃」未改，因为可见事实落在数据库而非宿主弹窗。
+  仍未闭合：无 fence 的孤儿领取需要人工/OS 停机证据，当前没有公开恢复路由；Windows 宿主实机
+  与安装态未取证（见 [CODEX_NEXT_STEP](../../../CODEX_NEXT_STEP.md)）。
 - `runAssistGoalTick` 曾是唯一不做准入判断的 tick Owner（`enqueueRound` 直接 `insertMessage`），
   维护排空期间仍会排入新的目标轮次。**2026-11-01 同日已复现并闭合**：反例先证明 DRAINING 下
   `advanced` 非空且新插了一条待生成消息，修复按其余 tick 的同形做法在 `advanceGoals()` 取候选

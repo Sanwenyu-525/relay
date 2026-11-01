@@ -4,6 +4,7 @@ import { INTERNAL_TOOL_DEFINITIONS, type InternalToolName } from '../workflow/to
 import { computerRuntimeStatus } from '../plugins/runtime-status.js';
 import { resolveMachineAttribution } from './conversation-execution.js';
 import { createRepositories } from './unit-of-work.js';
+import { findKnownPluginMentions } from './plugin-mentions.js';
 
 /**
  * 会话能力事实块（2026-10-20 第二轮）。
@@ -71,6 +72,15 @@ export interface SessionCapabilityFacts {
   readonly computerPlugin: boolean;
   readonly browserPlugin: boolean;
   /**
+   * 该能力只在**别的项目**登记了 ACTIVE 连接（本会话所属项目没有）。
+   *
+   * 未归属会话可以跨项目借用这条安装级能力；已绑定工作目录的会话不能——执行阶段按
+   * 请求行上的项目解析连接。把「别的项目有」写成「本会话可用」会让模型承诺一件
+   * 随后被准入拒绝的事，所以这两种事实必须分开说明。
+   */
+  readonly computerPluginBorrowedOnly?: boolean;
+  readonly browserPluginBorrowedOnly?: boolean;
+  /**
    * 电脑操控运行时的安装级状态（`computerRuntimeStatus().state`）：READY / NOT_PAIRED /
    * UNAVAILABLE / NOT_INSTALLED / NOT_AUTHENTICATED。未探测时为 undefined。
    *
@@ -84,6 +94,23 @@ export interface SessionCapabilityFacts {
 function capabilityUsable(tools: readonly string[], capability: string): boolean {
   return INTERNAL_TOOL_DEFINITIONS.some((definition) =>
     definition.capability === capability && tools.includes(definition.name));
+}
+
+/**
+ * 机器插件只有在「本次执行真的能用它」时才算可用。
+ *
+ * 未归属会话允许借用别的项目登记的安装级插件；已绑定目录的会话只按本项目连接执行。
+ * Runtime 缺失对电脑操控同样是否决项。三种事实都由服务端给出，不在这里推断权限。
+ */
+function machinePluginUsableForSession(facts: SessionCapabilityFacts,
+  plugin: 'computer' | 'browser'): boolean {
+  const registered = plugin === 'computer' ? facts.computerPlugin : facts.browserPlugin;
+  if (!registered) return false;
+  if (plugin === 'computer' && facts.computerRuntimeState !== undefined &&
+      facts.computerRuntimeState !== 'READY') return false;
+  const borrowedOnly = plugin === 'computer'
+    ? facts.computerPluginBorrowedOnly === true : facts.browserPluginBorrowedOnly === true;
+  return facts.workingRoot === null || !borrowedOnly;
 }
 
 function lastSegment(path: string): string {
@@ -105,7 +132,19 @@ export function formatSessionCapabilities(facts: SessionCapabilityFacts): string
     // 插件是安装级资源，跨项目登记也可用；那句话会让用户以为要先补项目才能开浏览器。
     lines.push('这条会话还没有归入项目，因此没有受管目录，文件与 Git 类工具不可用。');
   } else if (facts.workingRoot === null) {
-    lines.push('这条会话还没有选定工作目录，因此文件类工具不可用。');
+    /*
+     * 「没有绑定目录」与「文件工具不可用」不是同一件事，这句却把后者当前者写死了。
+     * 人设助手与学习档的来源解析本来就按项目取唯一 ACTIVE 受管根（assistantReadOrigin），
+     * 所以没绑目录的会话仍可能真的读到文件；此时再说一句「因此文件类工具不可用」，
+     * 模型就会拿着可用的 read_file 却回答读不到——同一段事实块自相矛盾。
+     * 推断出来的范围必须标成推断：它是可核对的作用域说明，不是用户确认过的绑定。
+     */
+    const fileToolsUsable = ['FILE_READ', 'FILE_QUERY', 'GIT_READ'].some(
+      (capability) => capabilityUsable(facts.tools, capability));
+    lines.push(fileToolsUsable
+      ? '这条会话还没有选定工作目录；本轮的文件工具按项目内唯一可用的受管目录读取，'
+        + '这是系统推断的作用域，不是用户指定的绑定。请照这个范围回答，不要说成已绑定目录。'
+      : '这条会话还没有选定工作目录，因此文件类工具不可用。');
   } else {
     lines.push(`工作目录：${lastSegment(facts.workingRoot)}（${facts.workingRoot}）`);
     lines.push(`目录写档位：${facts.writeTier === null ? '未设置'
@@ -113,25 +152,45 @@ export function formatSessionCapabilities(facts: SessionCapabilityFacts): string
   }
   lines.push(`本轮可用工具：${facts.tools.length === 0 ? '无' : facts.tools.join('、')}`);
   /*
-   * 机器插件两行（2026-10-30 修订）：输出条件从「会话没归入项目」改成「会话没有工作
-   * 目录」。机器操作与文件操作是两种授权，判据是本次有没有文件工作范围；挂在项目归属
-   * 上会漏掉「已归属项目、未绑定目录」这一档——那正是截图里模型说「做不到」的会话形态。
+   * 机器插件两行（2026-11-01 COMPUTER-PLUGIN-E2E）。
+   *
+   * 原实现只在「会话没有工作目录」时输出这两行。那会让绑定目录的普通会话只看到文件
+   * 工具，模型于是把一条明确的电脑操作请求读成普通讨论——真实账本里 `@电脑操控 打开
+   * 记事本` 的回复整段是「让我看看本轮可用的工具」正是这条缺口的后果。
+   *
+   * 现在两行的事实按「本次有没有可用的机器连接」输出，而不是按「有没有目录」输出：
+   *   * 未归属会话允许跨项目借用安装级插件；
+   *   * 已绑定目录的会话只按本项目连接执行，借用事实必须如实说成不可用。
+   * 这一段仍然只是事实说明，不授予任何权限。
    */
-  if (facts.workingRoot === null) {
-    const runtimeUnavailable = facts.computerRuntimeState !== undefined &&
-      facts.computerRuntimeState !== 'READY';
-    lines.push(facts.computerPlugin && !runtimeUnavailable
-      ? '电脑操控：可用。用户明确要求操作电脑（打开应用、点击、输入）时，在 execution 里带 '
-        + 'interaction="COMPUTER" 作为执行候选交给后台执行；输入类动作在执行阶段可能触发'
-        + '人工审批。不要在 reply 里回答「做不到」或「会话没有归入项目所以做不到」。'
-      : facts.computerPlugin
-        ? '电脑操控：连接已登记，但本机运行时不可用（' + facts.computerRuntimeState + '）；'
-          + '用户这样要求时请如实说明缺的是运行时，而不是连接授权。'
-        : '电脑操控：工作区还没有登记可用的电脑操控连接；用户这样要求时请如实说明缺这一项。');
-    lines.push(facts.browserPlugin
-      ? '浏览器操控：可用。用户明确要求浏览器操作（打开网页、点击、填表）时，在 execution 里带 '
-        + 'interaction="BROWSER" 作为执行候选交给后台执行。'
-      : '浏览器操控：工作区还没有登记可用的浏览器操控连接；用户这样要求时请如实说明缺这一项。');
+  const runtimeUnavailable = facts.computerRuntimeState !== undefined &&
+    facts.computerRuntimeState !== 'READY';
+  const computerUsable = machinePluginUsableForSession(facts, 'computer');
+  if (computerUsable) {
+    lines.push('电脑操控：可用。用户明确要求操作电脑（打开应用、点击、输入）时，在 execution 里带 '
+      + 'interaction="COMPUTER" 作为执行候选交给后台执行；输入类动作在执行阶段可能触发'
+      + '人工审批。不要在 reply 里回答「做不到」。本轮没有 computer_ 工具不代表不能执行：'
+      + '操作类工具只在实际执行阶段提供。');
+  } else if (facts.computerPlugin && runtimeUnavailable) {
+    lines.push('电脑操控：连接已登记，但本机运行时不可用（' + facts.computerRuntimeState + '）；'
+      + '用户这样要求时请如实说明缺的是运行时，而不是连接授权。');
+  } else if (facts.computerPlugin && facts.workingRoot !== null &&
+      facts.computerPluginBorrowedOnly === true) {
+    lines.push('电脑操控：本会话所属项目还没有可用的电脑操控连接；工作区其他项目有登记，'
+      + '但这次执行按本项目连接检查，不能跨项目借用。用户这样要求时请说明缺的是本项目连接。');
+  } else {
+    lines.push('电脑操控：工作区还没有登记可用的电脑操控连接；用户这样要求时请如实说明缺这一项，'
+      + '并指出可在项目的「连接与权限」页一键启用。不要说成本轮缺少桌面工具，也不要说本机没有这个工具。');
+  }
+  if (machinePluginUsableForSession(facts, 'browser')) {
+    lines.push('浏览器操控：可用。用户明确要求浏览器操作（打开网页、点击、填表）时，在 execution 里带 '
+      + 'interaction="BROWSER" 作为执行候选交给后台执行。');
+  } else if (facts.browserPlugin && facts.workingRoot !== null &&
+      facts.browserPluginBorrowedOnly === true) {
+    lines.push('浏览器操控：本会话所属项目还没有可用的浏览器操控连接；工作区其他项目有登记，'
+      + '但这次执行按本项目连接检查，不能跨项目借用。');
+  } else {
+    lines.push('浏览器操控：工作区还没有登记可用的浏览器操控连接；用户这样要求时请如实说明缺这一项。');
   }
 
   const gaps: string[] = [];
@@ -167,13 +226,53 @@ export function formatSessionCapabilities(facts: SessionCapabilityFacts): string
 }
 
 /**
+ * 本条消息的插件选择事实（2026-11-01 COMPUTER-PLUGIN-E2E）。
+ *
+ * 输入器里的 `@电脑操控` 只是用户选择的标签；这里把它变成一条模型能读到的服务端事实。
+ * 它**不**是授权、不是候选，也不绕过任何校验：模型仍要按执行候选协议写出 `execution`，
+ * 由原入口做确定性与准入判定。
+ *
+ * 只在用户明确选了电脑/浏览器插件时输出；GitHub mention 没有对应的 interaction 协议，
+ * 不在这里伪装成可执行操作。用户只是在问「能不能」时，明确要求模型保持 execution=null。
+ */
+export function formatSelectedPluginFact(content: string,
+  facts: SessionCapabilityFacts): string | null {
+  const selected = findKnownPluginMentions(content).filter(
+    (mention) => mention.key === 'computer' || mention.key === 'browser');
+  if (selected.length === 0) return null;
+  const labels = [...new Set(selected.map((mention) => mention.label))];
+  const lines: string[] = [
+    '【本条消息的插件选择（服务端识别的事实，不是授权）】',
+    `用户在本条消息里明确选择了内置插件：${labels.map((label) => `${label}（@${label}）`).join('、')}。`,
+    '这表示用户这次要求使用该插件完成任务；它不等于连接已登记、运行时就绪或已经获得审批。',
+  ];
+  if (selected.some((mention) => mention.key === 'computer')) {
+    lines.push(machinePluginUsableForSession(facts, 'computer')
+      ? '用户要求操作电脑时，必须按执行候选协议在 execution 中带 interaction="COMPUTER"，'
+        + '目标写进 objective；不要只给操作步骤，也不要把明确的操作请求写成普通讨论。'
+      : '本会话当前没有可用的电脑操控连接或运行时；用户要求操作电脑时，按上面的能力事实'
+        + '说明缺哪一项，不要伪造执行候选，也不要把缺项说成「本轮缺少桌面工具」。');
+  }
+  if (selected.some((mention) => mention.key === 'browser')) {
+    lines.push(machinePluginUsableForSession(facts, 'browser')
+      ? '用户要求浏览器操作时，必须按执行候选协议在 execution 中带 interaction="BROWSER"；'
+        + '不要只给页面步骤，也不要把明确的操作请求写成普通讨论。'
+      : '本会话当前没有可用的浏览器操控连接；用户要求浏览器操作时，按事实说明缺这一项。');
+  }
+  lines.push('如果用户只是在询问插件能否做到、怎么使用或值不值得做，仍然填 execution=null 并直接回答，'
+    + '不要因为识别到插件标签就启动桌面或页面操作。');
+  return lines.join('\n');
+}
+
+/**
  * 读服务端事实并格式化。
  *
  * 读取失败不阻断生成：目录读不到时按「没有目录」这一条可核对的事实说明，而不是让整轮
  * 生成失败——用户要的是一次如实回答，不是又一个错误码。
  */
 export async function describeSessionCapabilities(db: DbExecutor, session: AssistSessionRow,
-  input: { readonly tools: readonly InternalToolName[]; readonly allowWrite: boolean },
+  input: { readonly tools: readonly InternalToolName[]; readonly allowWrite: boolean;
+    readonly requestContent?: string | undefined },
 ): Promise<string> {
   const repositories = createRepositories(db);
   let workingRoot: string | null = null;
@@ -185,22 +284,30 @@ export async function describeSessionCapabilities(db: DbExecutor, session: Assis
       writeTier = (await repositories.gateway.readLocalDirectoryAccess(resource.id))?.write_tier ?? null;
     }
   }
-  // 机器插件可用性只在未归属会话的说明里出现，但读取对任何会话都便宜且无副作用；
-  // 归属会话的插件状态由既有缺口清单（按本轮工具）表达，不在这里重复第二份。
-  // 与主流程落库门（assist-runner）共用 resolveWorkspaceMachineAttribution：连接与
-  // 该项目的受管资源齐备才算可用，两处判断不漂移。
-  const [computerPlugin, browserPlugin] = await Promise.all([
+  // 机器插件状态对任何会话都要读：绑定目录的普通会话同样需要知道「这次能不能用电脑操控」。
+  // 与主流程落库门（assist-runner）共用 resolveMachineAttribution：连接与归属项目的受管
+  // 资源齐备才算登记；借用事实也原样带出，由格式化层按会话形态解释。
+  const [computerAttribution, browserAttribution] = await Promise.all([
     resolveMachineAttribution(repositories, { workspaceId: session.workspace_id,
-      projectId: session.project_id, capability: 'COMPUTER_INPUT' })
-      .then((attribution) => attribution !== undefined),
+      projectId: session.project_id, capability: 'COMPUTER_INPUT' }),
     resolveMachineAttribution(repositories, { workspaceId: session.workspace_id,
-      projectId: session.project_id, capability: 'BROWSER_ACTION' })
-      .then((attribution) => attribution !== undefined),
+      projectId: session.project_id, capability: 'BROWSER_ACTION' }),
   ]);
+  const facts: SessionCapabilityFacts = {
+    hasProject: session.project_id !== null, workingRoot, writeTier,
+    tools: input.tools, allowWrite: input.allowWrite,
+    computerPlugin: computerAttribution !== undefined,
+    browserPlugin: browserAttribution !== undefined,
+    computerPluginBorrowedOnly: computerAttribution?.borrowed === true,
+    browserPluginBorrowedOnly: browserAttribution?.borrowed === true,
+  };
   // 运行时状态是同步的纯路径检查，不产生副作用；探测失败不外抛，缺事实时不写这一层。
   let computerRuntimeState: string | undefined;
   try { computerRuntimeState = computerRuntimeStatus().state; } catch { computerRuntimeState = undefined; }
-  return formatSessionCapabilities({ hasProject: session.project_id !== null, workingRoot, writeTier,
-    tools: input.tools, allowWrite: input.allowWrite, computerPlugin, browserPlugin,
-    ...(computerRuntimeState === undefined ? {} : { computerRuntimeState }) });
+  const withRuntime: SessionCapabilityFacts = computerRuntimeState === undefined ? facts
+    : { ...facts, computerRuntimeState };
+  const formatted = formatSessionCapabilities(withRuntime);
+  const selected = input.requestContent === undefined ? null
+    : formatSelectedPluginFact(input.requestContent, withRuntime);
+  return selected === null ? formatted : `${formatted}\n\n${selected}`;
 }

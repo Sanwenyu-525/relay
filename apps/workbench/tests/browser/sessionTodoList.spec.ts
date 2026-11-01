@@ -260,3 +260,179 @@ test("迟到响应不回退视图：旧版本后到，面板停留在新版本",
     .toHaveCount(4);
   await page.screenshot({ path: `${shotDir}/05-todo-late-response.png` });
 });
+test("生成结束后的最终读取仍然落地：多次轮询之后 active 变 false 不吞掉最后一次响应", async ({ page }) => {
+  /*
+   * P0 回归（2026-10-31）：`applied` 是组件级 ref，`issued` 曾经是 Effect 内的局部变量。
+   * 生成结束时 Effect 因 active 变 false 重建，序号从 1 重新数，被上一轮的较大值永久挡掉，
+   * 于是「停止那一刻的最新清单」永远显示不出来。这里走真实路径复现：助手消息 RUNNING
+   * → 待办面板按 2.5s 轮询多次 → 消息状态翻成 COMPLETED（页面自己 1.5s 轮询发现）
+   * → 待办 Effect 重建做最后一次读取。修复前这一版不会出现在界面上。
+   */
+  const state = { assistantStatus: "RUNNING", todosReads: 0 };
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await page.route(`${apiBase}/**`, async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
+    if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
+    if (path === `${prefix}/tasks/${taskId}`) return fulfillJson(route, { id: taskId,
+      project_id: projectId, title: "会话待办验收", status: "IN_PROGRESS", mode: "ME",
+      revision: "2", created_at: "2026-10-16T00:00:00Z", updated_at: "2026-10-16T00:00:00Z",
+      executor: { kind: "HUMAN", run_id: null, ownership_epoch: "1" },
+      current_completion_id: null, waiting_reason: null, blocking_task_ids: [],
+      unresolved_blocker_ids: [], allowed_actions: [],
+      acceptance: { acceptance_revision: "2", objective: "待办清单可用", source: "CREATE",
+        created_at: "2026-10-16T00:00:00Z", criteria: [] }, dependencies: [] });
+    if (path === `${prefix}/projects/${projectId}`) return fulfillJson(route, { id: projectId,
+      title: "验收项目", project_type: "GENERAL", revision: "1", state_revision: "1",
+      archived_at: null });
+    if (path === `${prefix}/search`) return fulfillJson(route, { items: [], next_cursor: null });
+    if (path === `${prefix}/default-working-directory`) return fulfillJson(route,
+      { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
+        default_write_tier: null, context_budget_tokens: null, status: "UNSET", reason: null,
+        revision: "0" });
+    if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "openai-compatible",
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 65_536 });
+    if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
+    if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
+    if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route,
+      { items: [userMessage, { ...assistantMessage, status: state.assistantStatus }] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/todos`) {
+      state.todosReads += 1;
+      // 结束之后的那一次读取用一个大版本号：轮询此时已经停了，界面能不能跳到这个号
+      // 只取决于「结束后的最终读取」有没有落地，不会被一次恰好赶上的轮询蒙过去。
+      const version = state.assistantStatus === "COMPLETED"
+        ? 500 + state.todosReads : state.todosReads;
+      return fulfillJson(route, { snapshot: { sessionId, scopeKey: "turn:live", version,
+        inProgressLimit: 1, updatedAt: "2026-10-30T09:00:00.000Z",
+        items: [{ id: "i1", content: `第 ${version} 版步骤`, status: "in_progress" }] } });
+    }
+    if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
+    return fulfillJson(route, { items: [], next_cursor: null });
+  });
+  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+  await page.getByTestId("relay-connection-open").click();
+  await page.locator('input[name="relay-base-url"]').fill(apiBase);
+  await page.locator('input[name="relay-workspace-id"]').fill(workspaceId);
+  await page.locator('input[name="relay-bearer-token"]').fill("session-todo-token");
+  await page.getByTestId("relay-connect").click();
+  await page.getByTestId("relay-connection-state").filter({ hasText: "已连接" })
+    .waitFor({ timeout: 20_000 });
+  await page.keyboard.press("Escape");
+  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+
+  const list = page.getByTestId("session-todo-list");
+  // 至少三次成功轮询：版本一路跟到 3 以上，说明轮询通道本身是通的。
+  await expect(list).toHaveAttribute("data-session-todo-version", /^[3-9]$/u, { timeout: 30_000 });
+  const polled = Number(await list.getAttribute("data-session-todo-version"));
+  await page.screenshot({ path: `${shotDir}/06-todo-polling.png` });
+
+  // 生成结束：页面自己的 1.5s 消息轮询会发现状态翻转，待办 Effect 随之重建并做最后一次读取。
+  state.assistantStatus = "COMPLETED";
+  await expect(list).toHaveAttribute("data-session-todo-running", "false", { timeout: 30_000 });
+  // 轮询已经停了：版本能跳到 5xx 只可能是那一次「结束后的最终读取」落了地。
+  // 修复前它被上一轮的序号挡掉，面板会永远停在上面那个两位数的版本。
+  await expect(list, "生成结束后的最终读取必须落地").toHaveAttribute(
+    "data-session-todo-version", /^5\d\d$/u, { timeout: 30_000 });
+  const finalVersion = Number(await list.getAttribute("data-session-todo-version"));
+  expect(finalVersion).toBeGreaterThan(polled);
+  await expect(list).toContainText(`第 ${finalVersion} 版步骤`);
+  await page.screenshot({ path: `${shotDir}/07-todo-final-read-after-stop.png` });
+});
+
+test("待办面板与输入卡同宽同轴：三档窗口下左右缘都对齐", async ({ page }) => {
+  /*
+   * UI 收口（2026-10-31）的宽度契约：待办块与输入卡共用 `--chat-measure` 这一档
+   * （输入卡、目录细条、目标卡、队列都在这条轴上）。此前它是这一列里唯一铺满的块，
+   * 比输入卡宽 124px，读起来像另一个页面的内容。这里量的是几何，不是观感。
+   */
+  await installRoutes(page, { items: shortItems });
+  const widths = [{ width: 1162, height: 782 }, { width: 900, height: 782 },
+    { width: 720, height: 782 }];
+  let checked = 0;
+  for (const size of widths) {
+    await page.setViewportSize(size);
+    await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
+    await openSession(page);
+    await page.getByTestId("session-todo-list").locator("summary").click();
+    const panel = await page.getByTestId("session-todo-list").boundingBox();
+    const composer = await page.getByTestId("assist-composer").boundingBox();
+    expect(panel, `待办面板在 ${size.width}px 下必须存在`).not.toBeNull();
+    expect(composer, `输入卡在 ${size.width}px 下必须存在`).not.toBeNull();
+    const left = Math.round(panel!.x);
+    const right = Math.round(panel!.x + panel!.width);
+    const composerLeft = Math.round(composer!.x);
+    const composerRight = Math.round(composer!.x + composer!.width);
+    expect(left, `${size.width}px：左缘对齐输入卡`).toBeLessThanOrEqual(composerLeft + 1);
+    expect(left).toBeGreaterThanOrEqual(composerLeft - 1);
+    expect(right, `${size.width}px：右缘对齐输入卡`).toBeLessThanOrEqual(composerRight + 1);
+    expect(right).toBeGreaterThanOrEqual(composerRight - 1);
+    // 不得比输入卡更宽：这条是用户当轮指认的原问题。
+    expect(panel!.width).toBeLessThanOrEqual(composer!.width + 1);
+    console.log(`[todo-width] ${size.width}px：面板 ${left}..${right}，输入卡 ${composerLeft}..${composerRight}`);
+    checked += 1;
+  }
+  expect(checked).toBe(widths.length);
+});
+
+test("宽度对齐证据图：在输入卡左右缘画参考线", async ({ page }) => {
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, { items: shortItems });
+  await openSession(page);
+  await page.getByTestId("session-todo-list").locator("summary").click();
+  const composer = await page.getByTestId("assist-composer").boundingBox();
+  await page.evaluate((box) => {
+    for (const x of [box.x, box.x + box.width]) {
+      const line = document.createElement("div");
+      line.style.cssText = `position:fixed;top:0;bottom:0;left:${x}px;width:1px;` +
+        "background:#C2410C;opacity:.55;pointer-events:none;z-index:9999";
+      document.body.append(line);
+    }
+  }, composer!);
+  await page.screenshot({ path: `${shotDir}/08-todo-width-alignment.png` });
+});
+
+test("窄窗口 720px：展开后仍可用，不横向溢出", async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 782 });
+  await installRoutes(page, { items: shortItems });
+  await openSession(page);
+  const list = page.getByTestId("session-todo-list");
+  await list.locator("summary").click();
+  await expect(list.locator("[data-testid='session-todo-item']")).toHaveCount(3);
+  // 窄窗下不做横向滚动：正文换行、状态词留在右缘，整块不出视窗。
+  const overflow = await page.evaluate(() => ({
+    doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    panel: (() => {
+      const node = document.querySelector(".session-todos");
+      if (node === null) return 0;
+      const box = node.getBoundingClientRect();
+      return Math.round(Math.max(0, box.right - window.innerWidth) +
+        Math.max(0, -box.left));
+    })(),
+  }));
+  expect(overflow.doc, "页面不得横向溢出").toBeLessThanOrEqual(0);
+  expect(overflow.panel, "面板不得超出视窗").toBe(0);
+  await page.screenshot({ path: `${shotDir}/09-todo-narrow-720.png` });
+});
+
+test("长列表态（正常窗高）：16 项在面板内滚动，输入卡仍在原位", async ({ page }) => {
+  const state: { items: readonly { id: string; content: string; status: string }[] | null } =
+    { items: longItems };
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, state);
+  await openSession(page);
+  const list = page.getByTestId("session-todo-list");
+  await list.locator("summary").click();
+  await expect(list.locator("[data-testid='session-todo-item']")).toHaveCount(16);
+  const scroller = page.locator(".session-todos-list");
+  const metrics = await scroller.evaluate((node) => ({
+    clientHeight: node.clientHeight, scrollHeight: node.scrollHeight,
+  }));
+  // 16 项装不下：列表自己滚动，而不是把面板与输入卡一路撑高。
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  const panel = await list.boundingBox();
+  const composer = await page.getByTestId("assist-composer").boundingBox();
+  expect(Math.round(panel!.x)).toBe(Math.round(composer!.x));
+  expect(Math.round(panel!.width)).toBe(Math.round(composer!.width));
+  await page.screenshot({ path: `${shotDir}/10-todo-long-list.png` });
+});

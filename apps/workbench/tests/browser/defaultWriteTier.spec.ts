@@ -120,7 +120,9 @@ test("没有目录时三行仍可选，写的是工作区默认档位", async ({
   await expect(page.locator('[data-testid="write-permission-ask"]')).toHaveAttribute("data-pending", "true");
   expect(await rowOpacity()).toEqual(["0.55", rowsBefore[1]!, rowsBefore[2]!]);
   await expect(chip).toContainText("请求批准", { timeout: 20_000 });
-  await expect(chip).not.toContainText("默认");
+  // 2026-11-01 E2E-ALL-01 推翻 2026-10-22 的「芯片只显示档位名」：同一屏里顶栏说「未绑定目录」、
+  // 芯片说「完全访问」，用户据此认为本轮可以写文件。作用域限定词必须留在芯片上。
+  await expect(chip).toContainText("默认·请求批准");
   // data-tier 仍是 unbound：此刻仍然没有目录可写，芯片读的是「以后新开的目录」的档位。
   expect(await chip.getAttribute("data-tier")).toBe("unbound");
   expect(await chip.getAttribute("data-default-tier")).toBe("ask");
@@ -140,8 +142,8 @@ test("默认已是完全访问时，芯片带上危险色且行内说明仍说�
   await expect(page.getByTestId("assist-first-draft")).toBeVisible({ timeout: 20_000 });
 
   const chip = page.locator('[data-testid="write-permission-chip"]');
-  await expect(chip).toContainText("完全访问");
-  await expect(chip).not.toContainText("默认");
+  // 「默认·完全访问」而不是「完全访问」：这一档说的是以后新开的目录，此刻这条会话没有目录可写。
+  await expect(chip).toContainText("默认·完全访问");
   expect(await chip.getAttribute("data-tier")).toBe("unbound");
   expect(await chip.getAttribute("data-default-tier")).toBe("full");
   await chip.click();

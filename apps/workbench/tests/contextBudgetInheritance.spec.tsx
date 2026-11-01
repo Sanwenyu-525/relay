@@ -184,15 +184,12 @@ describe("会话上下文档位的导航链路继承", () => {
     expect(create?.sourceSessionId, "建会话必须带上跳转前所在会话").toBe(sessionA);
     expect(server.sessions.get(sessionB)?.tier, "B 继承 A 的 512K").toBe(524_288);
 
-    // 切到 B，把 B 改成 1024K：走界面上的「选档 → 保存档位」（0145 复审恢复的交互）。
+    // 切到 B，把 B 改成 1024K：点档位就是一次写（2026-10-31 用户指令删掉保存按钮）。
     await view.router.push(`/agent?work=${taskId}&session=${sessionB}`);
     await flush();
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    await view.wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    expect(server.budgetWrites, "只选不保存：不写服务端").toHaveLength(0);
-    await view.wrapper.get('[data-testid="context-budget-save"]').trigger("click");
+    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
     expect(server.budgetWrites.at(-1)).toEqual({ sessionId: sessionB, tier: 1_048_576 });
     expect(server.sessions.get(sessionA)?.tier, "改 B 不能改 A").toBe(524_288);
@@ -215,9 +212,7 @@ describe("会话上下文档位的导航链路继承", () => {
     view = await mountWorkbench(`/agent?session=${sessionC}`);
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    await view.wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    await view.wrapper.get('[data-testid="context-budget-save"]').trigger("click");
+    await view.layer.get('[data-testid="context-budget-option-262144"]').setValue(true);
     await flush();
     expect(server.budgetWrites.at(-1)).toEqual({ sessionId: sessionC, tier: 262_144 });
     expect(server.sessions.get(sessionC)?.tier, "C 改成 256K").toBe(262_144);
@@ -233,7 +228,7 @@ describe("会话上下文档位的导航链路继承", () => {
       const reopened = await mountWorkbench(`/agent?session=${id}`);
       await reopened.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
       await flush();
-      const checked = reopened.wrapper.findAll('[data-testid^="context-budget-option-"]')
+      const checked = reopened.layer.findAll('[data-testid^="context-budget-option-"]')
         .filter((item) => (item.element as HTMLInputElement).checked)
         .map((item) => item.attributes("data-testid"));
       expect(checked, `重新打开 ${id} 应读回自己的档位`).toEqual([
@@ -256,9 +251,9 @@ describe("会话上下文档位的导航链路继承", () => {
     // 空白新会话的浮层里也有三档：选 1024K 不发任何写请求，只落草稿作用域。
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    const options = view.wrapper.findAll('[data-testid^="context-budget-option-"]');
+    const options = view.layer.findAll('[data-testid^="context-budget-option-"]');
     expect(options.length).toBeGreaterThanOrEqual(3);
-    await view.wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
+    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
     expect(server.budgetWrites, "还没有会话时不得写档位").toHaveLength(0);
 
@@ -285,10 +280,10 @@ describe("会话上下文档位的导航链路继承", () => {
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
     // P0-A：来源会话 A=512K，空白输入器直接显示 512K。
-    expect((view.wrapper.get('[data-testid="context-budget-option-524288"]').element as HTMLInputElement).checked,
+    expect((view.layer.get('[data-testid="context-budget-option-524288"]').element as HTMLInputElement).checked,
       "空白输入器要显示来源会话的 512K").toBe(true);
     // 在 B 的空白里选 1024K，但不发送。
-    await view.wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
+    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
     expect(server.budgetWrites, "空白会话不写服务端").toHaveLength(0);
 
@@ -297,7 +292,7 @@ describe("会话上下文档位的导航链路继承", () => {
     const reopened = await mountWorkbench(firstBlank);
     await reopened.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    expect((reopened.wrapper.get('[data-testid="context-budget-option-1048576"]')
+    expect((reopened.layer.get('[data-testid="context-budget-option-1048576"]')
       .element as HTMLInputElement).checked, "同一个空白会话刷新后应读回草稿").toBe(true);
     reopened.unmount();
 
@@ -307,9 +302,9 @@ describe("会话上下文档位的导航链路继承", () => {
     await flush();
     await second.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    expect((second.wrapper.get('[data-testid="context-budget-option-524288"]')
+    expect((second.layer.get('[data-testid="context-budget-option-524288"]')
       .element as HTMLInputElement).checked, "另一条空白会话回到来源会话的 512K").toBe(true);
-    expect((second.wrapper.get('[data-testid="context-budget-option-1048576"]')
+    expect((second.layer.get('[data-testid="context-budget-option-1048576"]')
       .element as HTMLInputElement).checked, "不得串到上一条空白会话的选择").toBe(false);
     await second.wrapper.get('[data-testid="assist-first-draft"]').setValue("C 的首条");
     await second.wrapper.get('[data-testid="assist-first-send"]').trigger("click");

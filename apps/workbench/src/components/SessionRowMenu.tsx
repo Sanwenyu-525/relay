@@ -1,9 +1,11 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
-import { Archive, Copy, GitFork, Mail, MailOpen, MoreHorizontal, Pencil, Pin, PinOff, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Copy, Download, GitFork, Mail, MailOpen, MoreHorizontal, Pencil, Pin, PinOff, RotateCcw, Trash2 } from "lucide-react";
 import { createCommandId, type RelayApiClient, type RelayAssistSession } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { deleteBlockerAdvice, describeLiveError, describeLiveRead } from "../lib/liveErrors";
+import { deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelete";
+import { reserveSessionExportFileName, saveExportFile } from "../lib/sessionExportFile";
 import { useMenuExclusive } from "../lib/popoverMenu";
-import { escalateFeedback, openUndoFeedback } from "./Feedback";
+import { escalateFeedback, openUndoFeedback, Toast } from "./Feedback";
 
 /**
  * 会话改动只回这一行自身的事实（改名/置顶/未读/归档/重开），调用方据此收敛这一行。
@@ -18,6 +20,20 @@ export type SessionRowPatch =
   | { readonly kind: "reopen" }
   | { readonly kind: "delete" }
   | { readonly kind: "fork"; readonly forkedSessionId: string };
+
+/**
+ * 删除之后浮层停在哪一档（2026-10-31）。
+ *
+ * `confirm` 是**唯一一次**确认；确认之后的结果只有三种终态，不再回到带「删除」按钮的确认态：
+ *   * `blocked`    —— 服务端明确拒绝（被别的对象引用）：行还在，原因逐条可读，可执行动作按原因给。
+ *   * `failed`     —— 服务端明确拒绝且不是阻断（修订冲突等）：行还在。
+ *   * `unresolved` —— 是否生效未知：只能按原 command_id 核对回执，不能重发。
+ */
+type DeleteResult =
+  | { readonly kind: "blocked"; readonly reasons: readonly string[]; readonly reasonCodes: readonly string[] }
+  | { readonly kind: "failed"; readonly message: string; readonly requestId: string | null }
+  | { readonly kind: "unresolved"; readonly message: string; readonly requestId: string | null;
+      readonly commandId: string };
 
 /** 行本体右键时调用方拿来展开同一个面板的命令式入口。 */
 export interface SessionRowMenuHandle {
@@ -41,6 +57,17 @@ const GAP_PX = 4;
  * 本机没有注册 `relay://` 协议入口，所以这只是文本身份，粘回来不会自动打开会话。
  */
 const SESSION_URI_PREFIX = "relay://sessions/";
+
+/**
+ * 「导出会话」的悬停说明：这些后果要在点之前就读得到，而不是文件落盘之后再解释。
+ *
+ * 两条都不能省：一是**这份文件里到底有什么**（只读诊断证据，不上传任何平台），
+ * 二是**它可能带着用户自己的资料**——凭据字段由服务端脱敏，消息正文按原文保留，
+ * 所以「这份文件可以给谁看」这一步只有用户自己能判断。
+ */
+const EXPORT_HINT = "把这段讨论的诊断证据（消息原文、工具调用与状态、待办、上下文与模型用量、"
+  + "执行请求与动作身份）导出为本机 JSON 文件：只读取，不改动这段讨论，也不上传任何平台。"
+  + "可识别的凭据字段已脱敏，但消息正文按原文保留，文件里可能含你自己输入的个人或项目资料。";
 
 /**
  * 近期工作栏里一条会话的行内操作（工作台 §28.9、迁移 0090）。
@@ -89,6 +116,12 @@ const SESSION_URI_PREFIX = "relay://sessions/";
  *    摆位与动作面板共用同一个触发器与同一套「越界拉回视口」的规矩，但方向相反：这张卡比 176px 的
  *    左栏还宽，开在 ⋯ 左侧会被推到窗口左缘、尖角指不回触发器，所以它竖直居中地开在右侧，
  *    尖角落在卡片左缘；右边放不下才翻回左侧。两种方向都不推高这一行，⋯ 因此一动不动。
+ * 10. **导出会话是一条只读出口，不是又一条命令（2026-11-01 用户任务书）。** 一次
+ *    `GET /assist-sessions/:id/export` 换回服务端拼好的诊断文件：消息原文、工具轮次与状态、待办
+ *    快照、上下文与模型用量、执行请求与动作身份都在同一份投影里，界面不自己攒证据，也不因为
+ *    某一段读不到就补一份看起来完整的。它没有要写的服务端事实，所以不带 command_id、不推进修订、
+ *    不参与冲突重读，归档态同样可导；位置留在「复制会话 ID」之后、归档与删除之前——取证据的动作
+ *    不带不可逆读感，就不该排在危险项里。
  */
 export default function SessionRowMenu({ client, session, onChanged, onStale, onOpenChange, ref }: {
   client: RelayApiClient;
@@ -100,14 +133,24 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   /** 行本体右键时由调用方（RecentWorkRow）拿来展开同一个面板。 */
   ref?: Ref<SessionRowMenuHandle>;
 }) {
-  const [panel, setPanel] = useState<"none" | "actions" | "rename" | "confirm">("none");
+  const [panel, setPanel] = useState<"none" | "actions" | "rename" | "confirm" | "result">("none");
   const [draft, setDraft] = useState(session.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  /** 删除回执不明时不再给「再删一次」：换 command_id 重发违反契约，必须按原 ID 查回执。 */
-  const [deleteUncertain, setDeleteUncertain] = useState(false);
+  /**
+   * 导出进行中，以及成功后落在本机的那个文件名（null 表示这一次还没导出成功）。
+   *
+   * `partial` 跟着文件名一起存：服务端在文档的 `completeness` 里自己声明了「这是部分导出」，
+   * 成功提示必须把这句话一并说出来，不能把残缺报成完整。
+   *
+   * 与 `busy` 分开：`busy` 是「这一行有一条命令正在提交」，会把 ⋯ 触发器一起禁掉；
+   * 导出是只读读取，不该锁住整行，也不参与 CAS 与冲突重读。
+   */
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<{ fileName: string; partial: boolean } | null>(null);
+  /** 删除之后停在哪一档：阻断、明确失败，还是「是否生效未知」。 */
+  const [deleteResult, setDeleteResult] = useState<DeleteResult | null>(null);
   const copyTimer = useRef<number | null>(null);
   /**
    * 摆位结果与「尖角朝哪边」一起存：确认浮层的卡片比左栏还宽，开在 ⋯ 左边会被推到窗口左缘，
@@ -120,16 +163,27 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   const inputRef = useRef<HTMLInputElement>(null);
   /** 危险动作不从回车起手：确认浮层一出现，焦点就压在「取消」上。 */
   const cancelRef = useRef<HTMLButtonElement>(null);
+  /** 结果态的「关闭」键：焦点落在这里，读完原因直接走。 */
+  const resultCloseRef = useRef<HTMLButtonElement>(null);
   const archived = session.status === "ARCHIVED";
   const pinned = session.pinnedAt !== null;
   const unread = session.unreadAt !== null;
   const open = panel !== "none";
 
-  function openPanel() { setDraft(session.title); setError(null); setCopied(false); setPanel("actions"); }
+  /**
+   * 每次重新打开面板都回到「还没导出过」的读法：条目名与成功反馈描述的都是这一次打开里发生过的事。
+   *
+   * `exported` 只在这里收，不在 `close()` 里收——那条成功提示挂在页壳的反馈栈上，面板收了它不该跟着消失。
+   */
+  function openPanel() {
+    setDraft(session.title); setError(null); setCopied(false); setExported(null); setPanel("actions");
+  }
   useImperativeHandle(ref, () => ({ open: openPanel }));
 
   useEffect(() => { if (panel === "rename") inputRef.current?.focus(); }, [panel]);
   useEffect(() => { if (panel === "confirm") cancelRef.current?.focus(); }, [panel]);
+  // 结果态的焦点落在「关闭」上：这一档没有可点的删除键，读完原因只能走。
+  useEffect(() => { if (panel === "result") resultCloseRef.current?.focus(); }, [panel]);
   useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
   // 行外面板是浮层：自身的外部按下/滚动/Esc 都在下方处理，这里只挂独占——
   // 打开输入器上的任何浮层（「+」、档位、模型）时都把它收掉，两列浮层不互相压。
@@ -152,7 +206,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       const height = element.offsetHeight;
       const clampTop = (top: number) => Math.max(MARGIN_PX,
         Math.min(top, window.innerHeight - MARGIN_PX - height));
-      if (panel === "confirm") {
+      if (panel === "confirm" || panel === "result") {
         const right = box.right + GAP_PX;
         const toRight = right + width <= window.innerWidth - MARGIN_PX;
         setPlaced({ arrow: toRight ? "start" : "top", style: {
@@ -257,44 +311,72 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
   /**
    * 删除是唯一不可撤销的会话操作（ADR-027）：单击只打开确认浮层，确认后才发命令。
    *
-   * 三种失败各走各的路，不混成一句「删除失败」：
-   * - 回执不明（`RelayTransportError`）——动作是否生效未定，按契约不得换 command_id 重发，
-   *   因此浮层保留、确认键锁死，只能按原 command_id 查回执；
-   * - 修订落后——让调用方重读这一条，浮层留着，人对着新事实重新决定；
-   * - 被其它对象引用（`SESSION_DELETE_BLOCKED`）——阻止项写进浮层，并指向归档。
-   * 失败说明因此只能落在这一层浮层里：收起来就等于把「没删成」和「删了但结果不明」一起藏掉。
+   * 四种结果各走各的路，不混成一句「删除失败」（2026-10-31）：
+   * - 已删——服务端确认（含按原 command_id 核对回执确认）：行当场消失，浮层收起。
+   * - 被引用阻断——**终态**：原因逐条可读，每条配一句真正能做的动作；不再摆「删除」，
+   *   摆着只会让人再点一次同一个必然被拒绝的动作。
+   * - 明确失败（修订冲突等）——终态：行还在，说明该怎么再做。
+   * - 结果未知（5xx、响应丢失）——**不能宣称失败，也不能宣称成功**：按原 command_id
+   *   核对回执；核对不到就仍留这一档，绝不换 command_id 重发。
    */
   async function deleteSession() {
-    setBusy(true); setDeleteError(null); setDeleteUncertain(false);
+    setBusy(true);
+    const commandId = createCommandId();
     try {
-      await client.deleteAssistSession({ sessionId: session.id, commandId: createCommandId(),
-        expectedRevision: session.revision });
-      setPanel("none");
-      onChanged({ kind: "delete" });
-    } catch (caught) {
-      const described = describeLiveError(caught);
-      if (described.kind === "transport") {
-        setDeleteUncertain(true);
-        setDeleteError(described.message);
-      } else if (described.kind === "conflict") {
-        onStale();
-        setDeleteError("这条会话刚被改过，已重新读取最新内容，请核对后再删除。");
-      } else {
-        setDeleteError(described.message);
+      const outcome = await deleteSessionAndVerify(client, session, commandId);
+      if (outcome.state === "deleted") {
+        setPanel("none");
+        setDeleteResult(null);
+        onChanged({ kind: "delete" });
+        return;
       }
+      if (outcome.state === "blocked") {
+        setDeleteResult({ kind: "blocked", reasons: outcome.reasons,
+          reasonCodes: outcome.reasonCodes });
+      } else if (outcome.state === "failed") {
+        setDeleteResult({ kind: "failed", message: outcome.message,
+          requestId: outcome.requestId });
+        if (outcome.conflict) onStale();
+      } else {
+        setDeleteResult({ kind: "unresolved", message: outcome.message,
+          requestId: outcome.requestId, commandId });
+      }
+      setPanel("result");
+    } finally { setBusy(false); }
+  }
+
+  /**
+   * 按原 command_id 再核对一次回执（结果未知时的唯一出路）。
+   *
+   * 核对到 `DeleteAssistSession` 的回执 = 这次删除确实生效；核对不到就还是未知，
+   * 不重发、不改口。服务端说过：回执不存在不能证明一个仍在事务中的请求永远未提交，
+   * 所以这一档只能等，不能猜。
+   */
+  async function recheckDeleteReceipt() {
+    if (deleteResult?.kind !== "unresolved") return;
+    setBusy(true);
+    try {
+      const verdict = await verifyDeleteReceipt(client, deleteResult.commandId);
+      if (verdict === "deleted") {
+        setPanel("none");
+        setDeleteResult(null);
+        onChanged({ kind: "delete" });
+        return;
+      }
+      setDeleteResult({ ...deleteResult,
+        message: "还没查到这次删除的回执。它可能仍在提交中，请稍后再核对一次；不要重复删除。" });
     } finally { setBusy(false); }
   }
 
   function openDelete() {
     setError(null);
-    setDeleteError(null);
-    setDeleteUncertain(false);
+    setDeleteResult(null);
     setPanel("confirm");
   }
 
   function closeDelete() {
     setPanel("none");
-    setDeleteError(null);
+    setDeleteResult(null);
     triggerRef.current?.focus();
   }
 
@@ -329,6 +411,53 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
     }, () => setError("复制失败，请手动复制会话 ID。"));
   }
 
+  /**
+   * 导出这段讨论：一次只读请求换回一份诊断文件，界面不参与拼证据（2026-11-01 用户任务书）。
+   *
+   * 三条规矩对应这次承诺的三件事：
+   *   * **只读**——不发命令、不带 command_id、不推进修订，因此它不走 `run` 那套 CAS 与冲突重读；
+   *     归档态同样可导，复盘往往就发生在归档之后。
+   *   * **失败不落文件**——读取或校验一旦抛错，就把真实原因写进就地告警，连文件名都不占号，
+   *     更不会写一个空 JSON 假装成功。
+   *   * **说清落在哪**——成功提示直接报文件名；服务端在文档里自己声明了部分导出时，这句话跟着
+   *     一起说，不把残缺当完整。
+   */
+  async function exportSession() {
+    // 进行中重复激活直接忽略：这一条在请求期间是 `aria-disabled`（仍可聚焦，焦点不掉），
+    // 挡住第二次导出靠这个守卫，而不是靠 `disabled` 把键盘焦点丢到 body。
+    if (exporting) return;
+    setError(null);
+    setExported(null);
+    setExporting(true);
+    try {
+      const payload = await client.exportAssistSessionDocument(session.id);
+      // 名字到这一刻才占号：先占后失败会白白吃掉一个序号，下一次导出就得叫 `-2`。
+      const fileName = reserveSessionExportFileName(payload.title, payload.exportedAt);
+      saveExportFile(fileName, payload.text);
+      setExported({ fileName, partial: payload.partial });
+    } catch (caught) {
+      // 只读说法（describeLiveRead）：导出没有命令、没有回执，命令提交那句「按同一枚 command ID
+      // 查回执」在这里既读不到、也不该读——失败只说明没拿到内容、没生成文件。
+      setError(describeLiveRead(caught));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  /**
+   * 「导出会话」条目：归档态与普通态共用同一个按钮，因此在这里建一次，两个分支各摆一处。
+   *
+   * 样式只复用 `.recent-work-row-action`（同一档 20px 图标、字号、内边距与焦点环），不新增类：
+   * 菜单的尺寸与节奏是前九轮定下来的，多一个条目不该改这几项。
+   */
+  const exportItem = <button type="button" className="text-button recent-work-row-action"
+    aria-disabled={exporting} title={EXPORT_HINT}
+    data-testid={`recent-work-export-${session.id}`}
+    onClick={() => void exportSession()}>
+    <Download aria-hidden="true" />
+    {exporting ? "导出中…" : exported === null ? "导出会话" : "已导出会话"}
+  </button>;
+
   return <>
     <button type="button" className="recent-work-row-trigger" ref={triggerRef}
       aria-expanded={open} aria-controls={`recent-work-row-panel-${session.id}`}
@@ -337,7 +466,7 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       onClick={() => { if (open) { setPanel("none"); setError(null); setCopied(false); } else openPanel(); }}>
       <MoreHorizontal aria-hidden="true" />
     </button>
-    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}${panel === "confirm" ? " recent-work-row-panel--confirm" : ""}${panel === "confirm" && placed?.arrow === "start" ? " recent-work-row-panel--arrow-start" : ""}`}
+    {open && <div ref={panelRef} className={`recent-work-row-panel${panel === "rename" ? " recent-work-row-panel--rename" : ""}${(panel === "confirm" || panel === "result") ? " recent-work-row-panel--confirm" : ""}${(panel === "confirm" || panel === "result") && placed?.arrow === "start" ? " recent-work-row-panel--arrow-start" : ""}`}
       id={`recent-work-row-panel-${session.id}`} onKeyDown={onKeyDown}
       style={placed?.style ?? { visibility: "hidden" }}
       data-testid={`recent-work-panel-${session.id}`}>
@@ -347,6 +476,9 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
             onClick={() => void run((commandId) => client.reopenAssistSession({ sessionId: session.id,
               commandId, expectedRevision: session.revision }), () => ({ kind: "reopen" }))}>
             <RotateCcw aria-hidden="true" />重开这段讨论</button>
+          {/* 归档态同样给导出：要拿去外部分析的往往是已经结束、需要复盘的那一段。
+              它在「重开」与危险项之间——只读取，不动这一行任何事实。 */}
+          {exportItem}
           {/* 归档态也能删：删除与归档是两条通道，归档不先拦住删除（ADR-027）。 */}
           <div role="separator" className="recent-work-row-separator" />
           <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger"
@@ -388,6 +520,9 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
             data-testid={`recent-work-copy-id-${session.id}`} onClick={copyId}>
             <Copy aria-hidden="true" />{copied ? "已复制会话 ID" : "复制会话 ID"}
           </button>
+          {/* 导出与复制同属「取一份东西出去」这一组：都不写服务端事实，都排在带不可逆读感的
+              归档与删除之前（2026-11-01 用户任务书 §二）。 */}
+          {exportItem}
           <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger" disabled={busy}
             onClick={() => void archiveSession()}>
             <Archive aria-hidden="true" />归档</button>
@@ -406,16 +541,15 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
         <button type="button" className="text-button" disabled={busy} onClick={close}>取消</button>
       </form>}
       {/* 确认浮层（2026-10-19）：标题 + 一句后果 + 两键，与动作面板同一个容器、同一套摆位。
-          长正文里那条「被引用不能删」不再常驻——它只在服务端真的拒绝时由 deleteError 说出。 */}
+          长正文里那条「被引用不能删」不再常驻——它只在服务端真的拒绝时由结果态说出。 */}
       {panel === "confirm" && <>
         <p className="recent-work-confirm-title">删除这段讨论？</p>
         <p className="recent-work-confirm-text">
           删除后，消息、附件与工具调用记录将永久移除，无法恢复。</p>
-        {deleteError !== null && <p className="recent-work-row-error" role="alert">{deleteError}</p>}
         <div className="recent-work-confirm-actions">
           {/* 删除在左、取消在右（2026-10-19 用户指令）：两键各占一半，合计铺满卡片内容宽，
               与菜单条目同一条左右边界；初始焦点仍压在「取消」上，回车不会直接删。 */}
-          <button className="danger-button" type="button" disabled={busy || deleteUncertain}
+          <button className="danger-button" type="button" disabled={busy}
             data-testid={`session-delete-confirm-${session.id}`} onClick={() => void deleteSession()}>
             {busy ? "正在删除…" : "删除"}
           </button>
@@ -423,7 +557,44 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
             disabled={busy} data-testid={`session-delete-cancel-${session.id}`} onClick={closeDelete}>取消</button>
         </div>
       </>}
+      {/* 结果态（2026-10-31）：确认之后只有终态，没有第二次确认。
+          每类阻断配一句真正能做的动作；原始追溯号只在「技术详情」里，不进主提示句。 */}
+      {panel === "result" && deleteResult !== null && <>
+        <p className="recent-work-confirm-title">
+          {deleteResult.kind === "blocked" ? "这段讨论还不能删除"
+            : deleteResult.kind === "unresolved" ? "删除结果待核实" : "这次没有删除"}</p>
+        <div className="recent-work-delete-result" role="alert">
+          {deleteResult.kind === "blocked" && deleteResult.reasons.map((reason, index) => (
+            <p key={reason} className="recent-work-confirm-text">
+              {reason}。{deleteBlockerAdvice(deleteResult.reasonCodes[index] ?? "")}
+            </p>
+          ))}
+          {(deleteResult.kind === "failed" || deleteResult.kind === "unresolved") &&
+            <p className="recent-work-confirm-text">{deleteResult.message}</p>}
+          {deleteResult.kind !== "blocked" && deleteResult.requestId !== null && (
+            <details className="recent-work-delete-detail">
+              <summary>技术详情</summary>
+              <p>请求 ID：<code className="hash-code">{deleteResult.requestId}</code></p>
+            </details>
+          )}
+        </div>
+        <div className="recent-work-confirm-actions">
+          {deleteResult.kind === "unresolved" && (
+            <button className="secondary-button" type="button" disabled={busy}
+              data-testid={`session-delete-recheck-${session.id}`}
+              onClick={() => void recheckDeleteReceipt()}>{busy ? "核对中…" : "核对回执"}</button>
+          )}
+          <button ref={resultCloseRef} className="secondary-button" type="button"
+            data-testid={`session-delete-close-${session.id}`} onClick={closeDelete}>关闭</button>
+        </div>
+      </>}
       {error !== null && <p className="recent-work-row-error" role="alert">{error}</p>}
     </div>}
+    {/* 下载完成的确认挂在页壳的反馈栈里，不写进面板：面板会因为点到别处或滚一下立刻收起，
+        而「文件确实落了、叫什么、是不是部分导出」这句话得活得比面板久一点。 */}
+    {exported !== null && <Toast testId={`session-export-done-${session.id}`}>
+      {`已导出「${exported.fileName}」${exported.partial
+        ? "（部分导出：某一段超过单次上限，文件里的 completeness 写明了是哪一段）" : ""}`}
+    </Toast>}
   </>;
 }

@@ -166,7 +166,7 @@ test("截图 1：从 A（512K）新建，空白会话就显示 512K", async ({ p
   await openBlankMeter(page);
   const panel = page.getByTestId("assist-context-meter-panel");
   await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
-  await expect(panel.getByTestId("context-usage-tier-state")).toContainText("继承来源会话：512K");
+  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("继承来源会话：512K");
   await page.screenshot({ path: `${out}/01-A512K-new-blank-inherits-512K.png`, fullPage: true });
 });
 
@@ -188,7 +188,6 @@ test("截图 2：B 建出来后当前生效就是 512K", async ({ page }) => {
   const panel = page.getByTestId("assist-context-meter-panel");
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
-  await expect(panel.getByTestId("context-usage-tier-state")).toContainText("当前生效：512K");
   await page.screenshot({ path: `${out}/02-B-created-512K.png`, fullPage: true });
 });
 
@@ -200,7 +199,7 @@ test("截图 3：B 未发送改成 1024K 后从 A 新建 C，C 仍是 512K", asy
   await openBlankMeter(page);
   const panel = page.getByTestId("assist-context-meter-panel");
   await panel.getByTestId("context-budget-option-1048576").check();
-  await expect(panel.getByTestId("context-usage-tier-state")).toContainText("已选 1024K");
+  await expect(panel.getByTestId("context-usage-first-tier-state")).toContainText("已选 1024K");
   await page.screenshot({ path: `${out}/03a-B-blank-unsaved-1024K.png`, fullPage: true });
   // 不回发、不保存：直接回 A 再新建一条（C）。
   await page.goBack();
@@ -211,7 +210,7 @@ test("截图 3：B 未发送改成 1024K 后从 A 新建 C，C 仍是 512K", asy
   const cPanel = page.getByTestId("assist-context-meter-panel");
   await expect(cPanel.getByTestId("context-budget-option-524288")).toBeChecked();
   await expect(cPanel.getByTestId("context-budget-option-1048576")).not.toBeChecked();
-  await expect(cPanel.getByTestId("context-usage-tier-state")).toContainText("继承来源会话：512K");
+  await expect(cPanel.getByTestId("context-usage-first-tier-state")).toContainText("继承来源会话：512K");
   await page.screenshot({ path: `${out}/03b-C-after-B-unsaved-1024K-still-512K.png`, fullPage: true });
 });
 

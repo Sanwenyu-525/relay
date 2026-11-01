@@ -356,9 +356,10 @@ test("组 1：普通讨论归入目录项目——同一 session id、历史逐�
   await expect(page.getByTestId("collab-binding"), "绑定前不得出现已归属提示").toHaveCount(0);
 
   await openFolderInUi(page, folderRoot);
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED", { timeout: 30_000 });
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-session", fixture.sessionId);
-  await expect(page.getByTestId("folder-scope-project")).toContainText("项目：");
+  // 归属成功只由细条那一行说（P1-2）：输入卡上方不再常驻一句同样的话。
+  await expect(page.getByTestId("folder-scope-association"), "细条按服务端归属改口")
+    .toContainText("已归入项目：", { timeout: 30_000 });
+  await expect(page.getByTestId("collab-binding")).toHaveCount(0);
 
   // 服务端事实：同一个会话被归入目录解析出的项目，没有新建第二个会话。
   const after = await readSession(page.request, fixture.sessionId);
@@ -434,7 +435,9 @@ test("组 2a：归属被服务端拒绝（409 有消息在途）——原历史�
     { command_id: randomUUID() });
   expect(cancelled.status).toBe(200);
   await page.getByTestId("folder-open-manual").click();
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED", { timeout: 30_000 });
+  await expect(page.getByTestId("folder-scope-association")).toContainText("已归入项目：",
+    { timeout: 30_000 });
+  await expect(page.getByTestId("collab-binding")).toHaveCount(0);
   const rebound = await readSession(page.request, fixture.sessionId);
   expect(rebound["id"]).toBe(fixture.sessionId);
   expect(rebound["project_id"]).toMatch(/^[0-9a-f-]{36}$/u);
@@ -487,8 +490,10 @@ test("组 2b：归属响应中断但服务端已提交——按原 command_id �
   expect(committed["project_id"], "服务端确实已改归属").toMatch(/^[0-9a-f-]{36}$/u);
 
   await page.getByTestId("collab-binding-receipt").click();
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED", { timeout: 30_000 });
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-session", fixture.sessionId);
+  // 核对回来的成功把「待核对」整块收掉：既不再有 UNKNOWN 提示，也不再常驻一条成功回执。
+  await expect(page.getByTestId("collab-binding")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("collab-binding-receipt")).toHaveCount(0);
+  await expect(page.getByTestId("folder-scope-association")).toContainText("已归入项目：");
   // 核对只按原 command_id 查询，没有换 ID 重发第二条归属命令。
   expect(breaker.commandIds).toEqual([commandId]);
   await expect(page.getByTestId("assist-transcript")).toContainText(fixture.content);
@@ -542,7 +547,9 @@ test("组 2c：归属响应在提交前中断——回执核对沿用原 command
   await page.reload();
   await connect(page);
   await openFolderInUi(page, folderRoot);
-  await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED", { timeout: 30_000 });
+  await expect(page.getByTestId("folder-scope-association")).toContainText("已归入项目：",
+    { timeout: 30_000 });
+  await expect(page.getByTestId("collab-binding")).toHaveCount(0);
   const rebound = await readSession(page.request, fixture.sessionId);
   expect(rebound["id"]).toBe(fixture.sessionId);
   expect(rebound["project_id"]).toMatch(/^[0-9a-f-]{36}$/u);

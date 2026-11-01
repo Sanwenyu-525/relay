@@ -63,7 +63,13 @@ export type ReadDiffResult =
   | { readonly available: true; readonly diff: ConversationDiff }
   | {
       readonly available: false;
-      readonly reason: 'NO_RESOURCE' | 'NO_BASELINE' | 'ROOT_NOT_GIT' | 'RESOURCE_UNAVAILABLE';
+      /**
+       * `NO_SESSION_WRITES`（2026-11-01 P1-3）只在会话口径出现：本会话的写账本一条路径都没有，
+       * 而且还没有统计起点。两件事叠加时「缺少会话起点」不是一条用户能处理的事实——没有写入，
+       * 就没有任何需要起点来核对的东西。有写入时才回 `NO_BASELINE`（那一句是真的缺口）。
+       */
+      readonly reason: 'NO_RESOURCE' | 'NO_BASELINE' | 'NO_SESSION_WRITES' | 'ROOT_NOT_GIT' |
+        'RESOURCE_UNAVAILABLE';
     };
 
 /**
@@ -151,9 +157,6 @@ export async function readConversationDiff(repositories: Repositories,
   const rootPath = resource.canonical_root;
   const baseline = await repositories.conversationDiff.readLatestBaseline(
     input.workspaceId, input.sessionId, resourceId, rootPath);
-  if (baseline === undefined) {
-    return { available: false, reason: 'NO_BASELINE' };
-  }
 
   const sessionScope = (input.scope ?? 'SESSION') === 'SESSION';
   const written = sessionScope
@@ -168,7 +171,15 @@ export async function readConversationDiff(repositories: Repositories,
       if (error instanceof NotAGitRepositoryError) return { available: false, reason: 'ROOT_NOT_GIT' };
       throw error;
     }
+    /* 写过零个路径 + 还没有起点：这一条会话没有任何可核对的东西，回空 diff 要现造一个不存在的
+       起点时刻，回 NO_BASELINE 会让输入卡上方常驻一句用户无从处理的「缺少会话起点」。
+       两者都不说事实，因此单列一个原因，由界面按「本次对话没有文件变化」不占位处理（P1-3）。
+       起点存在时保持原来的可用空 diff——目录口径与既有读取行为不变。 */
+    if (baseline === undefined) return { available: false, reason: 'NO_SESSION_WRITES' };
     return { available: true, diff: emptySessionDiff(rootPath, resourceId, baseline) };
+  }
+  if (baseline === undefined) {
+    return { available: false, reason: 'NO_BASELINE' };
   }
 
   let current: CurrentScan;

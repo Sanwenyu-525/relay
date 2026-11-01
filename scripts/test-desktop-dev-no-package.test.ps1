@@ -53,7 +53,7 @@ try {
   Write-Text (Join-Path $fixture 'run.ps1') @'
 param([string]$Action)
 $ErrorActionPreference = 'Stop'
-function Get-Process { param([string]$Name, $ErrorAction) }
+function Get-Process { param([string]$Name, $ErrorAction) if ($Name -eq 'relay-desktop' -and $env:RELAY_FAKE_DEV_WINDOW) { [pscustomobject]@{ Id = 4242 } } }
 & (Join-Path $PSScriptRoot 'scripts\test-desktop.ps1') -Action $Action
 '@
   Write-Text (Join-Path $fixture 'apps\desktop\scripts\stage-api.ps1') @'
@@ -64,8 +64,12 @@ if ($Skip) { throw 'DesktopDev skipped staging without -SkipApiRefresh.' }
 Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"stage"}'
 '@
   Write-Text (Join-Path $fixture 'apps\desktop\scripts\dev-desktop.ps1') @'
-param([string]$ConfigPath, [int]$FrontendPort, [switch]$SkipApiRefresh)
+param([string]$Action, [string]$ConfigPath, [int]$FrontendPort, [switch]$SkipApiRefresh)
 $ErrorActionPreference = 'Stop'
+if ($Action -eq 'close') {
+  Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"close"}'
+  return
+}
 try {
   $handle = [IO.File]::Open((Join-Path (Split-Path $ConfigPath) 'launcher.lock'), 'Open', 'ReadWrite', 'None')
   $handle.Dispose()
@@ -95,7 +99,8 @@ Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"dev"}
     ready = $true; manifest_hash = 'fixture-dev-baseline'; dev_schema_hash = ''
   }
   $env:RELAY_LAUNCHER_TEST_EVENTS = $eventsPath
-  $env:RELAY_EXPECTED_DATA_ROOT = Join-Path $trial 'data'
+  # The trial data root lives outside the repository (the desktop API rejects an in-repo data root).
+  $env:RELAY_EXPECTED_DATA_ROOT = Join-Path (Join-Path $env:APPDATA 'dev.relay.agent') 'trial-data'
 
   # A fresh environment still needs one packaged build; this guard must not silently initialize from nothing.
   $missing = Run-Launcher 'DesktopDev'
@@ -119,10 +124,17 @@ Add-Content -LiteralPath $env:RELAY_LAUNCHER_TEST_EVENTS -Value '{"event":"dev"}
   $null = Run-OK 'DesktopDev'
   Assert (((Events).event -join ',') -eq 'stage,dev,stage,dev') 'Daily reuse reran verification or migration.'
 
+  # Menu 6 is a restart: a window already on screen is closed first, and the close happens
+  # before staging and migration so no schema upgrade runs against a live connection.
+  $env:RELAY_FAKE_DEV_WINDOW = '1'
+  Run-OK 'DesktopDev' | Out-Null
+  Assert (((Events).event -join ',') -eq 'stage,dev,stage,dev,close,stage,dev') 'Running window was not closed before preparing the development start.'
+  Remove-Item Env:RELAY_FAKE_DEV_WINDOW
+
   Run-OK 'Stop' | Out-Null
   & $pgCtl status -D $cluster *> $null
   Assert ($LASTEXITCODE -eq 3) 'Stop did not stop the fixture database.'
-  Write-Host 'PASS: 4 scenarios; fresh environment still needs Build, initialized environment opens without a package, no verification or migration, daily reuse and Stop.'
+  Write-Host 'PASS: 5 scenarios; fresh environment still needs Build, initialized environment opens without a package, no verification or migration, daily reuse, restart closes the live window before preparing, and Stop.'
 } finally {
   $env:RELAY_LAUNCHER_TEST_EVENTS = $savedEvents
   $env:RELAY_EXPECTED_DATA_ROOT = $savedExpectedDataRoot

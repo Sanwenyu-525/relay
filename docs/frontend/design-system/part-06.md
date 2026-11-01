@@ -158,27 +158,42 @@
 
 **V3 轻量化（2026-10-29 第四轮，用户「插件标识要像 Codex 一样简洁、不突兀；插件菜单不要阴影、不要铺满输入器」）**：`PluginChip.css` 重写，去掉 `::before` 容器底、`padding-inline`、`isolation` 与插件绿文字——默认透明背景、`color: inherit`（取所在表面的正文前景色）、无边框、无阴影/光晕，只保留 `inline-flex`、`align-items: center`、`gap: space.0.5`（2px）、16px 图标与名称省略号；编辑态宽度预算不变（`--chip-width` 仍等于 `@标签` 首片段实测字宽，本次只是把内部留白让给名称）。两态量测（⑲）：背景 `rgba(0,0,0,0)`、`box-shadow: none`、`filter: none`、padding 0、gap 2px、图标 16px、文字 `rgb(32,51,41)` 逐项一致，唯一差异是名称字号（编辑 meta／只读 body，编辑态受字宽预算约束）。`forced-colors: active` 下由「容器底 + 描边」改为芯片自身 `outline: 1px solid CanvasText`（容器底已不存在）。`@` 菜单只覆盖 `.chat-command-menu.chat-mention-menu`：`inset-inline: 0 auto` + `width: fit-content`（`min-width: 11rem`、`max-width: min(100%, 20rem)`）不再铺满输入器，`padding: space.1`、`box-shadow: none`、`border-color: border.separator`，行内边距 `space.1 space.2` + `radius.badge`；顶部常驻操作提示从 DOM 移除，键盘说明改挂 `aria-describedby` 指向的 `.visually-hidden` 文本。命令菜单与其它浮层不动。`ChatCommandInput.css` 中「芯片宽度 = 原文测量宽度」的绝对定位规则（`.plugin-chip.chat-command-chip`）原样保留，视觉收窄全部发生在芯片内部排版。前后对照用「只注入上一轮皮肤」的方式取证（同一内容、同一 DOM）：`output/plugin-chip-acceptance-20261028/chip-before-after-before.png` 与 `-after.png`，断言注入态确有 `rgb(237,245,239)` 容器底、本轮 `::before` 与背景均为透明。
 
-### 9.23 会话行的运行指示：一枚 12px 的环（2026-10-28）
+### 9.23 会话行的状态图标：八态共用一格（2026-10-28 起，2026-10-30 扩展）
 
-用户要求「切到别的会话时，从左栏就能看出哪条正在生成回复」，并明确否掉整行旋转边框、发光与闪烁，取向是 Codex 那种极简环形 Spinner。落点因此只有**类型图标那一格**（`font.size.caption` = 12px）：环与原来的 `MessageSquare` 同处一槽、同尺寸、同基座类（`.recent-work-kind`），换的只是图形。
+用户先要求「切到别的会话时，从左栏就能看出哪条正在生成回复」，随后（2026-10-30）要求把这一格扩成完整的状态系统：运行、排队之外，完成、失败、取消、未开始、归档、等待确认都要各自可辨。两次都明确否掉整行旋转边框、发光、闪烁与呼吸。落点始终只有**类型图标那一格**（`font.size.caption` = 12px）：与原来的 `MessageSquare` 同处一槽、同尺寸、同基座类（`.recent-work-kind`），换的只是图形与状态修饰类。
 
-| 状态 | 图形 | 动效 | 前景色 |
-|---|---|---|---|
-| `RUNNING`（已认领、正在生成） | 一段约 68% 的圆弧（`r=9`、`stroke-width=2`、`dasharray 38.45 18.1`，圆头端点） | 绕自身中心 1s 一周、`linear infinite`（token `motion.loop.spin`） | `color.text.secondary` |
-| `PENDING`（回复行已落库、还没人认领） | 一圈点线（同半径同粗细，`dasharray 1.8 5.2`），**静止** | 无 | 不换色，仍是 `color.text.muted` |
-| 终态 / 没有在途行 | 恢复 `MessageSquare` | 无 | `color.text.muted`（未读行 `color.text.secondary`，原有规则不变） |
+| 状态 | 判据（服务端读时派生） | 图形 | 动效 | 前景色 |
+|---|---|---|---|---|
+| `RUNNING` | `assist_messages` 有 `RUNNING` 行（Worker 已认领） | 三个实心圆点（`r=2.4`，圆心 5.5 / 12 / 18.5） | 三个点按 0 / 140 / 280ms 错峰上下，位移 −3.2 用户单位（12px 下约 1.6px），一轮 1.1s（`motion.loop.thinking`）、`motion.easing.loop`、`infinite` | `color.text.secondary` |
+| `PENDING` | 有 `PENDING` 行、没有 `RUNNING` | 钟表（Lucide `Clock`），静止 | 无 | `color.text.muted` |
+| `WAITING_APPROVAL` | `assist_proposals` 有 `status='PENDING'` 的提案 | 圆角方框 + 感叹号（`SquareExclamationPoint`），静止 | 无 | `color.status.warning.text`（琥珀 #96622A） |
+| `COMPLETED` | 最后一轮 `ASSISTANT` 行 `COMPLETED` | 圆形对勾（`CircleCheck`） | 一次性收敛 120ms（`motion.duration.fast` + `easing.standard`），`iteration-count: 1` | `color.text.muted` |
+| `FAILED` | 最后一轮 `FAILED` | 圆形感叹号（`CircleAlert`） | 无 | `color.status.danger.text`（低饱和砖红 #A34F43） |
+| `CANCELLED` | 最后一轮 `CANCELLED` | 斜线圆圈（`Ban`） | 无 | `color.text.muted` |
+| `NOT_STARTED` | 会话里一条消息都没有 | 空心消息框（`MessageSquare`） | 无 | `color.text.muted` |
+| `ARCHIVED` | `assist_sessions.status='ARCHIVED'` | 归档盒（`Archive`） | 无 | `color.text.muted` |
+| 无法判定 | 有消息但读不出最后一轮助手行；或旧服务端没有该字段 | 回退类型图标（`MessageSquare`，不带 `data-state`） | 无 | `color.text.muted`（未读行 `color.text.secondary`） |
 
-**为什么用形状而不是颜色或动效区分。** 关掉动效是本机的合法选择（`html[data-motion="off"]`）与系统偏好（`prefers-reduced-motion`）都要尊重，那时「在转」这件事不再可见；如果 `PENDING` 也画同一段弧，两者就会长得一模一样。所以运行中＝**弧**、排队中＝**点线**，静止时仍分得开，动效只是第二层信号。颜色沿用既有两档前景色（`text.secondary` / `text.muted`）：不为这枚环新开强调色，也不让它比标题更抢眼——「还没开始跑」不该比「正在跑」更亮，因此排队中保持类型图标那一档，只有运行中借未读行已经在用的 `text.secondary`。
+**优先级只有一条链**（在 `AssistRepository.deriveListState` 一处实现，列表与单条读取共用）：在途（`RUNNING` 压过 `PENDING`）→ 待确认 → 归档 → 未开始 → 最后一轮终态 → `null`。在途压过一切，因为它是此刻正在发生的事；待确认排在归档与终态之前，因为它是这一列里唯一「需要人动手」的事实；「未开始」排在终态之前，因为一条没有任何消息的会话用「还没开始」比用它上一轮的结局更能说明现在。
 
-**只转这一枚图形。** 行、标题、边框、底色一律静止，不做整行流光、不加 blur 光晕、不做呼吸缩放。旋转写在 SVG 自身（`transform-origin: 50% 50%`），12px 方框转到 45° 时外接矩形会到约 17px——所以凡是要比「这一格有没有变宽」的地方都读布局尺寸而不是 `getBoundingClientRect()`，否则量到的是转速。
+**`null` 不是完成。** 2026-10-28 的投影只有 `RUNNING`/`PENDING`/`null`，`null` 的含义是「没有在途的一轮」；把它当完成会在空会话与结算会话之间说谎。现在终态是另行读出的**另一条事实**（最后一轮助手行的 `status`），读不出就回退类型图标——宁可不知道，不编一个结局。
 
-**几何承诺不变。** 行高、行距、标题可用宽、置顶徽标与未读圆点的位置一像素不动：这一格本来就是 12px 且 `flex: none`，换图形不改盒模型；列的 160px 下限与「标题压到 ⋯ 下面」那一套（§9.11、§9.21）都照旧。悬停/聚焦/已勾选时复选框显形并让图标 `visibility: hidden`——环与原来的类型图标同一条规则，**优先级不变**：那一格显示复选框，环让位但不卸载（动画不重启，也不出现「移开指针后从零度开始转」的跳帧）。
+**形状 → 颜色 → 动效，三层按可靠性排序。** 关掉动效是本机的合法选择（`html[data-motion="off"]`），系统偏好（`prefers-reduced-motion: reduce`）也要尊重，那时「在动」这件事不再可见；灰度打印与色觉差异同样会拿走颜色。所以八个状态各有自己的轮廓，静止时仍逐一分得开，动效只是第三层信号。颜色只让两档离开中性色：失败借 danger、待确认借 warning——它们真的需要被看见；完成态留在 `text.muted`，因为左栏绝大多数行都是完成态，给「完成」上绿色会把这一列读成装饰，而不是状态。
 
-**首帧与收尾。** 环是 CSS 动画，元素挂载即按当前时钟运行，没有「等 JS 起播」的空白帧；状态翻转只换 class 或换成 `MessageSquare`，节点不重建，因此不会重播、不会跳角度。终态时这个节点整个不存在（不是停在最后一帧），也就不留动画残影。
+**运行中的三个点。** 只有圆点自己在动：`transform-box: view-box` + `translateY`，SVG 子元素的位移不参与布局，这一格的盒子尺寸恒定，行的外接矩形因此不随动画变化。起伏占一轮的前 60%，余下时间静止——一列里同时有几条在跑时，不会变成一排持续跳动的灯。动画写在 `circle` 上而不是整枚 `svg` 上，所以「图标盒子有没有变」与「点在不在动」是两件可以分别量的事。
 
-**减少动态效果**：`html[data-motion="off"]` 与 `@media (prefers-reduced-motion: reduce)` 都把 `animation` 置为 `none`（带 `!important`，压过全局 `* { animation-duration: … !important }`——只把时长压到 0 会让一圈无限动画原地瞬间重放，读起来像坏掉的闪烁）。停的是旋转，不是状态：弧仍在、点线仍在，可访问名称里的「正在生成 / 排队中」照读。
+**完成态只播一次。** `recent-work-settle` 是 120ms 的透明度 + `scale(0.92→1)`，`animation-iteration-count: 1` 且 `fill: both`：状态翻到完成那一次起播，之后轮询每分钟重渲染这一列都不会重播。这不是装饰性入场，而是「刚才那一轮结束了」的一次性回执。
 
-**验证出口**：真实 Chromium 侧 `tests/browser/recentWorkRunState.spec.ts` 五例——动画四要素（`recent-work-spin` / `1s` / `linear` / `infinite`）与行自身零动画、两种状态同尺寸不同 `dasharray`、密集列表行高与标题可用宽不回归、悬停时复选框显形且环 `visibility: hidden` 几何不跳、`data-motion=off` 与 `reducedMotion: reduce` 各自只停旋转；判定与轮询节拍归 `tests/recentWorkRunState.spec.ts`（jsdom）。
+**未读不再提亮状态图标。** 旧规则 `.recent-work-item--unread .recent-work-kind` 会把这一格刷成 `text.secondary`——放在八态上会把失败的红、待确认的琥珀一起刷掉。现在限定为 `.recent-work-kind:not([data-state])`：只有「没有状态可陈述」的类型图标才随未读提亮，状态色永远归状态。未读自身的两道信号（加粗标题 + 圆点）不变，两个维度各自成立。
+
+**几何承诺不变。** 行高、行距、标题可用宽、置顶徽标与未读圆点的位置一像素不动：这一格本来就是 12px 且 `flex: none`，换图形不改盒模型；列的 160px 下限与「标题压到 ⋯ 下面」那一套（§9.11、§9.21）都照旧。悬停/聚焦/已勾选时复选框显形并让图标 `visibility: hidden`——八态与原来的类型图标同一条规则，**优先级不变**：那一格显示复选框，图标让位但不卸载（动画不重启，移开指针也不会跳帧）。
+
+**服务端只有一条派生链。** HTTP 投影新增只读字段 `list_state`（见命令契约 §10.116），`run_state` 保留为它的在途子集——轮询与「此刻有没有在跑」要的是这个窄口径，客户端不必从八态里再挑一次。列表读取仍是一条语句：`has_messages`、在途、最后一轮助手行、待确认提案都是相关子查询，左栏有多少行都不额外发请求，也不为任何一行单独发请求。
+
+**减少动态效果**：`html[data-motion="off"]` 与 `@media (prefers-reduced-motion: reduce)` 都把 `animation` 置为 `none`（带 `!important`，压过全局 `* { animation-duration: … !important }`——只把时长压到 0 会让无限动画原地瞬间重放，读起来像坏掉的闪烁）。停的是动画，不是状态：三个点仍停在基线上、其余七个图形原样，可访问名称里的「正在生成 / 排队中 / 已完成 / 生成失败 / 已取消 / 等待确认提案 / 未开始 / 已归档」照读。
+
+**验证出口**：真实 Chromium 侧 `tests/browser/recentWorkRunState.spec.ts` 九例——八态的状态类与图形两两不同、三点动画四要素（`recent-work-dot` / `1.1s` / `0·0.14·0.28s` / `infinite`）与完成态 `iteration-count: 1`、动画期间行与图标盒子逐帧不动、翻到终态后 `getAnimations()` 无运行中动画且再轮询不重播、八行等高与标题可用宽一致、悬停复选框让位、`data-motion=off` 与 `reducedMotion: reduce` 各自全停、1024px 窄窗尺寸不变且不横向溢出、归档段画归档盒；判定、文案与轮询节拍归 `tests/recentWorkRunState.spec.ts`（jsdom，12 例）；派生链本身由 `apps/api/test/unit/session-list-state.test.ts` 逐档钉住。
+
 
 ### 9.23 上下文用量浮层的三段排版与三档横排（2026-10-30）
 
@@ -190,16 +205,103 @@
 - **选中即改变，因此没有动作行**：档位区**不设**「保存上下文长度 / 重新读取」两枚按钮——点档位即写服务端，写完用一行 `status` 文案回执（`color.text.muted` + caption 档）说明结果。理由是这两枚按钮把「选一个数」拆成三步（选 → 保存 → 等回执），而档位本身是**低风险、可逆**的单值设置，多一步确认只是仪式。回执/冲突/异常因此都以**行内状态行**呈现，不占独立动作区：正常状态一行 `meta` 文案，异常时多一行 `role="alert"`，回执查询入口（`text-link`）只在传输失败待核对时出现。
 - **状态行不推动布局**：状态行固定在档位行**下方**、动作行**上方**，高度随内容变化但**不占据输入卡内部空间**——浮层是 `position: fixed` 的独立层，它长高不会推动输入卡与消息列表。
 
+**2026-10-31 精修（三段重排后的排版）**：浮层宽 `max-width: 24rem`（原 21.25rem 读起来过窄，主读数与占比挤在行尾），内距 `space-4`。三段的视觉层级是：段标题 meta(14) 灰字 → 关键读数 rowTitle(20)/reading(18) 深色 → 其余 meta/caption。档位值（20px semibold tabular-nums）是全浮层最强的读数，占比与历史主读数同档 reading(18)，构成行与说明行 caption(12)/meta(14)。状态用一枚 chip（中性底 12px），只有「待核对」与「保存失败」换语义色；不用绿色大回执块，成功反馈降级为一行 caption 状态行，`.context-usage-tier-state:empty` 时不占高度。段间用 1px `border.separator` + `space-3` 留白，段内用 `space-2`；第一段不画顶线（它就是浮层身份）。三档横排与命中区规则不变。
+
 **容器几何另有一处修正（三次实测后的定案）**：浮层最初以圆环组为锚点（`group { position: relative }`），
 而圆环在工具行、贴近卡片底缘，浮层只能向上压进正文输入区——782px 高窗口实测底缘落在卡片内部约 60px 处。
 改成「让出包含块、锚到整张输入卡」后浮层能落在卡片上方，但它仍是卡片的子元素，
 任何祖先的 `overflow` 都会裁它：560×700 实测标题行被中栏裁掉，固定 `max-height: 68vh` 同样越界
 （卡片上方只有约 200px，内容却有 477px）。
 
-定案是 **fixed 定位 + 实测几何**：浮层打开时按输入卡实测位置落位——底边贴在卡片顶端上方 8px，
-右缘对齐卡片右缘，`max-height` 取视口高 − 16；放不下时**浮层内部滚动**，标题与主读数永远可见。
+定案是 **fixed 定位 + 实测几何**：浮层打开时按圆环实测位置落位（锚点与间距见下 2026-11-01 修订）。
 落位在 layout effect 里完成（不在 render 里读几何），窗口尺寸变化与内容高度变化
 （保存回执、冲突提示、分项刷新）各由 `resize` 事件与 `ResizeObserver` 触发一次重排。
 CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未量测时的初值。
 
 新样式只加 `.context-usage-*`（构成列表、三档、动作行），摘要段继续沿用 `.agent-chat-context-meter-*`，不复制第二套 token；所有数值、间距、圆角都取既有 `design-tokens.json` 变量。
+
+**2026-11-01 第三轮（读序、停靠区与圆环锚定）**：交互语义与根因记[工作台 §27.4](../workbench-design/part-08.md#274-定制与上下文反馈)，本节只定视觉规则。
+
+- **正文两段容器**：浮层内网格从「三段同层一起滚」改成 `.context-usage-scroll` + `.context-usage-dock` 两行——`grid-template-rows: minmax(0, 1fr) minmax(0, auto)`，滚动区 `overflow-y: auto` + `overscroll-behavior: contain` + `scrollbar-gutter: stable`，停靠区顶部一条 `border.separator`、超高时自身滚动。三档横排落在**停靠区**（浮层最底部），短窗口里档位不会被滚走，停靠区也不压分项、错误提示或键盘焦点。`gutter: stable` 是为这条服务的：滚动条出现与否不该改变正文可用宽度，否则每次读数刷新都把行末数值推向左右。旧的 `@media (max-width: 30rem)` 一档随之下线——三档横排在 420px 视口实测不溢出，[§9.6](part-03.md#96-控件基座与响应式收敛2026-10-08)的语义档守卫也不允许这种补丁断点。
+- **锚点从输入卡改成圆环**：`.agent-chat-context-meter-menu` `position: fixed` 且 `createPortal` 到 `document.body`。上一段列的两条祖先限制正是留在卡片内的代价，portal 是唯一同时满足「贴环」「不被中栏裁」「不越视口」的形态，与 `usePathTooltip` 同构。底边贴**圆环顶缘上方 7px**、右缘对齐圆环右缘；上方放不下且下方更空时整块翻到环下方同间距，方向写进 `data-side` 供用例断言；两边都放不下时夹在视口内、上下各留 8px。
+- **逐帧比对圆环矩形**：环在工具行里，位置由整页布局决定——模型名到达只改兄弟宽度、消息增多或工具行换行只改卡片高度，**环自身尺寸不变，`ResizeObserver` 看不见「只挪位不变大」**（真实 Chromium 实测：右缘差 120px，窄窗倒扣 73px 压住环本身）。浮层打开期间每帧读一次环的矩形，只有真挪了才重写落位；浮层挂在 body 上且 fixed，重写它的 `top/left` 不会反过来推动环，不构成回环。
+- **分项六色**：六类各取一枚 `color.category.*`，**只作用在 14px 图标**（`.context-usage-row[data-category] .context-usage-row-icon`），分类名仍 `color.text.secondary`、数值仍 `color.text.primary`——上色说的是「哪一类」，不是「有多少」。六色取同明度带的低饱和值（azure / violet / amber / teal / leaf / control），亮面对 `bg.surface` 全部 ≥3:1（最低 `other` 3.30），本机唯一暗面（开发场景实验室 `#1b211d`）同样全部 ≥3；取值与实测对比度写进 token 的 `contrastChecks`，样式只写 `var(--relay-color-category-*)`，将来真做暗色主题时自动继承。含义不靠颜色承载：六枚 lucide 图标形状各异 + 固定分类名 + 右对齐数值三重表达，两种红绿色盲下最接近的一对（青绿 ↔ 灰绿，ΔE≈8）因此不构成误读。数字一律 `tabular-nums`。
+- **圆环尺寸与读数**：`control.meter.size` 收回 1.5rem（24px 视觉直径），按钮盒仍取 `control.height.compact`（32px），命中区不小于 32×32——辅助读数不该压过同排文字，但点击区不跟着缩。环右侧常驻的独立百分比文字删除（`.agent-chat-context-meter-value` 连同其窄栏 `@container` 收起规则一并移除），同一读数仍在悬停 Tooltip、`aria-label` 与浮层里。悬停/按下只改底色并用 `@media (hover: hover) and (pointer: fine)` 门控；进度弧 `stroke-dasharray` 以 `motion.duration.panel`（180ms）补间一次，`prefers-reduced-motion` 下由全站规则收到 0ms，无循环动画。
+
+**2026-11-01 第五轮（用户指令：删两行＋中线对齐）**：上面两段里的「档位值 20px semibold」与「右缘对齐圆环右缘」**由本轮替代**。①「当前档位 N」标题行（含 20px 档位值与状态 chip）与「下次调用申请 N tokens」行删除，停靠区只留三档横排；当前值由单选态表达，保存中/待核对/失败仍由 `.context-usage-tier-state` 与 `role="alert"` 块说明，不再常驻「已保存」chip。②浮层水平落位由「右缘贴圆环右缘」改为**中线对准圆环中心**（左缘 = 环心 − 浮层宽/2），两侧各留 8px 视口边距；空间不足时夹住，并保证环心仍落在浮层覆盖范围内。垂直落位（贴环 7px / 翻面 / 夹进视口）不变。
+
+### 9.24 开发期场景实验室的预览优先工作区（2026-10-31）
+
+场景实验室（`apps/workbench/src/dev/ScenarioLabView.tsx` + `ScenarioLab.css`）是开发构建里的全屏调试工作区，不套 `pv-page` 原型皮肤，也不建立第二套色板：所有颜色、字号、间距、圆角、阴影都取 `--relay-*` 变量。
+
+**五层结构。** 页面导航（页头）／当前场景（预览头）／播放工具（Playback Bar）／AI 回复预览（舞台）／技术检查（检查面板）各自只表达一件事。层间用 1px `color.border.separator` 与留白分隔，不用卡片包住整条回复，也不叠阴影；唯一浮层是窄窗抽屉，取 `shadow.floating`。
+
+**尺寸与字形。** 目录列宽 `clamp(13.75rem, 16vw, 15.5rem)`；检查面板 `clamp(18rem, 20vw, 20rem)`；控件统一 `control.height.compact`（32px）；页头标题 `font.size.rowTitle`（20px），预览头用 `font.size.body`，说明、时间、计数用 `font.size.caption`；场景 ID、帧时间、命令、路径用 `font.family.code`。预览宽窗保持产品自己的 `--chat-measure`（46.5rem），窄窗／手机宽档为 30rem／24rem。
+
+**状态与验收分开。** 场景执行状态用真实状态词（在途、流式、终态、失败、未知……）；验收结果只用 6px 的 success／danger／warning／neutral 点或一行文字，不把「验收通过」画成产品执行成功，也不堆彩色徽章。目录筛选的「运行中／完成／异常」读场景自身 `stateKind`，「未验收」读本页跑出的验收状态。
+
+**响应式。** ≥1181px 目录常驻、检查面板可固定右列；1180px 以下检查面板改为覆盖抽屉；≤1100px 目录也改为覆盖抽屉，预览保持主体宽度。断点只改结构，不缩放字体，不把目录、预览、控制器竖着堆成一条。抽屉盖住的只是滚动区，页面根不产生横向滚动；宽窗的检查面板收起、窄窗的抽屉关闭分别由预览头开关与面板关闭键承担，不重复同一动作。
+
+**验证出口。** 真实 Chromium 的 `tests/browser/scenarioLabUiV2.spec.ts` 量目录宽度、预览列宽、检查面板开关前后的宽度变化、窄预览档、播放条高度、抽屉与 Esc、Gallery 分类数量；既有十条 DOM 性质与 145 条矩阵继续在 `assistScenarioLab.spec.ts` / `scenarioLabMatrix.spec.tsx` 跑。截图与实测数字存 `tmp/Scenario-Lab-UI-V2/`，不以类型检查代替视觉验收。
+
+### 9.25 场景实验室 V2.1：运行状态、单帧静态与验收摘要（2026-10-31）
+
+**单帧收敛。** 单帧场景不画进度轨道、播放/循环/速度/单步，只显示 10px 的「静态状态预览」徽标、`第 1/1 帧` 与 32px 的「重新检查」；多帧才使用完整 Playback Bar。末帧播放按钮文案改为「重新播放」，仍是同一种 32px 主按钮，不新增第二个主色。静态说明条与预览同宽（`max-width: 60rem`），1px `border.separator`、`bg.subtle`、`radius.control`，文字 12px，不放投影。
+
+**短场景舞台。** 单帧舞台用 `justify-content: safe center` 把真实 UI 与说明条放在舞台中段；内容高于视口时自动退回顶部，仍可滚动。不插入假消息、不给预览加边框或阴影；长任务/长回复仍从顶部开始。
+
+**运行状态。** 快速静态检查与完整场景验收各用一颗 32px 次级按钮，运行中显示 `done/total` 与独立「取消」；按钮不因等待而变主色。Inspector 的两段运行摘要用 10–12px 文字与 1px 分隔线表达状态、耗时与七项计数（全部通过/静态通过/失败/待浏览器/无法验证/无法覆盖/未运行），不堆彩色徽章。`browser-only` 只能是「待浏览器」数字，不能染成成功色。
+
+**状态点。** 目录的 6px 验收点新增 `static`/`unverifiable`（warning）与 `stale`（空心 muted）；`pass` 才是成功色。悬停标题写清「全部通过 / 静态检查通过 / 静态失败 / 无法稳定验证 / 证据已过期」，不把 SETTLED 当成功。
+
+**验证出口。** `scenarioLabRunsV21.spec.ts` 验单帧/多帧/G01 完整回放、取消、重复启动、切场景/视图/离页、稳定超时；`scenarioSettle.spec.ts` 与 `scenarioLabRuns.spec.ts` 固定纯逻辑。截图与实测存 `tmp/Scenario-Lab-UI-V2.1/`。
+
+### 9.26 会话待办清单：与输入卡同轴的轻量进度面板（2026-10-31，两轮）
+
+**宽度跟 owner 走。** 待办块与输入卡、目录细条、目标卡、队列共用 `--chat-measure`（`min(46.5rem, 100%)`，定义在 `.agent-assist` / `.embedded-assist` / `.skill-page`）：`width: 100%` + `max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth))` + `margin-inline: auto`。此前它是这一列里唯一铺满的块，1162px 窗口下比输入卡宽 124px（868 vs 744），读起来像另一个页面的内容。三档窗口实测两块的左右缘逐像素相同（1162：340..1084；900：268..884；720：16..704）。
+
+**面。** 白色面 + 1px `border.separator` + `radius.control`（8px，`radius.composer` 的 16px 留给输入卡），**不加投影**——抬升只声明一次（这里是边框）。此前用 `color.selection.bg`（鼠尾草绿）作常驻底色，而那是 hover / 选中的语义，等于整块永远处于「被选中」态，也是这一列里唯一的常驻色块；现在绿只出现在 `:hover` 上，与「执行过程」带子同一条规则。
+
+**摘要行是一条可点的 header。** `min-height: control.height.compact`（32px）恒定，水平内边距 `space.3` 与输入卡内边距同档（两块左缘对齐），`hover` 染 `selection.bg`，`:focus-visible` 用 `focus.width/offset` + `color.focus.ring`，过渡走 `motion.duration.fast` + `motion.easing.standard`。展开时摘要的下圆角收回（`border-end-*-radius: 0`），hover 底色才不会与正文之间露出弧口。
+
+**左边是「在做什么」，右边是「什么状态」。** 标题 `text.primary` 600；当前步骤 `text.secondary`；计数 `text.muted`；计数与当前步骤之间一道 1px `border.separator` 竖线（没有当前步骤时不留孤线）。停止徽标用 `margin-left: auto` 推到右缘，不再跟在当前步骤后面读成一句话。这句原文是「生成已结束，这一步未收尾」，2026-11-01 全链路测试后改成「本轮停止，这一步未收尾」：生成结束不等于这一轮停止——预算耗尽、审批等待、工具失败都会停在同一枚徽标上，说「生成已结束」把三种成因压成一种。
+
+**完成度条只在展开时出现。** 2px，轨道 `border.separator`、填充 `color.status.success.text`，宽度由 `--session-todos-ratio` 给（已完成/总数）。折叠态不画：那一行字已经有「已完成 1/3」，再压一条线会把 32px 的摘要撑高，而且贴着标题读成下划线。展开后它与标题、列表各留 `space.2`，是这份清单的进度表头；`prefers-reduced-motion` 下不做宽度过渡。
+
+**行靠留白不靠分隔线。** 行距就是 `gap: space.2`，删掉了逐行 `border-top`：一张卡片里套十六条横线会读成表格。正文整块按「箭头 1rem + `space.1`」缩进，清单图标落在标题图标那一列、清单文字落在标题文字那一列；图标统一 1rem，与 `ActivityRow` 的图标列同宽。
+
+**状态色只借语义。** 进行中图标用 `color.status.running.text`（与「执行过程·运行中」同色），且只有 `data-session-todo-running="true"` 时状态词也跟着变蓝——「进行中·已停止」保持 `text.muted`，不冒充在跑；读取失败用 `color.status.danger.text`。完成 = 删除线 + `text.muted`；取消 = 只降级不划线（此前两者都是删除线，取消的步骤看着像做完了）。`--color-text-tertiary` 在本项目**不存在**，原先的 `var(..., rgb(148 150 158))` 兜底一直在生效，一行冷灰跑在暖绿底上；已改回 `text.muted`。
+
+**脚注分三层。** 第一行是元数据 + 免责（`第 N 版 · 服务端快照。只记录进度，不代表执行结果或验收结论。`），第二行只在「本轮停了但清单还没跑完」时出现，说清怎么接着做（`本轮没有把这 N 项跑完。接着做只需再发一条消息……`），第三行是换任务的操作提示，提示里的写法用行内代码呈现（`新任务：` / `/newtask`）——要照抄的东西不该埋在句子里。「没做完」与「怎么继续」必须同屏：只报停滞不给出口，提示本身就成了一条死路（2026-11-01 全链路测试）。第二层在生成中不出现，避免与转圈的状态自相矛盾。行之间 `space.1`，与清单之间 1px 发丝线 + `space.2`，字号 `caption`、行高 `snug`。
+
+**验收。** `tests/browser/sessionTodoList.spec.ts` 9/9（含三档窗口左右缘逐像素对齐、窄窗无横向溢出、16 项内部滚动且输入卡不被顶出、生成结束后最终读取落地）；`tests/sessionTodoList.spec.tsx` 18/18（含完成度条比例与脚注两层的结构断言）。截图与实测在 `tmp/agent-todo-list-ui-polish/`。
+
+### 9.27 聊天用量常显与资料披露交互统一（2026-10-31）
+
+**用量是一行事实，不再按需展开。** AI 回复的 token 读数此前收在消息底部「用量」的 `<details>` 里，读一次成本就要点开一次。现在删掉这层折叠与它的 `summary`，页脚直接常显「上下文 48210 · 输出 913 tokens」；缺值时写「未知」而不是 0，也不隐藏整行。页脚仍是「复制键在左、用量在右」：`.agent-message-usage` 取 `flex: 1 1 auto` + `overflow-wrap: anywhere`，长数字换行而不把复制键挤出。
+
+**资料条改成右向箭头。** 摘要行去掉文件图标与原生三角 marker，改用与执行过程、活动行同一套的 `ChevronRight`：收起时指向右，`[open]` 转 90° 向下。摘要行同时去卡片化——不再画外框、底色与圆角，`hover` 只提文字色，`:focus-visible` 用 `focus.width/offset` + `color.focus.ring`。
+
+**统一范围与边界。** 抽 `.chat-disclosure`（摘要行形态）与 `.chat-disclosure-chevron`（标记列）两个类，**只在显式带类的 `details` 上生效**：不做全局 `<details>` 覆盖，菜单、原生选择器与 `.page-explanation` 的 CSS 箭头各自保留。本轮在聊天区收敛 10 处：资料来源、Skill 详情 ×3、逐文件结果、查看已撤回原文、预览详情、候选卡核对项、工具读取分组。原生 `<summary>` 保留：键盘操作、`aria-expanded`、`[open]` 语义与默认折叠状态都不动。
+
+**marker 要压两层。** `list-style: none` 与 `::-webkit-details-marker` 之后，`.tech-details` 上还有一条同特异性的 `> summary::marker`，而视图 CSS 先于 `styles.css` 注入、会被后者压过；因此补 `.tech-details.chat-disclosure > summary::marker { content: none }` 这条两级类名。
+
+**缩进只有一个来源。** `--chat-disclosure-indent = calc(font.size.caption + space.2)`（实测 12px 标记列 + 8px 间距），资料列表消费它，展开内容才与摘要文字同轴。注意 `.assist-source-list` 的 `padding-left` 与 `migrated-scoped.css` 里同特异性的 `space.4` 规则相撞、后者注入更晚：单类名压不过它，展开内容会停在 16px 而不是标记列之后（4px 错位），必须用 `.assist-source-summary .assist-source-list` 两级类名。
+
+**文案跟真实语义。** 来源状态 `SENT` 显示「已发送」（服务端含义是来源正文已装配并随本次调用发出），不自造「已理解」；原文枚举留在 `title` 里。
+
+**验收出口。** 真实 Chromium 在 375／1024／1440 三档 × 亮暗两主题读挂载后的几何：用量文本、`usage.closest('details') === null`、页脚与文档溢出均为 0；摘要只剩一个 svg（chevron 12×12）、`list-style-type: none`、`transform` 由 `none` 变 `matrix(0, 1, -1, 0, 0, 0)`；展开文字与摘要文字 x 相同（375：32/32，1024：193/193，1440：516/516）。截图与读数在 `tmp/UI-08-usage-source-disclosure/`。`tests/assistantModeSwitch.spec.ts` 50/50（含「消息底栏：复制键在左，用量常显在右侧且没有折叠入口」）；token 数值口径与后端统计逻辑未动。
+
+### 9.28 输入器底栏垂直对齐与窄窗尾部组（2026-11-01）
+
+2026-11-01 UI-COMPOSER-ALIGN：用户截图以水平参考线指出输入器底栏「视觉重心不一致」。真实 Chromium 逐控件量了包围盒、文字 Range、SVG 框与**墨迹加权重心**（非只读 `align-items:center`），把盒模型、文字度量与 SVG 路径分开判定。三处根因都在结构，不在观感微调：
+
+**① 尾部组悬在两行之间（主因）。** `.agent-chat-composer-tools` 自己 `flex-wrap` 后，`.agent-chat-composer-actions` 的 `align-items:center` 会把尾部组（计量环 + 模型）与发送键垂直居中在**整个工具块**上，而不是任何一行。960 宽实测：工具两行中心 790／826，尾部组与发送键落在 808；390 宽五档换行时落在中间行 707，而最后一行是 779。修法是给 `.agent-chat-composer-tail` 与 `.agent-chat-send` 加 `align-self:flex-end`：与最后一行同高（两处都是 `control.height.compact` 32px）。单行时与原居中结果逐像素相同（1280 宽控件中心恒 826），换行后每行组内中心误差 0，960 尾部组改到 826、390 改到 779。
+
+**② chip 折行溢出固定高度。** 工具行被尾部组挤窄后，权限标签在 390 宽被折成两行（文字 Range 高 37.5px），而 chip 的 `height` 固定为 32px，第二行溢出到相邻行。`.agent-chat-permission-chip` 与 `.agent-chat-options > summary` 补 `white-space:nowrap`：chip 是单行键，宽度不足时整枚换到下一行；长模型名仍由 `.model-selector-trigger-name` 的 ellipsis 收尾，不把发送键顶出卡外。缺上下文时出现的「选择任务/项目」chip 不套这条——它的项目名没有 ellipsis 容器，套上去会把长名字撑出卡片，保持旧折行。
+
+**③ 行盒中心与控件中心差 2px（诊断口径）。** 正文与工具行的 4px 间距原先画在 `.agent-chat-composer-actions` 的 `padding-top` 里，行盒高 36px、盒中心 824，控件中心 826——按「底栏盒中心」画参考线会把整排读成偏下。间距改到行外 `margin-top`（flex 列自身 4px gap + 4px margin = 原 4px gap + 4px padding），视觉间距与输入卡高度不变（1280/960/390 分别为 123/159/267px），行盒中心与控件中心自此同线。
+
+**SVG 光学补偿。** 盒模型与 SVG 盒都居中，只有路径重心偏离：完全访问档 `TriangleAlert` 墨迹加权重心 827.69（行中心 826），比同排 14px 标签（825.78）低 1.9px；`ArrowUp` 发送箭头重心 824.65，在实底方键里读成偏上。只对这两条路径各做 1px 反向量补偿（`translate:0 -1px` / `0 1px`），补偿后为 826.69 与 825.65；眼/手掌/圆勾/禁止、chevron、计量环与发送键方框均不动。含下伸部的拉丁标签（`gpt-oss-3.0-flash`、`普通 Agent`）文字墨迹重心比中文标签低约 1px，这是字体度量而非盒模型错位，不做位移。
+
+**验证出口。** 自建浏览器量测矩阵：1280×900（DPR 1／1.25／1.5）、960、390，首条输入器与已有会话各一档；控件盒中心与工具行中心误差 0.00，各行组内中心误差 0，`composerScroll`／`pageScroll` 均为 0；权限/模式/普通讨论/模型/上下文/「+」六片浮层开合前后工具栏几何不变，Esc 均能收起；焦点环 2px 可见；在途停止态与菜单展开态同几何。截图与逐控件读数在 `tmp/UI-COMPOSER-ALIGN/`（亮色全卡、参考线、hover、focus、960/390 修复前后对照、暗色 token 探针）。回归：`defaultWriteTier` 2/2、`modelSelectorDropdown` 6/6、`composerSourcePanel` 5/5。产品当前只有亮色主题，暗色以场景实验室 dark token 档在真实输入器上做兼容探针，不宣称已交付暗色皮肤。未新增 token、未改后端 / API / 权限与排列顺序。

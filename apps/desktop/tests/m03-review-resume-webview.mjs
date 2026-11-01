@@ -749,7 +749,7 @@ async function runArtifactLifecycle(first, ledger, projectId, taskId) {
   assert.equal(firstHistory.items[0].version_count, 1);
   assert.deepEqual(firstHistory.current_accepted_version_ids, []);
   await page.reload();
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await expect(page.getByTestId(`artifact-read-${v1.version_id}`)).toBeVisible();
   await expect(page.locator('input[name="artifact-version"]:checked')).toHaveCount(0);
   await expect(page.getByTestId('artifact-load-latest-draft')).toBeEnabled();
@@ -941,7 +941,7 @@ async function runChain() {
   await assertRuntimeRoleSeparation();
   const ledger = watchWebView(first.page, first.bootstrap);
   await first.page.goto('http://tauri.localhost/projects');
-  await expect(first.page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(first.page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await first.page.getByTestId('project-create-open').click();
   await first.page.locator('input[name="project-title"]').fill(`M03 G01 Review ${state.marker.session_id.slice(0, 8)}`);
   await first.page.locator('input[name="project-type"][value="GENERAL"]').check({ force: true });

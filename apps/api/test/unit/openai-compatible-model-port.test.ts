@@ -5,7 +5,7 @@ import { ChatOpenAI } from '@langchain/openai';
 
 import { FIRST_PARTY_REGISTRY } from '../../src/skills/first-party-registry.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
-import type { AssistRequest } from '../../src/workflow/fake-model-port.js';
+import type { AssistRequest, ModelUsageProgress } from '../../src/workflow/fake-model-port.js';
 import { CANDIDATE_OUTPUT_SCHEMA } from '../../src/workflow/markdown-deliverable.js';
 import { OpenAiCompatibleModelPort, ModelCallBudgetError, ModelOutputBudgetError,
   ModelTimeoutError,
@@ -170,6 +170,30 @@ for (const entry of ['DRAFT', 'ASSIST'] as const) {
   });
 }
 
+test('reasoning-only chunks record the first stream event but never publish text', async () => {
+  // AGENT_STREAM_VISIBILITY：首流事件不等于首正文。Provider 只给 reasoning 时，
+  // 观测回调必须触发（界面才能从「等待模型响应」走到「模型已响应，等待正文」），
+  // 但正文增量必须保持为空——不能把 reasoning 当正文展示。
+  const reasoningChunk = (text: string): string => `data: ${JSON.stringify({
+    id: 'chatcmpl-reasoning-fixture', object: 'chat.completion.chunk', created: 1,
+    model: 'fixture-model', choices: [{ index: 0,
+      delta: { role: 'assistant', reasoning_content: text }, finish_reason: null }],
+  })}\n\n`;
+  let streamEvents = 0;
+  const deltas: string[] = [];
+  const model = port(() => response([reasoningChunk('先想一想'), reasoningChunk('再回答。'),
+    event('', 'stop'), 'data: [DONE]\n\n']));
+  const result = await model.assist({ intent: 'DISCUSS', system: '只验证观测',
+    turns: [{ role: 'user', content: '回答' }],
+    onTextDelta: async (piece) => { deltas.push(piece); },
+    onStreamEvent: async () => { streamEvents += 1; } });
+  assert.equal(result.kind, 'CONTENT');
+  if (result.kind !== 'CONTENT') return;
+  assert.equal(result.content, '');
+  assert.equal(streamEvents, 1);
+  assert.deepEqual(deltas, []);
+});
+
 test('a complete declared tool request becomes TOOL_CALLS with its provider id', async () => {
   const model = port(() => response([toolChunk('search_text', '{"query":"Relay"}'),
     'data: [DONE]\n\n']));
@@ -253,6 +277,36 @@ for (const details of ['missing', 'zero', 'null'] as const) {
       cacheCreationTokens: details === 'missing' ? 2 : details === 'zero' ? 0 : null });
   });
 }
+
+test('assist reports observable usage progress without treating characters as billing', async (t) => {
+  // AGENT_LIVE_TOKEN_USAGE：进度只在生成过程中服务界面。初始帧给出输入估算、输出 0；
+  // 后续帧推进输出估算；Provider 上报后 providerUsage 单独携带真实值，不覆盖估算字段。
+  t.mock.method(ChatOpenAI.prototype, 'stream', async () => (async function* () {
+    yield Object.assign(new AIMessageChunk({ content: '' }), { usage_metadata: {
+      input_tokens: 44, output_tokens: 1, total_tokens: 45,
+      input_token_details: { cache_read: 7 } } });
+    yield new AIMessageChunk({ content: '你好世界' });
+    yield Object.assign(new AIMessageChunk({ content: '，继续写' }), { usage_metadata: {
+      input_tokens: 44, output_tokens: 9, total_tokens: 53,
+      input_token_details: { cache_read: 7 } } });
+  })());
+  const model = port(() => { throw new Error('progress fixture must not use transport'); });
+  const progress: ModelUsageProgress[] = [];
+  await model.assist({ intent: 'DISCUSS', system: 'synthetic',
+    turns: [{ role: 'user', content: '请回答' }],
+    onUsageProgress: async (value) => { progress.push(value); } });
+  assert.ok(progress.length >= 4, 'initial frame plus one per chunk');
+  assert.equal(progress[0]!.outputTokensEstimate, 0, 'no output observed before the stream');
+  assert.ok(progress[0]!.inputTokensEstimate > 0, 'input estimate is available before first text');
+  assert.equal(progress[0]!.providerUsage.inputTokens, null);
+  assert.equal(progress[1]!.outputTokensEstimate, 0, 'usage-only frame has no text yet');
+  assert.ok(progress[2]!.outputTokensEstimate >= 1, 'output estimate advances with text bytes');
+  const last = progress.at(-1)!;
+  assert.equal(last.providerUsage.inputTokens, 44);
+  assert.equal(last.providerUsage.outputTokens, 9);
+  assert.equal(last.providerUsage.cacheReadTokens, 7);
+  assert.ok(last.outputTokensEstimate >= 4, 'estimate keeps growing independently of provider usage');
+});
 
 for (const scenario of ['prior usage', 'same-chunk usage', 'empty request ID', 'non-text content'] as const) {
   test(`tool refusal retains normalized SDK metadata: ${scenario}`, async (t) => {
@@ -395,8 +449,11 @@ test('plain DISCUSS publishes a text delta before DONE while structured Assist s
 const assistResponseFormatCases: readonly {
   readonly name: string; readonly intent: AssistRequest['intent'];
   readonly skill?: AssistRequest['skill']; readonly structured: boolean;
+  readonly responseFormat?: AssistRequest['responseFormat'];
 }[] = [
   { name: 'ordinary DISCUSS', intent: 'DISCUSS', structured: false },
+  { name: 'explicit goal/plan envelope', intent: 'DISCUSS', structured: true,
+    responseFormat: 'json_object' },
   ...([
     ['task-to-execution-contract', '1.1.0'],
     ['verification-plan', '1.1.0'],
@@ -427,13 +484,14 @@ for (const scenario of assistResponseFormatCases) {
     const deltas: string[] = [];
     const result = await model.assist({ intent: scenario.intent,
       system: 'synthetic only', turns: [{ role: 'user', content: 'reply' }],
+      responseFormat: scenario.responseFormat,
       skill: scenario.skill, onTextDelta: async (text) => { deltas.push(text); } });
     assert.equal(calls, 1);
     assert.deepEqual(result, { kind: 'CONTENT', content: pieces.join(''),
       providerRequestId: 'chatcmpl-fixture',
       usage: { inputTokens: 34, outputTokens: 19,
         cacheReadTokens: null, cacheCreationTokens: null } });
-    assert.deepEqual(deltas, scenario.structured ? [] : pieces);
+    assert.deepEqual(deltas, scenario.structured && scenario.responseFormat === undefined ? [] : pieces);
     assert.ok(requestBody);
     if (scenario.structured) {
       assert.deepEqual(requestBody.response_format, { type: 'json_object' });

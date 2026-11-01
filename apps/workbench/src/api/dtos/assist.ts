@@ -592,8 +592,21 @@ export interface RelayAssistMessage {
   readonly sources: readonly { readonly sourceRef: string | null; readonly kind: string | null;
     readonly rootId: string | null; readonly version: string | null;
     readonly status: string; readonly reason: string | null;
-    /** 0125：记忆来源是人工确认还是自动记住；非记忆来源为 null。 */
-    readonly origin: "HUMAN_CONFIRMED" | "AUTO_CAPTURE" | null }[];
+    /**
+     * 0125：记忆来源是人工确认还是自动记住；非记忆来源为 null。
+     * 2026-11-01：记录里缺这个字段读成 null（未标注），不再默认成 HUMAN_CONFIRMED——
+     * 旧记录没写下来源类别不等于它是人工确认。
+     */
+    readonly origin: "HUMAN_CONFIRMED" | "AUTO_CAPTURE" | null;
+    /** DEV-0042：记忆内容来自谁的哪一段；缺失读成 null，`UNKNOWN` 是服务端明确标注的旧数据。 */
+    readonly sourceKind: "MANUAL" | "USER_STATEMENT" | "MODEL_OBSERVATION" | "UNKNOWN" | null;
+    /**
+     * BUG-CHAT-CONTEXT-CROSS-TALK：这条来源是用户手选的资料，还是系统按当前消息自动
+     * 召回的长期记忆。缺字段（旧服务端/非记忆来源）按「非自动召回」读，不补造来源。
+     */
+    readonly selection: "AUTO_MEMORY" | null;
+    /** 自动召回的判定依据：字面命中或历史回退（旧数据可能仍是后者）。 */
+    readonly selectionBasis: "LITERAL_MATCH" | "RECENT_CONFIRMED" | null }[];
   readonly skill: ({ readonly id: string; readonly version: string; readonly sha256: string | null;
     readonly definitionAvailability: "AVAILABLE" | "HISTORICAL_ONLY" | "UNAVAILABLE";
     readonly outputAvailability: "PENDING" | "HISTORICAL_SNAPSHOT" | "NO_OUTPUT" | "UNAVAILABLE";
@@ -604,6 +617,18 @@ export interface RelayAssistMessage {
   /** cache*Tokens 为 null 表示 Provider 未上报，不能读成 0。 */
   readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null;
     readonly cacheReadTokens: number | null; readonly cacheCreationTokens: number | null };
+  /**
+   * 本轮 PRIMARY 模型调用（含工具续轮）的账本汇总；完成态显示读它。
+   * 旧服务端缺字段时为 null，展示回退到 `usage`，不凭空补齐调用次数。
+   */
+  readonly usageSummary?: RelayTokenUsage | null;
+  /**
+   * AGENT_STREAM_VISIBILITY：服务端从 `model_calls` 与消息状态派生的**在途阶段**。
+   *
+   * 它只是等待文案的读侧依据，不是业务状态：PENDING/终态没有这一项；旧服务端
+   * 缺字段时界面回退到「正在生成」，不按等待时长猜测「模型是否已响应」。
+   */
+  readonly generationProgress?: RelayAssistGenerationProgress | null;
   readonly cancelRequested: boolean;
   /**
    * 0122：这条排队消息已被请求「插话」到正在生成的那一轮。缺字段（旧服务端）
@@ -623,6 +648,34 @@ export interface RelayAssistMessage {
   readonly withdrawnByRecallId: string | null;
   /** 0132：这条消息（或其直接回复）触发的撤回摘要；未撤回为 null。 */
   readonly recall: RelayAssistMessageRecallSummary | null;
+}
+
+/**
+ * AGENT_STREAM_VISIBILITY 的五档在途阶段（2026-11-01）。
+ *
+ * 每一档都由服务端事实派生，客户端不得自行加档或提前跨档：
+ *   * `PREPARING_CONTEXT`：消息已领取、本轮还没有登记模型请求；
+ *   * `WAITING_MODEL`：请求已登记，尚未收到 Provider 的任何流事件；
+ *   * `MODEL_STREAMING`：已收到流事件（可能只是 reasoning 或工具参数），没有正文；
+ *   * `MODEL_OUTPUT`：已收到正文增量；结构化信封可能仍不可安全投影；
+ *   * `PROCESSING`：最新调用已结算而消息仍 RUNNING（派发工具或准备续轮）。
+ */
+export type RelayAssistGenerationPhase =
+  "PREPARING_CONTEXT" | "WAITING_MODEL" | "MODEL_STREAMING" | "MODEL_OUTPUT" | "PROCESSING";
+
+export interface RelayAssistGenerationCallProgress {
+  readonly status: "STARTED" | "COMPLETED" | "FAILED" | "CANCELLED";
+  readonly startedAt: string;
+  readonly firstStreamEventAt: string | null;
+  readonly firstTextDeltaAt: string | null;
+  readonly firstPreviewPersistedAt: string | null;
+  readonly settledAt: string | null;
+}
+
+export interface RelayAssistGenerationProgress {
+  readonly phase: RelayAssistGenerationPhase;
+  readonly callCount: number;
+  readonly latestCall: RelayAssistGenerationCallProgress | null;
 }
 
 /** 0132：撤回状态。RUNNING 只出现在执行中的回执里。 */
@@ -683,6 +736,23 @@ export interface RelayAssistMessageAttachmentContent {
   readonly dataBase64: string;
 }
 
+/**
+ * 回复轮次的 Token 读数（AGENT_LIVE_TOKEN_USAGE）。
+ *
+ * `state` 决定展示口径：ESTIMATED（≈）/ PARTIAL（≥，部分未确认）/ CONFIRMED（精确）/
+ * UNKNOWN（没有可靠数据）。null 字段表示未上报，不能读成 0。
+ */
+export interface RelayTokenUsage {
+  readonly state: "ESTIMATED" | "PARTIAL" | "CONFIRMED" | "UNKNOWN";
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheCreationTokens: number | null;
+  readonly settledCalls: number;
+  readonly pendingCalls: number;
+  readonly missingUsageCalls: number;
+}
+
 export interface RelayAssistLivePreview {
   readonly sessionId: string;
   readonly messageId: string;
@@ -691,6 +761,8 @@ export interface RelayAssistLivePreview {
   readonly previewText: string | null;
   readonly previewTruncated: boolean;
   readonly previewAvailable: boolean;
+  /** 生成中的 Token 读数；旧服务端缺字段时缺省（按「没有可靠数据」显示）。 */
+  readonly usage?: RelayTokenUsage | null;
 }
 
 export interface RelayAssistProposalBase {
@@ -743,9 +815,10 @@ export interface RelayConversationFileDiff {
  * 会话总 diff 的只读投影：基线（本轮对话起点）到当前已落盘内容的净变化。
  *
  * 不可用（无目录 / 无基线 / 根非 git / 资源不可用）时只给原因，不给伪造的零值。
+ * `NO_SESSION_WRITES` 是会话口径专有的原因：本会话一条路径都没写过，起点缺不缺都不构成缺口。
  */
 export type RelayConversationDiffUnavailableReason =
-  "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
+  "NO_RESOURCE" | "NO_BASELINE" | "NO_SESSION_WRITES" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
 
 /** 一侧扫描的覆盖情况：`complete=false` 时 `reason` 说明扫描停在哪里。 */
 export interface RelayConversationDiffScanSide {
@@ -798,7 +871,7 @@ export type RelayConversationDiff =
     }
   | {
       readonly available: false;
-      readonly reason: "NO_RESOURCE" | "NO_BASELINE" | "ROOT_NOT_GIT" | "RESOURCE_UNAVAILABLE";
+      readonly reason: RelayConversationDiffUnavailableReason;
     };
 
 /** 展开阅读的单文件正文行；行号在该侧不存在时为 null。 */
@@ -887,9 +960,19 @@ export interface RelayContextUsageCall {
   readonly breakdown: RelayContextUsageBreakdown | null;
 }
 
-/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 最近一次调用，一次读完。 */
+/** 下一次调用会申请的预算（服务端用与冻结相同的函数算，不由前端取 min）。 */
+export interface RelayNextCallBudget {
+  readonly reservationTokens: number;
+  readonly contextBudgetTokens: RelayContextBudgetTokens;
+  /** 已知的 Provider 窗口；null = 窗口未知，此时 reservation 等于档位。 */
+  readonly providerWindowTokens: number | null;
+  readonly windowSource: "MODEL_CATALOG" | "UNKNOWN";
+}
+
+/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 下次预算 + 最近一次调用，一次读完。 */
 export interface RelaySessionContextUsage {
   readonly sessionId: string;
   readonly budget: { readonly tokens: RelayContextBudgetTokens; readonly revision: DecimalRevision };
+  readonly nextCall: RelayNextCallBudget | null;
   readonly lastCall: RelayContextUsageCall | null;
 }

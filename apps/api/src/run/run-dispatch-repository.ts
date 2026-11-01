@@ -354,10 +354,11 @@ export class RunDispatchRepository {
   }
 
   async listExpiredInvocations(limit: number): Promise<readonly {
-    run_id: string; epoch: bigint; status: RunInvocationRow['status'];
+    run_id: string; epoch: bigint; status: RunInvocationRow['status']; worker_id: string | null;
   }[]> {
-    const result = await sql<{ run_id: string; epoch: bigint; status: RunInvocationRow['status'] }>`
-      select run_id, epoch, status from run_invocations
+    const result = await sql<{ run_id: string; epoch: bigint;
+      status: RunInvocationRow['status']; worker_id: string | null }>`
+      select run_id, epoch, status, worker_id from run_invocations
       where status in ('ACTIVE', 'STOP_REQUIRED') and lease_until <= clock_timestamp()
       order by lease_until, run_id limit ${limit}
     `.execute(this.db);

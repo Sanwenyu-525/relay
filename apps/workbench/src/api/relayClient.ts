@@ -15,6 +15,8 @@ import * as subagentSupplementsApi from "./resources/subagentSupplements";
 export type { RelaySubagentSupplement, RelaySubagentSupplementResult } from "./resources/subagentSupplements";
 import * as sessionTodosApi from "./resources/sessionTodos";
 import type { RelaySessionTodoSnapshot } from "./resources/sessionTodos";
+import * as sessionExportApi from "./resources/sessionExport";
+import type { RelaySessionExport } from "./resources/sessionExport";
 export type { RelaySessionTodoItem, RelaySessionTodoSnapshot, RelaySessionTodoStatus }
   from "./resources/sessionTodos";
 import type { RelaySessionDelegation } from "./dtos/assist";
@@ -108,7 +110,7 @@ export type { RelayFieldError, RelayProblem } from "./core/errors";
 export { RelayApiError, RelayRunEventHttpError, RelayTransportError } from "./core/errors";
 export type { RelayApiConnection } from "./core/http";
 export type { RelayArtifact, RelayArtifactDirectUses, RelayArtifactImpactCandidate, RelayArtifactImpactCheck, RelayArtifactLineage, RelayArtifactTextLock, RelayArtifactVersionResult, RelayArtifactVersionSummary, RelayClosePartialFileWriteInput, RelayCombinationCheck, RelayGatewayReconcileResult, RelayFileWriteChangeSet, RelayFileWriteDispositionPreview, RelayFileWriteFrozenDiff, RelayFileWriteResidualCandidate, RelayImpactCandidateGroup, RelayImpactCandidateGroupItem, RelayImpactGroupSelection, RelayLineageParentKind, RelayLineageRelation, RelayTaskArtifacts } from "./dtos/artifacts";
-export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistMessageRecall, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistRunState, RelayAssistSession, RelayAssistSessionListState, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayContextBudgetTokens, RelaySessionContextBudgetResult, RelaySessionContextUsage, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "./dtos/assist";
+export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachment, RelayAssistMessageRecall, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistRunState, RelayAssistSession, RelayAssistSessionListState, RelayAssistSkillOutput, RelayAssistSourceRef, RelayAssistantProfile, RelayTokenUsage, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffFileRow, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationExecution, RelayConversationExecutionStage, RelayChatMode, RelayConversationFileDiff, RelayConversationMode, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallFileChange, RelayRunToolCallPreview, RelayRunToolCallPreviewFile, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayTaskSkillProposal, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayContextBudgetTokens, RelaySessionContextBudgetResult, RelaySessionContextUsage, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult } from "./dtos/assist";
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayDirectoryEntry, RelayDirectoryListingResult, RelayFileBrowseAction, RelayFileContentResult, RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedFileReadInput, RelayManagedFileReadOutcome, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
@@ -623,6 +625,17 @@ export class RelayApiClient {
   /** ADR-038: read-only session todo projection. */
   readonly getAssistSessionTodos?: (sessionId: string) => Promise<RelaySessionTodoSnapshot | null> =
     (sessionId) => sessionTodosApi.getAssistSessionTodos(this.#http, sessionId);
+
+  /**
+   * 会话导出（只读）：一次拿回服务端拼好的整份诊断文档。
+   *
+   * 界面不自己攒证据：消息、工具轮次、清单、模型用量与动作身份都来自同一份服务端投影，
+   * 客户端只负责校验「这确实是这条会话的导出文档」并落盘。读取不推进任何修订，也不需要
+   * command_id——它不是命令。
+   */
+  exportAssistSessionDocument(sessionId: string): Promise<RelaySessionExport> {
+    return sessionExportApi.exportAssistSessionDocument(this.#http, sessionId);
+  }
 
   async getFirstPartySkills(): Promise<readonly RelaySkillDefinition[]> {
     return assistApi.getFirstPartySkills(this.#http);

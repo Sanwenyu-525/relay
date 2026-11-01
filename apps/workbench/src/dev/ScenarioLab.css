@@ -1,47 +1,737 @@
 /* AI 回复场景实验室（仅开发构建）。
-   这里只写实验室外壳自己的样式：中间那一列的字体、间距、阅读宽度全部来自产品 CSS
-   （外壳借 `embedded-assist` + `agent-message-list`，不另定一档宽度）。 */
+   Preview-first 开发者工作区：目录 / 预览 / 检查面板三列各自持有滚动 Owner，
+   预览区默认拿到剩下的全部宽度；样式只引用 --relay-* token，不建立第二套色板。 */
 
-.scenario-lab-page { display: flex; flex-direction: column; gap: var(--relay-space-4); }
-/* 「返回工作台」是实验室页头的一等入口：贴着标题上方一行，不塞进右上角的模式按钮组里。 */
-.scenario-lab-back { display: inline-flex; align-items: center; gap: var(--relay-space-1);
-  margin-bottom: var(--relay-space-2); font-size: var(--relay-font-size-meta); }
-.scenario-lab-back > svg { width: 1em; height: 1em; }
-.scenario-lab-head { display: flex; flex-wrap: wrap; gap: var(--relay-space-4); align-items: flex-end; justify-content: space-between; }
-.scenario-lab-head h1 { margin: 0; font-size: var(--relay-font-size-section); font-weight: var(--relay-font-weight-semibold); }
-.scenario-lab-head-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); align-items: center; }
+/* 实验室是 page-focused 全屏工作区：让页面自己拿满可用高度，滚动只发生在
+   目录、预览与检查面板内部。桌面壳里 app-frame 已经是 flex 子项，不再套 100dvh。 */
+.app-frame:has(.scenario-lab-page) {
+  height: 100dvh;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  overflow: clip;
+}
+.desktop-window .app-frame:has(.scenario-lab-page) { height: auto; }
+.app-content:has(.scenario-lab-page),
+.app-main:has(.scenario-lab-page) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.app-content:has(.scenario-lab-page) > .app-topbar { flex: none; }
+/* App 的 Outlet 包了一层 keyed div；它必须和页面一起成为 flex 列，否则实验室按内容高度
+   撑到视口之外，目录与预览的滚动区底部会被裁掉、滚不到。 */
+.app-main:has(.scenario-lab-page) > div {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.desktop-window .app-main:has(.scenario-lab-page) { overflow: clip; }
 
-.scenario-lab-body { display: grid; grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr) minmax(18rem, 23rem); gap: var(--relay-space-4); align-items: start; }
-@media (max-width: 1100px) { .scenario-lab-body { grid-template-columns: 1fr; } }
+.scenario-lab-page {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  line-height: var(--relay-font-lineHeight-ui);
+}
 
-/* 目录：一条一行，验收状态落在最右端。失败原因走 title，不在列表里铺开。 */
-.scenario-lab-directory { max-height: calc(100vh - 9rem); overflow: auto; padding-right: var(--relay-space-1); }
-.scenario-lab-directory-summary { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-muted); }
-.scenario-lab-group { margin-bottom: var(--relay-space-4); }
-.scenario-lab-group h2 { display: flex; align-items: baseline; gap: var(--relay-space-2); margin: 0 0 var(--relay-space-1); font-size: var(--relay-font-size-body); font-weight: var(--relay-font-weight-semibold); }
-.scenario-lab-group-count { color: var(--relay-color-text-muted); font-weight: var(--relay-font-weight-regular); font-size: var(--relay-font-size-meta); }
-.scenario-lab-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.scenario-lab-item { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto; gap: var(--relay-space-2); align-items: center;
-  width: 100%; padding: 4px 6px; border: 0; border-radius: var(--relay-radius-sm); background: transparent;
-  color: var(--relay-color-text-primary); font: inherit; font-size: var(--relay-font-size-meta); text-align: left; cursor: pointer; }
+/* ── 顶部标题区：一层导航，不堆说明与二级按钮 ───────────────────────────── */
+/* 2026-10-31：返回入口并进标题行。外壳已经有「工作空间 / 开发工具 / 实验室」面包屑，
+   页内再单独占一行「返回工作台」是同一件事说两遍，还把预览整体往下推一档。
+   现在只有一行：返回 · 目录开关 · 标题 · 计数 · 隔离说明，右侧是批次操作。 */
+.scenario-lab-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2) var(--relay-space-4);
+  padding: var(--relay-space-2) var(--relay-space-6);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+.scenario-lab-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+.scenario-lab-head-divider {
+  flex: none;
+  width: var(--relay-border-width);
+  height: var(--relay-font-size-body);
+  background: var(--relay-color-border-separator);
+}
+.scenario-lab-back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--relay-space-1);
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-back:hover { color: var(--relay-color-action-text); }
+.scenario-lab-back > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; }
+.scenario-lab-head-main h1 {
+  margin: 0;
+  font-size: var(--relay-font-size-rowTitle);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  letter-spacing: -0.01em;
+}
+.scenario-lab-count,
+.scenario-lab-dev {
+  flex: none;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-count {
+  padding: 1px var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-dev { padding-left: var(--relay-space-1); }
+.scenario-lab-info {
+  display: inline-flex;
+  align-items: center;
+  color: var(--relay-color-text-muted);
+  cursor: help;
+}
+.scenario-lab-info > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
+.scenario-lab-info:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: 2px; border-radius: var(--relay-radius-badge); }
+.scenario-lab-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+/* 紧凑控件：实验室不沿用页面级 48px 主按钮，控制条与目录里统一到 32px 档。 */
+.scenario-lab-page :is(.primary-button, .secondary-button) {
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-3);
+  gap: var(--relay-space-1);
+  border-radius: var(--relay-radius-control);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+}
+.scenario-lab-page .primary-button > svg,
+.scenario-lab-page .secondary-button > svg {
+  width: var(--relay-font-size-meta);
+  height: var(--relay-font-size-meta);
+  flex: none;
+}
+.scenario-lab-page .icon-button {
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  min-width: var(--relay-control-height-compact);
+  border-radius: var(--relay-radius-control);
+}
+.scenario-lab-page .icon-button > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+}
+
+/* 分段控件：选中只靠一档纸面底与字重，不用彩色药丸。 */
+.scenario-lab-page .segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+}
+.scenario-lab-page .segmented-option {
+  min-height: calc(var(--relay-control-height-compact) - 6px);
+  padding: 0 var(--relay-space-2);
+  border: 0;
+  border-radius: calc(var(--relay-radius-control) - 2px);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.scenario-lab-page .segmented-option:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.scenario-lab-page .segmented-option--selected {
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--relay-color-text-primary) 8%, transparent);
+}
+.scenario-lab-page :is(.segmented-option, .primary-button, .secondary-button, .icon-button):focus-visible {
+  outline: 2px solid var(--relay-color-focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── 主体：目录 / 预览 / 检查面板 ─────────────────────────────────────── */
+.scenario-lab-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 目录：220–250px，轻量导航树，自己滚动。 */
+.scenario-lab-directory {
+  display: flex;
+  flex: 0 0 clamp(13.75rem, 16vw, 15.5rem);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+.scenario-lab-directory-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3) var(--relay-space-3) var(--relay-space-1);
+}
+.scenario-lab-directory-title { display: flex; align-items: baseline; gap: var(--relay-space-1); min-width: 0; }
+.scenario-lab-directory-title strong {
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+.scenario-lab-directory-title span {
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-directory-close { display: none; }
+
+.scenario-lab-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--relay-space-1);
+  height: var(--relay-control-height-compact);
+  margin: 0 var(--relay-space-3) var(--relay-space-2);
+  padding: 0 var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-search:focus-within {
+  border-color: var(--relay-color-action-primary);
+  box-shadow: 0 0 0 2px var(--relay-color-selection-bg);
+}
+.scenario-lab-search > svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); flex: none; }
+.scenario-lab-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  outline: none;
+}
+.scenario-lab-search input::placeholder { color: var(--relay-color-text-muted); }
+.scenario-lab-search input::-webkit-search-cancel-button { display: none; }
+.scenario-lab-search .icon-button { flex: none; width: var(--relay-control-target-minimum); height: var(--relay-control-target-minimum); min-width: 0; }
+
+.scenario-lab-filters {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 var(--relay-space-3);
+  margin-bottom: var(--relay-space-1);
+}
+.scenario-lab-filter {
+  min-height: var(--relay-control-target-minimum);
+  padding: 0 var(--relay-space-1);
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-muted);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
+}
+.scenario-lab-filter:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.scenario-lab-filter--active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-filter:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: 1px; }
+
+.scenario-lab-directory-summary {
+  display: block;
+  flex: none;
+  margin: 0;
+  padding: 0 var(--relay-space-3) var(--relay-space-2);
+  font-size: 0.625rem;
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-directory-filtering {
+  padding: 0 var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  font-size: 0.625rem;
+  color: var(--relay-color-text-secondary);
+}
+
+.scenario-lab-directory-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--relay-space-2) var(--relay-space-4);
+  scrollbar-gutter: stable;
+}
+.scenario-lab-group { margin: 0; }
+.scenario-lab-current-group { margin-bottom: var(--relay-space-2); }
+.scenario-lab-current-title {
+  margin: 0 0 2px;
+  padding: 0 var(--relay-space-1);
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-current-group ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scenario-lab-group-toggle {
+  display: grid;
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--relay-space-1);
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-1);
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  text-align: left;
+  cursor: pointer;
+}
+.scenario-lab-group-toggle:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+/* 分组开关与卡片标题此前没有焦点环：键盘走目录时会有一段「看不见焦点」的路。
+   两者都是整行可点的按钮，焦点环贴边画，避免被目录的滚动裁掉。 */
+.scenario-lab-group-toggle:focus-visible,
+.scenario-lab-card-open:focus-visible {
+  outline: 2px solid var(--relay-color-focus-ring);
+  outline-offset: -1px;
+  border-radius: var(--relay-radius-control);
+}
+.scenario-lab-search:focus-within {
+  border-color: var(--relay-color-focus-ring);
+  box-shadow: 0 0 0 1px var(--relay-color-focus-ring);
+}
+.scenario-lab-group-toggle > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+.scenario-lab-group-key {
+  font-family: var(--relay-font-family-code);
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-group-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scenario-lab-group-count {
+  color: var(--relay-color-text-muted);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-group ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0 0 var(--relay-space-1);
+  list-style: none;
+}
+.scenario-lab-group ul[hidden] { display: none; }
+.scenario-lab-item {
+  display: grid;
+  grid-template-columns: 2.35rem minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: var(--relay-space-1);
+  width: 100%;
+  /* 目录是 145 条的长清单，行高按导航密度走（28px），不是页面级 32px 控件档：
+     32px × 145 条要多滚约 580px 才到底。热区仍高于 24px 最小点击尺寸。 */
+  min-height: 1.75rem;
+  padding: 0 var(--relay-space-1) 0 var(--relay-space-4);
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  text-align: left;
+  cursor: pointer;
+}
 .scenario-lab-item:hover { background: var(--relay-color-selection-hover); }
-.scenario-lab-item--active { background: var(--relay-color-selection-bg); }
-.scenario-lab-item-id { color: var(--relay-color-text-muted); font-family: var(--relay-font-family-code); }
+.scenario-lab-item--active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-item:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: -1px; }
+.scenario-lab-item-id {
+  color: var(--relay-color-text-muted);
+  font-family: var(--relay-font-family-code);
+  font-size: 0.625rem;
+  font-weight: var(--relay-font-weight-regular);
+}
+.scenario-lab-item--active .scenario-lab-item-id { color: inherit; }
 .scenario-lab-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scenario-lab-item-kind { color: var(--relay-color-text-muted); }
-.scenario-lab-item-state { font-size: var(--relay-font-size-caption); }
-.scenario-lab-item-state[data-acceptance="pass"] { color: var(--relay-color-status-success-text); }
-.scenario-lab-item-state[data-acceptance="fail"] { color: var(--relay-color-status-danger-text); }
-.scenario-lab-item-state[data-acceptance="not-covered"] { color: var(--relay-color-status-warning-text); }
-.scenario-lab-item-state[data-acceptance="unchecked"] { color: var(--relay-color-text-muted); }
+.scenario-lab-item-state,
+.scenario-lab-card-state {
+  justify-self: end;
+  width: 6px;
+  height: 6px;
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-round);
+  background: transparent;
+}
+.scenario-lab-item-state[data-acceptance="pass"],
+.scenario-lab-card-state[data-acceptance="pass"] { border-color: var(--relay-color-status-success-text); background: var(--relay-color-status-success-text); }
+/* 失败档多一圈描边：状态点只有 6px，靠红/绿区分对色觉障碍等于没有区分。
+   形状不同（实心 vs 实心+环）在灰度下也读得出来，颜色只是加强。 */
+.scenario-lab-item-state[data-acceptance="fail"],
+.scenario-lab-card-state[data-acceptance="fail"] {
+  border-color: var(--relay-color-status-danger-text);
+  background: var(--relay-color-status-danger-text);
+  box-shadow: 0 0 0 1.5px var(--relay-color-bg-surface),
+    0 0 0 2.5px var(--relay-color-status-danger-text);
+}
+.scenario-lab-item-state[data-acceptance="not-covered"],
+.scenario-lab-card-state[data-acceptance="not-covered"],
+.scenario-lab-item-state[data-acceptance="static"],
+.scenario-lab-card-state[data-acceptance="static"],
+.scenario-lab-item-state[data-acceptance="unverifiable"],
+.scenario-lab-card-state[data-acceptance="unverifiable"] {
+  border-color: var(--relay-color-status-warning-text);
+  background: var(--relay-color-status-warning-text);
+}
+.scenario-lab-item-state[data-acceptance="stale"],
+.scenario-lab-card-state[data-acceptance="stale"] {
+  border-color: var(--relay-color-text-muted);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--relay-color-text-muted);
+}
+.scenario-lab-directory-empty {
+  margin: var(--relay-space-4) var(--relay-space-2);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-muted);
+}
 
-/* 预览列：`.scenario-shell` 借产品的 `embedded-assist` 拿到同一档阅读宽度；
-   窗口宽度三档只在这一处改列宽，产品组件内部的排版不受实验室影响。 */
-.scenario-lab-stage { min-width: 0; }
-.scenario-shell { padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
-.scenario-shell[data-viewport="narrow"] { --chat-measure: min(30rem, 100%); }
-.scenario-shell[data-viewport="phone"] { --chat-measure: 100%; max-width: 24rem; }
+/* ── 预览列 ───────────────────────────────────────────────────────────── */
+.scenario-lab-stage {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.scenario-lab-stage-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  min-height: 3.5rem;
+  padding: var(--relay-space-2) var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+.scenario-lab-stage-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+.scenario-lab-stage-id {
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-stage-title h2 {
+  margin: 0;
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-heading);
+  overflow-wrap: anywhere;
+}
+.scenario-lab-stage-kind {
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-stage-verdict {
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-stage-verdict--pass { color: var(--relay-color-status-success-text); }
+.scenario-lab-stage-verdict--static { color: var(--relay-color-status-warning-text); }
+.scenario-lab-stage-verdict--fail { color: var(--relay-color-status-danger-text); }
+.scenario-lab-stage-verdict--not-covered { color: var(--relay-color-status-warning-text); }
+.scenario-lab-stage-verdict--unverifiable { color: var(--relay-color-status-warning-text); }
+.scenario-lab-stage-verdict--stale { color: var(--relay-color-text-muted); }
+/* 当前窗口档：只在非默认（窄窗/手机宽）时出现，跟状态徽牌同一档字号与色阶，
+   不抢标题，但一眼能看出「现在不是按宽窗渲染的」。 */
+.scenario-lab-stage-window {
+  flex: none;
+  padding: 1px var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  font-size: var(--relay-font-size-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-stage-actions { display: flex; flex: none; align-items: center; gap: var(--relay-space-1); }
+.scenario-lab-inspector-toggle[aria-expanded="true"] {
+  background: var(--relay-color-selection-bg);
+  border-color: var(--relay-color-border-control);
+  color: var(--relay-color-selection-text);
+}
+
+/* 播放控制条：紧凑、贴着预览，不与预览抢视觉重量。 */
+.scenario-lab-controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2) var(--relay-space-3);
+  padding: var(--relay-space-2) var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-subtle);
+}
+.scenario-lab-transport { display: flex; flex: none; align-items: center; gap: 2px; }
+.scenario-lab-play { padding: 0 var(--relay-space-2); }
+.scenario-lab-play-label { font-size: var(--relay-font-size-caption); }
+.scenario-lab-progress {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: var(--relay-space-3);
+  min-width: 8rem;
+}
+.scenario-lab-seek {
+  flex: 1;
+  min-width: 5rem;
+  height: 1.125rem;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.scenario-lab-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--relay-radius-round);
+  background: linear-gradient(to right,
+    var(--relay-color-action-primary) 0 var(--scenario-progress),
+    var(--relay-color-meter-track) var(--scenario-progress) 100%);
+}
+.scenario-lab-seek::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: var(--relay-border-width) solid var(--relay-color-action-primary);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-bg-surface);
+  appearance: none;
+}
+.scenario-lab-seek:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: 3px; border-radius: var(--relay-radius-badge); }
+.scenario-lab-seek:disabled { cursor: default; opacity: 0.6; }
+.scenario-lab-controls-head {
+  flex: none;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.scenario-lab-playback-options { display: flex; flex: none; align-items: center; gap: var(--relay-space-1); }
+.scenario-lab-loop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-control-height-compact);
+  height: var(--relay-control-height-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+.scenario-lab-loop:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.scenario-lab-loop--active { background: var(--relay-color-selection-bg); color: var(--relay-color-selection-text); }
+.scenario-lab-loop > svg { width: var(--relay-font-size-body); height: var(--relay-font-size-body); }
+.scenario-lab-loop:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: 1px; }
+.scenario-lab-controls--static { padding-block: var(--relay-space-1); }
+.scenario-lab-static-mode {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+.scenario-lab-static-badge {
+  flex: none;
+  padding: 2px var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
+  font-size: 0.625rem;
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-controls--static .scenario-lab-controls-head { flex: 1; }
+.scenario-lab-controls--static .secondary-button { flex: none; }
+.scenario-lab-run-status {
+  flex: none;
+  padding: 2px var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  color: var(--relay-color-text-muted);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 预览滚动区：唯一滚动 Owner。内容纸面用 canvas 档，阅读列自己是白的，
+   宽窗不加边框与阴影，避免把整条回复包成一张厚卡片。 */
+.scenario-lab-preview-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--relay-color-bg-canvas);
+  scrollbar-gutter: stable;
+}
+.scenario-lab-preview-canvas {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  width: 100%;
+  min-height: 100%;
+  padding: var(--relay-space-6) var(--relay-space-6) var(--relay-space-10);
+}
+/* 单帧静态场景内容通常很短：用 safe center 把「实际 UI + 场景说明」放在舞台中段，
+   内容超出时自动退回顶部对齐，不会把首屏裁到滚不到的位置。 */
+.scenario-lab-preview-canvas--static { justify-content: safe center; }
+.scenario-lab-preview-canvas--static .scenario-shell { min-height: 0; }
+.scenario-lab-static-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  width: 100%;
+  max-width: 60rem;
+  margin-top: var(--relay-space-3);
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+}
+.scenario-lab-static-copy { display: grid; gap: var(--relay-space-1); min-width: 0; flex: 1 1 18rem; }
+.scenario-lab-static-copy strong {
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+.scenario-lab-static-copy p {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-muted);
+  overflow-wrap: anywhere;
+}
+.scenario-shell {
+  width: 100%;
+  max-width: 60rem;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.scenario-shell .scenario-preview { width: 100%; }
+/* 窗口档只模拟「窗口有多宽」，不改产品的阅读列规则。
+   `--chat-measure` 仍是 `.embedded-assist` 上产品自己定义的那一档（46.5rem），
+   因此窄窗里看到的换行位置就是真实 900px / 560px 窗口里的换行位置；此前这里把
+   measure 直接改成 30rem / 100%，等于给实验室另造了一档宽度——同一句话在两处断行不同，
+   一致性对照会立刻失败（见 `tests/browser/scenarioLabParity.spec.ts`）。
+   窗口边界用 outline 画：它不参与布局，不像 padding 那样再削掉一档可用宽度。 */
+.scenario-shell[data-viewport="narrow"],
+.scenario-shell[data-viewport="phone"] {
+  min-height: 0;
+  background: var(--relay-color-bg-surface);
+  outline: var(--relay-border-width) solid var(--relay-color-border-separator);
+  outline-offset: calc(-1 * var(--relay-border-width));
+  border-radius: var(--relay-radius-panel);
+}
+.scenario-shell[data-viewport="narrow"] { width: 900px; max-width: 100%; }
+.scenario-shell[data-viewport="phone"] { width: 560px; max-width: 100%; }
+
+/* 模拟窗口档时，舞台内边距让位给窗口本身：否则 900px 的窗口会被舞台 24px 内边距压成 895px，
+   「按真实尺寸预览」这句话就不成立（列宽没变，但换行位置会和真实窗口差一档）。 */
+.scenario-lab-preview-canvas:has(.scenario-shell[data-viewport="narrow"]),
+.scenario-lab-preview-canvas:has(.scenario-shell[data-viewport="phone"]) {
+  padding-inline: var(--relay-space-2);
+}
+
+/* 实验室专属提示：只解释「这里不执行真实副作用」，不冒充产品回执，也不进产品 DOM。
+   回退文件、读逐文件回执这两类动作在正式会话里会真的改磁盘 / 发请求，实验室做不到，
+   于是把「做不到」明说出来——这比给一个点下去没反应的按钮诚实。 */
+.scenario-lab-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: var(--relay-space-3) 0 0;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
+.scenario-lab-notice .text-link { margin-left: auto; }
 
 /* 暗色是实验室自己的临时反相：产品没有主题系统，因此这里只反相颜色变量，
    不改任何排版规则。F20 用它验「暗底上结构一个不少」，不宣称产品支持深色主题。 */
@@ -70,39 +760,442 @@
   background: var(--relay-color-bg-surface);
 }
 
-.scenario-lab-gallery { display: grid; gap: var(--relay-space-4); }
-.scenario-lab-card { display: grid; gap: var(--relay-space-2); }
-.scenario-lab-card > header { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: baseline; font-size: var(--relay-font-size-meta); }
+/* ── 展示全部状态：视觉比较网格，不是第二套回复 UI ─────────────────────── */
+.scenario-lab-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-4);
+  width: 100%;
+  padding: var(--relay-space-4) var(--relay-space-5) var(--relay-space-8);
+}
+.scenario-lab-family-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  width: fit-content;
+  max-width: 100%;
+}
+.scenario-lab-family-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-height: calc(var(--relay-control-height-compact) - 6px);
+  padding: 0 var(--relay-space-2);
+  border: 0;
+  border-radius: calc(var(--relay-radius-control) - 2px);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  cursor: pointer;
+}
+.scenario-lab-family-tab > span { font-family: var(--relay-font-family-code); font-size: 0.625rem; }
+.scenario-lab-family-tab > small { color: var(--relay-color-text-muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; }
+.scenario-lab-family-tab:hover { background: var(--relay-color-selection-hover); color: var(--relay-color-text-primary); }
+.scenario-lab-family-tab--active {
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-family-tab:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: 1px; }
+.scenario-lab-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: var(--relay-space-4);
+  align-items: start;
+}
+.scenario-lab-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  /* 视觉比较一次最多挂一个分类（≤22 条）；离屏卡片跳过布局与绘制，不虚拟化节点。 */
+  content-visibility: auto;
+  contain-intrinsic-size: 0 28rem;
+}
+.scenario-lab-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-3);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.scenario-lab-card-open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.scenario-lab-card-open:hover .scenario-lab-card-title { text-decoration: underline; text-underline-offset: 0.2em; }
+.scenario-lab-card-id {
+  flex: none;
+  font-family: var(--relay-font-family-code);
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-card-open > svg { flex: none; width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+.scenario-lab-card-meta {
+  flex: 0 0 100%;
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+}
+/* 状态点跟在标题后面、与标题同一行；它不再被 flex-wrap 甩到第三行去当一颗孤立的圆点。 */
+.scenario-lab-card-state { flex: none; margin-left: auto; }
+.scenario-lab-card-preview {
+  max-height: 24rem;
+  overflow: auto;
+  padding: var(--relay-space-3);
+  background: var(--relay-color-bg-surface);
+}
+.scenario-lab-card-preview .scenario-shell {
+  max-width: none;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* Gallery 是「同一分类横向比较」，卡片宽度由网格决定，本来就不是真实窗口尺寸：
+   这里把窗口档的固定宽度让位给卡片宽度，并撤掉窗口描边。它是比较视图，不是像素基准，
+   真实尺寸的对照由单场景预览承担（一致性测试也只认那一条路径）。 */
+.scenario-lab-card-preview .scenario-shell[data-viewport] {
+  width: 100%;
+  max-width: none;
+  outline: none;
+  background: transparent;
+}
 
-/* 控制器 */
-/* 控制器一列跟着视口站住：预览列可能很长，滚到下面还要能按单步与开关，
-   「上滚后位置稳不稳」这类测量也不必先把窗口滚回顶部去够按钮。 */
-.scenario-lab-controls { position: sticky; top: var(--relay-space-4); align-self: start;
-  display: grid; gap: var(--relay-space-3); max-height: calc(100vh - 9rem); overflow: auto; }
-.scenario-lab-controls-head strong { display: block; font-size: var(--relay-font-size-body); }
-.scenario-lab-transport { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); align-items: center; }
-.scenario-lab-transport .primary-button, .scenario-lab-transport .secondary-button { display: inline-flex; align-items: center; gap: 4px; }
-.scenario-lab-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
-.scenario-lab-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); }
-.scenario-lab-field-label { min-width: 4.5rem; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-muted); }
-.scenario-lab-note { margin: 0; padding: var(--relay-space-2) var(--relay-space-3); border-left: 2px solid var(--relay-color-border-separator);
-  background: var(--relay-color-bg-subtle); font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
-.scenario-lab-panel { display: grid; gap: var(--relay-space-2); padding: var(--relay-space-3); border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: var(--relay-radius-card); background: var(--relay-color-bg-surface); }
-.scenario-lab-panel h2 { margin: 0; display: flex; align-items: center; gap: var(--relay-space-2); font-size: var(--relay-font-size-body); font-weight: var(--relay-font-weight-semibold); }
-.scenario-lab-panel summary { cursor: pointer; font-size: var(--relay-font-size-meta); color: var(--relay-color-text-secondary); }
-.scenario-lab-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.scenario-lab-steps button { display: flex; gap: var(--relay-space-2); width: 100%; padding: 3px 6px; border: 0; border-radius: var(--relay-radius-sm);
-  background: transparent; color: var(--relay-color-text-primary); font: inherit; font-size: var(--relay-font-size-meta); text-align: left; cursor: pointer; }
-.scenario-lab-steps button:hover { background: var(--relay-color-selection-hover); }
-.scenario-lab-steps--now { background: var(--relay-color-selection-bg); }
-.scenario-lab-steps button span { color: var(--relay-color-text-muted); font-family: var(--relay-font-family-code); flex: none; }
-.scenario-lab-data { max-height: 18rem; overflow: auto; margin: 0; padding: var(--relay-space-2); border-radius: var(--relay-radius-sm);
-  background: var(--relay-color-bg-subtle); color: var(--relay-color-text-secondary);
-  font-family: var(--relay-font-family-code); font-size: var(--relay-font-size-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
-.scenario-lab-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--relay-font-size-meta); }
-.scenario-lab-results li { display: grid; gap: 2px; padding-left: var(--relay-space-3); border-left: 2px solid var(--relay-color-border-separator); }
-.scenario-lab-results li[data-status="pass"] { border-left-color: var(--relay-color-status-success-text); }
-.scenario-lab-results li[data-status="fail"] { border-left-color: var(--relay-color-status-danger-text); }
-.scenario-lab-results li[data-status="browser-only"] { border-left-color: var(--relay-color-status-neutral-text); }
-.scenario-lab-results small { color: var(--relay-color-status-danger-text); overflow-wrap: anywhere; }
+/* ── 检查面板：按需打开，默认不占预览宽度 ─────────────────────────────── */
+.scenario-lab-inspector {
+  display: flex;
+  flex: 0 0 clamp(18rem, 20vw, 20rem);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-surface);
+}
+.scenario-lab-inspector[data-open="false"] { display: none; }
+.scenario-lab-inspector-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3) var(--relay-space-3) var(--relay-space-2);
+}
+.scenario-lab-inspector-head > div { display: grid; gap: 2px; min-width: 0; }
+.scenario-lab-inspector-head strong { font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); }
+.scenario-lab-inspector-head p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-inspector-tabs {
+  display: flex;
+  flex: none;
+  gap: var(--relay-space-4);
+  padding: 0 var(--relay-space-3);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.scenario-lab-inspector-tab {
+  min-height: var(--relay-control-height);
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  cursor: pointer;
+}
+.scenario-lab-inspector-tab--active {
+  border-bottom-color: var(--relay-color-action-primary);
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-inspector-tab:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: -2px; }
+.scenario-lab-inspector-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--relay-space-4);
+  min-height: 0;
+  padding: var(--relay-space-4) var(--relay-space-3) var(--relay-space-6);
+  overflow-y: auto;
+}
+
+.scenario-lab-settings { display: flex; flex-direction: column; gap: var(--relay-space-4); }
+.scenario-lab-field { display: flex; flex-direction: column; gap: var(--relay-space-1); min-width: 0; }
+.scenario-lab-field-label {
+  font-size: 0.625rem;
+  font-weight: var(--relay-font-weight-semibold);
+  letter-spacing: 0.02em;
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-field .segmented { display: flex; width: 100%; }
+.scenario-lab-field .segmented-option { flex: 1 1 0; padding: 0 var(--relay-space-1); }
+.scenario-lab-setting-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-1); }
+.scenario-lab-setting-note {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-muted);
+}
+
+.scenario-lab-timeline {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scenario-lab-timeline li { min-width: 0; }
+.scenario-lab-timeline button {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height-compact);
+  padding: var(--relay-space-1) var(--relay-space-1);
+  border: 0;
+  border-radius: var(--relay-radius-badge);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  font-size: var(--relay-font-size-caption);
+  text-align: left;
+  cursor: pointer;
+}
+.scenario-lab-timeline button:hover { background: var(--relay-color-selection-hover); }
+.scenario-lab-timeline--now { background: var(--relay-color-selection-bg); }
+.scenario-lab-timeline button:focus-visible { outline: 2px solid var(--relay-color-focus-ring); outline-offset: -1px; }
+.scenario-lab-timeline-time {
+  font-family: var(--relay-font-family-code);
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-timeline-label { overflow-wrap: anywhere; }
+.scenario-lab-timeline-index {
+  font-size: 0.625rem;
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scenario-lab-verification { display: flex; flex-direction: column; gap: var(--relay-space-3); }
+.scenario-lab-run-summaries { display: grid; gap: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.scenario-lab-run-summary {
+  display: grid;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-3) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.scenario-lab-run-summary-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--relay-space-2); }
+.scenario-lab-run-summary-head strong { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-primary); }
+.scenario-lab-run-summary-status { font-size: 0.625rem; color: var(--relay-color-text-muted); }
+.scenario-lab-run-summary-meta {
+  margin: 0;
+  font-size: 0.625rem;
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.scenario-lab-run-summary-counts { display: flex; flex-wrap: wrap; gap: 2px var(--relay-space-2); font-size: 0.625rem; color: var(--relay-color-text-muted); }
+.scenario-lab-run-summary-counts strong { color: var(--relay-color-text-secondary); font-variant-numeric: tabular-nums; }
+.scenario-lab-run-summary-empty { font-style: normal; color: var(--relay-color-text-muted); }
+.scenario-lab-run-summary--stale .scenario-lab-run-summary-status { color: var(--relay-color-status-warning-text); }
+.scenario-lab-current-result {
+  display: grid;
+  gap: var(--relay-space-2);
+  padding-top: var(--relay-space-1);
+}
+.scenario-lab-run-current { justify-self: start; }
+.scenario-lab-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-2); font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.scenario-lab-verdict-state {
+  padding: 1px var(--relay-space-1);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-badge);
+  color: var(--relay-color-text-secondary);
+  font-size: 0.625rem;
+  font-weight: var(--relay-font-weight-semibold);
+}
+.scenario-lab-verdict-state[data-acceptance="pass"] { border-color: var(--relay-color-status-success-text); color: var(--relay-color-status-success-text); }
+.scenario-lab-verdict-state[data-acceptance="fail"] { border-color: var(--relay-color-status-danger-text); color: var(--relay-color-status-danger-text); }
+.scenario-lab-verdict-state[data-acceptance="not-covered"],
+.scenario-lab-verdict-state[data-acceptance="static"],
+.scenario-lab-verdict-state[data-acceptance="unverifiable"] {
+  border-color: var(--relay-color-status-warning-text);
+  color: var(--relay-color-status-warning-text);
+}
+.scenario-lab-verdict-state[data-acceptance="stale"] { color: var(--relay-color-text-muted); }
+.scenario-lab-verdict-note,
+.scenario-lab-verdict-alert {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-relaxed);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-verdict-alert { color: var(--relay-color-status-warning-text); }
+.scenario-lab-results {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scenario-lab-results li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: var(--relay-space-2);
+  align-items: start;
+  padding: var(--relay-space-2) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-snug);
+}
+.scenario-lab-results li::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: 0.35em;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-border-control);
+}
+.scenario-lab-results li[data-status="pass"]::before { background: var(--relay-color-status-success-text); }
+.scenario-lab-results li[data-status="fail"]::before { background: var(--relay-color-status-danger-text); }
+.scenario-lab-results li[data-status="browser-only"]::before { background: var(--relay-color-text-muted); }
+.scenario-lab-results small { grid-column: 2; color: var(--relay-color-text-muted); overflow-wrap: anywhere; }
+.scenario-lab-results li[data-status="fail"] small { color: var(--relay-color-status-danger-text); }
+.scenario-lab-data-details { margin-top: var(--relay-space-1); }
+.scenario-lab-data-details > summary {
+  cursor: pointer;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+}
+.scenario-lab-data-details[open] > summary { margin-bottom: var(--relay-space-2); color: var(--relay-color-text-secondary); }
+.scenario-lab-data {
+  max-height: 18rem;
+  margin: 0;
+  padding: var(--relay-space-2);
+  overflow: auto;
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-code);
+  font-size: 0.625rem;
+  line-height: var(--relay-font-lineHeight-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 窄窗抽屉的遮罩：只在 ≤1180 生效，宽窗不遮预览。 */
+.scenario-lab-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  padding: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--relay-color-text-primary) 18%, transparent);
+  cursor: default;
+}
+
+/* ── 响应式：预览第一，播放第二，目录第三，检查按需 ───────────────────── */
+@media (max-width: 1100px) {
+  .scenario-lab-directory {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(20rem, 88%);
+    flex: none;
+    border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+    box-shadow: var(--relay-shadow-floating);
+  }
+  .scenario-lab-directory[data-open="false"] { display: none; }
+  .scenario-lab-directory-close { display: inline-flex; }
+  .scenario-lab-inspector {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 30;
+    width: min(22rem, 92%);
+    flex: none;
+    border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+    box-shadow: var(--relay-shadow-floating);
+  }
+}
+/* 检查面板在 1101–1180 已是覆盖抽屉，遮罩也要跟着出现；目录仍是常驻列。 */
+@media (max-width: 1180px) {
+  .scenario-lab-scrim { display: block; }
+}
+@media (min-width: 1101px) {
+  .scenario-lab-directory[data-collapsed="true"] { display: none; }
+}
+/* 宽窗的检查面板由预览头上的「收起检查」控制，不再放第二颗重复的关闭键；
+   窄窗抽屉盖住了那颗开关，才需要面板自己的关闭入口。 */
+@media (min-width: 1181px) {
+  .scenario-lab-inspector-head .icon-button { display: none; }
+}
+
+@media (max-width: 900px) {
+  .scenario-lab-head { padding: var(--relay-space-2) var(--relay-space-4) var(--relay-space-2); }
+  .scenario-lab-stage-head { padding: var(--relay-space-2) var(--relay-space-3); }
+  .scenario-lab-controls { padding: var(--relay-space-2) var(--relay-space-3); }
+  .scenario-lab-preview-canvas { padding: var(--relay-space-4) var(--relay-space-4) var(--relay-space-8); }
+  .scenario-lab-gallery { padding: var(--relay-space-3) var(--relay-space-4) var(--relay-space-8); }
+}
+
+@media (max-width: 640px) {
+  .scenario-lab-head { padding: var(--relay-space-2) var(--relay-space-3); }
+  .scenario-lab-head-main h1 { font-size: 1.125rem; }
+  .scenario-lab-head-actions { width: 100%; gap: var(--relay-space-1); }
+  .scenario-lab-page :is(.primary-button, .secondary-button) { padding: 0 var(--relay-space-2); }
+  .scenario-lab-stage-head { align-items: flex-start; }
+  .scenario-lab-stage-title { row-gap: 2px; }
+  .scenario-lab-stage-actions { align-self: center; }
+  .scenario-lab-controls { gap: var(--relay-space-1) var(--relay-space-2); }
+  .scenario-lab-progress { flex: 1 1 6rem; min-width: 5rem; gap: var(--relay-space-2); }
+  .scenario-lab-playback-options { margin-left: 0; }
+  .scenario-lab-preview-canvas { padding: var(--relay-space-3) var(--relay-space-3) var(--relay-space-8); }
+  .scenario-lab-gallery { padding: var(--relay-space-2) var(--relay-space-3) var(--relay-space-6); }
+  .scenario-lab-family-tabs { width: 100%; }
+  .scenario-lab-family-tab { flex: 1 1 auto; justify-content: center; }
+  .scenario-lab-directory { width: min(20rem, 94%); }
+  .scenario-lab-inspector { width: min(22rem, 100%); }
+  .scenario-lab-static-strip { align-items: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scenario-lab-page .segmented-option,
+  .scenario-lab-page .icon-button,
+  .scenario-lab-page .scenario-lab-item,
+  .scenario-lab-page .scenario-lab-filter { transition: none; }
+}

@@ -1,55 +1,158 @@
-/* 会话待办清单（ADR-038，2026-10-30）。
-   只补这一块的几何与排版，复用已确认的 tokens：间距、字号、分隔线、文字色。
-   两条硬约束：摘要行高度恒定（上不上待办都不推输入器）；展开后内部滚动、限高。 */
+/* 会话待办清单（ADR-038，2026-10-30；UI 收口 2026-10-31）。
+   数值全部引用已确认的 tokens；`--chat-measure` 是这一列的本地宽度 owner。
+
+   定位：**聊天流里的轻量进度面板**，不是业务后台卡片。
+     * 视觉优先级低于 AI 回复正文与输入卡：无投影、1px 发丝边、8px 圆角；
+     * 与输入卡同宽同轴：`max-width: var(--chat-measure)` + `margin-inline: auto`，
+       与目录细条、目标卡、队列共用同一个宽度 owner（此前它是这一列里唯一铺满的块，
+       比输入卡宽 124px，读起来像另一个页面的内容）；
+     * 结构保留：折叠 / 展开、已完成数量、当前步骤、状态列表、说明文案。
+
+   三条硬约束（未变）：
+     * 摘要行高度恒定（上不上待办都不推输入器）；
+     * 展开后内部滚动、限高，长清单不顶走输入器；
+     * 只读：界面不提供本地勾选。 */
 
 .session-todos {
-  margin: 0;
+  /* 与输入卡同宽同轴：宽度只跟 owner 走，不各写各的。 */
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin-inline: auto;
+  margin-block: 0;
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
-  border-radius: 8px;
-  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-control);
+  /* 白色面 + 发丝边：本项目「容器」的语言（卡片是白的）。
+     不用 `color.selection.bg`（鼠尾草绿）——那是 hover / 选中的语义，
+     常驻一块绿会让整块读成「被选中」，而它只是输入卡上方的一块旁注。
+     也不加投影：抬升只声明一次（这里是边框），边框 + 投影会变成幽灵卡片。 */
+  background: var(--relay-color-bg-surface);
 }
 
+/* ── 摘要行：一条可点的轻量 header ─────────────────────────────────────
+   整行可点：箭头 · 清单图标 · 标题 · 计数 · 当前步骤 ·（右）未收尾提示。
+   水平内边距与输入卡内边距同档（space.3），两块的左缘因此对齐。 */
 .session-todos-summary {
   display: flex;
   align-items: center;
   gap: var(--relay-space-1);
   /* 高度恒定：计数从 0/2 变 2/2 时不得把输入器往下推。 */
-  min-height: 32px;
-  padding: var(--relay-space-1) var(--relay-space-2);
+  min-height: var(--relay-control-height-compact);
+  padding: var(--relay-space-1) var(--relay-space-3);
+  border-start-start-radius: calc(var(--relay-radius-control) - var(--relay-border-width));
+  border-start-end-radius: calc(var(--relay-radius-control) - var(--relay-border-width));
   cursor: pointer;
   list-style: none;
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-heading);
   color: var(--relay-color-text-secondary);
+  transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 .session-todos-summary::-webkit-details-marker { display: none; }
+/* 绿色只出现在「你正指着它」的时候——与执行过程的带子同一条规则。 */
+.session-todos-summary:hover { background: var(--relay-color-selection-bg); }
+.session-todos-summary:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: var(--relay-focus-offset);
+}
+
 .session-todos-chevron {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 1rem;
+  height: 1rem;
   color: var(--relay-color-text-muted);
-  transition: transform 120ms ease-out;
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
 .session-todos[open] > .session-todos-summary .session-todos-chevron { transform: rotate(90deg); }
-.session-todos-heading-icon { flex: none; width: 14px; height: 14px; color: var(--relay-color-text-muted); }
-.session-todos-title { flex: none; font-weight: var(--relay-font-weight-semibold); color: var(--relay-color-text-primary); }
-.session-todos-count { flex: none; font-variant-numeric: tabular-nums; }
+.session-todos-heading-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--relay-color-text-muted);
+}
+.session-todos-title {
+  flex: none;
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+/* 统计是旁注，当前步骤才是这一行要说的事：层级按这个顺序排。 */
+.session-todos-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--relay-color-text-muted);
+}
 .session-todos-current {
   min-width: 0;
   overflow: hidden;
+  padding-left: var(--relay-space-2);
+  /* 一道 1px 竖线把「统计」和「当前步骤」分开：否则整行读成一句话。 */
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--relay-color-text-muted);
+  color: var(--relay-color-text-secondary);
 }
-.session-todos-error-label { flex: none; color: var(--relay-color-text-muted); }
+/* 提示不得被长步骤挤掉：它是一句结论，不是可省略的修饰。
+   `margin-left: auto` 把它推到右缘：左边是「在做什么」，右边是「现在什么状态」——
+   两块各归各位，摘要行才像一条 header，而不是一句话。 */
+.session-todos-stalled,
+.session-todos-error-label { flex: none; }
+.session-todos-stalled {
+  margin-left: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
+}
+/* 没有「未收尾」提示时，读取失败标签自己靠右。 */
+.session-todos-error-label {
+  margin-left: auto;
+  color: var(--relay-color-status-danger-text);
+}
 
-.session-todos-body { padding: 0 var(--relay-space-2) var(--relay-space-1); }
-.session-todos-error { display: grid; gap: var(--relay-space-1); padding: var(--relay-space-1) 0; }
-.session-todos-error p { margin: 0; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+/* ── 完成度条 ─────────────────────────────────────────────────────────
+   只在展开时出现：折叠态已经有「已完成 1/3」这行字，再压一条线只会把 32px 的
+   摘要撑高，而且贴着标题文字读成下划线。展开后它是这份清单的进度表头，
+   与标题、列表各留 8px。 */
+.session-todos-progress {
+  display: none;
+  height: 2px;
+  margin: var(--relay-space-2) var(--relay-space-3) 0;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-border-separator);
+  overflow: hidden;
+}
+.session-todos[open] > .session-todos-progress { display: block; }
+.session-todos-progress::before {
+  content: "";
+  display: block;
+  width: var(--session-todos-ratio, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--relay-color-status-success-text);
+  transition: width var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
+}
+
+/* ── 展开区 ─────────────────────────────────────────────────────────────
+   正文按「箭头 + 间隔」缩进：清单图标对齐标题图标，清单文字对齐标题文字。
+   行与行之间靠留白而不是分隔线：一张卡片里套十六条横线会读成表格。 */
+.session-todos-body {
+  padding: var(--relay-space-2) var(--relay-space-3) var(--relay-space-2)
+    calc(var(--relay-space-3) + 1rem + var(--relay-space-1));
+}
+.session-todos-error {
+  display: grid;
+  gap: var(--relay-space-1);
+  padding: var(--relay-space-1) 0;
+}
+.session-todos-error p {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-snug);
+  color: var(--relay-color-text-secondary);
+}
 
 .session-todos-list {
   display: grid;
-  gap: 0;
+  /* 行距就是间距本身：没有分隔线，靠 8px 的间隙把行分开（layout: 用 gap 表达兄弟间距）。 */
+  gap: var(--relay-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -62,47 +165,79 @@
   display: flex;
   align-items: center;
   gap: var(--relay-space-1);
-  padding: var(--relay-space-1) 0;
   min-width: 0;
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-heading);
 }
-.session-todos-item + .session-todos-item {
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+.session-todos-icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--relay-color-text-muted);
 }
-.session-todos-icon { flex: none; width: 14px; height: 14px; color: var(--relay-color-text-muted); }
-.session-todos-text { min-width: 0; flex: 1; overflow-wrap: anywhere; color: var(--relay-color-text-primary); }
-.session-todos-text-completed { color: var(--relay-color-text-muted); text-decoration: line-through; }
-.session-todos-text-cancelled { color: var(--relay-color-text-muted); text-decoration: line-through; }
+.session-todos-text {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  color: var(--relay-color-text-primary);
+}
+/* 完成 = 划过的一行；取消 = 没做的分支，只降级、不划线。 */
+.session-todos-text-completed {
+  color: var(--relay-color-text-muted);
+  text-decoration: line-through;
+}
+.session-todos-text-cancelled { color: var(--relay-color-text-muted); }
+/* 状态词：默认旁注档。只有「真的在跑」那一行用运行态蓝——同一时刻最多一条，
+   所以它不会把整张清单染花，也不会让「进行中·已停止」冒充在跑。 */
 .session-todos-status {
   flex: none;
-  padding: 0 var(--relay-space-1);
-  border-radius: var(--relay-radius-round);
+  padding-left: var(--relay-space-2);
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
 }
-.session-todos-note {
-  margin: var(--relay-space-1) 0 0;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-body);
+.session-todos[data-session-todo-running="true"]
+  .session-todos-item[data-status="in_progress"] .session-todos-status {
+  color: var(--relay-color-status-running-text);
 }
 
-/* 运行中的进度点：只让「正在做」那一行有呼吸感，不给整块加高度或位移。 */
+/* ── 脚注 ───────────────────────────────────────────────────────────────
+   两行分属两个层级：上一行是「这一版是什么」的元数据 + 免责，下一行是操作提示。
+   提示里的写法用行内代码呈现，扫一眼就知道要照抄什么。 */
+.session-todos-note {
+  margin: 0;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-snug);
+}
+.session-todos-note:first-of-type {
+  margin-top: var(--relay-space-2);
+  padding-top: var(--relay-space-1);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+.session-todos-note + .session-todos-note { margin-top: var(--relay-space-1); }
+.session-todos-hint code {
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-bg-subtle);
+  font-family: var(--relay-font-family-code);
+  font-size: inherit;
+  color: var(--relay-color-text-secondary);
+}
+
+/* 运行中的进度点：只让「正在做」那一行有呼吸感，不给整块加高度或位移。
+   用运行态蓝（与执行过程「运行中」同色），一眼分得出「正在做」和「还没做」。 */
 @keyframes session-todos-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
-.session-todos-icon-active { animation: session-todos-pulse 1.6s ease-in-out infinite; }
+.session-todos-icon-active {
+  color: var(--relay-color-status-running-text);
+  animation: session-todos-pulse var(--relay-motion-loop-thinking) var(--relay-motion-easing-loop) infinite;
+}
+/* 生成已结束但最后一步仍标着 in_progress：静态呈现，不转圈，不冒充「正在运行」。 */
+.session-todos-icon-stalled { color: var(--relay-color-text-muted); }
+
 @media (prefers-reduced-motion: reduce) {
   .session-todos-icon-active { animation: none; }
   .session-todos-chevron { transition: none; }
-}
-/* 生成已结束但最后一步仍标着 in_progress：静态呈现，不转圈，不冒充“正在运行”。 */
-.session-todos-icon-stalled {
-  color: var(--color-text-tertiary, rgb(148 150 158));
-  opacity: 0.9;
-}
-
-.session-todos-stalled {
-  color: var(--color-text-tertiary, rgb(148 150 158));
-  font-size: 12px;
-  white-space: nowrap;
+  .session-todos-summary { transition: none; }
+  .session-todos-progress::before { transition: none; }
 }

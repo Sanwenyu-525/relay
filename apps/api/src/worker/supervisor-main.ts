@@ -14,7 +14,8 @@ import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/rest
 import { createRepositories } from '../application/unit-of-work.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { runAssistGoalTick } from '../application/goal-advance.js';
-import { recoverStoppedDesktopLaunch, runSupervisedWorkerOnce,
+import { noteStrandedWorker } from '../application/recover-run.js';
+import { recoverStoppedDesktopLaunch, recoverStrandedFencedClaim, runSupervisedWorkerOnce,
   type DesktopStopEvidence } from './supervisor.js';
 import { desktopDispatchReadyLine, desktopLaunchRecoveryAckLine } from './desktop-supervisor-protocol.js';
 
@@ -226,6 +227,12 @@ async function main(): Promise<void> {
         requeuedRunIds, blockedRunIds }));
     }
     const reported = new Set<string>();
+    const attempted = new Map<string, number>();
+    const notified = new Set<string>();
+    // 有 fence 证据时可以重试既有恢复 Owner；无证据时只保留事实。周期重试让
+    // 「上次恢复已 fence 但随后被 UNKNOWN 外部效果挡住、之后被人工核对」的领取收口，
+    // 且不会把租约到期当停机证明。
+    const recoveryRetryMs = 30_000;
     while (!controller.signal.aborted) {
       // A restarted supervisor cannot infer that a former child has stopped.
       // Surface the stranded claim without making it executable.
@@ -237,8 +244,30 @@ async function main(): Promise<void> {
           process.stdout.write(`${JSON.stringify({ type: 'worker_recovery_required',
             run_id: claim.run_id, epoch: claim.epoch.toString(), status: claim.status })}\n`);
         }
+        if (Date.now() - (attempted.get(key) ?? 0) >= recoveryRetryMs) {
+          attempted.set(key, Date.now());
+          try {
+            const outcome = await recoverStrandedFencedClaim({ db: database.executor, dataRoot,
+              runId: claim.run_id, workerId: claim.worker_id });
+            // 已释放领取：下一轮由正常派发接续，不再写滞留事实。
+            if (outcome === 'REQUEUED') { attempted.delete(key); continue; }
+          } catch {
+            // 恢复竞争（领取/epoch 已变化）不应让常驻 Supervisor 退出；只留诊断，
+            // 下一次重试按原证据与同一 operation_id 收口，不换身份或放宽判定。
+            process.stderr.write(`${JSON.stringify({ type: 'worker_recovery_failed',
+              run_id: claim.run_id })}\n`);
+          }
+        }
+        if (!notified.has(key) && claim.worker_id !== null) {
+          notified.add(key);
+          await noteStrandedWorker(database.executor,
+            { runId: claim.run_id, workerId: claim.worker_id });
+        }
       }
       if (controller.signal.aborted) break;
+      // 注意：不按 Run 级 worker 租约过期告警。Run 租约只在每步领取时刷新，
+      // 单步（如长模型调用）可以超过 30s 而进程仍健康；`scanRecoveryCandidates`
+      // 里的 Run 级候选因此不能当滞留事实，只有领取心跳（run_invocations）才可靠。
       // A Worker can exit after releasing its invocation but before applying a
       // pending control. The database scan, not a child notification, closes
       // that gap after supervisor restart.

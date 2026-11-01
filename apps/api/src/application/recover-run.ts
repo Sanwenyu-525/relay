@@ -18,6 +18,32 @@ export async function scanRecoveryCandidates(db: DbExecutor, limit = 100): Promi
 }
 
 /**
+ * 把「Run 仍被旧 Worker 占用」落成一条人可见的系统事实：只写审计，不授予执行权、
+ * 不改编 Run / Task 状态，也不代替任何恢复判定。同一 Run 与 Worker 只留一条；
+ * 并发重复插入不改变结论，因此不为此引入第二套唯一索引。
+ */
+export async function noteStrandedWorker(db: DbExecutor, input: {
+  readonly runId: string; readonly workerId: string;
+}): Promise<boolean> {
+  const repositories = createRepositories(db);
+  const run = await repositories.runs.readRun(input.runId);
+  if (run === undefined) return false;
+  // Run 已被另一个 Worker 正常领取时，旧候选不再成立，不能写出过期事实。
+  if (run.worker_id !== null && run.worker_id !== input.workerId) return false;
+  if (await repositories.activities.hasRunRecoveryRequiredNotice(run.id, input.workerId)) return false;
+  const task = await repositories.tasks.readTask(run.task_id);
+  await repositories.activities.insertActivityRecord({
+    id: randomUUID(), workspaceId: run.workspace_id, actorKind: 'SYSTEM',
+    actorRef: 'recovery-scanner', commandId: null,
+    projectId: task?.project_id ?? null, taskId: run.task_id, runId: run.id,
+    eventType: 'RUN_RECOVERY_REQUIRED',
+    factRefs: { run_id: run.id, worker_id: input.workerId,
+      worker_epoch: run.worker_epoch.toString() },
+  });
+  return true;
+}
+
+/**
  * 进程管理器确认旧 Worker 已停止后的恢复入口。先 fence epoch，再在锁外核对受管 Fake 发布效果；
  * 已成功步骤不重跑，DISPATCHING 只使用同一 operation_id 核对，不凭租约盲重发。
  */

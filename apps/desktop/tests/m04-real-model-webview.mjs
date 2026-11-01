@@ -73,7 +73,7 @@ async function runRealChain() {
   await assertRuntimeRoleSeparation();
   const ledger = watchWebView(page, bootstrap);
   await page.goto('http://tauri.localhost/projects');
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await page.getByTestId('project-create-open').click();
   await page.locator('input[name="project-title"]').fill('M04 synthetic desktop acceptance');
   await page.locator('input[name="project-type"][value="GENERAL"]').check({ force: true });

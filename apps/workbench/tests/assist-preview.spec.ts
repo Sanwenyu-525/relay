@@ -124,7 +124,8 @@ describe("M04 Assist DISCUSS 生成中草稿", () => {
     expect(view.wrapper.find(`[data-testid="assist-live-preview-${messageId}"]`).exists()).toBe(false);
     await flush(450);
     const draft = view.wrapper.get(`[data-testid="assist-live-preview-${messageId}"]`);
-    expect(draft.text()).toContain("生成中草稿");
+    // 2026-10-31 UI-08：可见状态词收敛为「正在生成…」，修订号收进「预览详情」。
+    expect(draft.text()).toContain("正在生成");
     expect(draft.text()).toContain("<b>尚未完成的草稿</b>");
     expect(draft.find("b").exists()).toBe(false);
     finish = true;

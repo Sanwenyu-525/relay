@@ -15,7 +15,10 @@ import { expect, test, type Locator, type Page, type Route } from "@playwright/t
 // tests/conversationDiffSummary.spec.tsx；这里不重复算术，只看真实渲染结果。
 
 const apiBase = "http://127.0.0.1:8787";
-const origin = "http://127.0.0.1:4173";
+// 端口跟着 RELAY_E2E_PORT 走（playwright.config.ts 同一条理由）：本机 4173 可能被另一项目的
+// 预览服务占着，`reuseExistingServer` 会静默复用并让每条用例在第一屏就 404。
+// 夹具的 CORS 允许源必须等于实际预览端口，否则伪造响应全被浏览器挡掉，连接永远到不了「已连接」。
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
@@ -75,7 +78,7 @@ const settledDiff = {
     { path: longPath, action: "CREATE", added: 1450, removed: 820, unavailable_reason: null }],
 };
 
-type DiffMode = "changed" | "noBaseline" | "notGit" | "empty" | "permission" | "refreshFail";
+type DiffMode = "changed" | "noBaseline" | "noWrites" | "notGit" | "empty" | "permission" | "refreshFail";
 
 interface State {
   settled: boolean;
@@ -172,6 +175,8 @@ function previewsBody(): unknown {
 function diffBody(): unknown {
   state.diffReads += 1;
   if (state.diffMode === "noBaseline" && !state.established) return { available: false, reason: "NO_BASELINE" };
+  // 本会话一条路径都没写过（服务端读会话写账本得出）：没有可核对的东西，不是缺口。
+  if (state.diffMode === "noWrites") return { available: false, reason: "NO_SESSION_WRITES" };
   if (state.diffMode === "notGit") return { available: false, reason: "ROOT_NOT_GIT" };
   if (state.diffMode === "permission") return { available: false, reason: "RESOURCE_UNAVAILABLE" };
   if (state.diffMode === "empty") {
@@ -288,9 +293,10 @@ async function openChat(page: Page, over: Partial<State> = {},
   await connect(page);
   await expect(page.getByTestId("assist-composer")).toBeVisible({ timeout: 20_000 });
   // 未绑定目录时这一行整块不出现（2026-10-17 用户指令「不要有这个提示」），完整且空时同样不出现
-  // （2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」）：入口等它等于永远等不到，
-  // 因此按状态分岔。输入卡已经出现＝会话渲染完，此时断「没有这一行」才是有内容的断言。
-  if (state.unbound || state.diffMode === "empty") {
+  // （2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」），本会话没写过文件时也不出现
+  // （2026-11-01 P1-3）：入口等它等于永远等不到，因此按状态分岔。
+  // 输入卡已经出现＝会话渲染完，此时断「没有这一行」才是有内容的断言。
+  if (state.unbound || state.diffMode === "empty" || state.diffMode === "noWrites") {
     await expect(page.getByTestId("conversation-diff-toggle")).toHaveCount(0);
   } else await expect(page.getByTestId("conversation-diff-toggle")).toBeVisible({ timeout: 20_000 });
 }
@@ -317,11 +323,9 @@ function intersects(left: Box, right: Box): boolean {
     && left.y < right.y + right.height && right.y < left.y + left.height;
 }
 
-/** 这一行的列间距：居中断言要按实际间距算剩余空间，不把 16px 写死在用例里。 */
-async function rowColumnGap(page: Page): Promise<number> {
-  const value = await page.locator(".agent-chat-prereq-row")
-    .evaluate((element) => getComputedStyle(element).columnGap);
-  return Number.parseFloat(value) || 0;
+/** 卡上那一行的真实盒：居中断言按这一行算剩余空间，不把 16px 或列宽写死在用例里。 */
+async function rowBox(page: Page): Promise<Box> {
+  return box(page.locator(".agent-chat-prereq-row"));
 }
 
 /** 取同一 CSS 变量的探针色与元素实测 computed color：颜色断言不靠类名自证。 */
@@ -392,28 +396,30 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     await page.screenshot({ path: "results/conversation-diff-local-rows.png" });
   });
 
-  test("目录信息与总数入口同一行：目录左对齐、入口在剩余空间居中，展开不撑高输入卡", async ({ page }) => {
+  test("目录细条在输入卡下方且同宽同轴，总数入口独占卡上一行并居中，展开不撑高输入卡", async ({ page }) => {
     await openChat(page);
     const card = await box(composer(page));
     const column = await box(page.locator(".agent-chat-composer").first());
     const strip = await box(folderStrip(page));
     const entry = await box(diffEntry(page));
     const send = await box(page.getByTestId("assist-send"));
-    // 位置：输入卡**外**（不是卡的后代），且在卡上方。
+    // 位置：总数入口在输入卡**外**（不是卡的后代），且在卡上方。
     await expect(composer(page).locator(".conversation-diff")).toHaveCount(0);
     expect(entry.y + entry.height).toBeLessThanOrEqual(card.y + 1);
-    // 同行（2026-10-18 用户指令「diff 摘要把左侧目录信息顶到上一行」）：入口与目录细条的垂直区间
-    // 重叠、水平盒互不相交——目录没被顶到上一行，入口也没压在上面。
-    expect(entry.y < strip.y + strip.height && strip.y < entry.y + entry.height).toBe(true);
+    // 2026-11-01 用户指令「把选择文件夹那一行放到输入框下面」：细条在卡下方，
+    // 与总数入口不再同行，两者盒不相交。
+    expect(strip.y).toBeGreaterThanOrEqual(card.y + card.height);
     expect(intersects(entry, strip)).toBe(false);
-    // 目录保持左对齐在这一列的左边缘；目录名仍可读（没被入口挤成省略号碎片）。
+    // 细条与输入卡同宽同轴、贴住列的左边缘；目录名仍可读（没被入口挤成省略号碎片）。
     expect(Math.abs(strip.x - column.x)).toBeLessThanOrEqual(1);
-    const name = await box(page.locator(".folder-strip-name"));
-    expect(name.width).toBeGreaterThan(40);
-    // 居中：入口中线落在「细条右缘 + 列间距 … 列右缘」这一段的中点——auto 边距自然给出的位置，
+    expect(Math.abs(strip.width - column.width)).toBeLessThanOrEqual(1);
+    // 2026-11-01 细条独占卡下这一行，不再被总数入口挤占：目录名按自身文字宽度排，不做省略号截断。
+    expect(await page.locator(".folder-strip-name")
+      .evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+    // 居中：卡上这一行只剩总数入口，它的中线落在这一行的中线上——auto 边距自然给出的位置，
     // 不是把宽度写死的坐标硬压。
-    const expectedCenter = (strip.x + strip.width + await rowColumnGap(page) + column.x + column.width) / 2;
-    expect(Math.abs(entry.x + entry.width / 2 - expectedCenter)).toBeLessThan(4);
+    const row = await rowBox(page);
+    expect(Math.abs(entry.x + entry.width / 2 - (row.x + row.width / 2))).toBeLessThan(4);
     // 着色走 computed style 实测：新增用 diff 绿、删除用 diff 红，且符号与可访问名都在。
     const addedColor = await colorVsToken(page,
       '[data-testid="conversation-diff-toggle"] [data-metric="added"]', "--relay-color-diff-add-marker");
@@ -558,6 +564,21 @@ test.describe("会话局部与总 diff 的真实布局", () => {
     // 这一行消失不影响同屏的输入卡与目录细条。
     await expect(composer(page)).toBeVisible();
     await page.locator(".collab-center").screenshot({ path: "results/conversation-diff-empty.png" });
+  });
+
+  /* 2026-11-01 P1-3：纯聊天会话（写账本一条路径都没有）还没有起点时，服务端回答 NO_SESSION_WRITES，
+     这一行整块不出现；同一条位置换成「写过文件但缺起点」（CD-05 那条）必须照旧常驻并给恢复按钮。
+     两条用例合起来才是完整口径：消失的是没有内容的占位，不是真实缺口。 */
+  test("本会话没写过文件：没有起点也不挂「缺少会话起点」", async ({ page }) => {
+    await openChat(page, { diffMode: "noWrites" });
+    await expect(page.locator('[data-region="conversation-diff"]')).toHaveCount(0);
+    const center = await page.locator(".collab-center").innerText();
+    expect(center).not.toContain("缺少会话起点");
+    expect(center).not.toMatch(/[+−]\s*0/u);
+    // 不出现不等于不查：有没有写入仍由服务端按会话写账本回答，写入之后入口会自己长出来。
+    expect(state.diffReads).toBeGreaterThan(0);
+    await expect(composer(page)).toBeVisible();
+    await page.locator(".collab-center").screenshot({ path: "results/conversation-diff-no-writes.png" });
   });
 
   test("目录不可读时正文与历史一并隐藏，只说明原因", async ({ page }) => {

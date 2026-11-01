@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { resetRelayConnectionForTest, useFixtureData } from "../src/lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../src/lib/draftGuard";
 import { flush, mountWorkbench } from "./mountApp";
 
@@ -83,6 +83,27 @@ describe("桌面引导失败", () => {
     expect(mounted.wrapper.find('[data-testid="desktop-titlebar"]').exists()).toBe(true);
     expect(mounted.wrapper.find('[data-testid="relay-connection-open"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="project-create-open"]').exists()).toBe(false);
+    expect(mounted.wrapper.text()).not.toContain("示例数据");
+  });
+});
+
+describe("桌面已连接 live", () => {
+  it("自动进入真实工作空间：顶栏没有手动连接入口，退回示例数据的调用也不生效", async () => {
+    stubOfflineDesktop();
+    const mounted = await mountWorkbench("/today");
+    unmount = mounted.unmount;
+    const titlebar = mounted.wrapper.get('[data-testid="desktop-titlebar"]');
+    expect(titlebar.attributes("data-source-mode")).toBe("live");
+    expect(titlebar.find('[data-testid="relay-connection-open"]').exists()).toBe(false);
+    expect(titlebar.text()).not.toContain("打开连接设置");
+
+    // 桌面已进入 live：即便有调用方想退回 fixture（原「断开并回到示例数据」走的就是这条路），
+    // 宿主边界也要把它拦住，用户不会无声落到一个可操作的假数据工作台。
+    await act(async () => { useFixtureData(); });
+    await flush();
+    expect(mounted.wrapper.get('[data-testid="desktop-titlebar"]').attributes("data-source-mode")).toBe("live");
+    expect(mounted.wrapper.find('[data-testid="desktop-service-unavailable"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="inbox-open"]').exists()).toBe(true);
     expect(mounted.wrapper.text()).not.toContain("示例数据");
   });
 });

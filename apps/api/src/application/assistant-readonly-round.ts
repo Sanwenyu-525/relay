@@ -11,12 +11,14 @@ import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistModelPort, AssistResult, ModelToolCall, ModelToolSpec, ModelToolTurn,
   ModelToolTurnResult, ModelUsage, AssistRequest } from '../workflow/fake-model-port.js';
 import { gatewayParamsFor, normalizeToolChanges, ToolRequestRejected } from './tool-loop.js';
+import { DomainError } from './domain-error.js';
 import { declaredToolSpecs, readInternalTool, type InternalToolName } from
   '../workflow/tool-catalog.js';
 import { capabilityFor, dispatchGatewayAction, prepareGatewayAction,
   targetMatches, type GatewayActionType, type GatewayOrigin, type GatewaySessionReadOrigin }
   from './gateway-actions.js';
-import { settleDelegationToolCall, type DelegationChildRunner } from './subagent-delegation.js';
+import { resolveDelegationScope, settleDelegationToolCall,
+  type DelegationChildRunner } from './subagent-delegation.js';
 import { readSubagentSupplementContext } from './subagent-supplements.js';
 import { SessionTodoRepository } from '../assist/session-todo-repository.js';
 import { TODO_WRITE_TOOL_NAME, todoWriteToolSpec } from '../assist/session-todos.js';
@@ -110,6 +112,7 @@ export { assistantReadonlySystemPrompt as assistantSystemPrompt }
   from '../workflow/prompts/conversation-prompts.js';
 
 export interface AssistantReadonlyRoundInput {
+  readonly responseFormat?: AssistRequest['responseFormat'];
   /** Working-context guard; keep active tool protocols intact and stop adding tools under pressure. */
   readonly inputByteLimit?: number;
   readonly contextTurns?: AssistRequest['turns'];
@@ -204,6 +207,7 @@ export interface SessionReadonlyRoundInput {
   readonly signal: AbortSignal;
   /** 本次的 system 模板文本；由调用方按自己的会话身份经统一路由入口选出。 */
   readonly system: string;
+  readonly responseFormat?: AssistRequest['responseFormat'];
   /**
    * 0126：本轮是否允许写文件。缺省 false——人设助手、学习搭档与只读档位的行为不变。
    * 只影响「词表里有没有写工具」；这一次请求能不能真正落盘仍由 Gateway 准入判定。
@@ -253,21 +257,28 @@ export interface SessionReadonlyRoundInput {
 /**
  * 本轮能否声明 `delegate_subagent`（0128 词表闸门）。
  *
- * 三个条件缺一不可，且都在**这一轮**成立：
+ * 四个条件缺一不可，且都在**这一轮**成立：
  *   * 发起者是根会话——子会话仅一层（ADR-017、总纲 §0.9）；
  *   * 有子执行注入点——没有它，词表项只会让模型反复调用、反复被拒；
- *   * 有非空 Worker 身份——委派尝试行要记录领取者，否则恢复核对无从判断这条尝试属于谁。
+ *   * 有非空 Worker 身份——委派尝试行要记录领取者，否则恢复核对无从判断这条尝试属于谁；
+ *   * 父会话此刻真的有子 Agent 可读的范围——子会话的项目与工作目录都从父行复制，父行
+ *     缺任一项时子执行面对的是空目录。把词表项交给它只会换来一次注定被拒的调用，而
+ *     「没有目录」本该只挡住委派，不挡住普通聊天、解释与文档起草。
  *
- * 只管「看得见」，不授予任何能力：真正建立委派时 `createDelegation` 还要按当前会话
- * 状态、项目与工作目录再判一次（委派不是授权）。
+ * 只管「看得见」，不授予任何能力：真正建立委派时 `createDelegation` 还要按**刚锁定的**
+ * 会话行与资源实时状态再判一次（委派不是授权）。两侧共用 `resolveDelegationScope` 这
+ * 一份判定，因此「词表里有」与「执行时被拒」不可能各按一套口径成立——本轮暴露的
+ * `SUBAGENT_PARENT_SCOPE_MISSING` 无效调用正是这两层分叉的直接产物。
  */
 export function delegateToolDeclared(input: {
   readonly parentSessionId: string | null;
   readonly runDelegation: DelegationChildRunner | undefined;
   readonly workerId: string | undefined;
+  /** `resolveDelegationScope` 本轮的结论；false 表示这条会话此刻撑不起一次子执行。 */
+  readonly delegationScopeReady: boolean;
 }): boolean {
   return input.parentSessionId === null && input.runDelegation !== undefined &&
-    input.workerId !== undefined && input.workerId !== '';
+    input.workerId !== undefined && input.workerId !== '' && input.delegationScopeReady;
 }
 
 /**
@@ -349,7 +360,14 @@ export function isWithdrawnActionBlocked(guard: WithdrawnActionGuard, signature:
 
 export type AssistantReadonlyOutcome =
   | { readonly kind: 'CONTENT'; readonly content: string; readonly usage: ModelUsage;
-      readonly providerRequestIds: readonly string[]; readonly rounds: number }
+      readonly providerRequestIds: readonly string[]; readonly rounds: number;
+      /**
+       * 本次生成实际派发/回传的工具调用次数（含被拒的）。
+       *
+       * 主流程的「信封修复」只能在没有执行过任何工具时触发：工具已产生回执说明这一轮
+       * 已经做过真实动作，拿一次修复调用再生成执行候选可能重复同一副作用。
+       */
+      readonly toolCalls: number }
   | { readonly kind: 'CANCELLED'; readonly providerRequestId: string | null;
       readonly usage: ModelUsage; readonly providerRequestIds: readonly string[] }
   | { readonly kind: 'FAILED'; readonly errorCode: string;
@@ -365,8 +383,31 @@ export type AssistantReadonlyOutcome =
       readonly usage: ModelUsage;
       readonly providerRequestIds: readonly string[] };
 
-const DEFAULT_MAX_ROUNDS = 6;
-const DEFAULT_MAX_TOOL_CALLS = 8;
+/**
+ * 会话轮次的默认预算（2026-11-01 E2E-ALL-01 复核后调整工具额度）。
+ *
+ * 一次模型响应可以**并行声明多个工具**，而额度只在每次派发时计数，所以真实用例里
+ * 「一条响应 11 个请求」会在第 8 次之后全部拿到 `SESSION_TOOL_BUDGET_EXHAUSTED`：
+ * 前 8 次是真跑了，后 3 次是模型压根不知道有墙。
+ *
+ * 额度取 12，与同一台机器上「对话内工具循环」的产品默认值一致
+ * （`conversation-execution.ts` 的 `CONVERSATION_TOOL_LOOP_MAX_TOOL_CALLS`），
+ * 仍远低于契约上限（`execution-contract.ts` 的 48）。轮次数不动：
+ * 循环深度由 `maxRounds` 兜住，成本失控的风险在轮次那一侧，不在单条响应的并行度上。
+ *
+ * 这不是一次「把 8 改成 48 就宣布解决」的扩容：真正的修复是下面三件事——
+ * 模型每次都看得到剩余额度、额度说清楚上限是多少、收尾那一轮仍能把待办写成事实。
+ */
+export const DEFAULT_MAX_ROUNDS = 6;
+export const DEFAULT_MAX_TOOL_CALLS = 12;
+/**
+ * 收尾窗口内允许几次「只写清单」的调用（ADR-038）。
+ *
+ * 待办结算不碰文件系统、不进 Gateway、不产生审批，把它算进读取额度会让模型面对
+ * 「更新进度」与「再读一个文件」二选一——真实用例里它选了后者，清单因此永远停在
+ * 建立时的 0/N。给一个小的独立额度，只用于把已经发生的事实写回去。
+ */
+const MAX_TODO_SETTLEMENT_CALLS = 6;
 const RESULT_TEXT_LIMIT = 16_000;
 
 /**
@@ -378,9 +419,37 @@ const RESULT_TEXT_LIMIT = 16_000;
  * 工具，然后整个消息以 `SESSION_TOOL_ROUNDS_EXHAUSTED` 失败，用户看到的是一次报错而不是答复。
  */
 const TOOL_BUDGET_WRAP_UP = '工具轮次或调用预算已用尽。请立即用已经拿到的结果给出最终答复，'
-  + '不要再请求任何工具。';
+  + '不要再请求任何工具。答复必须分三段说清：已经执行了哪些步骤及其结果、因为预算用尽'
+  + '而没有执行的步骤（逐项点名，不要用「其他工作」代替）、以及下一步用户可以怎么继续'
+  + '（补一句话即可接着这一轮的工作）。'
+  + '把预算用尽说成任务完成是错误的；同样，把你没有执行过的步骤写成已完成也是错误的。';
 const CONTEXT_PRESSURE_WRAP_UP = '上下文接近工作容量上限。请用已经拿到的结果给出最终答复，'
   + '保留未决事项，不要再请求任何工具。';
+/**
+ * 收尾窗口里给的那一条（2026-11-01 E2E-ALL-01）。
+ *
+ * 与 `TOOL_BUDGET_WRAP_UP` 的区别只有一处，但这一处决定了清单能不能反映真实进度：
+ * 读取额度已经用完，`todo_write` 还有一次机会把「哪几步做完了、哪几步没做」写成事实。
+ * 措辞必须自己说清这个例外，否则同一段里「不要再请求任何工具」和「请调用 todo_write」
+ * 会互相抵消，模型两条都不听。
+ */
+const TOOL_BUDGET_WRAP_UP_WITH_TODO = '工具调用预算已用尽，本轮不再提供任何读取或写入工具。'
+  + '现在只做两件事：先用 todo_write 把已经完成与确实没有完成的步骤按真实情况写回清单'
+  + '（不占读取额度，但本轮最多 ' + MAX_TODO_SETTLEMENT_CALLS + ' 次），然后给出面向用户的最终答复。'
+  + '答复必须分三段说清：已经执行了哪些步骤及其结果、哪些步骤没有执行、下一步用户可以怎么继续。'
+  + '没有做过的步骤不能标成已完成，也不能在正文里说成已完成。';
+/**
+ * 上一轮没有输出任何正文时的收尾指令（本轮修复）。
+ *
+ * 现象链：模型请求了工具 → 工具被类型化拒掉 → 结果照常回传 → 模型只回了个空串
+ * （真实 Provider 常见于只有 reasoning、没有 content 的那一类响应）。空串不是
+ * 「回答结束了」，而是这一轮没有任何产出：直接结算 COMPLETED 就是用户截图里的空白
+ * AI 回复，判成整轮失败又把「工具没执行」误说成「任务失败」。
+ * 这里先给它一次基于已有回执作答的机会——工具结果与拒因都已经在上下文里。
+ */
+const EMPTY_REPLY_WRAP_UP = '你上一条输出没有任何正文，用户因此读不到回答。'
+  + '请依据上面已有的工具回执与拒因，直接给出面向用户的最终答复；不要再请求工具。'
+  + '确实无法回答时，用一句话说明缺什么以及用户可以怎么做。';
 
 /** 是否已到必须收尾的轮次：最后一次轮次，或工具调用预算已经用尽。 */
 export function shouldWrapUpReadonlyRound(input: {
@@ -388,6 +457,33 @@ export function shouldWrapUpReadonlyRound(input: {
   readonly usedCalls: number; readonly maxToolCalls: number;
 }): boolean {
   return input.round >= input.maxRounds || input.usedCalls >= input.maxToolCalls;
+}
+
+/**
+ * 每次模型请求前的额度自述（2026-11-01 E2E-ALL-01）。
+ *
+ * 现象：模型一条响应里并行声明 11 个工具请求，第 9 个起被拒——它从头到尾不知道有墙，
+ * 于是既没有把关键读取排在前面，也没有在答复里说清哪些步骤没跑。额度只有在**可见**
+ * 时才成为计划约束；不可见的额度只会变成一次让用户体验变差的黑盒拒绝。
+ *
+ * 这一段是事实说明，不是授权，也不改变任何准入判定。
+ */
+export function toolBudgetNotice(input: {
+  readonly round: number; readonly maxRounds: number;
+  readonly usedCalls: number; readonly maxToolCalls: number;
+  readonly todoSettlementCalls: number; readonly maxTodoSettlementCalls: number;
+  readonly allowTodo: boolean;
+}): string {
+  const remaining = Math.max(0, input.maxToolCalls - input.usedCalls);
+  const lines = [`【本轮工具预算（服务端事实，不是授权）】第 ${input.round + 1}/${input.maxRounds + 1} 轮`
+    + `；工具调用已用 ${input.usedCalls}/${input.maxToolCalls} 次，还能用 ${remaining} 次。`,
+    '一条响应里并行声明的每个工具请求各占一次额度，被拒掉的请求同样已计入。',
+    '额度用完后下一次请求不再提供读取工具，请先把最能决定结论的读取排在前面。'];
+  if (input.allowTodo) {
+    lines.push(`更新待办清单用 todo_write，它不占读取额度，本轮最多 ${input.maxTodoSettlementCalls} 次`
+      + `（已用 ${input.todoSettlementCalls} 次）；做完一步就写回一步，别把清单留在建立时的状态。`);
+  }
+  return lines.join('\n');
 }
 
 /** 模型异常的类型化归类：只回答「哪一类」，不复制 provider 正文或凭据。 */
@@ -402,7 +498,7 @@ function sessionModelErrorCode(error: unknown): string {
 const EMPTY_USAGE: ModelUsage = { inputTokens: null, outputTokens: null,
   cacheReadTokens: null, cacheCreationTokens: null };
 
-function addUsage(a: ModelUsage, b: ModelUsage | undefined): ModelUsage {
+export function addUsage(a: ModelUsage, b: ModelUsage | undefined): ModelUsage {
   if (b === undefined) return a;
   const sum = (left: number | null | undefined, right: number | null | undefined): number | null => {
     const l = left ?? null;
@@ -469,6 +565,10 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
   const providerRequestIds: string[] = [];
   let usage: ModelUsage = EMPTY_USAGE;
   let usedCalls = 0;
+  /** 本次生成里 `todo_write` 的独立额度用量（不占读取额度，见 `MAX_TODO_SETTLEMENT_CALLS`）。 */
+  let settlementCalls = 0;
+  /** 上一轮正文为空：本请求强制收尾，只给一次机会（发出后即消费）。 */
+  let emptyReplyNudge = false;
   const turns = input.contextTurns ?? await historyTurns(db, message);
   /**
    * 0122：本轮生成期间用户插话的原文。
@@ -506,6 +606,18 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     return appended;
   };
 
+  /*
+   * ADR-038 执行准入（2026-10-31 第六轮）：工作身份在这一轮真正开跑前冻结一次（幂等）。
+   *
+   * 主路径已经在 `RequestAssistMessage` 的消息准入事务里冻结过；这里兜住不经该命令
+   * 创建的轮次（委派子会话、补充消息、目标轮次）。两处共用同一个判定函数与同一张表，
+   * 谁先到谁定案，后到的读回已冻结的事实——注入给模型的作用域与写入落地的作用域
+   * 因此不可能分叉。放在循环外：一轮生成只写一次，不随每次模型调用重复。
+   */
+  if (input.allowTodo === true) {
+    await new SessionTodoRepository(db).freezeTurnScope(message.session_id, message.id);
+  }
+
   for (let round = 0; round <= maxRounds; round += 1) {
     if (input.signal.aborted || await isCancelRequested(db, message.id)) {
       return { kind: 'CANCELLED', providerRequestId: providerRequestIds.at(-1) ?? null,
@@ -513,12 +625,29 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     }
     let response: AssistResult;
     let supplementIds: readonly string[] = [];
+    /** 本次请求是不是「空正文强制收尾」那一条：只给一次机会，之后仍为空就如实失败。 */
+    let emptyNudgeRequest = false;
     try {
       // 最后一轮或工具调用预算用完时强制收尾：本轮不声明工具，模型只能输出正文。
       const contextPressure = input.inputByteLimit !== undefined && toolTurns.length > 0 &&
         describeAssistRequestContext({ intent: 'DISCUSS', system: baseSystem, turns,
           tools: declared, toolTurns, steers }).covered_bytes >= Math.floor(input.inputByteLimit * 0.8);
-      const wrapUp = contextPressure || shouldWrapUpReadonlyRound({ round, maxRounds, usedCalls, maxToolCalls });
+      emptyNudgeRequest = emptyReplyNudge;
+      const wrapUp = contextPressure || emptyNudgeRequest ||
+        shouldWrapUpReadonlyRound({ round, maxRounds, usedCalls, maxToolCalls });
+      /*
+       * 收尾窗口（2026-11-01 E2E-ALL-01）：读取额度用完不等于「这轮什么都不能做了」。
+       * 待办结算是应用内动作，不碰目录、不进 Gateway、不产生审批，把它算进读取额度的
+       * 结果是清单永远停在建立时的 0/N——用户看到「已完成 0/10」时，读到的既不是进度
+       * 也不是结论，只是一个从来没被更新过的声明。
+       *
+       * 三条边界：最后一轮不开放（那一条必须只输出正文，否则整条消息以失败收场）；
+       * 结构化输出协议不开放（PLAN / GOAL_ROUND 的那一轮在解析 JSON，插一步工具回执
+       * 会把协议打断）；空正文强制收尾不开放（它要的是一句正文，不是又一次工具往返）。
+       */
+      const settlementWindow = wrapUp && !contextPressure && !emptyNudgeRequest &&
+        input.allowTodo === true && input.responseFormat === undefined &&
+        round < maxRounds && settlementCalls < MAX_TODO_SETTLEMENT_CALLS;
       // 收尾轮不再消费插话：这一轮之后没有下一次模型请求，接了也答不上。
       if (!wrapUp) await drainSteers();
       // 0128：插话是唯一会让模型误解「正式执行已经改向」的入口，因此只在发生插话后
@@ -535,14 +664,20 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       const supplements = await readSubagentSupplementContext(db, session, message.id, supplementContext);
       supplementIds = supplements.ids;
       const request: AssistRequest = { intent: 'DISCUSS',
+        ...(input.responseFormat === undefined ? {} : { responseFormat: input.responseFormat }),
         system: (executionNotice === undefined || executionNotice === null
           ? (hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem)
           : `${hasSteers ? `${baseSystem}\n\n${ASSIST_STEERING_RULES}` : baseSystem}\n\n${executionNotice}`)
+          + '\n\n' + toolBudgetNotice({ round, maxRounds, usedCalls, maxToolCalls,
+            todoSettlementCalls: settlementCalls, maxTodoSettlementCalls: MAX_TODO_SETTLEMENT_CALLS,
+            allowTodo: input.allowTodo === true })
           + (todoBlock === '' ? '' : '\n\n' + todoBlock)
           + (supplements.block === '' ? '' : '\n\n' + supplements.block),
-        turns: wrapUp ? [...turns, { role: 'user', content: contextPressure
-          ? CONTEXT_PRESSURE_WRAP_UP : TOOL_BUDGET_WRAP_UP }] : turns,
-        ...(wrapUp ? { tools: [] } : { tools: declared }),
+        turns: wrapUp ? [...turns, { role: 'user', content: settlementWindow
+          ? TOOL_BUDGET_WRAP_UP_WITH_TODO : contextPressure
+            ? CONTEXT_PRESSURE_WRAP_UP : emptyNudgeRequest
+              ? EMPTY_REPLY_WRAP_UP : TOOL_BUDGET_WRAP_UP }] : turns,
+        ...(wrapUp ? { tools: settlementWindow ? [todoWriteToolSpec()] : [] } : { tools: declared }),
         toolTurns, ...(steers.length === 0 ? {} : { steers: [...steers] }), signal: input.signal,
         ...(input.contextUsage === undefined ? {} : { contextUsage: input.contextUsage }) };
       // MEMORY_TOOL_PRESSURE: never truncate or replay an active tool protocol to make it fit.
@@ -552,6 +687,8 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       }
       response = input.invokeAssist === undefined
         ? await input.modelPort.assist(request) : await input.invokeAssist(request);
+      // 强制收尾只作用在这一条请求上：模型若在这条之后仍需要工具，下一轮照常给它。
+      emptyReplyNudge = false;
     } catch (error) {
       // 只读轮次过去把所有模型异常折叠成 MODEL_FAILED：用户只看到「失败」，排查时分不清
       // 是超时、输出不合法还是预算用尽——真实 Provider 的第一次端到端跑通正是卡在这里
@@ -566,8 +703,12 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         usage, providerRequestIds };
     }
     if (response.kind === 'CANCELLED') {
+      // SESSION_CANCELLED_CALL_EVIDENCE：中断前已返回的请求身份和用量仍是调用事实。
+      if (response.providerRequestId !== undefined && response.providerRequestId !== null) {
+        providerRequestIds.push(response.providerRequestId);
+      }
       return { kind: 'CANCELLED', providerRequestId: response.providerRequestId ?? null,
-        usage, providerRequestIds };
+        usage: addUsage(usage, response.usage), providerRequestIds };
     }
     providerRequestIds.push(response.providerRequestId);
     usage = addUsage(usage, response.usage);
@@ -578,6 +719,16 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         child: session.parent_session_id !== null });
     }
 
+    if (response.kind === 'CONTENT' && response.content.trim() === '') {
+      // 空正文：先要求它基于已有回执作答，仍然为空才如实按「这一条回复没有产出」收敛。
+      // 判成失败的是这一条回复，不是整段任务——工具被拒本身早已作为类型化事实回传。
+      // 强制收尾只给一次机会：反复追问只会把轮次预算烧在同一个空回答上。
+      if (!emptyNudgeRequest && round < maxRounds) {
+        emptyReplyNudge = true;
+        continue;
+      }
+      return { kind: 'FAILED', errorCode: 'MODEL_EMPTY_REPLY', usage, providerRequestIds };
+    }
     if (response.kind === 'CONTENT') {
       // 0122：模型已经给出正文，但这一步之后还有插话到达 → 这一轮不结束，再跑一步。
       // 只在还能再跑一轮时消费（wrapUp 轮之后没有下一次请求）。
@@ -588,7 +739,7 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         if (latest.ids.some((id) => !supplementIds.includes(id))) continue;
       }
       return { kind: 'CONTENT', content: response.content, usage, providerRequestIds,
-        rounds: round };
+        rounds: round, toolCalls: usedCalls };
     }
 
     const results: ModelToolTurnResult[] = [];
@@ -612,6 +763,7 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
               call, usedCalls: batchUsedCalls + index, maxToolCalls, maxRounds,
               resolveOrigin: input.resolveOrigin, allowWrite: false,
               allowTodo: input.allowTodo === true,
+              settlementCalls, maxSettlementCalls: MAX_TODO_SETTLEMENT_CALLS,
               allowDelegate: input.allowDelegate === true, runDelegation: input.runDelegation,
               workerId: input.workerId, signal: input.signal })));
           // Join every started child before propagating a failure to the parent.
@@ -659,12 +811,16 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
         usedCalls, maxToolCalls, maxRounds, resolveOrigin: input.resolveOrigin,
         allowWrite: input.allowWrite ?? false,
         allowTodo: input.allowTodo === true,
+        settlementCalls, maxSettlementCalls: MAX_TODO_SETTLEMENT_CALLS,
         allowDelegate: input.allowDelegate === true,
         runDelegation: input.runDelegation,
         workerId: input.workerId,
         // 0128：委派子轮次沿用本次生成的取消信号；不传下去的话父轮停止后子执行会继续跑。
         signal: input.signal });
-      usedCalls += 1;
+      // 两条额度分开记：待办结算是应用内动作，烧掉一次就等于少读一个文件，模型会
+      // 为了保住读取额度而不写清单——真实用例里的 0/10 就是这么来的。
+      if (call.name === TODO_WRITE_TOOL_NAME && input.allowTodo === true) settlementCalls += 1;
+      else usedCalls += 1;
       results.push(settled);
       if (input.signal.aborted || await isCancelRequested(db, message.id)) {
         return { kind: 'CANCELLED', providerRequestId: response.providerRequestId,
@@ -724,8 +880,17 @@ export async function runAgentSessionReadonlyRounds(db: DbExecutor,
   }
   const system = input.system ??
     selectRuntimeSystemPrompt({ kind: 'AGENT_MAIN_LOOP' }).system;
+  // 注入点与 Worker 身份之外，本轮再问一次「这条会话现在撑得起子执行吗」。只在已经拿得
+  // 到注入点的根会话上查，别为子会话与不支持委派的身份多走一次库。判定按领取时的会话快照：
+  // 目录绑定在有在途消息时会被命令层拒（assist-commands 的在途消息门），因此这一份视图在整轮
+  // 内不会漂移；绑定落地后的下一轮领取时自然读到新行，词表随之把委派工具放回来。
+  const delegationScopeReady = session.parent_session_id === null &&
+    input.runDelegation !== undefined && input.workerId !== undefined &&
+    input.workerId !== ''
+    ? (await resolveDelegationScope(createRepositories(db), session)).ok : false;
   return runSessionReadonlyRounds(db, { session, message, availableTools: input.availableTools,
     modelPort: input.modelPort, signal: input.signal, system,
+    ...(input.responseFormat === undefined ? {} : { responseFormat: input.responseFormat }),
     ...(input.invokeAssist === undefined ? {} : { invokeAssist: input.invokeAssist }),
     ...(input.contextTurns === undefined ? {} : { contextTurns: input.contextTurns }),
     ...(input.contextUsage === undefined ? {} : { contextUsage: input.contextUsage }),
@@ -739,11 +904,13 @@ export async function runAgentSessionReadonlyRounds(db: DbExecutor,
     ...(input.drainSteers === undefined ? {} : { drainSteers: input.drainSteers }),
     ...(input.readExecutionNotice === undefined ? {}
       : { readExecutionNotice: input.readExecutionNotice }),
-    // 0128：委派只对根会话开放（仅一层），且必须有执行注入点与非空 Worker 身份。
-    // 判定抽到 delegateToolDeclared，与结算侧的同一套条件对齐——词表里出现了工具却
-    // 每次都被拒，是最难从现象定位的一类接线缺口。
+    // 0128：委派只对根会话开放（仅一层），必须有执行注入点与非空 Worker 身份，且父会话
+    // 现在真的有可读范围。判定抽到 delegateToolDeclared，与执行侧共用 resolveDelegationScope：
+    // 词表里出现了工具却每次都被拒，是最难从现象定位的一类接线缺口；而执行侧的实时复核
+    // 一步都不能少——声明时可见不代表此刻仍可执行（TOCTOU、撤权、并发换绑）。
     allowDelegate: delegateToolDeclared({ parentSessionId: session.parent_session_id,
-      runDelegation: input.runDelegation, workerId: input.workerId }),
+      runDelegation: input.runDelegation, workerId: input.workerId,
+      delegationScopeReady }),
     ...(input.runDelegation === undefined ? {} : { runDelegation: input.runDelegation }),
     ...(input.workerId === undefined ? {} : { workerId: input.workerId }) });
 }
@@ -775,6 +942,14 @@ export interface SessionReadonlyToolCallContext {
   readonly usedCalls: number;
   readonly maxToolCalls: number;
   readonly maxRounds: number;
+  /**
+   * 本次生成里 `todo_write` 已用次数与上限（2026-11-01）。
+   *
+   * 单独一条额度，不挤占读取次数：清单写回不产生外部副作用，把它算进读取额度只会让
+   * 模型为了保住读取能力而不更新清单。
+   */
+  readonly settlementCalls: number;
+  readonly maxSettlementCalls: number;
   /** 按调用方的会话身份解析本次读取来源；解析失败即类型化拒掉这一次请求。 */
   readonly resolveOrigin: () => Promise<SessionReadOriginResolution>;
   /**
@@ -824,11 +999,35 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
       content: `【${reason}】${detail}`, isError: true };
   };
 
+  /*
+   * 两条额度各自判定（2026-11-01 E2E-ALL-01）。
+   *
+   * 拒因里必须带上「上限是多少、已经用了多少次」：只说「预算已用尽」时，模型既不知道
+   * 自己踩的是哪条墙，也无法在答复里向用户解释为什么后面几步没跑。真实用例里这正是
+   * 「11 个操作、3 个未执行、末尾一句轻描淡写的未能继续」的来源。
+   */
+  if (call.name === TODO_WRITE_TOOL_NAME) {
+    // ADR-038：清单写回是应用内动作，不需要目录也不需要连接，因此它在词表与来源
+    // 判定之前特判；不声明这条身份时如实拒绝，不掉进「不在词表」那句通用原因。
+    if (context.allowTodo !== true) {
+      return refuse('TODO_WRITE_UNAVAILABLE', '这条会话没有声明 todo_write，清单不可在这轮改写。');
+    }
+    if (context.settlementCalls >= context.maxSettlementCalls) {
+      return refuse('TODO_SETTLEMENT_BUDGET_EXHAUSTED',
+        `本轮的清单写回额度（${context.maxSettlementCalls} 次）已用完；` +
+        '请用已有的那一版清单，在正文里说明哪些步骤没有执行。');
+    }
+    return settleTodoWriteCall(db, { session, message: context.message, row, repository, call });
+  }
   if (context.usedCalls >= context.maxToolCalls) {
-    return refuse('SESSION_TOOL_BUDGET_EXHAUSTED', '本次只读工具调用预算已用尽；请用已有结果回答。');
+    return refuse('SESSION_TOOL_BUDGET_EXHAUSTED',
+      `本次工具调用预算已用尽（上限 ${context.maxToolCalls} 次，一次并行声明里的每个请求各占一次）。` +
+      '不要再请求工具：请只用上面已经拿到的结果给出最终答复，并逐项点名哪些步骤没有执行。');
   }
   if (round >= context.maxRounds) {
-    return refuse('SESSION_TOOL_ROUNDS_EXHAUSTED', '本次只读轮次预算已用尽；请用已有结果回答，不要继续请求工具。');
+    return refuse('SESSION_TOOL_ROUNDS_EXHAUSTED',
+      `本次工具轮次预算已用尽（上限 ${context.maxRounds + 1} 轮）。` +
+      '请只用上面已经拿到的结果给出最终答复，并逐项点名哪些步骤没有执行。');
   }
   // 0128：委派是应用内动作，没有 Gateway 动作与连接能力，因此在词表校验之前特判。
   // 两道独立闸门：词表里有没有它（allowDelegate，仅根会话）与这次声明合不合法
@@ -845,14 +1044,6 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
         arguments: call.arguments },
       workerId: context.workerId, signal: context.signal,
       runChild: context.runDelegation });
-  }
-  // ADR-038: todo_write is an in-app action; route it before vocabulary
-  // checks and origin resolution - it needs neither a directory nor a connection.
-  if (call.name === TODO_WRITE_TOOL_NAME) {
-    if (context.allowTodo !== true) {
-      return refuse('TODO_WRITE_UNAVAILABLE', 'todo_write is not declared for this session.');
-    }
-    return settleTodoWriteCall(db, { session, message: context.message, row, repository, call });
   }
   const definition = readInternalTool(call.name);
   if (definition === undefined ||
@@ -924,7 +1115,8 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
   } catch (error) {
     const detail = error instanceof Error ? error.message
       : `本次${capability === 'FILE_WRITE' ? '写入' : '读取'}被准入拒绝。`;
-    return refuse('GATEWAY_ACTION_DENIED', detail);
+    return refuse(error instanceof DomainError && error.code === 'SESSION_WRITE_REQUIRES_RUN'
+      ? error.code : 'GATEWAY_ACTION_DENIED', detail);
   }
   if (prepared.status !== 'PREPARED' && prepared.status !== 'SUCCEEDED') {
     if (prepared.status === 'WAITING_APPROVAL') {

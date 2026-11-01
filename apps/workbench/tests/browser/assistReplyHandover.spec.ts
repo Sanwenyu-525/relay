@@ -23,7 +23,7 @@ const sessionId = "66666666-6666-4666-8666-666666666666";
 const userMessageId = "c1111111-1111-4111-8111-111111111111";
 const assistantMessageId = "c2222222-2222-4222-8222-222222222222";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 const resultsDir = "D:/Develop/Relay-Agent/apps/workbench/results";
 
 const DRAFT = "先把要做的事说清楚：这一段是流式草稿，长度中等，用来量行高、左缘与换行节奏。";

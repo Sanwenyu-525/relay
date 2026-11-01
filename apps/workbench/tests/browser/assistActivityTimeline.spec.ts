@@ -22,7 +22,7 @@ const sessionId = "66666666-6666-4666-8666-666666666666";
 const userMessageId = "c1111111-1111-4111-8111-111111111111";
 const assistantMessageId = "c2222222-2222-4222-8222-222222222222";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 const resultsDir = "D:/Develop/Relay-Agent/apps/workbench/results";
 
 const FINAL = [
@@ -110,9 +110,23 @@ function toolCalls(phase: Phase) {
     ] };
 }
 
+/**
+ * 工具跑完、正文却是空的（P0-3）：这一对消息就是失败行的真实形状。
+ * 工具账本仍按已结算给，失败的是回复本身，不是「什么都没发生」。
+ */
+function failedMessages() {
+  return [
+    message(userMessageId, "1", "USER", "COMPLETED", "把这次的改动过程说清楚"),
+    { ...message(assistantMessageId, "2", "ASSISTANT", "FAILED", null),
+      error_code: "MODEL_EMPTY_REPLY", provider_error_kind: null }
+  ];
+}
+
 type Variant = "normal" | "empty" | "error";
 
-async function installRoutes(page: Page, state: { phase: () => Phase; variant?: () => Variant }): Promise<void> {
+async function installRoutes(page: Page, state: {
+  phase: () => Phase; variant?: () => Variant; failed?: () => boolean
+}): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -135,7 +149,7 @@ async function installRoutes(page: Page, state: { phase: () => Phase; variant?: 
     if (path === `${prefix}/assist-sessions/${sessionId}/goal`)
       return fulfillJson(route, { goal: null, rounds: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`)
-      return fulfillJson(route, { items: messages(state.phase()) });
+      return fulfillJson(route, { items: state.failed?.() ? failedMessages() : messages(state.phase()) });
     if (path.endsWith("/live-preview/events")) {
       await route.fulfill({ status: 502, headers: cors(), body: "" });
       return;
@@ -143,8 +157,11 @@ async function installRoutes(page: Page, state: { phase: () => Phase; variant?: 
     if (path.endsWith("/live-preview")) {
       // 运行中给一段真实草稿：草稿末尾会挂 inline 三点，是「主进度只允许一个」的必检对象。
       const running = state.phase() === "running";
+      // 失败那一例不给 COMPLETED：草稿端点说「没有草稿」，终态仍由消息 DTO 说。
+      const failed = state.failed?.() ?? false;
       return fulfillJson(route, { session_id: sessionId, message_id: assistantMessageId,
-        status: running ? "RUNNING" : "COMPLETED", preview_revision: running ? "2" : "0",
+        status: failed ? "FAILED" : running ? "RUNNING" : "COMPLETED",
+        preview_revision: running ? "2" : "0",
         preview_text: running ? "正在按顺序读取配置并核对依赖。" : null,
         preview_truncated: false, preview_available: running });
     }
@@ -156,7 +173,9 @@ async function installRoutes(page: Page, state: { phase: () => Phase; variant?: 
       if (variant === "empty") return fulfillJson(route, { session_id: sessionId,
         message_id: assistantMessageId, message_status: "COMPLETED", rounds: [] });
       if (variant === "error") return fulfillJson(route, { error: "trace unavailable" }, 500);
-      return fulfillJson(route, toolCalls(state.phase()));
+      const trace = toolCalls(state.phase());
+      // 失败那一例：工具确实结算过，但回复终态是 FAILED，不能由账本说成 COMPLETED。
+      return fulfillJson(route, state.failed?.() ? { ...trace, message_status: "FAILED" } : trace);
     }
     if (/\/assist-messages\/[^/]+\/model-runtime$/u.test(path)) return fulfillJson(route, {
       message_id: assistantMessageId, message_status: "COMPLETED", snapshot_available: false,
@@ -251,12 +270,10 @@ test.describe("统一活动时间线", () => {
     // 有当前行时标题图标不转（它只在「没有当前行」时接手）。
     await expect(page.locator(".activity-header-spin")).toHaveCount(0);
 
-    // 草稿里的 inline 三点必须真实存在——否则「停转」这条断言会在空集合上假通过。
-    const inlineDots = page.locator('.assist-inflight-dots[data-inline="true"] > i');
-    await expect(inlineDots).toHaveCount(3);
-    const dotAnimations = await inlineDots.evaluateAll((nodes) =>
-      nodes.map((node) => getComputedStyle(node).animationName));
-    expect(dotAnimations).toEqual(["none", "none", "none"]);
+    // 2026-10-31 UI-08：工具活动接手后，正文与草稿的三点**整组不在场**——
+    // 不是停转、也不是用 display:none 遮住，而是渲染条件为假。前一版留着静止三点，
+    // 读者看到的是「三个不动的小点和一枚转动的图标」，仍然像两个进度在抢注意力。
+    await expect(page.locator(".assist-inflight-dots")).toHaveCount(0);
 
     // 整条消息里「正在动」的元素恰好一个。
     const moving = await page.locator(
@@ -361,7 +378,7 @@ test.describe("缺口与默认态", () => {
     await expect(trace).toHaveAttribute("data-phase", "EMPTY");
     await expect(trace).toBeVisible();
     await expect(page.getByTestId(`session-round-trace-empty-${assistantMessageId}`))
-      .toContainText("本轮没有调用工具");
+      .toContainText("本次回复没有读取文件，也没有执行任何命令。");
     // 空态不是错误态。
     await expect(page.locator('[data-testid^="session-round-trace-error-"]')).toHaveCount(0);
     await page.screenshot({ path: `${resultsDir}/activity-empty.png`, fullPage: false });
@@ -383,5 +400,58 @@ test.describe("缺口与默认态", () => {
     // 读取失败不能说成「本轮没有调用工具」。
     await expect(page.getByTestId(`session-round-trace-empty-${assistantMessageId}`)).toHaveCount(0);
     await page.screenshot({ path: `${resultsDir}/activity-error.png`, fullPage: false });
+  });
+
+  /**
+   * 一条回复失败的读感（2026-11-01 P0-3 / P1-1 / P2）。
+   *
+   * jsdom 那边锁的是 DOM 里有什么；这里量的是它**占多少版面**：失败不能是一条横贯阅读列的
+   * 红色横幅，机器码在收起状态不得出现在可读文字里，长句在列内折行不撑破页面，
+   * 且不出现后端并没有实现的操作按钮。
+   */
+  test("回复失败：一行说清原因，机器码收进展开，不当横幅也不造按钮", async ({ page }) => {
+    fs.mkdirSync(resultsDir, { recursive: true });
+    await page.setViewportSize({ width: 1270, height: 900 });
+    await installRoutes(page, { phase: () => "settled", failed: () => true });
+    await page.goto(`/projects/${projectId}?skill=assist`);
+    await connect(page);
+
+    const line = page.locator(".assist-failure-line");
+    await expect(line).toBeVisible({ timeout: 20_000 });
+    await expect(line).toContainText("没有给出正文");
+    await expect(line).not.toContainText("MODEL_EMPTY_REPLY");
+
+    // 失败只占一两行高，不铺成横幅：与阅读列同宽，但高度远小于整列。
+    const box = await line.boundingBox();
+    const composer = await page.getByTestId("assist-composer").boundingBox();
+    expect(box).not.toBeNull();
+    expect(composer).not.toBeNull();
+    expect(box!.height).toBeLessThan(60);
+    expect(box!.width).toBeLessThanOrEqual(composer!.width + 1);
+
+    // 图标 + 文字 + role=alert 三通道：颜色不是唯一信号，且没有按钮。
+    await expect(page.locator('.assist-failure-line[role="alert"]')).toHaveCount(1);
+    await expect(page.locator(".assist-failure-line > svg")).toHaveCount(1);
+    await expect(page.locator(".assist-failure button")).toHaveCount(0);
+
+    // 收起时机器码不在屏幕上（`textContent` 含隐藏节点，因此量的是可见性不是字符串）；
+    // 展开才读到，且展开语言仍是同一个右向箭头。
+    const details = page.locator(".assist-failure-details");
+    expect(await details.evaluate((element: HTMLDetailsElement) => element.open)).toBe(false);
+    await expect(details.locator(".helper-text").first()).toBeHidden();
+    await details.locator("summary").click();
+    await expect(details).toHaveAttribute("open", "");
+    await expect(details.locator(".helper-text").first()).toBeVisible();
+    await expect(details).toContainText("MODEL_EMPTY_REPLY");
+    await expect(details.locator(".chat-disclosure-chevron")).toHaveCount(1);
+
+    // 展开后仍不撑破页面：长错误码与时间在列内折行。
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth
+      - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await page.screenshot({ path: `${resultsDir}/assist-failure-expanded.png`, fullPage: false });
+    await details.locator("summary").click();
+    await page.screenshot({ path: `${resultsDir}/assist-failure-collapsed.png`, fullPage: false });
   });
 });

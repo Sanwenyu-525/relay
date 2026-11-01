@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import ChatLocalFileDiff from "./ChatLocalFileDiff";
 import MessageCodeBlock from "./MessageCodeBlock";
 import { useRunToolCalls } from "../lib/useRunToolCalls";
@@ -213,8 +214,8 @@ export default function ExecutionTrajectorySummary({ client, runId, revision = n
           {groups !== null
             ? groups.map(([toolName, calls]) => <li key={toolName} className="execution-read-group">
               {/* 组行是「工具 · N 项」的一行概览，默认收起；计数与上方统计标签同源。 */}
-              <details data-testid={`execution-read-group-${toolName}`}>
-                <summary>{toolName} · {calls.length} 项</summary>
+              <details className="chat-disclosure" data-testid={`execution-read-group-${toolName}`}>
+                <summary><span className="chat-disclosure-chevron" aria-hidden="true"><ChevronRight /></span>{toolName} · {calls.length} 项</summary>
                 <ul className="execution-read-group-items">{calls.map(readItem)}</ul>
               </details>
             </li>)

@@ -6,6 +6,7 @@ import { AssistantProfileRepository } from '../assist/assistant-profile-reposito
 import { ConversationExecutionRepository } from '../assist/conversation-execution-repository.js';
 import { ConversationStateRepository } from '../assist/conversation-state-repository.js';
 import { PlanGoalRepository } from '../assist/plan-goal-repository.js';
+import { SessionTodoRepository } from '../assist/session-todo-repository.js';
 import { SubagentRepository } from '../assist/subagent-repository.js';
 import { LearningRepository } from '../learning/learning-repository.js';
 import { ArtifactRepository } from '../artifact/artifact-repository.js';
@@ -18,6 +19,7 @@ import { KnowledgeGuideRepository } from '../project/knowledge-guide-repository.
 import { ProjectDailyViewRepository } from '../project/project-daily-view-repository.js';
 import { ProjectReturnReviewRepository } from '../project/project-return-review-repository.js';
 import { CommandReceiptRepository } from '../receipt/command-receipt-repository.js';
+import { ModelCallRepository } from '../model/model-call-repository.js';
 import { RunRepository } from '../run/run-repository.js';
 import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { RecoveryRepository } from '../run/recovery-repository.js';
@@ -68,12 +70,26 @@ export interface Repositories {
   readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
+  /**
+   * AGENT_LIVE_TOKEN_USAGE：回复轮次的真实用量只在 `model_calls` 账本里。
+   *
+   * 接进事务上下文是为了让实时预览的「账本 + 在途估算」合并读在同一快照里完成，
+   * 不另开连接读第二遍。
+   */
+  readonly modelCalls: ModelCallRepository;
   readonly assistMemory: AssistMemoryRepository;
   /** 人设 助手配置的独占写入口。配置文本在这里，能力不在这里。 */
   readonly assistantProfiles: AssistantProfileRepository;
   readonly conversationExecutions: ConversationExecutionRepository;
   /** 0127：聊天 `/plan` 与 `/goal` 的计划版本、活动目标、轮次账本与额度授权。 */
   readonly planGoals: PlanGoalRepository;
+  /**
+   * ADR-038：会话待办清单的独占写入口（事件 + 快照 + 轮次归属）。
+   *
+   * 接进事务上下文的原因只有一个：消息准入要在**同一个事务**里冻结这一轮的工作身份，
+   * 归属与用户消息同生共死；用例不该为了这一件事自己再开一个连接。
+   */
+  readonly todos: SessionTodoRepository;
   /**
    * 0128：有界多 Agent 的委派账本与子尝试（ADR-017、运行架构 §2.5）的独占写入口。
    *
@@ -155,10 +171,12 @@ export function createRepositories(db: DbExecutor): Repositories {
     admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
+    modelCalls: new ModelCallRepository(db),
     assistMemory: new AssistMemoryRepository(db),
     assistantProfiles: new AssistantProfileRepository(db),
     conversationExecutions: new ConversationExecutionRepository(db),
     planGoals: new PlanGoalRepository(db),
+    todos: new SessionTodoRepository(db),
     subagents: new SubagentRepository(db),
     conversationState: new ConversationStateRepository(db),
     learning: new LearningRepository(db),

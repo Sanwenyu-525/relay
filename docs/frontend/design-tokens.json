@@ -153,6 +153,21 @@
       "$value": "#C9DBEF",
       "$description": "2026-10-29 新增：运行中焦点行的细边框与时间线连接线。"
     },
+    "color.palette.violet": {
+      "$type": "color",
+      "$value": "#7560B4",
+      "$description": "2026-11-01 新增：上下文构成分类图标用紫。与 azure/amber/forest 同属低饱和带，但明度落在「浅底 ≥3:1、暗底也 ≥3:1」的窗口里（#FFFFFF 上 5.14:1，#1B211D 上 3.19:1），换主题不需要改色值。只给图标着色，不进文字。"
+    },
+    "color.palette.teal": {
+      "$type": "color",
+      "$value": "#2E7D75",
+      "$description": "2026-11-01 新增：上下文构成分类图标用青绿，与 forest（绿）分开两档色相（#FFFFFF 上 4.88:1，#1B211D 上 3.36:1）。"
+    },
+    "color.palette.leaf": {
+      "$type": "color",
+      "$value": "#327C4E",
+      "$description": "2026-11-01 新增：上下文构成分类图标用绿。forest（#205D47）在暗底上只有 2.12:1，因此分类色另取同色相、明度高一档的一枚（#FFFFFF 上 5.09:1，#1B211D 上 3.22:1）；主操作与成功态仍用 forest，不受影响。"
+    },
     "color.bg.canvas": {
       "$type": "color",
       "$value": "{color.palette.paper}"
@@ -277,6 +292,36 @@
     "color.status.running.line": {
       "$type": "color",
       "$value": "{color.palette.azureLine}"
+    },
+    "color.category.history": {
+      "$type": "color",
+      "$value": "{color.palette.azure}",
+      "$description": "2026-11-01 新增：上下文构成「历史消息」图标色（蓝）。只着图标，分类名与数值仍是中性色；含义由名字承担，颜色只做同屏内的快速分组，不作为唯一编码通道。"
+    },
+    "color.category.system": {
+      "$type": "color",
+      "$value": "{color.palette.violet}",
+      "$description": "2026-11-01 新增：上下文构成「系统 / 指令」图标色（紫）。"
+    },
+    "color.category.tools": {
+      "$type": "color",
+      "$value": "{color.palette.amber}",
+      "$description": "2026-11-01 新增：上下文构成「工具调用」图标色（琥珀）。与警示琥珀同值但不同用途：这里不表达风险，只表达分组，风险仍由状态色 + 文字表达。"
+    },
+    "color.category.fileReads": {
+      "$type": "color",
+      "$value": "{color.palette.teal}",
+      "$description": "2026-11-01 新增：上下文构成「文件读取」图标色（青绿）。"
+    },
+    "color.category.memory": {
+      "$type": "color",
+      "$value": "{color.palette.leaf}",
+      "$description": "2026-11-01 新增：上下文构成「记忆 / 资料」图标色（绿）。"
+    },
+    "color.category.other": {
+      "$type": "color",
+      "$value": "{color.palette.control}",
+      "$description": "2026-11-01 新增：上下文构成「其他上下文」图标色（中性灰）。收在六色之末：它是兜底分类，不该比具名分类更显眼。"
     },
     "color.disabled.bg": {
       "$type": "color",
@@ -627,8 +672,8 @@
     },
     "control.meter.size": {
       "$type": "dimension",
-      "$value": "2rem",
-      "$description": "输入区上下文占用圆环直径。数值必须旁标可读文字，圆环本身不单独承载信息。2026-10-25 由 1.125rem 提到 2rem：与同排模型 chip（control.height.compact）同高对齐，用户指认 18px 圆环与 32px 控件并排高度不齐。"
+      "$value": "1.5rem",
+      "$description": "输入区上下文占用圆环的**视觉**直径。2026-10-25 曾由 1.125rem 提到 2rem 以与模型 chip 同高；2026-11-01 按用户指令收回 24px——圆环是辅助读数，32px 会压过同排的文字读数。点击区不跟着缩：按钮盒仍是 control.height.compact（32px），环在其中居中，因此命中区不小于 32×32。数值必须旁标可读文字（Tooltip / aria-label / 详情浮层），圆环本身不单独承载信息。"
     },
     "control.meter.stroke": {
       "$type": "dimension",
@@ -926,6 +971,36 @@
       "foreground": "color.meter.track",
       "background": "color.bg.surface",
       "minimum": 1.2
+    },
+    {
+      "foreground": "color.category.history",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.category.system",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.category.tools",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.category.fileReads",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.category.memory",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.category.other",
+      "background": "color.bg.surface",
+      "minimum": 3
     }
   ]
 }

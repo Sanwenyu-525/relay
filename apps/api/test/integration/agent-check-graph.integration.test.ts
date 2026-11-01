@@ -9,6 +9,8 @@ import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { sql } from 'kysely';
 
 import { createProject } from '../../src/application/create-project.js';
+import { createAssistSession, requestAssistMessage } from '../../src/application/assist-commands.js';
+import { describeSessionExecutionFacts } from '../../src/application/assist-execution-notice.js';
 import { createTask } from '../../src/application/create-task.js';
 import { delegateTask } from '../../src/application/delegate-task.js';
 import { createGatewayConnectionCommand } from '../../src/application/gateway-commands.js';
@@ -92,6 +94,22 @@ test('the production graph continues after a failed check through repair to a pe
         scopeGrant: { resource_id: resource.resourceId,
           allowed_actions: ['APPLY_CHANGESET', 'CLI_RUN'], checks: [check] } });
       const runId = delegated.result.run_id;
+      // 受控建立原消息关联；修正链仍由真实生产图、CLI 和文件入口执行。
+      const sessionId = (await createAssistSession(db, { workspaceId, projectId,
+        commandId: randomUUID(), title: '原执行回执' })).result.session_id;
+      const sent = await requestAssistMessage(db, { workspaceId, sessionId,
+        commandId: randomUUID(), content: '检查失败后修正，再核对结果。' });
+      const requestId = randomUUID();
+      await repositories.conversationExecutions.insertRequest({ id: requestId, workspaceId,
+        projectId, sessionId, sourceMessageId: sent.result.user_message_id,
+        resourceId: resource.resourceId, commandId: randomUUID(), rootPath: root,
+        baseContentSha256: createHash('sha256').update('检查失败后修正，再核对结果。').digest(),
+        taskCommandId: randomUUID(), readyCommandId: randomUUID(), delegateCommandId: randomUUID(),
+        executionKind: 'FILE_SCOPE', machineCapability: null });
+      await repositories.conversationExecutions.saveInterpretation(requestId, {
+        decision: 'PREPARE', candidateStatus: 'READY', status: 'READY', candidate: {}, clarification: null });
+      await repositories.conversationExecutions.advanceStage(requestId, { from: ['READY'],
+        status: 'DELEGATED', taskId: task.result.task_id, runId });
       const fakeToolScript: FakeToolScript = [
         [{ name: 'run_check', arguments: { check_id: 'tests' } }],
         [{ name: 'read_file', arguments: { relative_path: 'src/value.txt' } }],
@@ -119,6 +137,16 @@ test('the production graph continues after a failed check through repair to a pe
       assert.equal(rows[3]!.result_ref?.exitCode, 0);
       assert.equal(rows[3]!.result_ref?.outcome, 'SUCCEEDED');
       assert.equal(rows[3]!.result_ref?.stdout, `verified=${repaired.trim()}\n`);
+      const session = await repositories.assist.readSession(sessionId);
+      assert.ok(session);
+      const facts = await describeSessionExecutionFacts(repositories, session, 3n);
+      assert.ok(facts);
+      assert.ok(facts.includes(rows[0]!.id), '原会话应读到首次失败检查的确切回执');
+      assert.ok(facts.includes(rows[3]!.id), '原会话应读到修正后检查的确切回执');
+      assert.ok(facts.includes('"exit_code":1'));
+      assert.ok(facts.includes('"exit_code":0'));
+      assert.equal(facts.includes(`verified=${repaired.trim()}`), false, '不把原始命令输出注入会话');
+      assert.ok(facts.includes('不等于业务验收完成'));
       const operations = await repositories.gateway.listRunOperations(runId);
       assert.equal(operations.length, 4);
       const failed = await repositories.gateway.readOperation(rows[0]!.operation_id!);
@@ -180,6 +208,20 @@ test('the production graph continues after a failed check through repair to a pe
       assert.equal(await readFile(target, 'utf8'), repaired);
       assert.equal(await readFile(join(root, 'notes.txt'), 'utf8'), unrelated);
       assert.equal(await readFile(checker, 'utf8'), checkerText);
+      // 旧工具行虽 SETTLED，权威 Operation 为 UNKNOWN 时不能继续投影旧退出码。
+      await repositories.gateway.setOperationStatus(rows[3]!.operation_id!, 'UNKNOWN', rows[3]!.result_ref);
+      const uncertain = await describeSessionExecutionFacts(repositories, session, 3n);
+      assert.ok(uncertain);
+      const receiptLine = uncertain.split('\n').find((line) => line.includes('检查命令回执（不等于正式验证）：'))!;
+      const receiptData = JSON.parse(receiptLine.slice(receiptLine.indexOf('{'))) as {
+        receipts: { tool_call_id: string; operation_status: string; exit_code: number | null;
+          outcome: string | null }[] };
+      const unknownReceipt = receiptData.receipts.find((item) => item.tool_call_id === rows[3]!.id);
+      assert.ok(unknownReceipt);
+      assert.equal(unknownReceipt.operation_status, 'UNKNOWN');
+      assert.equal(unknownReceipt.exit_code, null);
+      assert.equal(unknownReceipt.outcome, null);
+      assert.deepEqual(await repositories.toolCalls.listByRun(runId), rows, '读取回执不重放工具');
     } finally {
       await app?.close();
       await database.drop();

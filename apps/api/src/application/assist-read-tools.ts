@@ -9,12 +9,20 @@ import { createRepositories, type Repositories } from './unit-of-work.js';
 /**
  * 会话绑定的受管资源。
  *
- * 判定口径与执行时的 `agentSessionReadOrigin()` 一致：同工作区、同项目、ACTIVE；
- * 会话绑了目录就取那一个，没绑时不猜（只有一个候选才取，多个候选返回 undefined）。
+ * 判定必须与**这一条会话真正会被用到的来源解析**一致，否则词表与准入分叉：
+ *   * 普通 Agent 主流程走 `agentSessionReadOrigin()`，只认会话行上持久绑定的那一个资源，
+ *     不按项目猜；所以这里对 AGENT 也不猜。
+ *   * 人设助手与学习档走 `assistantReadOrigin()`，本来就按项目取唯一 ACTIVE 资源；
+ *     对它们来说「只有一个候选才取，多个候选返回 undefined」才是正确口径。
+ *
+ * 2026-11-01 全链路测试暴露的分叉正是 AGENT 走了猜测那一支：会话没绑目录、项目里恰好
+ * 只有一个受管根，于是 `read_file`/`list_directory` 被声明给模型，每一次调用却被来源解析
+ * 拒掉，而拒掉的请求照样占读取额度——「11 个操作、3 个未执行」里有这一层。
  * 抽出来是为了让「能不能写」与「能看见哪些工具」用同一个资源，而不是各算一遍。
  */
 async function sessionResource(repositories: Repositories, session: AssistSessionRow) {
   if (session.project_id === null) return undefined;
+  if (session.conversation_mode === 'AGENT' && session.working_resource_id === null) return undefined;
   const resources = (await repositories.gateway.listResources())
     .filter((resource) => resource.workspace_id === session.workspace_id &&
       resource.project_id === session.project_id && resource.status === 'ACTIVE');

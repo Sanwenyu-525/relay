@@ -144,11 +144,17 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
   const readinessTier = tierOf(readiness);
   const tier: Tier = scopeMissing ? "unbound" : readinessTier;
   const label = tierLabels[tier];
-  // 没有目录时芯片读的是「工作区默认档位」，但只显示档位名（2026-10-22 用户指令去掉「默认」前缀）。
-  // 「此刻仍什么都写不了、这一档说的是以后新开的目录」由悬停说明、行内说明与上方状态行承载。
+  // 没有目录时芯片读的是「工作区默认档位」，具体怎么说见下面 chipLabel 那段。
   const defaultChoice = scopeMissing ? choiceOf(workspaceDefault?.defaultWriteTier ?? null) : null;
   const defaultTier = defaultChoice === null ? null : choiceTiers[defaultChoice];
-  const chipLabel = defaultTier === null ? label : tierLabels[defaultTier];
+  /*
+   * 没有目录时芯片读的是**工作区默认档位**——它说的是「以后第一次打开某个目录时那一行按什么
+   * 起步」，不是「这条会话现在能写」。2026-10-22 的指令去掉了「默认 · 」前缀（当时嫌芯片啰嗦），
+   * 2026-11-01 的真实全链路测试把它记成了一起误读：顶栏说「未绑定目录」，芯片同时说「完全访问」，
+   * 用户据此认为本轮可以写文件，而服务端本轮根本没有声明写工具。
+   * 那两个读数必须能同屏分辨，因此这里补回作用域限定词：芯片短，但「默认」二字在。
+   */
+  const chipLabel = defaultTier === null ? label : `默认·${tierLabels[defaultTier]}`;
   const TierIcon = defaultTier === null ? tierIcons[tier] : tierIcons[defaultTier];
   const onTierRef = useRef(onTier);
   onTierRef.current = onTier;

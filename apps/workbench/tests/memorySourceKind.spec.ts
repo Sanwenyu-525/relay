@@ -55,5 +55,10 @@ describe("记忆来源类别", () => {
     expect(memorySourceRefFrom(base).sourceKind).toBe("UNKNOWN");
     expect(memorySourceRefFrom({ ...base, kind: "KNOWLEDGE", source_kind: "USER_STATEMENT" })
       .sourceKind).toBeNull();
+    // 2026-11-01：消息来源记录缺 origin 读成未标注，不默认成人工确认；
+    // 只有记录里明确写下的 HUMAN_CONFIRMED 才是人工确认。
+    expect(memorySourceRefFrom(base).origin).toBeNull();
+    expect(memorySourceRefFrom({ ...base, origin: "HUMAN_CONFIRMED" }).origin)
+      .toBe("HUMAN_CONFIRMED");
   });
 });

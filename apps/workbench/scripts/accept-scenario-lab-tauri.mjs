@@ -125,6 +125,47 @@ function gitEvidence() {
     return { head: "", branch: "", dirty: null, capturedAt: new Date().toISOString() };
   }
 }
+/**
+ * 目录在宽窗是常驻列、窄窗是覆盖抽屉。
+ * 选场景前先保证目录可见，再按分类展开命中的那一组——不依赖旧界面「145 条全铺开」的前提。
+ */
+async function pickScenario(page, id) {
+  const directory = page.locator(".scenario-lab-directory");
+  if (await directory.isHidden()) {
+    await page.locator('[data-testid="scenario-directory-toggle"]').click();
+    await directory.waitFor({ state: "visible", timeout: 5_000 });
+  }
+  const group = page.locator(`[data-testid="scenario-group-${id.charAt(0)}"]`);
+  const item = page.locator(`[data-testid="scenario-pick-${id}"]`);
+  if (!(await item.isVisible())) {
+    await group.click();
+    await item.waitFor({ state: "visible", timeout: 5_000 });
+  }
+  await item.click();
+  await page.waitForSelector(`[data-scenario-preview] [data-scenario-id="${id}"]`, { timeout: 10_000 });
+}
+
+/** 展示设置（展开所有、动效开关）收在检查面板里；先按需打开并切到该页签。 */
+async function openInspectorTab(page, tab) {
+  const toggle = page.locator('[data-testid="scenario-inspector-toggle"]');
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+    await page.waitForFunction(() => document
+      .querySelector('[data-testid="scenario-inspector-toggle"]')?.getAttribute("aria-expanded") === "true");
+  }
+  await page.locator(`[data-testid="scenario-inspector-tab-${tab}"]`).click();
+}
+
+/** 宽窗用预览头的「收起检查」；窄窗抽屉盖住那颗开关，用面板自己的关闭键。 */
+async function closeInspector(page) {
+  // 1180 以下检查面板已是覆盖抽屉，预览头的开关会被遮罩盖住，用面板自己的关闭键。
+  const overlay = await page.evaluate(() => window.innerWidth <= 1180);
+  if (overlay) await page.locator('[data-testid="scenario-inspector-close"]').click();
+  else await page.locator('[data-testid="scenario-inspector-toggle"]').click();
+  await page.waitForFunction(() => document
+    .querySelector('[data-testid="scenario-inspector"]')?.getAttribute("data-open") === "false");
+}
+
 function check(name, fn) {
   return Promise.resolve().then(fn).then(
     (detail) => results.push({ name, ok: true, detail: detail ?? "" }),
@@ -201,7 +242,7 @@ async function main() {
     return "1 处，title=AI 回复场景实验室";
   });
 
-  await check("点击入口打开实验室：145 条场景、三栏、面包屑", async () => {
+  await check("点击入口打开实验室：145 条场景、预览优先布局、面包屑", async () => {
     await page.getByRole("navigation", { name: "辅助导航" }).locator(ENTRY).click();
     await page.waitForSelector(".scenario-lab-page", { timeout: 15_000 });
     phase = "lab";
@@ -213,12 +254,31 @@ async function main() {
     const breadcrumb = page.getByRole("navigation", { name: "面包屑" });
     assert.match(await breadcrumb.innerText(), /AI 回复场景实验室/u);
     assert.equal(await page.locator("[data-scenario-preview] [data-scenario-id]").count(), 1);
-    return `目录 ${String(picks)} 条，manifest ${String(manifest.length)} 条`;
+    // page-focused：近期工作栏让位给开发者工作区，普通页的收起偏好不受影响。
+    assert.equal(await page.locator(".app-context-rail").isHidden(), true, "实验室应隐藏近期工作栏");
+    // 预览优先：目录是窄导航列，检查面板默认不占宽度。
+    const geometry = await page.evaluate(() => {
+      const box = (selector) => {
+        const node = document.querySelector(selector);
+        if (node === null) return null;
+        const width = Math.round(node.getBoundingClientRect().width);
+        // display:none 的面板 querySelector 找得到，但几何是 0；按「不占位」返回 null。
+        return width > 0 ? width : null;
+      };
+      return { directory: box(".scenario-lab-directory"), stage: box(".scenario-lab-stage"),
+        inspector: box(".scenario-lab-inspector") };
+    });
+    assert.ok(geometry.directory >= 220 && geometry.directory <= 250,
+      `目录宽度 ${String(geometry.directory)}px 不在 220–250 档`);
+    assert.ok(geometry.stage > 800, `预览列只有 ${String(geometry.stage)}px，没有拿到主体宽度`);
+    assert.equal(geometry.inspector, null, "检查面板默认不应占据预览宽度");
+    assert.equal(await page.locator('[data-testid="scenario-inspector"]').getAttribute("data-open"), "false");
+    return `目录 ${String(picks)} 条；目录 ${String(geometry.directory)}px，预览 ${String(geometry.stage)}px，检查面板默认关闭`;
   });
 
   await check("工具展开正常：F05 多轮工具轨迹能逐行展开/收起", async () => {
-    await page.locator('[data-testid="scenario-pick-F05"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="F05"]');
+    await pickScenario(page, "F05");
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-expand-all"]').click();
     await page.waitForTimeout(300);
     const expanded = await page.evaluate(() => {
@@ -235,14 +295,16 @@ async function main() {
     const collapsed = await page.evaluate(() => document
       .querySelectorAll('[data-scenario-preview] button[aria-expanded="true"]').length);
     assert.equal(collapsed, 0, "收起后仍有展开着的按钮");
+    await closeInspector(page);
     return `展开 ${String(expanded.buttons)} 个工具行 + ${String(expanded.details)} 个原生 details，收起后归零`;
   });
 
   await check("动画播放正常：A04 播放推进虚拟帧，预览里有在跑的动画", async () => {
-    await page.locator('[data-testid="scenario-pick-A04"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="A04"]');
+    await pickScenario(page, "A04");
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-motion-on"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
+    await closeInspector(page);
     const head = page.locator(".scenario-lab-controls-head");
     assert.match(await head.innerText(), /第 1\/3 帧/u);
     await page.locator('[data-testid="scenario-play"]').click();
@@ -272,10 +334,11 @@ async function main() {
    *   * 动画层：运行中的「主进度动画」恰好一个，其余动画只登记类别，不数量硬凑。
    */
   await check("D04 主进度唯一：只有当前行转动，普通动画不计成第二个主进度", async () => {
-    await page.locator('[data-testid="scenario-pick-D04"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="D04"]');
+    await pickScenario(page, "D04");
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-motion-on"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
+    await closeInspector(page);
     await page.waitForTimeout(500);
     const reading = await page.evaluate(() => {
       const root = document.querySelector("[data-scenario-preview]");
@@ -325,21 +388,20 @@ async function main() {
       (nodes) => nodes.filter((node) => getComputedStyle(node).animationName !== "none").length);
     assert.ok(before > 0, "开启动效时没有受控动画在跑，这条测量没有意义");
     const infoBefore = await page.locator("[data-scenario-preview]").innerText();
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-motion-off"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.motion === "off");
+    await closeInspector(page);
     const after = await page.locator(selector).evaluateAll(
       (nodes) => nodes.filter((node) => getComputedStyle(node).animationName !== "none").length);
     assert.equal(after, 0, "关掉动效后主进度仍在动画");
     assert.equal(await page.locator("[data-scenario-preview]").innerText(), infoBefore,
       "关闭动效不能顺手少掉信息");
-    await page.locator('[data-testid="scenario-motion-on"]').click();
-    await page.waitForFunction(() => document.documentElement.dataset.motion === "on");
     return "受控主进度从 1 条降为 0，过程文本不变";
   });
 
   await check("B01 工具行展开/收起不卸载节点", async () => {
-    await page.locator('[data-testid="scenario-pick-B01"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="B01"]');
+    await pickScenario(page, "B01");
     const row = page.locator("[data-scenario-preview] .activity-item").first();
     assert.equal(await row.count(), 1, "B01 没有工具行");
     await row.evaluate((node) => { node.dataset.tauriProbe = "kept"; });
@@ -358,9 +420,10 @@ async function main() {
   });
 
   await check("长工具详情不撑宽页面：F07 展开后无页面级横向溢出", async () => {
-    await page.locator('[data-testid="scenario-pick-F07"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="F07"]');
+    await pickScenario(page, "F07");
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-expand-all"]').click();
+    await closeInspector(page);
     await page.waitForTimeout(400);
     const reading = await page.evaluate(() => {
       const root = document.querySelector("[data-scenario-preview]");
@@ -410,7 +473,7 @@ async function main() {
     return `${origin.url} 原样恢复，存储只动了视图偏好`;
   });
 
-  await check("窄窗 560：入口可达、三栏重排、控制器可用、长详情不撑宽", async () => {
+  await check("窄窗 560：预览优先、目录与检查面板浮出、控制器可用、长详情不撑宽", async () => {
     const size = await setWindowSize(page, 560, 760);
     assert.ok(size.width <= 640, `真窗口没缩到窄窗档：innerWidth=${String(size.width)}`);
     assert.ok(size.width < 1100, `窄窗判定阈值未达到：innerWidth=${String(size.width)}`);
@@ -425,13 +488,25 @@ async function main() {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth
       - document.documentElement.clientWidth);
     assert.ok(overflow <= 0, `窄窗下出现 ${String(overflow)}px 页面级横向溢出`);
-    const order = await page.evaluate(() => [".scenario-lab-directory", ".scenario-lab-stage", ".scenario-lab-controls"]
-      .map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().top ?? -1)));
-    assert.ok(order[0] < order[1] && order[1] < order[2], `窄窗三栏没有纵向重排：${order.join(" < ")}`);
+
+    // 预览第一：目录默认收进抽屉，舞台宽度不被目录或播放条之外的东西挤占。
+    assert.equal(await page.locator(".scenario-lab-directory").isHidden(), true, "窄窗目录应默认收起");
+    const stageWidth = await page.evaluate(() => Math.round(
+      document.querySelector(".scenario-lab-stage")?.getBoundingClientRect().width ?? 0));
+    assert.ok(stageWidth > 480, `窄窗预览只有 ${String(stageWidth)}px`);
+    await page.locator('[data-testid="scenario-directory-toggle"]').click();
+    assert.equal(await page.locator(".scenario-lab-directory").isVisible(), true, "目录抽屉没有打开");
+    const drawerWidth = await page.evaluate(() => Math.round(
+      document.querySelector(".scenario-lab-directory")?.getBoundingClientRect().width ?? 0));
+    assert.ok(drawerWidth <= Math.round(size.width * 0.94),
+      `目录抽屉宽 ${String(drawerWidth)}px 越出窄窗`);
+    const stageWhileDrawer = await page.evaluate(() => Math.round(
+      document.querySelector(".scenario-lab-stage")?.getBoundingClientRect().width ?? 0));
+    assert.equal(stageWhileDrawer, stageWidth, "目录抽屉把预览列挤窄了");
+    await page.locator('[data-testid="scenario-directory-close"]').click();
 
     // 「操作区可用」不是只看排布：按钮要有可点区域、不越出视口，并且真能推进一帧。
-    await page.locator('[data-testid="scenario-pick-A04"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="A04"]');
+    await pickScenario(page, "A04");
     const controls = await page.evaluate(() => {
       const panel = document.querySelector(".scenario-lab-controls");
       const buttons = panel === null ? []
@@ -441,21 +516,30 @@ async function main() {
         const rect = node.getBoundingClientRect();
         return rect.width < 8 || rect.height < 8 || rect.left < -1 || rect.right > window.innerWidth + 1;
       }).map((node) => node.getAttribute("data-testid"));
-      return { present: panel !== null, buttons: buttons.length, clipped };
+      return { present: panel !== null, buttons: buttons.length, clipped,
+        height: Math.round(panel?.getBoundingClientRect().height ?? 0) };
     });
-    assert.ok(controls.present, "窄窗下没有控制器");
-    assert.ok(controls.buttons > 0, "控制器里没有可见按钮");
+    assert.ok(controls.present, "窄窗下没有播放控制条");
+    assert.ok(controls.buttons > 0, "播放控制条里没有可见按钮");
     assert.deepEqual(controls.clipped, [], `窄窗下按钮被裁切或越界：${controls.clipped.join(" / ")}`);
+    assert.ok(controls.height < 100, `窄窗播放条高 ${String(controls.height)}px，被撑成多层`);
     const step = page.locator('[data-testid="scenario-step"]');
     assert.equal(await step.isEnabled(), true, "窄窗下「单步」不可用");
     await step.click();
     await page.waitForFunction(() => /第 2\/3 帧/u.test(
       document.querySelector(".scenario-lab-controls-head")?.textContent ?? ""), null, { timeout: 5_000 });
 
+    // 检查面板走抽屉，窄窗只能盖住预览而不是把预览列挤窄。
+    await page.locator('[data-testid="scenario-inspector-toggle"]').click();
+    assert.equal(await page.locator(".scenario-lab-inspector").isVisible(), true, "检查面板抽屉没有打开");
+    const stageWithInspector = await page.evaluate(() => Math.round(
+      document.querySelector(".scenario-lab-stage")?.getBoundingClientRect().width ?? 0));
+    assert.equal(stageWithInspector, stageWidth, "检查面板抽屉把预览列挤窄了");
+
     // 长工具详情在窄窗同样只能在自己容器里滚动，不能把页面顶宽。
-    await page.locator('[data-testid="scenario-pick-F07"]').click();
-    await page.waitForSelector('[data-scenario-preview] [data-scenario-id="F07"]');
+    await openInspectorTab(page, "display");
     await page.locator('[data-testid="scenario-expand-all"]').click();
+    await closeInspector(page);
     await page.waitForTimeout(400);
     const wide = await page.evaluate(() => {
       const root = document.querySelector("[data-scenario-preview]");
@@ -479,7 +563,9 @@ async function main() {
     await page.locator('[data-testid="scenario-back-to-workbench"]').click();
     await page.waitForURL(/\/agent$/u, { timeout: 10_000 });
     phase = "return";
-    return `innerWidth=${String(size.width)}，三栏 top ${order.join(" < ")}，可见按钮 ${String(controls.buttons)} 个且单步可用，F07 长内容 ${String(wide.measured)} 块、页面溢出 0`;
+    return `innerWidth=${String(size.width)}，预览 ${String(stageWidth)}px 未被抽屉挤窄，`
+      + `播放条 ${String(controls.height)}px / 可见按钮 ${String(controls.buttons)} 个且单步可用，`
+      + `F07 长内容 ${String(wide.measured)} 块、页面溢出 0`;
   });
 
   await check("实验室自身没有资源/路由错误，也没有连真实执行系统", async () => {

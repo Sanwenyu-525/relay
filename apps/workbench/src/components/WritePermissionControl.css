@@ -13,11 +13,25 @@
    只使用既有 token。 */
 .agent-chat-permission { position: relative; display: inline-flex; }
 .agent-chat-permission-chip { list-style: none; }
+/* UI-COMPOSER-ALIGN（2026-11-01）：chip 高度固定为 compact（32px），标签一旦折行
+   就会溢出到相邻行（390 宽实测：权限标签被挤成两行、文字 Range 37.5px）。
+   这一枚是单行键：宽度不足时整枚换到下一行，不把第二行文字压在下一行控件上。
+   目标选择 chip 不在此列——它的项目/任务名没有 ellipsis 容器，允许沿用旧折行。 */
+.agent-chat-permission-chip { white-space: nowrap; }
 .agent-chat-permission-chip::-webkit-details-marker { display: none; }
 .agent-chat-permission-chip svg:not(.agent-chat-chip-chevron) {
   width: var(--relay-control-icon-size);
   height: var(--relay-control-icon-size);
   flex: none;
+}
+/* UI-COMPOSER-ALIGN（2026-11-01）：完全访问档的三角警示图标在 20px SVG 盒里居中，
+   但路径本身底边重，墨迹加权重心比工具行中心低 1.69px（真实 Chromium 1280×900 实测
+   827.69 vs 826.00），与同排 14px 标签（重心 825.78）并排时读成图标偏下沉。
+   盒模型与命中区都无误，只对这一档的路径做 1px 光学补偿；眼/手掌/圆勾/禁止等
+   对称路径不适用，也不改动任何几何尺寸与间距。 */
+.agent-chat-permission-chip[data-tier="full"] > svg:not(.agent-chat-chip-chevron),
+.agent-chat-permission-chip[data-default-tier="full"] > svg:not(.agent-chat-chip-chevron) {
+  translate: 0 -1px;
 }
 .agent-chat-permission[open] .agent-chat-permission-chip {
   background: var(--relay-color-selection-hover);

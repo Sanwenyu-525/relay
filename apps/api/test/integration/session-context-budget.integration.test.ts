@@ -420,3 +420,66 @@ test('SB-10: HTTP 面——畸形 source_session_id 被请求契约明确拒绝�
     assert.equal(await tier(createdId), 262_144, '来源不存在按默认档建会话');
   } finally { await api.stop(); }
 });
+
+test('SB-11: 辅助外呼（记忆提取/压缩）进账本，但不抢「最近一次调用」的读数', async () => {
+  const workspaceId = await workspace();
+  const sessionId = await session(workspaceId);
+  await setSessionContextBudget(app.db, { workspaceId, sessionId, commandId: randomUUID(),
+    expectedRevision: '0', budgetTokens: 524_288 });
+  const sent = await requestAssistMessage(app.db, { workspaceId, sessionId,
+    commandId: randomUUID(), content: '帮我看看这段说明。' }, env);
+  const config = readModelPortConfig(env);
+  assert.ok(config);
+  const ticked = await runAssistGenerationTick(app.db, { workerId: randomUUID(),
+    storage: new ManagedContentStore(dataRoot),
+    modelPort: new OpenAiCompatibleModelPort(config, transport),
+    modelEnv: env, modelFetchDependencies: transport, leaseMs: 60_000 });
+  assert.equal(ticked?.status, 'COMPLETED', JSON.stringify(ticked));
+
+  const before = await readSessionContextUsage(app.db, workspaceId, sessionId);
+  assert.equal(before.last_call?.input_tokens, 1_200, '面向用户的那次调用是最近一次调用');
+
+  // 造一条辅助调用：同一条助手消息、晚一秒、输入很小、没有分项——真实形态就是
+  // 记忆提取/压缩那一类外呼。应用角色没有 model_calls 的写权限，用迁移角色插入。
+  const migrator = new Client({ connectionString: MIGRATION_DATABASE_URL });
+  await migrator.connect();
+  try {
+    await migrator.query(`insert into model_calls (id, workspace_id, kind, assist_message_id,
+      provider, model, config_fingerprint, status, usage_input_tokens, usage_output_tokens,
+      budget_reserved_tokens, purpose, started_at, settled_at)
+      values ($1, $2, 'ASSIST', $3, 'openai-compatible', 'fixture-model',
+      repeat('a', 64),
+      'COMPLETED', 512, 6, 524288, 'MEMORY_CAPTURE', now(), now())`,
+    [randomUUID(), workspaceId, sent.result.assistant_message_id]);
+  } finally { await migrator.end(); }
+
+  const after = await readSessionContextUsage(app.db, workspaceId, sessionId);
+  assert.equal(after.last_call?.input_tokens, 1_200,
+    '辅助调用不覆盖最近一次调用的读数（否则用户看到的是 512 tokens 的提取调用）');
+  assert.ok(after.last_call?.breakdown, '面向用户的那次调用仍然带着分项');
+});
+
+test('SB-12: 投影给出「下次调用会申请的预算」；窗口未知时不冒充可用容量', async () => {
+  const workspaceId = await workspace();
+  const sessionId = await session(workspaceId);
+  await setSessionContextBudget(app.db, { workspaceId, sessionId, commandId: randomUUID(),
+    expectedRevision: '0', budgetTokens: 1_048_576 });
+
+  const usage = await readSessionContextUsage(app.db, workspaceId, sessionId, env);
+  assert.equal(usage.next_call?.reservation_tokens, 1_048_576, '按当前档位申请');
+  assert.equal(usage.next_call?.context_budget_tokens, 1_048_576);
+  assert.equal(usage.next_call?.provider_window_tokens, null, '默认连接没有模型窗口事实');
+  assert.equal(usage.next_call?.window_source, 'UNKNOWN', '窗口未知就如实说未知');
+
+  // HTTP 面也带同一份事实（响应 schema 是 strict：未声明的字段会被丢掉）。
+  const api = await startTestApi({ env });
+  try {
+    const body = await api.get(workspacePath(workspaceId,
+      `/assist-sessions/${sessionId}/context-usage`));
+    assert.equal(body.status, 200, body.text);
+    const next = (body.body as { next_call: { reservation_tokens: number;
+      window_source: string } }).next_call;
+    assert.equal(next.reservation_tokens, 1_048_576);
+    assert.equal(next.window_source, 'UNKNOWN');
+  } finally { await api.stop(); }
+});

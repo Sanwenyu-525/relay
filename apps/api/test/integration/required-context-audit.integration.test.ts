@@ -246,3 +246,21 @@ test('不同 Agent 的规则入口不同：同一目录换 Agent 得到不同清
   assert.deepEqual(claude.files.map((file) => file.path), ['CLAUDE.md']);
   assert.equal(claude.files[0]!.category, 'AUTO_INJECTED');
 });
+
+/**
+ * BUG-CHAT-CONTEXT-CROSS-TALK：目录真实路径核对失败时如实说「没法扫」。
+ *
+ * 用户截图里的「无法完成风险检查：目录已不存在或无法核对真实路径」不是前端自造文案：
+ * 默认工作目录指向一个已被删除的临时目录时，服务端就落到这一档。这里钉住状态、原因与
+ * 「没有文件清单」——不得吞掉路径错误，也不得虚构一个可用目录。
+ */
+test('目录已不存在时如实返回 SCAN_UNAVAILABLE，不虚构有效目录', async () => {
+  const item = await fixture({ withFileRead: true, files: { 'AGENTS.md': 'a'.repeat(1_024) } });
+  await rm(item.root, { recursive: true, force: true });
+  const audit = await readAudit(item, '?agent=relay&refresh=1');
+  assert.equal(audit.state, 'SCAN_UNAVAILABLE');
+  assert.equal(audit.detail, '目录已不存在或无法核对真实路径。');
+  assert.equal(audit.fingerprint, 'unresolved');
+  assert.equal(audit.severity, 'NONE');
+  assert.deepEqual(audit.files, []);
+});

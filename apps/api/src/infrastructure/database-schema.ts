@@ -1074,6 +1074,14 @@ export interface ConversationExecutionRequestRow {
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
+  /**
+   * 0154：来源消息的序号与正文摘要。会话被物理删除后由删除路径补齐，两列是脱钩之后
+   * 唯一还能核对「这条请求当初来自哪条消息」的凭据——摘要只能核对，不能还原正文。
+   */
+  readonly source_message_seq: bigint | null;
+  readonly source_message_sha256: Buffer | null;
+  /** 0154：非空表示来源聊天已删除，这条请求不能再被推进成新的 Task/Run（失败关闭）。 */
+  readonly source_detached_at: Date | null;
 }
 
 export type StateMaintenanceDecision = 'DISCUSS' | 'CLARIFY' | 'MAINTAIN';
@@ -1698,6 +1706,11 @@ export interface AssistMessagePreviewRow {
   readonly revision: bigint;
   readonly preview_text: string;
   readonly truncated: boolean;
+  /**
+   * 0155：当前在途调用的可丢弃用量估算（生成本身仍以 `model_calls` 为唯一账本）。
+   * null 表示还没有可用的估算，不是 0。
+   */
+  readonly usage: JsonObject | null;
   readonly updated_at: Date;
 }
 
@@ -1772,10 +1785,18 @@ export interface ModelCallRow {
   readonly usage_cache_creation_tokens: number | null;
   readonly budget_reserved_tokens: number | null;
   /**
+   * 0153：这次外呼的用途。
+   *
+   * `PRIMARY` 是面向用户的生成（含多轮工具续轮）；`MEMORY_CAPTURE` / `MEMORY_COMPACT`
+   * 是记忆提取与压缩这两类辅助外呼——它们同样进账本与预算闸门，但不参与
+   * 「最近一次调用」的读数，也不采上下文分项（不是对话上下文）。
+   */
+  readonly purpose: 'PRIMARY' | 'MEMORY_CAPTURE' | 'MEMORY_COMPACT';
+  /**
    * 0145：这次调用送进模型的上下文构成（分类 + 估算 token）。
    *
    * 只存数值与来源分类，不存提示词、文件正文、工具输出或路径。NULL = 该调用没有采集
-   * （0145 之前的行，以及记忆提取这类不是「对话上下文」的调用）。
+   * （0145 之前的行，以及记忆提取/压缩这类 `purpose <> 'PRIMARY'` 的辅助外呼）。
    */
   readonly context_usage: JsonObject | null;
   readonly error_kind: string | null;

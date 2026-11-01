@@ -76,7 +76,7 @@ for (const tools of [false, true]) {
     const f = await fixture(tools);
     const marker = `MEMORY-${randomUUID()}`;
     const memory = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
-      commandId: randomUUID(), title: 'memory preference', text: marker, confirmed: true });
+      commandId: randomUUID(), title: 'memory preferences', text: marker, confirmed: true });
     const other = await fixture();
     const privateMarker = `PRIVATE-${randomUUID()}`;
     await createMemory(app.db, { workspaceId: other.workspaceId, projectId: other.projectId,
@@ -101,7 +101,7 @@ test('explicit memory sources do not consume the automatic recall candidate limi
   const f = await fixture();
   const r = createRepositories(app.db);
   const eligible = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
-    commandId: randomUUID(), title: 'retained', text: 'older eligible preference', confirmed: true });
+    commandId: randomUUID(), title: 'explicit retained', text: 'older explicit preference', confirmed: true });
   const excluded = new Set<string>();
   for (let i = 0; i < 8; i++) {
     const saved = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
@@ -130,7 +130,10 @@ test('message save requires confirmation, exact source hash and scope; provenanc
   const provenance = await api.get(f.path(`/memories/${id}/provenance`));
   assert.equal(provenance.status, 200, provenance.text);
   assert.equal((provenance.body as { sources: { message_id: string }[] }).sources[0]?.message_id, sent.user_message_id);
-  assert.ok((await createRepositories(app.db).assist.listDeleteBlockers(f.sessionId)).includes('MEMORY_SOURCES'));
+  // 2026-10-31：记忆来源凭据是会话自有账本，随会话删除一起清理（0137 起删除路径就是如此），
+  // 不再单独阻断删除；长期记忆正文与版本保留，另有停用入口。
+  const blockers = await createRepositories(app.db).assist.listDeleteBlockers(f.sessionId);
+  assert.equal(blockers.some((reason) => String(reason) === 'MEMORY_SOURCES'), false);
   const other = await fixture();
   assert.equal((await api.post(path, { ...body, command_id: randomUUID(), project_id: other.projectId })).status, 404);
   assert.equal((await api.get(other.path(`/memories/${id}/provenance`))).status, 404);
@@ -240,4 +243,63 @@ test('save-from-message replay returns the original memory after its expires_at 
   const detail = await api.get(f.path(`/memories/${memoryId}`));
   assert.equal((detail.body as { effective_status: string }).effective_status, 'EXPIRED');
   assert.equal((detail.body as { current_version: string }).current_version, '1');
+});
+
+/**
+ * BUG-CHAT-CONTEXT-CROSS-TALK：只发「你好」时不得注入无关记忆。
+ *
+ * 旧实现把没有字面命中的记忆按 updated_at 顺序当「近期已确认」回退带进来，装配处又把
+ * 它和手选资料合并说成「显式选中资料」——模型因此声称「你选中了一条资料」。这里同时钉住
+ * 两件事：问候不召回；真正相关时召回，并在模型输入与服务端来源记录里都标成自动召回。
+ */
+test('greeting does not recall unrelated memory; related recall is labeled automatic, not user-selected', async () => {
+  const f = await fixture();
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+  const marker = `NOTEBOOK-${randomUUID()}`;
+  await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    commandId: randomUUID(), title: '用户请求打开记事本', text: `打开记事本 ${marker}`, confirmed: true });
+
+  const greeting = await ask(f, '你好');
+  assert.ok(!greeting.text.includes(marker), '问候语不得注入无关记忆');
+  const greetingMessage = await createRepositories(app.db).assist.readMessage(greeting.assistant_message_id);
+  assert.equal(greetingMessage?.sources.length, 0, '问候轮不得记录记忆来源');
+
+  // 同一 workspace 内消息真实相关时才召回；召回理由与选择方式必须如实标注。
+  const related = await ask(f, '打开记事本');
+  assert.ok(related.text.includes(marker), related.text);
+  const prompt = related.inputs.at(-1)?.turns[0]?.content ?? '';
+  assert.match(prompt, /自动召回长期记忆：1 条/u);
+  assert.match(prompt, /不是用户本轮选择/u);
+  assert.ok(!prompt.includes('显式选中资料：1'), prompt);
+  const relatedMessage = await createRepositories(app.db).assist.readMessage(related.assistant_message_id);
+  const recorded = relatedMessage?.sources[0] as Record<string, unknown> | undefined;
+  assert.equal(recorded?.selection, 'AUTO_MEMORY');
+  assert.equal(recorded?.selection_basis, 'LITERAL_MATCH');
+});
+
+/** BUG-CHAT-CONTEXT-CROSS-TALK：短期历史按会话隔离，不因同 workspace 而串读。 */
+test('short-term history stays inside one session', async () => {
+  const f = await fixture();
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+    expectedRevision: '0', recallEnabled: false, automaticCompaction: true, autoCapture: false });
+  const marker = `HISTORY-${randomUUID()}`;
+  await ask(f, `记住这个标记：${marker}`);
+  const other = await createAssistSession(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
+    title: 'isolated', commandId: randomUUID() });
+  const sent = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
+    sessionId: other.result.session_id, commandId: randomUUID(), content: '你好' });
+  const inputs: AssistRequest[] = [];
+  const modelPort = new FakeModelPort();
+  modelPort.assist = async (request) => {
+    inputs.push(request);
+    return { kind: 'CONTENT', content: 'ok', providerRequestId: randomUUID(),
+      usage: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const result = await runAssistGenerationTick(app.db, { workerId: randomUUID(),
+    storage: new ManagedContentStore(dataRoot), modelPort, leaseMs: 60_000 });
+  assert.equal(result?.status, 'COMPLETED', JSON.stringify(result));
+  assert.equal(result?.messageId, sent.result.assistant_message_id);
+  const text = inputs.map((input) => input.turns.map((turn) => turn.content).join('\n')).join('\n');
+  assert.ok(!text.includes(marker), '另一个会话的正文不得进入本次输入');
 });

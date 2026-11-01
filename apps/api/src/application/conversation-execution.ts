@@ -785,6 +785,39 @@ function readableReply(content: string): string {
 }
 
 /**
+ * 主流程信封修复（2026-11-01 COMPUTER-PLUGIN-E2E）。
+ *
+ * 真实 Provider 并不总是遵守「只输出一个 JSON 对象」：账本里出现过整段分析过程被当成
+ * 最终回复、没有任何执行请求的情况。修复轮只做一件事——把已经产生的正文重新整理成
+ * 协议信封；它**不声明工具、不执行动作**，因此不会重复任何外部副作用。修复结果仍交给
+ * `readMainLoopOutcome()` 与既有确定性校验，不能因为「修复过」就放宽候选合法性。
+ */
+export function mainLoopEnvelopeRepairInstruction(originalRequest: string): string {
+  return [
+    '【输出格式修复（服务端要求）】',
+    '上一条助手输出没有按本轮协议给出可解析的 JSON 信封，因此没有生成任何执行请求，也没有执行任何操作。',
+    '请只输出一个 JSON 对象，不要分析过程、不要代码块、不要额外文字：',
+    '{"reply":"<给用户看的简体中文回答>","execution":null,"maintenance":null}',
+    '如果用户明确要求执行电脑或浏览器操作，execution 必须是：',
+    '{"title":"<任务标题>","objective":"<可判断的结果>","criteria":[{"statement":"<可核对条件>",'
+      + '"required":true,"method":"HUMAN"}],"expected_outputs":{"kind":"MARKDOWN_DOCUMENT"},'
+      + '"writes_files":false,"file_changes":[],"check":null,"interaction":"COMPUTER"|"BROWSER"}',
+    '如果用户只是在询问、讨论、确认可行性或要求说明步骤，execution 填 null 并直接回答。',
+    '如果能力事实说明该插件不可用，不要伪造 execution；在 reply 里说明缺的是连接、运行时还是审批。',
+    '候选只是执行请求，不代表操作已经完成；不要在 reply 里声称已经打开、点击或输入。',
+    '原用户消息：',
+    originalRequest,
+  ].join('\n');
+}
+
+/** 明确操作请求在信封修复后仍未得到可委托候选时的用户可见说明。 */
+export function mainLoopMachineIntentFailureText(labels: readonly string[]): string {
+  const name = labels.length === 0 ? '电脑或浏览器操作' : labels.join('、');
+  return '【服务端状态】没有登记执行请求（' + name + '）：模型这次没有按执行协议给出可委托的候选，'
+    + '也没有任何电脑或浏览器操作被执行。请重试，或把要打开的目标、要执行的动作说得更具体一些。';
+}
+
+/**
  * 读主流程这一次模型输出。
  *
  * 刻意的容错：**不是**信封就当普通回复。这条规则有两个方向的好处——
@@ -896,6 +929,11 @@ export async function applyConversationExecution(db: DbExecutor, input: {
 }): Promise<ApplyConversationExecutionResult> {
   let row = await readRequestRow(db, input.requestId, input.workspaceId);
   if (['DELEGATED', 'DISCUSSED', 'CLARIFY'].includes(row.status)) return applied(row);
+  // 0154：来源聊天已被删除时，这条请求只剩脱钩凭据。它可以被读、被审计，但不能再推进出
+  // 第二个 Task/Run——「从哪条消息来」已经无法核对，这一步必须失败关闭。
+  if (row.source_detached_at !== null) {
+    throw invalidTransition('这段讨论已被删除，这条执行请求不能再推进成新的任务；已产生的任务与运行不受影响。');
+  }
   if (row.candidate_status !== 'READY' || row.candidate === null) {
     throw invalidTransition('这条请求还没有可用的执行候选。');
   }
@@ -1045,9 +1083,15 @@ async function baselineOf(canonicalRoot: string, path: string): Promise<string> 
 const TOOL_LOOP_READ_TOOLS: readonly string[] =
   ['list_directory', 'find_paths', 'search_text', 'read_file'];
 
-/** 产品默认预算：够读完并改完一个明确请求，又不至于让一次对话跑成长任务。 */
-const CONVERSATION_TOOL_LOOP_MAX_ROUNDS = 6;
-const CONVERSATION_TOOL_LOOP_MAX_TOOL_CALLS = 12;
+/**
+ * 产品默认预算：够读完并改完一个明确请求，又不至于让一次对话跑成长任务。
+ *
+ * 导出让会话轮次能对齐同一档（`assistant-readonly-round.ts` 的默认额度），并有单元
+ * 检查守着：同一条「对话里读完再改」的工作，不该因为进了会话还是进了对话工具循环
+ * 而拿到两套额度（2026-11-01 E2E-ALL-01）。
+ */
+export const CONVERSATION_TOOL_LOOP_MAX_ROUNDS = 6;
+export const CONVERSATION_TOOL_LOOP_MAX_TOOL_CALLS = 12;
 /** 冻结检查清单里的稳定 id：模型只能按它点名，不能自带命令字符串。 */
 const CONVERSATION_CHECK_ID = 'check-1';
 

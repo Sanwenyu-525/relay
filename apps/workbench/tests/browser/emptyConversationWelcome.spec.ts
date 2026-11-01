@@ -12,7 +12,7 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -128,12 +128,11 @@ test.describe("新建会话空态一致", () => {
   // 2026-10-18 用户指令「这两行的功能重复了」：输入卡上方的状态行与目录细条合并，
   // 细条是唯一幸存的那一行——同宽同轴与「无原生控件外观」都由它承担；目录名本身
   // 就是「更换目录」入口（点它打开选择框），不再有第二颗键，也不再有第二行。
-  // 同日第三轮两条指认：「不要放在最右边」→ 待处理紧跟细条内容；「这个待你处理为什么跟
-  // 左边没有在同一个高度上」「未选择目录的话用户不一定知道这是一个按钮」→ 同一行两条文字
-  // 落在同一根水平轴上，缺目录那一档的文案写成动作并常驻一道虚线下划线。
-  test("首条输入区上方的发送前提一行与输入卡同宽同轴，未选目录写成动作键并与「待你处理」同高", async ({ page }) => {
+  // 2026-11-01 用户指令「把选择文件夹那一行放到输入框下面」：细条移到输入卡下方，
+  // 卡上那一行只剩「待你处理」；同宽同轴与缺目录档的按钮线索仍锁在这里。
+  test("目录细条在输入卡下方同宽同轴，未选目录写成动作键；「待你处理」留在卡上一行", async ({ page }) => {
     await installRoutes(page);
-    // 「待你处理」要有真实内容才能核对它与细条的同行关系。Playwright 后注册的 route 先匹配，
+    // 「待你处理」要有真实内容才能核对自己那一行。Playwright 后注册的 route 先匹配，
     // 且 glob 要带查询串（客户端请求的是 `/reviews?status=OPEN`）并写全 API Origin（catch-all 用的是
     // `apiBase` 那一档，相对 pattern 会解析到前端 4173 而不是 8787）。其余用例仍走空列表，整条不渲染。
     await page.route(`${apiBase}${prefix}/reviews**`, (route) => fulfillJson(route, { items: [openReview] }));
@@ -150,11 +149,14 @@ test.describe("新建会话空态一致", () => {
     expect(composerBox).not.toBeNull();
     // 这一列的居中规则（--chat-measure + margin-inline:auto）由输入卡持有，细条必须跟着它：
     // 2026-10-18 用户实机截图里状态行按整列宽铺开，文字落到输入卡左侧很远处，读成没有样式。
-    // 同日第二轮把「待你处理」并到这一行、紧跟细条之后（用户指令「不要放在最右边」）：
-    // 细条改成按内容收，同宽同轴因此由整行容器承担——细条左缘仍对齐，行的左右缘对齐输入卡。
+    // 2026-11-01 起细条在输入卡**下方**（用户指令「放到输入框下面」），左缘仍对齐，
+    // 而「待你处理」那一行仍留在卡上：整行的左右缘也照旧对齐输入卡。
     expect(bar!.x).toBeCloseTo(composerBox!.x, 0);
+    expect(bar!.width).toBeCloseTo(composerBox!.width, 0);
+    expect(bar!.y).toBeGreaterThanOrEqual(composerBox!.y + composerBox!.height);
     expect(row!.x).toBeCloseTo(composerBox!.x, 0);
     expect(row!.width).toBeCloseTo(composerBox!.width, 0);
+    expect(row!.y + row!.height).toBeLessThanOrEqual(composerBox!.y + 1);
     // 全局 `button` 只继承字体与颜色，不重置外框；这颗目录名键必须自己剥掉原生边框、底与内边距，
     const chrome = await strip.locator(".folder-strip-name").evaluate((el) => {
       const cs = getComputedStyle(el);
@@ -186,28 +188,17 @@ test.describe("新建会话空态一致", () => {
         clipped: cs.overflow === "hidden" && underlineBottom > el.getBoundingClientRect().height };
     });
     expect(affordance).toEqual({ line: "underline", style: "dashed", clipped: false });
-    // 同一行、同一根水平轴：原先那 4px 上内边距留在细条自己的盒子里，`align-items: center`
-    // 居中的是盒子不是文字，细条文字因此比「待你处理」低 2px（用户实机指认）。现在呼吸挪到行上。
+    // 「待你处理」仍在卡上那一行的右端（2026-10-20 第五轮「左侧工作目录信息 / 右侧待处理事项」）：
+    // 2026-11-01 细条移到卡下后，这一段里只剩待处理自己，它用 auto 外边距贴住行的右缘。
     const pending = page.getByTestId("pending-work");
     await expect(pending).toBeVisible({ timeout: 20_000 });
-    const nameLabel = await name.boundingBox();
-    const pendingLabel = await pending.locator(".pending-work-label").boundingBox();
-    expect(nameLabel).not.toBeNull();
-    expect(pendingLabel).not.toBeNull();
-    const center = (box: { y: number; height: number }): number => box.y + box.height / 2;
-    expect(Math.abs(center(nameLabel!) - center(pendingLabel!))).toBeLessThan(1);
-    // 左右分居两端（2026-10-20 第五轮「左侧工作目录信息 / 右侧待处理事项」）：细条按内容收在
-    // 左端，「待你处理」用 auto 外边距推到剩余空间的右端，两类语义各占一端、中间留一档间隔。
-    // 上一版「紧跟细条内容右端」在目录名后连缀归属、Git 标记与执行约束之后，会把待处理挤到
-    // 细条中间或折行，读成目录信息的一部分（用户截图指认「信息拥挤、语义混杂」）。
     const pendingBox = await pending.boundingBox();
     expect(pendingBox).not.toBeNull();
-    expect(pendingBox!.x).toBeGreaterThanOrEqual(bar!.x + bar!.width);
     expect(pendingBox!.x + pendingBox!.width).toBeCloseTo(row!.x + row!.width, 1);
-    expect(pendingBox!.x - (bar!.x + bar!.width)).toBeGreaterThan(8);
     // 合并后输入卡上方只剩这一行：不再渲染第二行状态摘要。
     await expect(page.getByTestId("composer-status")).toHaveCount(0);
     await page.locator(".agent-chat-prereq-row").screenshot({ path: "results/prereq-row-aligned.png" });
+    await strip.screenshot({ path: "results/folder-strip-below-composer.png" });
   });
 
   test("任务作用域空会话：同一欢迎块，说明句按归属收敛", async ({ page }) => {

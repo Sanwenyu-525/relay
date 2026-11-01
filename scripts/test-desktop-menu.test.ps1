@@ -17,6 +17,10 @@ try {
   # Ctrl+C must not end the launcher itself, only the running action.
   Assert ($source.Contains('add_CancelKeyPress') -and $source.Contains('$event.Cancel = $true')) 'Launcher no longer shields itself from Ctrl+C.'
 
+  # A resident menu must hand the next action the environment it started with. PATH matters most:
+  # the VS Build Tools import keeps appending to it until cmd dies with "the input line is too long".
+  Assert ($source.Contains("'PATH', 'RELAY_DB_URL'")) 'Launcher no longer restores PATH between actions.'
+
   # Status then quit: proves the menu is offered again after an action, and that
   # quitting leaves a zero exit code.
   $answers = Join-Path $fixture 'answers.txt'
@@ -43,7 +47,7 @@ try {
   # A non-interactive invocation must stay single-shot and propagate its exit code.
   $code = & $powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Action Status 2>&1 | Out-Null
   Assert ($LASTEXITCODE -eq 0) "Non-interactive Status exited with $LASTEXITCODE."
-  Write-Host 'PASS: 3 scenarios; Ctrl+C shield, menu loop after an action, single-shot non-interactive invocation.'
+  Write-Host 'PASS: 4 scenarios; Ctrl+C shield, PATH restored between actions, menu loop after an action, single-shot non-interactive invocation.'
 } finally {
   Assert ([IO.Path]::GetDirectoryName($fixture) -eq $temporary -and [IO.Path]::GetFileName($fixture).StartsWith('relay-menu-test-')) 'Unsafe fixture cleanup path.'
   if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }

@@ -4,7 +4,7 @@ import type {
 } from "../src/api/dtos/assist";
 import {
   activityCategory, activityHeadline, activityHeaderState, activityItemsFromRunProjection,
-  activityItemsFromSessionTrace,
+  activityItemsFromSessionTrace, activityReasonLabel, activityReasonNote,
   activityStateText, activitySummaryText, activityTargetOf, activityTone, activityVerb,
   formatActivityDuration, sessionActivityRounds, summarizeActivity, summarizeRunToolCalls,
   waitingOperationIds,
@@ -145,6 +145,35 @@ describe("Run 侧投影", () => {
       { failed: false, resultText: null, reason: null })).toBe("已结算，结果未提供");
     expect(activityStateText("SETTLED", "RUN_TOOL_CALL",
       { failed: false, resultText: "ok", reason: null })).toBe("已结算");
+  });
+
+  it("放弃分两档：带原因的说未执行，不带原因的只说没有结算结果", () => {
+    // ADR-038 第六轮：没有持久事件、消息已终止的待办写入收口成 ABANDONED + 原因码。
+    // 它确定没跑过，措辞可以更硬；没有原因的放弃只是「不再派发」，不替它断言没跑过。
+    expect(activityStateText("ABANDONED", "SESSION_TOOL_CALL",
+      { failed: false, resultText: null, reason: "TODO_NOT_EXECUTED" })).toBe("未执行，没有结果");
+    expect(activityStateText("ABANDONED", "SESSION_TOOL_CALL",
+      { failed: false, resultText: null, reason: null })).toBe("已放弃，没有结算结果");
+    // 原因码按人话标签呈现；未收录的原样透出，不编解释。
+    expect(activityReasonLabel("TODO_NOT_EXECUTED")).toBe("未执行");
+    expect(activityReasonLabel("SOMETHING_ELSE")).toBe("SOMETHING_ELSE");
+  });
+
+  it("原因行分两档：认得的码只给人话，认不出的码不编解释", () => {
+    // 服务端每条会话侧拒绝都带一句中文 detail，界面这一行是「帽子：原因」。
+    expect(activityReasonNote("SUBAGENT_PARENT_SCOPE_MISSING",
+      "主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。"))
+      .toBe("子任务未启动：主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。");
+    // 没有 detail 时标签自己得能读通——只剩一个枚举名等于把诊断成本转嫁给用户。
+    expect(activityReasonNote("SUBAGENT_PARENT_SCOPE_MISSING", null)).toBe("子任务未启动");
+    expect(activityReasonNote("AGENT_SESSION_HAS_NO_WORKING_DIRECTORY", null))
+      .toBe("这条会话还没有选定工作目录");
+    // 常显那一行不出现机器码：它留在第三层核对（ActivityDetail 的「未执行原因」）。
+    expect(activityReasonNote("SUBAGENT_PARENT_SCOPE_MISSING", null)).not.toContain("SUBAGENT_");
+    // 没收录的码原样透出，不套一句中文把真实原因糊掉。
+    expect(activityReasonNote("OUTSIDE_SCOPE", "目标不在本次绑定的目录内。"))
+      .toBe("OUTSIDE_SCOPE · 目标不在本次绑定的目录内。");
+    expect(activityReasonNote(null, "有细节也没有原因")).toBe("");
   });
 
   it("截断、超时与取消只按服务端落到的键显示", () => {

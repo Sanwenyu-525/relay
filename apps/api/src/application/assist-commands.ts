@@ -44,6 +44,7 @@ import { readAdmission, requireNormalAdmission } from './maintenance-admission.j
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { createGoalForMessage } from './assist-goals.js';
 import { assertChatModeSupportedForIdentity, parseChatModePrefix } from './chat-mode.js';
+import { parseNewTaskPrefix } from '../assist/session-todos.js';
 
 import { DEFAULT_SESSION_CONTEXT_BUDGET } from '../assist/assist-repository.js';
 import { resolveSessionReadTools } from './assist-read-tools.js';
@@ -547,14 +548,28 @@ export async function requestAssistMessage(
     if (contentProblem !== undefined) throw validationFailed([contentProblem]);
   }
   const content = normalizeText(input.content);
+  /*
+   * ADR-038（2026-10-31 第六轮）：`/newtask 内容` 是「换任务」的显式声明。
+   *
+   * 必须在命令解析**之前**剥掉：`/newtask` 不是登记过的系统命令，原样送进
+   * `resolveChatCommand` 会被判成未知命令整条拒绝（这正是本轮审计发现的缺陷——
+   * 注释里写了这个前缀，实际从来发不出去）。剥法与 `/plan`、`/goal` 一致：
+   * 命令决定这一轮怎么受理，命令后面的正文才是用户要说的话。
+   */
+  const newTaskPrefix = parseNewTaskPrefix(content);
+  if (newTaskPrefix !== null && newTaskPrefix.rest === '') {
+    throw validationFailed([{ field: 'content',
+      message: '/newtask 后面要跟内容；它只是声明「换一件新任务」，不是一条独立命令。' }]);
+  }
+  const afterNewTask = newTaskPrefix === null ? content : newTaskPrefix.rest;
   // 0127：`/plan 内容`、`/goal 内容` 是行为模式前缀。UI 客户端已经剥过一层；
   // 这里再剥一层并核对一致性，让原始 API 调用者发同一段文本得到同一事实。
-  const modePrefix = parseChatModePrefix(content);
+  const modePrefix = parseChatModePrefix(afterNewTask);
   if (input.chatMode !== undefined && modePrefix !== null && modePrefix.mode !== input.chatMode) {
     throw validationFailed([{ field: 'chat_mode',
       message: `正文里的 /${modePrefix.mode.toLowerCase()} 前缀与 chat_mode 不一致；请二选一。` }]);
   }
-  const effectiveContent = modePrefix === null ? content : modePrefix.rest;
+  const effectiveContent = modePrefix === null ? afterNewTask : modePrefix.rest;
   if (modePrefix !== null && effectiveContent === '') {
     throw validationFailed([{ field: 'content', message: '模式命令后面要跟内容；只切模式请用模式选择器。' }]);
   }
@@ -807,6 +822,19 @@ export async function requestAssistMessage(
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
         status: 'COMPLETED', intent: 'DISCUSS', content: effectiveContent, sources: [],
       });
+      /*
+       * ADR-038（2026-10-31 第六轮）：工作归属在这一刻冻结，且与用户消息同一个事务。
+       *
+       * 之前归属是在「谁先读」时顺手插一行——GET 带写副作用，界面轮询能替这一轮定身份，
+       * 并发下两个读者还会算出不同依据。现在只有两条准入路径能写：消息准入（这里）与
+       * 执行准入（只读轮次开跑前）。会话行在上方已加锁，同一会话的两次发送因此串行，
+       * 归属与消息要么一起成立、要么一起回滚。
+       *
+       * `startsNewTask` 是这一步刚解析出来的显式声明（`/newtask` 已从正文剥掉，
+       * 库里认不出来，只能由这里告知）；纯文本 `新任务：` 由仓储按正文判定。
+       */
+      await repositories.todos.freezeTurnScope(session.id, userMessageId,
+        { startsNewTask: newTaskPrefix !== null });
       // 0132（§8.5，2026-10-24 拍板口径）：发送前文件基线在消息准入事务内建立——
       // 提交后助手轮次才可能写文件，这里读到的就是「发送前」状态；采集失败/超限/预算
       // 占满不阻塞消息，按 INCOMPLETE 基线如实降级（撤回时按不可恢复处理）。

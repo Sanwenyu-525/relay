@@ -24,12 +24,22 @@ Accepted（方向由用户 2026-10-20 明确选择「会话内直接写」；同
 
 ## 决策
 
+2026-10-31 实现纠偏：真实免费模型与受控 PG 反例证实，AUTO 虽声明会话写工具，
+Gateway 原先只识别 Run 范围授权与目录 FULL，普通修改仍被降级为 ASK，落到会话无法
+自动接续的等待审批。现 prepare/admit 共用同一目录授权判断：当前档位 AUTO、策略 AUTO、
+来源 AGENT_SESSION_WRITE、动作 APPLY_CHANGESET 且无 DELETE 时复用这份已明确授予的
+目录权限；FULL 范围不变。Run、全文覆盖、删除、Git/CLI/浏览器/电脑不借用该豁免，
+ASK/DENY 不被覆盖；派发前重新读取档位及策略版本，撤权后拒绝。此修正落实既定 AUTO
+直写语义，不改变数据库/API 结构（Breaking Change: No）。既有待审批 Operation 不换
+身份重做，也不因修复自动执行；保留原 Review 核对边界。
+
 采用方案 2。要点：
 
 - **只放行 `FILE_WRITE` 能力下的 `APPLY_CHANGESET` 与 `READ_CHANGE_SET`**。同名能力下的 `WRITE_FILE`（全文覆盖、无基线）**不开放**：会话没有 Run 的 `resource_claims` 保护（该表强制绑定 task/run/worker，0060 与 0058 都记过这条限制），两个会话并发写同一文件时唯一可靠的闸门是那条 SHA-256 基线——prepare 与落盘前各无条件比对一次，后到者按 `TOOL_CHANGESET_BASELINE_CONFLICT` 拒绝，而不是悄悄覆盖对方刚写的正文。
 - **排他口径与 `USER_ACTION` 一致**：不建 claim，靠 prepare 与 admit 各自按 `listOccupiedResources()` 拒绝在途目录。这不是更弱的检查，而是同一规则的另一种表达。
 - **按实际工具启用直写**：`AUTO` / `FULL` 且本轮确实有 `apply_changeset` 才采用直写模板；`READ_ONLY` / `ASK` 不暴露会话写工具。仅有目录档位但连接已停用，不能向模型宣称能写。
 - **审批使用可恢复的 Run**：ASK 请求由原消息产出候选，经已有自动启动入口进入 Run，复用原动作审批与恢复，不让用户重建任务。AUTO 档删除在创建 Operation 前返回 `SESSION_WRITE_REQUIRES_RUN`，交给同一入口；FULL 仍按 Gateway 判定。其他自定义策略若已产生 WAITING_APPROVAL，只能核对原动作，不生成第二个候选替代。
+- 2026-10-31 自定义 ASK 接线修复：新会话写动作在最终策略判定为 ASK 时、创建 Operation/Review 前返回同一 `SESSION_WRITE_REQUIRES_RUN`，只把尚未执行的修改交给原消息的 Run 候选；不新增会话审批调度器。会话 prepare 重放按原 operation_id 查回并核对来源种类、Workspace/Project/资源、intent_key、参数与目标，保留原状态；异载荷拒绝，不把已保存的待审批状态改成新候选或自动批准。旧会话待审批的异步恢复仍未新增，核对原动作的限制保留。
 - **`execution` 只承载剩余工作**：已成功直写的改动不再入队；尚未执行的检查、浏览器/电脑操作或尚未创建动作的审批需求可进入原 Run。检查单独提交 `writes_files=false`、`file_changes=[]`。UNKNOWN 和已有待审批动作不得换身份重试。
 - **方法与执行能力分开**：普通 Agent 的明确 `MODIFY` 方法轮可复用相同直写入口；`INSPECT` / null 仍只读。方法说明决定取证步骤，不额外授予权限，也不再强制所有修改建 Task。人设助手、学习搭档、提案型 Skill 的边界不变。
 - **变更集前置校验复用 Run 侧同一份函数**（`normalizeToolChanges`：1–8 项、baseline 必须是真正的 64 位摘要、单文件 64 KiB）。Gateway prepare 会再校验一次；会话侧先做是为了让模型在派发前拿到类型化原因，而不是留一条注定被拒的动作。两份规则一旦漂移，两条入口就会对同一份声明给出不同结论。

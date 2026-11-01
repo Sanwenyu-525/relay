@@ -148,8 +148,11 @@ test("真实 API 同会话归属：普通讨论选目录后归入项目，会话
     await page.getByTestId("folder-scope-change").click();
     await page.getByTestId("folder-manual-root").fill(folderRoot);
     await page.getByTestId("folder-open-manual").click();
-    await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-status", "CONFIRMED");
-    await expect(page.getByTestId("collab-binding")).toHaveAttribute("data-session", sessionId);
+    // 2026-11-01 P1-2：归属成功不再留一条常驻回执。真实链路上的可观察出口是目录细条那一句
+    // 「已归入项目」，它读的是服务端这条会话的归属；输入卡上方那两行只在途/未知/失败时出现。
+    await expect(page.getByTestId("folder-scope-association")).toContainText("已归入项目：",
+      { timeout: 30_000 });
+    await expect(page.getByTestId("collab-binding")).toHaveCount(0);
 
     // 服务端事实：同一个会话被归入目录解析出的项目，不是新建第二个会话。
     const bound = await page.request.get(api(`/assist-sessions/${sessionId}`), { headers });

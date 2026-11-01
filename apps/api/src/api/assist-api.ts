@@ -19,13 +19,17 @@ import { archiveAssistSession, deleteAssistSession, forkAssistSession, renameAss
   from '../application/assist-session-controls.js';
 import { listAssistMessages, listAssistProposals, listAssistSessions, readAssistProposal,
   readAssistSession, readAssistSessionContexts, readAssistSessionWithActivity, projectAssistSkillMessage, readAssistLivePreview,
-  listAssistMessageAttachmentMeta, readAssistMessageAttachment,
+  readAssistMessageUsageSummaries, listAssistMessageAttachmentMeta, readAssistMessageAttachment,
   type AssistMessageAttachmentMeta }
   from '../application/assist-queries.js';
+import { assistUsageDto, projectAssistUsage } from '../application/assist-usage-projection.js';
+import { assistGenerationProgressDto, readAssistGenerationProgress,
+  ASSIST_GENERATION_PHASES } from '../application/assist-generation-progress.js';
 import { listAssistMessageRecallSummaries, readAssistMessageRecall, recallAssistMessage,
   readAssistMessageRecallUndo, readMessageRecallSettings, undoAssistMessageRecall,
   type AssistMessageRecallSummary } from '../application/assist-message-recall.js';
 import { resourceNotFound } from '../application/domain-error.js';
+import { exportAssistSession } from '../application/session-export.js';
 import { readSessionToolCalls } from '../application/session-tool-call-projection.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistSessionStatus, ConversationMode } from '../infrastructure/database-schema.js';
@@ -179,6 +183,42 @@ const AssistMessageRecallUndoDto = Type.Object({
     reason: Type.Union([Type.String(), Type.Null()]),
   }, strict)),
 }, strict);
+/**
+ * 回复轮次的 Token 读数（AGENT_LIVE_TOKEN_USAGE）。
+ *
+ * `state` 是口径的一部分，不是装饰：ESTIMATED/PARTIAL 的数值不是 Provider 精确值，
+ * 界面必须按 ≈ / ≥ 呈现；null 字段表示未上报，不能读成 0。
+ */
+const AssistUsageDto = Type.Object({
+  state: Type.Union([Type.Literal('ESTIMATED'), Type.Literal('PARTIAL'),
+    Type.Literal('CONFIRMED'), Type.Literal('UNKNOWN')]),
+  input_tokens: Type.Union([Type.Integer(), Type.Null()]),
+  output_tokens: Type.Union([Type.Integer(), Type.Null()]),
+  cache_read_tokens: Type.Union([Type.Integer(), Type.Null()]),
+  cache_creation_tokens: Type.Union([Type.Integer(), Type.Null()]),
+  settled_calls: Type.Integer({ minimum: 0 }),
+  pending_calls: Type.Integer({ minimum: 0 }),
+  missing_usage_calls: Type.Integer({ minimum: 0 }),
+}, strict);
+/**
+ * 执行阶段只读投影（AGENT_STREAM_VISIBILITY，2026-11-01）。
+ *
+ * 它不是新的业务状态：阶段由 `model_calls` 的 STARTED/首流/首正文/结算时间与消息
+ * 自身的 PENDING/RUNNING 一起派生。时间字段只用于就地展开的延迟诊断，不常驻正文。
+ */
+const AssistGenerationProgressDto = Type.Object({
+  phase: Type.Union(ASSIST_GENERATION_PHASES.map((phase) => Type.Literal(phase))),
+  call_count: Type.Integer({ minimum: 1 }),
+  latest_call: Type.Union([Type.Object({
+    status: Type.Union([Type.Literal('STARTED'), Type.Literal('COMPLETED'),
+      Type.Literal('FAILED'), Type.Literal('CANCELLED')]),
+    started_at: Type.String(),
+    first_stream_event_at: Type.Union([Type.String(), Type.Null()]),
+    first_text_delta_at: Type.Union([Type.String(), Type.Null()]),
+    first_preview_persisted_at: Type.Union([Type.String(), Type.Null()]),
+    settled_at: Type.Union([Type.String(), Type.Null()]),
+  }, strict), Type.Null()]),
+}, strict);
 const AssistMessageDto = Type.Object({
   id: uuid, session_id: uuid, seq: rev, role: Type.String(), status: Type.String(),
   intent: Type.String(), content: Type.Union([Type.String(), Type.Null()]),
@@ -199,6 +239,13 @@ const AssistMessageDto = Type.Object({
     output_tokens: Type.Union([Type.Integer(), Type.Null()]),
     cache_read_tokens: Type.Union([Type.Integer(), Type.Null()]),
     cache_creation_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict),
+  /** AGENT_LIVE_TOKEN_USAGE：本轮 PRIMARY 调用（含工具续轮）的账本汇总。 */
+  usage_summary: AssistUsageDto,
+  /**
+   * AGENT_STREAM_VISIBILITY：在途回复的真实执行阶段；PENDING/终态为 null。
+   * 客户端只用它决定等待文案，不把它写成任何业务状态。
+   */
+  generation_progress: Type.Union([AssistGenerationProgressDto, Type.Null()]),
   cancel_requested: Type.Boolean(),
   /** 0122：这条排队消息已被请求「插话」到正在生成的那一轮；生成方消费前为 true。 */
   steer_requested: Type.Boolean(),
@@ -220,6 +267,8 @@ const AssistLivePreviewDto = Type.Object({
     Type.Literal('COMPLETED'), Type.Literal('FAILED'), Type.Literal('CANCELLED')]),
   preview_revision: rev, preview_text: Type.Union([Type.String(), Type.Null()]),
   preview_truncated: Type.Boolean(), preview_available: Type.Boolean(),
+  /** AGENT_LIVE_TOKEN_USAGE：账本已确认部分 + 当前在途调用的可丢弃估算。 */
+  usage: Type.Union([AssistUsageDto, Type.Null()]),
 }, strict);
 /**
  * 会话工具轮次（工作台 §18.10「原消息下展示实际阶段」）。`arguments` 是开放对象，内容由
@@ -341,6 +390,13 @@ const SessionContextBudgetResult = Type.Object({
 const SessionContextUsageResult = Type.Object({
   session_id: uuid,
   budget: Type.Object({ tokens: Type.Number(), revision: rev }, strict),
+  // 0153：下一次调用会申请的预算（与冻结同一个函数算），窗口未知时 window_source=UNKNOWN。
+  next_call: Type.Union([Type.Null(), Type.Object({
+    reservation_tokens: Type.Number(),
+    context_budget_tokens: Type.Number(),
+    provider_window_tokens: Type.Union([Type.Number(), Type.Null()]),
+    window_source: Type.Union([Type.Literal('MODEL_CATALOG'), Type.Literal('UNKNOWN')]),
+  }, strict)]),
   last_call: Type.Union([Type.Null(), Type.Object({
     source: Type.Union([Type.Literal('MODEL_CALL'), Type.Literal('MESSAGE')]),
     call_id: Type.Union([uuid, Type.Null()]),
@@ -522,7 +578,9 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
     skill_output: JsonObject | null; content: string | null; sources: unknown;
     method: JsonObject | null; method_argument: string | null },
   attachments: readonly AssistMessageAttachmentMeta[] = [],
-  recall: AssistMessageRecallSummary | null = null) {
+  recall: AssistMessageRecallSummary | null = null,
+  usageSummary: JsonObject = assistUsageDto(projectAssistUsage([])),
+  generationProgress: JsonObject | null = null) {
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
@@ -535,6 +593,8 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
     usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens,
       cache_read_tokens: row.usage_cache_read_tokens,
       cache_creation_tokens: row.usage_cache_creation_tokens },
+    usage_summary: usageSummary,
+    generation_progress: generationProgress,
     cancel_requested: row.cancel_requested,
     steer_requested: row.steer_requested,
     attachments: attachments.map((item) => ({ id: item.id, name: item.name,
@@ -699,6 +759,24 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
     try {
       return await readSessionContextUsage(dependencies.database.executor, params.workspace_id,
         params.id);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  /**
+   * 会话导出：把「这段讨论到底发生了什么」一次读齐——消息原文、工具账本、清单快照、上下文与
+   * 逐次模型用量、执行请求与文件变更摘要，供用户上传给外部 Agent 做问题分析与执行复盘。
+   *
+   * 不声明 response schema：这份文档的字段随各投影走，声明了 TypeBox 反而会把没列出的列静默删
+   * 掉，正与「不静默残缺」冲突。归属由 `exportAssistSession` 内部的会话读取负责，跨 Workspace
+   * 与不存在的会话同一口径 404。整体跑在只读可重复读事务里，不推进任何事实。
+   */
+  app.get('/assist-sessions/:id/export', { schema: { params: sessionItem } },
+  async (request, reply) => {
+    const params = request.params as { workspace_id: string; id: string };
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return await exportAssistSession(dependencies.database.executor, {
+        workspaceId: params.workspace_id, sessionId: params.id });
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
@@ -919,10 +997,23 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         recallByMessage.set(recall.message_id, recall);
         recallByMessage.set(recall.assistant_message_id, recall);
       }
-      return { items: await Promise.all(rows.map(async (row) => messageDto(row,
-        await projectAssistSkillMessage(dependencies.database.executor,
-          dependencies.storage, session, row),
-        attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null))) };
+      // AGENT_LIVE_TOKEN_USAGE：本轮用量汇总一次查齐；完成态读账本，不从界面或估算推断。
+      const usageSummaries = await readAssistMessageUsageSummaries(
+        dependencies.database.executor, rows.map((row) => row.id));
+      // AGENT_STREAM_VISIBILITY：只有还在 RUNNING 的回复需要阶段投影；一次查齐其调用证据。
+      const runningMessageIds = rows.filter((row) =>
+        row.role === 'ASSISTANT' && row.status === 'RUNNING').map((row) => row.id);
+      const generationProgress = await readAssistGenerationProgress(
+        dependencies.database.executor, runningMessageIds);
+      return { items: await Promise.all(rows.map(async (row) => {
+        const progress = generationProgress.get(row.id);
+        return messageDto(row,
+          await projectAssistSkillMessage(dependencies.database.executor,
+            dependencies.storage, session, row),
+          attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null,
+          assistUsageDto(usageSummaries.get(row.id) ?? projectAssistUsage([])),
+          progress === undefined ? null : assistGenerationProgressDto(progress));
+      })) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 

@@ -81,7 +81,9 @@ export class RelayHttp {
         impactedTaskIds: Array.isArray(conflict.impacted_task_ids)
           ? conflict.impacted_task_ids.filter((id): id is string => typeof id === "string") : [],
         recallPaths: Array.isArray(conflict.recall_paths)
-          ? conflict.recall_paths.filter((path): path is string => typeof path === "string") : []
+          ? conflict.recall_paths.filter((path): path is string => typeof path === "string") : [],
+        // 5xx 的问题体里带服务端追溯号：只在详情区展示，主提示句不出现内部诊断信息。
+        requestId: optionalString(record, "request_id")
       });
     }
     if (expectedStatus !== undefined && response.status !== expectedStatus) {

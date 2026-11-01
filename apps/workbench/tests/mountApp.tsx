@@ -60,6 +60,10 @@ export async function mountWorkbench(path: string) {
   await flush();
   return {
     wrapper: new DomWrapper(container),
+    /** 挂在 document.body 上的那层：portal 出去的浮层（圆环详情、路径提示）不在 container 子树里，
+     *  用 wrapper 查不到。与 collaborationWorkspace 里 `document.querySelector` 的既有口径同一件事，
+     *  只是收进夹具，避免每条用例自己摸 document。 */
+    layer: new DomWrapper(document.body),
     router: {
       push: async (target: string) => { await act(async () => { await router.navigate(target); }); },
       /** 开始导航但不等待 Router promise：被 useBlocker 拦截的 Promise 会等用户作出选择。 */

@@ -13,6 +13,12 @@ import { createAssistSession, bindAssistSessionDirectory, requestAssistMessage,
   steerAssistMessage } from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
+import { setLocalDirectoryWriteTier } from '../../src/application/local-directory-access.js';
+import { dispatchGatewayAction, prepareGatewayAction } from '../../src/application/gateway-actions.js';
+import { normalizeToolChanges } from '../../src/application/tool-loop.js';
+import { advanceRunStep } from '../../src/application/run-steps.js';
+import { resolveReview } from '../../src/application/review-decisions.js';
+import { executeToolLoopStep } from '../../src/worker/tool-loop-action.js';
 import { resolveSessionReadTools, sessionWriteAllowed } from '../../src/application/assist-read-tools.js';
 import { createGatewayPolicy, registerManagedResource } from
   '../../src/application/gateway-configuration.js';
@@ -350,6 +356,74 @@ test('AM-06 原消息→请求→Task→Run 是一条链：Run 由 Run Worker �
   assert.equal(tick, undefined, '没有新消息时消息轮次不应启动');
   assert.equal((await createRepositories(app.db).runs.readRun(applied.run_id!))?.status,
     before_?.status, '消息轮次不得改变 Run 的状态');
+  const captured: string[] = [];
+  const evidencePort = oneShotPort('{"reply":"按当前执行事实说明进度。","execution":null}');
+  const original = evidencePort.assist.bind(evidencePort);
+  const port: AssistModelPort = { identity: evidencePort.identity, assist: async (request) => {
+    captured.push(request.turns.map((turn) => turn.content).join('\n'));
+    return original(request);
+  } };
+  await ask(fx, '刚才那件事现在是什么状态？', port);
+  assert.ok(captured.at(-1)?.includes(`Run ${applied.run_id}：${before_?.status}`),
+    '后续追问必须读取原 Run 的服务端当前事实');
+  await sql`update runs set status = 'FAILED', terminal_at = now(), revision = revision + 1
+    where id = ${applied.run_id}`.execute(app.db);
+  await ask(fx, '重新确认当前状态', port);
+  assert.ok(captured.at(-1)?.includes(`Run ${applied.run_id}：FAILED`), '不能沿用上一轮活动状态');
+  assert.ok(captured.at(-1)?.includes('不等于业务验收完成'));
+  const repositories = createRepositories(app.db);
+  const task = await repositories.tasks.readTask(applied.task_id!);
+  assert.ok(task);
+  const verificationId = randomUUID();
+  const artifactId = randomUUID();
+  const checkedVersionId = randomUUID();
+  const uncheckedVersionId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    await r.artifacts.insertArtifact({ id: artifactId, workspaceId: fx.workspaceId,
+      projectId: fx.projectId, taskId: task.id, artifactKind: 'MARKDOWN_DOCUMENT', title: '受验产物' });
+    for (const [index, id] of [checkedVersionId, uncheckedVersionId].entries()) {
+      await r.artifacts.insertArtifactVersion({ id, artifactId, versionNumber: BigInt(index + 1),
+        storageRef: `test/${id}.md`, contentHash: Buffer.alloc(32, index + 1), size: 1n,
+        mediaType: 'text/markdown', sourceKind: 'AI', sourceRef: null });
+    }
+    await r.verifications.insertSession({ id: verificationId, taskId: task.id,
+      acceptanceRevision: task.acceptance_revision, runId: applied.run_id!,
+      executionContractId: applied.run_id!, verifierPolicyVersion: 'fixture',
+      checkPlanHash: Buffer.alloc(32, 3), checkPlan: {} });
+    await r.verifications.insertTarget({ sessionId: verificationId,
+      artifactVersionId: checkedVersionId, contentHash: Buffer.alloc(32, 1) });
+    for (const [index, result] of (['PASS', 'ERROR'] as const).entries()) {
+      await r.verifications.insertCheckResult({ id: randomUUID(), sessionId: verificationId,
+        criterionId: 'c1', checkAttempt: index + 1, checkerId: 'fixture', checkerVersion: '1',
+        result, required: true, severity: 'HARD', evidenceRefs: { private_log: 'DO_NOT_INJECT_RAW_LOG' } });
+    }
+    await r.verifications.finalizeSession({ sessionId: verificationId, expectedRevision: 0n,
+      status: 'HUMAN', correctionBudgetUsed: 0n });
+  });
+  await ask(fx, '检查的具体结果是什么？', port);
+  assert.ok(captured.at(-1)?.includes(verificationId), '必须回流原 Run 的确切验证身份');
+  assert.ok(captured.at(-1)?.includes(checkedVersionId), '检查只绑定受验版本');
+  assert.equal(captured.at(-1)?.includes(uncheckedVersionId), false, '新版不能继承旧检查');
+  assert.ok(captured.at(-1)?.includes('"result":"ERROR"'), '使用最新检查尝试，ERROR 不冒充 PASS');
+  assert.equal(captured.at(-1)?.includes('DO_NOT_INJECT_RAW_LOG'), false);
+  await repositories.verifications.insertApplicabilityRevocation({ sessionId: verificationId,
+    reason: 'CHECKER_DEFECT', sourceRef: 'fixture:revoke' });
+  await ask(fx, '现在这份检查还适用吗？', port);
+  assert.ok(captured.at(-1)?.includes('"applicability_revoked":true'));
+  await repositories.tasks.insertAcceptanceVersion({ taskId: task.id,
+    acceptanceRevision: task.acceptance_revision + 1n, objective: '新验收目标',
+    requiredOutputSpec: {}, source: 'REOPEN' });
+  await sql`update tasks set acceptance_revision = acceptance_revision + 1,
+    revision = revision + 1 where id = ${task.id}`.execute(app.db);
+  await ask(fx, '验收要求改变后能沿用吗？', port);
+  assert.ok(captured.at(-1)?.includes('"acceptance_matches_current":false'));
+  assert.equal((await repositories.runs.readRun(applied.run_id!))?.status, 'FAILED');
+  assert.equal((await repositories.tasks.readTask(task.id))?.status, task.status,
+    '追问只读事实，不提交完成或驱动执行');
+  const other = await fixture();
+  await ask(other, '进展如何？', port);
+  assert.equal(captured.at(-1)?.includes(applied.run_id!), false, '不得串入其他会话执行事实');
+  assert.equal(captured.at(-1)?.includes(verificationId), false);
 });
 
 test('AM-06 会话里已有活动 Run 时，第二条执行链按类型化冲突拒绝，不并行推进', async () => {
@@ -662,9 +736,16 @@ test('0126 完全访问档把写工具放进词表', async () => {
   assert.ok(declared().includes('read_file'), '写启用不应挤掉读工具');
 });
 
-test('0126 会话轮次直接写：apply_changeset 真实落盘，写动作属 AGENT_SESSION_WRITE', async () => {
+for (const tier of ['FULL', 'AUTO'] as const)
+test(`0126 ${tier} 会话轮次直接写：apply_changeset 真实落盘，写动作属 AGENT_SESSION_WRITE`, async () => {
   const fx = await fixture();
-  await enableSessionWrite(fx);
+  const { resourceId } = await enableSessionWrite(fx);
+  if (tier === 'AUTO') {
+    const access = await createRepositories(app.db).gateway.readLocalDirectoryAccess(resourceId);
+    assert.ok(access);
+    await setLocalDirectoryWriteTier(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+      resourceId, commandId: randomUUID(), expectedRevision: access.revision.toString(), tier });
+  }
   const target = join(fx.root, 'src', 'index.ts');
   const before = await readFile(target, 'utf8');
   const baselineSha256 = createHash('sha256').update(before, 'utf8').digest('hex');
@@ -707,6 +788,82 @@ test('0126 会话轮次直接写：apply_changeset 真实落盘，写动作属 A
   const runRows = await sql<{ count: string }>`select count(*)::text as count from runs
     where workspace_id = ${fx.workspaceId}`.execute(app.db);
   assert.equal(runRows.rows[0]?.count, '0');
+});
+
+test('原会话写动作重放保持 Operation 身份，旧待审批状态不创建替代动作', async () => {
+  const fx = await fixture();
+  const { resourceId, canonicalRoot } = await enableSessionWrite(fx);
+  const repositories = createRepositories(app.db);
+  const access = await repositories.gateway.readLocalDirectoryAccess(resourceId);
+  assert.ok(access?.write_connection_id);
+  const messageId = randomUUID();
+  await repositories.assist.insertMessage({ id: messageId, sessionId: fx.sessionId, seq: 1n,
+    role: 'ASSISTANT', status: 'RUNNING', intent: 'DISCUSS', content: null, sources: [] });
+  const original = await readFile(join(fx.root, 'NOTES.md'), 'utf8');
+  const input = { workspaceId: fx.workspaceId, operationId: randomUUID(), intentKey: randomUUID(),
+    connectionId: access.write_connection_id, origin: { kind: 'AGENT_SESSION_WRITE' as const,
+      projectId: fx.projectId, resourceId, sessionId: fx.sessionId, messageId },
+    actionType: 'APPLY_CHANGESET' as const, target: canonicalRoot,
+    params: normalizeToolChanges([{ path: 'NOTES.md', action: 'MODIFY', content: 'not dispatched\n',
+      baselineSha256: createHash('sha256').update(original).digest('hex') }]) };
+  const prepared = await prepareGatewayAction(app.db, input);
+  const invocationsBefore = await repositories.gateway.listInvocations(prepared.operation_id);
+  assert.equal((await prepareGatewayAction(app.db, input)).operation_id, prepared.operation_id);
+  // 受控模拟旧版本已保存的会话待审批行；不借修改生产策略自动执行它。
+  await repositories.gateway.setOperationStatus(prepared.operation_id, 'WAITING_APPROVAL');
+  await createGatewayPolicy(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+    capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET', targetPrefix: canonicalRoot,
+    decision: 'ASK', maxPayloadBytes: 262144 });
+  const replay = await prepareGatewayAction(app.db, input);
+  assert.equal(replay.operation_id, prepared.operation_id);
+  assert.equal(replay.status, 'WAITING_APPROVAL');
+  await assert.rejects(() => prepareGatewayAction(app.db, { ...input, intentKey: randomUUID() }),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'GATEWAY_INTENT_CONFLICT');
+  await assert.rejects(() => prepareGatewayAction(app.db, { ...input,
+    params: normalizeToolChanges([{ path: 'NOTES.md', action: 'MODIFY', content: 'different payload\n',
+      baselineSha256: createHash('sha256').update(original).digest('hex') }]) }),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'GATEWAY_INTENT_CONFLICT');
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), original);
+  assert.deepEqual(await repositories.gateway.listInvocations(prepared.operation_id), invocationsBefore,
+    'prepare 已保留的 RESERVED 身份可重读，但不能再追加调用');
+  assert.ok(invocationsBefore.every((invocation) => invocation.dispatched_at === null));
+  const count = await sql<{ count: bigint }>`select count(*)::bigint as count from logical_operations
+    where project_id = ${fx.projectId} and origin = 'AGENT_SESSION_WRITE'`.execute(app.db);
+  assert.equal(count.rows[0]?.count, 1n);
+});
+
+for (const tightenedTier of ['ASK', 'READ_ONLY'] as const)
+test(`AUTO 已准备的会话修改在派发前改为 ${tightenedTier} 时不落盘`, async () => {
+  const fx = await fixture();
+  const { resourceId, canonicalRoot } = await enableSessionWrite(fx);
+  const repositories = createRepositories(app.db);
+  let access = await repositories.gateway.readLocalDirectoryAccess(resourceId);
+  assert.ok(access?.write_connection_id);
+  const writeConnection = access.write_connection_id;
+  await setLocalDirectoryWriteTier(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+    resourceId, commandId: randomUUID(), expectedRevision: access.revision.toString(), tier: 'AUTO' });
+  const messageId = randomUUID();
+  await repositories.assist.insertMessage({ id: messageId, sessionId: fx.sessionId, seq: 1n,
+    role: 'ASSISTANT', status: 'RUNNING', intent: 'DISCUSS', content: null, sources: [] });
+  const origin = { kind: 'AGENT_SESSION_WRITE' as const, projectId: fx.projectId,
+    resourceId, sessionId: fx.sessionId, messageId };
+  const target = join(fx.root, 'src', 'index.ts');
+  const original = await readFile(target, 'utf8');
+  const prepared = await prepareGatewayAction(app.db, { workspaceId: fx.workspaceId,
+    operationId: randomUUID(), intentKey: randomUUID(), connectionId: writeConnection,
+    origin, actionType: 'APPLY_CHANGESET', target: canonicalRoot,
+    params: normalizeToolChanges([{ path: 'src/index.ts', action: 'MODIFY',
+      content: 'must not be written\n', baselineSha256: createHash('sha256').update(original).digest('hex') }]) });
+  assert.equal(prepared.status, 'PREPARED', 'AUTO 普通修改应当先正常准备');
+  access = await repositories.gateway.readLocalDirectoryAccess(resourceId);
+  assert.ok(access);
+  await setLocalDirectoryWriteTier(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+    resourceId, commandId: randomUUID(), expectedRevision: access.revision.toString(), tier: tightenedTier });
+  await assert.rejects(() => dispatchGatewayAction(app.db, { workspaceId: fx.workspaceId,
+    operationId: prepared.operation_id, origin }), (error: unknown) =>
+    error instanceof Error && 'code' in error &&
+      (error.code === 'GATEWAY_PERMISSION_STALE' || error.code === 'GATEWAY_PERMISSION_DENIED'));
+  assert.equal(await readFile(target, 'utf8'), original, '准备事实不能覆盖后续撤权');
 });
 
 test('0126 基线过期时拒绝并保留原文件，不覆盖别人刚写的正文', async () => {
@@ -863,6 +1020,96 @@ for (const interaction of ['BROWSER', 'COMPUTER'] as const) {
     assert.equal(grants.rows[0]?.count, '0', '工具需求不得隐式变成操作授权或免批');
   });
 }
+
+test('自定义 ASK 写策略在会话动作创建前转 Run，原消息审批恢复只写一次', async () => {
+  const fx = await fixture();
+  const { canonicalRoot } = await enableSessionWrite(fx);
+  await createGatewayPolicy(app.db, { workspaceId: fx.workspaceId, projectId: fx.projectId,
+    capability: 'FILE_WRITE', actionType: 'APPLY_CHANGESET', targetPrefix: canonicalRoot,
+    decision: 'ASK', maxPayloadBytes: 262144 });
+  const before = await readFile(join(fx.root, 'NOTES.md'), 'utf8');
+  const after = before + 'APPROVED_ONCE\n';
+  const script = [[{ name: 'apply_changeset', arguments: { changes: [
+    { path: 'NOTES.md', action: 'MODIFY',
+      baselineSha256: createHash('sha256').update(before).digest('hex'), content: after }] } }]];
+  const base = new FakeModelPort();
+  let refusal = '';
+  const finalPort = oneShotPort(JSON.stringify({ reply: '原修改需审批，交给可恢复执行。',
+    execution: { title: '经批准修改说明', objective: '给 NOTES.md 追加一行',
+      criteria: [{ statement: '人工核对变更', required: true, method: 'HUMAN' }],
+      expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: true,
+      file_changes: [{ path: 'NOTES.md', action: 'MODIFY' }] } }));
+  const port: AssistModelPort = { identity: base.identity, assist: async (request) => {
+    if (request.toolTurns?.[0] === undefined) return base.assist(request);
+    refusal = request.toolTurns[0].results[0]?.content ?? '';
+    return finalPort.assist(request);
+  } };
+  const result = await ask(fx, `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, port);
+  assert.match(refusal, /SESSION_WRITE_REQUIRES_RUN/);
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), before);
+  const sessionWrites = await sql<{ count: bigint }>`select count(*)::bigint as count
+    from logical_operations where project_id = ${fx.projectId} and origin = 'AGENT_SESSION_WRITE'`.execute(app.db);
+  assert.equal(sessionWrites.rows[0]?.count, 0n, '不能遗留无恢复 Owner 的会话写动作');
+  assert.equal(result.requests.length, 1);
+  const requestId = result.requests[0]!.id;
+  const applied = await applyConversationExecution(app.db, { workspaceId: fx.workspaceId, requestId });
+  assert.ok(applied.run_id);
+  const runId = applied.run_id;
+  assert.equal((await applyConversationExecution(app.db, { workspaceId: fx.workspaceId, requestId })).run_id, runId);
+  let toolCallId: string | undefined;
+  for (let index = 0; index < 8; index += 1) {
+    const step = await advanceRunStep(app.db, { runId, workerId: `ask-run-${randomUUID()}`,
+      storage: new ManagedContentStore(dataRoot), fakeToolScript: script });
+    if (step.status === 'TOOL_LOOP_ACTION_REQUIRED') { toolCallId = step.tool_call_id; break; }
+    assert.ok(['STEP_SUCCEEDED', 'REPLAYED'].includes(step.status), JSON.stringify(step));
+  }
+  assert.ok(toolCallId);
+  const claim = { commandId: randomUUID(), runId, workspaceId: fx.workspaceId,
+    kind: 'START' as const, reviewDecisionId: null, workerId: `ask-run-${randomUUID()}`, epoch: 0n };
+  const waiting = await executeToolLoopStep(app.db, { claim, toolCallId });
+  assert.equal(waiting.status, 'WAITING');
+  assert.ok(waiting.reviewId);
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), before);
+  const repositories = createRepositories(app.db);
+  const review = await repositories.reviews.readRequest(waiting.reviewId);
+  assert.ok(review);
+  const decisionInput = { workspaceId: fx.workspaceId, reviewId: review.id, commandId: randomUUID(),
+    expectedRevision: String(review.revision), targetHash: review.target_hash.toString('hex'),
+    decision: 'APPROVE' as const };
+  const approved = await resolveReview(app.db, decisionInput);
+  const repeatedDecision = await resolveReview(app.db, decisionInput);
+  assert.equal(repeatedDecision.replayed, true);
+  assert.deepEqual(repeatedDecision.result, approved.result);
+  const commands = await sql<{ id: string }>`select id from run_commands
+    where review_decision_id = ${approved.result.decision_id}`.execute(app.db);
+  assert.equal(commands.rows.length, 1);
+  const resumeClaim = { ...claim, commandId: commands.rows[0]!.id, kind: 'RESUME' as const,
+    reviewDecisionId: approved.result.decision_id };
+  const resumed = await executeToolLoopStep(app.db, { claim: resumeClaim, toolCallId });
+  assert.equal(resumed.status, 'SUCCEEDED', JSON.stringify(resumed));
+  const replay = await executeToolLoopStep(app.db, { claim: resumeClaim, toolCallId });
+  assert.equal(replay.operationId, waiting.operationId);
+  assert.equal(resumed.operationId, waiting.operationId);
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), after);
+  assert.equal((await repositories.gateway.listInvocations(waiting.operationId!)).length, 1);
+  assert.equal((await repositories.toolCalls.listByRun(runId)).length, 1);
+  let completionBlocked = false;
+  for (let index = 0; index < 8; index += 1) {
+    const step = await advanceRunStep(app.db, { runId, workerId: `ask-finish-${randomUUID()}`,
+      storage: new ManagedContentStore(dataRoot), fakeToolScript: script });
+    if (step.status === 'COMPLETION_BLOCKED') {
+      assert.equal(step.reason, 'VERIFICATION_NOT_PASSED');
+      completionBlocked = true;
+      break;
+    }
+    assert.ok(['STEP_SUCCEEDED', 'REPLAYED'].includes(step.status), JSON.stringify(step));
+  }
+  assert.equal(completionBlocked, true, '人工验收条件不能因动作获批而自动提交完成');
+  assert.equal((await repositories.runs.readRun(runId))?.status, 'WAITING_APPROVAL');
+  assert.equal((await repositories.reviews.listByRun(runId)).filter((item) =>
+    item.kind === 'CRITERION' && item.status === 'OPEN').length, 1);
+  assert.equal(await readFile(join(fx.root, 'NOTES.md'), 'utf8'), after);
+});
 
 test('AUTO 档删除在创建动作前转交 Run，不遗留无法接续的会话审批', async () => {
   const fx = await fixture();

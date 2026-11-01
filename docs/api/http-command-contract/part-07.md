@@ -40,29 +40,38 @@
 
 **不可撤销。** 这是全项目唯一删除会话的命令：没有回收站，没有「取消删除」反向命令，误删与重启都无法找回。界面必须先弹确认框、逐字写明不可恢复，**不给撤销条**；归档仍是可撤销通道，两者不合并成一个「移除」动作。
 
-**删什么。** 只删会话自有账本，按子 → 父顺序在同一短事务内显式执行（不依赖 `ON DELETE CASCADE`）：消息、提案、附件（`bytea` 内容随行消失）、生成中预览、会话工具调用、模型选择、自然语言状态维护请求与其变更、未进入组合检查的影响检查与候选分组、辅助模型调用计量与已到期供应商冷却、会话 diff 基线，最后是会话行本身。`conversation_diff_baselines.session_id` 是普通列（0097 无外键），必须显式删，否则留下悬空账本。
+**删什么。** 只删会话自有账本，按子 → 父顺序在同一短事务内显式执行（不依赖 `ON DELETE CASCADE`）：消息、提案、附件（`bytea` 内容随行消失）、生成中预览、会话工具调用、模型选择、自然语言状态维护请求与其变更、未进入组合检查的影响检查与候选分组、辅助模型调用计量与已到期供应商冷却、会话 diff 基线，0132 的撤回基线／逐文件条目／撤回请求／保护副本／撤销行，0146 与 0151 的会话待办快照／事件／轮次归属，0148 的子代理补充消息，最后是会话行本身。`conversation_diff_baselines.session_id` 是普通列（0097 无外键），必须显式删，否则留下悬空账本。撤回子表清完、删撤回行之前，先按 `session_id` 解除本会话消息的 `withdrawn_by_recall_id`（0132 的 NO ACTION 非延迟外键）——这一步只属于「整条会话确定物理删除」的这一版事务，换行／编辑／撤回路径都不做（2026-11-01 补充，见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-11-01-补充撤回反向引用的解除时机)）。
+
+**执行请求不被删，但会被脱钩（0154）。** `conversation_execution_requests` 引用会话与原用户消息（默认 NO ACTION），承载「这个 Task 从哪条消息来」的授权来源。0154 去掉那两条外键（两列仍是普通 uuid 列，身份留着），删除会话时把来源消息的**序号与正文摘要**、**脱钩时刻**写进请求行（`source_message_seq` / `source_message_sha256` / `source_detached_at`）：任务侧仍能核对来源，摘要只能核对、不能还原正文，不复制正文与标题。`source_detached_at` 非空后该请求**不能再被推进成新的 Task/Run**（应用层 409 `INVALID_TRANSITION` 失败关闭），已产生的 Task/Run 不受影响。
 
 **不删什么（阻断）。** 命令先查阻断项，命中任意一项即整条拒绝、零删除，返回 `409 SESSION_DELETE_BLOCKED`，`conflict.blocking_reasons` 逐项列出：
 
 | 代码 | 含义 |
 |---|---|
 | `FORK_CHILDREN` | 存在以本会话为来源的分叉会话 |
+| `SUBAGENT_CHILDREN` | 存在以本会话为父的子代理会话 |
+| `DELEGATION_LEDGER_REFERENCED` | 本会话是父会话委派账本里的子会话，或其消息是委派尝试的结论消息 |
 | `TASK_ACCEPTANCE_CITED` | Task 验收观察把本会话的消息作为来源 |
 | `HYPOTHESIS_CITED` | 项目假设版本把本会话的消息作为来源 |
 | `WORK_SEGMENT_CITED` | 工作片段把本会话的消息作为来源 |
 | `BLUEPRINT_CITED` | 项目蓝图提案把本会话的消息作为来源 |
-| `EXECUTION_REQUESTS` | 本会话发起过执行请求 |
-| `LEARNING_RECORDS` | 本会话有学习记录 |
+| `EXECUTION_REQUESTS_IN_FLIGHT` | 本会话有一条执行请求仍在解析（候选已定的请求是脱钩凭据，不再阻断） |
+| `LEARNING_RECORDS` | 本会话有学习记录（学习记录有自己的删除入口） |
 | `ARTIFACT_IMPACT_COMMITTED` | 本会话的影响检查已进入组合检查 |
 | `PROVIDER_COOLDOWN_ACTIVE` | 本会话的模型调用仍在未到期的供应商冷却里 |
+| `MEMORY_COMPACTION_ACTIVE` | 本会话的工作记忆正在整理中 |
+
+2026-10-31 撤销了初版的 `MEMORY_SOURCES`（自动记忆的来源绑定是会话自有凭据，随会话清理；长期记忆正文与版本保留、另有停用入口），并把 `EXECUTION_REQUESTS` 收窄为上表的 `EXECUTION_REQUESTS_IN_FLIGHT`；理由与代价见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-10-31-修订按数据所有权重审阻断面)。
 
 另有与归档共用的在途栅栏：存在 `PENDING`/`RUNNING` 消息时返回 `409 INVALID_TRANSITION`。跨 Workspace 的会话按 `404 RESOURCE_NOT_FOUND`。
+
+**结果未知怎么读（2026-10-31）。** 删除是不可撤销操作，服务端 5xx 与响应丢失都**不能证明这次删除没发生**（命令与回执在同一事务里提交）。客户端因此按四档处理：已删、被引用阻断、明确失败、**结果未知**。最后一档先按**原 `command_id`** 查 `GET /commands/{command_id}`：回执存在且 `command_type='DeleteAssistSession'` 即视为已删；查不到（404 `COMMAND_NOT_FOUND`）只能记为待核实——服务端明确说过回执不存在不能证明一个仍在事务中的请求永远未提交。任何一档都不换 `command_id` 重发。
 
 **并发与幂等。** 行锁 + `expected_revision` CAS 先于判定：陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，一行不动。删除成功后会话行已不存在，重放**不能**靠再读会话判定，而是读 `command_receipts`：同 `command_id` 同载荷返回原结果并附 `command-replayed: true`，换载荷返回 `409 COMMAND_ID_REUSED`。
 
 **审计。** 命令回执之外，在同一事务写一条 append-only 的 `activity_records`（`event_type='ASSIST_SESSION_DELETED'`）。`fact_refs` 只记会话 ID、删除前修订与删除行数，不复制标题或正文——用户要求删除之后，审计不成为第二份保存。
 
-**证据（如实分层）。** 真实 PostgreSQL：`assist-session-delete.integration.test.ts` **9/9**（账本删净且无悬空基线、行消失后回执重放、换载荷复用 ID 被拒、陈旧基线零删除、在途消息栅栏、分叉与学习记录两类阻断、跨 Workspace 不可见、0116 授权不外溢、删除后无只读恢复入口）；工作台 `sessionRowMenu.spec.ts` **19/19**（新增四条：确认与取消、确认后行从活跃区消失且无撤销条、阻断项留在确认框、回执不明锁死确认键）；`tsc --noEmit` 两侧对本片文件干净。真实 WebView2 窗口与多 DPI 下确认框的焦点与观感未复核。
+**证据（如实分层）。** 真实 PostgreSQL：`assist-session-delete.integration.test.ts` **25/25**（账本删净且无悬空基线、行消失后回执重放、换载荷复用 ID 被拒、陈旧基线零删除、在途消息栅栏、分叉与学习记录两类阻断、跨 Workspace 不可见、0116 授权不外溢、删除后无只读恢复入口，2026-10-31 新增五例：自动记忆来源随会话清理而长期记忆正文保留、撤回账本（基线／逐文件条目／撤回请求／保护副本／撤销行）清干净、会话待办三表无残行、执行请求脱钩后 Task 仍在且该请求不再能推进、0154 授权不外溢到 `tasks` 与 `memory_items`；2026-11-01 新增两例：真实完成撤回的会话可删除（消息侧反向引用在删除事务内解除、撤回账本整组消失、全库不留悬空撤回引用）、撤回会话的删除事务中途失败整条回滚（消息、反向引用与账本一行不少，回滚后重删仍成立））；工作台 `sessionRowMenu.spec.ts` **30/30**（删除相关八例：确认与取消、确认后行从活跃区消失、阻断终态给可执行动作、409 按原 ID 核对回执后判已删、500 停在待核实、批量四档与同因聚合、核对回执确认已删后按确切 sessionId 收掉活跃与归档两份投影与勾选、批量混合结局下只收已确认的那条）；真实 Chromium `tests/browser/sessionDeleteFlow.spec.ts` **4/4**（一次确认、无第三张删除卡、结论分层与限高、追溯号只在详情里、核对回执后行当场消失且刷新后与服务端一致）；`tsc --noEmit` 两侧 exit 0。真实 WebView2 窗口与多 DPI 下确认框的焦点与观感未复核。
 
 ### 10.94 周期定时启动任务（2026-10-18 源码实现，迁移 0115）
 
@@ -204,7 +213,7 @@
 
 已受理但尚未领取的整理，如果会话/Project 随后归档，Worker 以 `FAILED/MEMORY_SCOPE_CHANGED` 收敛且不调用模型，不让无效范围的 PENDING 请求永久挡住管理；该整理仍可通过取消命令提前收敛。
 
-普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配排序，零匹配时近期回退，消息 sources 附 `selection=AUTO_MEMORY`、`selection_basis=LITERAL_MATCH|RECENT_CONFIRMED`，不是语义向量召回。2026-10-30 修正：中英文混合查询按文字边界分词，显式来源在候选限制前排除，避免去重耗尽候选。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
+普通聊天自动召回最多3条、合计8000字符，与手工资料合计最多20来源；仅同 Workspace 全局与当前 Project、当前有效已确认版本。按有界字面匹配召回，`selection_basis=LITERAL_MATCH`；**2026-11-01 起零匹配不再注入任何自动记忆**（旧的「近期回退」会让「你好」带出最近一条无关记忆），历史消息里仍可能读到 `RECENT_CONFIRMED`。装配时自动召回与「显式选中资料」分开陈述，来源段表头写明「不是用户本轮选择，也不是本轮指令」；消息 sources 同时冻结 `origin` 与 `source_kind`，读取时缺 `origin` 读 `null`（未标注）、缺 `source_kind` 读 `UNKNOWN`，不把缺失当人工确认。2026-10-30 修正：中英文混合查询按文字边界分词，显式来源在候选限制前排除，避免去重耗尽候选。关闭或来源失效时，历史自动来源与依赖该来源的旧摘要/答复不能匿名回流。
 
 2026-10-30 压缩策略：有冻结有效调用预算 B 时，以与端口相同的 UTF-8 字节/3 估算，工作输入上限为 `floor(B × 0.75) × 3` 字节，为提示、工具及输出预留余量；旧摘要＋已结算增量达到该上限的 80% 时申请自动整理，不再仅因达到32条消息触发。保留最近8条原文，在完整轮次边界建立检查点；整理输入与普通生成最终组装均使用同一工作上限，真实端口仍单独检查完整请求及输出预算。B 取冻结调用预算（包含已知 Provider 容量限制），不直接把所选档位冒充模型窗口；无真实模型快照时优先使用会话档位，读不到会话才回退工作区默认；无任何预算的旧 Mock 路径保留32条/48000字节触发及128000字节保护。参数属于工程估算，不能证明 Provider 物理窗口、精确 tokenizer 或缓存收益。失败保留旧检查点和原文，同一覆盖边界自动失败不立即反复重试，可显式重新整理。typed errors 包括 `MEMORY_CONTEXT_TOO_LARGE / MEMORY_HISTORY_LIMIT / MEMORY_SUMMARY_INVALID / MEMORY_PUBLICATION_REJECTED / MEMORY_SOURCE_CHANGED / MEMORY_UNRESOLVED_TOOL_STATE / MEMORY_WORKER_LOST`，不可作为成功或自动换模型依据。请求/响应与档位整数不变，Breaking Change: No，无 migration。
 
@@ -318,7 +327,8 @@
 - **由系统判断要不要记**（2026-10-21，ADR-032）：**不提供「要不要生成这条记忆」的人工选择**。是否值得沉淀由提取环节的 agent 判断（信号门：未来的助手会不会因为这条内容而做得更好），没有值得记的就什么都不写。人工只保留事后停用某一条与整体关掉自动捕获；`auto_capture` 是总闸（与上游的「Generate memories」同位），默认开。
 - **失败静默**：超时、非法 JSON、预算不足、Worker 丢失、端口异常都只放弃这一轮提取——不写记忆、不改回复、不重试、不换模型。主回复的成功与否与提取无关。
 - **去重**：唯一键 `(session_id, message_id, normalized_sha256)`；同范围已有完全相同标题与正文的 ACTIVE 记忆时不再写入；已撤销的同一内容不再提取。不做语义去重，不引入向量库。
-- **召回**：条数、字符与来源上限不变（3 条 / 8000 字符 / 20 来源）；排序改为 `literal_match` 优先 → 人工确认先于自动捕获 → 类别（用户原话 → 来源未标注 → 模型观察），同等相关度下 `HUMAN_CONFIRMED` 先于 `AUTO_CAPTURE`。记忆来源的投影带 `origin` 与 `source_kind`，非记忆来源不带。
+- **召回**：条数、字符与来源上限不变（3 条 / 8000 字符 / 20 来源）；**2026-11-01 起只注入与当前用户消息字面命中的记忆**，未命中的不再按 `updated_at` 作「近期回退」进入本轮上下文——那会让问候语「你好」带出最近一条「请求打开记事本」，模型再把它说成用户本轮选中的资料。命中项排序为人工确认先于自动捕获 → 类别（用户原话 → 来源未标注 → 模型观察），同等相关度下 `HUMAN_CONFIRMED` 先于 `AUTO_CAPTURE`。消息 sources 仍冻结 `selection=AUTO_MEMORY` 与 `selection_basis`；新召回只产生 `LITERAL_MATCH`，`RECENT_CONFIRMED` 仅保留为历史来源的兼容读法。不引入向量库。
+- **消息来源元数据（2026-11-01 BUG-CHAT-CONTEXT-CROSS-TALK P1）**：装配时 `origin` 与 `source_kind` 随 `selection` 一起冻结进消息 `sources`——自动召回以召回行（`memory_items`）为准，手选记忆以读取到的记忆根为准；非记忆来源不带这两维。读取时**缺 `origin` 读成 `null`（未标注），不默认成 `HUMAN_CONFIRMED`**；缺 `source_kind` 读成 `UNKNOWN`。只有记录里明确写下的值才显示为人工确认/用户原话；旧记录不按记忆根回填，避免把「当时没记下来」追认成「人工确认」。记忆来源的投影带 `origin` 与 `source_kind`，非记忆来源不带。
 - **端点**：
 
 | 端点 | 请求与结果 |

@@ -38,7 +38,7 @@ if ($interactive) {
 do {
 # 交互模式每轮都重新显示菜单：不能用 $Action 判断，它仍是上一次选中的动作。
 if ($interactive) {
-  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 桌面开发窗口（热更新；已初始化后无需打包，API 自动刷新暂存）`n0. 退出"
+  Write-Host "Relay 桌面测试版`n1. 启动测试版`n2. 打包最新测试版`n3. 停止测试环境（保留数据）`n4. 查看状态和目录`n5. 浏览器开发预览`n6. 重启桌面开发窗口（已有窗口先关闭；热更新，已初始化后无需打包，API 自动刷新暂存）`n0. 退出"
   switch (Read-Host '请选择') {
     '1' { $Action = 'Start' }
     '2' { $Action = 'Build' }
@@ -82,7 +82,9 @@ try {
   continue
 }
 $savedEnvironment = @{}
-foreach ($key in @('RELAY_DB_URL', 'RELAY_MIGRATION_DB_URL', 'RELAY_DESKTOP_CONFIG_PATH', 'RELAY_DESKTOP_DATA_ROOT')) {
+# PATH 也要还原：菜单常驻进程里每个动作都会往进程 PATH 上并环境（dev-desktop.ps1 导入 VS 环境、
+# build-release.ps1 前置 node 目录），超过 cmd 的单行上限后动作只剩「输入行太长。」，且菜单不会自愈。
+foreach ($key in @('PATH', 'RELAY_DB_URL', 'RELAY_MIGRATION_DB_URL', 'RELAY_DESKTOP_CONFIG_PATH', 'RELAY_DESKTOP_DATA_ROOT')) {
   $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 function Invoke-Checked {
@@ -159,11 +161,19 @@ try {
     if ($interactive) { continue }
     return
   }
-  if ($Action -eq 'DesktopDev' -and (Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue)) {
-    throw '桌面窗口已在运行，请先关闭现有窗口，再启动桌面开发窗口。'
+  # 菜单 6 是重启语义：已有开发窗口——含上一次 Ctrl+C 后没跟着退出的孤儿窗口——先正常关闭再重开，
+  # 不要求用户回原终端收尾。关闭必须早于刷新暂存与补迁移：结构升级不能压在还连着库的窗口上。
+  # 打包版测试进程有独立的清单校验与生命周期，不由这里代关，仍按原样拒绝。
+  if ($Action -eq 'DesktopDev') {
+    if (@(Get-TrialProcesses).Count) { throw '测试包进程仍在运行，请先关闭测试版，再启动桌面开发窗口。' }
+    if (@(Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue).Count) {
+      Write-Host '正在关闭已有的桌面开发窗口…'
+      & (Join-Path $root 'apps\desktop\scripts\dev-desktop.ps1') -Action close
+    }
+  } elseif (@(Get-Process -Name 'relay-desktop' -ErrorAction SilentlyContinue).Count) {
+    throw '桌面窗口已在运行，请先关闭现有窗口，再操作测试环境。'
   }
   if (@(Get-TrialProcesses).Count) {
-    if ($Action -eq 'DesktopDev') { throw '测试包进程仍在运行，请先关闭测试版，再启动桌面开发窗口。' }
     Write-Host 'The trial is already running. Use its existing window.'
     if ($interactive) { continue }
     return
@@ -290,7 +300,9 @@ try {
     "RELAY_DESKTOP_WORKSPACE_ID=$($state.workspace_id)")
   [IO.File]::WriteAllText($config, (($runtimeLines + $userLines) -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
   $env:RELAY_DESKTOP_CONFIG_PATH = $config
-  $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $trial 'data'
+  # 桌面 API 的值校验要求数据目录位于源码仓库之外（config.ts validateDataRoot），
+  # 所以不能再用 <repo>\.relay-test\data，改用应用自己的 APPDATA 目录下的 trial-data。
+  $env:RELAY_DESKTOP_DATA_ROOT = Join-Path (Join-Path $env:APPDATA 'dev.relay.agent') 'trial-data'
   New-Item -ItemType Directory -Path $env:RELAY_DESKTOP_DATA_ROOT -Force | Out-Null
   if ($Action -eq 'DesktopDev') {
     Write-Host '正在打开桌面开发窗口（Ctrl+C 停止）…'

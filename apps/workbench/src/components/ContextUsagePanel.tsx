@@ -23,10 +23,11 @@ import "./ContextUsagePanel.css";
  *   · 分项来自服务端按请求文本的估算，界面必须标「估算」；没有分项就只写「暂无分项统计」，
  *     不补数、不把总量平均分摊到几个分类里；
  *   · 没有「跟随应用默认」这一档：每个会话从建立那一刻起就有确定档位；
- *   · **选择与保存分开**（2026-10-30 复审恢复原定交互）：点档位只改本地已选值，
- *     按「保存档位」才写服务端（带该会话自己的档位修订 CAS）。生效与否只由服务端回执
- *     决定：保存中与待核对的档位一律标「尚未生效」，不宣称已切换。409 重读最新值并
- *     说明；传输失败保留原 command_id 待核对（不换新 ID）。
+ *   · **点档位就写服务端**（2026-10-31 用户指令：删掉「保存档位 / 重新读取」两枚按钮，
+ *     档位点击即保存）。点下去就是一次写（带该会话自己的档位修订 CAS），不再有「已选未
+ *     保存」这个中间态。生效与否只由服务端回执决定：在途与待核对时不宣称已切换，
+ *     状态行明说「正在保存 X；确认之前仍按 Y 生效」。409 与明确失败都退回生效值并说明；
+ *     传输失败保留原 command_id 待核对（不换新 ID），那条待核对档位仍显示为选中态。
  *
  * 没有会话时（首条消息之前）也能选：档位先存在**当前新会话草稿作用域**，随建会话命令
  * 一起写进创建事务，因此第一个模型调用就按用户选的档位冻结预算，不存在「先按 256K
@@ -100,19 +101,30 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
    * 正在保存的会话集合：按会话记，不按浮层记。
    *
    * 浮层是同一个组件实例，切会话只是换 props。用一个布尔表示「保存中」，会让 A 会话的在途
-   * 请求把 B 会话的「保存档位」也锁住；A 的请求结束时，又去解开 B 的锁。
+   * 请求把 B 会话的单选组也锁住；A 的请求结束时，又去解开 B 的锁。
    */
   const [savingSessions, setSavingSessions] = useState<readonly string[]>([]);
   const saving = sessionId !== null && savingSessions.includes(sessionId);
   /**
-   * 已选、还没保存的那一档（P0-C，2026-10-30 复审恢复「选择后点击保存」）。
+   * 在途写的**同步**标记。
    *
-   * 选择只改这里，不写服务端；写服务端必须由「保存档位」触发。这样单选组里出现的新值
-   * 永远不会被读成「已经生效」——生效值只来自服务端已保存的那一档。
+   * `saving` 是渲染后的派生值：同一帧里连着点两档时，第二个事件处理器看到的仍是旧闭包，
+   * 会放出第二条写命令（两条同基线 CAS，一条成功一条 409，但「一次只允许一个未确认的写」
+   * 已经被破坏）。ref 在事件里立即可见，用它做真正的闸门；`saving` 只管界面禁用。
    */
-  const [draftSelection, setDraftSelection] = useState<RelayContextBudgetTokens | null>(null);
-  /** 选下这一档时服务端的基线值（P1）：基线被别人挪走时要说得出来。 */
-  const [draftBaseline, setDraftBaseline] = useState<RelayContextBudgetTokens | null>(null);
+  const savingRef = useRef<readonly string[]>([]);
+  /**
+   * 用户刚点下、正在写给服务端的那一档（按会话登记）。
+   *
+   * 点档位就是一次写，所以它只活在一次写的过程里：回执确认、409 或明确失败都会清掉，
+   * 让选择器回到服务端事实；只有传输失败（结果未决）时才留到回执核对完，免得把
+   * 「可能已经写成功」的那一档先退回旧值，让用户以为没写。
+   *
+   * 按会话存放而不是单个值：切到别的会话时，A 的在途选择不能画到 B 的单选组上。
+   */
+  const [chosenBySession, setChosenBySession] =
+    useState<readonly Scoped<RelayContextBudgetTokens>[]>([]);
+  const chosenFor = chosenBySession.find((item) => item.sessionId === sessionId)?.value ?? null;
   const [conflict, setConflict] = useState<Scoped<string> | null>(null);
   const [actionError, setActionError] = useState<Scoped<string> | null>(null);
   const [pendingBySession, setPendingBySession] = useState<readonly Pending[]>([]);
@@ -137,6 +149,14 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   const forgetPending = useCallback((targetSessionId: string) => {
     setPendingBySession((current) => current.filter((item) => item.sessionId !== targetSessionId));
   }, []);
+  /** 登记/撤下这条会话「正在写」的档位。 */
+  const rememberChosen = useCallback((targetSessionId: string, tokens: RelayContextBudgetTokens) => {
+    setChosenBySession((current) => [...current.filter((item) => item.sessionId !== targetSessionId),
+      { sessionId: targetSessionId, value: tokens }]);
+  }, []);
+  const forgetChosen = useCallback((targetSessionId: string) => {
+    setChosenBySession((current) => current.filter((item) => item.sessionId !== targetSessionId));
+  }, []);
   /*
    * 刚写成功、但父组件还没把新投影读回来的那一小段时间。
    *
@@ -157,68 +177,50 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   const committedFor = committed !== null && committed.sessionId === sessionId ? committed : null;
   const name = useId();
   const disposed = useRef(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     disposed.current = false;
     return () => { disposed.current = true; };
   }, []);
   useEffect(() => {
-    // 切会话只清这一屏的草稿：未决命令、提示与覆盖层都按会话存放，不需要清（P0-6）。
-    setDraftSelection(null); setDraftBaseline(null);
-  }, [sessionId]);
-  useEffect(() => {
     if (committed === null || usage === null) return;
     if (usage.sessionId !== committed.sessionId) return;
     // 投影还停在这次写的基线上：界面还没追上，覆盖层继续顶住，避免回闪。
     if (usage.budget.revision === committed.baseRevision) return;
+    // 服务端已经走到这一步：覆盖层让位，界面完全交给服务端事实。
     setCommitted(null);
-    if (draftSelection === committed.tokens) {
-      // 服务端已落在这一档上、用户保存后没有再改选择：草稿兑现，清掉（P1）。
-      setDraftSelection(null); setDraftBaseline(null);
-    } else if (draftSelection !== null) {
-      // 保存之后用户又选了一档：草稿留着，但基线以服务端现在的值为准。
-      setDraftBaseline(usage.budget.tokens);
-    }
-  }, [committed, draftSelection, usage]);
+  }, [committed, usage]);
 
-  /**
-   * 内容变了就把浮层滚回顶部。
+  /*
+   * 这里**不再**有「内容变了就把浮层滚回顶部」的复位（2026-11-01 用户指认档位切换时菜单闪动）。
    *
-   * 浮层是**底边锚定**、高度受限的容器：回执、冲突提示或新的分项出现时它会向上长，
-   * 浏览器会保住原来的视觉位置，结果把标题与主读数顶出可视区——看起来像是「用量不见了」。
-   * 这里在内容变化时显式回到顶部，三段结构永远从「上下文用量」开始读。
+   * 那条复位压的是结构问题：浮层底边锚定、整块 overflow-y: auto，回执或冲突提示一出现容器就向上长，
+   * 浏览器保住原视觉位置，把标题与主读数顶出可视区，看起来像「用量不见了」。
+   * 现在浮层分成「上固定 / 中滚动 / 档位停靠」三段（见 ContextUsagePanel.css）：回执与错误只在中间的
+   * 滚动区里长高，档位区固定在底部不动，几何由外层按圆环重新落位——不需要滚回顶部，也**不该**滚回：
+   * 用户正读到第五行时点一下档位就被顶回第一行，那一次顶回就是用户看到的「跳」。
    */
-  useEffect(() => {
-    const menu = rootRef.current?.closest(".agent-chat-context-meter-menu");
-    if (menu instanceof HTMLElement) menu.scrollTop = 0;
-  }, [usage, noticeFor, conflictFor, pending, actionErrorFor]);
 
   /*
    * 两个值必须分开说，界面才不会撒谎：
    *   savedTier —— 服务端已保存的档位，也就是「现在生效」的唯一来源；
    *                committed 只覆盖「回执已确认、投影还没追上」的一小段，避免回闪。
-   *   chosen    —— 单选组的显示值：用户刚点的那一档优先，否则就是生效值。
-   * 「已选未保存」「保存中待确认」都只改 chosen，savedTier 不动，状态行照实说明。
+   *   chosen    —— 单选组的显示值：这次点击点下去的那一档优先（写的过程中/待核对时），
+   *                其余时候就是生效值。点击即写，所以不存在「已选未保存」这个第三态。
    */
   const savedTier = committedFor?.tokens ?? usage?.budget.tokens ?? draftTier ?? TIERS[0].value;
-  const chosen = draftSelection ?? savedTier;
-  /**
-   * 草稿还在，但基线已经被别人挪走了（P1）。
-   *
-   * 「已选 X，尚未保存」说的是你和当前值的关系；这一句说的是基线自己也动过——少它的话用户
-   * 只会以为自己看漏了，而不知道服务端那一行已经换人写过。
-   */
-  const baselineMoved = draftSelection !== null && draftBaseline !== null
-    && draftBaseline !== savedTier;
+  const chosen = chosenFor ?? savedTier;
   /** 空白新会话：用户显式选的 > 来源会话（已读到）> 无来源时的缺省 256K；读不到就留空。 */
   const firstChosen = draftTier ?? (inheritState === "ready" ? inheritedTier
     : inheritState === "none" ? TIERS[0].value : null);
-  /** 有会话时的状态行：生效值只认服务端那一档。 */
+  /**
+   * 有会话时的状态行：正常状态不再常驻说明——三档的单选态已经说明当前值。
+   * 只有「在途」「待核对」这种需要解释的情况才出一行。
+   */
   const tierState = saving
-    ? `正在保存 ${formatTierLabel(draftSelection)}；确认之前仍按 ${formatTierLabel(savedTier)} 生效。`
-    : draftSelection !== null && draftSelection !== savedTier
-      ? `已选 ${formatTierLabel(draftSelection)}，尚未保存；现在生效的是 ${formatTierLabel(savedTier)}。`
-      : `当前生效：${formatTierLabel(savedTier)}；下一次模型调用按它冻结预算。`;
+    ? `正在保存 ${formatTierLabel(chosenFor)}；确认之前仍按 ${formatTierLabel(savedTier)} 生效。`
+    : pending !== null
+      ? `最后一次确认生效：${formatTierLabel(savedTier)}；待核对的那一档尚未确认。`
+      : null;
   /** 还没有会话时的状态行：继承结果只有读到来源会话那一行才敢说。 */
   const firstTierState = draftTier != null
     ? `已选 ${formatTierLabel(draftTier)}：会话建立时写入，第一个模型调用就按它冻结预算。`
@@ -245,7 +247,7 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
       onReload();
       return;
     }
-    if (saving) return;
+    if (savingRef.current.includes(sessionId)) return;
     // P0-1：有一条还没核对完的写命令时，绝不再生成新的 command_id。
     if (pending !== null) {
       setActionError({ sessionId, value: "上一条保存命令还没核对完：先查它的回执；确认它没有"
@@ -256,18 +258,20 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
     const origin = sessionId;
     // 用最近一次确认过的修订做 CAS：刚写成功但投影还没追上时，用旧修订会被打成 409。
     const expectedRevision = committedFor?.revision ?? usage.budget.revision;
+    savingRef.current = [...savingRef.current, origin];
     setSavingSessions((current) => [...current, origin]);
-    setDraftSelection(next); setNotice(null); setActionError(null); setConflict(null);
+    rememberChosen(origin, next);
+    setNotice(null); setActionError(null); setConflict(null);
     try {
       const result = await client.setSessionContextBudget({ sessionId: origin, commandId,
         expectedRevision, budgetTokens: next });
       if (disposed.current) return;
       forgetPending(origin);
+      forgetChosen(origin);
       setCommitted({ sessionId: origin, tokens: result.contextBudgetTokens,
         revision: result.revision, baseRevision: expectedRevision });
       setNotice({ sessionId: origin,
-        value: `已保存（修订 v${result.revision}）：本会话每次模型调用最多携带 `
-          + `${result.contextBudgetTokens.toLocaleString()} tokens。` });
+        value: `已保存：下次调用按 ${result.contextBudgetTokens.toLocaleString()} tokens 申请。` });
       onSaved();
     } catch (caught) {
       if (disposed.current) return;
@@ -275,24 +279,28 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
       if (described.kind === "conflict") {
         // 409：这条命令没有被提交（对方赢了），不留待核对，直接换基线重读（P0-5）。
         forgetPending(origin);
+        forgetChosen(origin);
         setConflict({ sessionId: origin, value: described.message });
         onReload();
       } else if (caught instanceof RelayTransportError) {
         // 传输失败不等于没写成功：保留原 command_id 与载荷，由回执核对收口。
+        // 这一档也继续显示为选中（结果未决，不先退回旧值），但状态行不宣称已生效。
         rememberPending({ sessionId: origin, commandId, expectedRevision, budget: next,
           reason: described.message });
       } else {
-        // 明确失败：服务端说这条命令没写，就不再占着待核对名额。
+        // 明确失败：服务端说这条命令没写，就不再占着待核对名额，选择也退回生效值。
         forgetPending(origin);
+        forgetChosen(origin);
         setActionError({ sessionId: origin, value: described.message });
       }
     } finally {
+      savingRef.current = savingRef.current.filter((item) => item !== origin);
       if (!disposed.current) {
         setSavingSessions((current) => current.filter((item) => item !== origin));
       }
     }
-  }, [client, committedFor, forgetPending, loading, onDraftTierChange, onReload, onSaved,
-    pending, rememberPending, saving, sessionId, usage]);
+  }, [client, committedFor, forgetChosen, forgetPending, loading, onDraftTierChange, onReload,
+    onSaved, pending, rememberChosen, rememberPending, sessionId, usage]);
 
   async function checkReceipt(): Promise<void> {
     if (client === null || pending === null) return;
@@ -314,12 +322,13 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
         return;
       }
       forgetPending(origin);
+      forgetChosen(origin);
       const revision = String(receipt.result.revision ?? "");
       // 回执确认了服务端事实：先把这一档钉住，避免重读回来之前选择器回闪旧值。
       setCommitted({ sessionId: origin, tokens: pending.budget, revision,
         baseRevision: pending.expectedRevision });
       setNotice({ sessionId: origin,
-        value: `原命令回执已核对：会话档位已保存（修订 v${revision}）。` });
+        value: "原命令回执已核对：档位已保存。" });
       onReload();
       onSaved();
     } catch (caught) {
@@ -344,7 +353,8 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   async function retryPending(): Promise<void> {
     if (client === null || pending === null) return;
     const origin = pending.sessionId;
-    if (savingSessions.includes(origin)) return;
+    if (savingRef.current.includes(origin)) return;
+    savingRef.current = [...savingRef.current, origin];
     setSavingSessions((current) => [...current, origin]);
     setActionError(null); setConflict(null); setNotice(null);
     try {
@@ -353,10 +363,10 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
         budgetTokens: pending.budget });
       if (disposed.current) return;
       forgetPending(origin);
+      forgetChosen(origin);
       setCommitted({ sessionId: origin, tokens: result.contextBudgetTokens,
         revision: result.revision, baseRevision: pending.expectedRevision });
-      setNotice({ sessionId: origin,
-        value: `原命令已重放并核对（修订 v${result.revision}）：会话档位已保存。` });
+      setNotice({ sessionId: origin, value: "原命令已重放并核对：档位已保存。" });
       onReload();
       onSaved();
     } catch (caught) {
@@ -365,6 +375,7 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
       if (described.kind === "conflict") {
         // 原命令没被提交、修订又往前走：换基线重读，不再保留这条命令。
         forgetPending(origin);
+        forgetChosen(origin);
         setConflict({ sessionId: origin, value: described.message });
         onReload();
       } else if (caught instanceof RelayTransportError) {
@@ -373,9 +384,11 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
           value: `按原命令重试仍未取到回执：${described.message}` });
       } else {
         forgetPending(origin);
+        forgetChosen(origin);
         setActionError({ sessionId: origin, value: described.message });
       }
     } finally {
+      savingRef.current = savingRef.current.filter((item) => item !== origin);
       if (!disposed.current) {
         setSavingSessions((current) => current.filter((item) => item !== origin));
       }
@@ -393,153 +406,162 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   const percent = ratio === null ? null : formatRatioPercent(ratio);
   const breakdown = lastCall?.breakdown ?? null;
   const hitRate = cacheHitRate(inputTokens, lastCall?.cacheReadTokens ?? null);
-  // 档位与那次调用冻结的预算不同时，明确写出来：否则「占比 16%」和「当前 1024K」
-  // 会读成互相矛盾的两个数。
-  const freezeDiffers = usage?.budget.tokens != null && lastCall?.reservedTokens != null &&
-    lastCall.reservedTokens !== usage.budget.tokens;
 
-  return <div className="context-usage" data-testid="context-usage-panel" ref={rootRef}>
-    {error !== null && <div className="action-error" role="alert" data-testid="context-usage-error">
-      <p>上下文用量读取失败：{error}</p>
-      <button className="secondary-button" type="button" disabled={loading}
-        onClick={onReload}>重新读取</button>
-    </div>}
+  return <div className="context-usage" data-testid="context-usage-panel">
+    {/*
+      * 2026-11-01 用户指令：浮层读序改为「最近一次模型调用 → 上下文构成 → 当前档位」，
+      * 三档始终横排并钉在菜单最底部。
+      *
+      * 分成「滚动区 + 停靠区」两段 DOM，是为了让「档位永远可点」不依赖滚动位置：停靠区是布局的
+      * 参与者，不是 sticky/absolute 覆盖层——它变高只会压缩上面的滚动区，不会遮住分项、错误提示
+      * 或键盘焦点；窗口极短、压缩到极限时由停靠区自己滚动，而三档就排在它的第一屏。
+      */}
+    <div className="context-usage-scroll">
+      {error !== null && <div className="action-error" role="alert" data-testid="context-usage-error">
+        <p>上下文用量读取失败：{error}</p>
+        <button className="secondary-button" type="button" disabled={loading}
+          onClick={onReload}>重新读取</button>
+      </div>}
 
-    {usage !== null && <>
-      {lastCall === null || inputTokens === null
-        ? <p className="agent-chat-context-meter-empty" data-testid="assist-context-meter-empty">
-          {lastCall === null
-            ? "尚无模型调用。收到回复后这里显示该次调用的上下文用量。"
-            : "这次调用没有上报输入用量，无法给出占比。"}</p>
-        : <>
-          <div className="agent-chat-context-meter-main">
-            <p className="agent-chat-context-meter-figure">
-              <span className="agent-chat-context-meter-amount">
-                <span data-testid="assist-context-meter-input">{inputTokens.toLocaleString()}</span>
-                {reserved !== null && <><span className="agent-chat-context-meter-sep"> / </span>
-                  <span>{reserved.toLocaleString()}</span></>}
-                <span className="agent-chat-context-meter-unit"> tokens</span>
-              </span>
-              {percent !== null && <span className="agent-chat-context-meter-percent"
-                data-testid="assist-context-meter-percent" data-over={ratio !== null && ratio > 1
-                  ? "true" : undefined}>{percent}%</span>}
-              {percent === null && reserved === null && <span className="agent-chat-context-meter-unknown"
-                data-testid="assist-context-meter-budget-unknown">预算未知</span>}
-            </p>
-            {ratio !== null && <span className="agent-chat-context-meter-bar" aria-hidden="true"
-              data-over={ratio > 1 ? "true" : undefined}>
-              <span style={{ width: `${Math.min(1, ratio) * 100}%` }} /></span>}
-            {/* 二级信息两列：预算余量（估算）与本次输出。余量是「预算 − 上报用量」，
-                不等于模型物理窗口的剩余容量。 */}
-            {(remaining !== null || lastCall.outputTokens !== null)
-              && <div className="agent-chat-context-meter-secondary"
-                data-single={remaining === null || lastCall.outputTokens === null ? "true" : undefined}>
-                {remaining !== null && <div className="agent-chat-context-meter-stat">
-                  <span className="agent-chat-context-meter-stat-label">
-                    {remaining < 0 ? "超出预算（估算）" : "预算余量（估算）"}</span>
-                  <span className="agent-chat-context-meter-stat-value"
-                    data-over={remaining < 0 ? "true" : undefined}
-                    data-testid="assist-context-meter-remaining">
-                    {Math.abs(remaining).toLocaleString()}
-                    <span className="agent-chat-context-meter-stat-unit"> tokens</span>
-                  </span>
-                </div>}
-                {lastCall.outputTokens !== null && <div className="agent-chat-context-meter-stat">
-                  <span className="agent-chat-context-meter-stat-label">本次输出</span>
-                  <span className="agent-chat-context-meter-stat-value"
-                    data-testid="assist-context-meter-output">
-                  {lastCall.outputTokens.toLocaleString()}
-                  <span className="agent-chat-context-meter-stat-unit"> tokens</span>
-                  </span>
-                </div>}
-              </div>}
-            {/* 缓存读数属于输入量的缓存维度：单独一行，不参与构成加总，也没上报就整项不出现。 */}
-            {(lastCall.cacheReadTokens !== null || lastCall.cacheCreationTokens !== null
-              || hitRate !== null) && <dl className="agent-chat-context-meter-cache">
-              {lastCall.cacheReadTokens !== null && <div className="agent-chat-context-meter-cache-row">
-                <dt>缓存读取</dt>
-                <dd data-testid="assist-context-meter-cache-read">{lastCall.cacheReadTokens.toLocaleString()}
-                  <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
-              </div>}
-              {lastCall.cacheCreationTokens !== null && <div className="agent-chat-context-meter-cache-row">
-                <dt>缓存写入</dt>
-                <dd data-testid="assist-context-meter-cache-write">
-                  {lastCall.cacheCreationTokens.toLocaleString()}
-                  <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
-              </div>}
-              {hitRate !== null && <div className="agent-chat-context-meter-cache-row">
-                <dt>缓存命中率</dt>
-                <dd data-testid="assist-context-meter-cache-hit">{hitRate}%</dd>
-              </div>}
-            </dl>}
+      {usage !== null && <>
+        {/* 第一段：这一次调用实际用了多少、当时冻结了多少预算。分母是那次调用的历史记录，
+            与末段的当前档位是两件事，不共用一个数字，也不互相顶替。 */}
+        <section className="context-usage-section" aria-labelledby={`${name}-history`}
+          data-testid="context-usage-history">
+          <div className="context-usage-heading-row">
+            <h2 className="context-usage-section-title" id={`${name}-history`}>最近一次模型调用</h2>
+            <span className="context-usage-tag"
+              title="用量来自上一次调用；档位设置只影响后续调用，不改写这条记录。">历史记录</span>
           </div>
-          {freezeDiffers && <p className="context-usage-note" data-testid="context-usage-frozen-note">
-            这次调用按 {lastCall.reservedTokens?.toLocaleString()} tokens 的冻结预算记录，
-            当前档位是 {usage?.budget.tokens.toLocaleString()} tokens；占比按当时的口径显示。
-          </p>}
-        </>}
+          {lastCall === null || inputTokens === null
+            ? <p className="agent-chat-context-meter-empty" data-testid="assist-context-meter-empty">
+              {lastCall === null
+                ? "尚无模型调用。收到回复后这里显示该次调用的上下文用量。"
+                : "这次调用没有上报输入用量，无法给出占比。"}</p>
+            : <>
+              <div className="agent-chat-context-meter-main">
+                <p className="agent-chat-context-meter-figure">
+                  <span className="agent-chat-context-meter-amount">
+                    <span data-testid="assist-context-meter-input">{inputTokens.toLocaleString()}</span>
+                    {reserved !== null && <><span className="agent-chat-context-meter-sep"> / </span>
+                      <span>{reserved.toLocaleString()}</span></>}
+                    <span className="agent-chat-context-meter-unit"> tokens</span>
+                  </span>
+                  {percent !== null && <span className="agent-chat-context-meter-percent"
+                    data-testid="assist-context-meter-percent" data-over={ratio !== null && ratio > 1
+                      ? "true" : undefined}>{percent}%</span>}
+                  {percent === null && reserved === null && <span className="agent-chat-context-meter-unknown"
+                    data-testid="assist-context-meter-budget-unknown">预算未知</span>}
+                </p>
+                {ratio !== null && <span className="agent-chat-context-meter-bar" aria-hidden="true"
+                  data-over={ratio > 1 ? "true" : undefined}>
+                  <span style={{ width: `${Math.min(1, ratio) * 100}%` }} /></span>}
+                {/* 二级信息两列：预算余量（估算）与本次输出。余量是「预算 − 上报用量」，
+                    不等于模型物理窗口的剩余容量。 */}
+                {(remaining !== null || lastCall.outputTokens !== null)
+                  && <div className="agent-chat-context-meter-secondary"
+                    data-single={remaining === null || lastCall.outputTokens === null ? "true" : undefined}>
+                    {remaining !== null && <div className="agent-chat-context-meter-stat">
+                      <span className="agent-chat-context-meter-stat-label">
+                        {remaining < 0 ? "超出预算（估算）" : "预算余量（估算）"}</span>
+                      <span className="agent-chat-context-meter-stat-value"
+                        data-over={remaining < 0 ? "true" : undefined}
+                        data-testid="assist-context-meter-remaining">
+                        {Math.abs(remaining).toLocaleString()}
+                        <span className="agent-chat-context-meter-stat-unit"> tokens</span>
+                      </span>
+                    </div>}
+                    {lastCall.outputTokens !== null && <div className="agent-chat-context-meter-stat">
+                      <span className="agent-chat-context-meter-stat-label">本次输出</span>
+                      <span className="agent-chat-context-meter-stat-value"
+                        data-testid="assist-context-meter-output">
+                      {lastCall.outputTokens.toLocaleString()}
+                      <span className="agent-chat-context-meter-stat-unit"> tokens</span>
+                      </span>
+                    </div>}
+                  </div>}
+                {/* 缓存读数属于输入量的缓存维度：单独一行，不参与构成加总，也没上报就整项不出现。 */}
+                {(lastCall.cacheReadTokens !== null || lastCall.cacheCreationTokens !== null
+                  || hitRate !== null) && <dl className="agent-chat-context-meter-cache">
+                  {lastCall.cacheReadTokens !== null && <div className="agent-chat-context-meter-cache-row">
+                    <dt>缓存读取</dt>
+                    <dd data-testid="assist-context-meter-cache-read">{lastCall.cacheReadTokens.toLocaleString()}
+                      <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
+                  </div>}
+                  {lastCall.cacheCreationTokens !== null && <div className="agent-chat-context-meter-cache-row">
+                    <dt>缓存写入</dt>
+                    <dd data-testid="assist-context-meter-cache-write">
+                      {lastCall.cacheCreationTokens.toLocaleString()}
+                      <span className="agent-chat-context-meter-cache-unit"> tokens</span></dd>
+                  </div>}
+                  {hitRate !== null && <div className="agent-chat-context-meter-cache-row">
+                    <dt>缓存命中率</dt>
+                    <dd data-testid="assist-context-meter-cache-hit">{hitRate}%</dd>
+                  </div>}
+                </dl>}
+              </div>
+            </>}
+        </section>
 
-      <section className="context-usage-section" aria-labelledby={`${name}-breakdown`}>
-        <h3 className="context-usage-section-title" id={`${name}-breakdown`}>
-          上下文构成
-          {breakdown !== null && <span className="context-usage-estimate"
-            data-testid="context-usage-estimate">估算</span>}
-        </h3>
-        {breakdown === null
-          ? <p className="context-usage-note" data-testid="context-usage-breakdown-empty">
-            暂无分项统计。这条记录只保留了总用量。</p>
-          : <ul className="context-usage-list" data-testid="context-usage-breakdown">
-            {sortedCategories(breakdown).map((entry) => {
-              const meta = CATEGORY_META[entry.key];
-              const Icon = meta.icon;
-              return <li key={entry.key} className="context-usage-row"
-                data-testid={`context-usage-row-${entry.key}`}>
-                <Icon aria-hidden="true" className="context-usage-row-icon" size={14} />
-                <span className="context-usage-row-label">{meta.label}</span>
-                <span className="context-usage-row-value">{entry.tokens.toLocaleString()}
-                  <span className="context-usage-row-unit"> tokens</span></span>
-              </li>;
-            })}
-          </ul>}
-        {breakdown !== null && breakdown.imageParts > 0 &&
-          <p className="context-usage-note" data-testid="context-usage-image-note">
-            另有 {breakdown.imageParts} 段图片未计入估算：图片 token 由模型侧编码决定。</p>}
-      </section>
+        <section className="context-usage-section" aria-labelledby={`${name}-breakdown`}>
+          <h3 className="context-usage-section-title" id={`${name}-breakdown`}>
+            上下文构成
+            {breakdown !== null && <span className="context-usage-estimate"
+              data-testid="context-usage-estimate">估算</span>}
+          </h3>
+          {breakdown === null
+            ? <p className="context-usage-note" data-testid="context-usage-breakdown-empty">
+              当前记录没有分项统计</p>
+            : <ul className="context-usage-list" data-testid="context-usage-breakdown">
+              {sortedCategories(breakdown).map((entry) => {
+                const meta = CATEGORY_META[entry.key];
+                const Icon = meta.icon;
+                return <li key={entry.key} className="context-usage-row"
+                  data-category={entry.key}
+                  data-testid={`context-usage-row-${entry.key}`}>
+                  <Icon aria-hidden="true" className="context-usage-row-icon" size={14} />
+                  <span className="context-usage-row-label">{meta.label}</span>
+                  <span className="context-usage-row-value">{entry.tokens.toLocaleString()}
+                    <span className="context-usage-row-unit"> tokens</span></span>
+                </li>;
+              })}
+            </ul>}
+          {breakdown !== null && breakdown.imageParts > 0 &&
+            <p className="context-usage-note" data-testid="context-usage-image-note">
+              另有 {breakdown.imageParts} 段图片未计入估算：图片 token 由模型侧编码决定。</p>}
+        </section>
+      </>}
+      {usage === null && loading && <p className="context-usage-note" role="status"
+        data-testid="context-usage-loading">正在读取上下文用量…</p>}
+    </div>
 
-      <section className="context-usage-section" aria-labelledby={`${name}-tiers`}
-        data-testid="context-budget-inline">
-        <h3 className="context-usage-section-title" id={`${name}-tiers`}>上下文档位</h3>
-        <p className="context-usage-note">本会话独立保存，新会话继承上一会话的选择。</p>
+    {/* 末段：以后按哪一档。它钉在菜单底部、离圆环最近，不随上方内容滚走。
+        2026-11-01 用户指令：删掉「当前档位 256K」这一行——三档的单选态本身就是当前值，
+        再写一遍只是重复；状态短标签随之退场，保存中/待核对/失败仍由下方状态行与错误块说明。 */}
+    <div className="context-usage-dock">
+      <section className="context-usage-section" data-testid="context-budget-inline">
         <div className="context-usage-tiers" role="radiogroup" aria-label="上下文档位"
           data-testid="context-usage-tiers">
           {TIERS.map((tier) => <label className="context-usage-tier" key={tier.value}
             data-divider={TIERS.indexOf(tier) === 0 ? undefined : "true"}>
             <input type="radio" name={`${name}-tier`} value={tier.value}
               data-testid={`context-budget-option-${tier.value}`}
-              checked={chosen === tier.value} disabled={saving || pending !== null}
-              onChange={() => { setDraftSelection(tier.value); setDraftBaseline(savedTier); }} />
+              checked={(sessionId === null ? firstChosen : chosen) === tier.value}
+              disabled={sessionId !== null && (saving || pending !== null)}
+              onChange={() => { void applyTier(tier.value); }} />
             <span>{tier.label}</span>
           </label>)}
         </div>
-        <div className="context-usage-tier-actions">
-          <button className="secondary-button secondary-button--compact" type="button"
-            data-testid="context-budget-save"
-            disabled={saving || loading || usage === null || draftSelection === null
-              || draftSelection === savedTier || pending !== null}
-            onClick={() => { if (draftSelection !== null) void applyTier(draftSelection); }}>
-            {saving ? "正在保存" : "保存档位"}</button>
-          <button className="secondary-button secondary-button--compact" type="button"
-            data-testid="context-budget-reload" disabled={saving} onClick={() => onReload()}>
-            重新读取</button>
-        </div>
-        <p className="context-usage-note" role="status" data-testid="context-usage-tier-state">
-          {tierState}
-        </p>
-        {baselineMoved && <p className="action-error" role="alert"
-          data-testid="context-usage-baseline-moved">
-          基线已变：选档时服务端是 {formatTierLabel(draftBaseline)}，现在是 {formatTierLabel(savedTier)}。你的选择 {formatTierLabel(draftSelection)} 仍未保存，再点保存会按当前修订提交。
-        </p>}
-        {noticeFor !== null && <p className="receipt-message" role="status"
+        {/* 2026-11-01 用户指令：删掉「下次调用申请 N tokens」这一行。它把同一档位换个数再写一遍，
+            窗口未知时还会多挂一枚解释标签；档位选择本身已表达「按哪一档申请」。 */}
+        {sessionId === null && <p className="context-usage-note"
+          data-testid="context-usage-first-tier-state">{firstTierState}</p>}
+        <p className="context-usage-tier-state" role="status" data-testid="context-usage-tier-state">
+          {tierState}</p>
+        {sessionId === null && inheritState === "failed" && <button className="text-link" type="button"
+          data-testid="context-usage-inherit-retry" onClick={() => onRetryInherit?.()}>
+          重新读取来源档位</button>}
+        {noticeFor !== null && <p className="context-usage-note" role="status"
           data-testid="context-budget-notice">{noticeFor}</p>}
         {actionErrorFor !== null && <p className="action-error" role="alert"
           data-testid="context-usage-action-error">{actionErrorFor}</p>}
@@ -559,32 +581,7 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
             {saving ? "正在重试…" : "按原命令重试"}</button>
         </div>}
       </section>
-    </>}
-    {sessionId === null && (
-      <section className="context-usage-section" aria-labelledby={`${name}-first-tiers`}>
-        <h3 className="context-usage-section-title" id={`${name}-first-tiers`}>上下文档位</h3>
-        <p className="context-usage-note">本会话独立保存，新会话继承上一会话的选择。</p>
-        <div className="context-usage-tiers" role="radiogroup" aria-label="上下文档位"
-          data-testid="context-usage-tiers">
-          {TIERS.map((tier) => <label className="context-usage-tier" key={tier.value}
-            data-divider={TIERS.indexOf(tier) === 0 ? undefined : "true"}>
-            <input type="radio" name={`${name}-first-tier`} value={tier.value}
-              data-testid={`context-budget-option-${tier.value}`}
-              checked={firstChosen === tier.value}
-              onChange={() => { onDraftTierChange?.(tier.value); }} />
-            <span>{tier.label}</span>
-          </label>)}
-        </div>
-        <p className="context-usage-note" role="status" data-testid="context-usage-tier-state">
-          {firstTierState}
-        </p>
-        {inheritState === "failed" && <button className="text-link" type="button"
-          data-testid="context-usage-inherit-retry" onClick={() => onRetryInherit?.()}>
-          重新读取来源档位</button>}
-      </section>
-    )}
-    {usage === null && loading && <p className="context-usage-note" role="status"
-      data-testid="context-usage-loading">正在读取上下文用量…</p>}
+    </div>
   </div>;
 }
 

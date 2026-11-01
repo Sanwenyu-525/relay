@@ -292,7 +292,7 @@ test('展开正文同源：单文件行数与总数一致，未知路径按 PATH
   assert.deepEqual(sessionDetail, { available: false, reason: 'PATH_NOT_FOUND' });
 });
 
-test('不可用原因：未绑定为 NO_RESOURCE、未建基线为 NO_BASELINE、非 Git 根两侧各有其名', async () => {
+test('不可用原因：未绑定为 NO_RESOURCE、未建基线按是否写过文件分开、非 Git 根两侧各有其名', async () => {
   const f = await workspaceFixture();
 
   // 1) 会话还没有工作目录：读取不抛错，返回 NO_RESOURCE。
@@ -304,7 +304,9 @@ test('不可用原因：未绑定为 NO_RESOURCE、未建基线为 NO_BASELINE�
     { workspaceId: f.workspaceId, sessionId: unboundSession });
   assert.equal(establishNoResource.reason, 'NO_RESOURCE');
 
-  // 2) 已绑定目录但还没建立基线：读取返回 NO_BASELINE（不拿当前内容当起点）。
+  // 2) 已绑定目录但还没建立基线。2026-11-01 P1-3 把这一条按「本会话到底写过没有」分开：
+  //    会话口径下这条会话一次都没写过，没有可核对的东西，返回 NO_SESSION_WRITES（界面因此不占位）；
+  //    目录口径与单文件正文仍返回 NO_BASELINE——「不拿当前内容当起点」这条原则没有松动。
   const unbaselinedSession = await newSession(f.workspaceId, f.projectId, '未建基线');
   const gitRepo = await createGitRepo();
   await writeFile(join(gitRepo.root, 'note.txt'), `alpha${LF}`);
@@ -313,7 +315,10 @@ test('不可用原因：未绑定为 NO_RESOURCE、未建基线为 NO_BASELINE�
   await bindDirectory(f.workspaceId, unbaselinedSession, gitDirectory.resourceId);
   const noBaseline = await readConversationDiff(repositories,
     { workspaceId: f.workspaceId, sessionId: unbaselinedSession });
-  assert.deepEqual(noBaseline, { available: false, reason: 'NO_BASELINE' });
+  assert.deepEqual(noBaseline, { available: false, reason: 'NO_SESSION_WRITES' });
+  const noBaselineDirectoryScope = await readConversationDiff(repositories,
+    { workspaceId: f.workspaceId, sessionId: unbaselinedSession, scope: 'DIRECTORY' });
+  assert.deepEqual(noBaselineDirectoryScope, { available: false, reason: 'NO_BASELINE' });
   const noBaselineDetail = await readConversationDiffFile(repositories,
     { workspaceId: f.workspaceId, sessionId: unbaselinedSession, path: 'note.txt' });
   assert.deepEqual(noBaselineDetail, { available: false, reason: 'NO_BASELINE' });

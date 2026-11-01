@@ -335,6 +335,56 @@ test('计划模式的写尝试由准入拒掉：账本里有类型化拒绝，�
   assert.equal(plans.length, 1);
 });
 
+for (const evidence of [null, '', '   ']) test(`目标完成门：MET 证据 ${JSON.stringify(evidence)} 不能进入待验收，也不能确认完成`, async () => {
+  const workspaceId = await newWorkspace('missing-evidence');
+  const sessionId = await newSession(workspaceId, '缺少完成证据');
+  const sent = await send(workspaceId, sessionId, '/goal 检查结果并给出证据', 'GOAL');
+  const goalId = sent.result.goal_id;
+  assert.ok(goalId);
+  await settleAssistant(sent.result.assistant_message_id, [JSON.stringify({ reply: '模型自报完成。',
+    goal: { state: 'COMPLETE',
+      success_criteria: [{ key: 'c1', statement: '检查确有通过依据', required: true }],
+      criteria_status: [{ key: 'c1', status: 'MET', evidence }],
+      steps: [{ title: '检查', status: 'DONE' }], current_step: null,
+      progress: '声称完成但没有证据', questions: [], blocked_reason: null, adjustment: null } })]);
+  const tick = await runAssistGoalTick(app.db, { workerId: 'missing-evidence-worker' });
+  assert.ok(tick.settled.some((round) => round.goalId === goalId && round.outcome === 'COMPLETE_UNVERIFIED'));
+  const goal = await createRepositories(app.db).planGoals.readGoal(goalId);
+  assert.equal(goal?.status, 'ACTIVE');
+  const view = await readSessionGoal(app.db, { workspaceId, sessionId });
+  assert.equal(view.goal?.criteria[0]?.status, 'PENDING');
+  await assert.rejects(() => confirmGoalCompletion(app.db, { workspaceId, goalId, commandId: randomUUID() }));
+  await cancelGoal(app.db, { workspaceId, goalId, commandId: randomUUID() });
+  await runAssistGoalTick(app.db, { workerId: 'missing-evidence-cleanup' });
+});
+
+test('目标协议：普通文字声称完成不代替信封，连续无结构后停止自动推进', async () => {
+  const workspaceId = await newWorkspace('goal-no-structure');
+  const sessionId = await newSession(workspaceId, '缺少结构化结论');
+  const sent = await send(workspaceId, sessionId, '/goal 检查真实结果', 'GOAL');
+  const goalId = sent.result.goal_id;
+  assert.ok(goalId);
+  const repositories = createRepositories(app.db);
+  for (let index = 1; index <= 3; index += 1) {
+    const messageId = index === 1 ? sent.result.assistant_message_id : goalRoundMessageId(goalId, index);
+    await settleAssistant(messageId, ['目标已完成，全部通过。']);
+    const tick = await runAssistGoalTick(app.db, { workerId: `no-structure-${index}` });
+    assert.ok(tick.settled.some((round) => round.goalId === goalId && round.outcome === 'NO_STRUCTURE'));
+    const goal = await repositories.planGoals.readGoal(goalId);
+    assert.equal(goal?.round_count, index);
+    assert.equal(goal?.status, index < 3 ? 'ACTIVE' : 'WAITING_USER');
+    assert.equal(tick.advanced.some((round) => round.goalId === goalId), index < 3);
+  }
+  const stopped = await repositories.planGoals.readGoal(goalId);
+  assert.equal(stopped?.stop_reason?.code, 'NO_PROGRESS');
+  assert.equal(await repositories.planGoals.readInflightRoundMessage(goalId), undefined);
+  const replay = await runAssistGoalTick(app.db, { workerId: 'no-structure-replay' });
+  assert.equal(replay.advanced.some((round) => round.goalId === goalId), false);
+  await assert.rejects(() => confirmGoalCompletion(app.db, { workspaceId, goalId, commandId: randomUUID() }));
+  await cancelGoal(app.db, { workspaceId, goalId, commandId: randomUUID() });
+  await runAssistGoalTick(app.db, { workerId: 'no-structure-cleanup' });
+});
+
 test('目标模式：消息建立目标并绑定轮次，推进器接续下一轮直至待验收', async () => {
   const workspaceId = await newWorkspace('goal');
   const sessionId = await newSession(workspaceId, '持续目标');
@@ -460,6 +510,56 @@ test('模式切换：切走活动目标先记 PAUSING，tick 落成 PAUSED；恢
   // 没有在途轮次时推进器把 PAUSING 落成 PAUSED；留一个 ACTIVE 目标在库里会污染后续用例。
   await runAssistGoalTick(app.db, { workerId: `tick-${randomUUID()}` });
   assert.equal((await repositories2.planGoals.readGoal(goalId))?.status, 'PAUSED');
+});
+
+test('目标接续：API 重启后恢复同一目标，继续命令重放不重复投递轮次', async () => {
+  const workspaceId = await newWorkspace('restart-resume');
+  const sessionId = await newSession(workspaceId, '重启接续');
+  const sent = await send(workspaceId, sessionId, '/goal 保留进展后继续整理', 'GOAL');
+  const goalId = sent.result.goal_id;
+  assert.ok(goalId);
+  await pauseGoal(app.db, { workspaceId, goalId, commandId: randomUUID() });
+  await settleAssistant(sent.result.assistant_message_id, [JSON.stringify({ reply: '第一步已记录。',
+    goal: { state: 'CONTINUE',
+      success_criteria: [{ key: 'c1', statement: '保留原目标条件', required: true }],
+      criteria_status: [{ key: 'c1', status: 'UNMET', evidence: '尚需下一步' }],
+      steps: [{ title: '原步骤', status: 'DOING' }], current_step: '原步骤',
+      progress: '第一步已记录', questions: [], blocked_reason: null, adjustment: null } })]);
+  await runAssistGoalTick(app.db, { workerId: 'before-restart' });
+  const repositories = createRepositories(app.db);
+  const paused = await repositories.planGoals.readGoal(goalId);
+  assert.equal(paused?.status, 'PAUSED');
+  assert.ok(paused);
+  const getPath = workspacePath(workspaceId, `/assist-sessions/${sessionId}/goal`);
+  const resumePath = workspacePath(workspaceId, `/assist-goals/${goalId}/resume`);
+  await api.stop();
+  api = await startTestApi();
+  const restored = await api.get(getPath);
+  assert.equal(restored.status, 200);
+  assert.equal((restored.body as { goal: { goal_id: string; status: string } }).goal.goal_id, goalId);
+  assert.equal((restored.body as { goal: { status: string } }).goal.status, 'PAUSED');
+  const command = { command_id: randomUUID() };
+  const resumed = await api.post(resumePath, command);
+  assert.equal(resumed.status, 200);
+  const firstTick = await runAssistGoalTick(app.db, { workerId: 'after-restart' });
+  const expectedMessageId = goalRoundMessageId(goalId, paused.round_count + 1);
+  assert.ok(firstTick.advanced.some((round) => round.goalId === goalId && round.messageId === expectedMessageId));
+  await api.stop();
+  api = await startTestApi();
+  const replay = await api.post(resumePath, command);
+  assert.equal(replay.status, 200);
+  assert.deepEqual((replay.body as { result: unknown }).result, (resumed.body as { result: unknown }).result);
+  const repeatedTick = await runAssistGoalTick(app.db, { workerId: 'second-restarted-worker' });
+  assert.equal(repeatedTick.advanced.some((round) => round.goalId === goalId), false);
+  const current = await repositories.planGoals.readGoal(goalId);
+  assert.equal(current?.objective, paused.objective);
+  assert.deepEqual(current?.criteria, paused.criteria);
+  assert.deepEqual(current?.steps, paused.steps);
+  assert.equal((await repositories.planGoals.readInflightRoundMessage(goalId))?.id, expectedMessageId);
+  const rows = (await repositories.assist.listMessages(sessionId, 50)).filter((message) => message.goal_id === goalId);
+  assert.equal(rows.length, 2, '只保留原轮次与唯一的接续轮次');
+  await cancelGoal(app.db, { workspaceId, goalId, commandId: randomUUID() });
+  await runAssistGoalTick(app.db, { workerId: 'restart-test-cleanup' });
 });
 
 test('暂停命令：ACTIVE 目标可暂停，回执带出目标当前事实', async () => {

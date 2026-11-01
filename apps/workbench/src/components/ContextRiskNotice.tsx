@@ -141,14 +141,15 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
   }, [audit, client, resourceId]);
 
   // 审计不可用 / 没有读取权限 / 没扫成：不能说成「没有风险」，也不能静默消失（P0-B 第 6 条）。
-  // 仍然只是一行，不占输入卡，也不阻止发送。
+  // 这里只是一行状态说明，不占输入卡也不阻止发送；真正的发送入口还会再跑一次审计，
+  // 仍然没有结论时由确认条等用户选「仍然发送 / 取消发送」——所以这行不能再写「仍可发送」。
   if (audit === null) {
     if (error === null) return null;
     return <div className="context-risk context-risk-unavailable" data-testid="context-risk-unavailable">
       <div role="status" aria-live="polite">
         <span className="context-risk-mark" aria-hidden="true">!</span>
         <span className="context-risk-text">{`无法完成风险检查：${error}`}</span>
-        <span className="context-risk-action">仍可发送</span>
+        <span className="context-risk-action">发送前会再检查一次</span>
       </div>
     </div>;
   }
@@ -160,7 +161,7 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
         <span className="context-risk-text">{audit.state === "NO_FILE_ACCESS"
           ? "未扫描必读文件：这个目录没有生效的读取权限（不等于没有风险）"
           : `无法完成风险检查：${audit.detail}`}</span>
-        <span className="context-risk-action">仍可发送</span>
+        <span className="context-risk-action">发送前会再检查一次</span>
       </div>
     </div>;
   }

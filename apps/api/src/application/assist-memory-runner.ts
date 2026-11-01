@@ -185,7 +185,9 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     if (Buffer.byteLength(content, 'utf8') > limits.inputBytes) throw new AssistMemoryUnavailable('MEMORY_COMPACTION_INPUT_TOO_LARGE');
     const port = await resolveCompactionPort(db, job, options);
     const recorded = await recordModelInvocation(db, {
-      origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: job.anchor_message_id },
+      // 0153：压缩是辅助外呼——同样记账与受预算闸门约束，但不是「最近一次调用」。
+      origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
+        assistMessageId: job.anchor_message_id, purpose: 'MEMORY_COMPACT' },
       identity: port.identity, signal: controller.signal,
       invoke: async (callId) => {
         if (!await repository.bindCall(job.id, options.workerId, job.claim_epoch, callId)) {

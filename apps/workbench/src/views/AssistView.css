@@ -6,20 +6,47 @@
    照原型收成 ~746px 居中。只改这一处即整列同宽，避免各写各的导致错位。
    用 --chat-measure 而非 --relay-* 前缀：这是本地布局常量，不是 tokens.ts 注入的设计 token。 */
 .agent-assist, .embedded-assist, .skill-page { --chat-measure: min(46.5rem, 100%); }
+
+/* —— 聊天区的三层宽度（工作台 §58，2026-10-31 统一）——
+   ① Canvas＝`.agent-chat-transcript-shell`：铺满中栏、自己滚动，滚动条贴中栏右缘。
+      它只决定「聊天区有多宽」——时间线轨道、回到最新按钮、浮层都按它的宽度定位。
+   ② Reading Column＝`--chat-measure`（= 输入卡宽度）：决定「内容排多宽」。
+   ③ Content＝会话列里的普通内容块：一律取第②层，不再各写各的 max-width。
+
+   此前只把消息列、输入卡、队列、待办、目标条、目录细条逐个改成同宽，
+   漏掉的块（执行准备面板 `.execution-summary`、目标读取失败条 `.warning-callout`、
+   必读文件预警 `.context-risk`、委派记录 `.session-delegations`）就按画布铺满：
+   1440 视口实测比输入卡宽 358px，左右各溢出 179px，读成「另一个页面的内容」。
+
+   因此这里按**结构**收口：会话列的直接子块统一进阅读列，唯一例外是滚动容器本身
+   ——它必须 full-bleed，收窄会让自绘滚动条跟着缩到内容中间。`width: 100%` 不能省：
+   横向 auto 外边距会让 flex 子项退出 stretch，只写 max-width 会得到 fit-content。
+   弹层、Toast、回到最新按钮都不在这个层级上（前者 portal 到 body，后两者在滚动容器里），
+   因此不会被这条规则误伤。 */
+.agent-chat-conversation > *:not(.agent-chat-transcript-shell) {
+  width: 100%;
+  max-width: var(--chat-measure);
+  margin-inline: auto;
+}
+/* 执行准备面板里的目录与文件路径可能长到没有断点：让它们在卡片内部换行，
+   而不是把卡片顶出阅读列或逼出横向滚动条。`anywhere` 同时收窄 min-content 宽度，
+   单看 `break-word` 在 flex 子项上仍会被最长的那个 token 撑开。 */
+.agent-chat-conversation > .execution-summary { overflow-wrap: anywhere; }
+/* 收窄到阅读列之后，提示条里的动作键不能再按画布宽度分配空间：按内容收缩的按钮
+   会被挤成「一列竖排汉字」（1024 视口实测「重试读取目标状态」折成两行、375 视口折成八行）。
+   整条允许换行、按钮不参与压缩，放不下时按钮整体落到下一行。作用域仍只在这列内，
+   其他页面上的 `.warning-callout` 保持原样。 */
+.agent-chat-conversation > .warning-callout { flex-wrap: wrap; }
+.agent-chat-conversation > .warning-callout > button { flex: none; }
 .agent-assist-session-bar { flex: none; }
 .collab-center .agent-chat-start { gap: var(--relay-space-3); }
-/* 输入卡上方的「发送前提」一行（2026-10-18 用户指令）：目录细条（嵌入态是状态行）按内容收，
-   「待你处理」紧跟在它右端，中间隔一档 `space-4`；整行的同宽同轴由本容器承担
-   （细条撑满会把待处理推到最右边，用户指令「不要放在最右边」）。
-   归属与目录绑定回执仍各自占整行（`flex-basis:100%`），告警不挤进状态行；
-   窄窗放不下时整块按 `flex-wrap` 换行。空行（嵌入态且无待处理）不占位。
-   细条原来那 4px 上内边距挪到本容器（2026-10-18 用户指认「待你处理跟左边不在同一个高度」）：
-   `align-items: center` 居中的是盒子不是文字，细条盒子里那 4px 把它自己的文字压低 2px，
-   同一行的「待你处理」就高出 2px。呼吸留在行上，两边文字才落在同一根水平轴上。 */
-/* 输入框上方的「发送前提」一行（工作台 §28.3）：左侧工作目录信息、右侧待处理事项，
-   两类语义各占一端，中间由 flex 自动分配剩余空间（2026-10-20 第五轮重排）。
-   原来是「细条内容右端紧跟待处理」，目录名后面连缀归属、Git 标记与执行约束后再接
-   「待你处理」，同一行挤成五种语义、互相穿插；现在细条按内容收在左端、待处理推到右端。 */
+/* 输入卡上方的「发送前提」一行（2026-10-18 用户指令）：归属回执按整行，
+   「待你处理」与总数入口按剩余空间分配；整行的同宽同轴由本容器承担。
+   2026-11-01 用户指令「把选择文件夹那一行放到输入框下面」：目录细条已改走
+   `composerFooter` 渲染在卡下，本行不再与它共用（相关子项规则随之删除）。
+   窄窗放不下时整块按 `flex-wrap` 换行。空行（嵌入态且无待处理）不占位。 */
+/* 输入框上方的「发送前提」一行（工作台 §28.3）：回执、待处理与总数入口共用，
+   由 flex 自动分配剩余空间。 */
 .agent-chat-prereq-row {
   position: relative;
   display: flex;
@@ -33,7 +60,8 @@
   margin-inline: auto;
 }
 /* 目录慢提示是浮层而不是新的一行：插入时输入卡不上移，空态标题也不会被挤出可视区。
-   锚在细条上方，背景与阴影沿用浮层 token；取消或目录回执到达后整块消失。 */
+   锚在卡上这一行上方（2026-11-01 细条已移到卡下，本行只剩回执与待处理），
+   背景与阴影沿用浮层 token；取消或目录回执到达后整块消失。 */
 .collab-directory-slow {
   position: absolute;
   left: 0;
@@ -44,9 +72,7 @@
   box-shadow: var(--relay-shadow-floating);
 }
 .agent-chat-prereq-row:empty { display: none; }
-.agent-chat-prereq-row > .folder-strip,
 .agent-chat-prereq-row > .composer-status-bar { flex: 0 1 auto; min-width: 0; width: auto; max-width: none; margin-inline: 0; }
-.agent-chat-prereq-row > .folder-strip { padding-top: 0; }
 .agent-chat-prereq-row > .pending-work { flex: none; }
 .agent-chat-prereq-row > .collab-binding { flex: 1 1 100%; }
 .agent-chat-start .agent-chat-empty-work { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--relay-space-2); text-align: center; overflow-y: auto; }
@@ -276,7 +302,7 @@
 /* 消息流本身铺满中栏：滚动条贴着中栏右缘，不再压在居中的消息列旁边。
    真正的阅读 measure 交给里面的 .agent-message-list 居中收窄，
    滚动容器 full-bleed、内容列居中，是 deepseek-harness ChatView 的同一做法。 */
-/* 短会话时消息贴底（靠近输入），消掉消息与输入之间的大片空洞；长会话仍照常向上滚动。 */
+/* 消息流自己滚动；目标、事实条和输入区留在视野内。短会话从阅读起点排起，长会话向上滚动。 */
 .agent-chat-transcript {
   flex: 1;
   min-height: 0;
@@ -284,46 +310,15 @@
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--relay-space-1) 0 var(--relay-space-2);
+  /* 2026-10-31 UI-08：短会话不再贴底，消息从阅读起点（上缘）开始。
+     顶部留一档阅读间距，第一条消息与顶栏之间不贴着边；底部留一档，长会话滚到底时
+     最后一行也不压在输入区上。 */
+  padding: var(--relay-space-3) 0 var(--relay-space-2);
   scrollbar-gutter: stable;
 }
-/* 顶栏渐隐带（2026-10-17 用户指令，参照其实机截图的顶栏处理）：正文滚过转录区上缘时先淡出，
-   不在协作页顶栏的下缘硬切一刀。遮罩画在滚动视口自己的上缘，由不滚动的外壳（shell）绝对定位承担，
-   因此它不随内容移动，也不给中栏添第二个滚动容器（工作台 §31.1 的单一滚动 Owner 不变量）。
-   底色取外壳纸面 --relay-color-bg-surface（styles.css 的 .app-content 平铺同一档）；
-   只在真的滚过顶部时绘制——静止时把渐变压在第一条消息上，读起来像渲染坏了。 */
-.agent-chat-transcript-shell::before {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: var(--relay-space-8);
-  background: linear-gradient(to bottom, var(--relay-color-bg-surface), transparent);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
-}
-.agent-chat-transcript-shell[data-top-fade="on"]::before { opacity: 1; }
-/* 底缘渐隐带（2026-10-17 用户接续指令）：正文被输入区上方那行目录细条切走时同样先淡出，
-   与上缘同档高度、同一来源色，只是方向相反——上下两条边因此是同一套处理，不是两处各自的补丁。
-   层级留在 auto：时间线轨道（sticky 档）与回到最新键（popover 档）都浮在它上面，
-   渐变只洗正文，不把刻度与那颗键一起糊掉。 */
-.agent-chat-transcript-shell::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: var(--relay-space-8);
-  background: linear-gradient(to top, var(--relay-color-bg-surface), transparent);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
-}
-.agent-chat-transcript-shell[data-bottom-fade="on"]::after { opacity: 1; }
-@media (prefers-reduced-motion: reduce) {
-  .agent-chat-transcript-shell::before,
-  .agent-chat-transcript-shell::after { transition: none; }
-}
+/* 2026-10-31 UI-08：聊天区不再绘制横穿阅读区域的渐隐带（原 ::before/::after 两条
+   32px linear-gradient）。那两条遮罩在亮/暗主题里都读成一块多余的阴影，且会让
+   滚动位置的表达依赖视觉特效；「回到最新」按钮与 followLatest 已足够。 */
 /* 输入器按原型收成居中的紧凑卡：max-width 交给 --chat-measure owner（≈原型 746px），
    不再跟着消息列铺到 72rem——用户反馈整条太长。窄中栏时 width:100%+min-width:0 自然收缩，不裁切。 */
 .agent-chat-composer { width: 100%; min-width: 0; max-width: var(--chat-measure); margin-inline: auto; box-shadow: none; }
@@ -334,7 +329,10 @@
    两条规则刻意分开写：一处是助手/用户共用的页脚复制键，一处是回退键的容器。 */
 .agent-message-copy svg { width: var(--relay-font-size-meta); height: var(--relay-font-size-meta); }
 
-.agent-message-list { list-style: none; margin: auto auto 0; padding: 0; display: grid; gap: var(--relay-space-2); width: 100%; max-width: var(--chat-measure); }
+/* 2026-10-31 UI-08：消息列从阅读起点（顶部）排起，不再用 `margin-top:auto` 贴底。
+   贴底会把首条消息推到输入框上方，让「我刚发了什么」落在屏幕最下沿；短会话与长会话
+   都从同一条阅读起点开始，长会话照常由滚动与 followLatest 跟到最新。 */
+.agent-message-list { list-style: none; margin: 0 auto; padding: 0; display: grid; align-content: start; gap: var(--relay-space-2); width: 100%; max-width: var(--chat-measure); }
 .agent-message-slot { display: grid; gap: var(--relay-space-1); }
 
 /* 日期分隔线：跨栏细线 + 居中日期；上下各留半档间距，不占整条空白。 */
@@ -486,11 +484,6 @@
    与用户消息同列同侧。 */
 .agent-first-transition-strip { justify-items: end; }
 .agent-first-transition-strip > * { justify-self: end; }
-/* 短会话贴底（P1-A）：`.agent-message-list` 的 `margin-top: auto` 只有在列容器里才生效。
-   基础内容列此前是普通块，auto 上下边距按 0 解析，短会话的消息因此停在转录区顶部、
-   与输入卡之间留一大片空洞——首条消息刚发出去时尤其明显（那一屏本来就只有一条）。
-   只在滚动 Owner 内生效：嵌入态没有自己的高度，`100%` 解析为 auto，行为不变。 */
-.agent-chat-transcript > .agent-chat-content { display: flex; flex-direction: column; min-height: 100%; }
 /* 过渡行也占住时间线轨那一侧的留白（P1-A）。
    阅读列的中线对齐靠 ChatTimelineNav.css 里那条 `:has(.agent-chat-timeline)` 的
    padding-inline：轨道出现后，滚动容器两侧留白才对称，消息列才与输入卡同一条中轴。
@@ -641,13 +634,22 @@
    （工作台 §40），这里连同它们的规则一起删掉，不留无调用方的样式。 */
 .agent-message-usage {
   margin: 0;
-  flex: 1;
   min-width: 0;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
   font-variant-numeric: tabular-nums;
   line-height: var(--relay-font-lineHeight-heading);
 }
+/* 2026-10-31 UI-08：用量回到页脚常显（取消「用量」折叠）。它仍是次级信息：
+    单行、弱色、等宽数字；与复制键同排，不抢正文。窄窗口优先折行，长数字也不把
+    页脚顶出阅读列。 */
+.agent-message-footer .agent-message-usage { flex: 1 1 auto; overflow-wrap: anywhere; }
+/* AGENT_LIVE_TOKEN_USAGE（2026-11-01）：生成中的读数跟在回复底部，与页脚同一档
+   次级信息，但不放进页脚（页脚只在完成态出现）。数字高频更新，因此只做原位文本
+   替换：不加滚动数字、底框、阴影或逐帧过渡，避免闪烁与滚动跳动。 */
+.agent-message-usage-live { overflow-wrap: anywhere; }
+/* 「部分用量未知」是下界而不是精确值：用次级色区分，字号与行高保持不变。 */
+.agent-message-usage[data-state="PARTIAL"] { color: var(--relay-color-text-secondary); }
 .agent-message-footer .agent-message-copy {
   flex: none;
   width: var(--relay-control-target-minimum);
@@ -678,16 +680,85 @@
    展开后的逐条来源状态仍用正文色，不用状态底色冒充已确认事实。
    2026-10-19 第二轮：列表从「·」串改为行式排版——引用是主文字（可截断省略），
    状态收进与统计标签同族的细线徽牌（中文），reason 是 muted 说明不抢主行。 */
-.assist-source-summary { border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-subtle); }
-.assist-source-summary > summary { display: flex; align-items: center; gap: var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
-.assist-source-summary > summary svg { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.assist-source-summary[open] > summary { border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.assist-source-list { display: grid; gap: var(--relay-space-1); margin: 0; padding: var(--relay-space-2) var(--relay-space-3); list-style: none; }
+/* 2026-10-31 UI-08：资料条从卡片收成一行轻量披露——去掉完整外框、底色与展开分隔线，
+   不再用文件图标当披露标识（chevron 才是）。展开内容的左缘与摘要文字落在同一条
+   左轴上：chevron 列宽 + gap，而不是卡片内边距。 */
+.assist-source-summary { margin: var(--relay-space-2) 0; }
+.assist-source-summary > summary { display: flex; align-items: center; gap: var(--relay-space-2); padding: 0; cursor: pointer; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); line-height: var(--relay-font-lineHeight-heading); }
+.assist-source-summary > summary:hover { color: var(--relay-color-text-primary); }
+.assist-source-summary[open] > summary { margin-bottom: var(--relay-space-1); }
+/* 带两级类名：migrated-scoped.css 里 .assist-source-list { padding-left: var(--relay-space-4) }
+   与我同特异性且后注入，单类名压不过它，展开内容会停在 16px 而不是标记列之后。 */
+.assist-source-summary .assist-source-list { padding-left: var(--chat-disclosure-indent); }
 .assist-source-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); min-width: 0; font-size: var(--relay-font-size-meta); line-height: var(--relay-font-lineHeight-snug); }
 .assist-source-ref { min-width: 0; overflow-wrap: anywhere; color: var(--relay-color-text-primary); }
 .assist-source-row[data-available="false"] .assist-source-ref { color: var(--relay-color-text-secondary); }
-.assist-source-state { flex: none; padding: 0 var(--relay-space-1); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-badge); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-heading); }
+/* 2026-11-01：自动召回的记忆用同一族细线徽牌标出来源类别，不新造底色或图标语言。
+   它与右侧状态徽牌共用样式，读者只需区分文字，不必再学第二种标记。 */
+.assist-source-state, .assist-source-selection { flex: none; padding: 0 var(--relay-space-1); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-badge); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-heading); }
 .assist-source-reason { min-width: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+
+/* —— 聊天区域披露行统一形态（2026-10-31 UI-08）——
+   资料条、Skill 详情、工具逐文件结果、撤回原文、候选卡核对项原本各用各的展开标记：
+   资料条挂文件图标加浏览器默认三角，技术详情挂原生三角形 marker，同一屏同时出现两种
+   箭头、甚至两枚标记同场。这里把同语义的披露收敛到同一个右向 chevron：默认指向右，
+   展开旋转 90° 指向下；尺寸、颜色、动效与既有 .activity-header-chevron /
+   .activity-item-toggle 同档（caption 档 12px、muted、fast + standard 曲线），
+   复用既有 token，不新造箭头语言。
+   只在显式带 .chat-disclosure 的 details 上生效：不做全局 <details> 覆盖，
+   菜单、原生选择器与其他页面的披露控件不受影响。 */
+/* 披露行左侧的「标记列 + 间隔」宽度：展开内容要跟摘要文字同轴，就复用它，不另写数字。 */
+.chat-disclosure { --chat-disclosure-indent: calc(var(--relay-font-size-caption) + var(--relay-space-2)); }
+.chat-disclosure > summary { display: flex; align-items: center; gap: var(--relay-space-2); list-style: none; cursor: pointer; }
+.chat-disclosure > summary::-webkit-details-marker { display: none; }
+/* marker 要压两次：list-style 管 Firefox，::-webkit-details-marker 管 Chromium/WebView2。
+   styles.css 里 .tech-details 的通用 marker 规则与我同特异性但后注入，故这里带两级类名压过它。 */
+.tech-details.chat-disclosure > summary::marker { content: none; }
+.chat-disclosure-chevron {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.chat-disclosure-chevron > svg { width: 100%; height: 100%; }
+.chat-disclosure[open] > summary .chat-disclosure-chevron { transform: rotate(90deg); }
+.chat-disclosure > summary:hover .chat-disclosure-chevron { color: var(--relay-color-text-primary); }
+.chat-disclosure > summary:focus-visible { outline: var(--relay-border-width) solid var(--relay-color-focus-ring); outline-offset: 2px; border-radius: var(--relay-radius-badge); }
+/* 本机「关闭动效」设置只留状态变化，不留位移；系统 reduced-motion 由 styles.css 的
+   全局归零过渡时长接管。 */
+html[data-motion="off"] .chat-disclosure-chevron { transition: none; }
+
+/* 一条回复失败的说明（2026-11-01 P0-3 / P1-1）。
+   原先这一处用 `.action-error`：danger 底 + 整圈 danger 描边，横贯整个阅读列。
+   一屏里连续两条失败回复就是两条红横条，而且它比正文还重——「过度泛红」的典型。
+   现在与工具行的例外同一档语言：图标 + danger 文字，不铺底、不描边、不加阴影，
+   失败仍然一眼可见（颜色 + 图标 + role=alert 三通道），但版面不再被横幅接管。
+   字号走 meta 档（与状态芯片、草稿状态词同一族），长句在列内折行不外溢。 */
+.assist-failure { display: grid; gap: var(--relay-space-1); min-width: 0; margin-top: var(--relay-space-1); }
+.assist-failure-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-2);
+  margin: 0;
+  color: var(--relay-color-status-danger-text);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+.assist-failure-line > svg { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+/* `.tech-details code` 是块级（给整段 JSON 用）；这里码跟在句子后面，拉回行内。 */
+.tech-details.assist-failure-details code {
+  display: inline;
+  padding: 0;
+  background: transparent;
+  font-family: var(--relay-font-family-code);
+  overflow-wrap: anywhere;
+}
+.assist-failure-details { margin: 0; }
 
 /* 文档候选卡：说明这条回复产出了哪份候选，正文与接受入口仍在提案区。 */
 .assist-candidate-card { display: flex; align-items: center; gap: var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); background: var(--relay-color-bg-surface); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
@@ -706,38 +777,49 @@
    caption 级的未完成标记——读起来是「同一段话的草稿版」，不是一张等着被替换的卡片。
    行高与正文一致是刻意选择：交接瞬间的高度差只剩 Markdown 块距，滚动不跳。 */
 .assist-reply { display: grid; gap: var(--relay-space-1); min-width: 0; max-width: 100%; }
+/* 网格项默认 min-width:auto，会把内容的「最小可容纳宽度」一路上抬，反过来把这一列撑宽。
+   此前正文吃 `overflow-wrap: anywhere`，最小宽度约等于一个字符，这条规则看不出来；
+   2026-11-01 E2E-ALL-01 让长标识符按整体计宽之后，一张 649px 的表就把 547px 的消息体撑到了
+   649px——表格没在自己盒子里滚动，而是把整列推宽。滚动必须发生在表内，前提是祖先不被撑开，
+   所以这里给 .assist-reply 的每个子项补回 min-width:0（与 .agent-message-body > * 同一手法）。 */
+.assist-reply > * { min-width: 0; }
+/* 草稿状态行（2026-10-25；2026-10-31 UI-08 收敛文案）：可见的只有一句状态词
+   （正在生成 / 正在核对最终正文 / 待核对），预览修订号等技术解释收进就地展开的「预览详情」。
+   容器由 p 改为可容纳详情入口的一行，仍保持 caption 级、次级色、与正文同列。 */
 .assist-reply-note {
-  margin: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--relay-space-2);
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-heading);
 }
+.assist-reply-note > p { margin: 0; }
+/* 视图 CSS 先于 styles.css 注入：带两级类名，压过 .tech-details 的通用外边距。 */
+.assist-reply .assist-reply-note-details { margin: 0; }
+.assist-reply .assist-reply-note-details > summary {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  cursor: pointer;
+}
+.assist-reply .assist-reply-note-details[open] { flex-basis: 100%; }
 /* 草稿正文：字号/行高与 .assist-message-markdown .markdown-preview 对齐（16px · relaxed）。
    纯文本仍保留 pre-wrap，草稿里的换行就是模型给的换行。 */
 .assist-reply-draft {
   font-size: var(--relay-font-size-body);
   line-height: var(--relay-font-lineHeight-relaxed);
 }
-/* 2026-10-29 V3：执行过程已经列出真实活动时，撤掉正文起始位的那组三点。
-   两处同时说「还在跑」只会让读者以为有两个进度在抢注意力（§6.2 只保留一个主进度动效）。
-   仅当面板里**确有活动行**时才撤：纯文本回复没有活动行，三点仍是唯一的「还在写」信号；
-   贴在草稿末尾的行内三点（[data-inline]）不受影响。 */
-.agent-message-body:has(.activity-panel .activity-item) .assist-inflight-dots:not([data-inline="true"]) {
-  display: none;
-}
-
-/* 主进度指示的优先级（2026-10-30 验收整改）。
-   同一时刻只允许一个东西在动：
-     1. 有「当前活动行」→ 由那一行的状态图标转动，它是唯一焦点；
-     2. 没有当前行但整轮在跑（工具之间、尚未开始调用）→ 由执行过程标题图标转动；
-     3. 整轮结束或没有过程面板 → 由正文/草稿的三点承担「还在写」。
-   因此：只要面板里出现了活动行，正文与草稿里的三点全部停转（含贴在草稿末尾的
-   inline 三点——V3 首版只关了非 inline 的那一组，导致工具执行时两处同时跳）。
-   三点本身不撤掉：它是「文字还在往下写」的静态标记，停转后不再抢注意力。 */
-.agent-message-body:has(.activity-panel .activity-item) .assist-inflight-dots > i {
-  animation: none;
-  opacity: 0.55;
-}
+/* 主进度指示的唯一 Owner（2026-10-31 UI-08）。
+   同一时刻只允许一个东西在动，优先次序：
+     1. 在途且确有真实工具记录 → SessionRoundTrace：当前活动行的状态图标（没有当前行时
+        是标题图标），由组件内部的 live 判定保证只有一枚在转；
+     2. 等待阶段（PENDING / RUNNING 零记录）与普通生成 → 正文起始位或草稿末尾的三点。
+   两套互斥由 AssistMessageRow 的 toolActivityOwnsProgress 状态决定：为 true 时三点
+   整组**不渲染**（不是停转、不是 display:none）。这里因此不再保留 `:has()` 遮盖规则：
+   那会让「谁在动」同时由 React 与选择器两处决定，两处必然会在某个状态上打架，
+   而优先级也只能写在注释里，无法被测试直接断言。 */
 
 /* 核对中的两种档位（2026-10-29 V2）：都只是呈现，不改权威状态。
    settling —— 正常的过渡：草稿还在原位，最终正文正在读回。用次级色，读起来是「等一下」。
@@ -876,7 +958,12 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   align-items: center;
   gap: var(--relay-space-2);
   flex-wrap: wrap;
-  padding-top: var(--relay-space-1);
+  /* UI-COMPOSER-ALIGN（2026-11-01）：正文与工具行之间的 4px 间距原来画在本行自己的
+     padding-top 里，行盒因此比控件高 4px、盒中心比控件中心高 2px（实测 824 vs 826）；
+     量「底栏中心线」时会把整排控件读成偏下。间距改为行外 margin，视觉间距不变
+     （flex 列自身的 4px gap + 4px margin = 原来的 4px gap + 4px padding），
+     行盒中心与控件中心从此是同一条线。 */
+  margin-top: var(--relay-space-1);
   border-top: 0;
   container-name: composer-actions;
   container-type: inline-size;
@@ -923,6 +1010,9 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   margin-left: auto;
   min-width: 0;
   min-height: 0;
+  /* 与尾部组同一条底轴（见 .agent-chat-composer-tail 的 align-self 说明）：
+     工具行内部换行时发送键跟着最后一行，不再悬在两行之间。 */
+  align-self: flex-end;
   width: var(--relay-control-height-compact);
   height: var(--relay-control-height-compact);
   padding: 0;
@@ -952,6 +1042,11 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
 }
 /* 键边长 2×radius.composer = 2rem，已高于 control.target.minimum，命中区不需要额外扩展。 */
 .agent-chat-composer-actions .agent-chat-send svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+/* UI-COMPOSER-ALIGN（2026-11-01）：ArrowUp 的箭头两翼在字形上半部，墨迹加权重心比
+   20px 图标盒中心高 1.35px（真实 Chromium 1280×900 实测 824.65 vs 826.00），在实底
+   方键里读成箭头偏上。图标盒与命中区不变，只对发送态字形做 1px 光学补偿；
+   停止态是居中的实心方块（data-state），不适用也不改它。 */
+.agent-chat-composer-actions .agent-chat-send:not([data-state]) svg { translate: 0 1px; }
 /* 命中率在左、圆环在右，与发送键同属底栏右侧一组。 */
 .agent-chat-usage {
   display: inline-flex;
@@ -975,6 +1070,12 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   gap: var(--relay-space-1);
   flex: 0 1 auto;
   min-width: 0;
+  /* UI-COMPOSER-ALIGN（2026-11-01）：工具行在自己内部换行后，右端一组原来被
+     `.agent-chat-composer-actions` 的 align-items:center 垂直居中在**两行之间**
+     （960 宽实测：工具两行中心 790/826，尾部组却在 808），不与任何一行共中线。
+     改贴底：尾部组与最后一行同高同轴（两行都是 compact 32px）；单行时与原来的
+     居中结果完全一致，1280 宽的几何一个像素都不变。 */
+  align-self: flex-end;
 }
 /* 模型、资料、用量计量常驻工具行（2026-10-18 用户指令「把这三个单独放到输入框里面，
    普通讨论的右边就可以了」）：三项在「普通讨论」右侧成组。计量此前在「…」浮层里靠
@@ -1004,16 +1105,17 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    圆环在工具行里、贴近卡片底缘，任何以圆环为锚点的绝对定位都会向上压进正文输入区，
    以卡片为锚又会被中栏的 overflow 裁掉。fixed + 实测是唯一同时满足
    「不遮挡输入区」「不被裁剪」「窄窗可读」的形态，因此这里不再改包含块。 */
-/* 圆环按钮＝环 + 百分比读数（2026-10-28）。3% 这类小比例在 32px 环上只剩一段两三个像素的
-   弧，既读不出进度又像一枚「正在加载」的绿点；读数补上之后环仍是主标记，文字只承担读数。
-   内边距给悬停底色留出边，同时把命中区撑到环以外，不必为点击再加一层外壳。 */
+/* 圆环按钮＝环本体（2026-10-28 建，2026-11-01 按用户指令收掉右侧百分比读数）。
+   按钮盒取 control.height.compact（32px），环本体取 control.meter.size（24px）：
+   视觉直径缩到 24px，命中区仍是 32×32，不低于 control.target.minimum——
+   缩的是画出来的环，不是能点到的地方。内边距给悬停底色留出边，不必为点击再加外壳。 */
 .agent-chat-context-meter {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--relay-space-1);
-  height: var(--relay-control-meter-size);
-  min-width: var(--relay-control-meter-size);
+  height: var(--relay-control-height-compact);
+  min-width: var(--relay-control-height-compact);
   padding: 0 var(--relay-space-1);
   background: transparent;
   border: 0;
@@ -1031,20 +1133,9 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   .agent-chat-context-meter:hover { background: var(--relay-color-selection-hover); }
 }
 .agent-chat-context-meter:active { background: var(--relay-color-selection-bg); }
-/* 读数用等宽数字：3% → 10% → 100% 时宽度变化不会带着模型芯片左右跳。 */
-.agent-chat-context-meter-value {
-  flex: none;
-  font-size: var(--relay-font-size-caption);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  letter-spacing: 0;
-}
-.agent-chat-context-meter[data-state="high"] .agent-chat-context-meter-value { color: var(--relay-color-status-warning-text); }
-/* 输入器工具行窄到放不下读数时先收起百分比：圆环、完整可访问名称（aria-label）与
-   点击详情都保留，功能不因省宽度而消失。 */
-@container composer-actions (max-width: 34rem) {
-  .agent-chat-context-meter-value { display: none; }
-}
+/* 2026-11-01 用户指令：删除圆环右侧的独立百分比文本。数字没有消失——同一份读数
+   仍在悬停 Tooltip、按钮的 aria-label 与详情浮层里，只是不再常驻工具行。
+   （此前的 `.agent-chat-context-meter-value` 与其窄栏 `@container` 收起规则一并删除。） */
 .agent-chat-context-meter svg {
   width: var(--relay-control-meter-size);
   height: var(--relay-control-meter-size);
@@ -1064,32 +1155,32 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   transition: stroke-dasharray var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
 }
 .agent-chat-context-meter[data-state="high"] .agent-chat-context-meter-fill { stroke: var(--relay-color-status-warning-text); }
-/* 点击圆环的上下文用量浮层（2026-10-25 建；2026-10-29 第二轮整改）。
-   沿用模型下拉 .model-selector-menu 的同一套弹层语言——向上锚定、popover 层、panel 圆角、
-   floating 阴影，不新增 token 值。圆环在右端一组（tail）的左侧，浮层右缘对齐圆环右缘、
-   向左展开，不越过输入卡右缘。宽度按内容在 300–340px 之间自适应：低于 300px 时主行的
-   分子/分母与百分比会互相折行，高于 340px 又会在输入器旁显出一道空荡的长条。 */
+/* 点击圆环的上下文用量浮层（2026-10-25 建；2026-10-29 第二轮整改；2026-11-01 第三轮：
+   改挂在 body 上、按圆环实测落位）。
+   沿用模型下拉 .model-selector-menu 的同一套弹层语言——popover 层、panel 圆角、floating 阴影，
+   不新增 token 值。位置与 max-height 由 ContextMeter 现算（底边贴在圆环上方 7px，
+   放不下时翻到圆环下方或夹在视口内），这里只给静态兜底：left/top 是视口坐标，
+   fixed 相对视口成立的前提正是浮层不在工具行那个 container query 里（portal 到 body）。
+   宽度按内容在 300–340px 之间自适应：低于 300px 时主行的分子/分母与百分比会互相折行，
+   高于 340px 又会在输入器旁显出一道空荡的长条。 */
 .agent-chat-context-meter-menu {
-  position: absolute;
-  bottom: calc(100% + var(--relay-space-2));
-  left: auto;
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   z-index: var(--relay-zIndex-popover);
+  /* 两段式：标题行固定，正文（读数滚动区 + 档位停靠区）吃满剩下的高度。
+     容器自身不再 overflow-y:auto——整块滚会把「档位」滚出视野，正是本轮要修的问题。 */
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--relay-space-2);
   box-sizing: border-box;
   width: max-content;
-  min-width: min(18.75rem, calc(100vw - var(--relay-space-8)));
-  max-width: min(21.25rem, calc(100vw - var(--relay-space-8)));
-  /* 内容多时自己滚动；主读数在最上方，不需要滚动就能看见。
-     浮层是绝对定位，展开不会推动输入卡与消息列表重排。
-     2026-10-30（0145）：正文多了「上下文构成」一段，24rem 在 782px 高的窗口里已经装不下
-     三段（实测内容 477px），一打开就要滚动，读起来像「还有东西被藏起来了」。
-     抬到 30rem / 68vh：桌面窗口一次读完，小窗口仍由内部滚动兜底。 */
+  min-width: min(21.5rem, calc(100vw - var(--relay-space-8)));
+  max-width: min(24rem, calc(100vw - var(--relay-space-8)));
   max-height: min(30rem, 68vh);
-  overflow-y: auto;
+  overflow: hidden;
   overscroll-behavior: contain;
-  padding: var(--relay-space-3);
+  padding: var(--relay-space-4);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
@@ -1220,6 +1311,8 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    只剩一项时占满一行，窄窗也退回一列。这里是浮层里唯一的分隔线。 */
 .agent-chat-context-meter-secondary {
   display: grid;
+  /* 两列固定：浮层最窄也只有 344px，两枚读数各占一半仍读得清；
+     上一轮那条「窄视口退回一列」的断点既过不了 §9.6 的语义档守卫，也确实没必要。 */
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--relay-space-2) var(--relay-space-3);
   padding-top: var(--relay-space-2);
@@ -1272,12 +1365,6 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-relaxed);
-}
-/* 极窄输入器（工具行本身已不足 22rem）：浮层右缘仍贴圆环，宽度改由工具行的实际宽度封顶，
-   保证左缘不越出输入卡——中栏是 overflow:hidden，越出即被裁掉；二级信息同时退回一列。 */
-@container composer-actions (max-width: 22rem) {
-  .agent-chat-context-meter-menu { min-width: 0; max-width: calc(100cqi - var(--relay-space-2)); }
-  .agent-chat-context-meter-secondary { grid-template-columns: minmax(0, 1fr); }
 }
 /* 工具控件：无胶囊底/边，图标+文字直接落在卡面上（对齐参考底栏）。 */
 .agent-chat-tool {
@@ -1954,6 +2041,9 @@ html[data-motion="off"] .agent-chat-attach-submenu { animation: none; }
   font-size: var(--relay-font-size-meta);
   font-weight: var(--relay-font-weight-medium);
   line-height: var(--relay-font-lineHeight-heading);
+  /* UI-COMPOSER-ALIGN（2026-11-01）：同权限 chip——单行 chip 不折行，否则固定 32px
+     高度装不下两行文字（390 宽实测）。 */
+  white-space: nowrap;
   list-style: none;
   cursor: pointer;
   transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
@@ -2387,6 +2477,51 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
   border: none;
   padding: 0;
 }
+
+/* 2026-11-01 AGENT_STREAM_VISIBILITY：在途回复的阶段行。
+   一个阅读列里的单行文字 + 既有三点动效；不套卡片、不加底色/阴影，
+   与 meta 行和正文同一阅读起点。正文一出现这一行就卸下（由渲染条件决定，不是遮盖）。
+   延迟诊断只在用户展开时出现，两列读法在窄容器里自动换行。 */
+.assist-stage { display: grid; gap: var(--relay-space-1); margin: 0; min-width: 0; }
+.assist-stage-line {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: 0;
+  min-width: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+/* 首条等待行把文案直接排在三点后面（没有 .assist-stage-line 包裹），
+   因此字号与颜色在这一处写明，避免它按正文档 16px 跳出来。 */
+.assist-stage-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--relay-font-size-meta);
+  color: var(--relay-color-text-secondary);
+}
+.assist-stage-details { margin: 0; }
+.assist-stage-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  color: var(--relay-color-text-secondary);
+}
+.assist-stage-diagnostics > li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--relay-space-1) var(--relay-space-3);
+  min-width: 0;
+}
+.assist-stage-diagnostic-label { flex: 1 1 auto; min-width: 0; color: var(--relay-color-text-muted); }
+.assist-stage-diagnostic-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 /* 「部分不可统计」的逐条解释（CD-17）：成因、范围、条数都摆在面板里，不用单一颜色表达状态。 */
 .conversation-diff-incomplete {

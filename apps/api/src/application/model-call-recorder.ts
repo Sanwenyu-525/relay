@@ -61,6 +61,21 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
   return { callId, result };
 }
 
+/**
+ * 首个 Provider 流事件的**观测**（AGENT_STREAM_VISIBILITY，2026-11-01）。
+ *
+ * 这是证据写入，不是业务动作：写不进去（调用已结算、租约已失、数据库瞬时错误）
+ * 都不能把一次成功的模型调用改判成失败。条件 UPDATE 只记第一次；调用方与免费路由
+ * 重复包装时第二次是空操作。
+ */
+export async function observeModelFirstStream(db: DbExecutor, callId: string): Promise<void> {
+  try {
+    await new ModelCallRepository(db).recordFirstStreamEvent(callId, new Date());
+  } catch {
+    // 只丢这一枚观测时间；调用结算、正文与预览仍走原路径。
+  }
+}
+
 /** Provider cache fields are optional extras; absent or malformed means unknown. */
 function cacheToken(value: unknown): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;

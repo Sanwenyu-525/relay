@@ -617,7 +617,7 @@ async function runChain() {
   await assertRuntimeRoleSeparation();
   const ledger = watchWebView(first.page, first.bootstrap);
   await first.page.goto('http://tauri.localhost/projects');
-  await expect(first.page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(first.page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await first.page.getByTestId('project-create-open').click();
   await first.page.locator('input[name="project-title"]').fill(`M03 Action Approval ${state.marker.session_id.slice(0, 8)}`);
   await first.page.locator('input[name="project-type"][value="GENERAL"]').check({ force: true });

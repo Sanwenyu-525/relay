@@ -115,6 +115,8 @@ P1（同类歧义，同批改）：
 
 **正文排版收敛。** 块距统一 `space.3`(12px，含此前的表格 16px)；标题在回复里整体降一档（20 / 18 / 16px，600，上边距 `space.4`），首块不留上边距；表格自带横向滚动盒；行内代码有底色、颜色仍是正文色；末块贴底。规则归本节，数值仍取 tokens。
 
+**表格里的标识符不许被劈开**（2026-11-01 全链路测试，用户实机截图）。工具名、状态词与错误码是用户判断这一步成败的唯一凭据，`list_directory` 断成 `list_direct` + `ory` 就等于把结果说错。口径三条：单元格用 `overflow-wrap: break-word` 而不是 `anywhere`（`anywhere` 会把最小可容纳宽度算到单个字符，长标识符因此被允许从中间切开），表格改成「至少铺满阅读列、按需变宽」，多出来的宽度交给表格自己的 `overflow-x` 盒；单元格最小宽度取 12 个正文字符，因为一旦表格需要滚动，每一列都会退到自己的最小宽度，6 字宽的说明列会被压成一条竖排丝带；不降任何字号，也不给整表加 `white-space: nowrap`（中文仍按 `line-break` 自然换行）。**配套的一条祖先约束**：`.assist-reply > *` 必须有 `min-width: 0`——网格项默认 `min-width: auto`，会把内容的最小可容纳宽度一路上抬，一张比阅读列宽的表能直接把消息列撑宽（实测 547px 的列被撑到 649px），滚动就不发生在表内而是把整列推走。验收：`tests/browser/assistReplyTypography.spec.ts` 三条用例量每个 ASCII 词落在几行矩形上（1 行为完整），并锁住窄窗（843）与常规窗（1270）下滚动盒宽度不超过正文列、页面无级联横向溢出；把 CSS 改回旧写法，同一断言立刻报出「3 行 / 2 行」。
+
 **滚动。** `followLatest` 只由真实滚动位置决定：在底部时流式增长继续跟随，用户上滚后不再被拉回；交接、过程自动收起都走同一条判定，不额外驱动滚动。窄窗口与右侧检查器打开时，回复列（含代码块、表格）各自在自己的滚动盒内，不产生页面级横向溢出。
 
 **未验边界。** 真实 Windows/WebView2 实窗、多 DPI、输入法；真实 Provider 的首字延迟与长流（本轮用可控的 GET 轮询与延迟响应构造空档）；右侧检查器打开态的横向溢出只在 860px 窄窗验证，未在 `/agent` 协作页开检查器逐个量；独立验收未做。
@@ -223,3 +225,159 @@ P1（同类歧义，同批改）：
 ### 55.5 未验边界
 
 真实 Windows/WebView2 实窗已验（见[测试计划 §50](../../testing/verification-plan/part-07.md#50-ai-回复场景实验室的桌面入口与集成验收2026-10-30)）；多 DPI、跨显示器与键盘全流程未验。独立验收未做。
+
+## 56. 场景实验室 UI V2：预览优先的开发者工作区（2026-10-31，已实施，浏览器已验）
+
+**背景。** §55 的实验室功能齐全，但外壳仍是「三栏等权 + 右侧长表单」：145 条场景全部铺开、控制器比预览更抢眼、1100px 以下直接把三栏竖向堆叠，预览列在常用窗口里只剩约 420px。本轮只重做实验室的使用体验与视觉结构，不改 145 条场景、`ScenarioRunner` 的帧语义或 `scenarioClient` 的只读边界。
+
+### 56.1 页面定位与页壳
+
+- 实验室进入 page-focused 布局：`AppShell` 对 `/__dev/assist-scenarios`（仅开发构建）不再渲染近期工作栏，`app-frame--page-focused` 把宽度交给页面；普通页的侧栏收起状态、列宽偏好和返回来源不受影响。
+- 页面自身拿满可用高度，不在根上滚动：目录、预览、检查面板各自持有滚动 Owner。`App.tsx` 的 keyed Outlet 包装层与 `.app-main` 一起成为 flex 列，否则页面会按内容高度伸出视口、目录底部滚不到。
+- 顶部只保留一层导航：返回入口、标题、场景总数、「仅开发构建」、轻量信息入口，以及模式切换（逐条播放／全部状态）、运行全部、导出报告。开发隔离说明收进 `title` 与 `aria-label`，不在页头铺一段说明文字。
+
+### 56.2 场景目录
+
+- 宽度 `clamp(13.75rem, 16vw, 15.5rem)`（220–250px），独立滚动；宽窗可收起成整列隐藏，窄窗改为覆盖抽屉。
+- 分组按 A/B/C/D/E/F/G/X 折叠，组头显示真实条数；当前场景所属分类自动展开，其他组默认收起。145 条仍全部挂在 DOM 里（折叠只 `hidden`，不卸载），批量验收与清单比对不受影响。
+- 搜索匹配 ID、标题、组件位置与状态类型；搜索时自动展开命中分组。筛选「全部／运行中／完成／异常／未验收」只读两处真实事实：`stateKind`（在途/流式、终态、失败/未知/取消），以及本页跑出的验收结果（失败、未覆盖、未跑）。
+- 筛选后当前场景若不在结果集，目录顶部保留一条「当前场景」置顶行；选中项不会因为筛选凭空消失。
+- 状态只用一个 6px 验收点：通过／失败／未覆盖／未跑分别取 success/danger/warning/neutral token；悬停 `title` 与 `aria-label` 给出验收结论或失败原因。场景标题单行截断，完整标题在 `title`。
+
+### 56.3 播放控制
+
+- 高频播放操作移到预览上方，成为一条紧凑 Playback Bar：上一帧、播放/暂停、下一帧、重置、按帧进度轨道、`第 x/y 帧 · z ms`、0.5×/1×/2×、循环。
+- 进度轨道是原生 `input[type=range]`，键盘 `Home/End/方向键` 按帧跳转；跳转、单步、重置都直接调用同一个 `ScenarioRunner`，不创建第二套播放状态。
+- 切换场景仍按场景 id 重挂预览外壳、停播、帧归零；旧场景的计时器与动画不残留。`scenario-play` 的 `aria-pressed` 仍是播放状态的唯一界面事实。
+
+### 56.4 检查面板（Inspector）
+
+- 默认关闭，不占预览宽度。打开后在宽窗固定为右列（`clamp(18rem, 20vw, 20rem)`），关闭立即把宽度还给预览；1180px 以下改为右侧覆盖抽屉，检测不到预览列宽变化。
+- 三个页签：**展示设置**（阅读密度、窗口宽度、动效、预览底色、展开所有／收起所有）、**事件时间线**（逐帧列表，点击即 seek）、**验收结果**（断言逐条结果、失败原因、未覆盖说明、浏览器批次提示）。
+- 原始状态 JSON 收进「验收结果」里的 `<details>`，默认不展开；不再常驻占据画面。
+- 宽窗的关闭入口只有预览头的「收起检查」；窄窗抽屉盖住该按钮时才保留面板自己的关闭键，避免同一动作出现两枚重复按钮。
+- 阅读密度与动效仍走产品自己的视图偏好，离开实验室按进入前的值还原。
+
+### 56.5 展示全部状态（Gallery）
+
+- 先选分类，再只渲染该分类的场景（每类最多 22 条）；卡片用真实组件停在末帧，不另造回复 UI。
+- 卡片语言是轻量纸面：1px 分隔线、`radius.panel`、无投影；卡片头给 ID、标题、状态类型、组件位置与验收点，点击卡片头回到单场景。预览区有最大高度，长任务默认折叠，必要时在卡片内部滚动。
+- 离屏卡片用 `content-visibility: auto` 跳过布局与绘制，但节点仍挂载；分类切换不改变 `ScenarioRunner` 或验收口径。
+
+### 56.6 视觉层级与控件
+
+- 五层只表达五件事：页面导航（页头）／当前场景（预览头）／播放工具（Playback Bar）／AI 回复预览（舞台）／技术检查（Inspector）。层与层之间用 1px `border.separator` 和留白分隔，不再用多层卡片与阴影。
+- 控件统一到 `control.height.compact`（32px）；字号取 caption/meta/body token；ID、时间、命令、路径用 `font.family.code`。状态色只取 `color.status.*`，验收通过不代表产品执行成功。
+- 预览舞台用 `bg.canvas` 纸面；宽窗的回复列保持 `--chat-measure`（744px），不再套厚边框；窄窗／手机宽在舞台中央显示 30rem／24rem 的模拟窗口，外壳列宽不变。视觉规则归[设计系统 §9.24](../design-system/part-06.md#924-开发期场景实验室的预览优先工作区2026-10-31)。
+
+### 56.7 响应式
+
+- ≥1181px：目录常驻列；检查面板打开时为固定右列。
+- 1101–1180px：目录仍常驻；检查面板改为覆盖抽屉。
+- ≤1100px：目录收为覆盖抽屉，预览占满主体宽度；播放条保持一条（560px 实测 71px 高，不再堆成三层）。
+- 900px / 560px：页头按需换行；所有控件留在可点区域，不产生页面级横向溢出；目录与检查面板用 Esc 关闭。
+- 断点只改变结构（常驻列／抽屉／换行），不用流体字号，也不把三块内容竖向堆叠成一条。
+
+### 56.8 保留能力与边界
+
+145 条场景、场景清单 JSON、目录搜索与选择、播放/暂停/单步/重置、速度与循环、展开/收起过程、阅读密度、动效开关、预览尺寸、Gallery、原始事件与结果、一键运行全部、验收结果、导出报告、开发版入口、返回来源与生产构建隔离全部保留。实验室仍只读内存模拟世界：不写业务库、不调 Provider、不执行命令、不产生真实审批；验收结果不写入业务验收账本。
+
+### 56.9 验证与未验边界
+
+- 真实 Chromium：新增 `tests/browser/scenarioLabUiV2.spec.ts` 覆盖预览优先布局、目录折叠/搜索/筛选、检查面板开关与预览宽度稳定、播放条、Gallery、900/560 窄窗、滚动 Owner；既有 `scenarioLabEntry.spec.ts`、`assistScenarioLab.spec.ts`（十条 DOM 性质）、`assistScenarioLabShots.spec.ts` 按新入口同步操作步骤，断言未删除。jsdom `tests/scenarioLabMatrix.spec.tsx` 继续逐条跑 145 条呈现断言。
+- 生产隔离继续由 `tests/browser-prod/scenarioLabProdIsolation.spec.ts` 与 `scripts/check-scenario-lab-isolation.mjs` 复验。
+- 截图与验收材料存 `tmp/Scenario-Lab-UI-V2/`；真实 Windows／WebView2 实窗截图与 `accept-scenario-lab-tauri.mjs` 复跑结论在同目录 `acceptance.md` 记录。
+- 未验：多 DPI、跨显示器、安装包内实验室（生产构建不注册该路由，按隔离预期不可达）、键盘全组合。独立验收未做。
+
+## 57. 场景实验室 UI V2.1：批次生命周期、验收口径与完整回放（2026-10-31，已实施，浏览器已验）
+
+**背景。** V2 的外壳已经预览优先，但独立验收发现三类实质问题：批量只有「cancelled 对象」没有批次身份，取消/切场景/离开页面后旧异步仍可能写回；验收把 `browser-only` 静默算进通过，目录与 Inspector 只显示「通过/失败」；`settlePreview` 超时后仍返回当前 DOM，没停稳也会留下通过记录。本轮只修这些事实与交互，不重建场景，不改产品状态机。
+
+### 57.1 批次身份与取消
+
+- 每次运行创建 `run id + mode + scope + cancel token`，既存在 React state 也保存在 `activeRunRef`；`commit/finish` 同时核对「token 未取消 + active id 仍是自己」。
+- 运行中可点「取消」：只置取消标记并写 `cancelled` 状态，不再继续切场景、不再增加 done、不把 `done/total` 写成满额。未处理场景保持 `unchecked/未运行`。
+- 点击目录场景、切换 Gallery/单场景、离开页面都会取消进行中的批次；离开页面只置标记，不再 setState。
+- 重复启动由 `activeRunRef` 同步拒绝，运行中两个启动按钮禁用；取消后可启动新批次，旧 run id 的迟到 promise 因身份不符被丢弃。
+- **根因记录：** `App.tsx` 的 keyed Outlet 以 `pathname+search` 为 key。旧实验室在切场景时 `setQuery`，会整页重挂并清空批次状态；V2.1 不再在切换场景时改 URL，query 只作为打开时的深链与 `labSettleMs` 入口。
+
+### 57.2 验收口径
+
+- 新增 `LabAcceptance`：未运行、完整通过、静态通过、静态失败、无法覆盖、无法稳定验证、证据已过期。
+- `browser-only` 不计入静态通过；快速静态检查最多到「静态检查通过 · N 待浏览器」，完整场景验收执行完交互且无待浏览器项才写「全部通过」。
+- 快速静态检查与完整场景验收各自保存 `run` 记录（含 run id、scope、开始时间、耗时、done/total、verdicts、逐条 check results、取消原因），Inspector 两行独立展示耗时与通过/静态通过/失败/待浏览器/无法验证/无法覆盖/未运行；不把两者合成一份计数。
+- 目录只读「最近一次尝试」；当前场景没有批次结果时，手动静态检查可作为当前行的结果，但摘要明确写「当前场景」，不冒充全量批次。完整验收当前场景的记录 scope 为 `current`，目录摘要明确写「其余 144 条未运行（本次只验当前场景）」。
+- 场景定义指纹（steps/checks/interactions/conditions/note）随结果保存；指纹变化后旧记录标「证据已过期」，不再计入通过。`judgeScenario`/`countRun` 是纯函数，单测覆盖。
+- 导出报告分「快速静态检查 / 完整场景验收」两段摘要与逐场景两列结果；`browser-only` 单独列。
+
+### 57.3 预览停稳
+
+- 停稳算法独立在 `scenarioSettle.ts`：只返回 `ok`、`timeout`（unmounted/identity/unstable）、`cancelled`。超时不再返回当前 DOM，身份不符不拿上一条残留。
+- 调用方只有 `ok` 才跑断言；超时记「无法稳定验证」并带原因；取消不产生结果。等待与时钟可注入，单测覆盖迟到响应、反复更新、持续加载、身份不符、取消与超时区分。
+- `?labSettleMs=1` 是验收用的显式超时入口（1–10000ms）；浏览器用例用它验证「全部无法验证、静态通过为 0」。
+
+### 57.4 快速静态检查与完整场景验收
+
+- **快速静态检查**（`scenario-run-all`）：第 0 帧挂稳 → 末帧挂稳 → 执行末帧静态断言；不执行场景交互脚本，不实现 Playwright 的浏览器专属检查。
+- **完整场景验收**（`scenario-run-full` / 「完整验收当前场景」）：逐个帧顺序 seek 并停稳，再从第 0 帧执行 `click/inspect/advance` 交互脚本，最后落末帧跑静态断言；`scrollUp` 的几何/滚动稳定性明确交给 Playwright，本页只记待浏览器，不重复实现。
+- 交互目标不存在记失败；交互执行数写进结果；完整通过要求交互脚本与全部必要检查完成。G01 用例验证 6 帧 + 7 条交互的真实重放。
+
+### 57.5 单帧播放器与短场景
+
+- 单帧场景（如 A05）不显示进度轨道、播放/循环/速度/单步；只显示「静态状态预览」、`第 1/1 帧` 与「重新检查」。多帧场景才显示完整 Playback Bar；末帧播放按钮文案变为「重新播放」，点击明确从第 0 帧重播。
+- 单帧预览增加「静态状态预览」说明条：场景说明 + 「查看检查结果」入口；舞台只在内容短时居中（`safe center`），内容超出仍从顶部开始并可滚动。不伪造 AI 消息填充空白，也不改长任务/长回复的滚动。
+
+### 57.6 验证与未验边界
+
+- 新增 `tests/scenarioSettle.spec.ts`（停稳边界）、`tests/scenarioLabRuns.spec.ts`（验收口径与计数）、`tests/browser/scenarioLabRunsV21.spec.ts`（A05/A04/G01、取消、重复启动、切场景/切 Gallery、离开页面、settle 超时）。
+- 既有 entry/UI V2/十条 DOM 性质/截图批次按新入口同步；`scenarioLabUiV2` 默认桌面改为断言单帧静态条，窄窗播放检查改用 A04。
+- 未验：Tauri 实机批次取消/完整回放仍需 CDP 脚本复跑；多 DPI、安装态、键盘全组合未验。独立验收未做。
+
+## 58. 聊天阅读列统一宽度：三层布局与执行准备面板收口（2026-10-31，已实施，浏览器已验）
+
+**背景。** 用户截图指认：独立聊天页里「正在准备执行」面板横跨整个聊天区，而输入框只有约 744px。根因不是某一条样式写错，而是宽度归属缺一层规定——消息列、输入卡、队列、待办、目标条、目录细条各自写了 `--chat-measure`，后来新增的块（执行准备摘要、目标投影失败条、必读文件预警、子任务委派记录）没有这条约束，就按中栏画布铺满。1440 视口实测：面板 1101.61px（322.39–1424），输入卡 744px（501.19–1245.19），左右各溢出 178.8px。
+
+### 58.1 三层宽度模型
+
+- **① Canvas**：`.agent-chat-transcript-shell` 铺满中栏、自己滚动（`scrollbar-gutter: stable`），滚动条贴中栏右缘。时间线轨道、回到最新按钮、浮层都按它定位。它决定「聊天区多宽」，**不决定内容多宽**。
+- **② Reading Column**：`--chat-measure`（`.agent-assist` / `.embedded-assist` / `.skill-page` 上定义，`min(46.5rem, 100%)`），唯一宽度 owner，与输入卡同一条中心线。不再新增第二套宽度常量。
+- **③ Content**：会话列的直接子块统一取第②层。实现写在 `AssistView.css` 顶部：`.agent-chat-conversation > *:not(.agent-chat-transcript-shell) { width: 100%; max-width: var(--chat-measure); margin-inline: auto; }`。
+- 排除滚动容器是刻意的：收窄它会让自绘滚动条跟着缩到内容中间，等于把 Canvas 和内容列合成一层。`width: 100%` 也不能省——横向 `auto` 外边距会让 flex 子项退出 stretch，只写 `max-width` 会得到 fit-content 宽度的卡片。
+- 弹层、Toast/Notice（portal 到 body）与回到最新按钮都不在这个层级，不受该规则影响；时间线轨道在滚动容器内部按容器宽度工作。
+
+### 58.2 修复清单
+
+**原本按画布宽度铺开（本次收进阅读列）**
+
+- `.execution-summary`（执行准备面板，P0）：`READY`／`TASK_PREPARED`／`FAILED`／`CLARIFY` 共用同一容器，四种状态一起收口。
+- `.warning-callout`（目标/计划投影读取失败条）。
+- `.context-risk`（必读文件体积预警与发送前风险条）。
+- `.session-delegations`／`.subagent-supplements`（子任务委派记录与补充入口）、只读子任务那行 `helper-text`。
+- `.agent-chat-conversation-heading`（协作页外壳里 `display: none`，其他宿主可见时同样进列）。
+
+**已符合规范、本次未改**
+
+- 消息列 `.agent-message-list`（正文、代码块、表格、附件都在它内部，长代码与表格各自在组件内横向滚动）。
+- 输入卡 `.agent-chat-composer`、等待队列 `.assist-queue`、会话待办 `.session-todos`、目标条 `.goal-strip` 与计划卡 fallback、学习记录 `.learning-records-panel`、发送前状态行 `.composer-status-bar`、输入卡上方那一行 `.agent-chat-prereq-row`、目录细条 `.folder-scope-bar`、欢迎页最近动态 `.recent-activity-summary`——这些早已是 `max-width: var(--chat-measure)` + `margin-inline: auto`，本次不动。
+- 全局 `.execution-summary`（`FolderScope.css`）未改：它在执行轨迹摘要里还以 `.execution-trajectory` 的形式被复用，收口只放在聊天列的层级上，其他页面的用法保持原样。
+
+### 58.3 长内容与窄窗
+
+- 执行准备面板加 `overflow-wrap: anywhere`：目录与文件路径没有断点时也在卡片内换行；`anywhere` 同时收窄 min-content，单靠 `break-word` 在 flex 子项上仍会被最长 token 撑开。
+- 收窄后 `.warning-callout` 里的动作键会被挤成竖排汉字（1024 折两行、375 折八行）。作用域内补 `flex-wrap: wrap` + 按钮 `flex: none`：放不下时按钮整体落到下一行，其他页面上的同名组件不受影响。
+- 窄窗（< 744px + 中栏内边距）时整列按 `100%` 收缩，面板、输入卡、消息列三者仍是同一条轴线：375 实测 16–359，420 实测 16–404。
+- 面板保持既有内部滚动（`overflow: auto`）与压缩权：竖向空间极紧时先让出高度的是面板，不是消息区；375 视口消息区仍保留 ≥160px。
+
+### 58.4 验证
+
+- 新增 `tests/browser/chatReadingColumnUnification.spec.ts`（11 条，真实 Chromium，API 全部 `page.route` 伪造）：1440／1024／1160×780（Tauri 窗口尺寸）／1280／420／375；`READY`、`FAILED`、`CLARIFY`、`TASK_PREPARED`；长路径；投影失败提示；侧栏收起（画布 1133.61→1320，内容仍 744）；运行中缩放（1440→980，内容随输入卡变 696）；修复前后对照（同一夹具加等价覆盖样式还原旧布局，1101.61→744）。
+- 左右缘与中心轴一律按 ≤1px 断言；同时断言 375/420 的 `documentElement` 无横向溢出、面板 `scrollWidth` 不超 `clientWidth`。
+- 回归：`chatReadingColumn.spec.ts` 2/2、`sessionTodoList.spec.ts` 9/9（其自带三档同宽断言）、`tsc --noEmit` 通过、与聊天列相关的 jsdom 用例 64/64。
+- 证据与数字：`tmp/UI-chat-reading-column-unification/`（`acceptance.md`、`test-results/boxes.jsonl`、`screenshots/`）。
+
+### 58.5 未验边界
+
+- 未在真实 Windows/WebView2 窗口里截图：1160×780 是 `src-tauri/src/lib.rs` 的 `inner_size`，用例按同尺寸视口量几何。
+- 产品侧只有亮色一套主题（`data-theme` 仅存在于场景实验室预览宿主）；本次改动只涉及宽度与换行，不含颜色，未另做暗色比对。
+- 极窄 + 投影失败提示同时出现时，执行准备面板会被压到内部滚动，底边可能截断半行；这是「面板先让高、消息区保可读」的既有取舍，本次未改压缩规则。
+- 32 个浏览器用例把 CORS origin 硬编码为 `127.0.0.1:4173`，本机该端口被另一个项目的预览服务占用（`Task Dock`），这些用例无法在本机启动，未纳入本次回归。

@@ -309,3 +309,41 @@ test('未识别的 Agent 不冒充 relay：matched=false 且保留请求的 id',
   assert.equal(other.profile.id, 'relay');
   assert.equal(resolveProfile(null).matched, false);
 });
+
+/* ---------------------------------------------------------------- P1-2 */
+
+/**
+ * 嵌套规则按真实适用范围累计（2026-10-31，P1-2）。
+ *
+ * 子目录里的同名规则文件只在该子树内工作时才读，把它们全算进「首轮预计加载量」会把
+ * 别的子树的选择抬成本会话的风险。这里钉三件事：合计只数始终适用的部分、
+ * 嵌套文件仍逐条列出、以及给了说明而不是静默少算。
+ */
+test('嵌套规则文件不进首轮合计，但仍列出并说明适用范围', () => {
+  const nested = { path: 'services/api/AGENTS.md', category: 'TASK_REQUIRED' as const,
+    scope: 'NESTED' as const, reason: '子目录规则文件', bytes: bytesFor(60_000),
+    mtimeMs: 1_700_000_000_000 };
+  const assessed = assessRequiredContextFiles([file('AGENTS.md', 30_000), nested], budget());
+  // 合计只有入口那一份；嵌套那份不参与累计。
+  assert.equal(assessed.budget.required_total_tokens, 30_000);
+  assert.equal(assessed.files.length, 2, '嵌套文件仍然要列出来');
+  assert.ok(assessed.reasons.some((reason) => reason.code === 'NESTED_CONDITIONAL'));
+  // 单文件占比仍按有效预算算，界面据此显示体积，但不抬整体档位。
+  const nestedFile = assessed.files.find((entry) => entry.scope === 'NESTED');
+  assert.ok(nestedFile?.share !== null && nestedFile!.share! > 0.2);
+  assert.equal(assessed.severity, 'NONE');
+});
+
+test('只有入口文件参与累计阈值：两份都算才报警的组合不再误报', () => {
+  const nestedA = { path: 'a/AGENTS.md', category: 'TASK_REQUIRED' as const,
+    scope: 'NESTED' as const, reason: '子目录规则文件', bytes: bytesFor(40_000),
+    mtimeMs: 1_700_000_000_000 };
+  const nestedB = { path: 'b/AGENTS.md', category: 'TASK_REQUIRED' as const,
+    scope: 'NESTED' as const, reason: '子目录规则文件', bytes: bytesFor(40_000),
+    mtimeMs: 1_700_000_000_000 };
+  const assessed = assessRequiredContextFiles([file('AGENTS.md', 20_000), nestedA, nestedB],
+    budget());
+  assert.equal(assessed.budget.required_total_tokens, 20_000);
+  assert.ok(!assessed.reasons.some((reason) => reason.code.startsWith('TOTAL_FILES_')));
+  assert.ok(assessed.reasons.some((reason) => reason.code === 'NESTED_CONDITIONAL'));
+});

@@ -198,13 +198,57 @@ test('read: no resource -> NO_RESOURCE', async () => {
   assert.equal(result.reason, 'NO_RESOURCE');
 });
 
-test('read: no baseline -> NO_BASELINE', async () => {
+test('read: 本会话有写入但起点没建立 -> NO_BASELINE（真缺口，界面要留恢复入口）', async () => {
+  const root = await withTempRepo(async () => {});
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: ['a.txt'] };
+  state.sessions.set('s1', makeSession());
+  state.resources.set('res-1', makeResource({ canonical_root: root }));
+  const repos = buildRepositories(state);
+  const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'NO_BASELINE');
+  await rm(root, { recursive: true, force: true });
+});
+
+/* 2026-11-01 P1-3：纯聊天、写账本一条路径都没有时，「缺少会话起点」不是一条能处理的事实——
+   没有写入就没有要核对的东西。服务端把这两种情况分成两个原因，界面才敢让这一行不占位。 */
+test('read: 本会话没写过文件且没有起点 -> NO_SESSION_WRITES（不是缺口）', async () => {
   const root = await withTempRepo(async () => {});
   const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
   state.sessions.set('s1', makeSession());
   state.resources.set('res-1', makeResource({ canonical_root: root }));
   const repos = buildRepositories(state);
   const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'NO_SESSION_WRITES');
+  await rm(root, { recursive: true, force: true });
+});
+
+// 根已不是 Git 仓库这条事实不能被「本来就没改」吞掉，优先级仍高于 NO_SESSION_WRITES。
+test('read: 没写过文件、没有起点、根也不是 git -> 如实报 ROOT_NOT_GIT', async () => {
+  const nonGitDir = await mkdtemp(join(tmpdir(), 'relay-cd-nongit-'));
+  try {
+    const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
+    state.sessions.set('s1', makeSession());
+    state.resources.set('res-1', makeResource({ canonical_root: nonGitDir }));
+    const repos = buildRepositories(state);
+    const result = await readConversationDiff(repos, { workspaceId: 'ws-1', sessionId: 's1' });
+    assert.equal(result.available, false);
+    assert.equal(result.reason, 'ROOT_NOT_GIT');
+  } finally {
+    await rm(nonGitDir, { recursive: true, force: true });
+  }
+});
+
+// 目录口径是「专门来看统计的地方」，整段目录的同期修改与本会话写入无关，不能被短路掉。
+test('read: 目录口径没有起点仍然报 NO_BASELINE，不因本会话零写入而消失', async () => {
+  const root = await withTempRepo(async () => {});
+  const state: FakeState = { sessions: new Map(), resources: new Map(), baselines: [], written: [] };
+  state.sessions.set('s1', makeSession());
+  state.resources.set('res-1', makeResource({ canonical_root: root }));
+  const repos = buildRepositories(state);
+  const result = await readConversationDiff(repos,
+    { workspaceId: 'ws-1', sessionId: 's1', scope: 'DIRECTORY' });
   assert.equal(result.available, false);
   assert.equal(result.reason, 'NO_BASELINE');
   await rm(root, { recursive: true, force: true });

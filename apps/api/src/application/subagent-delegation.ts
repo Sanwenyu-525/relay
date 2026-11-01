@@ -9,7 +9,7 @@ import type { DelegationRole, DelegationTerminalStatus } from '../assist/subagen
 import { SessionToolCallRepository, type SessionToolCallRow } from '../assist/session-tool-call-repository.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import { freshAssistModelAttemptState } from './assist-model-snapshot.js';
-import { createRepositories, withTransaction } from './unit-of-work.js';
+import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
 import { DELEGATE_SUBAGENT_TOOL_NAME } from '../workflow/tool-catalog.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 import { ToolRequestRejected } from './tool-loop.js';
@@ -234,6 +234,43 @@ export class DelegationRefusedError extends Error {
   constructor(readonly reason: string, message: string) { super(message); }
 }
 
+/** 父会话当前能不能撑起一次子执行（见 `resolveDelegationScope`）。 */
+export type DelegationScopeResolution =
+  | { readonly ok: true; readonly projectId: string; readonly resourceId: string }
+  | { readonly ok: false; readonly reason: string; readonly detail: string };
+
+/**
+ * 子 Agent 有没有「可读范围」的唯一判定（0128，本轮把三层口径对齐）。
+ *
+ * 子会话的项目与工作目录都从父会话行复制，因此父会话缺任一项、或绑定的资源已经
+ * 停用/不属于这个项目时，子 Agent 面对的是一个空目录：它跑完整个预算也读不到东西。
+ *
+ * 这一份判定被**两个层次**共用，各读各的事实来源：
+ *   * 词表声明（`runAgentSessionReadonlyRounds`）：本轮生成开始时按会话快照判一次，
+ *     不成立就不把 `delegate_subagent` 交给模型——没有目录时普通聊天、解释和文档
+ *     起草照常用，不该被子任务的目录要求挡住；
+ *   * 执行准入（`createDelegation`）：在事务内按**刚锁定的会话行**再判一次。声明时
+ *     可见不等于此刻仍可执行，停用、撤权与并发换绑都在这里失败关闭。
+ *
+ * 判定与资源读取都走调用方给的事务连接，因此判定依据与随后写入用的是同一版事实。
+ */
+export async function resolveDelegationScope(repositories: Repositories,
+  session: Pick<AssistSessionRow, 'id' | 'workspace_id' | 'project_id' |
+    'working_resource_id'>): Promise<DelegationScopeResolution> {
+  if (session.project_id === null || session.working_resource_id === null) {
+    return { ok: false, reason: 'SUBAGENT_PARENT_SCOPE_MISSING',
+      detail: '主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。' };
+  }
+  const resource = await repositories.gateway.readResource(session.working_resource_id);
+  if (resource === undefined || resource.status !== 'ACTIVE' ||
+      resource.project_id !== session.project_id ||
+      resource.workspace_id !== session.workspace_id) {
+    return { ok: false, reason: 'SUBAGENT_PARENT_RESOURCE_UNAVAILABLE',
+      detail: '主会话绑定的工作目录当前不可用，子 Agent 没有可读的范围。' };
+  }
+  return { ok: true, projectId: session.project_id, resourceId: resource.id };
+}
+
 /**
  * 子会话的主子关联与预算作用域（0128、运行架构 §2.5.3）。
  *
@@ -277,17 +314,10 @@ export async function createDelegation(db: DbExecutor, input: {
       throw new DelegationRefusedError('SUBAGENT_PARENT_SESSION_INACTIVE',
         '主会话已归档，不能建立新的委派。');
     }
-    if (locked.project_id === null || locked.working_resource_id === null) {
-      throw new DelegationRefusedError('SUBAGENT_PARENT_SCOPE_MISSING',
-        '主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。');
-    }
-    const resource = await repositories.gateway.readResource(locked.working_resource_id);
-    if (resource === undefined || resource.status !== 'ACTIVE' ||
-        resource.project_id !== locked.project_id ||
-        resource.workspace_id !== locked.workspace_id) {
-      throw new DelegationRefusedError('SUBAGENT_PARENT_RESOURCE_UNAVAILABLE',
-        '主会话绑定的工作目录当前不可用，子 Agent 没有可读的范围。');
-    }
+    // 词表声明时可见不等于此刻仍可委派：换绑、停用、撤权与并发请求都落在这两步之间的窗口里。
+    // 因此按**刚锁定的这一行**再判一次，判定与资源读取共用同一个事务连接（失败关闭，不放行）。
+    const scope = await resolveDelegationScope(repositories, locked);
+    if (!scope.ok) throw new DelegationRefusedError(scope.reason, scope.detail);
     // 槽位计数在父会话行锁内进行：两个并发请求不会同时看到 1 而各自放行。
     const open = await repositories.subagents.countOpenByParent(locked.id);
     if (open >= MAX_CONCURRENT_DELEGATIONS) {
@@ -297,11 +327,11 @@ export async function createDelegation(db: DbExecutor, input: {
     }
     const childSessionId = randomUUID();
     await repositories.assist.insertSession({
-      id: childSessionId, workspaceId: locked.workspace_id, projectId: locked.project_id,
+      id: childSessionId, workspaceId: locked.workspace_id, projectId: scope.projectId,
       taskId: null,
       title: childTitle(input.request.role, input.request.objective),
       conversationMode: 'AGENT', chatMode: 'CHAT',
-      workingResourceId: locked.working_resource_id,
+      workingResourceId: scope.resourceId,
       workingDirectorySource: locked.working_directory_source ?? 'USER_PICKED',
       // 0145：子会话共用主会话的预算作用域，档位随之继承——否则一次 1024K 的委派会在
       // 子轮次里按 256K 申请预算，工具续轮更早被拒。

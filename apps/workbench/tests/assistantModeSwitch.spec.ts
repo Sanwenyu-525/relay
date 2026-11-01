@@ -115,6 +115,23 @@ function stub(options: Stub) {
     }
     if (path === `${prefix}/assistant-profiles`) return options.profileList?.()
       ?? json({ items: options.profiles ?? [profile()] });
+    /**
+     * 发送前风险审计（P0-C）：`state: OK` 且 `severity: NONE` 才直接放行。
+     * 缺这一段时审计解析失败会被判成「风险未知」而拦住首条发送，本文件里所有走首条的
+     * 用例都会停在输入器上。这里只给「没有风险」这一档。
+     */
+    if (path.includes("/required-context-audit")) return json({
+      state: "OK", detail: "", agent: { id: "relay", label: "Relay" }, root: "D:/tmp/probe",
+      scanned_at: "2026-10-06T00:00:00Z", fingerprint: "fp-1", severity: "NONE", files: [],
+      budget: { provider_window_tokens: null, provider_window_known: false, call_budget_tokens: 256000,
+        call_budget_source: "APPLICATION_DEFAULT", effective_input_tokens: null,
+        effective_basis: "CALL_BUDGET",
+        reserves: { output_tokens: 0, system_prompt_tokens: 0, tool_definition_tokens: 0, history_tokens: 0 },
+        estimated_total_input_tokens: null, required_total_tokens: 0, required_total_share: 0,
+        confidence: "WINDOW_UNKNOWN", estimate: { method: "BYTES", bytes_per_token: 4, note: "" } },
+      reasons: [], suggestions: [], skipped: [], access: null,
+      thresholds: { single_file: { notice: 0.1, high: 0.3, severe: 0.6 },
+        total_files: { notice: 0.1, high: 0.3, severe: 0.6 } } });
     if (path.endsWith("/working-directory") && method === "POST") {
       const body = options.posts.at(-1)!.body;
       return json({ command_id: body.command_id, committed_at: "2026-10-16T00:00:00Z",
@@ -209,7 +226,14 @@ function stub(options: Stub) {
 async function openAgent(options: Stub) {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
   vi.stubGlobal("fetch", stub(options));
-  const view = await mountWorkbench("/agent");
+  /**
+   * 从项目作用域进入，再打开那个目录。
+   *
+   * UI-FOLDER-01 起「欢迎页选目录」落在该目录的**空白新对话**上，不再自动续上项目里
+   * 最近一条会话；本文件全部用例讲的是「已有一条会话里的输入卡与档位」，因此入口必须
+   * 显式落到项目作用域，不能靠选目录时顺带续上的那一条。
+   */
+  const view = await mountWorkbench(`/agent?project=${projectId}`);
   await openWorkingDirectory("D:/tmp/probe");
   return view;
 }
@@ -392,7 +416,10 @@ describe("会话模式单选框", () => {
       await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
       await flush(60);
       expect(feedbackText("assist-receipt-notice")).toContain("撤回本次调整");
-      expect(options.posts.filter((p) => !p.path.endsWith("/working-directories/open"))).toHaveLength(0);
+      // 进入这条会话时打开目录的两条命令（open + 归属/目录绑定）不是这条 /undo 的副作用；
+      // 断言的是「发 /undo 本身没有发出任何消息或新命令」。
+      expect(options.posts.filter((p) => !p.path.endsWith("/working-directories/open")
+        && !p.path.endsWith("/working-directory") && !p.path.endsWith("/binding"))).toHaveLength(0);
     } finally { view.unmount(); }
   });
   it("明确转执行新建普通身份，带目标和方案，不改原学习会话", async () => {
@@ -1087,15 +1114,24 @@ describe("会话模式单选框", () => {
     } finally { view.unmount(); }
   });
 
-  it("消息底栏：复制键排在用量左侧，因此左缘与正文左缘对齐", async () => {
+  it("消息底栏：复制键在左，用量常显在右侧且没有折叠入口", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [], withMessages: [agentSessionId] };
     const view = await openAgent(options);
     try {
-      // 同一排的先后就是左缘的依据：flex 行首第一项贴着正文左缘，用量跟在它后面。
+      // 2026-10-31 UI-08：用量不再折叠，完成回复的页脚直接给出读数；复制键仍是行首第一项，
+      // 左缘与正文左缘对齐。
       const children = Array.from(view.wrapper.get(".agent-message-footer").element?.children ?? []);
-      expect(children.map((element) => element.className.split(" ")[0])).toEqual(["icon-button", "helper-text"]);
+      expect(children.map((element) => element.className.split(" ")[0]))
+        .toEqual(["icon-button", "agent-message-usage"]);
       expect(children[0]!.getAttribute("data-testid")).toContain("assist-copy-");
-      expect(children[1]!.getAttribute("data-testid")).toContain("assist-usage-");
+      // 没有折叠容器，也就没有「用量」文字入口：读数本身就是可见事实。
+      expect(view.wrapper.find('[data-testid^="assist-usage-details-"]').exists()).toBe(false);
+      const usage = view.wrapper.get('[data-testid^="assist-usage-"]');
+      expect(usage.element?.closest("details")).toBeNull();
+      // AGENT_LIVE_TOKEN_USAGE（2026-11-01）：完成态改读本轮账本汇总，文案统一为
+      // 「本轮 … tokens」；未上报时如实说未上报。折叠入口仍然不存在。
+      expect(usage.text()).toBe("本轮 Token 未上报");
+      expect(usage.attributes("data-state")).toBe("UNKNOWN");
     } finally { view.unmount(); }
   });
 

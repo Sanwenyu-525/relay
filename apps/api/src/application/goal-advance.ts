@@ -130,14 +130,15 @@ function stepList(goal: AssistGoalRow): JsonObject[] {
 }
 
 function unmetRequired(criteria: readonly JsonObject[]): string[] {
-  return criteria.filter((item) => item.required !== false && item.status !== 'MET')
+  return criteria.filter((item) => item.required !== false && (item.status !== 'MET'
+    || typeof item.evidence !== 'string' || item.evidence.trim().length === 0))
     .map((item) => String(item.statement ?? ''));
 }
 
 /**
  * 把一次目标轮次的结果翻译成目标状态变更。
  *
- * 完成判定在这里，而且只认证据：所有**必需**成功条件都 `MET` 才进入「等待人工验收」；
+ * 完成判定在这里：所有**必需**成功条件都 `MET` 且有非空证据才进入「等待人工验收」；
  * 模型说完成但条件没满足（或还没有条件）时，目标继续推进并记一条具体缺口。
  */
 function decideFromEnvelope(goal: AssistGoalRow, envelope: GoalEnvelope,
@@ -167,9 +168,10 @@ function decideFromEnvelope(goal: AssistGoalRow, envelope: GoalEnvelope,
   const merged = criteria.map((item): JsonObject => {
     const report = byKey.get(String(item.key ?? ''));
     if (report === undefined) return item;
-    if (item.status === report.status && item.evidence === report.evidence) return item;
+    const status = report.status === 'MET' && !report.evidence?.trim() ? 'PENDING' : report.status;
+    if (item.status === status && item.evidence === report.evidence) return item;
     changed = true;
-    return { ...item, status: report.status, evidence: report.evidence };
+    return { ...item, status, evidence: report.evidence };
   });
 
   const steps = body.steps.length > 0

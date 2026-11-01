@@ -20,6 +20,13 @@ export interface ModelCallOrigin {
   readonly criterionId?: string;
   readonly checkAttempt?: number;
   /**
+   * 0153：这次外呼的用途，缺省 `PRIMARY`。
+   *
+   * 记忆提取与压缩复用主对话的冻结预算、挂在同一条 assistant message 上，但它们是
+   * 辅助外呼：不采上下文分项，也不该抢走「最近一次调用」的读数。
+   */
+  readonly purpose?: ModelCallRow['purpose'];
+  /**
    * 0145：本次调用的上下文构成（分类 + 估算 token）。
    *
    * 在**装配请求**时算好随调用一起写：调用结算后提示词早已不存在，事后再也还原不出
@@ -259,7 +266,7 @@ export class ModelCallRepository {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
       assist_message_id, member_message_id, manifest_id, criterion_id, check_attempt,
       provider, model, config_fingerprint, credential_fingerprint, input_sha256,
-      read_operation_id, read_invocation_id, budget_reserved_tokens, context_usage)
+      read_operation_id, read_invocation_id, budget_reserved_tokens, context_usage, purpose)
       values (${id}, ${origin.workspaceId}, ${origin.kind},
         ${origin.stepAttemptId ?? null}, ${origin.assistMessageId ?? null},
         ${origin.memberMessageId ?? null}, ${origin.manifestId ?? null},
@@ -270,7 +277,8 @@ export class ModelCallRepository {
         ${origin.readOperationId ?? null}, ${origin.readInvocationId ?? null},
         ${identity.budget?.callReservationTokens ?? null},
         ${origin.contextUsage === undefined ? null
-          : JSON.stringify(origin.contextUsage)}::jsonb)`.execute(db);
+          : JSON.stringify(origin.contextUsage)}::jsonb,
+        ${origin.purpose ?? 'PRIMARY'})`.execute(db);
   }
 
   async settle(id: string, input: ModelCallSettlement): Promise<void> {
@@ -318,6 +326,65 @@ export class ModelCallRepository {
   async listForAssistMessage(messageId: string): Promise<readonly ModelCallRow[]> {
     return (await sql<ModelCallRow>`select * from model_calls
       where assist_message_id = ${messageId} order by started_at, id`.execute(this.db)).rows;
+  }
+
+  /**
+   * 一批回复轮次的**计量摘要**（AGENT_LIVE_TOKEN_USAGE，2026-11-01）。
+   *
+   * 只取本轮用户可见生成的 `PRIMARY` 调用：记忆提取/压缩这类辅助外呼虽然挂在同一条
+   * assistant message 上，但不是用户这一轮的消耗，不能并进读数。返回每行原始整数，
+   * 缩写与展示由界面负责；未上报保持 null。
+   */
+  async usageRowsForAssistMessages(messageIds: readonly string[]): Promise<readonly {
+    id: string; assist_message_id: string; status: ModelCallRow['status'];
+    input_tokens: number | null; output_tokens: number | null;
+    cache_read_tokens: number | null; cache_creation_tokens: number | null;
+  }[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<{ id: string; assist_message_id: string; status: ModelCallRow['status'];
+      input_tokens: number | null; output_tokens: number | null;
+      cache_read_tokens: number | null; cache_creation_tokens: number | null }>`
+      select id, assist_message_id, status, usage_input_tokens as input_tokens,
+        usage_output_tokens as output_tokens,
+        usage_cache_read_tokens as cache_read_tokens,
+        usage_cache_creation_tokens as cache_creation_tokens
+      from model_calls
+      where assist_message_id in (${sql.join(messageIds, sql`, `)})
+        and kind = 'ASSIST' and purpose = 'PRIMARY'
+      order by started_at, id`.execute(this.db)).rows;
+  }
+
+  /**
+   * 一批回复轮次的**执行阶段证据**（AGENT_STREAM_VISIBILITY，2026-11-01）。
+   *
+   * 与用量摘要同一条查询口径（`kind='ASSIST' and purpose='PRIMARY'`），只多取四个既有
+   * 观测时间。阶段由应用层从这些事实派生，仓储不解释它们；辅助外呼不参与本轮进度。
+   */
+  async generationRowsForAssistMessages(messageIds: readonly string[]): Promise<readonly {
+    assist_message_id: string; status: ModelCallRow['status'];
+    started_at: Date; first_stream_event_at: Date | null;
+    first_text_delta_at: Date | null; first_preview_persisted_at: Date | null;
+    settled_at: Date | null;
+  }[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<{ assist_message_id: string; status: ModelCallRow['status'];
+      started_at: Date; first_stream_event_at: Date | null;
+      first_text_delta_at: Date | null; first_preview_persisted_at: Date | null;
+      settled_at: Date | null }>`
+      select assist_message_id, status, started_at, first_stream_event_at,
+        first_text_delta_at, first_preview_persisted_at, settled_at
+      from model_calls
+      where assist_message_id in (${sql.join(messageIds, sql`, `)})
+        and kind = 'ASSIST' and purpose = 'PRIMARY'
+      order by started_at, id`.execute(this.db)).rows;
+  }
+
+  /** 一批消息的调用行一次读齐（会话导出用），不逐条发消息各问一次。 */
+  async listForAssistMessages(messageIds: readonly string[]): Promise<readonly ModelCallRow[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<ModelCallRow>`select * from model_calls
+      where assist_message_id in (${sql.join(messageIds, sql`, `)})
+      order by started_at, id`.execute(this.db)).rows;
   }
 
   /** 最近一次模型端口验证（实例级：跨 Workspace 取最新一条 VERIFY）。 */

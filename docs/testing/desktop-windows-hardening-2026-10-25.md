@@ -103,7 +103,7 @@
   - `PREUNINSTALL`：只加重解析点安全网（数据目录本身是 junction/符号链接时清掉模板「删除应用数据」勾选，避免 `RmDir /r` 穿透）；数据保留由模板自带复选框承担（默认不勾＝保留，静默卸载不执行该页＝保留，`$UpdateMode=1` 也不删）；全程不做 `taskkill`。
 - **产物**：`Relay Agent_0.1.0_x64-setup.exe`（54,207,202 字节，LZMA；payload 约 214 MB），makensis 退出码 0。
 - **安装/卸载生命周期：14 项全部通过**（`verify-installer.ps1`，日志 `output/p0-4-installer-verify.log`）：静默安装 exit 0；7 个 payload（relay-desktop/node/api main+supervisor/helper/computer-runtime/uninstall）齐全；开始菜单 `Relay Agent\Relay Agent.lnk` 创建；`HKCU\...\Uninstall\Relay Agent`（DisplayVersion 0.1.0、UninstallString 指向安装目录）注册；静默卸载 exit 0；安装目录与快捷方式移除；**用户数据 5 个文件逐文件不变**。
-- **安装版首次启动健康检查：通过**（独立临时 PG + 安装版 node/api，CDP 探针，日志 `output/p0-4-installed-health.log`）：`desktop_bootstrap` 返回 `http://127.0.0.1:43117` + 64 字符令牌；`GET /health/ready` = **200** `{"status":"ready","components":{"database":{"status":"up"},"schema":{"status":"up"}}}`；工作台标题栏显示「数据来源：已连接本机 API」。收尾 PG `postgres_stop_exit=0`、临时根已删。
+- **安装版首次启动健康检查：通过**（独立临时 PG + 安装版 node/api，CDP 探针，日志 `output/p0-4-installed-health.log`）：`desktop_bootstrap` 返回 `http://127.0.0.1:43117` + 64 字符令牌；`GET /health/ready` = **200** `{"status":"ready","components":{"database":{"status":"up"},"schema":{"status":"up"}}}`；工作台标题栏显示「数据来源：已连接本机 API」（该断言自 2026-11-01 起对桌面版已过时：桌面标题带不再渲染此入口，核对改用顶栏 `data-source-mode=live`，见[工作台交互](../frontend/workbench-design/part-01.md)）。收尾 PG `postgres_stop_exit=0`、临时根已删。
 - **升级链缺陷（实测 exit 4）**：在已有安装上重跑安装器 → 静默安装返回 **4**（钩子的维护会话失败分支）。根因：`bundle.resources` 未包含 `desktop-build-manifest.json`，安装版缺少维护会话所需的包清单，`maintenance.js hold-desktop-stop` 拒绝执行。行为是 **fail-closed**（中止覆盖，未破坏旧安装），但升级不可用。修复方向：在「exe 打包 patch 之后、makensis 之前」生成 build-identity manifest 并纳入 payload（需要构建脚本改造，且要确认 CLI 对 `artifact_sha256` 的校验口径）。
 
 ## 7. 未验项（不得视为通过）

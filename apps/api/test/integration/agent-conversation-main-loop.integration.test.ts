@@ -12,8 +12,9 @@ import { listAssistMessages } from '../../src/application/assist-queries.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
 import { runSessionReadonlyRounds } from '../../src/application/assistant-readonly-round.js';
-import { createDelegation, listSessionDelegations, reconcileDelegationAttempts,
-  runDelegationAttemptFlow } from '../../src/application/subagent-delegation.js';
+import { createDelegation, DelegationRefusedError, listSessionDelegations,
+  reconcileDelegationAttempts, resolveDelegationScope, runDelegationAttemptFlow } from
+  '../../src/application/subagent-delegation.js';
 import { ModelCallRepository, ModelScopeBudgetError } from '../../src/model/model-call-repository.js';
 import { freshAssistModelAttemptState } from '../../src/application/assist-model-snapshot.js';
 import { listSubagentSupplements, supplementSubagent } from '../../src/application/subagent-supplements.js';
@@ -99,6 +100,8 @@ async function fixture(options: {
   readonly extraRoot?: boolean;
   /** 是否把会话绑定到目录；缺省绑定。 */
   readonly bind?: boolean;
+  /** 会话是否归属项目；缺省归属。`project: false, bind: false` 就是「无项目无目录」那一档。 */
+  readonly project?: boolean;
 } = {}): Promise<AgentFixture> {
   const workspaceId = randomUUID();
   const projectId = randomUUID();
@@ -136,7 +139,8 @@ async function fixture(options: {
       targetPrefix: canonicalRoot, decision: 'AUTO', maxPayloadBytes: 262144 });
   }
   const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
-    title: '普通会话', projectId, conversationMode: 'AGENT' });
+    title: '普通会话', ...(options.project === false ? {} : { projectId }),
+    conversationMode: 'AGENT' });
   // 本套断言主轮次的工具/插话；自动提取由 memory-auto-capture 套件独立覆盖，历史记忆仍开启。
   await setMemorySettings(app.db, { workspaceId, commandId: randomUUID(), expectedRevision: '0',
     recallEnabled: true, automaticCompaction: true, autoCapture: false });
@@ -792,6 +796,149 @@ test('AM-03 未绑定目录的会话按类型化原因拒掉本次读取，不�
   // 关键：拒掉的理由里必须出现「先选择目录」，而不是任何关于「系统没有读取能力」的说法。
   const refusal = rows[0]?.rejection_detail ?? '';
   assert.match(refusal, /请先选择目录/u);
+});
+
+// ------------------------------------------------ P0-1 委派：声明层与执行层同源
+
+/**
+ * 2026-11-01 的截图事实：模型发出了 `delegate_subagent`，被执行层按
+ * `SUBAGENT_PARENT_SCOPE_MISSING` 拒掉，用户那一轮因此什么都没有。根因是同一个闸门写在了
+ * 两处且条件不同——声明层只看「根会话 + 注入点 + Worker」，执行层还要项目、工作目录与可用
+ * 资源。下面几条例用钉的是修复后的口径：
+ *
+ *   * 缺范围就**不进词表**，可提前避免的无效调用不再发生；
+ *   * 缺范围**不挡普通回答**——起草、解释、闲聊没有目录也成立；
+ *   * 执行侧的实时复核一步不减：停用、换绑之后的拒绝仍在这里发生；
+ *   * 模型越权发出未声明的委派调用时，只拒这一次调用，拒因回灌后本轮仍有真实答复。
+ */
+
+const blankUsage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+  cacheCreationTokens: null };
+
+/**
+ * 直接按会话事实建一次委派：绕过词表，用来证明执行层的准入与声明层同源。
+ * fixture 消息在 finally 里收口，否则它会留下一条永远 PENDING 的消息。
+ */
+async function tryDelegation(sessionId: string) {
+  const repositories = createRepositories(app.db);
+  const parent = await repositories.assist.readSession(sessionId);
+  assert.ok(parent);
+  const sent = await requestAssistMessage(app.db, { workspaceId: parent.workspace_id,
+    sessionId, commandId: randomUUID(), content: '只读调查' });
+  try {
+    return await createDelegation(app.db, { parentSession: parent,
+      parentMessageId: sent.result.assistant_message_id, parentToolCallId: null,
+      request: { role: 'INVESTIGATE', objective: '读取 README', scope: ['README.md'],
+        baseline: null, outputRequirements: '给出证据', required: false },
+      modelSelectionSnapshot: null, workerId: 'p01-admission' });
+  } finally {
+    await sql`update assist_messages set status = 'CANCELLED'
+      where id = ${sent.result.assistant_message_id}`.execute(app.db);
+  }
+}
+
+test('P0-1 只有项目、没有绑定目录：委派不进词表，普通回答照常完成', async () => {
+  const fx = await fixture({ bind: false });
+  const outcome = await ask(fx, '帮我起草一段说明，不用读文件');
+  // 没有目录不是没有会话：这一轮必须给出真实正文，而不是被委派的前置条件拖成失败。
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.ok((outcome.content ?? '').trim() !== '',
+    '缺目录时普通回答仍要有正文：' + String(outcome.content));
+  // 可见性与准入分离：连接在，只读词表就在；只有委派这一项因为缺范围而收起。
+  assert.ok(outcome.declaredTools.includes('list_directory'),
+    JSON.stringify(outcome.declaredTools));
+  assert.ok(!outcome.declaredTools.includes('delegate_subagent'),
+    '范围不成立就不声明：' + JSON.stringify(outcome.declaredTools));
+
+  // 执行侧不看词表：同一份会话事实直接建委派，必须是同一个类型化原因。
+  const scope = await resolveDelegationScope(createRepositories(app.db),
+    (await createRepositories(app.db).assist.readSession(fx.sessionId))!);
+  assert.deepEqual(scope, { ok: false, reason: 'SUBAGENT_PARENT_SCOPE_MISSING',
+    detail: '主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。' });
+  await assert.rejects(tryDelegation(fx.sessionId), (error: unknown) =>
+    error instanceof DelegationRefusedError &&
+    error.reason === 'SUBAGENT_PARENT_SCOPE_MISSING');
+});
+
+test('P0-1 无项目且无目录：同样不进词表，普通回答仍然完成', async () => {
+  const fx = await fixture({ bind: false, project: false });
+  const outcome = await ask(fx, '讲讲这段代码的思路');
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.equal(outcome.identity.projectId, null, '用例前提：这条会话确实没有项目');
+  assert.equal(outcome.identity.workingResourceId, null, '用例前提：这条会话确实没有目录');
+  assert.ok(!outcome.declaredTools.includes('delegate_subagent'),
+    JSON.stringify(outcome.declaredTools));
+  await assert.rejects(tryDelegation(fx.sessionId), (error: unknown) =>
+    error instanceof DelegationRefusedError &&
+    error.reason === 'SUBAGENT_PARENT_SCOPE_MISSING');
+});
+
+test('P0-1 绑定的资源被停用后：词表收起委派，执行侧仍按实时状态拒绝', async () => {
+  const fx = await fixture();
+  const repositories = createRepositories(app.db);
+  const resourceId = (await repositories.assist.readSession(fx.sessionId))!
+    .working_resource_id!;
+  await withTransaction(app.db, async (r) => { await r.gateway.disableResource(resourceId); });
+  // 声明层读到的就是这一轮此刻的范围结论——停用之后不再有委派词表项。
+  const outcome = await ask(fx, '现在还能派子任务吗');
+  assert.ok(!outcome.declaredTools.includes('delegate_subagent'),
+    '资源停用后不得再声明委派：' + JSON.stringify(outcome.declaredTools));
+  // 执行层不信任声明层：即使有人绕过词表直接建委派，也在这里按实时状态拒掉。
+  await assert.rejects(tryDelegation(fx.sessionId), (error: unknown) =>
+    error instanceof DelegationRefusedError &&
+    error.reason === 'SUBAGENT_PARENT_RESOURCE_UNAVAILABLE');
+});
+
+test('P0-1 模型越权发出未声明的委派调用：只拒这一次调用，拒因回灌后本轮仍有真实答复', async () => {
+  const fx = await fixture({ bind: false });
+  // 真实 Provider 会发出没在词表里的工具名，因此这条不走 askWithScript（Fake 会自己过滤掉
+  // 未声明的工具），用 scriptedPort 强行发出——钉的正是「选择不适用的工具」这一路。
+  const port = scriptedPort([[{ name: 'delegate_subagent',
+    arguments: { role: 'INVESTIGATE', objective: '读 README' } }]],
+  (round) => ({ kind: 'CONTENT', content: '这一轮没有可委派的范围，我直接给结论。',
+    providerRequestId: `stub-p01-${round}`, usage: blankUsage }));
+  const outcome = await ask(fx, '帮我调查 README', port);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.equal(outcome.content, '这一轮没有可委派的范围，我直接给结论。',
+    '一次调用被拒不能把整轮拖成空正文：' + String(outcome.content));
+  const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+  const refused = rows.filter((row) => row.tool_name === 'delegate_subagent');
+  assert.equal(refused.length, 1, JSON.stringify(rows.map((row) => row.tool_name)));
+  assert.equal(refused[0]?.status, 'REJECTED');
+  assert.equal(refused[0]?.rejection_reason, 'SUBAGENT_DELEGATE_UNAVAILABLE');
+  assert.equal(refused[0]?.operation_id, null, '被拒的委派不能留下任何执行对象');
+  // 拒因必须真的回到模型上下文，否则模型只会重复同一个调用。
+  assert.ok(outcome.fedBack.some((item) => item.name === 'delegate_subagent'
+    && item.content.includes('不能委派子 Agent')), JSON.stringify(outcome.fedBack));
+});
+
+// ------------------------------------------------------- P0-3 空正文不是完成
+
+test('P0-3 空正文先给一次强制收尾：真实正文回来后才是 COMPLETED', async () => {
+  const fx = await fixture();
+  const port = scriptedPort([], (round) => round === 1
+    ? { kind: 'CONTENT', content: '   ', providerRequestId: 'stub-blank', usage: blankUsage }
+    : { kind: 'CONTENT', content: '按上面的回执，这一步不需要修改任何文件。',
+      providerRequestId: 'stub-reply', usage: blankUsage });
+  const outcome = await ask(fx, '总结一下这次检查', port);
+  assert.equal(outcome.assistCalls, 2, '一次空正文应当只换一次收尾机会：' + outcome.assistCalls);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.equal(outcome.content, '按上面的回执，这一步不需要修改任何文件。');
+  // 收尾那条请求不再声明工具：它唯一的任务是给出用户读得到的正文。
+  assert.deepEqual(outcome.declaredTools, [],
+    '强制收尾轮不应再带工具词表：' + JSON.stringify(outcome.declaredTools));
+});
+
+test('P0-3 反复空正文按 MODEL_EMPTY_REPLY 失败，不写成 COMPLETED 也不留空正文冒充完成', async () => {
+  const fx = await fixture();
+  const port = scriptedPort([], (round) => ({ kind: 'CONTENT', content: '',
+    providerRequestId: `stub-empty-${round}`, usage: blankUsage }));
+  const outcome = await ask(fx, '讲一段话', port);
+  assert.equal(outcome.status, 'FAILED', JSON.stringify(outcome));
+  assert.equal(outcome.errorCode, 'MODEL_EMPTY_REPLY');
+  assert.equal(outcome.content, null, '失败的一轮不落空正文冒充答案');
+  assert.equal(outcome.assistCalls, 2,
+    '机会只有一次，不把轮次预算烧在同一个空回答上：' + outcome.assistCalls);
 });
 
 // ------------------------------------------------------------------------- AM-04

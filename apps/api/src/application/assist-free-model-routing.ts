@@ -20,7 +20,7 @@ import { ModelProviderCooldownRepository } from '../model/model-provider-cooldow
 import { syncModelCatalog } from './model-catalog-sync.js';
 import { createOpenRouterCatalogSource } from '../workflow/openrouter-catalog-source.js';
 import { contextUsageToJson, describeAssistRequestContext } from './assist-context-usage.js';
-import { recordModelInvocation } from './model-call-recorder.js';
+import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
 import { createRepositories } from './unit-of-work.js';
 import { parseAssistModelSnapshot, snapshotIdentityBudget, type AssistModelCandidateSnapshot,
   type ParsedAssistModelSnapshot } from './assist-model-snapshot.js';
@@ -152,12 +152,15 @@ export async function invokeAssistWithFreeModelRouting(context: AssistFreeModelR
       onTextDelta: async (piece) => {
         if (piece !== '' && !firstTextDeltaRecorded) {
           firstTextDeltaRecorded = true;
-          await new ModelCallRepository(db).recordFirstTextDelta(callId, new Date());
+          // AGENT_STREAM_VISIBILITY：证据写入失败只丢这一枚时间，不改判模型调用。
+          try {
+            await new ModelCallRepository(db).recordFirstTextDelta(callId, new Date());
+          } catch { /* evidence only */ }
         }
         await request.onTextDelta?.(piece);
       },
       onStreamEvent: async () => {
-        await new ModelCallRepository(db).recordFirstStreamEvent(callId, new Date());
+        await observeModelFirstStream(db, callId);
         await request.onStreamEvent?.();
       } };
     try {

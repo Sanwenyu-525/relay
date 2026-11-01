@@ -11,6 +11,8 @@ import { flush, mountReact } from "./mountApp";
 // 展开阅读与总数同修订、迟到响应不覆盖新值，以及「从现在开始统计」由用户主动触发。
 // 2026-10-24 用户指令「没有 git diff 的时候不显示这个红框部分」：完整且空与读取中都不占位，
 // 其余状态（不可用成因、失败）仍必须可见。
+// 2026-11-01 P1-3：本会话一个文件都没写过时服务端回答 NO_SESSION_WRITES，这一行同样不占位；
+// 「有写入但缺起点」仍是 NO_BASELINE，照旧可见并保留「从现在开始统计」。
 
 const changed: Extract<RelayConversationDiff, { available: true }> = {
   available: true, scope: "SESSION", baselineCapturedAt: "2026-10-16T09:00:00Z", baselineRevision: "3",
@@ -177,6 +179,21 @@ describe("会话总 diff 入口", () => {
         .toContain("统计起点已从现在开始建立");
       // 新起点之后总数才出现，不倒造过去。
       expect(toggle(view).text()).toContain("3 个文件");
+    } finally { view.unmount(); }
+  });
+
+  /* 2026-11-01 P1-3：纯聊天、没有起点时，服务端回答 NO_SESSION_WRITES 而不是 NO_BASELINE，
+     这一行整块不出现——常驻一句「缺少会话起点」既不是缺口，也没有用户能做的处理。
+     同一条位置换成「有写入但缺起点」（上一条用例）时必须照旧可见并给恢复按钮：
+     消失的是没有内容的占位，不是真实缺口。 */
+  it("本会话没写过文件：没有起点也不再挂「缺少会话起点」", async () => {
+    const view = await mount(clientOf({ getConversationDiff: vi.fn(async (): Promise<RelayConversationDiff> => ({
+      available: false, reason: "NO_SESSION_WRITES" })) }));
+    try {
+      await flush(40);
+      expect(view.wrapper.find('[data-testid="conversation-diff-toggle"]').exists()).toBe(false);
+      expect(view.wrapper.text()).not.toContain("缺少会话起点");
+      expect(view.wrapper.text()).not.toContain("+0");
     } finally { view.unmount(); }
   });
 

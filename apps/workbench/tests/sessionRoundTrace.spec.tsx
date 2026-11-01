@@ -4,7 +4,10 @@ import { SessionRoundTrace } from "../src/components/SessionRoundTrace";
 import { DomWrapper, flush, mountReact } from "./mountApp";
 
 /**
- * 执行过程（工作台 §18.10；2026-10-29 V3）。
+ * 工具活动（工作台 §18.10；2026-10-29 V3，2026-10-31 UI-08 收口）。
+ *
+ * 2026-10-31 UI-08 的产品语义：正文三点 = 回复还在等待/生成；工具活动 = 已落账的真实工具调用。
+ * 两者不是同一种业务信息，因此等待阶段不再画一条「工具活动 · 等待处理」。
  *
  * 这里验的是「点击一定有确定的反馈」，以及四条不能含糊的口径：
  *   * 入口对每条 AI 消息恒在——读到零条也不消失（V2 的 `return null` 缺陷的永久回归）。
@@ -75,7 +78,7 @@ describe("在途轮次", () => {
     const { wrapper } = await mount(message(), 2_000);
     const details = entry(wrapper);
     expect(details.attributes("open")).toBeDefined();
-    expect(details.text()).toContain("执行过程");
+    expect(details.text()).toContain("工具活动");
     // 标题行只说「规模 + 状态」：总数未知（模型还可能继续调工具），因此不报 2/5。
     expect(details.text()).toContain("已结算 1 项 · 正在执行");
     expect(details.text()).not.toContain("预计还需");
@@ -152,20 +155,50 @@ describe("在途轮次", () => {
     expect(details().attributes("open")).toBeDefined();
   });
 
-  it("被拒与未知分档：标题报未执行，轮次标题报待核对", async () => {
-    stub(() => json(trace([round(0, [call({ status: "REJECTED", rejection_reason: "OUTSIDE_SCOPE" }),
-      call({ id: "88888888-8888-4888-8888-888888888888", ordinal: 1, tool_name: "search_text",
-        status: "UNKNOWN", settled_at: null })])], "COMPLETED")));
+  it("被拒与未知分档：标题报整条的例外，多轮时每一轮只报自己那一轮的", async () => {
+    stub(() => json(trace([round(0, [call({ status: "REJECTED", rejection_reason: "OUTSIDE_SCOPE" })]),
+      round(1, [call({ id: "88888888-8888-4888-8888-888888888888", ordinal: 0,
+        tool_name: "search_text", status: "UNKNOWN", settled_at: null })])], "COMPLETED")));
     const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
     await wrapper.get("summary").trigger("click");
     await flush(20);
     // 两种例外是两件事：被拒=根本没执行，未知=结果不明。它们不合并成一句「异常」。
     expect(wrapper.get("summary").text()).toContain("1 项未执行");
     expect(wrapper.get("summary").text()).not.toContain("已结束");
-    const roundTitle = wrapper.get('[data-testid="session-round-0"]').text();
+    const roundTitle = wrapper.get('[data-testid="session-round-1"]').text();
     expect(roundTitle).toContain("1 项待核对");
+    // 组标题报的是**这一轮**的事实，不跟着整条消息染色：第 0 轮没有未知项。
+    expect(wrapper.get('[data-testid="session-round-0"]').text()).not.toContain("待核对");
     expect(wrapper.get(`[data-testid="session-round-trace-${messageId}"]`).attributes("data-state"))
       .toBe("settled");
+  });
+
+  /**
+   * 只有一轮时组标题整行都是重复信息（2026-11-01 P1-1）：「第 1 轮 · 2 项 · 1 项未执行」
+   * 与标题行「工具活动 · 2 项操作 · 1 项未执行」是同一份聚合读两遍，而「第 1 轮」在只有
+   * 一轮时不携带任何信息。收掉的是重复的聚合数字，不是失败本身——行内的状态词与常显原因
+   * 句必须照旧可见，例外在任何折叠下都不藏。
+   */
+  it("只有一轮：不画组标题，聚合数字只在标题行说一遍，例外仍在行内可见", async () => {
+    stub(() => json(trace([round(0, [call({ status: "REJECTED",
+      rejection_reason: "SUBAGENT_PARENT_SCOPE_MISSING",
+      rejection_detail: "主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。" })])], "COMPLETED")));
+    const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
+    await wrapper.get("summary").trigger("click");
+    await flush(20);
+    expect(wrapper.get("summary").text()).toContain("1 项未执行");
+    expect(wrapper.find(".activity-panel-round-title").exists()).toBe(false);
+    expect(wrapper.text()).toContain("被拒绝，没有执行");
+    // 常显那一行说人话：截图里原先摊的是 `SUBAGENT_PARENT_SCOPE_MISSING · …` 一个枚举名。
+    expect(wrapper.get('[data-testid="session-round-call-reason-55555555-5555-4555-8555-555555555555"]').text())
+      .toBe("子任务未启动：主会话还没有绑定项目或工作目录，子 Agent 没有可读的范围。");
+    // 机器码没有消失，只是退到展开层（核对「服务端记的到底是哪个码」时才需要）。
+    expect(wrapper.text()).not.toContain("SUBAGENT_PARENT_SCOPE_MISSING");
+    await wrapper.get('[data-testid="session-round-call-55555555-5555-4555-8555-555555555555-toggle"]')
+      .trigger("click");
+    await flush(20);
+    expect(wrapper.get('[data-testid="session-round-call-55555555-5555-4555-8555-555555555555-detail"]').text())
+      .toContain("SUBAGENT_PARENT_SCOPE_MISSING");
   });
 });
 
@@ -198,7 +231,7 @@ describe("终态与缺口", () => {
     expect(fetchMock.mock.calls.length).toBe(0);
     const details = wrapper.get(`[data-testid="session-round-trace-${messageId}"]`);
     // 还没读到：只说「展开查看」，不预判有没有工具、也不报数字。
-    expect(details.text()).toContain("执行过程");
+    expect(details.text()).toContain("工具活动");
     expect(details.text()).toContain("展开查看");
     expect(details.text()).not.toContain("read_file");
     await wrapper.get("summary").trigger("click");
@@ -225,7 +258,7 @@ describe("终态与缺口", () => {
     const after = wrapper.find(`[data-testid="session-round-trace-${messageId}"]`);
     expect(after.exists()).toBe(true);
     expect(after.attributes("data-phase")).toBe("EMPTY");
-    expect(after.text()).toContain("执行过程");
+    expect(after.text()).toContain("工具活动");
     expect(after.text()).toContain("本轮没有调用工具");
     expect(wrapper.find(`[data-testid="session-round-trace-empty-${messageId}"]`).exists()).toBe(true);
     // 空态不是错误态，也不是「有轮次」。
@@ -297,6 +330,40 @@ describe("终态与缺口", () => {
   });
 });
 
+/**
+ * 普通纯文本回复的过程入口（2026-10-31 UI-08）。
+ * 默认视图只留正文：用户没主动展开、这一轮又确实零工具时，整条「工具活动」不在场；
+ * 用户点开过的入口仍然保留，并且空状态收成一行结论，不再是一块技术说明卡。
+ */
+describe("纯文本回复的过程入口", () => {
+  it("终态读到零条且用户没展开过：整行不常驻，正文不再跟着一条空说明", async () => {
+    stub(() => json(trace([], "RUNNING")));
+    const mounted = await mountReact(<SessionRoundTrace client={client} message={message()}
+      pollIntervalMs={2_000} />);
+    unmount = mounted.unmount;
+    await flush(20);
+    // 在途且零记录：这一段等待由正文三点独立承担，这里不摆一条空横条。
+    expect(mounted.wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists()).toBe(false);
+    await mounted.rerender(<SessionRoundTrace client={client}
+      message={message({ status: "COMPLETED" })} pollIntervalMs={2_000} />);
+    await flush(20);
+    expect(mounted.wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists(),
+      "终态零工具时普通回复不应常驻过程行").toBe(false);
+  });
+
+  it("用户主动展开过：读回零条后入口仍在，空状态只给一行结论", async () => {
+    stub(() => json(trace([], "COMPLETED")));
+    const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
+    await wrapper.get("summary").trigger("click");
+    await flush(20);
+    expect(entry(wrapper).text()).toContain("本轮没有调用工具");
+    const empty = wrapper.get(`[data-testid="session-round-trace-empty-${messageId}"]`);
+    // 入口没有消失（V3 P0），但空状态从说明卡收成一行 caption。
+    expect(empty.element?.tagName).toBe("P");
+    expect(empty.text()).not.toContain("本次回复仅基于已有信息与上下文生成");
+  });
+});
+
 describe("长轮次收敛", () => {
   it("单轮超过阈值时先显示前若干项与全部例外，展开后完整可见", async () => {
     const calls = Array.from({ length: 12 }, (_, index) => call({
@@ -319,40 +386,89 @@ describe("长轮次收敛", () => {
 });
 
 /**
- * 在途零记录（2026-10-30 验收整改的永久回归）。
+ * 等待阶段与首次工具活动（2026-10-31 UI-08）。
  *
- * 独立验收发现的缺陷：消息还在跑、工具还没开始时，面板被判成 EMPTY 并写
- * 「本轮没有调用工具」——那是替模型提前下结论。现在这种情况是 RUNNING_NO_TOOLS：
- * 只报「正在执行」，不报规模、不给空态块。
+ * 产品语义：三点动画表示 AI 回复处于等待或生成阶段，工具活动表示已落账的真实工具调用。
+ * 两者不是同一种业务信息，所以等待阶段**不再**在正文上方画一条「工具活动 · 等待处理」；
+ * 第一次真实工具活动到达时才长出入口。读数失败不等于「没有调用工具」，必须保留错误与重读；
+ * 终态零工具不制造空的过程区域，但历史消息未读取时仍保留「展开查看」。
  */
-describe("在途零记录", () => {
-  it("运行中且尚无工具记录：不宣布「没有调用工具」", async () => {
+describe("等待阶段不占位", () => {
+  it("PENDING 且零记录：整块不渲染，等待只由正文三点表达", async () => {
+    const fetchMock = stub(() => json(trace([], "PENDING")));
+    const { wrapper } = await mount(message({ status: "PENDING" }), 2_000);
+    expect(wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists()).toBe(false);
+    expect(wrapper.find('[data-testid^="session-round-trace-empty-"]').exists()).toBe(false);
+    // 轮询仍在跑：等的是「第一批工具记录」，不是「面板有没有出现」。
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("RUNNING 且零记录：同样不占位，也不宣布「没有调用工具」", async () => {
     stub(() => json(trace([], "RUNNING")));
     const { wrapper } = await mount(message({ status: "RUNNING" }), 2_000);
+    expect(wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("没有调用工具");
+  });
+
+  it("第一次真实工具活动到达：入口出现、默认展开，标题是「工具活动」", async () => {
+    stub(() => json(trace([round(0, [call({ status: "REQUESTED", settled_at: null })])], "RUNNING")));
+    const { wrapper } = await mount(message({ status: "RUNNING" }), 2_000);
     const details = entry(wrapper);
-    expect(details.attributes("data-phase")).toBe("RUNNING_NO_TOOLS");
-    expect(details.attributes("data-tone")).toBe("running");
-    expect(details.text()).toContain("正在执行");
-    expect(details.text()).not.toContain("没有调用工具");
-    expect(details.text()).not.toContain("本轮");
-    expect(wrapper.find(`[data-testid="session-round-trace-empty-${messageId}"]`).exists()).toBe(false);
+    expect(details.attributes("open")).toBeDefined();
+    expect(details.text()).toContain("工具活动");
+    expect(details.text()).not.toContain("等待处理");
+    expect(details.attributes("data-phase")).toBe("RUNNING");
+    // 它接手主进度动效：行内旋转图标出现，标题图标不再重复转。
+    expect(wrapper.findAll(".activity-item-spin")).toHaveLength(1);
+    expect(wrapper.findAll(".activity-header-spin")).toHaveLength(0);
   });
 
-  it("已提交但 Worker 尚未领取：说「等待处理」，不说正在执行", async () => {
-    stub(() => json(trace([], "PENDING")));
-    const { wrapper } = await mount(message({ status: "PENDING" }), 2_000);
-    expect(wrapper.get("summary").text()).toContain("等待处理");
-    expect(wrapper.get("summary").text()).not.toContain("没有调用工具");
+  it("工具都结算完、正文还在生成：记录留着，标题图标接手唯一的主进度动效", async () => {
+    stub(() => json(trace([round(0, [call()])], "RUNNING")));
+    const { wrapper } = await mount(message({ status: "RUNNING" }), 2_000);
+    // 在途的规模只报已结算数，不报总数（总数此刻未知）。
+    expect(wrapper.text()).toContain("已结算 1 项 · 正在执行");
+    expect(wrapper.findAll(".activity-item-spin")).toHaveLength(0);
+    expect(wrapper.findAll(".activity-header-spin")).toHaveLength(1);
   });
 
-  it("同样的零记录在消息结束后才变成「没有调用工具」", async () => {
-    stub(() => json(trace([], "COMPLETED")));
-    const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
-    // 终态不预取：先只说「展开查看」。
-    expect(wrapper.get("summary").text()).toContain("展开查看");
-    await wrapper.get("summary").trigger("click");
+  it("读数失败：错误与重读都在，失败不等于「没有调用工具」", async () => {
+    let failing = true;
+    const fetchMock = vi.fn(async () => failing ? new Response("", { status: 503 })
+      : json(trace([], "RUNNING")));
+    vi.stubGlobal("fetch", fetchMock);
+    const mounted = await mountReact(<SessionRoundTrace client={client} message={message()}
+      pollIntervalMs={2_000} />);
+    unmount = mounted.unmount;
     await flush(20);
-    expect(entry(wrapper).attributes("data-phase")).toBe("EMPTY");
-    expect(wrapper.get(`[data-testid="session-round-trace-empty-${messageId}"]`).exists()).toBe(true);
+    expect(mounted.wrapper.get('[data-testid^="session-round-trace-error-"]').text())
+      .toContain("过程读取失败");
+    expect(mounted.wrapper.find('[data-testid^="session-round-trace-empty-"]').exists()).toBe(false);
+    failing = false;
+    await mounted.wrapper.get('[data-testid^="session-round-trace-retry-"]').trigger("click");
+    await flush(20);
+    // 恢复后确实读回零条：错误消失，入口按事实收起（事实变了，不是被遮住）。
+    expect(mounted.wrapper.find('[data-testid^="session-round-trace-error-"]').exists()).toBe(false);
+    expect(mounted.wrapper.find(`[data-testid="session-round-trace-${messageId}"]`).exists()).toBe(false);
+  });
+
+  it("主进度动效的 Owner 只在「在途 + 有真实记录」时交给工具活动", async () => {
+    const seen: boolean[] = [];
+    let rounds: readonly unknown[] = [];
+    // 50ms 一档：需要轮询真的把「第一批记录」读回来，而不是只换了一个 prop。
+    vi.stubGlobal("fetch", vi.fn(async () => json(trace(rounds, "RUNNING"))));
+    const onOwn = (owns: boolean) => { seen.push(owns); };
+    const mounted = await mountReact(<SessionRoundTrace client={client} message={message()}
+      pollIntervalMs={50} onProgressOwnerChange={onOwn} />);
+    unmount = mounted.unmount;
+    await flush(60);
+    expect(seen.at(-1)).toBe(false);
+    rounds = [round(0, [call({ status: "REQUESTED", settled_at: null })])];
+    await flush(250);
+    expect(seen.at(-1)).toBe(true);
+    await mounted.rerender(<SessionRoundTrace client={client} message={message({ status: "COMPLETED" })}
+      pollIntervalMs={50} onProgressOwnerChange={onOwn} />);
+    await flush(250);
+    expect(seen.at(-1)).toBe(false);
   });
 });

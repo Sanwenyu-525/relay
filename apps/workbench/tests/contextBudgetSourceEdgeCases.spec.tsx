@@ -333,7 +333,7 @@ describe("新会话档位继承的来源身份反例", () => {
     // 显式选 1024K（随建会话命令冻结），再把首条发出去——第一次创建「已落库但响应丢失」。
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    await view.wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
+    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
     await flush();
     server.failNextCreate = true;
     await sendFirst(view, "响应丢失后的重试");

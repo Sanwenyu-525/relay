@@ -11,7 +11,6 @@ import type { JsonObject } from '../infrastructure/json.js';
  * 「在途消息」不在这张表里：它由 `hasInflightMessages` 单独判定，与归档共用同一道栅栏。
  */
 export type SessionDeleteBlockerReason =
-  | 'MEMORY_SOURCES'
   | 'MEMORY_COMPACTION_ACTIVE'
   | 'FORK_CHILDREN'
   | 'SUBAGENT_CHILDREN'
@@ -20,7 +19,7 @@ export type SessionDeleteBlockerReason =
   | 'HYPOTHESIS_CITED'
   | 'WORK_SEGMENT_CITED'
   | 'BLUEPRINT_CITED'
-  | 'EXECUTION_REQUESTS'
+  | 'EXECUTION_REQUESTS_IN_FLIGHT'
   | 'LEARNING_RECORDS'
   | 'ARTIFACT_IMPACT_COMMITTED'
   | 'PROVIDER_COOLDOWN_ACTIVE';
@@ -70,7 +69,7 @@ export type AssistSessionListState =
   | 'ARCHIVED';
 
 /** 派生 `AssistSessionListState` 所需的原始事实；列表与单条读取共用一份形状。 */
-interface AssistSessionStateFacts {
+export interface AssistSessionStateFacts {
   readonly status: AssistSessionStatus;
   readonly has_messages: boolean;
   readonly run_state: AssistSessionRunState | null;
@@ -84,8 +83,11 @@ interface AssistSessionStateFacts {
  * `last_assistant_status` 落到 PENDING/RUNNING 时说明有在途行、`run_state` 已先行返回；
  * 真出现「在途但 run_state 为空」只可能是两条读法错位，那时返回 `null`（未知），
  * 不挑一个终态顶上。
+ *
+ * 导出是为了让这条优先级链能被单元测试逐档钉住（`apps/api/test/unit/session-list-state`），
+ * 不是为了给别的模块另开一条读法——仓储之外只应有 HTTP 层读它。
  */
-function deriveListState(facts: AssistSessionStateFacts): AssistSessionListState | null {
+export function deriveListState(facts: AssistSessionStateFacts): AssistSessionListState | null {
   if (facts.run_state !== null) return facts.run_state;
   if (facts.waiting_approval) return 'WAITING_APPROVAL';
   if (facts.status === 'ARCHIVED') return 'ARCHIVED';
@@ -231,6 +233,7 @@ export class AssistRepository {
         c.settled_at, c.started_at, c.assist_message_id
       from model_calls c join assist_messages m on m.id = c.assist_message_id
       where m.session_id = ${sessionId} and c.kind = 'ASSIST' and c.status <> 'STARTED'
+        and c.purpose = 'PRIMARY'
         and (c.usage_input_tokens is not null or c.usage_output_tokens is not null)
       order by c.settled_at desc nulls last, c.started_at desc, c.id desc
       limit 1`.execute(this.db)).rows[0];
@@ -527,8 +530,18 @@ export class AssistRepository {
    *
    * 只读，先于任何 DELETE 执行；命中任意一项，删除命令整条拒绝。理由不是保守，而是
    * 这些行各自有保留 Owner：Task 验收观察属于任务、假设与工作片段属于项目、组合检查
-   * 绑定 Task、学习记录有自己的删除入口、执行请求是「任务从哪条消息来」的来源、
-   * 未到期的供应商冷却属于平台调用安全。删会话不能让它们一并消失。
+   * 绑定 Task、学习记录有自己的删除入口、未到期的供应商冷却属于平台调用安全。
+   * 删会话不能让它们一并消失。
+   *
+   * 2026-10-31 按数据所有权重审了两项（用户要求「删除正常会话应该简单可靠」）：
+   *   * `MEMORY_SOURCES` 撤销。`memory_message_sources` / `memory_auto_captures` 记的是
+   *     「这条记忆从哪条消息的哪一段提出」，消息随会话消失后它已无法核对；0137 起删除路径
+   *     就把它们当会话自有凭据清掉，长期记忆正文与版本（`memory_items` / `memory_versions`）
+   *     保留、另有停用入口。继续按它阻断等于让策略与实现互相矛盾——删除里明明删得掉，
+   *     判定层却先拒绝。
+   *   * `EXECUTION_REQUESTS` 收窄成 `EXECUTION_REQUESTS_IN_FLIGHT`。执行请求行随 0154
+   *     变成可脱钩的持久凭据（保留来源消息身份、序号与正文摘要），Task/Run 事实一个不动；
+   *     只有仍在解释中的请求（`INTERPRETING`）是真正的在途执行，才继续阻断。
    *
    * 分叉子会话单独算一类：外键是 NO ACTION，父行删掉后子会话的 `forked_from_session_id`
    * 会永久悬空；不把来源说明改成 NULL，因为那等于替子会话改历史。
@@ -564,8 +577,9 @@ export class AssistRepository {
         join assist_messages m on m.id = b.skill_message_id
         where m.session_id = ${sessionId})
       union all
-      select 6, 'EXECUTION_REQUESTS' where exists (
-        select 1 from conversation_execution_requests where session_id = ${sessionId})
+      select 6, 'EXECUTION_REQUESTS_IN_FLIGHT' where exists (
+        select 1 from conversation_execution_requests
+        where session_id = ${sessionId} and status = 'INTERPRETING')
       union all
       select 7, 'LEARNING_RECORDS' where exists (
         select 1 from learning_evidence where session_id = ${sessionId})
@@ -588,19 +602,16 @@ export class AssistRepository {
       select 11, 'LEARNING_RECORDS' where exists (
         select 1 from learning_session_controls where session_id = ${sessionId})
       union all
-      select 12, 'MEMORY_SOURCES' where exists (
-        select 1 from memory_message_sources where session_id = ${sessionId})
-      union all
-      select 13, 'MEMORY_COMPACTION_ACTIVE' where exists (
+      select 12, 'MEMORY_COMPACTION_ACTIVE' where exists (
         select 1 from assist_memory_requests where session_id = ${sessionId} and status in ('PENDING', 'RUNNING'))
       union all
-      select 14, 'SUBAGENT_CHILDREN' where exists (
+      select 13, 'SUBAGENT_CHILDREN' where exists (
         select 1 from assist_sessions where parent_session_id = ${sessionId})
       union all
-      select 15, 'DELEGATION_LEDGER_REFERENCED' where exists (
+      select 14, 'DELEGATION_LEDGER_REFERENCED' where exists (
         select 1 from assist_delegations where child_session_id = ${sessionId})
       union all
-      select 16, 'DELEGATION_LEDGER_REFERENCED' where exists (
+      select 15, 'DELEGATION_LEDGER_REFERENCED' where exists (
         select 1 from assist_delegation_attempts a
         join assist_delegations d on d.id = a.delegation_id
         join assist_messages m on m.id = a.result_message_id
@@ -619,7 +630,9 @@ export class AssistRepository {
    *
    * 删的是**会话自有**的账本：消息、提案、附件、预览、工具调用、模型选择、状态维护请求、
    * 未进入组合检查的影响检查、辅助模型调用计量、已到期冷却、diff 基线、0127 的计划与目标
-   * 账本、0128 的委派账本。学习记录、执行请求与跨对象来源在阻断层就已拒绝，不会走到这里。
+   * 账本、0128 的委派账本与补充消息、0132 的撤回基线 / 撤回请求 / 保护副本 / 撤销、
+   * 0146 与 0151 的会话待办清单。学习记录与跨对象来源在阻断层就已拒绝，不会走到这里；
+   * 执行请求行保留成脱钩凭据（0154），长期记忆正文与其版本保留。
    *
    * 0127 的清理顺序由一组 NO ACTION 互指决定：计划引用来源消息、消息引用目标快照、
    * 目标引用计划版本——三方成环，必须先删额度授予与轮次这两张纯子表，再解除消息侧的
@@ -640,6 +653,31 @@ export class AssistRepository {
     // 不动 memory_items / memory_versions——长期记忆有自己的停用入口，删会话不等于遗忘。
     await sql`delete from memory_auto_captures where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from memory_message_sources where session_id = ${sessionId}`.execute(this.db);
+    // 0132 的撤回账本：基线外键指向会话与消息、撤回行外键指向两条消息，全部 NO ACTION，
+    // 而且 `assist_messages.withdrawn_by_recall_id` 反向指着撤回行——不先撤掉这一组，
+    // 删消息时不是外键失败就是留下悬空引用。字节库（`assist_message_snapshot_blobs`）是
+    // 内容寻址、跨会话共享的，这里只解引用、不删行，容量由它自己的保留清理负责。
+    await sql`delete from assist_message_recall_undos where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_message_recall_protections where recall_id in (
+      select id from assist_message_recalls where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from assist_message_recall_files where recall_id in (
+      select id from assist_message_recalls where session_id = ${sessionId})`.execute(this.db);
+    // 撤回行的子表都清了，还差消息侧那一枚反向引用：`withdrawn_by_recall_id` 的外键不是延迟
+    // 约束，先删撤回行会当场失败。这里只清**本会话**消息的引用——这些消息紧接着就在同一条
+    // 事务里整批删除，撤回来源不承载独立事实；换行/编辑路径都不允许做这一步（2026-11-01
+    // 独立验收发现的 P0：撤回结算过的会话此前删不掉）。
+    await sql`update assist_messages set withdrawn_by_recall_id = null
+      where session_id = ${sessionId} and withdrawn_by_recall_id is not null`.execute(this.db);
+    await sql`delete from assist_message_recalls where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_message_baseline_files where baseline_id in (
+      select id from assist_message_baselines where session_id = ${sessionId})`.execute(this.db);
+    await sql`delete from assist_message_baselines where session_id = ${sessionId}`.execute(this.db);
+    // 0146 / 0151 的会话待办清单：快照、事件与轮次归属都随会话消失（清单是这段讨论的进度，
+    // 不是被别的对象引用的外部事实）。三张表虽然带 ON DELETE CASCADE，仍在这里显式删：
+    // 顺序可读，也不依赖级联带来的权限要求。
+    await sql`delete from assist_session_todo_turn_scopes where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_session_todo_events where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from assist_session_todo_snapshots where session_id = ${sessionId}`.execute(this.db);
     const attachments = await sql<{ id: string }>`delete from assist_message_attachments
       where session_id = ${sessionId} returning id`.execute(this.db);
     await sql`delete from assist_message_previews where message_id in (
@@ -674,7 +712,23 @@ export class AssistRepository {
     await sql`delete from assist_plans where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_delegation_attempts where delegation_id in (
       select id from assist_delegations where parent_session_id = ${sessionId})`.execute(this.db);
+    // 0148 的补充消息：一行同时指向委派账本与三条消息（来源、父会话已读、子会话已读），
+    // 全是 NO ACTION。它既要在委派账本之前删掉，也要在被引用的消息之前删掉。
+    await sql`delete from assist_delegation_supplements where delegation_id in (
+      select id from assist_delegations where parent_session_id = ${sessionId})
+      or source_message_id in (select id from assist_messages where session_id = ${sessionId})
+      or parent_seen_message_id in (select id from assist_messages where session_id = ${sessionId})`
+      .execute(this.db);
     await sql`delete from assist_delegations where parent_session_id = ${sessionId}`.execute(this.db);
+    // 0154：执行请求行**保留**（它承载「这条 Task/Run 从哪条消息来」的事实），来源身份改成
+    // 持久凭据——把消息序号与正文摘要写进请求行并标注脱钩时刻，然后才允许消息消失。
+    // 摘要只能核对、不能还原正文，因此这一步不会把已删的聊天变成第二份保存。
+    await sql`update conversation_execution_requests r
+      set source_message_seq = m.seq,
+          source_message_sha256 = sha256(convert_to(coalesce(m.content, ''), 'UTF8')),
+          source_detached_at = now()
+      from assist_messages m
+      where m.id = r.source_message_id and r.session_id = ${sessionId}`.execute(this.db);
     const messages = await sql<{ id: string }>`delete from assist_messages
       where session_id = ${sessionId} returning id`.execute(this.db);
     const session = await sql<{ id: string }>`delete from assist_sessions
@@ -932,6 +986,29 @@ export class AssistRepository {
     on conflict (message_id) do update set
       revision = assist_message_previews.revision + 1,
       preview_text = excluded.preview_text, truncated = excluded.truncated,
+      updated_at = now()
+    returning message_id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 生成中的 Token 估算（AGENT_LIVE_TOKEN_USAGE）：只写**可丢弃**的预览行。
+   *
+   * 与 `writeLivePreview` 同一所有者 CAS：消息已结算、换 Worker 或已请求取消时写不进去。
+   * 因此迟到的用量帧不会复活已删除的预览，也不会覆盖较新的读数。
+   */
+  async writeLiveUsage(messageId: string, workerId: string,
+    usage: JsonObject): Promise<boolean> {
+    return (await sql<{ message_id: string }>`with owner as materialized (
+      select id from assist_messages where id = ${messageId}
+        and role = 'ASSISTANT' and intent = 'DISCUSS' and skill_snapshot is null
+        and status = 'RUNNING' and worker_id = ${workerId}
+        and cancel_requested = false for update
+    )
+    insert into assist_message_previews (message_id, preview_text, truncated, usage)
+    select id, '', false, ${JSON.stringify(usage)}::jsonb from owner
+    on conflict (message_id) do update set
+      revision = assist_message_previews.revision + 1,
+      usage = excluded.usage,
       updated_at = now()
     returning message_id`.execute(this.db)).rows.length === 1;
   }

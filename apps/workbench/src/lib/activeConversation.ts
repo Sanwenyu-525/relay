@@ -65,6 +65,17 @@ export function clearActiveConversation(): void {
   publishActiveConversation(empty);
 }
 
+/**
+ * 只读地取当前这一份投影。
+ *
+ * 给「事件收尾那一拍要核对身份、而不是重新渲染」的消费者用：一条批量删除要跑好几秒，
+ * 期间组件的闭包还停在起手那一份事实上，用它判断删的是不是当前会话可能已经晚了一拍。
+ * 读的是同一个 store 的同一份值，不是第二套业务状态。
+ */
+export function readActiveConversation(): ActiveConversation {
+  return current;
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };

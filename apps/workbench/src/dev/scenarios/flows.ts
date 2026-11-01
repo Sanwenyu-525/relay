@@ -346,7 +346,9 @@ export const FLOWS = [
       gone("恢复后错误块撤掉", sel.previewError()),
       gone("终态没有草稿块", sel.replyDraft()),
       gone("终态撤掉在途三点", sel.inflight()),
-      visible("执行过程入口仍在", sel.trace())
+      // 2026-10-31 UI-08：普通纯文本回复（这一轮零工具、用户没展开过过程）不再常驻过程入口，
+      // 正文才是这条回复的内容。需要核对工具的会话仍由真实活动行承担。
+      gone("纯文本终态不常驻执行过程入口", sel.trace())
     ],
     interactions: [
       { kind: "advance", label: "推进到中断那一帧",
@@ -419,9 +421,9 @@ export const FLOWS = [
     id: "G06", title: "纯文本回复（无工具、无空白交接帧）", host: "SESSION",
     stateKind: "流式", component: sessionComponent,
     note: "整条链没有任何工具调用，因此这一族要钉的是**过渡本身**：PENDING 说等待处理、"
-      + "草稿逐帧增长且标注不是完整消息、交接那一帧草稿留在原位、落定后入口仍在并如实说没调用工具。"
-      + "开局 IDLE（终态首次展开才读）不在这里断言：这一条的第 0 帧是在途，账本已经被读过，"
-      + "IDLE 由单帧终态场景（A05 / D01 / E01 一族）负责。",
+      + "草稿逐帧增长且标注不是完整消息、交接那一帧草稿留在原位、落定后只留正文。"
+      + "2026-10-31 UI-08：纯文本终态不再常驻「执行过程」入口——它在生成期间已经被读过、"
+      + "确认零工具，落定后收起；用户主动展开过的入口仍保留（由 A05 / E11 一族钉住）。",
     steps: [
       at(0, "刚提交（PENDING）", qa({ status: "PENDING", content: null })),
       at(900, "开始流式输出（v1，20%）", {
@@ -434,10 +436,11 @@ export const FLOWS = [
           previewText: draftOf(MARKDOWN_RICH, 0.6) })
       }),
       at(3_800, "预览判终态、正文还没读回（SETTLING）", {
-        ...qa({ status: "COMPLETED", content: null }),
+        // 此刻消息行还停在 RUNNING 那次读数上（那一次 GET 还没回来）；交接淡入要等正文
+        // 落定那一帧才挂上，两个标记在产品里不会同时出现。
+        ...qa({ status: "RUNNING", content: null }),
         settling: { text: draftOf(MARKDOWN_RICH, 0.6), revision: "5", truncated: false,
-          outcome: "COMPLETED", stage: "SETTLING" },
-        handover: true
+          outcome: "COMPLETED", stage: "SETTLING" }
       }),
       at(5_000, "正文读回，同一位置落定", {
         ...qa({ status: "COMPLETED", content: MARKDOWN_RICH }),
@@ -451,7 +454,8 @@ export const FLOWS = [
       attr("落定后整块换成 final 档（data-verify 只在核对中挂上）", sel.replyBlock(), "data-state", "final"),
       // 草稿说明块在 final 档整块不渲染：这里能证明「不再自称核对中」的正是它不在场。
       gone("落定后草稿说明块撤掉", sel.replyNote()),
-      visible("执行过程入口不消失", sel.trace()),
+      // 2026-10-31 UI-08：纯文本终态不常驻过程行；正文与复制键才是默认视图。
+      gone("纯文本终态不常驻执行过程入口", sel.trace()),
       visible("复制入口在场", sel.copy())
     ],
     interactions: [
@@ -466,15 +470,11 @@ export const FLOWS = [
       { kind: "advance", label: "推进到交接那一帧",
         then: [visible("核对中的回复块仍在同一位置", sel.replyVerify()),
           attr("核对档标为 settling", sel.replyBlock(), "data-verify", "settling"),
-          text("说明仍是草稿", sel.replyNote(), "以下仍是草稿 · 正在核对最终正文"),
+          text("说明仍是草稿", sel.replyNote(), "正在核对最终正文"),
           gone("交接不留空白帧", sel.replyFinal())] },
       { kind: "advance", label: "推进到正文落定",
-        then: [visible("正文块在场", sel.replyFinal()), gone("核对块让位给正文", sel.replyVerify())] },
-      { kind: "click", selector: sel.traceToggle(), label: "展开执行过程（首次读取）",
-        then: [attr("相位换成 EMPTY", sel.trace(), "data-phase", "EMPTY"),
-          visible("空状态说明在场", sel.traceEmpty()),
-          text("如实说本轮没有调用工具", sel.traceActivity(), "本轮没有调用工具"),
-          visible("展开后入口仍在", sel.trace())] }
+        then: [visible("正文块在场", sel.replyFinal()), gone("核对块让位给正文", sel.replyVerify()),
+          gone("纯文本终态不常驻执行过程入口", sel.trace())] }
     ]
   })
 ];

@@ -24,7 +24,7 @@ try {
   if (pages.length !== 1) throw new Error(`Expected one packaged WebView, found ${pages.length}`);
   const page = pages[0];
   await page.goto('http://tauri.localhost/projects');
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await page.getByTestId('project-create-open').click();
   await page.locator('input[name="project-title"]').fill(`M02 WebView 闭环 ${session.session_id.slice(0, 8)}`);
   await page.locator('input[name="project-type"][value="GENERAL"]').check({ force: true });
@@ -114,7 +114,7 @@ try {
   assert.deepEqual(secondArtifactReceipt.result, secondVersion);
 
   await page.reload();
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   const acceptedVersionIds = [firstVersion.version_id, secondVersion.version_id].sort();
   await page.getByTestId(`completion-artifact-${firstVersion.version_id}`).check();
   await page.getByTestId(`completion-artifact-${secondVersion.version_id}`).check();
@@ -146,7 +146,7 @@ try {
     [firstVersion.sha256, secondVersion.sha256].sort());
 
   await page.reload();
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await expect(page.getByTestId(`completion-artifact-${firstVersion.version_id}`)).toBeDisabled();
   await expect(page.getByTestId(`completion-artifact-${secondVersion.version_id}`)).toBeDisabled();
   await expect(page.getByTestId('task-complete')).toBeDisabled();
@@ -176,7 +176,7 @@ try {
   assert.deepEqual(reopenedEvidence.artifact_versions.map((version) => version.artifact_version_id).sort(), acceptedVersionIds);
   await expect(page.getByTestId('task-reopen-receipt')).toContainText('已重开');
   await page.reload();
-  await expect(page.getByTestId('relay-connection-open')).toContainText('已连接本机 API');
+  await expect(page.locator('[data-testid="desktop-titlebar"]')).toHaveAttribute('data-source-mode', 'live');
   await expect(page.getByTestId(`completion-artifact-${firstVersion.version_id}`)).not.toBeChecked();
   await expect(page.getByTestId(`completion-artifact-${secondVersion.version_id}`)).not.toBeChecked();
   const reopenedArtifacts = await apiGet(`/tasks/${taskId}/artifacts`);

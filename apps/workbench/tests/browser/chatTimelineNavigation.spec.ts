@@ -13,7 +13,7 @@ const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionA = "66666666-6666-4666-8666-666666666666";
 const sessionB = "77777777-7777-4777-8777-777777777777";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 type Mode = "ready" | "empty" | "loading" | "fail";
 

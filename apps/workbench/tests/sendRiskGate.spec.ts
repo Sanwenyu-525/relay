@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RequiredContextAudit } from "../src/api/resources/requiredContext";
 import { classifyRiskAudit, confirmationApplies, firstSendPayload, intentSignature,
-  isGateStale, riskScopeSignature } from "../src/lib/sendRiskGate";
+  isGateStale, riskScopeSignature, riskUnknownMessage, snapshotSignature } from "../src/lib/sendRiskGate";
 
 /* 发送前预检的判定与失效规则（P0-C）。这些用例钉的是「读代码看不出问题」的三处：
  * 审计没有结论时会不会被当成安全、确认期间换了作用域或改了正文会不会沿用旧确认。 */
@@ -112,5 +112,54 @@ describe("firstSendPayload（P0-2：预检前不改草稿）", () => {
 
   it("只写命令不写内容：原文保留，模式不预先生效", () => {
     expect(firstSendPayload("/plan")).toEqual({ content: "/plan", chatMode: null });
+  });
+});
+
+/* P0-2（2026-10-31）：发出去的东西不止正文与模式——附件、Skill、资料与会话身份同样进指纹。 */
+describe("待发载荷指纹", () => {
+  const base = { content: "整理实验评价指标", chatMode: null } as const;
+
+  it("附件增删改都算另一次发送", () => {
+    const plain = intentSignature(base);
+    expect(intentSignature({ ...base, attachments: [] })).toBe(plain);
+    expect(intentSignature({ ...base, attachments: ["a.png:1024:image/png"] })).not.toBe(plain);
+    expect(intentSignature({ ...base, attachments: ["a.png:1024:image/png", "b.png:2048:image/png"] }))
+      .not.toBe(intentSignature({ ...base, attachments: ["a.png:1024:image/png"] }));
+  });
+
+  it("Skill 选择、资料引用与会话身份同样进指纹", () => {
+    const plain = intentSignature(base);
+    expect(intentSignature({ ...base, skill: "project-resume@2" })).not.toBe(plain);
+    expect(intentSignature({ ...base, sources: ["PROJECT:root-1@3"] })).not.toBe(plain);
+    expect(intentSignature({ ...base, identity: "ASSISTANT:profile-1" }))
+      .not.toBe(intentSignature({ ...base, identity: "AGENT:" }));
+  });
+
+  it("快照指纹同时盖住作用域、载荷与「作用域无法确定」的原因", () => {
+    const scope = { resourceId: "res-1", sessionId: null, model: "gpt-5", budgetTokens: 262144 };
+    const plain = snapshotSignature({ scope, intent: base });
+    expect(snapshotSignature({ scope: { ...scope }, intent: { ...base } })).toBe(plain);
+    expect(snapshotSignature({ scope: { ...scope, budgetTokens: 524288 }, intent: base })).not.toBe(plain);
+    expect(snapshotSignature({ scope, intent: { ...base, content: "换个说法" } })).not.toBe(plain);
+    expect(snapshotSignature({ scope, intent: base, unknownReason: "默认目录不可用" })).not.toBe(plain);
+  });
+});
+
+describe("风险未知的两种新原因", () => {
+  it("检查期间事实变化：说清是「上一次结果不适用」，不说成没有风险", () => {
+    const outcome = classifyRiskAudit({ audit: null, failure: null, failureCode: "STATE_CHANGED" });
+    expect(outcome.kind).toBe("UNKNOWN");
+    if (outcome.kind === "UNKNOWN") {
+      expect(outcome.code).toBe("STATE_CHANGED");
+      expect(outcome.message).toContain("不适用");
+    }
+  });
+
+  it("作用域无法确定：文案由调用方补细节，不套一层泛泛的「未知」", () => {
+    const outcome = classifyRiskAudit({ audit: null, failure: null, failureCode: "SCOPE_UNKNOWN" });
+    expect(outcome.kind).toBe("UNKNOWN");
+    if (outcome.kind === "UNKNOWN") expect(outcome.code).toBe("SCOPE_UNKNOWN");
+    expect(riskUnknownMessage("SCOPE_UNKNOWN", "设置里的默认目录当前不可用"))
+      .toContain("（设置里的默认目录当前不可用）");
   });
 });

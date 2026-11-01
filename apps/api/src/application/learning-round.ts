@@ -2,7 +2,7 @@ import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/datab
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { contextUsageToJson, describeAssistRequestContext } from './assist-context-usage.js';
-import { recordModelInvocation } from './model-call-recorder.js';
+import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
 import { createRepositories } from './unit-of-work.js';
 import { SessionToolCallRepository } from '../assist/session-tool-call-repository.js';
 import {
@@ -124,7 +124,9 @@ Promise<LearningRoundOutcome> {
           contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
           identity: input.modelPort.identity,
           signal: input.signal,
-          invoke: async () => input.modelPort.assist(request),
+          // AGENT_STREAM_VISIBILITY：学习轮次同样是用户可见的回复，首个流事件照常观测。
+          invoke: async (callId) => input.modelPort.assist({ ...request,
+            onStreamEvent: () => observeModelFirstStream(db, callId) }),
           settle: (result) => result.kind === 'CANCELLED'
             ? { status: 'CANCELLED', providerRequestId: result.providerRequestId ?? null,
               ...(result.usage === undefined ? {} : { usage: result.usage }) }
@@ -158,6 +160,8 @@ Promise<LearningRoundOutcome> {
         // 0126：会话写是普通 Agent 主流程的能力，学习档恒为 false。
         // 0128：委派同样只属于普通 Agent 根会话；学习档恒为 false。
         allowWrite: false, allowDelegate: false,
+        // 学习档不声明 todo_write，因此这条独立额度恒为 0（上限 0 = 一次都不给）。
+        settlementCalls: 0, maxSettlementCalls: 0,
         resolveOrigin: () => assistantReadOrigin(db, session, message.id) });
       usedCalls += 1;
       results.push(settled);

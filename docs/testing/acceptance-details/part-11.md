@@ -20,6 +20,32 @@
 
 ## 条目 191
 
+2026-10-31 检查命令退出码与修正后回执的接续结果，统一归[条目 244](part-14.md#条目-244)，不与下方验证摘要批次合计。
+
+2026-10-31 正式执行验证证据回流：AM-06 真实 PG 反例先红，证实原会话只拿 Run/Task 状态，已有验证身份未进入模型上下文。修复后同一只读装配读取原 Run 最近验证、确切受验版本/摘要与每项最新检查，标明验收版本匹配及适用性撤销；最多 5 个版本/10 项检查并列省略数，不注入原始日志。AM-06 用受控产物/验证记录覆盖旧 PASS→最新 ERROR、新版不继承、撤销、验收要求变化、跨会话隔离，以及追问不驱动 Run/Task。fresh build 后 `agent-main-loop-execution` **35/35**、`verification` **32/32**，同批 **67/67**、零跳过，构建/迁移/Graph/PG 启停 exit 0，临时集群删除 True。日志 `tmp/agent-execution-verification-facts-{red,green}.log`。这是受控模型实际请求与持久化读取链的实施者自检，不证明真实模型依据结果完成修正、读取文件正文或人工验收；Provider、Windows/安装与独立验收仍未由本批证明。无公共 API/数据库变化，Breaking Change: No。
+
+2026-10-31 AUTO 会话直写纠偏：真实免费模型暴露 `AUTO` 普通修改仍落 `SESSION_WRITE_NEEDS_APPROVAL`；受控同场景先红，修复 Gateway prepare/admit 对既定目录授权的接线后转绿。仅当前 AUTO 目录＋AUTO 策略＋AGENT_SESSION_WRITE＋无 DELETE 的 APPLY_CHANGESET 被覆盖；Run/其他能力、ASK/DENY/删除不借权。五套件同批 **121/121**（agent-main-loop-execution 33、gateway 31、local-directory-access-review 4、local-directory-access 8、tool-loop 45），fresh build/test exit 0；另加派发前降档反例的定向 **5/5**（FULL/AUTO 修改、降 ASK/READ_ONLY 拒绝、AUTO 删除转原 Run）。两批分别记录，不累加覆盖数。真实 OpenRouter **AUTO/FULL 两个文件场景 2/2**、零跳过、fresh build/test exit 0：`dots-studio/dots-3-note-preview:free` 每场景 4 次外呼，发出前核对零价格与禁付费回退；真实 read_file→apply_changeset→read_file，随机磁盘标记进入原会话，目标文件逐字节匹配、无关文件保持原样，再扫生成 tick 无新调用/工具/重复写入。PG 启停、迁移、Graph exit 0，临时集群删除 True。原始日志 `tmp/session-auto-write-{red,green,boundary,free-final}.log`；修复前的 `tmp/agent-free-files-{live,diagnostic,boundaries2}.log` 保留原失败与 FULL 基线，不拼接成修复后通过。两次测试编译错误（可选参数与声明顺序）均修正后重新编译，无删除失败断言。无付费模型/子代理/用户目录操作；Windows 安装态、真实模型检查修正、既有自定义 ASK 会话动作恢复仍不由本批证明。规则与根因归 ADR-031 和生成生命周期记录，Breaking Change: No。
+
+2026-10-31 执行事实回流：AM-06 新增后续追问反例先红，修复后在每轮 Context 中从原请求关联重读 Run/Task 状态与 revision，过滤其他会话、Workspace、已撤回或当前轮次之后的来源；明确 Run 成功不等于业务验收完成。真实临时 PG 三套件 `agent-conversation-main-loop` 38/38、`agent-main-loop-execution` 32/32、`chat-plan-goal` 16/16，同批 86/86、零跳过，fresh build/test exit 0，临时集群删除 True。日志 `tmp/agent-execution-facts-{red,green}.log`；只验证受控模型的真实上下文与持久化边界，不证明真实模型语义、Windows 或安装态。
+
+2026-10-31 预览协议边界接续：修复普通说明文字后接信封时执行字段可能进入预览的缺口，并支持标准 JSON/无语言代码围栏中的首字段 reply。单元 5/5（含每个切分位置），当前源码编译 exit 0，独立临时 PG/HTTP/SSE `assist-live-preview` 12/12、零跳过、test exit 0；本批 SkipBuild 复用刚编译的同一产物。PG 启停、迁移、Graph 均 exit 0，临时集群删除 True；日志 `tmp/agent-preview-envelope-final.log`。普通文本遇 `{` 会保守停止预览，最终回复不截断；其他字段顺序与未知语言围栏等待完整回复。无外部模型调用、无子代理，未新增 Windows 验收。D 盘约 67.8 GiB 可用；共享构建目录保留，必要失败/通过日志保留。文档检查仍有 25 条既有失链。
+
+2026-10-31 后续功能：Agent 结构化 reply 增量预览已接入（仅首字段 JSON 字符串，其他协议字段不外露，非支持形态等待完整解析）。单元 `assist-live-preview` 4/4；真实临时 PG/独立 API/SSE 的 `assist-live-preview` 10/10、`session-todo-tool-loop` 5/5，fresh build/test exit 0，迁移、Graph、PG 启停 exit 0，临时集群删除 True。日志 `tmp/agent-reply-stream.log`；文档检查仍为 25 处历史失链。无真实 Provider/Windows 新证据；本条接续替代前轮“结构化 reply 暂不增量解码”的限制，边界见[生命周期记录](../../development/agent-generation-lifecycle.md)。已检查 D 盘约 67.8 GiB 可用及主要产物目录；仅复用共享 dist 与原生 helper，未删除共享产物，保留必要日志。
+
+2026-10-31 功能链接续：补齐工具循环 CANCELLED 正常响应的请求 ID 与用量累计，避免仅保留此前轮次计量。当前源码 `session-todo-tool-loop` 真实临时 PG 套件 5/5、零跳过，fresh build/test exit 0；模型为受控端口，无外部调用。原始结果 `tmp/agent-cancel-evidence.log`。不扩展为真实 Provider 或桌面验收。
+
+2026-10-31 基础 Agent 接续收口（当前 Agent 单独实施与自检，基线 HEAD `8794d312`＋本轮修改，未 commit/push）：TL-41 先在真实 PG 复现恢复批次被无事件旧调用占满，修复为筛选已提交事件后再限量；原未提交调用不执行、不改成功。扩大回归还复现普通会话统一工具循环后请求身份/用量丢失、取消竞争落 FAILED、预览回调缺失三类回归，复用原模型账本、预览 Publisher 与生成异常出口修复。主循环保留类型化超时/协议原因，普通文本可预览，结构化信封只记首文本、完整解析后显示正文。根因与边界见[生命周期记录](../../development/agent-generation-lifecycle.md)，无 migration/API 结构变化，Breaking Change: No。
+
+Node 24.21.0＋临时 PG18.6 的完整九套件批次 **211/211**、零跳过、build/test exit 0：agent-conversation-main-loop 38、agent-main-loop-execution 32、assist-free-model-routing 1、assist-live-preview 10、assist 49、conversation-execution-autostart 4、session-todo-tool-loop 4、session-todos 28、tool-loop 45。覆盖连续读取/写入、检查失败后修正、权限/审批/UNKNOWN/跨项目目录冲突、停止/取消/租约恢复、独立 HTTP/SSE 预览、来源撤销、结构化信封不外露、待办补结算与免费候选切换。最后的错误类型保留补验单列，不拼接成重跑九套件：见下段。定向六份单元测试 **82/82**、exit 0。业务迁移、Graph、PG 启停均 exit 0，临时集群删除 True。
+
+最后补验 **61/61**、零跳过、fresh build/test exit 0：assist 50（新增类型化超时/工具协议错误反例）、assist-live-preview 10、assist-free-model-routing 1。PG 启停、迁移、Graph 均 exit 0，临时集群删除 True；与上面的九套件分别报告，不把重叠用例累加成覆盖总数。
+
+真实 OpenRouter **免费模型 2/2**、零跳过、test exit 0：当前目录选择 `dots-studio/dots-3-note-preview:free`，真实目录→选择→冻结消息→生成→原调用账本；第二例真实调用 `todo_write`、回送结果、快照 v1 且条目完成。两例分别 2/3 次真实 HTTP 调用（含独立自动记忆），每次均核对零价格上限、禁止 Provider fallback 与付费模型替换，原消息与调用均 COMPLETED。原始失败保留：最初默认 Provider 三项均 429；改 OpenRouter 后所选 OpenAI 模型 403 地区不可用；用户要求免费后已终止付费 Qwen 批次并确认 PG 清理，该批不计入免费模型成绩。免费双例首跑第二例在目录有效缓存返回 SKIPPED 时被旧夹具拒绝，尚未调用模型；夹具允许复用已同步目录后完整 2/2 通过，没有删除工具执行断言。
+
+早期失败批次全部保留：饥饿反例先红；首次修复复跑被测试夹具越权修改 requested_at 拒绝，随后改用真实插入顺序；聊天/预览首轮失败已按根因或当前契约修正并重跑。预览夹具只关闭独立自动记忆，生产默认不变；来源撤销改为断言后续真实模型请求排除旧来源/旧回复，不能用「下一轮是否失败」代替来源隔离。日志位于本机 `tmp/agent-basic-closure-{red,green,green2,final,final2,final3,final4,final5,openrouter-free,openrouter-free-tools,openrouter-free-tools2,unit-final,docs}.log`，未把早期失败批次改记通过。文档检查 exit 1，仍为 25 处既有历史证据失链，本轮未新增该类错误。
+
+结论是基础后端与列明免费模型切片通过自检，**不是整体交付**：免费真实磁盘读写/检查自主修正、最新 Windows/WebView2 与安装态、真实 IME/DPI、外部独立验收未由本轮证明；结构化 `reply` 暂不增量解码；旧间歇冷启动问题未归因。本轮按用户要求不派子代理。
+
 2026-10-30 Agent 主链接续修复（实施者自检，HEAD `e2af9480`＋共享未提交修改）：新增真实 PG 反例，先确认已停止宿主仍完成新消息、同会话两名 Worker 提前并发生成；再确认主流程模型在途时用户取消与宿主停止均不能及时中断请求。修复领取前停止栅栏、同会话生成排他及 try/finally 提前清理异步生命周期。宿主停止保留原领取事实待租约恢复，用户取消仍按持久意图收敛。根因与实现边界归[生成生命周期记录](../../development/agent-generation-lifecycle.md)，未新增 migration 或 HTTP 字段，Breaking Change: No。
 
 最终同批 Node 24.21.0＋临时 PG18.6＋真实 HTTP/文件系统八套件 **146/146**、零跳过：agent-conversation-main-loop 22、agent-main-loop-execution 32、assist-message-recall-runtime 3、assist 49、assistant-readonly-round 6、chat-plan-goal 16、learning-round 6、memory-auto-capture 12。覆盖原消息连续读取/写入、资源作用域与权限、插话/撤回恢复、消息队列与停止、提案/CAS、计划目标、人设/学习身份及自动记忆；业务迁移与 Saver 安装、PG 启停 exit 0，临时集群已删除。API 全量 TypeScript 编译 exit 0；五份定向单测 **70/70**（tool-loop、openai-compatible-model-port、assist-steer-context、conversation-prompts、runtime-prompt-router）。

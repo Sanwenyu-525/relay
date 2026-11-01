@@ -19,6 +19,30 @@ async function openLabFromNav(page: Page): Promise<void> {
   await expect(page.locator(".scenario-lab-page")).toBeVisible();
 }
 
+/**
+ * 目录按分类折叠：只有当前场景所属的组默认展开。
+ * 点一条别的族的场景前先展开它所在的组——这条步骤替代旧界面「145 条全铺开」的隐含前提，
+ * 之后仍然点的是同一颗 `scenario-pick-<id>` 入口，不另开选择路径。
+ */
+async function pickScenario(page: Page, id: string): Promise<void> {
+  const group = page.locator(`[data-testid="scenario-group-${id.charAt(0)}"]`);
+  await expect(group).toBeVisible();
+  const item = page.locator(`[data-testid="scenario-pick-${id}"]`);
+  if (!(await item.isVisible())) await group.click();
+  await expect(item).toBeVisible();
+  await item.click();
+  await expect(page.locator(`[data-scenario-preview] [data-scenario-id="${id}"]`)).toHaveCount(1);
+}
+
+/** 检查面板默认关闭；展示设置与事件时间线都在里面，先打开再切到目标页签。 */
+async function openInspectorTab(page: Page, tab: "display" | "timeline" | "verification"): Promise<void> {
+  const toggle = page.locator('[data-testid="scenario-inspector-toggle"]');
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await page.locator(`[data-testid="scenario-inspector-tab-${tab}"]`).click();
+  await expect(page.locator(`[data-testid="scenario-inspector-tab-${tab}"]`)).toHaveAttribute("aria-selected", "true");
+}
+
 async function snapshotStorage(page: Page): Promise<Record<string, string>> {
   return page.evaluate(() => {
     const entries: Record<string, string> = {};
@@ -58,10 +82,14 @@ test.describe("开发工具入口", () => {
     await expect(page.getByRole("navigation", { name: "场景目录" })).toBeVisible();
     await expect(page.locator('[data-testid^="scenario-pick-"]')).toHaveCount(145);
     await expect(page.locator("[data-scenario-preview] [data-scenario-id]")).toHaveCount(1);
+    // A05 是单帧场景：不显示无意义的播放/进度控件，只给静态状态标识与「重新检查」。
     const controls = page.getByRole("complementary", { name: "场景控制器" });
-    await expect(controls.getByRole("button", { name: "播放" })).toBeVisible();
-    await expect(page.locator('[data-testid="scenario-step"]')).toBeVisible();
-    await expect(page.locator('[data-testid="scenario-reset"]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-static-preview"]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-check-again"]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-play"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="scenario-step"]')).toHaveCount(0);
+    await expect(page.getByTestId("scenario-static-strip")).toBeVisible();
+    await expect(controls).toBeVisible();
 
     const manifest = JSON.parse(await page.locator("#scenario-lab-manifest").innerText()) as unknown[];
     expect(manifest).toHaveLength(145);
@@ -159,10 +187,10 @@ test.describe("开发工具入口", () => {
     const densityBefore = before["relay.workbench.activityDensity"] ?? "standard";
 
     await openLabFromNav(page);
-    await page.locator('[data-testid="scenario-pick-A04"]').click();
+    await pickScenario(page, "A04");
     await page.locator('[data-testid="scenario-play"]').click();
     await page.waitForTimeout(400);
-    await page.locator('[data-testid="scenario-pick-B14"]').click();
+    await pickScenario(page, "B14");
     await page.locator('[data-testid="scenario-next"]').click();
     await page.locator('[data-testid="scenario-back-to-workbench"]').click();
     await expect(page).toHaveURL(/\/agent$/u);
@@ -208,7 +236,7 @@ test.describe("开发工具入口", () => {
     await expect(page.locator(".scenario-lab-page")).toBeVisible();
   });
 
-  test("窄窗 560：入口在导航抽屉里可达，三栏纵向排布且无页面级横向溢出", async ({ page }) => {
+  test("窄窗 560：入口在导航抽屉里可达，预览仍是主内容，目录与检查面板按需浮出", async ({ page }) => {
     await page.setViewportSize({ width: 560, height: 760 });
     await page.goto("/projects");
     await expect(page.locator(".app-navrail")).toBeHidden();
@@ -226,17 +254,36 @@ test.describe("开发工具入口", () => {
       - document.documentElement.clientWidth);
     expect(overflow, "560px 宽下出现页面级横向溢出").toBeLessThanOrEqual(0);
 
-    const boxes = await page.evaluate(() => [".scenario-lab-directory", ".scenario-lab-stage", ".scenario-lab-controls"]
-      .map((selector) => {
-        const node = document.querySelector(selector);
-        if (node === null) return null;
-        const rect = node.getBoundingClientRect();
-        return { top: Math.round(rect.top), left: Math.round(rect.left), width: Math.round(rect.width) };
-      }));
-    expect(boxes.every((box) => box !== null), "窄窗下三栏有缺失").toBe(true);
-    const [directory, stage, controls] = boxes as { top: number; width: number }[];
-    expect(stage!.top, "窄窗下预览应排在目录之下").toBeGreaterThan(directory!.top);
-    expect(controls!.top, "窄窗下控制器应排在预览之下").toBeGreaterThan(stage!.top);
+    // 预览第一：目录默认收进抽屉，播放条仍在预览上方，不把页面先铺成一列场景目录。
+    await expect(page.locator(".scenario-lab-directory")).toBeHidden();
+    const stage = page.locator(".scenario-lab-stage");
+    await expect(stage).toBeVisible();
+    await expect(page.locator('[data-scenario-preview]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-static-preview"]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-check-again"]')).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-play"]')).toHaveCount(0);
+    const stageWidth = (await stage.boundingBox())?.width ?? 0;
+    expect(stageWidth, "560px 下预览没有拿到主体宽度").toBeGreaterThan(480);
+
+    // 目录是覆盖抽屉：打开后仍不抢预览的列宽，浮层宽度受视口约束。
+    await page.locator('[data-testid="scenario-directory-toggle"]').click();
+    const directory = page.getByRole("navigation", { name: "场景目录" });
+    await expect(directory).toBeVisible();
+    await expect(page.locator('[data-testid="scenario-directory-toggle"]')).toHaveAttribute("aria-expanded", "true");
+    const overlayWidth = (await directory.boundingBox())?.width ?? 0;
+    expect(overlayWidth, "窄窗目录越出视口").toBeLessThanOrEqual(560 * 0.94 + 1);
+    expect((await stage.boundingBox())?.width ?? 0, "目录抽屉把预览列挤窄了").toBe(stageWidth);
+    await page.locator('[data-testid="scenario-directory-close"]').click();
+    await expect(directory).toBeHidden();
+
+    // 检查面板同样按需浮出，Esc 可关；预览列宽在打开与关闭之间不变。
+    await page.locator('[data-testid="scenario-inspector-toggle"]').click();
+    const inspector = page.getByRole("complementary", { name: "检查面板" });
+    await expect(inspector).toBeVisible();
+    expect((await stage.boundingBox())?.width ?? 0, "检查面板抽屉把预览列挤窄了").toBe(stageWidth);
+    await page.keyboard.press("Escape");
+    await expect(inspector).toBeHidden();
+    expect((await stage.boundingBox())?.width ?? 0, "关闭检查面板后预览列宽没有恢复").toBe(stageWidth);
   });
 
   test("切换场景后停播、帧归零，上一场景的计时器与动画都不再留下", async ({ page }) => {
@@ -259,10 +306,12 @@ test.describe("开发工具入口", () => {
     const playingFrame = await countPreviewAnimations();
     expect(playingFrame, "播放中预览区应有受控动画").toBeGreaterThan(0);
 
-    await page.locator('[data-testid="scenario-pick-B01"]').click();
+    await pickScenario(page, "B01");
     await expect(page.locator('[data-scenario-id="A04"]')).toHaveCount(0);
     await expect(page.locator('[data-scenario-id="B01"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="scenario-play"]')).toHaveAttribute("aria-pressed", "false");
+    // B01 也是单帧：切换后进入静态状态预览，不残留上一条场景的播放条。
+    await expect(page.locator('[data-testid="scenario-play"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="scenario-static-preview"]')).toBeVisible();
     const head = page.locator(".scenario-lab-controls-head");
     await expect(head).toContainText("第 1/1 帧");
     await page.waitForTimeout(700);
@@ -280,11 +329,13 @@ test.describe("开发工具入口", () => {
 
   test("在真实外壳里播到末帧，静态断言照常出结果", async ({ page }) => {
     await page.goto(LAB);
-    await page.locator('[data-testid="scenario-pick-G01"]').click();
+    await pickScenario(page, "G01");
+    await openInspectorTab(page, "timeline");
     const jumps = page.locator('[data-testid^="scenario-jump-"]');
     const last = await jumps.count();
     expect(last).toBeGreaterThan(1);
     await jumps.nth(last - 1).click();
+    await openInspectorTab(page, "verification");
     const results = page.locator(".scenario-lab-results li[data-status]");
     await expect(results.first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.scenario-lab-results li[data-status="fail"]')).toHaveCount(0);

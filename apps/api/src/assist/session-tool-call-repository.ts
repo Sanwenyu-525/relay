@@ -135,6 +135,25 @@ export class SessionToolCallRepository {
       where id = ${id} and status = 'REQUESTED' returning id`.execute(this.db)).rows.length === 1;
   }
 
+  /**
+   * ADR-038 第六轮：`todo_write` 的**未执行终态**。
+   *
+   * 只对「写入从未提交过」的调用使用——事件表里查无此调用就是它的定义。它与 `abandon()`
+   * 的区别是范围与理由都收得更死：只认 todo_write、只认没有绑定 Operation 的行
+   * （todo_write 是应用内动作，本就没有），并且必须给出类型化原因。
+   *
+   * 为什么不复用 `reject()`：拒绝是「准入/校验把它挡下来了」，而这里模型根本没得到过
+   * 结果，两者对用户的含义不同；为什么不标 `UNKNOWN`：UNKNOWN 是「派出去了、结果不明」，
+   * 会诱导人去核对外部副作用，而这里确定没有副作用。为什么不重跑：写入事务没提交，
+   * 重跑就是替一条已经终止的生成伪造进度。
+   */
+  async abandonTodoWrite(id: string, reason: string, detail: string): Promise<boolean> {
+    return (await sql<{ id: string }>`update session_tool_calls set status = 'ABANDONED',
+      rejection_reason = ${reason}, rejection_detail = ${detail}, settled_at = now()
+      where id = ${id} and status = 'REQUESTED' and operation_id is null
+        and tool_name = 'todo_write' returning id`.execute(this.db)).rows.length === 1;
+  }
+
   /** 恢复用：这条消息还有哪些没结算的请求。读取本身不重新派发。 */
   async listPending(messageId: string): Promise<readonly SessionToolCallRow[]> {
     return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
@@ -143,15 +162,40 @@ export class SessionToolCallRepository {
   }
 
   /**
-   * ADR-038 恢复扫描：全 workspace 里还没结算的 `todo_write` 请求（有界）。
+   * ADR-038 恢复扫描：全 workspace 里已提交事件但还没结算的 `todo_write` 请求（有界）。
    *
    * 只做读取，不派发、不改状态——核对与结算由恢复用例按原调用身份进行。
    * 快照已提交但账本未结算的调用在这里重新可见；事件表里查无此调用的行保持
-   * REQUESTED 可诊断，不会被当成已成功改写。
+   * REQUESTED 可诊断，不会被当成已成功改写，也不占用补结算的批次名额。
    */
   async listPendingTodoWrites(limit: number): Promise<readonly SessionToolCallRow[]> {
     return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
       where status = 'REQUESTED' and tool_name = 'todo_write' and operation_id is null
+        and exists (select 1 from assist_session_todo_events e
+          where e.session_id = session_tool_calls.session_id
+            and e.tool_call_id = session_tool_calls.id)
+      order by requested_at, id limit ${limit}`.execute(this.db)).rows;
+  }
+
+  /**
+   * ADR-038 第六轮：**没有持久事件、所属消息已终止**的 `todo_write` 请求（有界）。
+   *
+   * 这是上一轮留下的悬挂行：写入事务从未提交（事件表查无此调用），而生成早已结束
+   * （FAILED / CANCELLED / COMPLETED），不会再有人来结算它。它此前永久停在 REQUESTED，
+   * 界面上表现为「已请求，尚未结算」，而事实是这次调用根本没执行。
+   *
+   * 只读、不派发。消息仍在 PENDING / RUNNING 的行不在这里出现——那可能真的还在跑，
+   * 提前收口等于替一次进行中的生成下结论。
+   */
+  async listOrphanedTodoWrites(limit: number): Promise<readonly SessionToolCallRow[]> {
+    return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
+      where status = 'REQUESTED' and tool_name = 'todo_write' and operation_id is null
+        and exists (select 1 from assist_messages m
+          where m.id = session_tool_calls.message_id
+            and m.status in ('COMPLETED', 'FAILED', 'CANCELLED'))
+        and not exists (select 1 from assist_session_todo_events e
+          where e.session_id = session_tool_calls.session_id
+            and e.tool_call_id = session_tool_calls.id)
       order by requested_at, id limit ${limit}`.execute(this.db)).rows;
   }
 }

@@ -199,13 +199,74 @@ export function activityStateText(state: ActivityState, source: ActivitySource,
     case "PREPARED": return "执行中或结果未决，尚无结算结果";
     case "WAITING_APPROVAL": return "等待你批准";
     case "REJECTED": return "被拒绝，没有执行";
-    case "ABANDONED": return "已放弃，没有结算结果";
+    // 带类型化原因的放弃是**明确的未执行**（ADR-038 第六轮：没有持久事件、消息已终止的
+    // 待办写入）；不带原因的放弃只是「不再派发」，措辞停在更弱的那一档，不替它断言没跑过。
+    case "ABANDONED": return detail.reason === null ? "已放弃，没有结算结果" : "未执行，没有结果";
     case "UNKNOWN": return "结果未知，需核对";
     default:
       if (source === "SESSION_TOOL_CALL") return "已结算";
       if (detail.resultText === null && detail.reason === null) return "已结算，结果未提供";
       return detail.failed ? "已结算但失败" : "已结算";
   }
+}
+
+/**
+ * 已知原因码的人话标签（2026-10-31，2026-11-01 P1-1 补全）。
+ *
+ * 账本里的原因码是机器身份，直接摊给用户看等于让他读枚举名。会话侧每条类型化拒绝都带
+ * 一句中文 `rejection_detail`，因此这里只写「这一项没做成」的那顶帽子，具体原因由 detail 说；
+ * 没有 detail 时这一条本身必须能独立读通。只收录**确实会出现在界面上**的码
+ * （Run 侧 Gateway 词表原样透出：它的 detail 已经是人话，且码是核对用的动作身份）。
+ * 未收录的原样显示——露出一个英文码比编一个不存在的解释安全。
+ */
+const REASON_LABELS: Readonly<Record<string, string>> = {
+  TODO_NOT_EXECUTED: "未执行",
+  // 子 Agent 委派（P0-1 三层准入在账本上的读法）
+  SUBAGENT_PARENT_SCOPE_MISSING: "子任务未启动",
+  SUBAGENT_PARENT_RESOURCE_UNAVAILABLE: "子任务未启动",
+  SUBAGENT_SLOTS_EXHAUSTED: "子任务并发已满",
+  SUBAGENT_DELEGATE_UNAVAILABLE: "子任务入口不可用",
+  // 会话作用域与工作目录
+  AGENT_SESSION_HAS_NO_PROJECT: "这条会话还没有归入项目",
+  AGENT_SESSION_HAS_NO_WORKING_DIRECTORY: "这条会话还没有选定工作目录",
+  AGENT_SESSION_WORKING_DIRECTORY_UNAVAILABLE: "绑定的工作目录已不存在",
+  AGENT_SESSION_WORKING_DIRECTORY_MISMATCH: "绑定的工作目录与项目不一致",
+  AGENT_SESSION_WORKING_DIRECTORY_DISABLED: "绑定的工作目录已停用",
+  // 只读轮次的预算与词表
+  SESSION_TOOL_BUDGET_EXHAUSTED: "工具调用次数已用完",
+  SESSION_TOOL_ROUNDS_EXHAUSTED: "工具轮次已用完",
+  TOOL_NOT_READ_ONLY: "这一轮没有提供该工具",
+  TOOL_ARGUMENT_INVALID: "工具参数不合法",
+  TOOL_CHANGESET_INVALID: "变更声明不合法",
+  SESSION_CAPABILITY_NOT_CONFIGURED: "当前项目没有这条能力",
+  SESSION_WRITE_REQUIRES_RUN: "这次写入需要走执行入口",
+  SESSION_WRITE_NEEDS_APPROVAL: "这次写入等待你的批准",
+  SESSION_OPERATION_ATTACH_FAILED: "动作身份无法绑定到这条请求",
+  // 待办写入
+  TODO_ARGUMENTS_INVALID: "待办参数不合法",
+  TODO_WRITE_UNAVAILABLE: "待办写入不可用",
+  // 额度耗尽后的收尾窗口同样有上限（E2E-ALL-01）：说清是「写清单的次数」用完，不是清单坏了。
+  TODO_SETTLEMENT_BUDGET_EXHAUSTED: "清单写回次数已用完"
+};
+
+export function activityReasonLabel(reason: string): string {
+  return REASON_LABELS[reason] ?? reason;
+}
+
+/**
+ * 常显那一行的原因句（第一层，不需要展开就能读到）。
+ *
+ * 认得的码：`标签：服务端 detail`——机器码不出现在这一行，它留在第三层核对
+ * （2026-11-01 P1-1：截图里「SUBAGENT_PARENT_SCOPE_MISSING · …」整串摊在聊天里，
+ * 用户读到的是枚举名而不是「子任务没起来」）。
+ * 不认得的码：维持 `码 · detail` 的原样透出，不编一句中文盖过它。
+ */
+export function activityReasonNote(rejectionReason: string | null,
+  rejectionDetail: string | null): string {
+  if (rejectionReason === null) return "";
+  const label = REASON_LABELS[rejectionReason];
+  if (label === undefined) return rejectionDetail === null ? rejectionReason : `${rejectionReason} · ${rejectionDetail}`;
+  return rejectionDetail === null ? label : `${label}：${rejectionDetail}`;
 }
 
 /** 视觉档：只有这一处把状态折成颜色。 */
@@ -551,7 +612,7 @@ export type ActivityPhaseTone = "running" | "attention" | "danger" | "settled" |
 export interface ActivityHeaderState {
   readonly phase: ActivityPhase;
   readonly tone: ActivityPhaseTone;
-  /** 标题固定为「执行过程」；相位不改变标题，只改变右侧的规模与状态。 */
+  /** 标题固定为「工具活动」；相位不改变标题，只改变右侧的规模与状态。 */
   readonly title: string;
   /** 规模 + 状态，例如「3 项操作 · 已结束」。 */
   readonly meta: string;
@@ -582,7 +643,10 @@ export function activityHeaderState(input: {
   readonly summary: ActivitySummary;
 }): ActivityHeaderState {
   const { loaded, error, inFlight, awaitingWorker = false, summary } = input;
-  const title = "执行过程";
+  // 2026-10-31 UI-08：标题由「执行过程」改为「工具活动」。
+  // 这一块只呈现 session_tool_calls 里已落账的工具事实，不含模型的私有推理；
+  // 旧标题会让人期待一段思考叙述。
+  const title = "工具活动";
   const phase = (value: ActivityPhase): ActivityHeaderState =>
     ({ phase: value, tone: PHASE_TONE[value], title, meta: metaOf(value, summary, awaitingWorker) });
   if (error) return phase("ERROR");

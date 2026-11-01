@@ -286,8 +286,9 @@ test('TL-13 工作轮次隔离：新任务不继承旧清单，版本从 1 重�
   const firstAssistant = await insertMessage(sessionId, 2n, 'ASSISTANT');
   await writeInTurn(sessionId, workspaceId, firstAssistant, randomUUID(),
     [{ content: '任务 A', status: 'completed' }], 0);
-  // 用户在同一会话里又提了另一件事：新轮次的清单从空开始。
-  const secondUser = await insertMessage(sessionId, 3n, 'USER');
+  // 用户在同一会话里又提了另一件事：**明确声明**换任务才开新轮次（第六轮起延续是默认，
+  // 未声明就延续当前工作），新轮次的清单从空开始。
+  const secondUser = await insertMessage(sessionId, 3n, 'USER', '新任务：整理发布说明');
   const repo = new SessionTodoRepository(app.db);
   assert.equal(await repo.read(sessionId), undefined);
   assert.equal(await repo.readContextBlock(sessionId), '');
@@ -342,7 +343,8 @@ test('TL-22 不同轮次相同版本：各自 v1 共存于事件表，快照只�
   const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
   await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
     [{ content: 'A', status: 'completed' }], 0);
-  const u2 = await insertMessage(sessionId, 3n, 'USER');
+  // 第六轮起「延续」是默认，两轮各自 v1 的前提是用户明确声明换任务。
+  const u2 = await insertMessage(sessionId, 3n, 'USER', '新任务：换一件');
   const a2 = await insertMessage(sessionId, 4n, 'ASSISTANT');
   const second = await writeInTurn(sessionId, workspaceId, a2, randomUUID(),
     [{ content: 'B', status: 'pending' }], 0);
@@ -529,7 +531,7 @@ test('TL-29 账本恢复：快照已提交、账本 REQUESTED 的调用按原身
   assert.equal(await eventCount(sessionId), 1);
 });
 
-test('TL-30 账本恢复的可诊断边界：事件不存在的调用保持 REQUESTED，异载荷不吞掉', async () => {
+test('TL-30 账本恢复的可诊断边界：事件不存在的调用不重跑，异载荷不吞掉', async () => {
   const workspaceId = randomUUID();
   const sessionId = await seedSession(app.db, workspaceId);
   await insertMessage(sessionId, 1n, 'USER');
@@ -554,7 +556,13 @@ test('TL-30 账本恢复的可诊断边界：事件不存在的调用保持 REQU
   assert.equal(result.settled.includes(neverCommitted.id), false,
     '从未提交的写入不得被恢复执行');
   assert.equal(result.settled.includes(conflicted.id), false, '异载荷调用不得被结算');
-  assert.equal((await calls.read(neverCommitted.id))?.status, 'REQUESTED');
+  // 第六轮：事件不存在且消息已终止 → 收口成「未执行」，不再永久停在 REQUESTED。
+  assert.ok(result.abandoned.includes(neverCommitted.id), '无事件的悬挂行必须给出终态');
+  const abandonedRow = await calls.read(neverCommitted.id);
+  assert.equal(abandonedRow?.status, 'ABANDONED');
+  assert.equal(abandonedRow?.rejection_reason, 'TODO_NOT_EXECUTED');
+  assert.equal(abandonedRow?.result_digest, null, '未执行不得带结算结果');
+  // 异载荷行仍是 REQUESTED：它确实提交过事件，需要人工核对，不能当没跑过。
   assert.equal((await calls.read(conflicted.id))?.status, 'REQUESTED');
   assert.equal(await eventCount(sessionId), 1, '恢复不替失败生成补写清单');
   assert.equal((await new SessionTodoRepository(app.db).read(sessionId))?.items[0]?.content,
@@ -601,23 +609,30 @@ test('TL-31 用户插话不切换工作身份：同一轮里插话后的写入�
   assert.equal(await turnBasis(sessionId, u2), 'CONTINUED_UNFINISHED');
 });
 
-test('TL-32 全部完成后继续纠错：确定性开新作用域，版本从 1 重计，历史留在事件表', async () => {
+test('TL-32 全部完成后回来纠错：延续同一工作作用域，版本继续递增', async () => {
   const workspaceId = randomUUID();
   const sessionId = await seedSession(app.db, workspaceId);
   const u1 = await insertMessage(sessionId, 1n, 'USER');
   const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
   await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
     [{ content: '任务 A 第一步', status: 'completed' }], 0);
-  // 清单已全部收尾，「这里不对」不是延续：新一轮的归属在自己的 turn 键上。
+  // 清单已全部收尾，但用户没有声明换任务：「这里不对」是对同一件工作的纠错，
+  // 不是新工作。第六轮之前这里被判成开新作用域，上一份清单因此从注入和界面同时消失。
   const u2 = await insertMessage(sessionId, 3n, 'USER', '这里不对，第二步漏了');
   const a2 = await insertMessage(sessionId, 4n, 'ASSISTANT');
   const corrected = await writeInTurn(sessionId, workspaceId, a2, randomUUID(),
     [{ content: '任务 A 第一步', status: 'completed' },
-      { content: '任务 A 第二步（补）', status: 'in_progress' }], 0);
-  assert.equal(corrected.snapshot.scopeKey, `turn:${u2}`);
-  assert.equal(corrected.snapshot.version, 1);
-  assert.equal(await turnBasis(sessionId, u2), 'OPENED');
-  assert.equal(await eventCount(sessionId), 2, '旧轮次的事件保留，不被合并或覆盖');
+      { content: '任务 A 第二步（补）', status: 'in_progress' }], 1);
+  assert.equal(corrected.snapshot.scopeKey, `turn:${u1}`, '纠错属于同一件工作');
+  assert.equal(corrected.snapshot.version, 2, '同一作用域内版本继续递增');
+  assert.equal(await turnBasis(sessionId, u2), 'CONTINUED_COMPLETED',
+    '依据如实记录当时看到的清单状态：已收尾，但延续');
+  assert.equal(await turnBasis(sessionId, u1), 'OPENED');
+  // 注入给模型的仍是同一份清单：纠错的那一轮不会从「没有待办」开始。
+  const injected = await new SessionTodoRepository(app.db).readContextBlock(sessionId, a2);
+  assert.match(injected, /任务 A 第二步（补）/u);
+  // 事件表保留两版，历史不合并、不覆盖。
+  assert.equal(await eventCount(sessionId), 2);
 });
 
 test('TL-33 未完成时明确切换独立任务：前缀强制开新作用域并冻结依据', async () => {
@@ -691,4 +706,177 @@ test('TL-35 延续语境下的旧轮次迟到写入：冻结归属落回原作�
   const current = await new SessionTodoRepository(app.db).read(sessionId);
   assert.equal(current?.scopeKey, `turn:${u3}`);
   assert.equal(current?.version, 1);
+});
+/** 归属表的行数：读取接口是否偷偷写了它，只看这一列就够。 */
+async function turnScopeRows(sessionId: string): Promise<readonly { message_id: string;
+  scope_key: string; basis: string }[]> {
+  return (await sql<{ message_id: string; scope_key: string; basis: string }>`
+    select message_id, scope_key, basis from assist_session_todo_turn_scopes
+    where session_id = ${sessionId} order by message_id`.execute(app.db)).rows;
+}
+
+test('TL-36 GET 不写归属表：反复读取不新增归属行，写入准入才冻结一次', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  const u1 = await insertMessage(sessionId, 1n, 'USER');
+  const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
+  const api = await startTestApi();
+  try {
+    // 归属尚未判定时连读三次：读取接口只给答案，不落库。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await api.get(workspacePath(workspaceId,
+        `/assist-sessions/${sessionId}/todos`));
+      assert.equal(response.status, 200);
+      assert.equal((response.body as { snapshot: unknown }).snapshot, null);
+    }
+    assert.deepEqual(await turnScopeRows(sessionId), [], 'GET 不得写 assist_session_todo_turn_scopes');
+
+    // 执行准入（这里用写入入口代表）才冻结：归属行出现，且只有一行。
+    await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
+      [{ content: '第一步', status: 'in_progress' }], 0);
+    const frozen = await turnScopeRows(sessionId);
+    assert.equal(frozen.length, 1);
+    assert.equal(frozen[0]?.message_id, u1);
+    assert.equal(frozen[0]?.scope_key, `turn:${u1}`);
+
+    // 再读若干次：归属行数量与内容都不再变化，投影照常可读。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await api.get(workspacePath(workspaceId,
+        `/assist-sessions/${sessionId}/todos`));
+      assert.equal(response.status, 200);
+      assert.equal((response.body as { snapshot: { version: number } | null })
+        .snapshot?.version, 1);
+    }
+    assert.deepEqual(await turnScopeRows(sessionId), frozen, 'GET 不得改写已冻结的归属');
+  } finally { await api.stop(); }
+});
+
+test('TL-37 插话后读取仍落在同一归属，且不替插话轮次造归属行', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  const u1 = await insertMessage(sessionId, 1n, 'USER');
+  const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
+  await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
+    [{ content: '任务 A 第一步', status: 'in_progress' }], 0);
+  // 生成进行中插话：最新一轮变成插话消息，但它还没被任何准入判定过。
+  const u2 = await insertMessage(sessionId, 3n, 'USER', '这个背景是什么？');
+  const repo = new SessionTodoRepository(app.db);
+  // 只读解析与已冻结归属一致（延续未完成清单），并且不落库。
+  assert.equal(await repo.resolveScopeKey(sessionId), `turn:${u1}`);
+  assert.equal((await repo.read(sessionId))?.version, 1);
+  const rows = await turnScopeRows(sessionId);
+  assert.deepEqual(rows.map((row) => row.message_id), [u1],
+    '读取不得替插话轮次造归属行');
+  // 执行准入显式冻结插话轮次：与只读解析得到同一个作用域，不改写已有归属。
+  assert.equal(await repo.freezeTurnScope(sessionId, u2), `turn:${u1}`);
+  const afterFreeze = await turnScopeRows(sessionId);
+  assert.equal(afterFreeze.length, 2);
+  assert.equal(afterFreeze.find((row) => row.message_id === u2)?.basis, 'CONTINUED_UNFINISHED');
+  assert.equal(afterFreeze.find((row) => row.message_id === u1)?.basis, 'OPENED');
+});
+
+test('TL-38 未完成时切换独立任务：声明新任务才开新作用域，读口同步换到新轮次', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  const u1 = await insertMessage(sessionId, 1n, 'USER');
+  const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
+  await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
+    [{ content: '任务 A 第一步', status: 'in_progress' }], 0);
+  // 未完成 + 明确声明换任务：开新作用域（TL-33 的只读侧对照）。
+  const u2 = await insertMessage(sessionId, 3n, 'USER', '新任务：先去办另一件事');
+  const repo = new SessionTodoRepository(app.db);
+  assert.equal(await repo.resolveScopeKey(sessionId), `turn:${u2}`,
+    '明确声明换任务后，读口立刻落在新轮次，旧清单不再对外可见');
+  assert.equal(await repo.read(sessionId), undefined);
+  assert.deepEqual((await turnScopeRows(sessionId)).map((row) => row.message_id), [u1],
+    '只读解析不落库');
+  assert.equal(await repo.freezeTurnScope(sessionId, u2), `turn:${u2}`);
+  assert.equal((await turnScopeRows(sessionId)).find((row) => row.message_id === u2)?.basis,
+    'FORCED_NEW_PREFIX');
+});
+
+test('TL-39 重启后读到冻结归属：新仓储实例不重算、不改写', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  const u1 = await insertMessage(sessionId, 1n, 'USER');
+  const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
+  await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
+    [{ content: '任务 A 第一步', status: 'completed' }], 0);
+  const u2 = await insertMessage(sessionId, 3n, 'USER', '继续');
+  const a2 = await insertMessage(sessionId, 4n, 'ASSISTANT');
+  await writeInTurn(sessionId, workspaceId, a2, randomUUID(),
+    [{ content: '任务 A 第一步', status: 'completed' },
+      { content: '任务 A 第二步', status: 'completed' }], 1);
+  const before = await turnScopeRows(sessionId);
+  // 进程重启：新仓储实例 + 幂等冻结不得改写已定案的归属与依据。
+  const restarted = new SessionTodoRepository(app.db);
+  assert.equal(await restarted.freezeTurnScope(sessionId, u2), `turn:${u1}`);
+  assert.equal(await restarted.resolveScopeKey(sessionId), `turn:${u1}`);
+  assert.deepEqual(await turnScopeRows(sessionId), before);
+});
+
+test('TL-42 消息仍在跑时不做未执行收口：进行中的调用不得被提前判死', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  await insertMessage(sessionId, 1n, 'USER');
+  const runningMessageId = randomUUID();
+  await createRepositories(app.db).assist.insertMessage({ id: runningMessageId,
+    sessionId, seq: 2n, role: 'ASSISTANT', status: 'RUNNING', intent: 'DISCUSS',
+    content: null, sources: [] });
+  const calls = new SessionToolCallRepository(app.db);
+  const inFlight = await calls.insert({ id: randomUUID(), sessionId,
+    messageId: runningMessageId, round: 1, ordinal: 1, toolName: 'todo_write',
+    arguments: { items: [{ content: '还在途中', status: 'in_progress' }], expected_version: 0 },
+    argumentsSha256: 'c'.repeat(64), providerToolCallId: 'provider-running' });
+
+  const result = await reconcileTodoWriteSettlements(app.db);
+  assert.equal(result.abandoned.includes(inFlight.id), false);
+  assert.equal((await calls.read(inFlight.id))?.status, 'REQUESTED',
+    '生成还在跑：可能确实在途中，不能替它下结论');
+
+  // 生成结束（CANCELLED）之后同一行才允许收口。
+  await sql`update assist_messages set status = 'CANCELLED' where id = ${runningMessageId}`
+    .execute(app.db);
+  const after = await reconcileTodoWriteSettlements(app.db);
+  assert.ok(after.abandoned.includes(inFlight.id));
+  assert.equal((await calls.read(inFlight.id))?.status, 'ABANDONED');
+});
+
+test('TL-43 /newtask 前缀：消息准入剥掉命令、强制开新作用域，读口同步换轮次', async () => {
+  const workspaceId = randomUUID();
+  const sessionId = await seedSession(app.db, workspaceId);
+  const u1 = await insertMessage(sessionId, 1n, 'USER');
+  const a1 = await insertMessage(sessionId, 2n, 'ASSISTANT');
+  await writeInTurn(sessionId, workspaceId, a1, randomUUID(),
+    [{ content: '任务 A 第一步', status: 'in_progress' }], 0);
+  const api = await startTestApi();
+  try {
+    // 只有命令没有内容：明确拒绝，而不是把一条空消息发出去。
+    const empty = await api.post(workspacePath(workspaceId,
+      `/assist-sessions/${sessionId}/messages`), { command_id: randomUUID(), content: '/newtask' });
+    assert.equal(empty.status, 422);
+    assert.equal(await turnScopeRows(sessionId).then((rows) => rows.length), 1,
+      '被拒绝的请求不得留下归属行');
+
+    const posted = await api.post(workspacePath(workspaceId,
+      `/assist-sessions/${sessionId}/messages`),
+      { command_id: randomUUID(), content: '/newtask 整理发布说明' });
+    // 修复前这里会 422（/newtask 不在系统命令表里）：注释写了前缀，但发不出去。
+    assert.equal(posted.status, 202);
+    const list = await api.get(workspacePath(workspaceId, `/assist-sessions/${sessionId}/messages`));
+    const users = (list.body as { items: { id: string; role: string; content: string | null }[] })
+      .items.filter((item) => item.role === 'USER');
+    const last = users[users.length - 1]!;
+    assert.equal(last.content, '整理发布说明', '命令不进正文，用户说的话保持原样');
+    assert.notEqual(last.id, u1);
+
+    const frozen = (await turnScopeRows(sessionId)).find((row) => row.message_id === last.id);
+    assert.equal(frozen?.basis, 'FORCED_NEW_PREFIX', '上一轮未完成也开新作用域');
+    assert.equal(frozen?.scope_key, `turn:${last.id}`);
+    // 读口立刻不再展示上一轮的清单：新任务不继承旧清单。
+    const todos = await api.get(workspacePath(workspaceId,
+      `/assist-sessions/${sessionId}/todos`));
+    assert.equal(todos.status, 200);
+    assert.equal((todos.body as { snapshot: unknown }).snapshot, null);
+  } finally { await api.stop(); }
 });

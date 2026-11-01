@@ -137,6 +137,11 @@ function transitionRow(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-testid="assist-first-transition"]');
 }
 
+/** AI 侧等待行（2026-10-31 UI-08）：三点属于助手列，不属于用户消息。 */
+function waitingRow(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-testid="assist-first-assistant-waiting"]');
+}
+
 /** jsdom 没有剪贴板实现：造一个带 clipboardData 的 paste 事件，走输入器既有附件入口。 */
 async function pasteFile(target: Element, file: File): Promise<void> {
   const event = new Event("paste", { bubbles: true, cancelable: true });
@@ -183,11 +188,18 @@ describe("首条消息的过渡状态（不空白、不重复、不伪造）", (
       expect(sending!.querySelector('[data-testid="assist-first-pending"]')).not.toBeNull();
       expect(document.querySelector('[data-testid="assist-first-pending"]')!.closest('[data-testid="assist-first-transition"]'))
         .not.toBeNull();
+      // 2026-10-31 UI-08：AI 生成三点属于助手列，不再挂在用户消息的 meta 行里。
+      expect(sending!.querySelector(".assist-inflight-dots")).toBeNull();
+      const waiting = waitingRow();
+      expect(waiting, "AI 等待行必须出现").not.toBeNull();
+      expect(waiting!.querySelector(".agent-message")!.getAttribute("data-role")).toBe("ASSISTANT");
+      expect(waiting!.querySelector(".assist-inflight-dots")).not.toBeNull();
+      expect(waiting!.closest('[data-testid="assist-first-transition"]')).toBeNull();
       // 欢迎页与「还没有消息。」都不与在途事实同时出现。
       expect(document.querySelector('[data-testid="assist-empty-welcome"]')).toBeNull();
       expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).not.toContain("还没有消息");
 
-      // ③ 202 回执已到、消息投影还没读回：过渡行留下，状态说清下一步。
+      // ③ 202 回执已到、消息投影还没读回：过渡行留下，状态说清下一步；等待行继续在 AI 侧。
       h.messageGate.release();
       await flush(160); await flush();
       const awaiting = transitionRow();
@@ -196,17 +208,28 @@ describe("首条消息的过渡状态（不空白、不重复、不伪造）", (
       expect(awaiting!.textContent).toContain("已送达");
       expect(awaiting!.textContent).toContain("在根目录下创建一个aa.md");
       expect(awaiting!.querySelector('[data-testid="assist-first-pending"]')).toBeNull();
+      expect(waitingRow(), "投影未到时 AI 等待行不能缺席").not.toBeNull();
       // 投影仍未到：这时刷新也不会把消息区读成空会话。
       await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
       await flush(80);
       expect(transitionRow()).not.toBeNull();
       expect(document.querySelector('[data-testid="assist-empty-welcome"]')).toBeNull();
 
-      // ④ 真实消息读回：过渡行卸载，正文只出现一次（不产生重复用户消息）。
+      // ③b 只有用户消息先读回、ASSISTANT 行还没到：过渡行卸载，等待行接棒（不出现空窗）。
+      h.projection.items = [userMessage("在根目录下创建一个aa.md")];
+      await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
+      await flush(120);
+      expect(transitionRow()).toBeNull();
+      expect(waitingRow(), "真实用户消息读回后 AI 等待行消失").not.toBeNull();
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).not.toContain("还没有消息");
+
+      // ④ 真实消息读回：过渡行卸载，正文只出现一次（不产生重复用户消息）；
+      // 服务端 ASSISTANT PENDING 行一出现，等待行立刻卸载（去重），三点回到回复行上。
       h.projection.items = [userMessage("在根目录下创建一个aa.md"), assistantMessage("PENDING", null)];
       await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
       await flush(120);
       expect(transitionRow()).toBeNull();
+      expect(waitingRow(), "服务端 ASSISTANT 行出现后仍有等待行（重复渲染）").toBeNull();
       const transcript = view.wrapper.get('[data-testid="assist-transcript"]').text();
       expect(occurrences(transcript, "在根目录下创建一个aa.md")).toBe(1);
       // ⑤ AI 在跑：在途三点在回复行上，不在别处另起一块加载态。
@@ -239,6 +262,8 @@ describe("首条消息的过渡状态（不空白、不重复、不伪造）", (
       expect(failed!.getAttribute("data-phase")).toBe("failed");
       expect(failed!.textContent).toContain("这条会被拒绝的消息");
       expect(failed!.querySelector('[data-testid="assist-first-transition-state"]')!.textContent).toBe("发送失败");
+      // 明确失败不是「AI 正在生成」：等待行必须撤掉。
+      expect(waitingRow()).toBeNull();
       // 明确拒绝没有可核对的结果：不得保留 command_id 或核对入口。
       expect(document.querySelector('[data-testid="assist-first-pending"]')).toBeNull();
       expect(document.querySelector('[data-testid="assist-first-receipt"]')).toBeNull();
@@ -267,6 +292,8 @@ describe("首条消息的过渡状态（不空白、不重复、不伪造）", (
       expect(unresolved).not.toBeNull();
       expect(unresolved!.getAttribute("data-phase")).toBe("unresolved");
       expect(unresolved!.textContent).toContain("这条命令的响应丢了");
+      // 结果未决不等于还在跑：不画「AI 正在生成」的等待行。
+      expect(waitingRow()).toBeNull();
       // 未决命令的回执操作在正文里只有一行结论，完整身份在核对弹窗里。
       expect(unresolved!.querySelector('[data-testid="assist-first-pending"]')).not.toBeNull();
       expect(unresolved!.textContent).toContain("待核对");

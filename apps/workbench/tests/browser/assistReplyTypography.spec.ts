@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 /**
@@ -20,7 +22,7 @@ const sessionId = "66666666-6666-4666-8666-666666666666";
 const userMessageId = "c1111111-1111-4111-8111-111111111111";
 const assistantMessageId = "c3333333-3333-4333-8333-333333333333";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 const RICH = [
   "# 这次做了什么",
@@ -69,7 +71,7 @@ function message(id: string, seq: string, role: "USER" | "ASSISTANT", content: s
       cache_creation_tokens: null } };
 }
 
-async function install(page: Page): Promise<void> {
+async function install(page: Page, content = RICH): Promise<void> {
   await page.route(`${apiBase}/**`, async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -93,7 +95,7 @@ async function install(page: Page): Promise<void> {
     if (path === `${prefix}/assist-sessions/${sessionId}/goal`) return json({ goal: null, rounds: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return json({ items: [
       message(userMessageId, "1", "USER", "整理一下这次做了什么"),
-      message(assistantMessageId, "2", "ASSISTANT", RICH)] });
+      message(assistantMessageId, "2", "ASSISTANT", content)] });
     if (path.endsWith("/tool-calls")) return json({ session_id: sessionId,
       message_id: assistantMessageId, message_status: "COMPLETED", rounds: [] });
     if (path.endsWith("/live-preview/events")) return route.fulfill({ status: 502, headers: cors(), body: "" });
@@ -168,10 +170,10 @@ test("长中文回复：标题降档、块距统一、表格与代码块各自�
   const inline = await read("p.markdown-preview__paragraph code");
   expect(inline.background).not.toBe("rgba(0, 0, 0, 0)");
 
-  // 表格在自己的滚动盒里，宽度不超过消息列；页面没有级联横向溢出。
+  // 表格在自己的滚动盒里，宽度不超过消息列；窄内容时铺满阅读列、不需要横向滚动。
   const tableBox = await read(".markdown-preview__table-scroll");
   expect(tableBox.width).toBeLessThanOrEqual(body.width);
-  expect(tableBox.scrollWidth).toBeGreaterThanOrEqual(tableBox.clientWidth);
+  expect(tableBox.scrollWidth).toBe(tableBox.clientWidth);
 
   // 链接仍然可辨认：颜色不同于正文，且有下划线。
   const link = await read(".markdown-preview__paragraph a");
@@ -190,3 +192,111 @@ test("长中文回复：标题降档、块距统一、表格与代码块各自�
 
   await article.screenshot({ path: "D:/Develop/Relay-Agent/apps/workbench/results/assist-reply-06-long-chinese.png" });
 });
+
+/**
+ * 表格里的标识符不许被劈开（2026-11-01 E2E-ALL-01 用户实机截图）。
+ *
+ * 上一轮之前，单元格吃 `overflow-wrap: anywhere` + 表格 `width: 100%`：长标识符被算成
+ * 「一个字符也放得下」，于是 `list_directory` 显示成 `list_direct` + `ory`，
+ * `SESSION_TOOL_BUDGET_EXHAUSTED` 更是断成三行——工具名是用户判断成败的唯一凭据，
+ * 被切开就等于把结果说错了。这里不测 CSS 声明值，直接量文本矩形：
+ * 一个标识符落在一行 = 只有一个矩形；断成两半就会给出两个矩形。
+ *
+ * 同时锁住另外三条边界：中文说明仍要自然换行（不能为了保标识符把整张表变成 nowrap）、
+ * 字号不许为了宽度被调小、宽出来的部分只在表格自己的盒子里横向滚动，不外溢到页面。
+ */
+const IDENTIFIER_TABLE = [
+  "这一轮的工具调用结果如下：",
+  "",
+  "| 工具 | 状态 | 额度 | 说明 |",
+  "| --- | --- | --- | --- |",
+  "| `SESSION_TOOL_BUDGET_EXHAUSTED` | 未执行 | `maxToolCalls=12` | 本轮读取额度已经用完，这一条没有发给网关，所以什么都没读到。 |",
+  "| `list_directory` | 已结算 | `usedCalls=12` | 目录已绑定，返回四十二个条目。 |",
+  "| apply_changeset | BLOCKED | `rejection_reason` | 没有可用的写入连接，动作被拒绝。 |"
+].join("\n");
+
+function measureTable(table: HTMLTableElement) {
+  // 逐个 ASCII 词（≥6 字符，含工具名、状态词、错误码）用 Range 量它落在几行上。
+  const walker = document.createTreeWalker(table, NodeFilter.SHOW_TEXT);
+  const tokens: { text: string; lines: number }[] = [];
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node.textContent ?? "";
+    for (const match of text.matchAll(/[A-Za-z][A-Za-z0-9_.]{5,}/gu)) {
+      const start = match.index ?? 0;
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + match[0].length);
+      tokens.push({ text: match[0], lines: range.getClientRects().length });
+    }
+  }
+  const cells = [...table.querySelectorAll("td")];
+  return {
+    tokens,
+    // 中文说明格的行数：窄窗口里必须 > 1，否则说明我们把换行一起关掉了。
+    proseLines: cells.map((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      return range.getClientRects().length;
+    }),
+    fontSize: getComputedStyle(cells[0] ?? table).fontSize,
+    tableWidth: Math.round(table.getBoundingClientRect().width),
+    wrapWidth: Math.round(table.closest(".markdown-preview__table-scroll")?.clientWidth ?? 0)
+  };
+}
+
+async function openIdentifierTable(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  await install(page, IDENTIFIER_TABLE);
+  await page.goto(`/projects/${projectId}?skill=assist`);
+  await connect(page);
+  await page.locator(`[data-testid="assist-copy-${assistantMessageId}"]`).waitFor({ timeout: 30_000 });
+  const article = page.locator(`article.agent-message[data-role="ASSISTANT"]`).first();
+  const body = article.locator(".assist-message-markdown .markdown-preview");
+  const measured = await article.locator(".markdown-preview__table").first().evaluate(measureTable);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  return { article, body, measured, overflow };
+}
+
+test("表格窄窗口：标识符保持完整，中文照常换行，横向滚动只发生在表内", async ({ page }) => {
+  const { article, body, measured, overflow } = await openIdentifierTable(page, 843);
+  expect(measured.tokens.length).toBeGreaterThanOrEqual(4);
+  for (const token of measured.tokens) expect(token.lines, token.text).toBe(1);
+  // 字号仍是正文 body 档：宽度问题不用缩字解决。
+  expect(measured.fontSize).toBe("16px");
+  // 表格按内容变宽并超出滚动盒 → 多出来的宽度交给表自己的横向滚动条。
+  expect(measured.tableWidth).toBeGreaterThan(measured.wrapWidth);
+  expect(Math.round((await body.boundingBox())?.width ?? 0)).toBeGreaterThanOrEqual(measured.wrapWidth);
+  // 中文说明格确实还在换行（没有整表 nowrap）。
+  expect(Math.max(...measured.proseLines)).toBeGreaterThan(1);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await article.screenshot({ path: "D:/Develop/Relay-Agent/tmp/E2E-ALL-01-remediation/markdown-table-narrow.png" });
+});
+
+test("表格常规窗口：标识符不被劈开，滚动盒也不把消息列撑宽", async ({ page }) => {
+  const { article, body, measured, overflow } = await openIdentifierTable(page, 1270);
+  for (const token of measured.tokens) expect(token.lines, token.text).toBe(1);
+  // 撑宽的是表格自己，不是这一列：滚动盒始终等于正文宽度，页面不出级联横向滚动条。
+  expect(measured.wrapWidth).toBeLessThanOrEqual(Math.round((await body.boundingBox())?.width ?? 0));
+  expect(overflow).toBeLessThanOrEqual(1);
+  await article.screenshot({ path: "D:/Develop/Relay-Agent/tmp/E2E-ALL-01-remediation/markdown-table-normal.png" });
+});
+
+/**
+ * 主题口径（2026-11-01 全链路整改补）。
+ *
+ * 产品当前只有一套（浅色）主题令牌：`SafeMarkdown.css` 里没有 `color-scheme`，工作台也没有
+ * 深色开关，只有场景实验室的外壳有 `data-theme="dark"`。所以「明暗主题都正确」这一项在真实
+ * 应用里无法逐项量色——能钉住的是它**不依赖**某个主题：配色一律走令牌，将来令牌换深色，
+ * 正文与表格不会留下写死的颜色。这条静态断言就是那件可验证的事。
+ */
+test("正文与表格的配色只走令牌：没有写死的颜色等着被主题出卖", async () => {
+  const css = await readFile(new URL("../../src/components/SafeMarkdown.css", import.meta.url), "utf8");
+  expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/u);
+  expect(css).not.toMatch(/\brgba?\(/u);
+  expect(css).not.toMatch(/\bhsla?\(/u);
+  // 表格本次改的那一段（表身 + 单元格）必须留在令牌上，否则主题一换就会出现两套对比度。
+  expect(css).toMatch(
+    /\.markdown-preview__table th,\s*\.markdown-preview__table td \{[\s\S]*?border-bottom:\s*var\(--relay-border-width\) solid var\(--relay-color-border-separator\)/u,
+  );
+});
+

@@ -4,15 +4,52 @@
 
    数值一律 tabular-nums：余量从 5 位变 4 位时不能把「tokens」带着左右跳。 */
 
-.context-usage { display: grid; gap: var(--relay-space-2); }
+/* —— 两段容器（2026-11-01 用户指令：档位钉在菜单最底部，读数在上）——
+   上面是可滚动的读数区，下面是档位停靠区。分成两段 DOM 而不是给整块加 sticky：
+   停靠区是布局的参与者，它变高只会压缩上面的滚动区，不会遮住分项、错误提示或键盘焦点；
+   窗口极短、压缩到极限时由停靠区自己滚动，而三档排在它的第一屏，任何时候都点得到。
+   两行的最小值都写 0：不写的话浏览器会让轨道退到 min-content，读数区就顶穿浮层，
+   看起来又变成「整块一起滚」。 */
+.context-usage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
+  min-height: 0;
+}
 .context-usage > * { min-width: 0; }
+.context-usage-scroll {
+  display: grid;
+  align-content: start;
+  gap: var(--relay-space-3);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 滚动条占位恒定：回执/冲突提示出现导致内容变高时，纵向滚动条不会临时挤掉 8px 宽度，
+     那一挤就是「点完档位整块左右跳一下」的另一半来源。 */
+  scrollbar-gutter: stable;
+  padding-bottom: var(--relay-space-3);
+}
+.context-usage-dock {
+  display: grid;
+  align-content: start;
+  gap: var(--relay-space-2);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
 
 /* —— 分区 —— */
 .context-usage-section {
   display: grid;
-  gap: var(--relay-space-1);
-  padding-top: var(--relay-space-2);
+  gap: var(--relay-space-2);
+  padding-top: var(--relay-space-3);
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+/* 第一段是身份（上下文 / 当前档位），它不需要一条把自己和标题分开的线。 */
+.context-usage-section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
 }
 .context-usage-section-title {
   display: flex;
@@ -64,7 +101,18 @@
 .context-usage-row + .context-usage-row {
   border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
+/* 图标是这一行的**类别记号**，色彩只上图标：名称与数值一律保持中性文本色，
+   读数额时不受色相牵引，色盲或暗底下也不会把「工具调用」读成别的类别
+   （类别另有文字标签，颜色从不是唯一载体）。六色取自同一亮度带，
+   在浅色面与深色面（开发态 ScenarioLab）上都是 ≥3:1（见 design-tokens.json 的 contrastChecks）。
+   没配到色的类别（新增枚举值）自动落回中性色，不会画成不可辨认的黑。 */
 .context-usage-row-icon { flex: none; color: var(--relay-color-text-muted); }
+.context-usage-row[data-category="HISTORY"] .context-usage-row-icon { color: var(--relay-color-category-history); }
+.context-usage-row[data-category="SYSTEM"] .context-usage-row-icon { color: var(--relay-color-category-system); }
+.context-usage-row[data-category="TOOLS"] .context-usage-row-icon { color: var(--relay-color-category-tools); }
+.context-usage-row[data-category="FILE_READS"] .context-usage-row-icon { color: var(--relay-color-category-fileReads); }
+.context-usage-row[data-category="MEMORY"] .context-usage-row-icon { color: var(--relay-color-category-memory); }
+.context-usage-row[data-category="OTHER"] .context-usage-row-icon { color: var(--relay-color-category-other); }
 .context-usage-row-label {
   min-width: 0;
   color: var(--relay-color-text-secondary);
@@ -85,7 +133,32 @@
   font-size: var(--relay-font-size-caption);
 }
 
+/* 分区标题行（「最近一次模型调用」+ 右侧「历史记录」标签）：标题与短标签同一行。 */
+.context-usage-heading-row {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+.context-usage-tag {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+  cursor: help;
+}
+/* 状态行为空时不占高度：正常保存成功不需要在档位下再写一句「当前生效」。 */
+.context-usage-tier-state:empty { display: none; }
+
+/* 浮层里的摘要比圆环旁的同一套排版放大一档：16px 的「已用 / 预算」在这三层结构里
+   只是正文，分不出主次。只作用于浮层，不动圆环自己的样式。 */
+.context-usage .agent-chat-context-meter-amount { font-size: var(--relay-font-size-reading); }
+.context-usage .agent-chat-context-meter-percent { font-size: var(--relay-font-size-reading); }
+
 /* —— 档位 ——
+   2026-11-01 用户指令：删掉「当前档位 256K」标题行与「下次调用申请」行，停靠区只留三档。
+   单选态本身就是当前值，再写一遍只是重复；状态与申请量改由下方状态行/错误块按需说明。
    三个选项严格一行：radio 与文字同一个命中区（label），中间靠 gap 分开。
    不做卡片、不做两行：这一段是「选一个数」，不是三段并列的介绍。 */
 .context-usage-tiers {
@@ -137,18 +210,5 @@
   line-height: var(--relay-font-lineHeight-heading);
 }
 
-/* 窄窗口：选项收紧间距与字号（仍是一行）。 */
-@container composer-actions (max-width: 34rem) {
-  .context-usage-tiers { gap: var(--relay-space-2); }
-  .context-usage-tier { font-size: var(--relay-font-size-caption); }
-}
-
-/* 2026-10-30 复审（P0-C）：选择与保存分开后，两枚动作键与三档同一节，不另起一段说明。
-   窄窗口只剩一行时允许换行成两排，但不改变三档本身的横排。 */
-.context-usage-tier-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--relay-space-2);
-  margin-top: var(--relay-space-1);
-}
+/* 2026-10-31 用户指令：档位点击即保存，删掉「保存档位 / 重新读取」两枚动作键——
+   这一节只剩三档与状态行，不再有按钮行。 */

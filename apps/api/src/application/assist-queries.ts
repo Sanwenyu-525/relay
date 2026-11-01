@@ -13,6 +13,8 @@ import { availableFrozenMethod,
   inspectFrozenMethodSnapshot } from '../skills/builtin-methods.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
+import { assistUsageDto, projectAssistUsage, readLiveUsageEstimate,
+  type AssistCallUsageRow, type AssistUsageSummary } from './assist-usage-projection.js';
 
 /**
  * Assist 只读查询：全部按 Workspace 作用域过滤，跨作用域 ID 按不可见处理（404）。
@@ -130,12 +132,19 @@ export interface AssistMessageAttachmentContent {
   readonly dataBase64: string;
 }
 
-/** Short, reauthorized snapshot; revisions describe only disposable draft display. */
+/**
+ * Short, reauthorized snapshot; revisions describe only disposable draft display.
+ *
+ * `usage`（AGENT_LIVE_TOKEN_USAGE）：生成中的 Token 读数 = 已结算调用（`model_calls`，
+ * 权威）+ 当前在途调用的可丢弃估算（预览行）。两者按 call_id 去重，结算后账本优先。
+ * 不含记忆提取/压缩等辅助外呼（仓储按 `purpose='PRIMARY'` 过滤）。
+ */
 export async function readAssistLivePreview(db: DbExecutor, storage: ManagedContentStore,
   input: { workspaceId: string; sessionId: string; messageId: string }): Promise<{
     session_id: string; message_id: string; status: AssistMessageRow['status'];
     preview_revision: string; preview_text: string | null;
     preview_truncated: boolean; preview_available: boolean;
+    usage: JsonObject | null;
   }> {
   return withTransaction(db, async (r) => {
     if (await r.workspaces.lockAuthority(input.workspaceId, 'share') === undefined) {
@@ -147,7 +156,7 @@ export async function readAssistLivePreview(db: DbExecutor, storage: ManagedCont
         message?.session_id !== session.id) throw resourceNotFound('Assist message');
     const empty = { session_id: session.id, message_id: message.id,
       status: message.status, preview_revision: '0', preview_text: null,
-      preview_truncated: false, preview_available: false };
+      preview_truncated: false, preview_available: false, usage: null };
     if (message.role !== 'ASSISTANT' || message.intent !== 'DISCUSS' ||
         message.skill_snapshot !== null ||
         message.status !== 'PENDING' && message.status !== 'RUNNING' ||
@@ -175,10 +184,33 @@ export async function readAssistLivePreview(db: DbExecutor, storage: ManagedCont
         current.status !== 'PENDING' && current.status !== 'RUNNING' ||
         current.cancel_requested) return { ...empty, status: current?.status ?? message.status };
     const preview = await r.assist.readLivePreview(message.id);
+    const usageRows = await r.modelCalls.usageRowsForAssistMessages([message.id]);
+    const usage = projectAssistUsage(usageRows, readLiveUsageEstimate(preview?.usage));
     return { ...empty, preview_revision: preview === undefined ? '0' :
-      toDecimalString(preview.revision), preview_text: preview?.preview_text ?? null,
-      preview_truncated: preview?.truncated ?? false, preview_available: true };
+      toDecimalString(preview.revision),
+      // 纯用量帧会先建一行空正文：空串对客户端就是「还没有正文」，与旧 DTO 的 null 同义。
+      preview_text: preview === undefined || preview.preview_text === ''
+        ? null : preview.preview_text,
+      preview_truncated: preview?.truncated ?? false, preview_available: true,
+      usage: assistUsageDto(usage) };
   });
+}
+
+/**
+ * 消息列表的用量投影（AGENT_LIVE_TOKEN_USAGE）：一次查齐这一批回复的全部 PRIMARY 调用，
+ * 再按 message_id 汇总。完成态显示读这里，不把「部分调用未上报」的求和当成精确值。
+ */
+export async function readAssistMessageUsageSummaries(db: DbExecutor,
+  messageIds: readonly string[]): Promise<ReadonlyMap<string, AssistUsageSummary>> {
+  const rows = messageIds.length === 0 ? [] : await createRepositories(db).modelCalls
+    .usageRowsForAssistMessages(messageIds);
+  const grouped = new Map<string, AssistCallUsageRow[]>();
+  for (const row of rows) {
+    const list = grouped.get(row.assist_message_id) ?? [];
+    list.push({ ...row });
+    grouped.set(row.assist_message_id, list);
+  }
+  return new Map(messageIds.map((id) => [id, projectAssistUsage(grouped.get(id) ?? [])]));
 }
 
 export async function listAssistProposals(db: DbExecutor, storage: ManagedContentStore, input: {

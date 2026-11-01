@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { originAllows, type GatewayOrigin } from '../../src/application/gateway-actions.js';
-import { assistantSystemPrompt, assistantToolNames, actionSignature, delegateToolDeclared,
-  isEffectfulToolCall, isWithdrawnActionBlocked, shouldWrapUpReadonlyRound,
+import { assistantSystemPrompt, assistantToolNames, actionSignature, DEFAULT_MAX_ROUNDS,
+  DEFAULT_MAX_TOOL_CALLS, delegateToolDeclared,
+  isEffectfulToolCall, isWithdrawnActionBlocked, shouldWrapUpReadonlyRound, toolBudgetNotice,
   type WithdrawnActionGuard } from '../../src/application/assistant-readonly-round.js';
 import { childSessionScope, delegationResultText, readSubagentEnvelope,
   type DelegationChildRunner, type SubagentChildOutcome }
@@ -105,13 +106,49 @@ test('ASSISTANT_READ 只按能力放行，写能力整类都不在词表内', ()
 });
 
 test('预算用尽的最后一轮必须强制收尾：不再声明工具，只给模型一次作答机会', () => {
-  const base = { maxRounds: 6, maxToolCalls: 8 };
+  const base = { maxRounds: DEFAULT_MAX_ROUNDS, maxToolCalls: DEFAULT_MAX_TOOL_CALLS };
   assert.equal(shouldWrapUpReadonlyRound({ ...base, round: 0, usedCalls: 0 }), false);
   assert.equal(shouldWrapUpReadonlyRound({ ...base, round: 5, usedCalls: 3 }), false);
   // 轮次到顶：即使一个工具都没调过，也不能再开新一轮工具请求。
   assert.equal(shouldWrapUpReadonlyRound({ ...base, round: 6, usedCalls: 0 }), true);
   // 调用预算先用完：下一次请求就要收尾，不必等轮次到顶。
-  assert.equal(shouldWrapUpReadonlyRound({ ...base, round: 2, usedCalls: 8 }), true);
+  assert.equal(shouldWrapUpReadonlyRound({ ...base, round: 2, usedCalls: 12 }), true);
+});
+
+test('E2E-ALL-01：会话额度在契约上限之内，且与对话内工具循环同一产品默认', async () => {
+  // 额度可以谈，但必须是「契约上限之下、与同机另一条循环对齐」的那一档：
+  // 会话轮次 6/12 与 `conversation-execution` 的对话内工具循环一致，
+  // 而 12 轮 / 48 次是 Delegate 契约承认的硬上限（`execution-contract`）。
+  const { TOOL_LOOP_MAX_ROUNDS, TOOL_LOOP_MAX_TOOL_CALLS } =
+    await import('../../src/workflow/execution-contract.js');
+  const { CONVERSATION_TOOL_LOOP_MAX_ROUNDS, CONVERSATION_TOOL_LOOP_MAX_TOOL_CALLS } =
+    await import('../../src/application/conversation-execution.js');
+  assert.ok(DEFAULT_MAX_TOOL_CALLS <= TOOL_LOOP_MAX_TOOL_CALLS,
+    `会话额度 ${DEFAULT_MAX_TOOL_CALLS} 不得超过契约上限 ${TOOL_LOOP_MAX_TOOL_CALLS}`);
+  assert.ok(DEFAULT_MAX_ROUNDS <= TOOL_LOOP_MAX_ROUNDS,
+    `会话轮次 ${DEFAULT_MAX_ROUNDS} 不得超过契约上限 ${TOOL_LOOP_MAX_ROUNDS}`);
+  assert.equal(DEFAULT_MAX_TOOL_CALLS, CONVERSATION_TOOL_LOOP_MAX_TOOL_CALLS,
+    '同一条「对话里顺手读完再改」的工作不该因为走会话还是走对话工具循环而拿到两套额度');
+  assert.equal(DEFAULT_MAX_ROUNDS, CONVERSATION_TOOL_LOOP_MAX_ROUNDS);
+});
+
+test('额度自述：每次请求都让模型看见上限、已用与剩余，并说清并行声明各占一次', () => {
+  const notice = toolBudgetNotice({ round: 2, maxRounds: 6, usedCalls: 5, maxToolCalls: 12,
+    todoSettlementCalls: 1, maxTodoSettlementCalls: 6, allowTodo: true });
+  assert.match(notice, /第 3\/7 轮/);
+  assert.match(notice, /已用 5\/12 次，还能用 7 次/);
+  assert.match(notice, /各占一次额度/);
+  // 清单写回不占读取额度这件事必须写在自述里，否则模型仍会为了保额度而不写清单。
+  assert.match(notice, /不占读取额度/);
+  assert.match(notice, /最多 6 次/);
+  assert.match(notice, /已用 1/);
+});
+
+test('额度自述：没有声明待办的身份不出现 todo_write 那一句', () => {
+  const notice = toolBudgetNotice({ round: 0, maxRounds: 6, usedCalls: 0, maxToolCalls: 12,
+    todoSettlementCalls: 0, maxTodoSettlementCalls: 6, allowTodo: false });
+  assert.equal(notice.includes('todo_write'), false);
+  assert.match(notice, /还能用 12 次/);
 });
 
 /* ------------------------- 0126：会话内直接写文件 ------------------------- */
@@ -180,7 +217,8 @@ const childRunner: DelegationChildRunner = async () =>
 test('0128：委派工具只在本轮真能执行时才进词表——注入点与 Worker 身份缺一不可', () => {
   const base = { parentSessionId: null as string | null,
     runDelegation: childRunner as DelegationChildRunner | undefined,
-    workerId: 'worker-1' as string | undefined };
+    workerId: 'worker-1' as string | undefined,
+    delegationScopeReady: true };
   assert.equal(delegateToolDeclared(base), true);
   // 子会话仅一层（ADR-017）：已经挂在父会话下就再也拿不到这个词表项。
   assert.equal(delegateToolDeclared({ ...base, parentSessionId: 'root-session' }), false);
@@ -190,6 +228,19 @@ test('0128：委派工具只在本轮真能执行时才进词表——注入点�
   assert.equal(delegateToolDeclared({ ...base, runDelegation: undefined }), false);
   assert.equal(delegateToolDeclared({ ...base, workerId: undefined }), false);
   assert.equal(delegateToolDeclared({ ...base, workerId: '' }), false);
+});
+
+test('P0-1：会话撑不起子执行时不进词表——声明层与执行层共用同一个判定', () => {
+  // 2026-11-01 截图复现的是 SUBAGENT_PARENT_SCOPE_MISSING：会话没绑定项目或工作目录，
+  // 词表却把 delegate_subagent 给了模型，模型调用后被执行层拒绝。这一条钉住第 4 个条件：
+  // 范围不成立就不声明，而不是声明了再拒绝。
+  const base = { parentSessionId: null as string | null,
+    runDelegation: childRunner as DelegationChildRunner | undefined,
+    workerId: 'worker-1' as string | undefined,
+    delegationScopeReady: false };
+  assert.equal(delegateToolDeclared(base), false);
+  // 其余三个条件都不受影响：这里只让范围变 false，不能顺带放宽别的闸门。
+  assert.equal(delegateToolDeclared({ ...base, delegationScopeReady: true }), true);
 });
 
 test('0128：子会话的预算作用域指向根会话（子调用计入原主执行的共享预算）', () => {

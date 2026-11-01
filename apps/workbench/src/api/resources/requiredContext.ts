@@ -254,6 +254,16 @@ export interface RequiredContextAuditQuery {
   readonly refresh?: boolean;
 }
 
+/**
+ * 当前实际会按项目规则入口读文件的 Agent 是谁（P1-1，2026-10-31）。
+ *
+ * 本机运行时只有 Relay 内置 Agent 会读 AGENTS.md / CODEBUDDY.md 这类入口；界面因此显式传
+ * `agent=relay`，而不是依赖服务端默认值——默认值一改，预警就会按另一套入口文件名去数，
+ * 报出来的体积与真正会进上下文的内容对不上。将来接入别家 CLI 时，这一处换成会话上冻结的
+ * Agent 身份即可，请求形状与服务端画像都不用动。
+ */
+export const RELAY_REQUIRED_CONTEXT_AGENT = "relay";
+
 export async function getRequiredContextAudit(http: RelayHttp,
   query: RequiredContextAuditQuery): Promise<RequiredContextAudit> {
   const search = new URLSearchParams();

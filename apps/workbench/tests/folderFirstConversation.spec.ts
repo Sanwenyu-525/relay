@@ -58,6 +58,41 @@ function execution(over: Record<string, unknown> = {}) {
     revision: "1", ...over };
 }
 
+/**
+ * 单条会话读回投影（`include_context` 也走这一条）。
+ *
+ * `?project=` 入口、归属与目录绑定的前置读取都要读回确切会话；缺这一段时夹具按
+ * 「未预期请求」抛错，客户端会把一次成功的归属/绑定读成「结果未知」。
+ */
+function sessionProjection(over: Record<string, unknown> = {}) {
+  return { id: sessionId, workspace_id: workspaceId, project_id: projectId, task_id: null,
+    title: "关于MyProject", status: "ACTIVE", revision: "1", conversation_mode: "AGENT",
+    remember: true, working_resource_id: null,
+    created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z", ...over };
+}
+
+/**
+ * 发送前风险审计的「干净」读数：`state: OK` 且 `severity: NONE` 才直接放行。
+ *
+ * 2026-10-30 起首条发送要先过一次风险预检（P0-C）；夹具不提供这一段时审计解析失败会被
+ * 判成「风险未知」而拦住发送，本文件里所有走首条发送的用例都会停在输入器上。
+ * 这里只提供「没有风险」这一档：风险确认与未知那几档由专门的风险用例覆盖。
+ */
+function cleanAudit(rootPath: string) {
+  return { state: "OK", detail: "", agent: { id: "relay", label: "Relay" }, root: rootPath,
+    scanned_at: "2026-10-02T00:00:00Z", fingerprint: "fp-1", severity: "NONE", files: [],
+    budget: { provider_window_tokens: null, provider_window_known: false, call_budget_tokens: 256000,
+      call_budget_source: "APPLICATION_DEFAULT", effective_input_tokens: null,
+      effective_basis: "CALL_BUDGET",
+      reserves: { output_tokens: 0, system_prompt_tokens: 0, tool_definition_tokens: 0, history_tokens: 0 },
+      estimated_total_input_tokens: null, required_total_tokens: 0, required_total_share: 0,
+      confidence: "WINDOW_UNKNOWN",
+      estimate: { method: "BYTES", bytes_per_token: 4, note: "" } },
+    reasons: [], suggestions: [], skipped: [], access: null,
+    thresholds: { single_file: { notice: 0.1, high: 0.3, severe: 0.6 },
+      total_files: { notice: 0.1, high: 0.3, severe: 0.6 } } };
+}
+
 interface Routes {
   loseDirectoryResponse?: boolean;
   apply?: () => Response;
@@ -75,6 +110,10 @@ interface Routes {
   messageRejection?: () => Response;
   /** GET /commands/:id —— 只按原 command_id 返回回执。 */
   receipt?: (commandId: string) => Response;
+  /** Workspace 默认目录投影：默认未设置；风险用例显式声明 READY / UNAVAILABLE。 */
+  defaultDirectory?: () => Response;
+  /** 必读文件审计：默认干净；风险用例显式声明 SCAN_UNAVAILABLE 等读数。 */
+  requiredContextAudit?: () => Response;
 }
 
 function router(routes: Routes, posts: { path: string; body: unknown }[]) {
@@ -95,6 +134,10 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
         result: { session_id: sessionId, working_resource_id: body.resource_id, revision: "2" },
         links: { resource: "" } });
       }
+      if (path === `${prefix}/assist-sessions/${sessionId}/binding`) return json({
+        command_id: body.command_id, committed_at: "2026-10-16T00:00:00Z",
+        result: { session_id: sessionId, project_id: body.project_id, revision: "2" },
+        links: { resource: "" } });
       if (path === `${prefix}/working-directories/open`) return routes.open?.(body) ?? json({
         command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z", result: readyDirectory(),
         links: { resource: "" } }, 200);
@@ -130,10 +173,14 @@ function router(routes: Routes, posts: { path: string; body: unknown }[]) {
     if (receipt) {
       return routes.receipt?.(receipt[1]!) ?? json({ code: "NOT_FOUND", detail: "命令回执不存在" }, 404);
     }
-    if (path === `${prefix}/default-working-directory`) return json({ resource_id: null,
+    if (path === `${prefix}/default-working-directory`) return routes.defaultDirectory?.() ?? json({
+      resource_id: null,
       canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
       status: "UNSET", reason: null,
       revision: "0" });
+    if (path.startsWith(`${prefix}/working-directories/`) && path.endsWith("/required-context-audit")) {
+      return routes.requiredContextAudit?.() ?? json(cleanAudit(root));
+    }
     if (path === `${prefix}/projects/${projectId}`) return json(project());
     if (path === `${prefix}/projects/${projectId}/state`) return json({ project_id: projectId, revision: "1",
       phase_key: "GENERAL", next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
@@ -173,6 +220,7 @@ describe("文件夹入口与对话直接执行", () => {
     const posts: { path: string; body: unknown }[] = [];
     let attempts = 0;
     vi.stubGlobal("fetch", router({
+      sessionRead: () => response(sessionProjection()),
       sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
         task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
         updated_at: "2026-10-02T00:00:00Z" }] }),
@@ -189,7 +237,7 @@ describe("文件夹入口与对话直接执行", () => {
           status: attempts === 1 ? "TASK_PREPARED" : "DELEGATED",
           task_id: taskId, run_id: attempts === 1 ? null : runId, revision: "2" })] })
     }, posts));
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
     try {
       await openWorkingDirectory(root);
       await flush();
@@ -305,6 +353,31 @@ describe("文件夹入口与对话直接执行", () => {
       const text = view.wrapper.get('[data-testid="collab-current-directory"]').text();
       expect(text).toContain("未就绪");
       expect(text).not.toContain("发送后绑定");
+    } finally { view.unmount(); }
+  });
+
+  it("默认目录失效：提示说清风险未核实，且明说发送前还会再检查一次", async () => {
+    // BUG-CHAT-CONTEXT-CROSS-TALK：这一行此前写「仍可发送」，但发送入口实际会停在
+    // 风险确认条上等用户选「仍然发送 / 取消发送」。两处说法必须一致，也不得把
+    // 一次没扫成的审计说成「没有风险」。
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const fetchMock = router({
+      defaultDirectory: () => response({
+        resource_id: "res-1", canonical_root: "D:\\Gone", display_name: "Gone", write_tier: null,
+        default_write_tier: null, status: "UNAVAILABLE", reason: "DIRECTORY_UNAVAILABLE", revision: "2" }),
+      requiredContextAudit: () => response({ ...cleanAudit("D:\\Gone"), state: "SCAN_UNAVAILABLE",
+        detail: "目录已不存在或无法核对真实路径。", root: null })
+    }, posts);
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await mountWorkbench("/agent");
+    try {
+      const notice = view.wrapper.get('[data-testid="context-risk-unavailable"]');
+      expect(notice.text()).toContain("无法完成风险检查：目录已不存在或无法核对真实路径。");
+      expect(notice.text()).toContain("发送前会再检查一次");
+      expect(notice.text()).not.toContain("仍可发送");
+      // 这只是读数提示：页面读取本身不产生任何写命令。
+      expect(posts.length).toBe(0);
     } finally { view.unmount(); }
   });
 
@@ -668,11 +741,12 @@ describe("文件夹入口与对话直接执行", () => {
     const fetchMock = router({
       open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
         result: readyDirectory(), links: { resource: "" } }, 200),
+      sessionRead: () => response(sessionProjection()),
       sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
         task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
         updated_at: "2026-10-02T00:00:00Z" }] }) }, posts);
     vi.stubGlobal("fetch", fetchMock);
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
     try {
       await openWorkingDirectory(root);
       await flush();
@@ -711,6 +785,7 @@ describe("文件夹入口与对话直接执行", () => {
     const fetchMock = router({
       open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
         result: readyDirectory(), links: { resource: "" } }, 200),
+      sessionRead: () => response(sessionProjection()),
       sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
         task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
         updated_at: "2026-10-02T00:00:00Z" }] }),
@@ -744,7 +819,7 @@ describe("文件夹入口与对话直接执行", () => {
       }
       return original(input, init);
     }));
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
     try {
       await openWorkingDirectory(root);
       await flush(); await flush();
@@ -774,6 +849,7 @@ describe("文件夹入口与对话直接执行", () => {
     const fetchMock = router({
       open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
         result: readyDirectory(), links: { resource: "" } }, 200),
+      sessionRead: () => response(sessionProjection()),
       sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
         task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
         updated_at: "2026-10-02T00:00:00Z" }] }),
@@ -810,7 +886,7 @@ describe("文件夹入口与对话直接执行", () => {
       }
       return original(input, init);
     }));
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
     try {
       await openWorkingDirectory(root);
       await flush(); await flush();
@@ -839,6 +915,7 @@ describe("文件夹入口与对话直接执行", () => {
     const fetchMock = router({
       open: (body) => response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
         result: readyDirectory(), links: { resource: "" } }, 200),
+      sessionRead: () => response(sessionProjection()),
       sessions: () => response({ items: [{ id: sessionId, workspace_id: workspaceId, project_id: projectId,
         task_id: null, title: "关于MyProject", status: "ACTIVE", revision: "1",
         updated_at: "2026-10-02T00:00:00Z" }] }) }, posts);
@@ -849,7 +926,7 @@ describe("文件夹入口与对话直接执行", () => {
       }
       return original(input, init);
     }));
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
     try {
       await openWorkingDirectory(root);
       await flush();

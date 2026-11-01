@@ -4,7 +4,7 @@ import { RelayContractError, RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
 import { sessionContextBudgetFrom, sessionContextUsageFrom } from "../parse/assist";
-import { assistMessageFrom, assistMessageRecallFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
+import { assistMessageFrom, assistMessageRecallFrom, assistantProfileFrom, assistProposalFrom, assistSessionBindingFrom, assistSessionDeleteFrom, assistSessionDirectoryBindingFrom, assistSessionForkFrom, assistSessionFrom, assistSessionPinFrom, assistSessionStateFrom, assistSessionTitleFrom, assistSessionUnreadFrom, assistSourceBody, conversationExecutionFrom, conversationExecutionSummaryFrom, packDefinitionFrom, sessionToolCallsFrom, skillDefinitionFrom, tokenUsageFrom, workingDirectoryFrom, workspaceDefaultDirectoryFrom } from "../parse/assist";
 import { commandEnvelopeFrom } from "../parse/projects";
 import type { RelayChatMode, RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAttachmentContent, RelayAssistMessageAttachmentUpload, RelayAssistMessageRecall, RelayAssistProposal, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistantProfile, RelayContextBudgetTokens, RelayConversationMode, RelayAssistSourceRef, RelayConversationExecution, RelayConversationExecutionStage, RelayPackDefinition, RelaySessionToolCalls, RelaySkillDefinition, RelaySkillInput, RelayWorkingDirectory, RelayWorkspaceContextBudgetResult, RelayWorkspaceDefaultDirectory, RelayWorkspaceDefaultDirectoryResult, RelayWorkspaceDefaultWriteTierResult, RelaySessionContextBudgetResult, RelaySessionContextUsage } from "../dtos/assist";
 import type { RelayCommandEnvelope } from "../dtos/projects";
@@ -272,7 +272,8 @@ export function assistLivePreviewFrom(raw: unknown, expectedSessionId: string, e
     previewRevision: decimal(row, "preview_revision", "assist live preview"),
     previewText: nullableString(row, "preview_text", "assist live preview"),
     previewTruncated: boolean(row, "preview_truncated", "assist live preview"),
-    previewAvailable: boolean(row, "preview_available", "assist live preview") };
+    previewAvailable: boolean(row, "preview_available", "assist live preview"),
+    usage: tokenUsageFrom(row.usage, "assist live preview usage") };
 }
 
 export async function getAssistLivePreview(http: RelayHttp, sessionId: string, messageId: string): Promise<RelayAssistLivePreview> {

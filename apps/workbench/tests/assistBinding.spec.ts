@@ -216,12 +216,14 @@ describe("会话工作目录绑定（0087）", () => {
       expect(directory[0]!.body.resource_id).toBe("res-1");
       expect((directory[0]!.body as { command_id?: string }).command_id)
         .toMatch(/^[0-9a-f-]{36}$/u);
-      const notice = view.wrapper.get('[data-testid="collab-directory-binding"]');
-      expect(notice.attributes("data-status")).toBe("CONFIRMED");
-      expect(notice.attributes("data-session")).toBe(sessionId);
-      expect(notice.attributes("data-resource")).toBe("res-1");
-      // 目录是作用域不是授权：文案不得暗示已获得读取或写入权限。
-      expect(notice.text()).toContain("不授予写权限");
+      // 2026-11-01 P1-2：绑定成功不再常驻一条回执。这条命令的身份仍要被界面确认收到，
+      // 确认的方式是把事实写进目录细条（服务端读回的那条会话作用域），而不是在输入卡上方
+      // 再摆一句同样的话——那一句会一直留在那儿，包括用户切到别的会话之后。
+      expect(view.wrapper.find('[data-testid="collab-directory-binding"]').exists()).toBe(false);
+      await flush();
+      expect(folderStripName()).toBe("MyProject");
+      // 未确认的绑定不能显示成已绑定：回执清空的前提是服务端确实读回了这个资源。
+      expect(h.directory.value).toBe("res-1");
 
       // 再打开同一个目录不重复发命令：已绑到同一资源时不制造第二次写入。
       await openFolder();
@@ -240,8 +242,8 @@ describe("会话工作目录绑定（0087）", () => {
       await startDiscussion(view, "看一下这个目录下面的文件");
       await openWorkingDirectory(root);
       for (let i = 0; i < 12 && h.directory.value === null; i++) await flush();
-      expect(view.wrapper.get('[data-testid="collab-directory-binding"]').attributes("data-status"))
-        .toBe("CONFIRMED");
+      // 成功回执已退场（P1-2），这里的同步锚点改成服务端事实本身：绑定落账 + 作用域重读回来。
+      expect(view.wrapper.find('[data-testid="collab-directory-binding"]').exists()).toBe(false);
 
       // 绑定改的是服务端事实：回执之后必须还有一次带 include_context 的重读，两处投影才会跟上。
       expect(h.scopeReads.lastIndexOf("READ")).toBeGreaterThan(h.scopeReads.indexOf("BIND"));
@@ -312,8 +314,11 @@ describe("普通讨论归入项目（同会话接续）", () => {
       expect(binding).toHaveLength(1);
       expect((binding[0]!.body as { command_id?: string }).command_id).toMatch(/^[0-9a-f-]{36}$/u);
       expect(binding[0]!.body.project_id).toBe(projectId);
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("CONFIRMED");
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-session")).toBe(sessionId);
+      // 归属成功后不再留一条常驻回执（P1-2）；持久的说法只有细条那一句，它读的是
+      // 服务端重回来的会话归属，因此「已归入项目」说的确实是这条会话。
+      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
+      await flush();
+      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
       // 归属不等于授权：不进入执行链、不产生提案、不新建第二个会话。
       expect(h.posts.some((post) => post.path.endsWith("/execution-requests"))).toBe(false);
       expect(h.posts.some((post) => post.path.includes("/applications"))).toBe(false);
@@ -416,8 +421,42 @@ describe("归属命令的结果未知与迟到响应", () => {
       // 只按原 command_id 查询，且没有换新 ID 重发归属命令。
       expect(h.gets).toContain(`${prefix}/commands/${commandId}`);
       expect(bindingPosts(h)).toHaveLength(1);
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("CONFIRMED");
+      // 核对回来的同样是成功：回执与那颗核对键一起收干净，不留常驻文案，也不停在「待核对」。
+      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
+      expect(view.wrapper.find('[data-testid="collab-binding-receipt"]').exists()).toBe(false);
     } finally { view.unmount(); }
+  });
+
+  /**
+   * P0-2（2026-11-01 用户截图指认的一类矛盾）：归属命令是按**那条会话**发的，
+   * 提示却过去只看「有没有记录」。在途期间新开一段讨论，输入卡上方不能把上一段讨论的
+   * 在途状态说成「这段讨论正在归入项目」。
+   */
+  it("归属命令在途时新开一段讨论，那句在途提示不会跟着搬到新对话上方", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const h = harness();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
+    const view = await mountWorkbench("/agent");
+    try {
+      await startDiscussion(view, "先讨论一下这个目录");
+      await openFolder();
+      // 还在原来那段讨论上时，在途提示说的是它自己：这一刻它应当可见。
+      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("PENDING");
+
+      await openFolderDialog();
+      await clickPortal("collab-new-conversation");
+      await flush();
+      // 换到用户新开的这段讨论之后，那句话不再属于屏上的会话，因此整块不渲染。
+      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
+      release();
+      await flush();
+      await flush();
+      // 迟到的成功只落它自己那条会话：新对话上方仍然没有归属提示。
+      expect(bindingPosts(h)).toHaveLength(1);
+      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
+    } finally { release(); view.unmount(); }
   });
 
   it("归属命令在途时离页不产生重复归属", async () => {
@@ -493,7 +532,7 @@ describe("归属命令的结果未知与迟到响应", () => {
       const binding = bindingPosts(h);
       expect(binding).toHaveLength(1);
       expect(binding[0]!.body.project_id).toBe(projectId);
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("CONFIRMED");
+      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
       // 归属后按项目身份重读同一会话，历史仍可读，没有新建第二个会话。
       expect(h.gets).toContain(`${prefix}/assist-sessions/${sessionId}/messages`);
       expect(h.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);

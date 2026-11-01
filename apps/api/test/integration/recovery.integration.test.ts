@@ -11,7 +11,8 @@ import { sql } from 'kysely';
 import { delegateTask } from '../../src/application/delegate-task.js';
 import { applySafeControl, readControlRequest, requestRunControl, resumeRun } from '../../src/application/control-requests.js';
 import { advanceRunStep, SimulatedWorkerCrash } from '../../src/application/run-steps.js';
-import { recoverStoppedWorker, scanRecoveryCandidates } from '../../src/application/recover-run.js';
+import { noteStrandedWorker, recoverStoppedWorker, scanRecoveryCandidates } from '../../src/application/recover-run.js';
+import { recoverStrandedFencedClaim } from '../../src/worker/supervisor.js';
 import { readRunById } from '../../src/application/run-queries.js';
 import { lockTaskAndRun } from '../../src/application/lock-task-run.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
@@ -330,6 +331,76 @@ test('P08 a crash after publish reconciles success without a second publish or a
   const versions = await sql<{ count: bigint }>`select count(*) as count from artifact_versions v join artifacts a on a.id = v.artifact_id where a.task_id = ${f.taskId}`.execute(app.db);
   assert.equal(versions.rows[0]?.count, 1n);
 });
+
+test('P1 过期领取只写一条人可见事实，租约到期不得触发重入', async () => {
+  const f = await fixture();
+  const commandId = await claimExpiredDelivery(f);
+  await sql`update run_invocations set lease_until = now() - interval '1 second'
+    where run_id = ${f.runId}`.execute(app.db);
+  const claimed = await sql<{ status: string; worker_id: string | null; lease_until: Date | null }>`
+    select status, worker_id, lease_until from run_invocations where run_id = ${f.runId}
+  `.execute(app.db);
+  assert.equal(claimed.rows[0]?.status, 'ACTIVE');
+  assert.equal(claimed.rows[0]?.worker_id, f.workerId);
+  assert.equal(await recoverStrandedFencedClaim({ db: app.db, dataRoot, runId: f.runId,
+    workerId: f.workerId }), 'NO_STOP_EVIDENCE');
+  assert.equal(await noteStrandedWorker(app.db, { runId: f.runId, workerId: f.workerId }), true);
+  assert.equal(await noteStrandedWorker(app.db, { runId: f.runId, workerId: f.workerId }), false);
+
+  const notices = await sql<{ count: bigint }>`
+    select count(*)::bigint as count from activity_records
+    where event_type = 'RUN_RECOVERY_REQUIRED'
+      and fact_refs ->> 'run_id' = ${f.runId} and fact_refs ->> 'worker_id' = ${f.workerId}
+  `.execute(app.db);
+  assert.equal(notices.rows[0]?.count, 1n);
+  // 通知不授予执行权：Run 仍归原 Worker，领取仍占着，命令尚未重新排队。
+  assert.equal((await runState(f.runId)).worker_id, f.workerId);
+  const delivery = await sql<{ invocation_status: string; outbox_status: string }>`
+    select i.status as invocation_status, o.status as outbox_status
+    from run_invocations i join run_command_outbox o on o.command_id = ${commandId}
+    where i.run_id = ${f.runId}
+  `.execute(app.db);
+  assert.deepEqual(delivery.rows[0], { invocation_status: 'ACTIVE', outbox_status: 'CLAIMED' });
+});
+
+test('P1 已持久 fence 在重投前崩溃时，常驻恢复入口按原证据收口同一领取', async () => {
+  const f = await fixture();
+  const commandId = await claimExpiredDelivery(f);
+  await assert.rejects(recoverStoppedWorker(app.db, { runId: f.runId,
+    stoppedWorkerId: f.workerId, stoppedEvidence: 'test: first worker process stopped',
+    storage: f.storage, hooks: { afterFence: async () => { throw new SimulatedWorkerCrash('after fence commit'); } } }),
+  SimulatedWorkerCrash);
+  assert.equal((await runState(f.runId)).worker_id, null);
+
+  assert.equal(await recoverStrandedFencedClaim({ db: app.db, dataRoot, runId: f.runId,
+    workerId: f.workerId }), 'REQUEUED');
+  const delivery = await sql<{ invocation_status: string; outbox_status: string;
+    stop_evidence: string | null }>`
+    select i.status as invocation_status, o.status as outbox_status, i.stop_evidence
+    from run_invocations i join run_command_outbox o on o.command_id = ${commandId}
+    where i.run_id = ${f.runId}
+  `.execute(app.db);
+  assert.deepEqual(delivery.rows[0], { invocation_status: 'IDLE', outbox_status: 'PENDING',
+    stop_evidence: 'test: first worker process stopped' });
+  // 收口只释放旧领取；Run 的业务状态没有被恢复动作改写。
+  assert.equal((await runState(f.runId)).status, 'CREATED');
+});
+
+async function claimExpiredDelivery(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+  return withTransaction(app.db, async (repositories) => {
+    const command = await sql<{ id: string }>`
+      select id from run_commands where run_id = ${f.runId} order by created_at, id limit 1
+    `.execute(app.db);
+    const commandId = command.rows[0]?.id;
+    if (commandId === undefined) throw new Error('missing Run START command');
+    const claim = await repositories.dispatch.claimInvocation(f.runId, commandId, f.workerId, 60_000);
+    await repositories.dispatch.claimOutbox(commandId, f.workerId, claim.epoch);
+    const worker = await repositories.runs.claimWorker(f.runId, f.workerId,
+      new Date(Date.now() + 60_000));
+    if (worker === undefined) throw new Error('claim Run worker');
+    return commandId;
+  });
+}
 
 test('P08 a second crash after durable fence resumes reconciliation with the same operation_id', async () => {
   const f = await fixture();

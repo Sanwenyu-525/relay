@@ -9,6 +9,7 @@ import {
   TODO_PROMPT_ITEM_LIMIT,
   TodoRequestRejected,
   todoParallelLimit,
+  parseNewTaskPrefix,
   todoPromptSelection,
   todoScopeKey,
   todoWriteToolSpec,
@@ -162,4 +163,16 @@ test('工具结果与 spec：状态、版本与必填参数就位', () => {
   assert.deepEqual(spec.parameters.required, ['items']);
   const properties = spec.parameters.properties as { expected_version: { minimum: number } };
   assert.equal(properties.expected_version.minimum, 0, '首次写入必须能用 0 表达基线');
+});
+test('换任务的显式声明：/newtask 剥掉命令只留正文，其它写法一律不认', () => {
+  // 与「新任务：」同义：命令决定这一轮怎么受理，命令后面的内容才是正文。
+  assert.deepEqual(parseNewTaskPrefix('/newtask 整理发布说明'), { rest: '整理发布说明' });
+  assert.deepEqual(parseNewTaskPrefix('  /NEWTASK   换一件事  '), { rest: '换一件事' });
+  // 只有命令没有内容：返回空正文，由调用方拒绝（不能发一条空消息）。
+  assert.deepEqual(parseNewTaskPrefix('/newtask'), { rest: '' });
+  // 不做关键词猜测：句子中间出现、或只是提到这个词，都不算声明。
+  assert.equal(parseNewTaskPrefix('请继续 /newtask 这件事'), null);
+  assert.equal(parseNewTaskPrefix('newtask 整理发布说明'), null);
+  assert.equal(parseNewTaskPrefix('新任务：整理发布说明'), null);
+  assert.equal(parseNewTaskPrefix(''), null);
 });

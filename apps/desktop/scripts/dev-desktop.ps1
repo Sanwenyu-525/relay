@@ -7,6 +7,8 @@
 #   ... -Action status   查看后台实例状态（runner / 窗口 / Vite / 日志路径）。
 #   ... -Action stop     停止后台实例：结束 runner 进程树并兜底清理 dev 版窗口与 Vite 残留。
 #   ... -Action restart  先关闭旧的 dev 窗口（后台或前台实例），再以前台方式重新启动。
+#   ... -Action close    只关闭旧的 dev 窗口并等单实例锁释放，不开新窗口。启动器菜单 6 在
+#                        刷新暂存与补迁移之前调用它：数据库结构升级不能压在还连着的窗口上。
 #                        （仓库根的 dev-desktop.bat 已删除，请直接调用本脚本。）
 # 可选参数：
 #   -ConfigPath <绝对路径>   桌面 desktop.env（默认优先 .relay-test\desktop.env，其次 %APPDATA%\dev.relay.agent\desktop.env）
@@ -21,7 +23,7 @@
 # 限制：与打包版共用单实例互斥；运行打包版时请先关闭，反之亦然。
 # Rust 源码变更由 tauri dev 自动重编译并重启应用；前端由 Vite HMR 热更新。
 param(
-  [ValidateSet('', 'start', 'stop', 'status', 'restart')]
+  [ValidateSet('', 'start', 'stop', 'status', 'restart', 'close')]
   [string]$Action = '',
   [string]$ConfigPath,
   [int]$FrontendPort = 5173,
@@ -40,7 +42,28 @@ $tauriRoot = Join-Path $desktopRoot 'src-tauri'
 $resourceRoot = Join-Path $tauriRoot 'resources'
 $workbenchRoot = Join-Path $repoRoot 'apps\workbench'
 $node = Join-Path $repoRoot '.research\runtime-cache\node-v24.21.0-win-x64\node.exe'
-$corepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
+# pnpm 的调用方式不能写死成「可移植 node + 同级 corepack」：.research\runtime-cache 下的
+# 可移植运行时只落了 node.exe，没有 node_modules\corepack，硬编码会让开发窗口在入参自检
+# 阶段直接抛 Missing input 并退回菜单。按仓库根 scripts\dev-stack.ps1 的 Resolve-PnpmRunner
+# 同序回落：可移植 corepack → PATH 上的 pnpm → PATH 上的 corepack（钉 pnpm@9.15.9）。
+function Resolve-PnpmRunner {
+  $portableCorepack = Join-Path (Split-Path -Parent $node) 'node_modules\corepack\dist\corepack.js'
+  if ((Test-Path -LiteralPath $node -PathType Leaf) -and (Test-Path -LiteralPath $portableCorepack -PathType Leaf)) {
+    return @{ Name = 'corepack pnpm@9.15.9（runtime-cache）'; File = $node; Prefix = @($portableCorepack, 'pnpm@9.15.9') }
+  }
+  $pnpm = Get-Command pnpm -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -match '\.(exe|cmd)$' } | Select-Object -First 1
+  if ($null -ne $pnpm) {
+    return @{ Name = "pnpm（PATH：$($pnpm.Source)）"; File = $pnpm.Source; Prefix = @() }
+  }
+  $corepack = Get-Command corepack -CommandType Application -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -match '\.(exe|cmd)$' } | Select-Object -First 1
+  if ($null -ne $corepack) {
+    return @{ Name = "corepack pnpm@9.15.9（PATH：$($corepack.Source)）"; File = $corepack.Source; Prefix = @('pnpm@9.15.9') }
+  }
+  return $null
+}
+$pnpmRunner = Resolve-PnpmRunner
 
 $stateDir = Join-Path $repoRoot '.relay-dev\dev-desktop'
 $pidFile = Join-Path $stateDir 'runner.pid'
@@ -107,7 +130,7 @@ function Stop-DevDesktop {
 }
 
 # 后台管理模式：PID 记录 + 日志集中在 .relay-dev\dev-desktop\；前台流程保持原样。
-if ($Action -eq 'restart') {
+if ($Action -eq 'restart' -or $Action -eq 'close') {
   Stop-DevDesktop -IncludeWindow
   # 等窗口和单实例锁真正退出，避免紧接着的前台启动被旧实例挡住。
   $deadline = (Get-Date).AddSeconds(15)
@@ -124,6 +147,7 @@ if ($Action -eq 'restart') {
     }
   } while ($busy -and (Get-Date) -lt $deadline)
   if ($busy) { throw '旧桌面窗口未在 15 秒内退出，未启动第二个实例。请手动关闭后重试。' }
+  if ($Action -eq 'close') { Write-Host '旧开发窗口已关闭。'; return }
   Write-Host '旧开发窗口已清理，正在重新启动…'
 }
 
@@ -194,7 +218,7 @@ function Invoke-Pnpm {
   param([string]$Directory, [string[]]$Arguments)
   Push-Location $Directory
   try {
-    & $node $corepack 'pnpm@9.15.9' @Arguments
+    & $pnpmRunner.File @($pnpmRunner.Prefix + $Arguments)
     # 用户按 Ctrl+C 时控制台向整个进程组广播 CTRL_C_EVENT，tauri/cargo 以 STATUS_CONTROL_C_EXIT 结束。
     # 这是预期内的停止方式（finally 仍会收尾），不能当成工具失败抛错。
     if ($LASTEXITCODE -eq -1073741510) { return }
@@ -207,9 +231,15 @@ function Invoke-Pnpm {
 
 Assert-DesktopAvailable
 
-foreach ($path in @($node, $corepack, (Join-Path $tauriRoot 'tauri.conf.json'))) {
+if ($null -eq $pnpmRunner) {
+  throw '未找到 pnpm：runtime-cache 下的 node 不带 corepack，PATH 上也没有 pnpm 或 corepack。请安装 pnpm@9.15.9，或在 .research\runtime-cache\node-v24.21.0-win-x64\node_modules 下补齐 corepack。'
+}
+foreach ($path in @($node, (Join-Path $tauriRoot 'tauri.conf.json'))) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing input: $path" }
 }
+Write-Host "pnpm 运行方式：$($pnpmRunner.Name)"
+$dataRootShown = if ($env:RELAY_DESKTOP_DATA_ROOT) { $env:RELAY_DESKTOP_DATA_ROOT } else { '(未设置，宿主回落到 %APPDATA%\dev.relay.agent\data)' }
+Write-Host "桌面数据目录：$dataRootShown"
 
 # 1) 暂存开发资源：dev 模式 Resource 目录解析到 src-tauri 根。
 #    复用 build-release.ps1 已暂存的 resources\（由 dev-stack.bat Build 维护）；缺失时要求先构建一次。
@@ -272,7 +302,8 @@ Write-Host "dev 桌面使用配置：$env:RELAY_DESKTOP_CONFIG_PATH"
 $trialConfig = Join-Path $repoRoot '.relay-test\desktop.env'
 if (-not $env:RELAY_DESKTOP_DATA_ROOT -and
     [IO.Path]::GetFullPath($ConfigPath) -eq [IO.Path]::GetFullPath($trialConfig)) {
-  $env:RELAY_DESKTOP_DATA_ROOT = Join-Path $repoRoot '.relay-test\data'
+  # 同 test-desktop.ps1：仓库内的数据目录会被 API 的值校验拒绝，改用 APPDATA 下的 trial-data。
+  $env:RELAY_DESKTOP_DATA_ROOT = Join-Path (Join-Path $env:APPDATA 'dev.relay.agent') 'trial-data'
   Write-Host "dev 桌面数据目录：$env:RELAY_DESKTOP_DATA_ROOT"
 }
 
@@ -359,10 +390,36 @@ if (-not $portBusy) {
 $vsDevCmd = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat'
 if (-not (Test-Path -LiteralPath $vsDevCmd -PathType Leaf)) { throw "缺少 VS Build Tools：$vsDevCmd" }
 $env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-msvc'
-cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && set" | ForEach-Object {
-  $name, $value = $_ -split '=', 2
-  if ($name -and $null -ne $value) { Set-Item -Path "Env:$name" -Value $value }
+# 两张单独处理：先跑完 cmd 再解析，失败要能看出来（以前把管道直接接给 ForEach-Object，
+# cmd 报错时只能看到它自己吐的两行中文，什么变量没导进来也不知道）。
+# PATH 按并集去重：菜单进程常驻时每选一次 6 都会再导入一遍 VS 环境，
+# 不去重会让 PATH 逐轮膨胀，超过 cmd 的单行 8191 字符上限后就只剩「输入行太长。／命令语法不正确。」。
+# 这里必须临时降到 Continue：Stop 会把 cmd 的 stderr 升级成终止错误，2>$null 也拦不住，
+# 下面那句带原因的提示根本跑不到，用户只剩一句「输入行太长。」。
+$nativePreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$vsEnvRaw = @(cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && set" 2>&1)
+$vsEnvExit = $LASTEXITCODE
+$ErrorActionPreference = $nativePreference
+$vsEnvErrors = @($vsEnvRaw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() })
+$vsEnvLines = @($vsEnvRaw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+if ($vsEnvExit -ne 0 -or -not $vsEnvLines.Count) {
+  $reason = if ($vsEnvErrors.Count) { $vsEnvErrors -join ' / ' } else { '无输出' }
+  throw "导入 VS Build Tools 环境失败（exit $vsEnvExit）。进程 PATH 现有 $($env:PATH.Length) 字符，VsDevCmd 还要往 %PATH% 上继续拼，超过约 8K 就撞 cmd 的单行上限。处置：关掉常驻菜单窗口重开 dev-stack.bat（菜单进程会累积每轮导入的环境变量），或换 PATH 更短的终端。cmd 原话：$reason"
 }
+foreach ($line in $vsEnvLines) {
+  $name, $value = $line -split '=', 2
+  if (-not $name -or $null -eq $value) { continue }
+  if ($name -ieq 'PATH') {
+    $merged = [System.Collections.Generic.List[string]]::new()
+    foreach ($p in @(($env:PATH -split ';') + ($value -split ';'))) {
+      if ($p -and -not $merged.Contains($p)) { $merged.Add($p) }
+    }
+    $value = ($merged -join ';')
+  }
+  Set-Item -Path "Env:$name" -Value $value
+}
+Write-Host "VS 环境已导入（$($vsEnvLines.Count) 项，PATH 长 $($env:PATH.Length)）"
 Write-Host '启动 tauri dev 桌面窗口（Ctrl+C 停止）…'
 try {
   Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'dev')

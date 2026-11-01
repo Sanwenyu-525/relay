@@ -572,8 +572,8 @@ export const STATES = [
     id: "D16", title: "Run 与会话的关联轨迹", host: "LINK", stateKind: "工具",
     component: linkedComponent,
     note: "同一轮在两侧各有一份投影：会话账本只有请求与结算，结果正文与逐文件账本在那个 Run 的轨迹里。"
-      + "两处同时在场时，谁都不能替对方补内容。「查看逐步轨迹」是产品自己的回调入口，"
-      + "实验室不在场景中途换宿主，因此只验它在位与文案。",
+      + "两处同时在场时，谁都不能替对方补内容。正式会话调用执行摘要时不传「查看逐步轨迹」的回调，"
+      + "因此这一条同时钉住「没有回调就不出现那颗入口」——实验室不再为空操作造一颗假按钮。",
     steps: frame("一条写入：会话侧已结算，Run 侧给出逐文件账本", {
       ...closedWorld(sessionCall(0, { toolName: "apply_changeset",
         args: { changes: [{ path: WRITE_PATH, action: "MODIFY" }] } })),
@@ -591,11 +591,12 @@ export const STATES = [
       text("摘要按同一份账本报写入次数", sel.summary(), "写入 1 次"),
       visible("局部增删行按落盘账本显示", sel.diffRow(ledgerKey(0, runCallId(0), WRITE_PATH))),
       text("已落盘的这一行说已修改", sel.diffRow(ledgerKey(0, runCallId(0), WRITE_PATH)), "已修改"),
-      visible("给出通往逐步轨迹的入口", sel.summaryOpen()),
-      text("入口文案是逐步轨迹", sel.summaryOpen(), "查看逐步轨迹"),
+      // 2026-10-31 一致性修复：正式会话调用 `ExecutionTrajectorySummary` 时**不传**
+      // `onOpenTrajectory`，摘要因此没有这颗入口。实验室此前补了一个空回调，凭空多出
+      // 一颗点不动的「查看逐步轨迹」——现在两边同一条件：没有回调就没有入口。
+      gone("产品没传回调时不出现逐步轨迹入口", sel.summaryOpen()),
       notText("会话侧不替 Run 报正文", sel.trace(), "已结算但失败")
-    ],
-    interactions: [{
+    ],    interactions: [{
       kind: "click", selector: sel.traceToggle(), label: "展开会话侧的执行过程",
       then: [visible("同一轮在会话侧只有一行", sel.call(sessionCallId(0))),
         text("状态词是已结算", sel.call(sessionCallId(0)), "已结算"),

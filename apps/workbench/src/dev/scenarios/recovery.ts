@@ -492,13 +492,19 @@ export const RECOVERY = [
     id: "E13", title: "最终正文重读失败", host: "SESSION", stateKind: "未知",
     component: sessionComponent,
     note: "与 A12 的分工：A12 钉住「读不回来时怎么标」，这一条钉住**恢复路径**——"
-      + "重读入口留在原位，正文回来后在同一位置落定，不留第二个回复块。",
+      + "重读入口留在原位，正文回来后在同一位置落定，不留第二个回复块。"
+      + "过程账本给一条真实的已结算读取：在途零记录时面板按 UI-08 不占位，"
+      + "这一条末帧要断言的是「终态那一档的 settled 标记」，所以世界里得先有可断言的事实。",
     steps: [
-      at(0, "终态已到、正文重读失败（UNVERIFIED）", {
-        messages: pair({ status: "COMPLETED", content: null }),
+      at(0, "预览判终态、正文重读失败（UNVERIFIED）", {
+        // 核对档配的是**还没读回终态**的那一行：服务端把 status 与 content 写在同一条 UPDATE 里，
+        // 所以本地读到 COMPLETED 时必然已带正文；正文为空只可能出现在仍是在途的这一档。
+        messages: pair({ status: "RUNNING", content: null }),
+        traces: { [MOCK.assistantMessageId]: sessionTrace([[readCall(0, PATH)]]) },
         settling: { text: draftOf(MARKDOWN_RICH, 0.9), revision: "9", truncated: false,
           outcome: "COMPLETED", stage: "UNVERIFIED" } }),
       at(2_000, "点击重读：正文读回", { messages: pair({ status: "COMPLETED", content: MARKDOWN_RICH }),
+        traces: { [MOCK.assistantMessageId]: sessionTrace([[readCall(0, PATH)]]) },
         settling: null })
     ],
     checks: [

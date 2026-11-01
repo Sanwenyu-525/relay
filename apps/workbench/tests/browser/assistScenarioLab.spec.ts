@@ -54,6 +54,18 @@ function watchErrors(page: Page): string[] {
   return errors;
 }
 
+/**
+ * 展示设置收在检查面板里：展开/收起过程、动效开关都属于「显示设置」。
+ * 先按需打开面板并切到该页签，再点原来的 testid——入口与动作本身没有另开一条路径。
+ */
+async function openDisplaySettings(page: Page): Promise<void> {
+  const toggle = page.locator("[data-testid='scenario-inspector-toggle']");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await page.locator("[data-testid='scenario-inspector-tab-display']").click();
+  await expect(page.locator("[data-testid='scenario-inspector-tab-display']")).toHaveAttribute("aria-selected", "true");
+}
+
 /** 打开一条场景并等到外壳挂的就是这一条：批量切下一条时上一条的 DOM 可能还在。 */
 async function openLab(page: Page, scenario: string, frame = 0): Promise<Locator> {
   await page.goto(labUrl(scenario, frame));
@@ -115,6 +127,7 @@ async function scrollProbe(page: Page, scenario: string, anchorSelector: string,
   await openLab(page, scenario);
   await settle(page);
   if (expandAll) {
+    await openDisplaySettings(page);
     await page.locator("[data-testid='scenario-expand-all']").click();
     await settle(page);
   }
@@ -253,6 +266,7 @@ test.describe("十条 DOM 属性", () => {
     await expect(toggle, "点过程入口没有展开/收起")
       .toHaveAttribute("aria-expanded", initial === "true" ? "false" : "true", { timeout: 3_000 });
 
+    await openDisplaySettings(page);
     await page.locator("[data-testid='scenario-expand-all']").click();
     await expect(toggle, "展开所有没有真的展开").toHaveAttribute("aria-expanded", "true", { timeout: 3_000 });
     await expect(page.locator(".activity-item").first()).toBeVisible();
@@ -400,6 +414,7 @@ test.describe("十条 DOM 属性", () => {
     const errors = watchErrors(page);
     await openLab(page, "D04");
     await settle(page);
+    await openDisplaySettings(page);
     await page.locator("[data-testid='scenario-motion-on']").click();
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.motion)).toBe("on");
 
@@ -419,6 +434,7 @@ test.describe("十条 DOM 属性", () => {
     await openLab(page, "D04");
     await settle(page);
     const spinningSelector = "[data-scenario-preview] .activity-item-spin, [data-scenario-preview] .activity-header-spin";
+    await openDisplaySettings(page);
     await page.locator("[data-testid='scenario-motion-on']").click();
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.motion)).toBe("on");
     const before = await page.locator(spinningSelector).evaluateAll(
@@ -446,6 +462,7 @@ test.describe("十条 DOM 属性", () => {
       await openLab(page, id);
       await settle(page);
       // 展开所有：长路径、长输出默认藏在折叠里，不展开就等于没测到。
+      await openDisplaySettings(page);
       await page.locator("[data-testid='scenario-expand-all']").click();
       await settle(page);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -530,8 +547,12 @@ test.describe("批量运行", () => {
     const digestsBefore = sourceFileDigests();
     const gitEvidence = readGitEvidence();
     await page.locator("[data-testid='scenario-run-all']").click();
-    await expect(page.locator("[data-testid='scenario-run-all']"), "批量没有在跑").toContainText("运行中", { timeout: 60_000 });
-    await expect(page.locator("[data-testid='scenario-run-all']")).toContainText("运行全部场景", { timeout: 840_000 });
+    await expect(page.locator("[data-testid='scenario-run-status']"), "批量没有在跑")
+      .toHaveAttribute("data-run-status", "running", { timeout: 60_000 });
+    await expect(page.locator("[data-testid='scenario-run-status']"), "快速静态检查没有完成")
+      .toHaveAttribute("data-run-status", "completed", { timeout: 840_000 });
+    const summary = page.locator("[data-testid='scenario-run-summary-static']");
+    const pendingBrowser = Number(await summary.getAttribute("data-pending-browser"));
 
     const verdicts = await page.locator("[data-testid^='scenario-pick-'] [data-acceptance]").evaluateAll(
       (nodes) => nodes.map((node) => ({
@@ -543,11 +564,18 @@ test.describe("批量运行", () => {
     const drift = sourceDrift(digestsBefore, sourceFileDigests());
     const report = {
       ranAt: new Date().toISOString(),
+      runMode: "static",
       total: entries.length,
+      /** 完整通过：静态/交互都完成且没有待浏览器项。 */
       pass: verdicts.filter((item) => item.acceptance === "pass").length,
+      /** 静态通过：静态断言全过，但仍有 browser-only 或未执行的交互。 */
+      staticPass: verdicts.filter((item) => item.acceptance === "static").length,
+      pendingBrowser,
       fail: failed.map((item) => `${item.id}：${item.reason}`),
       notCovered: verdicts.filter((item) => item.acceptance === "not-covered").map((item) => item.id),
       unchecked: verdicts.filter((item) => item.acceptance === "unchecked").map((item) => item.id),
+      unverifiable: verdicts.filter((item) => item.acceptance === "unverifiable").map((item) => item.id),
+      staleVerdicts: verdicts.filter((item) => item.acceptance === "stale").map((item) => item.id),
       browserOnlyChecks: entries.reduce((sum, item) => sum + item.browserOnly.length, 0),
       verdicts,
       consoleErrors: errors,
@@ -565,8 +593,14 @@ test.describe("批量运行", () => {
       + `${drift.join(", ")}`).toEqual([]);
     expect(failed, `有 ${failed.length} 条在真实浏览器里失败`).toEqual([]);
     expect(report.unchecked, "有场景没跑到").toEqual([]);
+    expect(report.unverifiable, "有场景因为预览没停稳而无法验证").toEqual([]);
+    expect(report.staleVerdicts, "有场景的结果已过期").toEqual([]);
     expect(errors, "批量过程中出现控制台错误").toEqual([]);
     expect(report.total).toBe(EXPECTED_SCENARIO_COUNT);
     expect(report.notCovered, "当前清单里不应再有未覆盖的条目").toEqual([]);
+    expect(report.pass + report.staticPass, "静态批次没有逐条给出结果").toBe(EXPECTED_SCENARIO_COUNT);
+    expect(report.staticPass, "应当有只通过静态断言的场景").toBeGreaterThan(0);
+    expect(report.pendingBrowser, "browser-only 必须单独计数，不能计入静态通过")
+      .toBe(report.browserOnlyChecks);
   });
 });

@@ -1,11 +1,81 @@
+import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelaySessionContextUsage } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
+import type { RelayAssistGenerationPhase, RelayAssistGenerationProgress } from "../dtos/assist";
 import type { DecimalRevision } from "../../types";
 import type { RelaySessionDelegation } from "../dtos/assist";
 import type { RelayGatewayDecision, RelayWriteTier } from "../dtos/gateway";
 
 export function assistSourceBody(source: RelayAssistSourceRef) {
   return { kind: source.kind, root_id: source.rootId, version: source.version };
+}
+
+/**
+ * Token 读数解析（AGENT_LIVE_TOKEN_USAGE）。
+ *
+ * 缺字段按「没有可靠数据」读成 null，不补 0；读到未知状态显式失败——把估算当精确值
+ * 展示，比让这一条投影读失败更糟。`settled_calls` 等计数同样按可选处理，让旧服务端
+ * 的旧消息仍可读，只是详情里不显示调用次数。
+ */
+export function tokenUsageFrom(value: unknown, label: string): RelayTokenUsage | null {
+  if (value === undefined || value === null) return null;
+  const row = object(value, label);
+  const state = string(row, "state", label);
+  if (state !== "ESTIMATED" && state !== "PARTIAL" && state !== "CONFIRMED" && state !== "UNKNOWN") {
+    throw new RelayContractError(`${label} 的用量状态无效。`);
+  }
+  const count = (key: string): number => {
+    const raw = row[key];
+    return Number.isSafeInteger(raw) && (raw as number) >= 0 ? raw as number : 0;
+  };
+  return { state,
+    inputTokens: nullableInteger(row, "input_tokens", label),
+    outputTokens: nullableInteger(row, "output_tokens", label),
+    cacheReadTokens: nullableOptionalInteger(row, "cache_read_tokens", label),
+    cacheCreationTokens: nullableOptionalInteger(row, "cache_creation_tokens", label),
+    settledCalls: count("settled_calls"),
+    pendingCalls: count("pending_calls"),
+    missingUsageCalls: count("missing_usage_calls") };
+}
+
+/**
+ * 记忆来源的选择方式（BUG-CHAT-CONTEXT-CROSS-TALK）。
+ *
+ * 只有 `AUTO_MEMORY` 是自动召回；缺字段是旧服务端或非记忆来源，读成「不是自动召回」。
+ * 读到没见过的词显式失败——猜成 null 会把一条自动记忆显示成用户手选的资料，
+ * 那正是这次要修的误导，宁可让这一条读失败也不补造来源。
+ */
+function sourceSelection(value: unknown): "AUTO_MEMORY" | null {
+  if (value === undefined || value === null) return null;
+  if (value === "AUTO_MEMORY") return value;
+  throw new RelayContractError("assist source.selection 响应格式无效。");
+}
+
+function sourceSelectionBasis(value: unknown): "LITERAL_MATCH" | "RECENT_CONFIRMED" | null {
+  if (value === undefined || value === null) return null;
+  if (value === "LITERAL_MATCH" || value === "RECENT_CONFIRMED") return value;
+  throw new RelayContractError("assist source.selection_basis 响应格式无效。");
+}
+
+/**
+ * 记忆来源的「谁写的」与「来自谁的哪一段」（ADR-030 / DEV-0042）。
+ *
+ * 缺字段读成 null（未标注），不默认成 HUMAN_CONFIRMED：旧消息来源记录没写下 origin
+ * 只说明当时没有采集这一维，不能据此宣称它是人工确认。只有记录里明确的
+ * HUMAN_CONFIRMED 才显示为人工确认；未知取值显式失败。
+ */
+function sourceOrigin(value: unknown): "HUMAN_CONFIRMED" | "AUTO_CAPTURE" | null {
+  if (value === undefined || value === null) return null;
+  if (value === "HUMAN_CONFIRMED" || value === "AUTO_CAPTURE") return value;
+  throw new RelayContractError("assist source.origin 响应格式无效。");
+}
+
+function sourceKindValue(value: unknown):
+"MANUAL" | "USER_STATEMENT" | "MODEL_OBSERVATION" | "UNKNOWN" | null {
+  if (value === undefined || value === null) return null;
+  if (value === "MANUAL" || value === "USER_STATEMENT" ||
+      value === "MODEL_OBSERVATION" || value === "UNKNOWN") return value;
+  throw new RelayContractError("assist source.source_kind 响应格式无效。");
 }
 
 export function sessionDelegationFrom(value: unknown): RelaySessionDelegation {
@@ -312,6 +382,44 @@ export function assistMessageRecallFrom(value: unknown): RelayAssistMessageRecal
     }) };
 }
 
+const ASSIST_GENERATION_PHASES: readonly RelayAssistGenerationPhase[] = ["PREPARING_CONTEXT",
+  "WAITING_MODEL", "MODEL_STREAMING", "MODEL_OUTPUT", "PROCESSING"];
+
+/**
+ * 在途阶段投影的解析（AGENT_STREAM_VISIBILITY）。
+ *
+ * 缺字段/null 按「没有阶段读数」读成 null，界面回退到「正在生成」；未知阶段同样读成
+ * null——不把没见过的枚举硬塞进界面，也不因此让整条消息读取失败。已知阶段缺失
+ * 必要时间时同样放弃这一份投影，而不是补造时刻。
+ */
+export function assistGenerationProgressFrom(value: unknown, label: string):
+RelayAssistGenerationProgress | null {
+  if (value === undefined || value === null) return null;
+  const row = object(value, label);
+  const phase = string(row, "phase", label);
+  if (!ASSIST_GENERATION_PHASES.includes(phase as RelayAssistGenerationPhase)) return null;
+  const callCount = row.call_count;
+  if (!Number.isSafeInteger(callCount) || (callCount as number) < 1) return null;
+  const rawLatest = row.latest_call;
+  if (rawLatest === undefined || rawLatest === null) {
+    return { phase: phase as RelayAssistGenerationPhase, callCount: callCount as number,
+      latestCall: null };
+  }
+  const latest = object(rawLatest, `${label}.latest_call`);
+  const status = string(latest, "status", `${label}.latest_call`);
+  if (status !== "STARTED" && status !== "COMPLETED" && status !== "FAILED" &&
+      status !== "CANCELLED") return null;
+  const startedAt = optionalString(latest, "started_at");
+  if (startedAt === null) return null;
+  return { phase: phase as RelayAssistGenerationPhase, callCount: callCount as number,
+    latestCall: { status,
+      startedAt,
+      firstStreamEventAt: optionalString(latest, "first_stream_event_at"),
+      firstTextDeltaAt: optionalString(latest, "first_text_delta_at"),
+      firstPreviewPersistedAt: optionalString(latest, "first_preview_persisted_at"),
+      settledAt: optionalString(latest, "settled_at") } };
+}
+
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
   const row = object(value, "assist message");
   const role = string(row, "role", "assist message");
@@ -364,10 +472,16 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
         version: optionalString(source, "version"),
         status: string(source, "status", "assist source"),
         reason: optionalString(source, "reason"),
-        // 0125：只有记忆来源带 origin；缺字段按人工确认读，非记忆来源保持 null。
-        origin: source.kind === "MEMORY"
-          ? (source.origin === "AUTO_CAPTURE" ? "AUTO_CAPTURE" as const : "HUMAN_CONFIRMED" as const)
-          : null };
+        // 0125：只有记忆来源带 origin；2026-11-01：缺失读成 null（未标注），
+        // 不再默认成人工确认；非记忆来源保持 null。
+        origin: source.kind === "MEMORY" ? sourceOrigin(source.origin) : null,
+        // DEV-0042：来源类别同样只属于记忆；缺失与「服务端明确标注 UNKNOWN」都表示
+        // 没有可核对的类别，不会升级成用户原话或人工确认。
+        sourceKind: source.kind === "MEMORY" ? sourceKindValue(source.source_kind) : null,
+        // BUG-CHAT-CONTEXT-CROSS-TALK：来源是手选还是自动召回必须原样保留，
+        // 展示层据此分类；丢弃它正是「自动记忆被显示成已读取资料」的一半原因。
+        selection: sourceSelection(source.selection),
+        selectionBasis: sourceSelectionBasis(source.selection_basis) };
     }),
     skill, skillInput: row.skill_input === null || row.skill_input === undefined
       ? null : object(row.skill_input, "assist skill input"),
@@ -379,6 +493,9 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
       // 不能因为缺字段就判定整个响应非法。
       cacheReadTokens: nullableOptionalInteger(usage, "cache_read_tokens", "assist usage"),
       cacheCreationTokens: nullableOptionalInteger(usage, "cache_creation_tokens", "assist usage") },
+    usageSummary: tokenUsageFrom(row.usage_summary, "assist usage summary"),
+    generationProgress: assistGenerationProgressFrom(row.generation_progress,
+      "assist generation progress"),
     cancelRequested: row.cancel_requested === true,
     // 0122：旧服务端没有这个字段，按「没有插话请求」读。
     steerRequested: row.steer_requested === true,
@@ -929,7 +1046,8 @@ export function conversationDiffFrom(value: unknown): RelayConversationDiff {
   }
   if (available === false) {
     const reason = string(row, "reason", "conversation diff");
-    if (!["NO_RESOURCE", "NO_BASELINE", "ROOT_NOT_GIT", "RESOURCE_UNAVAILABLE"].includes(reason)) {
+    if (!["NO_RESOURCE", "NO_BASELINE", "NO_SESSION_WRITES", "ROOT_NOT_GIT",
+      "RESOURCE_UNAVAILABLE"].includes(reason)) {
       throw new Error("会话 diff 不可用原因无效。");
     }
     return { available: false, reason: reason as RelayConversationDiffUnavailableReason };
@@ -1057,10 +1175,24 @@ export function sessionContextUsageFrom(value: unknown): RelaySessionContextUsag
   const row = object(value, "session context usage");
   const budget = object(row.budget, "session context usage.budget");
   const raw = row.last_call;
+  const rawNext = row.next_call;
   return { sessionId: string(row, "session_id", "session context usage"),
     budget: { tokens: sessionContextBudgetFrom(budget.tokens),
       revision: decimal(budget, "revision", "session context usage.budget") },
+    nextCall: rawNext === null || rawNext === undefined ? null : nextCallFrom(rawNext),
     lastCall: raw === null || raw === undefined ? null : contextUsageCallFrom(raw) };
+}
+
+function nextCallFrom(value: unknown): RelayNextCallBudget {
+  const row = object(value, "context usage next_call");
+  const source = string(row, "window_source", "context usage next_call");
+  if (source !== "MODEL_CATALOG" && source !== "UNKNOWN") {
+    throw new Error("context usage next_call.window_source 无法识别");
+  }
+  return { reservationTokens: integer(row, "reservation_tokens", "context usage next_call"),
+    contextBudgetTokens: sessionContextBudgetFrom(row.context_budget_tokens),
+    providerWindowTokens: nullableInteger(row, "provider_window_tokens", "context usage next_call"),
+    windowSource: source };
 }
 
 function contextUsageCallFrom(value: unknown): RelayContextUsageCall {

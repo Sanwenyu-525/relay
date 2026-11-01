@@ -49,7 +49,7 @@ const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/u;
  * and anything missing from both ended up rendered as "未识别的事件" — a real action that
  * actually happened read as a UI defect, and several of the same kind stacked up as identical
  * placeholder rows in "最近动态" (reported in a screenshot).
- * It is now filled in against every `eventType:` literal under apps/api/src (64 types).
+ * It is now filled in against every `eventType:` literal under apps/api/src (65 types).
  * The sentinel is kept on purpose: it is only returned when the server really has no summary
  * for a type, and the frontend then falls back to its own mapping or a clearly degraded copy,
  * so an unknown event is never dressed up as a concrete operation.
@@ -84,6 +84,7 @@ const SUMMARY: Record<string, string> = {
   DELEGATION_CREATED: '委托 AI 执行', RUN_CREATED: '创建 Run', RUN_FINISHED: 'Run 结束',
   RUN_FAILED: '运行失败', RUN_WAITING_TOOL_LOOP: 'Run 等待工具结果',
   RUN_WORKER_FENCED: 'Run 被 fencing 拦下', RUN_OWNERSHIP_MISMATCH: 'Run 归属不符',
+  RUN_RECOVERY_REQUIRED: 'Run 等待恢复核对',
   RUN_GRAPH_LAYOUT_REBUILT: '重排 Run 图', STEP_ATTEMPT_RESULT_REJECTED_STALE: '丢弃过期的步骤结果',
   ARTIFACT_VERSION_SAVED: '保存产物版本', ARTIFACT_VERSION_SELECTED: '选用产物版本',
   ACCEPTANCE_COMPARISON_FROZEN: '冻结验收比对',

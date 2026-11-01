@@ -313,7 +313,7 @@ describe("协作工作区主路径", () => {
     } finally { failed.unmount(); }
   });
 
-  it("「待你处理」按工作区给出真实入口，并与目录细条同一行", async () => {
+  it("「待你处理」按工作区给出真实入口，目录细条在输入卡下方", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
 
     // 全局（无项目、无目录）：待判断 + 未归属任务。
@@ -326,14 +326,15 @@ describe("协作工作区主路径", () => {
       expect(strip.text()).toContain("待你处理");
       expect(strip.text()).toContain("1 项待判断");
       expect(strip.text()).toContain("1 个未归属任务");
-      // 位置（2026-10-18 用户指令「这两个没有处于同一行」）：与目录细条同属输入卡上方
-      // 「发送前提」的一行——同一个行容器里的两个子节点，整行仍排在输入器之前。
+      // 位置（2026-11-01 用户指令「把选择文件夹那一行放到输入框下面」）：目录细条移到
+      // 输入卡之后，卡上那一行只剩「待你处理」；整行仍排在输入器之前。
       const row = global.wrapper.get(".agent-chat-prereq-row").element!;
       const folderStrip = global.wrapper.get('[data-testid="folder-scope-strip"]').element!;
-      const composer = global.wrapper.get('[data-testid="assist-first-draft"]').element!;
-      expect(folderStrip.parentElement).toBe(row);
+      const composer = global.wrapper.get(".agent-chat-composer").element!;
+      expect(folderStrip.parentElement).not.toBe(row);
       expect(strip.element!.parentElement).toBe(row);
       expect((row.compareDocumentPosition(composer) & 4) !== 0).toBe(true); // 行在输入器之前
+      expect((composer.compareDocumentPosition(folderStrip) & 4) !== 0).toBe(true); // 细条在输入器之后
     } finally { global.unmount(); }
 
     // 项目（任务归属项目）：目标 + 本项目待判断。
@@ -961,11 +962,10 @@ describe("协作工作区主路径", () => {
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);
         expect(meter.attributes("aria-label")).toContain(scenario.aria);
-        // 2026-10-28：环旁给出读数。3% 这类小比例在 32px 环上只剩一段小弧，
-        // 没有读数时既读不出进度又像「正在加载」；未知态不写读数，免得把「算不出」写成 0%。
-        const reading = meter.find(".agent-chat-context-meter-value");
-        if (scenario.state === "unknown") expect(reading.exists()).toBe(false);
-        else expect(reading.text()).toBe(scenario.aria);
+        // 2026-11-01 用户指令：删掉圆环右侧的独立百分比文本。数字没有消失——
+        // 它就在这条 aria-label 里，也仍在悬停 Tooltip 与详情浮层里（下面各有一条断言），
+        // 只是不再常驻工具行。这一枚也顺带保证读数不会以两种排版同时出现。
+        expect(meter.find(".agent-chat-context-meter-value").exists()).toBe(false);
         // 悬停效果（2026-10-22 用户指令「上下文圆圈的鼠标悬停效果优化一下」）：这句话改由
         // 应用内浮层承载，悬停即浮出。原生 title 一并去掉——Chromium/WebView2 要等约一秒，
         // 圆环只有 18px，两套提示叠着只会读成「没有反应」。
@@ -1010,7 +1010,7 @@ describe("协作工作区主路径", () => {
       expect(meter.attributes("aria-haspopup")).toBe("dialog");
       await meter.trigger("click"); await flush();
       expect(meter.attributes("aria-expanded")).toBe("true");
-      const panel = view.wrapper.get('[data-testid="assist-context-meter-panel"]');
+      const panel = view.layer.get('[data-testid="assist-context-meter-panel"]');
       // 2026-10-29 第二轮整改：打开先读数据；「属于哪一次」只用一枚短标签。
       expect(panel.get(".agent-chat-context-meter-heading").text()).toBe("上下文用量");
       expect(panel.get(".agent-chat-context-meter-source").text()).toBe("最近一次记录");
@@ -1051,16 +1051,16 @@ describe("协作工作区主路径", () => {
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
       }); await flush();
-      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
+      expect(view.layer.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
       expect(meter.attributes("aria-expanded")).toBe("false");
       expect(document.activeElement).toBe(meter.element);
       // 再开一次后，点浮层外一次即收。
       await meter.trigger("click"); await flush();
-      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(true);
+      expect(view.layer.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(true);
       await act(async () => {
         document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
       }); await flush();
-      expect(view.wrapper.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
+      expect(view.layer.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
 
@@ -1122,6 +1122,42 @@ describe("协作工作区主路径", () => {
       expect(card.text()).toContain("待确认");
       // 候选卡只作指引：正文与接受入口仍在提案区，不在此处重复。
       expect(card.find("button").exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("自动召回的记忆与手选资料在来源条上分开计数与标注", async () => {
+    // BUG-CHAT-CONTEXT-CROSS-TALK：服务端已冻结 selection=AUTO_MEMORY，界面不得把它
+    // 和用户手选的资料一起数成「已读取 N 份资料」——那正是「你选中了一条资料」的由来。
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const memoryId = "12121212-1212-4212-8212-121212121212";
+    const read = router({ messages: () => response({ items: [
+      { id: "user-turn", session_id: sessionId, seq: "1", role: "USER", status: "COMPLETED",
+        intent: "DISCUSS", content: "你好", error_code: null, sources: [],
+        usage: { input_tokens: null, output_tokens: null }, cancel_requested: false },
+      { id: "ai-turn", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED",
+        intent: "DISCUSS", content: "你好。", error_code: null,
+        sources: [
+          { kind: "KNOWLEDGE", root_id: "k1", version: "1",
+            source_ref: "研究问题清单 v1", status: "AVAILABLE", reason: null },
+          { kind: "MEMORY", root_id: memoryId, version: "1",
+            source_ref: `memory:${memoryId}:v1`, status: "SENT", reason: null,
+            origin: "AUTO_CAPTURE", selection: "AUTO_MEMORY", selection_basis: "LITERAL_MATCH" }
+        ],
+        usage: { input_tokens: null, output_tokens: null }, cancel_requested: false }] }) });
+    vi.stubGlobal("fetch", read);
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const row = view.wrapper.get('.agent-message[data-role="ASSISTANT"]');
+      const summary = row.get(".assist-source-summary");
+      expect(summary.text()).toContain("已读取 1 份资料");
+      expect(summary.text()).toContain("已参考 1 条长期记忆");
+      const rows = row.findAll(".assist-source-row");
+      expect(rows).toHaveLength(2);
+      const auto = rows.find((entry) => entry.text().includes(`memory:${memoryId}:v1`))!;
+      expect(auto.get(".assist-source-selection").text()).toContain("自动召回");
+      expect(auto.get(".assist-source-selection").text()).toContain("按字面匹配");
+      const knowledge = rows.find((entry) => entry.text().includes("研究问题清单 v1"))!;
+      expect(knowledge.find(".assist-source-selection").exists()).toBe(false);
     } finally { view.unmount(); }
   });
 

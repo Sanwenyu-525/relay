@@ -90,14 +90,16 @@ export const LIFECYCLE = [
   make({
     id: "A01", title: "新会话首次发送", host: "SESSION", stateKind: "在途",
     component: sessionComponent,
-    note: "PENDING 比「正在执行」更早一档：meta 行不写状态词，进度由三点与「等待处理」表达。",
+    note: "PENDING 比「正在执行」更早一档：meta 行不写状态词，等待由阶段行的一句「等待处理」"
+      + "与三点共同表达（2026-11-01 AGENT_STREAM_VISIBILITY）。此刻还没有任何工具记录，"
+      + "所以正文上方不画「工具活动」——等待不是工具活动（UI-08）。",
     steps: frame("PENDING 且还没有任何草稿", qa({ status: "PENDING", content: null })),
     checks: [
-      visible("在途三点在场", sel.inflight()),
-      attr("三点给出可访问名", sel.inflight(), "aria-label", "已提交，等待处理，正在生成"),
+      visible("在途阶段行在场", sel.inflight()),
+      attr("阶段行标记真实阶段", sel.inflight(), "data-phase", "AWAITING_WORKER"),
+      text("阶段行说等待处理", sel.inflight(), "等待处理"),
       gone("PENDING 不在 meta 行标状态词", sel.status()),
-      attr("过程相位是 RUNNING_NO_TOOLS", sel.trace(), "data-phase", "RUNNING_NO_TOOLS"),
-      text("零记录时只说等待处理", sel.traceActivity(), "等待处理"),
+      gone("零记录时不画工具活动入口：等待不是工具活动", sel.trace()),
       gone("还没有正文块", sel.replyFinal())
     ]
   }),
@@ -105,10 +107,10 @@ export const LIFECYCLE = [
   make({
     id: "A03", title: "AI 正在处理，尚未调用工具", host: "SESSION", stateKind: "在途",
     component: sessionComponent,
-    note: "在途且零记录只能说「正在执行」：这一档还没有任何结算事实，界面不许提前写成"
-      + "「本轮没有调用工具」（那是 EMPTY 相位，属于终态）。第一次读数还没回来时，面板必须显式说"
-      + "「正在读取这一轮的过程…」，不许拿空状态或上一帧的旧事实顶替。读数什么时候回来不由真实时间决定，"
-      + "而由场景的下一步取消 hold 决定（受控挂起），所以这一支在稳定帧上可测，也不依赖任何固定睡眠。",
+    note: "在途且零记录：这一档还没有任何结算事实，界面既不许提前写成「本轮没有调用工具」"
+      + "（那是 EMPTY 相位，属于终态），也不摆一条空的「工具活动」横条——等待归正文三点。"
+      + "读数什么时候回来不由真实时间决定，而由场景的下一步取消 hold 决定（受控挂起），"
+      + "所以这一支在稳定帧上可测，也不依赖任何固定睡眠。",
     steps: [
       at(0, "在途：第一次读数挂着没回来",
         { ...liveWorld(), hold: { getAssistSessionToolCalls: "fresh" } }),
@@ -129,7 +131,7 @@ export const LIFECYCLE = [
           hold: {} })
     ],
     checks: [
-      visible("在途三点在场", sel.inflight()),
+      gone("工具活动接手后三点让位：同一时刻只有一个主进度动效", sel.inflight()),
       attr("在途默认把过程展开", sel.trace(), "data-state", "active"),
       text("状态词是正在生成", sel.status(), "正在生成"),
       visible("末帧过程入口仍在", sel.trace()),
@@ -138,19 +140,16 @@ export const LIFECYCLE = [
       gone("读完不再显示加载", sel.traceLoading())
     ],
     interactions: [
-      inspect("挂起中：明说正在读取这一轮的过程",
-        visible("加载节点在场", sel.traceLoading()),
-        text("加载文案如实", sel.traceLoading(), "正在读取这一轮的过程"),
-        gone("挂起时不提前画空状态", sel.traceEmpty()),
-        notText("挂起时不说没有调用工具", sel.traceActivity(), "本轮没有调用工具"),
-        attr("挂起相位是 RUNNING_NO_TOOLS", sel.trace(), "data-phase", "RUNNING_NO_TOOLS")),
-      { kind: "advance", label: "显式释放：读数回来，仍如实报在途",
+      inspect("挂起中：还没有工具记录，正文上方不画工具活动",
+        gone("挂起时不画入口", sel.trace()),
+        gone("挂起时不画加载节点", sel.traceLoading()),
+        gone("挂起时不提前画空状态", sel.traceEmpty())),
+      { kind: "advance", label: "显式释放：读数回来仍是零条，入口依旧不在场",
         then: [
           gone("释放后不再显示加载", sel.traceLoading()),
           gone("零记录也不写没有调用工具", sel.traceEmpty()),
-          notText("在途零记录不说没有调用工具", sel.traceActivity(), "本轮没有调用工具"),
-          text("零记录只报正在执行", sel.traceActivity(), "正在执行"),
-          gone("零记录时不画任何调用行", sel.call(sessionCallId(0)))
+          gone("零记录不占位：等待仍由三点表达", sel.trace()),
+          visible("在途三点照旧", sel.inflight())
         ] },
       { kind: "advance", label: "读数失败：错误与重新读取入口都在",
         then: [
@@ -169,13 +168,13 @@ export const LIFECYCLE = [
         then: [
           gone("恢复后错误消失", sel.traceError()),
           gone("恢复后不再显示加载", sel.traceLoading()),
-          text("恢复后仍如实报在途", sel.traceActivity(), "正在执行")
+          gone("恢复后读回零条，入口按事实收起", sel.trace())
         ] },
       { kind: "advance", label: "旧读数挂着没回来：界面还停在上一次读到的读数",
         then: [
-          text("挂起期间不动旧读数", sel.traceActivity(), "正在执行"),
-          notText("挂起的新事实不会自己冒出来", sel.traceActivity(), "1 项操作"),
-          visible("在途过程入口仍在", sel.trace())
+          gone("挂起期间仍无记录，没有数值可读", sel.traceActivity()),
+          gone("挂起的新事实不会自己冒出来：入口还没入场", sel.trace()),
+          gone("旧读数挂着时仍无记录，入口不入场", sel.trace())
         ] },
       { kind: "advance", label: "新读数已到：迟到的旧读数不许盖回来",
         then: [
@@ -237,15 +236,19 @@ export const LIFECYCLE = [
   make({
     id: "A11", title: "正在核对最终回复", host: "SESSION", stateKind: "在途",
     component: sessionComponent,
-    steps: frame("预览已判终态、正文尚未读回", { ...qa({ status: "COMPLETED", content: null }),
+    note: "预览已判终态、正文还没读回：正式会话此刻的**消息行仍是 RUNNING**（那一次 GET 还没回来），"
+      + "所以这里也把消息放在 RUNNING，而不是提前写成 COMPLETED——写成终态会让这一帧变成"
+      + "产品到不了的状态（耗时口径、过程面板档位都不一样）。",
+    steps: frame("预览已判终态、正文尚未读回", { ...qa({ status: "RUNNING", content: null }),
       settling: { text: draftOf(MARKDOWN_RICH, 0.9), revision: "9", truncated: false,
-        outcome: "COMPLETED", stage: "SETTLING" },
-      handover: true }),
+        outcome: "COMPLETED", stage: "SETTLING" } }),
     checks: [
       visible("核对中的回复块在场", sel.replyVerify()),
       attr("核对档标为 settling", sel.replyBlock(), "data-verify", "settling"),
-      text("说明仍是草稿", sel.replyNote(), "以下仍是草稿 · 正在核对最终正文"),
-      attr("交接淡入标记在场", sel.replyBlock(), "data-handover", "true"),
+      text("说明仍是草稿", sel.replyNote(), "正在核对最终正文"),
+      // 交接淡入只属于「正文读回」的那一帧（A10 的最后一条）：产品里核对中的那一帧
+      // handover 还是 false，两个标记不会同时出现。
+      attr("核对帧不挂交接淡入标记", sel.replyBlock(), "data-handover", "(缺)"),
       text("播报一次粗粒度状态", sel.announce(), "正在核对最终正文")
     ]
   }),
@@ -253,8 +256,9 @@ export const LIFECYCLE = [
   make({
     id: "A12", title: "最终回复读取失败", host: "SESSION", stateKind: "未知",
     component: sessionComponent,
-    note: "重读失败不能画成已完成：这一档给恢复入口，且播报「状态待核对」。",
-    steps: frame("核对失败，草稿留在原位", { ...qa({ status: "COMPLETED", content: null }),
+    note: "重读失败不能画成已完成：这一档给恢复入口，且播报「状态待核对」。"
+      + "与 A11 同一口径：重读失败时消息行还停在 RUNNING 的那次读数上，界面才谈得上「待核对」。",
+    steps: frame("核对失败，草稿留在原位", { ...qa({ status: "RUNNING", content: null }),
       settling: { text: draftOf(MARKDOWN_RICH, 0.9), revision: "9", truncated: false,
         outcome: "COMPLETED", stage: "UNVERIFIED" } }),
     checks: [
@@ -271,17 +275,19 @@ export const LIFECYCLE = [
     component: sessionComponent,
     note: "先有核对中的草稿位，再同一位置换成 Markdown 正文：中间不能出现两帧之间的空白。",
     steps: [
-      at(0, "草稿留在原位（SETTLING）", { ...qa({ status: "COMPLETED", content: null }),
+      at(0, "草稿留在原位（SETTLING）", { ...qa({ status: "RUNNING", content: null }),
         settling: { text: draftOf(MARKDOWN_RICH, 0.9), revision: "9", truncated: false,
-          outcome: "COMPLETED", stage: "SETTLING" }, handover: true }),
-      at(1_200, "正文读回，同一位置落定", { ...qa({ status: "COMPLETED", content: MARKDOWN_RICH }), handover: false })
+          outcome: "COMPLETED", stage: "SETTLING" } }),
+      at(1_200, "正文读回，同一位置落定", { ...qa({ status: "COMPLETED", content: MARKDOWN_RICH }), handover: true })
     ],
     checks: [
       visible("最终正文块在场", sel.replyFinal()),
       text("标题按 Markdown 渲染", sel.replyFinal(), "这一轮做了什么"),
+      attr("交接淡入标记挂在正文落定的那一帧", sel.replyBlock(), "data-handover", "true"),
       gone("正文落定后草稿块撤下", sel.replyDraft()),
       gone("交接标记不留给历史消息", sel.replyVerify()),
-      visible("用量行在场", sel.usage()),
+      // 2026-10-31 UI-08：用量常显在页脚，没有折叠入口；读数直接可见。
+      visible("用量读数直接可见", sel.usage()),
       visible("复制入口在场", sel.copy())
     ]
   }),
@@ -403,7 +409,8 @@ export const LIFECYCLE = [
       visible("来源条在场", sel.sources()),
       text("来源数量如实统计", sel.sources(), "已读取 3 份资料"),
       text("不可用的来源照样说明", sel.sources(), "来源不可用"),
-      visible("用量行在场", sel.usage()),
+      // 2026-10-31 UI-08：用量常显在页脚，没有折叠入口；读数直接可见。
+      visible("用量读数直接可见", sel.usage()),
       text("用量报上下文 tokens", sel.usage(), "48210"),
       visible("助手档显示冻结人设", sel.persona())
     ]
@@ -428,7 +435,7 @@ export const LIFECYCLE = [
       gone("历史那条终态不画在途三点", sel.inflight("mock-msg-a1")),
       text("历史正文原样可读", sel.replyFinal("mock-msg-a1"), "顺序问题在依赖声明上"),
       gone("PENDING 不在 meta 行标状态词", `${sel.message("mock-msg-a2")} .agent-message-status`),
-      text("新一年的过程开局只说等待处理", sel.trace("mock-msg-a2"), "等待处理"),
+      gone("PENDING 零记录不画工具活动入口，等待只由三点表达", sel.trace("mock-msg-a2")),
       gone("新一轮还没有正文块", sel.replyFinal("mock-msg-a2"))
     ]
   }),
@@ -445,7 +452,7 @@ export const LIFECYCLE = [
       visible("正文按 Markdown 根渲染", sel.markdown()),
       count("段落数与夹具一致", `${sel.markdown()} p`, 6),
       visible("复制入口在场", sel.copy()),
-      visible("用量行在场", sel.usage())
+      visible("用量读数直接可见", sel.usage())
     ]
   }),
 

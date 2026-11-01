@@ -18,7 +18,7 @@ const userMessageId = "c1111111-1111-4111-8111-111111111111";
 const assistantMessageId = "c2222222-2222-4222-8222-222222222222";
 const richMessageId = "c4444444-4444-4444-8444-444444444444";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
 
 /** 截图里那条回复的原文：一句结论 + 粗体引子 + 四条列表 + 一句收尾。 */
 const REPLY = [

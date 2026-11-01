@@ -219,6 +219,14 @@ const ALL_MIGRATIONS = [
     '0149_conversation_execution_scope',
   '0150_assist_session_todo_scope_order',
   '0151_assist_session_todo_turn_scopes',
+  // 0152（2026-10-31）：归属依据补 CONTINUED_COMPLETED，并让 ABANDONED 在会话工具账本上
+  // 真正可写（两条 CHECK 从未给它留分支）。清单必须同步，否则真实库上会因多一条而失败。
+  '0152_assist_session_todo_turn_basis_and_abandoned',
+  // 0153–0155（2026-11-01）：模型调用用途、会话删除授权/脱钩、预览行 Token 估算。
+  // 清单必须同步，否则真实库上会因多几条而失败。
+  '0153_model_call_purpose',
+  '0154_assist_session_delete_recall_todos_and_execution_source',
+  '0155_assist_message_preview_usage',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -389,6 +397,9 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
     // 0116 会话删除授权引用 0050/0051 建出的影响检查与执行请求表；历史夹具里这两张表
     // 不存在，授权迁移必须与它们同进同出，否则第一轮就会报「关系不存在」。
     files.delete('0116_assist_session_delete.sql');
+    // 0154 同样引用 0051 的执行请求表（并改 0132/0146/0148 的账本授权）；历史夹具里
+    // 0051/0149 缺席时必须一起缺席，否则第一轮就报 conversation_execution_requests 不存在。
+    files.delete('0154_assist_session_delete_recall_todos_and_execution_source.sql');
     // 0108 修改 0056 创建的 run_scope_grants；历史夹具中必须与它一起缺席。
     files.delete('0108_scope_grant_browser_actions.sql');
   });
@@ -426,8 +437,10 @@ test('first-output migration leaves pre-existing settled calls NULL', async () =
       // 0086 与 0050 同进同出，所以第二轮在这里补上；0087 只依赖 0008/0015 建出的表，
       // 不依赖被删掉的那一批，因此它留在历史夹具里，第二轮不会重复应用。
       '0086_impact_group_dependencies', '0108_scope_grant_browser_actions',
-      // 0116 的授权对象由第二轮补回的 0050/0051 建出，因此它也在第二轮应用。
-      '0116_assist_session_delete', '0149_conversation_execution_scope']);
+      // 0116 的授权对象由第二轮补回的 0050/0051 建出，因此它也在第二轮应用；
+      // 0154 同样改 0051 的执行请求表（并补 0132/0146/0148 的账本授权），与 0149 同批。
+      '0116_assist_session_delete', '0149_conversation_execution_scope',
+      '0154_assist_session_delete_recall_todos_and_execution_source']);
     await calls.recordFirstTextDelta(callId, new Date());
     await calls.recordFirstPreviewPersisted(callId);
     const legacy = await calls.read(callId);

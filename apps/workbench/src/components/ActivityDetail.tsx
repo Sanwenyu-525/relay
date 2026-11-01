@@ -1,4 +1,4 @@
-import type { ActivityItem } from "../lib/activityPresentation";
+import { activityReasonLabel, type ActivityItem } from "../lib/activityPresentation";
 
 /**
  * 工具详情的统一渲染器（2026-10-30 验收整改）。
@@ -24,6 +24,8 @@ export default function ActivityDetail({ item }: { readonly item: ActivityItem }
   }
   if (detail.timedOut) meta.push("服务端记录为超时");
   if (detail.cancelled) meta.push("服务端记录为已取消");
+  const reason = detail.rejectionReason;
+  const reasonLabel = reason === null ? "" : activityReasonLabel(reason);
 
   return <div className="activity-detail">
     <p className="activity-detail-meta">工具 <code className="hash-code">{item.toolName}</code></p>
@@ -42,9 +44,12 @@ export default function ActivityDetail({ item }: { readonly item: ActivityItem }
     </p>
     {detail.operationId !== null && <p className="activity-detail-meta">
       动作身份 <code className="hash-code">{detail.operationId}</code></p>}
-    {detail.rejectionReason !== null && <p className="activity-detail-meta">
-      未执行原因 {detail.rejectionReason}
-      {detail.rejectionDetail === null ? "" : ` · ${detail.rejectionDetail}`}</p>}
+    {reason !== null && <p className="activity-detail-meta">
+      未执行原因 {reasonLabel}
+      {detail.rejectionDetail === null ? "" : `：${detail.rejectionDetail}`}
+      {/* 机器码只在展开层出现（2026-11-01 P1-1）：常显那一行说的是人话，而「服务端记的到底是
+          哪个码」是核对时才需要的身份，跟工具名、时间戳同一档。标签本身就等于码时不再重复一遍。 */}
+      {reasonLabel === reason ? "" : `（码 ${reason}）`}</p>}
     {/* 会话账本没有结果正文时，明确说清缺的是什么——不是「没有输出」，而是「这个账本不存」。 */}
     {detail.resultText === null && item.source === "SESSION_TOOL_CALL" && <p className="activity-detail-meta">
       会话账本只记录请求与结算，不保存工具结果正文；实际结果（如有）在该 Run 的工具轨迹里按动作身份核对。

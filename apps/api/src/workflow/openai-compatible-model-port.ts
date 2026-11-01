@@ -13,7 +13,7 @@ import type { AssistModelPort, AssistContentPart, AssistRequest,
   ComposerDraftRequest, ComposerDraftResult, ConversationInterpretationRequest,
   ModelPort, ModelRequest, ModelResult, ModelIdentity, ModelToolArgumentsDelta,
   ModelToolCall, ModelToolSpec,
-  ModelToolTurn, ModelUsage } from './fake-model-port.js';
+  ModelToolTurn, ModelUsage, ModelUsageProgress } from './fake-model-port.js';
 import { parseLearningEnvelope } from './fake-model-port.js';
 import type { ModelPortConfig } from './model-port-config.js';
 import { computeModelConfigFingerprint } from './model-port-config.js';
@@ -178,10 +178,10 @@ ${input.content}`),
     const learning = request.learning !== undefined;
     try {
       const response = await this.complete(messages, request.signal,
-        request.intent !== 'DISCUSS' || request.skill !== undefined || learning,
+        request.responseFormat === 'json_object' || request.intent !== 'DISCUSS' || request.skill !== undefined || learning,
         request.intent === 'DISCUSS' && request.skill === undefined && !learning
           ? request.onTextDelta : undefined, tools, request.onStreamEvent,
-        request.onToolArgumentsDelta);
+        request.onToolArgumentsDelta, request.onUsageProgress);
       if (request.signal?.aborted === true) return { kind: 'CANCELLED',
         providerRequestId: response.providerRequestId, usage: response.usage };
       // 已声明工具时模型可能这一轮就发出请求：它不是正文，正文只来自没有工具请求的那一轮。
@@ -251,7 +251,8 @@ ${input.content}`),
 
   private async complete(messages: BaseMessage[], userSignal?: AbortSignal,    structured = false, onTextDelta?: (text: string) => Promise<void>,
     tools?: readonly ModelToolSpec[], onStreamEvent?: (() => Promise<void>) | undefined,
-    onToolArgumentsDelta?: ((delta: ModelToolArgumentsDelta) => Promise<void>) | undefined):
+    onToolArgumentsDelta?: ((delta: ModelToolArgumentsDelta) => Promise<void>) | undefined,
+    onUsageProgress?: ((progress: ModelUsageProgress) => Promise<void>) | undefined):
     Promise<{ text: string; toolCalls?: readonly ModelToolCall[];
       reasoningContent?: string;
       providerRequestId: string;
@@ -279,7 +280,16 @@ ${input.content}`),
     let accumulated: AIMessageChunk | undefined;
     let usage: ModelUsage = { inputTokens: null, outputTokens: null,
     cacheReadTokens: null, cacheCreationTokens: null };
+    // AGENT_LIVE_TOKEN_USAGE：估算用与预算检查同一个 UTF-8 字节 / 3 换算；它只在
+    // 生成过程中服务界面，结算仍以 Provider 上报并写入 model_calls 的用量为准。
+    const reportUsage = async (outputBytes: number): Promise<void> => {
+      if (onUsageProgress === undefined) return;
+      await onUsageProgress({ inputTokensEstimate: estimatedInputTokens,
+        outputTokensEstimate: Math.ceil(outputBytes / 3), providerUsage: usage });
+    };
     try {
+      // 请求尚未发出时先给出输入量估算：界面不必等到第一个文字片段才有读数。
+      await reportUsage(0);
       // SDK 1.5.13 入站保留 reasoning_content、出站转换却不回传它。仅在本次历史
       // 确有该字段时用请求局部 fetch 补回，避免并发调用共享可变 transcript。
       const hasReasoning = messages.some((message) =>
@@ -346,6 +356,8 @@ ${input.content}`),
             }
           }
         }
+        // 输出估算包含正文、推理与工具参数；工具参数只从累计原文计一次，不与正文重复。
+        await reportUsage(bytes + Buffer.byteLength(toolText, 'utf8'));
         if (chunk.response_metadata?.finish_reason === 'length' ||
             Buffer.byteLength(toolText, 'utf8') > maxBytes) {
           throw new ModelOutputBudgetError(providerRequestId, usage);

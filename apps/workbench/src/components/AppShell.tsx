@@ -56,7 +56,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const location = useLocation();
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
-  const pageFocused = ["/projects", "/reviews", "/activity", "/activities"].includes(path);
+  // 场景实验室是开发者的全屏工作区：同样让出近期工作栏，把宽度交给预览；
+  // 只是不渲染该栏，不改用户的收起偏好与列宽，返回普通页时原样恢复。
+  const pageFocused = ["/projects", "/reviews", "/activity", "/activities"].includes(path)
+    || (import.meta.env.DEV && path === "/__dev/assist-scenarios");
   const inboxActive = path === "/tasks" && query.get("tab") === "inbox";
   const isNavigationItemActive = (to: string) => to === "/inbox" ? inboxActive
     : to === "/tasks" ? path === "/tasks" && !inboxActive

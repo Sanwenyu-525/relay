@@ -162,6 +162,17 @@ export class RecoveryRepository {
     return result.rows[0]?.present ?? false;
   }
 
+  /** 已持久化的停机依据；只有 fence 行能证明旧 Worker 已停止，租约到期不能。 */
+  async readWorkerFenceEvidence(runId: string, workerId: string,
+    workerEpoch: bigint): Promise<string | undefined> {
+    const result = await sql<{ stopped_evidence: string }>`
+      select stopped_evidence from run_worker_fences
+      where run_id = ${runId} and stopped_worker_id = ${workerId}
+        and worker_epoch = ${workerEpoch}
+    `.execute(this.db);
+    return result.rows[0]?.stopped_evidence;
+  }
+
   async listExpiredWorkerRuns(limit: number): Promise<readonly { readonly id: string; readonly worker_id: string }[]> {
     const result = await sql<{ id: string; worker_id: string }>`
       select id, worker_id from (
