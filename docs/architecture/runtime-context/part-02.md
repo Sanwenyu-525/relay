@@ -201,10 +201,13 @@ Worker」：`--once` 只领 Run 命令，`--assist-once` 只做会话生成，�
 - **与手工启动的持续 Worker 同时在跑是安全的**：领取 CAS、job 行锁、请求行命令身份与租约清扫
   都在各 tick 内部。真实双宿主用例观察到一条消息只有一位结算者，只产生一条回信与一条
   `kind='MEMBER'` 调用账本。
-- **维护排空与崩溃接续沿用原协议**：准入门在三个 tick 函数内部（各自 `readAdmission(..., 'share')`
+- **维护排空与崩溃接续沿用原协议**：准入门在 tick Owner 函数内部（`web-import-runner.ts:42`、
+  `conversation-execution-autostart.ts:47`、`member-wakeup.ts:157` 各自 `readAdmission(..., 'share')`
   先退出），派发器不重复判断；排空期间过期 CLAIMED 行也不清扫，恢复准入后才由
   `sweepExpiredWakeup` 在尝试上限内回到 RECORDED 接续，超上限按 `WAKEUP_ATTEMPTS_EXHAUSTED`
   收口，不改成静默重发。空闲时候选查询返回空集，不产生模型调用。
+  同日 `advanceGoals()` 补上同一栅栏（§2.12）：目标推进的**投递下一轮**属于新执行，排空期间
+  不准入；**控制意图落定与已结束轮次的记账**仍在准入判断之前照常收口，排空不冻住了结。
 - **本轮不动的归属**：`runAssistGoalTick` 仍归 Supervisor、`runAssistGenerationTick` 仍由
   一次性 Worker 承担，各自只有一个驱动者；把它们并到 API 会造成同一个 tick 两个竞争者、
   并把派发决策拆成两处。
@@ -276,10 +279,12 @@ Watchdog 的不可越界约束（本轮核定为边界，不是待议项）：�
 - 需要授权才能推进的结构性缺口只有一个：孤儿 claim 的收口与可见性（E 的第二行）。它跨
   `apps/api` 与 Rust 宿主两侧，且实机已有受害 Run，建议按 P1 立项、P0 修最小收口（见
   [CODEX_NEXT_STEP](../../../CODEX_NEXT_STEP.md)）。
-- `runAssistGoalTick` 是唯一不做准入判断的 tick Owner（`application/goal-advance.ts` 全文无
-  `readAdmission`，`enqueueRound` 直接 `insertMessage`），维护排空期间仍可能排入新的目标轮次。
-  其余 tick 都在 Owner 内部自带栅栏（§2.11）。本轮**未改**：`goal-advance.ts` 正被其他 Agent 修改，
-  且缺一个先失败的反例；登记为待复现候选。
+- `runAssistGoalTick` 曾是唯一不做准入判断的 tick Owner（`enqueueRound` 直接 `insertMessage`），
+  维护排空期间仍会排入新的目标轮次。**2026-11-01 同日已复现并闭合**：反例先证明 DRAINING 下
+  `advanced` 非空且新插了一条待生成消息，修复按其余 tick 的同形做法在 `advanceGoals()` 取候选
+  与拿租约**之前**退出，前两个阶段（控制意图落定、已结束轮次记账）不受影响。证据见
+  [验收详情 346](../../testing/acceptance-details/part-19.md#条目-346)；租约不被空占是这条
+  检查位置的硬约束，否则恢复准入后要先等一次租约过期。
 - 并发闸（C 第三行）与订阅面（B 第三行）是真实差距，但都没有本轮的复现证据支撑改动。
 - 明确不做：云端常驻、跨设备执行、通用 Router Runtime、多 Agent 自主扩权、未经批准的自主执行。
 

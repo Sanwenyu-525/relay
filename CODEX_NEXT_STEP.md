@@ -1,6 +1,6 @@
 # Relay 当前状态与下一步
 
-角色：唯一进度入口；更新：2026-11-01（ENG-SA-01 后台调度常驻驱动修复与长期自主协作五轴对照）。只维护当前工作、阻塞、下一步，不追加逐轮经过和测试输出。
+角色：唯一进度入口；更新：2026-11-01（ENG-SA-01 后台调度常驻驱动修复与长期自主协作五轴对照；同日 goal tick 维护准入门收口 ENG-SA-02）。只维护当前工作、阻塞、下一步，不追加逐轮经过和测试输出。
 
 ## 开工读取
 
@@ -69,7 +69,7 @@
 - 继续某模块：定位其验收行 → 核对当前源码、未提交改动与原任务书依赖门 → 选择尚未闭合的一项 → 实施、自检并按模块要求独立验收。
 - 需要人工环境、登录态或安装条件的出口，保留未验状态；不盲重试 UNKNOWN，也不继承历史会话的外部执行权限。
 - 2026-10-27 Goal/Project：待核对命令作用域持久恢复、草稿守卫分离及接续投影/窄标题栏修复已完成；Workbench 137/137、typecheck/build 通过，Chromium 14/14；9 组真实 PG/HTTP 58/58（当时迁移至 0143）。随后并行 API 源码持续修改，release 编译结束后因输入指纹变化中止；API typecheck 有一次 exit 0，但检查期间源码也变化，不能认定最新快照稳定。旧包保存在 `test-release-goal-baseline-20261027`；另一工作树仍持有 Relay 单实例锁，最新 WebView2、干净 HEAD 构建及独立验收未完成。整体验收 BLOCKED，细节见[验收详情 011](docs/testing/acceptance-details/part-01.md#条目-011)。
-- 2026-11-01 ENG-SA-01 后续（未授权开发，仅登记）：P1 收口孤儿 claim——`application/recover-run.ts:13` `scanRecoveryCandidates` 无生产调用者，Supervisor 只上报 `worker_recovery_required` 且宿主故意丢弃（`apps/desktop/src-tauri/src/lib.rs:629-632`），实机已有一条 Run 卡 `RUNNING`＋孤儿 `ACTIVE` claim 并阻挡项目归档；候选是在既有 Supervisor 内接上原恢复 Owner 与一条人可见通知，不新设 Watchdog 进程。P2 复现候选：`application/goal-advance.ts` 是唯不自带准入门的 tick Owner（排空期仍可能排入新目标轮次），需先造失败反例再改；另有跨会话 `handoff_payload` 无消费者、全局并发闸缺失。逐项标签与证据见 [runtime-context §2.12](docs/architecture/runtime-context/part-02.md#212-与长期自主协作机制的差距对照2026-11-01eng-sa-01-审计)。
+- 2026-11-01 ENG-SA-01 后续（P1 仅登记，goal tick 一项经用户授权在续轮 ENG-SA-02 闭合）：P1 收口孤儿 claim——`application/recover-run.ts:13` `scanRecoveryCandidates` 无生产调用者，Supervisor 只上报 `worker_recovery_required` 且宿主故意丢弃（`apps/desktop/src-tauri/src/lib.rs:629-632`），实机已有一条 Run 卡 `RUNNING`＋孤儿 `ACTIVE` claim 并阻挡项目归档；候选是在既有 Supervisor 内接上原恢复 Owner 与一条人可见通知，不新设 Watchdog 进程。同日已复现并闭合上一轮登记的 P2 候选「`goal-advance.ts` 是唯不自带准入门的 tick Owner」：反例先证明 DRAINING 期间 `advanceGoals()` 仍投递新的目标轮次，修复按其余 tick 的同形做法在取候选与拿租约之前退出，已落库控制意图的收口与已结束轮次的记账不受影响，四条后台 tick 现全部自带栅栏（证据见[验收详情 346](docs/testing/acceptance-details/part-19.md#条目-346)）。仍未闭合：跨会话 `handoff_payload` 无消费者、全局并发闸缺失、Windows 宿主生命周期未取证。逐项标签与证据见 [runtime-context §2.12](docs/architecture/runtime-context/part-02.md#212-与长期自主协作机制的差距对照2026-11-01eng-sa-01-审计)。
 - 禅道是当前问题与需求登记处，见[接入](docs/deployment/禅道接入.md)；历史台账不新增登记。
 
 ## 按需追溯

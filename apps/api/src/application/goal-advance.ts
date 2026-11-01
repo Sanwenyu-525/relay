@@ -6,6 +6,7 @@ import type { JsonObject } from '../infrastructure/json.js';
 import { PlanGoalRepository } from '../assist/plan-goal-repository.js';
 import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
 import { goalStateForPrompt } from './assist-goals.js';
+import { readAdmission } from './maintenance-admission.js';
 import { goalEnvelopeFromJson, goalEnvelopeToJson,
   type GoalEnvelope } from './plan-goal-envelope.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
@@ -396,6 +397,10 @@ async function advanceGoals(db: DbExecutor, options: {
 }): Promise<void> {
   const { result } = options;
   const repositories = createRepositories(db);
+  // 投递下一轮是**新执行**，不是结算：排空/隔离期只挡这一步，与另三条后台链同规则。
+  // 检查放在取候选与拿租约之前——挡下时既不该占住目标租约（否则恢复后要空等一次租约过期），
+  // 也不影响前面两个阶段：控制意图落定与已结束轮次的记账照常收口。
+  if ((await readAdmission(repositories, 'share')).mode !== 'NORMAL') return;
   const candidates = await repositories.planGoals.listAdvanceCandidates(options.now, 10);
   for (const goal of candidates) {
     if (goal.status !== 'ACTIVE') continue;
