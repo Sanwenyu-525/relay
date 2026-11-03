@@ -365,4 +365,25 @@ describe("模型连接登记卡片", () => {
     // 预设不代填型号：用户必须自己确认确切型号。
     expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
   });
+
+  it("星火预设预填 MaaS 端点，但不写死型号", async () => {
+    const { client } = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    const preset = form.get('select[aria-label="服务预设"]');
+    expect(preset.findAll("option").map((option) => option.text()))
+      .toContain("讯飞星火（MaaS）");
+    await preset.setValue("spark");
+    expect((form.get('input[aria-label="服务端点"]').element as HTMLInputElement).value)
+      .toBe("https://maas-api.cn-huabei-1.xf-yun.com/v2");
+    // 星火不是枚举，也不是写死清单：型号仍由用户按账号订阅填写。
+    expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
+    expect((form.get('input[aria-label="确切型号"]').attributes("placeholder")) ?? "")
+      .toContain("spark-x2.6");
+  });
 });

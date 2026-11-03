@@ -420,6 +420,10 @@ const connectionPresets = [
   { id: "openai", label: "OpenAI", baseUrl: "", modelHint: "例如 gpt-4o-mini" },
   { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1",
     modelHint: "例如 openai/gpt-4o-mini" },
+  // 2026-11-03：星火只是自定义 OpenAI 兼容连接的预置模板，不新增枚举、不写死型号；
+  // 端点预填，型号由用户按账号订阅填写（当前 MaaS 账号仅有 spark-x2.6）。
+  { id: "spark", label: "讯飞星火（MaaS）", baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+    modelHint: "例如 spark-x2.6" },
   { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1",
     modelHint: "例如 deepseek-chat" },
   { id: "custom", label: "自定义", baseUrl: "", modelHint: "例如 provider/model-id" }

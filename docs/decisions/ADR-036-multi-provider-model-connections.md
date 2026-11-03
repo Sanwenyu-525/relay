@@ -103,6 +103,24 @@ P0/P1 已落地的相关事实（本轮之前或本轮完成，均可复核）�
 
 **仍未做**：真实外部 Provider 调用（本轮无有效真实 API Key）、真实 Windows/WebView2 与安装态、独立验收、跨工作区共享连接（仍按「连接属工作区」不开放）。
 
+## 阶段五进度（2026-11-03）：星火作为自定义连接预置模板（真实外呼验收）
+
+用户否决「静态清单 + 环境变量写死」的第四种连接类型，改为**全部在设置页可配置**：
+
+- **复用既有链路，零迁移、零枚举改动**。`POST /model-connections` 已支持任意 `openai-compatible` 连接（`base_url` 可自定义、`default_model` 为自由字符串、API Key 存 DPAPI）。星火不作为 Provider 枚举值，也不写死型号清单；`session_model_selection.connection` 的 `CHECK` 与表级约束保持 0158 原样。
+- **设置页预设**：`ModelConnectionsCard` 的「服务预设」新增「讯飞星火（MaaS）」，只预填 `https://maas-api.cn-huabei-1.xf-yun.com/v2`，型号留空由用户按账号订阅填写。保存后连接进入「已登记连接」体系，动态出现在模型下拉的 `已登记连接` 分组，与 `免费模型 · OpenRouter` 分组分开。
+- **凭据与回退优先序**（冲突时左边先赢）：
+  1. 显式会话选择 / 工作区聊天默认的已登记连接（凭据来自 DPAPI 凭据库，`base_url`/`default_model` 来自连接行）；
+  2. 进程默认 `RELAY_MODEL_*`；
+  3. 仅当 `RELAY_MODEL_API_KEY` 缺省或空白时，进程默认可回退机器级 `SPARK_API_KEY`（并使用 MaaS 端点与 `spark-x2.6`）。
+  设置页连接永远优先于 `SPARK_API_KEY`：选中连接后执行端只读冻结的连接身份，不会读进程级回退。
+- **验收证据（一次性真实外呼，非常规测试）**：
+  - 设置页预设预填 MaaS 端点、型号留空；保存的连接 `base_url`/`default_model` 与填写一致，下拉 `已登记连接` 组出现「星火 MaaS（真实）」，`免费模型 · OpenRouter` 组同时可见；
+  - 选中该连接后真实请求 `POST https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions`，`model=spark-x2.6`，HTTP 200，响应流含 `reasoning_content`；消息 `COMPLETED`，正文「星火连接已生效」（连接默认 30s 超时对长上下文不足，验收时把该连接的 `budget.timeout_ms` 经既有 PATCH 调到 120s，未改代码默认值）；
+  - 同一会话切回进程默认 `agnes-3.0-flash`，请求 `POST https://api.agnes-ai.cn/v1/chat/completions`，HTTP 200，消息 `COMPLETED`，正文「默认模型仍可用」。
+  - 自动化覆盖：`model-port-config` 单测锁定 `SPARK_API_KEY` 仅在 `RELAY_MODEL_API_KEY` 缺失时生效；`chat-model-connection` 集成测试断言连接声明的 `base_url`/`model`/Bearer 凭据，并显式断言其压过 `SPARK_API_KEY` 回退；Workbench 用例覆盖预设预填与「已登记连接」分组。真实外呼只作一次性证据，不进常规测试。
+- **回滚风险**：无迁移、无新表列，回滚只需回退本次代码提交；既有连接行与 DPAPI 凭据仍可被原链路读取，`agnes-3.0-flash` 默认路径未改。
+
 ## 未决问题
 
 1. 秘密存储选型（DPAPI 与 Credential Manager 的实际打包行为需在目标机器验证）。

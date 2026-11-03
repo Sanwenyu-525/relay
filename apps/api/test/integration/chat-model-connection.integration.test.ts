@@ -56,12 +56,15 @@ const app = openDatabase(APP_DATABASE_URL, 'relay-chat-model-connection-test');
 let dataRoot: string;
 let storage: ManagedContentStore;
 
-/** 进程默认刻意是另一个型号：执行端若偷偷回退，断言会立刻失败。 */
+/** 进程默认刻意是另一个型号：执行端若偷偷回退，断言会立刻失败。
+ *  同时给出 SPARK_API_KEY：设置页登记连接（含自己的 DPAPI 凭据）优先于这条进程级回退，
+ *  外呼仍必须使用连接声明的 base_url/model/凭据。 */
 const PROCESS_DEFAULT_ENV = {
   RELAY_MODEL_PROVIDER: 'openai-compatible',
   RELAY_MODEL_NAME: 'synthetic/process-default',
   RELAY_MODEL_API_KEY: 'synthetic-process-default-key',
   RELAY_MODEL_BASE_URL: 'https://model-gateway.example.com/v1',
+  SPARK_API_KEY: 'synthetic-spark-fallback-key',
 } as NodeJS.ProcessEnv;
 
 const PUBLIC_LOOKUP = async () => [{ address: '93.184.216.34', family: 4 }];
@@ -91,17 +94,19 @@ function unavailableCredentials(): CredentialStore {
   return { put: fail, resolve: fail, delete: fail, status: fail };
 }
 
-interface CapturedRequest { readonly model: string; readonly authorization: string | null }
+interface CapturedRequest { readonly url: string; readonly model: string;
+  readonly authorization: string | null }
 
 function controlledProvider(content: string) {
   const requests: CapturedRequest[] = [];
   const dependencies: ModelFetchDependencies = {
     lookup: PUBLIC_LOOKUP,
-    fetch: (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const raw = typeof init?.body === 'string' ? init.body : '';
       const body = raw === '' ? {} : JSON.parse(raw) as Record<string, unknown>;
       const headers = new Headers(init?.headers ?? {});
-      requests.push({ model: typeof body.model === 'string' ? body.model : '',
+      requests.push({ url: input instanceof Request ? input.url : String(input),
+        model: typeof body.model === 'string' ? body.model : '',
         authorization: headers.get('authorization') });
       const chunk = (delta: object, finishReason: string | null = null): string =>
         `data: ${JSON.stringify({ id: 'chatcmpl-chat-connection', object: 'chat.completion.chunk',
@@ -126,11 +131,11 @@ interface Connection { readonly id: string; readonly model: string;
   readonly revision: bigint; readonly apiKey: string }
 
 async function createConnection(workspaceId: string, credentials: CredentialStore,
-  input: { readonly name: string; readonly model: string; readonly apiKey: string }):
-Promise<Connection> {
+  input: { readonly name: string; readonly model: string; readonly apiKey: string;
+    readonly baseUrl?: string | null }): Promise<Connection> {
   const outcome = await createModelConnectionCommand({ db: app.db, credentials }, {
     workspaceId, commandId: randomUUID(), name: input.name,
-    defaultModel: input.model, apiKey: input.apiKey });
+    defaultModel: input.model, apiKey: input.apiKey, baseUrl: input.baseUrl ?? null });
   const connection = outcome.result.connection as { id: string; revision: string };
   return { id: String(connection.id), model: input.model,
     revision: BigInt(String(connection.revision)), apiKey: input.apiKey };
@@ -246,6 +251,31 @@ test('会话选择已登记连接：消息冻结连接身份，生成按连接�
     assert.equal(settled.status, 'COMPLETED');
     assert.match(settled.content ?? '', /会话连接回复/u);
   });
+
+test('自定义 OpenAI 兼容连接：外呼使用连接声明的 base_url/model/凭据，并优先于 SPARK_API_KEY 回退', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const credentials = memoryCredentials();
+  // 星火只是自定义连接的一个模板：端点与型号都来自设置页保存的连接，不在代码里写死。
+  const baseUrl = 'https://maas-api.cn-huabei-1.xf-yun.com/v2';
+  const connection = await createConnection(workspaceId, credentials, {
+    name: '讯飞星火（MaaS）', model: 'spark-x2.6', apiKey: 'synthetic-spark-key', baseUrl });
+  const sessionId = await newSession(workspaceId);
+  await selectConnection(workspaceId, sessionId, connection.id, credentials);
+  const accepted = await requestAssistMessage(app.db, { workspaceId, sessionId,
+    commandId: randomUUID(), content: '请用星火连接回答' }, PROCESS_DEFAULT_ENV, credentials);
+  const provider = controlledProvider('星火连接回复');
+  const outcome = await generate(accepted.result.assistant_message_id, credentials, provider);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  assert.ok(provider.requests.length >= 1);
+  for (const request of provider.requests) {
+    assert.equal(request.url, `${baseUrl}/chat/completions`, '必须打到连接声明的端点');
+    assert.equal(request.model, 'spark-x2.6', '型号必须来自连接，而不是进程默认');
+    assert.equal(request.authorization, 'Bearer synthetic-spark-key',
+      '设置页连接的凭据优先于 SPARK_API_KEY 进程级回退');
+  }
+  const calls = await modelCallsForAssist(accepted.result.assistant_message_id);
+  assert.ok(calls.every((call) => call.model === 'spark-x2.6'));
+});
 
 test('凭据轮换后排队消息以 ASSIST_MODEL_CREDENTIAL_CHANGED 停止且零外呼', async () => {
   const workspaceId = await createWorkspace(app.db);
