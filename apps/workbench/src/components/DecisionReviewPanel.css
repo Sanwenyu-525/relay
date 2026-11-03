@@ -1,0 +1,108 @@
+.decision-review {
+  margin-top: var(--relay-space-6);
+  padding: var(--relay-space-6);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+}
+
+.decision-review__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+}
+
+.decision-review__heading h3 {
+  margin: 0;
+}
+
+/* 未知结果提示复用 warning-callout 的色底，但它是多段说明 + 按钮组，
+   不能沿用 warning-callout 的横向 flex 排列。 */
+.decision-review .decision-review__pending {
+  display: block;
+}
+
+.decision-review .decision-review__pending > * + * {
+  margin-top: var(--relay-space-2);
+}
+
+.decision-review__badge {
+  flex: none;
+  padding: var(--relay-space-1) var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-pill);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+}
+
+.decision-review__section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+  margin-top: var(--relay-space-5);
+}
+
+.decision-review__section-head h4,
+.decision-review__reviews > h4 {
+  margin: 0;
+}
+
+.decision-review__list {
+  margin: var(--relay-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decision-review__item {
+  padding: var(--relay-space-3) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  overflow-wrap: anywhere;
+}
+
+.decision-review__item p {
+  margin: 0 0 var(--relay-space-2);
+}
+
+.decision-review__reviews {
+  margin-top: var(--relay-space-6);
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.decision-review__form {
+  margin-top: var(--relay-space-4);
+  padding: var(--relay-space-4);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-elevated);
+}
+
+.decision-review__form .field,
+.decision-review__reviews .field {
+  margin-top: var(--relay-space-3);
+}
+
+.decision-review__source-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+}
+
+.decision-review__history {
+  margin-top: var(--relay-space-6);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.decision-review__history > summary {
+  padding: var(--relay-space-2) 0;
+  color: var(--relay-color-text-secondary);
+  cursor: pointer;
+}
+
+.decision-review [data-applicable="false"] {
+  opacity: 0.85;
+}

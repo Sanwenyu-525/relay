@@ -12,7 +12,7 @@ import { assistLivePreviewFrom } from "../src/api/resources/assist";
 import {
   approvalReview, at, assistantMessage, candidateProposal, changeSets, commandResult, draftOf, frozenDiff,
   labRun, livePreview, MARKDOWN_RICH, MOCK, modelCallOf, pair, readCall, recallReceipt, recallSummary,
-  runCall, runPreview, runPreviewFile, runProjection, sessionTrace, userMessage
+  runCall, runPreview, runPreviewFile, runProjection, sessionTrace
 } from "../src/dev/scenarioFixtures";
 
 /**
@@ -259,7 +259,7 @@ describe("夹具 ↔ 产品解析器：工具轨迹（会话侧与 Run 侧词表
     expect(runToolCallsFrom(wire({
       run_id: MOCK.runId, run_status: "RUNNING", wait_reason: null,
       rounds: projection.rounds.map((round, index) => ({ round: index,
-        model_call_id: round.modelCallId, calls: calls.map(wireRunCall) }))
+        model_call_id: round.modelCallId, calls: calls.map((call) => wireRunCall(call)) }))
     }))).toEqual(projection);
   });
 
@@ -339,7 +339,7 @@ describe("夹具 ↔ 产品解析器：文件写入 Diff 与会话总 Diff", () 
   });
 
   it("会话总 Diff：净变化与覆盖读成产品 DTO；旧形状按目录口径与未知覆盖读", () => {
-    expect(conversationDiffFrom(wire({
+    const sessionDiff = conversationDiffFrom(wire({
       available: true, scope: "SESSION", baseline_captured_at: at(0), baseline_revision: "12",
       root_path: "mock://managed/root", resource_id: "mock-resource", incomplete: false,
       coverage: { baseline: { complete: true, reason: null, files: 3, listed: 3 },
@@ -348,7 +348,9 @@ describe("夹具 ↔ 产品解析器：文件写入 Diff 与会话总 Diff", () 
       total_files: 1, total_added: 4, total_removed: 1,
       files: [{ path: "src/lib/order.ts", action: "MODIFY", added: 4, removed: 1,
         unavailable_reason: null }]
-    })).coverage).toEqual({
+    }));
+    if (!sessionDiff.available) throw new Error(`expected available diff, got ${sessionDiff.reason}`);
+    expect(sessionDiff.coverage).toEqual({
       baseline: { complete: true, reason: null, files: 3, listed: 3 },
       current: { complete: false, reason: "SCAN_LIMIT", files: 3, listed: 2 },
       uncheckedFiles: 1, unverifiedFiles: 0, unverifiableFiles: 0, unscannedFiles: 1 });
@@ -358,6 +360,7 @@ describe("夹具 ↔ 产品解析器：文件写入 Diff 与会话总 Diff", () 
       root_path: "mock://managed/root", resource_id: "mock-resource", incomplete: true,
       total_files: 0, total_added: 0, total_removed: 0, files: []
     }));
+    if (!legacy.available) throw new Error(`expected available diff, got ${legacy.reason}`);
     expect({ scope: legacy.scope, coverage: legacy.coverage })
       .toEqual({ scope: "DIRECTORY", coverage: null });
     expect(conversationDiffFrom(wire({ available: false, reason: "NO_BASELINE" })))

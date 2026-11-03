@@ -5,6 +5,7 @@ import PageHeader from "../components/PageHeader";
 import AppDialog from "../components/AppDialog";
 import EmptyState from "../components/EmptyState";
 import KnowledgeReader from "../components/KnowledgeReader";
+import DecisionReviewPanel from "../components/DecisionReviewPanel";
 import SafeMarkdown from "../components/SafeMarkdown";
 import ProjectKnowledgeGuide from "../components/ProjectKnowledgeGuide";
 import WebImportPanel from "../components/WebImportPanel";
@@ -1366,6 +1367,9 @@ export default function KnowledgeView() {
                   onClick={() => openForm(true)}>去追加新版本</button></div>}
             </section>}
             {selectedDecision && <article className="knowledge-fact-paper"><h3>做出的选择</h3><p className="knowledge-body">{selectedDecision.choice}</p><h3>依据</h3><p className="knowledge-body">{selectedDecision.rationale}</p><h3>备选与代价</h3><p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>{selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</article>}
+            {/* 决定依据与复核：登记与判断都在这里，服务端负责变化检测、去重与修订冲突。 */}
+            {selectedDecision && client && projectId && <DecisionReviewPanel key={selectedDecision.id}
+              client={client} projectId={projectId} decision={selectedDecision} />}
             {selectedRule && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedRule.statement}</p><p>{selectedRule.strength === "HARD" ? "硬约束" : "偏好"} · 执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p></article>}
             {restoreEntry && <section className="knowledge-restore" data-testid="knowledge-restore-entry" aria-label="恢复状态">
               <p className="helper-text" data-testid="knowledge-restore-note">{restoreEntry.note}</p>
