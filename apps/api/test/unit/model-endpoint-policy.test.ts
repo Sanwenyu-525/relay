@@ -106,3 +106,44 @@ test('valid SSE completion and caller cancellation both release the upstream rea
     assert.equal(cancelled, finish === 'CANCEL');
   }
 });
+test('DNS resolution is bounded by its own budget instead of waiting forever', async () => {
+  let sent = 0;
+  const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+    dnsTimeoutMs: 30,
+    lookup: () => new Promise<readonly { address: string; family: number }[]>(() => {}),
+    fetch: async () => { sent += 1; return new Response('{}'); },
+  });
+  await assert.rejects(() => guarded('https://models.vendor.com/v1/chat/completions'),
+    /MODEL_ENDPOINT_DNS_TIMEOUT/u);
+  assert.equal(sent, 0);
+});
+
+test('caller cancellation ends DNS and never sends the request', async () => {
+  let sent = 0;
+  const controller = new AbortController();
+  const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+    lookup: () => new Promise<readonly { address: string; family: number }[]>((resolve) => {
+      setTimeout(() => resolve([{ address: '8.8.8.8', family: 4 }]), 60);
+    }),
+    fetch: async () => { sent += 1; return new Response('{}'); },
+  });
+  const pending = guarded('https://models.vendor.com/v1/chat/completions',
+    { signal: controller.signal });
+  setTimeout(() => controller.abort(), 10);
+  await assert.rejects(() => pending, /MODEL_ENDPOINT_ABORTED/u);
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(sent, 0);
+});
+
+test('an already-cancelled call fails before DNS work or any request', async () => {
+  let sent = 0;
+  let looked = 0;
+  const guarded = guardedModelFetch('https://models.vendor.com/v1', {
+    lookup: async () => { looked += 1; return [{ address: '8.8.8.8', family: 4 }]; },
+    fetch: async () => { sent += 1; return new Response('{}'); },
+  });
+  await assert.rejects(() => guarded('https://models.vendor.com/v1/chat/completions',
+    { signal: AbortSignal.abort() }), /MODEL_ENDPOINT_ABORTED/u);
+  assert.equal(looked, 0);
+  assert.equal(sent, 0);
+});

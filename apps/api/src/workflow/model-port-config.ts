@@ -37,14 +37,29 @@ const DEFAULT_MAX_SCOPE_CALLS = 32;
 const DEFAULT_MAX_SCOPE_TOKENS = 262_144;
 export const OPENROUTER_CHAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
+/**
+ * 讯飞星火 MaaS 的 OpenAI 兼容端点：控制台 OpenAI_Chat 完整路径为 <base>/chat/completions。
+ * 只在 SPARK_API_KEY 回退路径上作为默认 base URL 使用。
+ */
+export const SPARK_CHAT_BASE_URL = 'https://maas-api.cn-huabei-1.xf-yun.com/v2';
+/** SPARK_API_KEY 回退路径的默认模型名（星火控制台 OpenAI_Chat 示例的 model 字段）。 */
+export const SPARK_CHAT_DEFAULT_MODEL = 'spark-x2.6';
+
 export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | undefined {
   const provider = env.RELAY_MODEL_PROVIDER;
   if (provider === undefined || provider === '' || provider === 'fake') return undefined;
   if (provider !== 'openai-compatible') {
     throw new ConfigError([`RELAY_MODEL_PROVIDER ${provider} is unsupported`]);
   }
-  const apiKey = env.RELAY_MODEL_API_KEY;
-  const model = env.RELAY_MODEL_NAME;
+  // 2026-11-03：RELAY_MODEL_API_KEY 缺省或空白时回退机器级 SPARK_API_KEY（讯飞星火 MaaS），
+  // 该回退路径自带默认端点与默认模型名；显式 RELAY_MODEL_* 的优先级不变。
+  const explicitApiKey = env.RELAY_MODEL_API_KEY?.trim() ?? '';
+  const sparkApiKey = env.SPARK_API_KEY?.trim() ?? '';
+  const sparkFallback = explicitApiKey === '' && sparkApiKey !== '';
+  const apiKey = explicitApiKey !== '' ? explicitApiKey
+    : (sparkFallback ? sparkApiKey : undefined);
+  const model = (env.RELAY_MODEL_NAME ?? '').trim() !== '' ? env.RELAY_MODEL_NAME
+    : (sparkFallback ? SPARK_CHAT_DEFAULT_MODEL : env.RELAY_MODEL_NAME);
   const issues: string[] = [];
   if (apiKey === undefined || apiKey.trim() === '') issues.push('RELAY_MODEL_API_KEY is required');
   if (model === undefined || model.trim() === '') issues.push('RELAY_MODEL_NAME is required');
@@ -70,7 +85,9 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
     issues.push('RELAY_MODEL_MAX_SCOPE_TOKENS must cover RELAY_MODEL_MAX_CALL_TOKENS');
   }
   if (issues.length > 0) throw new ConfigError(issues);
-  const baseUrl = env.RELAY_MODEL_BASE_URL;
+  const explicitBaseUrl = env.RELAY_MODEL_BASE_URL?.trim() ?? '';
+  const baseUrl = explicitBaseUrl !== '' ? env.RELAY_MODEL_BASE_URL
+    : (sparkFallback ? SPARK_CHAT_BASE_URL : env.RELAY_MODEL_BASE_URL);
   const parsedBaseUrl = baseUrl === undefined || baseUrl === '' ? undefined
     : parseModelBaseUrl(baseUrl);
   return { provider: 'openai-compatible', model: model!.trim(), apiKey: apiKey!.trim(),

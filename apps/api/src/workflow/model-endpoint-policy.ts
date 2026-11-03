@@ -41,6 +41,40 @@ export interface ModelFetchDependencies {
   readonly fetch?: typeof fetch;
   readonly lookup?: (hostname: string) => Promise<readonly {
     address: string; family: number }[]>;
+  /** DNS 阶段的独立预算；缺省用 DEFAULT_MODEL_DNS_TIMEOUT_MS。 */
+  readonly dnsTimeoutMs?: number;
+}
+
+/** 模型调用的 DNS 阶段不得无界等待：缺省预算（毫秒）。 */
+export const DEFAULT_MODEL_DNS_TIMEOUT_MS = 15_000;
+
+function assertNotCancelled(signal: AbortSignal | null): void {
+  if (signal?.aborted === true) throw new Error('MODEL_ENDPOINT_ABORTED');
+}
+
+/**
+ * DNS 不得成为无界等待：预算到点或调用方取消都立刻结束解析。
+ * 解析本身不可取消，但调用方不再等它——之后也不会再发起 fetch。
+ */
+async function lookupWithinBudget(
+  resolve: (hostname: string) => Promise<readonly { address: string; family: number }[]>,
+  hostname: string, timeoutMs: number, signal: AbortSignal | null,
+): Promise<readonly { address: string; family: number }[]> {
+  if (signal?.aborted === true) throw new Error('MODEL_ENDPOINT_ABORTED');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    const budget = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('MODEL_ENDPOINT_DNS_TIMEOUT')), timeoutMs);
+      if (signal === null) return;
+      onAbort = () => reject(new Error('MODEL_ENDPOINT_ABORTED'));
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    return await Promise.race([resolve(hostname), budget]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (signal !== null && onAbort !== undefined) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 /** Redirects are rejected before fetch follows them; every SDK request must stay
@@ -58,11 +92,16 @@ export function guardedModelFetch(baseUrl: string,
         target.username !== '' || target.password !== '' || target.hash !== '') {
       throw new Error('MODEL_ENDPOINT_NOT_ALLOWED');
     }
-    const addresses = await (dependencies.lookup ??
-      ((hostname: string) => lookup(hostname, { all: true })))(allowed.hostname);
+    const signal = init?.signal ?? null;
+    assertNotCancelled(signal);
+    const addresses = await lookupWithinBudget(
+      dependencies.lookup ?? ((hostname: string) => lookup(hostname, { all: true })),
+      allowed.hostname, dependencies.dnsTimeoutMs ?? DEFAULT_MODEL_DNS_TIMEOUT_MS, signal);
     if (addresses.length === 0 || addresses.some((entry) => !isPublicAddress(entry.address))) {
       throw new Error('MODEL_ENDPOINT_NOT_PUBLIC');
     }
+    // 取消后不得再发起请求：DNS 期间可能已被取消，这里必须再核对一次。
+    assertNotCancelled(signal);
     const response = await (dependencies.fetch ?? fetch)(input, { ...init, redirect: 'error' });
     const finalUrl = response.url === '' ? null : new URL(response.url);
     if ((response.status >= 300 && response.status < 400) || response.redirected ||

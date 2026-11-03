@@ -100,3 +100,41 @@ test('OpenRouter chat credential falls back to the standard OPENROUTER_API_KEY',
   assert.throws(() => readOpenRouterModelPortConfig(
     { OPENROUTER_API_KEY: '   ' }, 'vendor/model:free'), ConfigError);
 });
+
+// 2026-11-03：SPARK_API_KEY 回退只在 RELAY_MODEL_API_KEY 缺省/空白时生效，
+// 且该路径自带星火 MaaS 的默认端点与默认模型名；显式 RELAY_MODEL_* 仍然优先。
+test('SPARK_API_KEY fills the model credential only when RELAY_MODEL_API_KEY is absent', () => {
+  const fallback = readModelPortConfig({
+    RELAY_MODEL_PROVIDER: 'openai-compatible', SPARK_API_KEY: ' spark-key ',
+  });
+  assert.ok(fallback);
+  assert.equal(fallback.apiKey, 'spark-key');
+  assert.equal(fallback.model, 'spark-x2.6');
+  assert.equal(fallback.baseUrl, 'https://maas-api.cn-huabei-1.xf-yun.com/v2');
+
+  const explicitWins = readModelPortConfig({
+    RELAY_MODEL_PROVIDER: 'openai-compatible', SPARK_API_KEY: 'spark-key',
+    RELAY_MODEL_API_KEY: ' relay-key ', RELAY_MODEL_NAME: 'vendor-model',
+    RELAY_MODEL_BASE_URL: 'https://model.vendor.com/v1',
+  });
+  assert.ok(explicitWins);
+  assert.equal(explicitWins.apiKey, 'relay-key');
+  assert.equal(explicitWins.model, 'vendor-model');
+  assert.equal(explicitWins.baseUrl, 'https://model.vendor.com/v1');
+
+  const explicitModelKeepsSparkEndpoint = readModelPortConfig({
+    RELAY_MODEL_PROVIDER: 'openai-compatible', SPARK_API_KEY: 'spark-key',
+    RELAY_MODEL_NAME: 'spark-x2.6-lite',
+  });
+  assert.ok(explicitModelKeepsSparkEndpoint);
+  assert.equal(explicitModelKeepsSparkEndpoint.model, 'spark-x2.6-lite');
+  assert.equal(explicitModelKeepsSparkEndpoint.baseUrl,
+    'https://maas-api.cn-huabei-1.xf-yun.com/v2');
+
+  // 空白 SPARK_API_KEY 不构成回退，缺少 RELAY_MODEL_API_KEY 仍然按残缺配置失败。
+  assert.throws(() => readModelPortConfig({
+    RELAY_MODEL_PROVIDER: 'openai-compatible', SPARK_API_KEY: '   ',
+  }), ConfigError);
+  // provider 缺省 / fake 时回退也不改变 Fake 路径。
+  assert.equal(readModelPortConfig({ SPARK_API_KEY: 'spark-key' }), undefined);
+});

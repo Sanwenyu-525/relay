@@ -369,7 +369,9 @@ fn validate_desktop_config_keys(config: &str) -> Result<(), String> {
             // 2026-10-19: 目录里没有该模型时，运维用它显式声明「该模型接受图片输入」。
             // 不放进白名单的话，桌面版用户既无法发送图片、也拿不到「加上这一行」的出路：
             // 宿主会先以 unsupported setting 拒绝启动。
-            "RELAY_MODEL_IMAGE_INPUT") {
+            "RELAY_MODEL_IMAGE_INPUT" |
+            // 2026-11-03：RELAY_MODEL_API_KEY 缺省时 Relay 用它作为星火 MaaS 的模型密钥。
+            "SPARK_API_KEY") {
             return Err("desktop.env contains an unsupported setting".into());
         }
     }
@@ -1258,7 +1260,7 @@ mod tests {
              RELAY_DB_CONNECT_TIMEOUT_MS=3000\nRELAY_DESKTOP_WORKSPACE_ID=00000000-0000-4000-8000-000000000000\n\
              RELAY_MODEL_PROVIDER=openai-compatible\nRELAY_MODEL_NAME=test-model\n\
              RELAY_MODEL_API_KEY=sk-local-only\nRELAY_MODEL_BASE_URL=https://api.example.cn/v1\n\
-             RELAY_MODEL_IMAGE_INPUT=true\nRELAY_COMPUTER_RUNTIME=C:\\\\Relay\\\\runtime.exe\n").is_ok());
+             RELAY_MODEL_IMAGE_INPUT=true\nSPARK_API_KEY=spark-local-only\nRELAY_COMPUTER_RUNTIME=C:\\\\Relay\\\\runtime.exe\n").is_ok());
         for text in ["RELAY_DB_URL=x\nNODE_OPTIONS=--import=evil\n",
             "RELAY_DB_URL=x\nRELAY_MODEL_PROVIDER=openai-compatible\nRELAY_SOMETHING=1\n",
             "RELAY_DB_URL=x\nmalformed"] {
