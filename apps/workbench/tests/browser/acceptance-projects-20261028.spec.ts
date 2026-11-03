@@ -137,7 +137,10 @@ for (const state of ["normal", "empty", "load-error"]) {
 for (const path of ["/goals", "/goals/goal-example"]) {
   test(`目标 fixture 真实能力边界 ${path}`, async ({ page }) => {
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: /示例模式没有正式 Goal/ })).toBeVisible();
+    // 2026-11-03：页面标题恢复为页面名（目标 / 目标详情），示例说明降为状态卡标题，
+    // 因此断言改为卡片正文，而不是 heading 角色。
+    await expect(page.getByRole("heading", { name: path === "/goals" ? "目标" : "目标详情" })).toBeVisible();
+    await expect(page.locator(".pv-fixture-card")).toContainText(/示例模式没有正式 Goal/);
     await capture(page, path === "/goals" ? "goals-fixture-gap" : "goal-detail-fixture-gap");
   });
 }

@@ -150,11 +150,25 @@
   line-height: var(--relay-font-lineHeight-ui);
 }
 
-/* 表单：标签在上、控件在下；宽屏保持单列，不把设置项拉成两栏说明墙。 */
+/* 表单：标签在上、控件在下。2026-11-03 第二轮：宽屏下「显示与界面」改为两列，
+   避免 834px 卡片里控件只占 352px、右侧留下 458px 空白；仍保持标签在上，
+   不做「左标签 + 右说明」的说明墙。单字段表单（默认工作台）继续单列。 */
 .settings-form {
   display: grid;
   gap: var(--relay-space-4);
   margin-top: var(--relay-space-4);
+}
+
+@media (width >= 64rem) {
+  .settings-page .settings-basic .settings-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--relay-space-6);
+    align-items: start;
+  }
+
+  .settings-page .settings-basic .settings-form > .settings-save-actions {
+    grid-column: 1 / -1;
+  }
 }
 
 .settings-field {
@@ -209,11 +223,22 @@
   margin-top: 0;
 }
 
+/* 控件高度统一到 control（40px）：此前下拉 40、分段控件 48、保存按钮 48，
+   同一张卡片里三种高度。分段控件只在本页收窄，其他页面保持 prominent。 */
+.settings-page .settings-field .segmented-option {
+  height: var(--relay-control-height);
+}
+
+/* 外观是只读事实（见 SettingsView.tsx 注释），只标状态、不摆可点的控件。 */
 .settings-readonly-value {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--relay-space-2);
+  min-height: var(--relay-control-height);
+}
+
+.settings-page .settings-form .primary-button {
   min-height: var(--relay-control-height);
 }
 

@@ -9,6 +9,7 @@ import {
 } from "../api/relayClient";
 import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
+import FixtureNote from "../components/FixtureNote";
 import ViewConfigurationPanel from "../components/ViewConfigurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { gatewayCapabilityLabel } from "../lib/labels";
@@ -315,7 +316,7 @@ export default function ConnectionsView() {
     {connection.mode === "fixture" && <section className="surface-panel connections-empty" aria-label="本机 API 连接">
       <h2>本机 API 连接</h2>
       <div className="connections-empty-body">
-        <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>
+        <FixtureNote>当前为示例数据；连接设置只在显式连接本机 API 后可用。</FixtureNote>
         <Link className="secondary-button" to={viaSettings ? "/settings" : "/projects"}>{viaSettings ? "返回设置" : "返回项目入口"}</Link>
       </div>
     </section>}
@@ -606,15 +607,16 @@ export function ProjectConnectionsView() {
   const activeResources = snapshot?.resources.filter((item) => item.status === "ACTIVE") ?? [];
   const busy = submitting || pending !== null;
   return <section className="connections-page pv-page">
-    <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置" lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY，新建连接默认拒绝。" />
+    <PageHeader testId="project-connections-page-head" title="连接与权限" overline="Connections" meta="项目设置"
+      lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY，新建连接默认拒绝。"
+      actions={<Link className="secondary-button" to={`/projects/${projectId}`}>返回原项目页</Link>} />
     <ProjectNav projectId={projectId} active="connections" />
     <ReturnToConversation search={search} />
-    <p><Link className="inline-link" to={`/projects/${projectId}`}>返回原项目页</Link></p>
     <details className="connections-view-configuration">
       <summary>工作台默认视图与页面顺序</summary>
       <ViewConfigurationPanel client={client} projectId={projectId} projectArchivedAt={projectArchivedAt} />
     </details>
-    {client === null ? <p className="warning-callout" role="status">当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</p> : <>
+    {client === null ? <FixtureNote>当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</FixtureNote> : <>
       <div className="connections-title"><h2>{snapshot?.project.title ?? "当前项目"}</h2>
         <button className="secondary-button" type="button" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</button></div>
       <details className="connections-identity"><summary>项目身份与配置范围</summary><p className="helper-text">Project ID：<code className="hash-code">{projectId}</code></p><p className="helper-text">连接绑定能力和目标边界；权限策略另行授权。默认拒绝，不会因创建连接自动放行。</p></details>

@@ -12,6 +12,7 @@ import ContextBudgetCard from "../components/ContextBudgetCard";
 import { CurrentModelUsageCard } from "../components/CurrentModelUsageCard";
 import { ModelConnectionsCard } from "../components/ModelConnectionsCard";
 import PageHeader from "../components/PageHeader";
+import FixtureNote from "../components/FixtureNote";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -233,7 +234,6 @@ function VerificationDetailCard({ verification, verifying }: {
           {" "}{modelErrorGuides[last.errorCategory]}</dd></div>}
       </dl>}
     {verifying && <p role="status">正在验证…</p>}
-    <p className="helper-text">连接验证只用固定短文本，不读取项目资料，也不代表真实任务执行成功。</p>
   </section>;
 }
 
@@ -252,7 +252,7 @@ function ModelAdvancedDiagnostics({ client, status, verification, verifying, onS
   return <details className="settings-advanced" data-testid="settings-model-advanced">
     <summary>高级诊断与能力声明</summary>
     <div className="settings-advanced-body">
-      <p className="helper-text">以下内容用于排查连接问题，不代表任务可执行。</p>
+      <p className="helper-text">以下内容用于排查连接问题，不参与任务执行判定。</p>
       {status !== null && <ModelPortCard status={status} client={client} onSaved={onSaved} />}
       {status?.configured === true && <VerificationDetailCard verification={verification}
         verifying={verifying} />}
@@ -669,6 +669,8 @@ function GeneralPreferencesCard() {
       </div>
       <div className="settings-field">
         <span className="field-label" id="settings-appearance-label">界面外观</span>
+        {/* 外观是只读事实，不是伪装成可用的主题开关（tests/displayPreferences.spec.ts 锁定）：
+            用状态标记 + 说明表达「当前只有浅色」，不摆一个点了没反应的控件。 */}
         <div id="settings-appearance" className="settings-readonly-value" role="group"
           aria-labelledby="settings-appearance-label" data-testid="settings-appearance">
           <span className="status-chip status-chip--neutral">浅色</span>
@@ -898,11 +900,12 @@ export default function SettingsView() {
         </div>
 
         <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>
-          {visited.model && (client === null ? <div className="warning-callout" role="status">
+          {visited.model && (client === null ? <FixtureNote>
             当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，
             或通过顶栏「数据来源」连接本机 API。
-          </div> : <>            <p className="settings-scope-note" data-testid="settings-ai-scope">
-              以下设置按工作空间生效，只影响之后的新消息与新 Run；已排队、生成中或已冻结的执行保持原连接。
+          </FixtureNote> : <>            <p className="settings-scope-note" data-testid="settings-ai-scope">
+              以下设置按工作空间生效：聊天默认只影响没有显式会话选择的新消息，Run 默认只决定新任务冻结哪条连接；
+              已排队、生成中或已冻结的执行保持原连接。
             </p>
             {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
             {error && <div className="action-error" role="alert">

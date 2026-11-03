@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayTaskChain,
   type RelayTaskChainAuthorization, type RelayTaskChainControl, type RelayTaskChainCreate,
@@ -76,12 +76,30 @@ function usageValue(value: unknown): string {
   return String(value);
 }
 
+/**
+ * 未连接 / 读取中 / 读取失败也保留页面框架：页头、项目内导航与卡片同 live 分支对齐。
+ * 示例模式不是另一种页面，只是这次没有可读的任务链事实。
+ */
+function TaskChainsStatePage({ projectId, children }: { projectId: string; children: ReactNode }) {
+  return <section className="skill-page task-chain-page pv-page"><div className="page-layout"><main className="page-primary">
+    <PageHeader title="有限任务链" lede="先固定任务顺序，再单独确认预算与授权期限。创建草稿不会启动任务。" />
+    <ProjectNav projectId={projectId} active="chains" />
+    {children}
+  </main></div></section>;
+}
+
 export default function ProjectTaskChainsView() {
   const { id = "" } = useParams();
   const connection = useRelayConnection();
-  if (!connection.client) return <div className="pv-page"><section className="page-state"><p className="eyebrow">有限任务链</p>
-    <h1>需要连接本机 API</h1><p>任务链必须读取真实任务、验收版本和执行记录；示例数据不会模拟授权或运行状态。</p>
-    <Link className="secondary-button" to="/settings/connections">连接工作空间</Link></section></div>;
+  if (!connection.client) return <TaskChainsStatePage projectId={id}>
+    <section className="pv-card pv-fixture-card">
+      <div className="pv-card-h"><strong>需要连接本机 API</strong></div>
+      <div className="pv-card-b">
+        <p>任务链必须读取真实任务、验收版本和执行记录；示例数据不会模拟授权或运行状态。</p>
+        <Link className="secondary-button" to="/settings/connections">连接工作空间</Link>
+      </div>
+    </section>
+  </TaskChainsStatePage>;
   return <LiveTaskChains key={`${connection.epoch}:${id}`} client={connection.client} projectId={id} />;
 }
 
@@ -291,9 +309,21 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
   const canAuthorize = selectedChain !== null && (selectedChain.status === "DRAFT" || selectedChain.status === "WAITING_RESUME" || selectedChain.status === "PAUSED")
     && !archived && uncertainCalls === 0;
 
-  if (loading) return <section className="page-state" role="status"><h1>正在读取有限任务链…</h1></section>;
-  if (error && projectTitle === "") return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目任务链</h1>
-    <p>{error}</p><button className="secondary-button" type="button" onClick={() => void refresh()}>重新读取</button></section>;
+  if (loading) return <TaskChainsStatePage projectId={projectId}>
+    <section className="pv-card pv-fixture-card" role="status">
+      <div className="pv-card-h"><strong>正在读取有限任务链…</strong></div>
+      <div className="pv-card-b"><p>正在读取项目任务、验收版本与任务链记录。</p></div>
+    </section>
+  </TaskChainsStatePage>;
+  if (error && projectTitle === "") return <TaskChainsStatePage projectId={projectId}>
+    <section className="pv-card pv-fixture-card pv-fixture-card--error" role="alert">
+      <div className="pv-card-h"><strong>暂时无法读取项目任务链</strong></div>
+      <div className="pv-card-b">
+        <p>{error}</p>
+        <button className="secondary-button" type="button" onClick={() => void refresh()}>重新读取</button>
+      </div>
+    </section>
+  </TaskChainsStatePage>;
 
   return <section className="skill-page task-chain-page pv-page"><div className="page-layout"><main className="page-primary">
     <PageHeader title="有限任务链" meta={projectTitle} lede="先固定任务顺序，再单独确认预算与授权期限。创建草稿不会启动任务。" />

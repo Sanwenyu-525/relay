@@ -1,0 +1,6 @@
+/* 状态页（示例 / 读取中 / 读取失败）只有一列事实：卡外的待核对命令与只读草稿
+   跟卡片同宽，避免 780px 的卡下面挂出 1220px 的诊断块。 */
+.goal-detail-page .pv-fixture-card ~ .warning-callout,
+.goal-detail-page .pv-fixture-card ~ .resume-section {
+  max-width: 780px;
+}

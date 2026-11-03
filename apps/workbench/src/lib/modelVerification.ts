@@ -92,12 +92,12 @@ export const verificationLabels: Record<ModelVerificationStateKind, Verification
   VERIFYING: {
     chip: "验证中",
     tone: "neutral",
-    detail: "正在用固定短文本做一次连接验证，结果只证明当前配置可连通。"
+    detail: "正在调用当前配置的端点。"
   },
   VERIFIED: {
     chip: "验证通过",
     tone: "success",
-    detail: "固定短文本连接验证通过；这不表示任何真实任务已经执行成功。"
+    detail: "最近一次连接验证成功。"
   },
   VERIFY_FAILED: {
     chip: "验证失败",

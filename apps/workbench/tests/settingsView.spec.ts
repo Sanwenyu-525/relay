@@ -185,9 +185,10 @@ describe("设置页模型端口状态", () => {
     expect(mounted.wrapper.get('[data-testid="service-state"]').text()).toContain("验证通过");
     const detail = mounted.wrapper.get('[data-testid="verification-detail"]');
     expect(detail.text()).toContain("与当前配置一致");
-    expect(detail.text()).toContain("真实任务执行成功");
-    // 详情页的结论句与主状态一致：验证只回答连接可用，不是任务成功。
-    expect(detail.text()).toContain("连接验证");
+    expect(detail.text()).toContain("验证目标");
+    // 规则说明统一在「连接与模型状态」一处：验证不是任务成功。
+    expect(mounted.wrapper.get('[data-testid="service-state"]').text())
+      .toContain("不等于真实任务执行成功");
     // 验证时间用本设备可读格式显示，原始 ISO 串只保留在 time.dateTime 属性里。
     expect(detail.text()).not.toContain("2026-09-28T10:00:00.000Z");
     expect(detail.text()).toContain("2026-09-28 18:00:00");

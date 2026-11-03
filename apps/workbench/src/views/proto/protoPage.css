@@ -694,6 +694,15 @@
 .pv-page.page-state--error { border-color: #f0d7d2; }
 .pv-page.page-state .secondary-button { margin-top: 13px; }
 
+/* 空态改为「页头 + 卡片」时，卡片与 page-state 同宽（示例模式、只读预览）：
+   页面框架先给标题与范围，说明留在卡内。 */
+.pv-page .pv-fixture-card { max-width: 780px; }
+.pv-page .pv-fixture-card--error { border-color: #f0d7d2; }
+/* 错误态卡片标题用 h2 承载（屏幕阅读器可按标题定位失败区域），视觉与卡片 strong 一致。 */
+.pv-page .pv-fixture-card .pv-card-h h2 { margin: 0; font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .pv-fixture-card .pv-card-b p { font-size: 12px; line-height: 1.75; color: #486452; margin: 0; }
+.pv-page .pv-fixture-card .pv-card-b .secondary-button { margin-top: 13px; }
+
 /* 禁用按钮不再沿用主色底：pv 皮肤下主/次按钮的底色覆盖了全局 disabled 档，
    留下浅绿底配浅字（对比度约 1.5:1）。不可用状态用中性底 + 可读灰字，原因交给旁边文案。 */
 .pv-page .primary-button:disabled,

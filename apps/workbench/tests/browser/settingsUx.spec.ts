@@ -161,9 +161,13 @@ test("四组设置、失效默认目录、恢复与窄窗截图", async ({ page 
   await expect(page.getByTestId("settings-default-directory-value")).toContainText("有效");
   await screenshot(page, "general-recovered-1440");
 
-  // AI 与模型：当前状态 → 模型连接 → 上下文 → 记忆 → 高级诊断。
+  // AI 与模型：当前使用的模型 → 当前状态 → 模型连接 → 上下文 → 记忆 → 高级诊断。
   await page.getByTestId("settings-group-model").click();
-  await expect(page.getByTestId("settings-ai-scope")).toContainText("会话聊天使用的模型在对话输入器里选择");
+  const scope = page.getByTestId("settings-ai-scope");
+  await expect(scope).toContainText("聊天默认只影响没有显式会话选择的新消息");
+  await expect(scope).toContainText("Run 默认只决定新任务冻结哪条连接");
+  await expect(scope).toContainText("已冻结的执行保持原连接");
+  await expect(page.getByTestId("current-model-usage")).toBeVisible();
   await expect(page.getByTestId("service-state")).toBeVisible();
   await expect(page.getByTestId("model-connections")).toBeVisible();
   await expect(page.getByTestId("model-connections")).not.toContainText("验证通过");
@@ -172,7 +176,7 @@ test("四组设置、失效默认目录、恢复与窄窗截图", async ({ page 
   await expect(advanced.locator("summary")).toHaveText("高级诊断与能力声明");
   const order = await page.locator('[role="tabpanel"]:not([hidden]) > section.settings-card > h2')
     .allTextContents();
-  expect(order).toEqual(["连接与模型状态", "模型连接", "上下文长度", "长期与短期记忆"]);
+  expect(order).toEqual(["当前使用的模型", "连接与模型状态", "模型连接", "上下文长度", "长期与短期记忆"]);
   await screenshot(page, "ai-1440");
 
   // 权限与执行：只读真实状态与入口，不提供无作用域全局开关。

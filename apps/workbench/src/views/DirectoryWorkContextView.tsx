@@ -21,12 +21,17 @@ export default function DirectoryWorkContextView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveDirectoryContext key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
-    : <section className="page-state pv-page" data-testid="directory-context-fixture-gap">
-      <p className="eyebrow">目录</p>
-      <h1>示例模式没有目录工作上下文</h1>
-      <p>目录与普通会话来自本机 API 的受管资源事实；示例模式不生成目录或会话。</p>
-      <Link className="secondary-button" to="/projects">返回项目</Link>
-    </section>;
+    : <div className="pv-page directory-context-page">
+      <PageHeader testId="directory-context-head" overline="Directory" title="目录"
+        lede="目录与普通会话来自本机 API 的受管资源事实；切换入口不改 Session ID、Project 绑定或历史。" />
+      <section className="pv-card pv-fixture-card" data-testid="directory-context-fixture-gap">
+        <div className="pv-card-h"><strong>示例模式没有目录工作上下文</strong></div>
+        <div className="pv-card-b">
+          <p>目录与普通会话来自本机 API 的受管资源事实；示例模式不生成目录或会话。</p>
+          <Link className="secondary-button" to="/projects">返回项目</Link>
+        </div>
+      </section>
+    </div>;
 }
 
 function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClient }) {
@@ -48,15 +53,28 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
     return () => { version.current++; };
   }, [client, id, reload]);
 
-  if (loading) return <section className="page-state pv-page" role="status">
-    <p className="eyebrow">目录</p><h1>正在读取目录工作上下文</h1>
-    <p>只读查询目录、所属项目、关联 Goal 与会话，不会创建或重绑会话。</p></section>;
-  if (error || facts === null) return <section className="page-state page-state--error pv-page" role="alert">
-    <p className="eyebrow">目录</p><h1>暂时无法读取目录</h1>
-    <p>{error ?? "目录事实不可用。"}</p>
-    <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
-      <RotateCcw aria-hidden="true" />重新读取</button>
-  </section>;
+  if (loading) return <div className="pv-page directory-context-page">
+    <PageHeader testId="directory-context-head" overline="Directory" title="目录"
+      lede="目录与普通会话来自本机 API 的受管资源事实；切换入口不改 Session ID、Project 绑定或历史。" />
+    <section className="pv-card pv-fixture-card" role="status" aria-live="polite">
+      <div className="pv-card-h"><strong>正在读取目录工作上下文</strong></div>
+      <div className="pv-card-b">
+        <p>只读查询目录、所属项目、关联 Goal 与会话，不会创建或重绑会话。</p>
+      </div>
+    </section>
+  </div>;
+  if (error || facts === null) return <div className="pv-page directory-context-page">
+    <PageHeader testId="directory-context-head" overline="Directory" title="目录"
+      lede="目录与普通会话来自本机 API 的受管资源事实；切换入口不改 Session ID、Project 绑定或历史。" />
+    <section className="pv-card pv-fixture-card pv-fixture-card--error" role="alert">
+      <div className="pv-card-h"><strong>暂时无法读取目录</strong></div>
+      <div className="pv-card-b">
+        <p>{error ?? "目录事实不可用。"}</p>
+        <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
+          <RotateCcw aria-hidden="true" />重新读取</button>
+      </div>
+    </section>
+  </div>;
 
   const { directory, linkedGoals, sessions } = facts;
   const project = directory.project;

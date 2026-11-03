@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { createCommandId, RelayApiError, type RelayApiClient,
   type RelayPeriodPlan, type RelayScopeOption, type RelayScopeOptionKind,
@@ -79,12 +79,30 @@ function estimateDraftDirty(draft: EstimateDraft): boolean {
   return Object.values(draft).some((value) => value.trim() !== "");
 }
 
+/**
+ * 未连接 / 读取中 / 读取失败也保留页面框架：页头、项目内导航与卡片同 live 分支对齐。
+ * 示例模式不是另一种页面，只是这次没有可读的计划事实。
+ */
+function PlanningStatePage({ projectId, children }: { projectId: string; children: ReactNode }) {
+  return <section className="skill-page planning-page pv-page"><div className="page-layout"><main className="page-primary">
+    <PageHeader title="下一段工作" lede="把本段时间和要推进的任务排成可审阅计划。接受计划只处理计划项，不授权执行。" />
+    <ProjectNav projectId={projectId} active="planning" />
+    {children}
+  </main></div></section>;
+}
+
 export default function ProjectPlanningView() {
   const { id = "" } = useParams();
   const connection = useRelayConnection();
-  if (!connection.client) return <div className="pv-page"><section className="page-state"><p className="eyebrow">下一段工作</p>
-    <h1>需要连接本机 API</h1><p>计划和范围推演读取真实项目任务、目标与用户声明的估时；示例数据不提供可写的计划事实。</p>
-    <Link className="secondary-button" to="/settings/connections">连接工作空间</Link></section></div>;
+  if (!connection.client) return <PlanningStatePage projectId={id}>
+    <section className="pv-card pv-fixture-card">
+      <div className="pv-card-h"><strong>需要连接本机 API</strong></div>
+      <div className="pv-card-b">
+        <p>计划和范围推演读取真实项目任务、目标与用户声明的估时；示例数据不提供可写的计划事实。</p>
+        <Link className="secondary-button" to="/settings/connections">连接工作空间</Link>
+      </div>
+    </section>
+  </PlanningStatePage>;
   return <LiveProjectPlanning key={`${connection.epoch}:${id}`} client={connection.client} projectId={id} />;
 }
 
@@ -398,9 +416,21 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
   const planInputValid = Number.isSafeInteger(availableMs) && availableMs >= 60000 && availableMs <= 604800000 &&
     Number.isSafeInteger(diagnosticMs) && diagnosticMs >= 60000 && diagnosticMs <= availableMs;
 
-  if (loading) return <section className="page-state" role="status"><h1>正在读取下一段工作…</h1></section>;
-  if (error && projectTitle === "") return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目计划</h1>
-    <p>{error}</p><button className="secondary-button" type="button" onClick={() => void refreshPlans(false)}>重新读取</button></section>;
+  if (loading) return <PlanningStatePage projectId={projectId}>
+    <section className="pv-card pv-fixture-card" role="status">
+      <div className="pv-card-h"><strong>正在读取下一段工作…</strong></div>
+      <div className="pv-card-b"><p>正在读取项目任务、目标与估时记录。</p></div>
+    </section>
+  </PlanningStatePage>;
+  if (error && projectTitle === "") return <PlanningStatePage projectId={projectId}>
+    <section className="pv-card pv-fixture-card pv-fixture-card--error" role="alert">
+      <div className="pv-card-h"><strong>暂时无法读取项目计划</strong></div>
+      <div className="pv-card-b">
+        <p>{error}</p>
+        <button className="secondary-button" type="button" onClick={() => void refreshPlans(false)}>重新读取</button>
+      </div>
+    </section>
+  </PlanningStatePage>;
 
   return <section className="skill-page planning-page pv-page"><div className="page-layout"><main className="page-primary">
     <PageHeader title="下一段工作" meta={projectTitle} lede="把本段时间和要推进的任务排成可审阅计划。接受计划只处理计划项，不授权执行。" />

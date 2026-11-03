@@ -4,6 +4,7 @@ import { Info, RotateCcw } from "lucide-react";
 import ReviewDecisionPanel, { isReviewExpired, reviewReasonText } from "../components/ReviewDecisionPanel";
 import ArtifactReaderPanel from "../components/ArtifactReaderPanel";
 import PageHeader from "../components/PageHeader";
+import FixtureNote from "../components/FixtureNote";
 import { RelayApiError, RelayTransportError, type RelayReview } from "../api/relayClient";
 import { reviewKindLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
@@ -151,13 +152,13 @@ export default function ReviewsView() {
           只负责滚动与移动焦点，不代替阅读，也不代替逐项判断。 */}
       {selected !== null && selected.status === "OPEN" && (selectedId === null || selected.id === selectedId) &&
         <nav className="review-jump" aria-label="页内定位">
-          <button type="button" className="text-link" data-testid="review-jump-conditions"
+          <button type="button" className="secondary-button" data-testid="review-jump-conditions"
             onClick={() => jumpTo("review-bound-summary")}>查看判断条件</button>
-          <button type="button" className="text-link" data-testid="review-jump-decision"
+          <button type="button" className="secondary-button" data-testid="review-jump-decision"
             title="移动到决定区；这里不会替你提交任何决定"
             onClick={() => jumpTo("review-decision-actions", "review-decision")}>前往决定</button>
         </nav>}
-      {!live && <p className="warning-callout">当前为只读示例。连接本机 API 后可处理真实 Review 请求。</p>}
+      {!live && <FixtureNote>当前为只读示例。连接本机 API 后可处理真实 Review 请求。</FixtureNote>}
       {error && <p className="action-error" role="alert" data-testid="review-read-error">{error}</p>}
       <section className="review-list" aria-label="待审请求">
         <nav className="review-filters" aria-label="请求类型">

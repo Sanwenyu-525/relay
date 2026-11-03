@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { RelayApiError, type RelayArtifactDirectUses, type RelayArtifactLineage } from "../api/relayClient";
 import ArtifactVersionCompare from "../components/ArtifactVersionCompare";
 import PageHeader from "../components/PageHeader";
+import FixtureNote from "../components/FixtureNote";
 import ArtifactTextLocksPanel from "../components/ArtifactTextLocksPanel";
 import ArtifactImpactCheckPanel from "../components/ArtifactImpactCheckPanel";
 import KnowledgeCurationPanel from "../components/KnowledgeCurationPanel";
@@ -66,7 +67,7 @@ export default function ArtifactLineageView() {
     {client === null ? <section className="surface-panel lineage-empty" aria-label="产物来源关系">
       <h2>产物来源关系</h2>
       <div className="lineage-empty-body">
-        <p className="warning-callout" role="status">示例数据没有真实产物来源关系。</p>
+        <FixtureNote>示例数据没有真实产物来源关系。</FixtureNote>
         <Link className="secondary-button" to="/tasks">返回任务列表</Link>
       </div>
     </section> : <>

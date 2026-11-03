@@ -358,6 +358,7 @@ export default function CreateScheduledTaskView() {
   return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-create-head"
       title={editing ? "编辑定时任务" : "新建定时任务"}
+      overline={editing ? "Edit Schedule" : "New Schedule"}
       lede={editing
         ? `编辑 · ${statusLabel}。修改会写入修改历史；只影响之后的新触发，已发生的触发保持原样。`
         : "到点自动创建并启动任务：每次触发新建一个任务并交给 AI 执行；重复执行的是这套设定，不是同一个任务。"} />

@@ -15,6 +15,7 @@ import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, rese
 import { goalStatusLabels, phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import "./GoalDetailView.css";
 
 /**
  * 正式 Goal 详情：Goal 自身事实、关联 Project、解除影响清单与只读工作上下文。
@@ -193,12 +194,18 @@ export default function GoalDetailView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveGoalDetail key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
-    : <section className="page-state pv-page" data-testid="goal-detail-fixture-gap">
-      <p className="eyebrow">Goal Detail</p>
-      <h1>示例模式没有正式 Goal 详情</h1>
-      <p>Goal 的编辑、归档与项目关联都需要连接本机 API。示例模式不生成目标事实。</p>
-      <Link className="secondary-button" to="/projects">返回项目</Link>
-    </section>;
+    : <div className="pv-page goal-detail-page">
+      {/* 示例、读取中与读取失败都保留页头与卡片框：状态不是另一种页面，只是这次没有可读事实。 */}
+      <PageHeader testId="goal-detail-head" overline="Goal Detail" title="目标详情"
+        lede="目标自身的标题与说明、项目关联和只读工作上下文。" />
+      <section className="pv-card pv-fixture-card" data-testid="goal-detail-fixture-gap">
+        <div className="pv-card-h"><strong>示例模式没有正式 Goal 详情</strong></div>
+        <div className="pv-card-b">
+          <p>Goal 的编辑、归档与项目关联都需要连接本机 API。示例模式不生成目标事实。</p>
+          <Link className="secondary-button" to="/projects">返回项目</Link>
+        </div>
+      </section>
+    </div>;
 }
 
 function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) {
@@ -448,14 +455,29 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
       expectedRevision: facts.goal.revision });
   }
 
-  if (loading) return <section className="page-state pv-page" role="status">
-    <p className="eyebrow">Goal Detail</p><h1>正在读取目标事实</h1>
-    <p>只读查询 Goal、关联 Project 与工作上下文，不会创建或重绑会话。</p></section>;
-  if (error || facts === null) return <section className="page-state page-state--error pv-page" role="alert">
-    <p className="eyebrow">Goal Detail</p><h1>暂时无法读取目标</h1>
-    <p>{error ?? "目标事实不可用。"}</p>
-    {receipt && <p className="receipt-message" role="status" data-testid="goal-detail-receipt">{receipt}</p>}
-    {actionError && <p className="action-error" role="alert" data-testid="goal-detail-error">{actionError}</p>}
+  if (loading) return <div className="pv-page goal-detail-page">
+    <PageHeader testId="goal-detail-head" overline="Goal Detail" title="目标详情"
+      lede="目标自身的标题与说明、项目关联和只读工作上下文。" />
+    <section className="pv-card pv-fixture-card" role="status" aria-live="polite">
+      <div className="pv-card-h"><strong>正在读取目标事实</strong></div>
+      <div className="pv-card-b">
+        <p>只读查询 Goal、关联 Project 与工作上下文，不会创建或重绑会话。</p>
+      </div>
+    </section>
+  </div>;
+  if (error || facts === null) return <div className="pv-page goal-detail-page">
+    <PageHeader testId="goal-detail-head" overline="Goal Detail" title="目标详情"
+      lede="目标自身的标题与说明、项目关联和只读工作上下文。" />
+    <section className="pv-card pv-fixture-card pv-fixture-card--error" role="alert">
+      <div className="pv-card-h"><h2>暂时无法读取目标</h2></div>
+      <div className="pv-card-b">
+        <p>{error ?? "目标事实不可用。"}</p>
+        {receipt && <div className="receipt-message" role="status" data-testid="goal-detail-receipt">{receipt}</div>}
+        {actionError && <div className="action-error" role="alert" data-testid="goal-detail-error">{actionError}</div>}
+        <button className="secondary-button" type="button" onClick={reloadFacts}>
+          <RotateCcw aria-hidden="true" />重新读取</button>
+      </div>
+    </section>
     {pending && <div className="warning-callout" data-testid="goal-detail-pending">
       <strong>Goal 命令待核对</strong>
       <p>原 command ID：{pending.commandId} · 类型 {commandTypeOf(pending)} · 基于 v{pending.expectedRevision}。核对前不会发出第二条命令。</p>
@@ -478,9 +500,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         setDraft({ title: "", description: "" }); setConflictFacts(null);
       }}>丢弃本地草稿</button>
     </section>}
-    <button className="secondary-button" type="button" onClick={reloadFacts}>
-      <RotateCcw aria-hidden="true" />重新读取</button>
-  </section>;
+  </div>;
 
   const { goal, projects, workContext, workContextError, progress } = facts;
   const archived = goal.status !== "ACTIVE";

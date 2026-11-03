@@ -137,8 +137,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
         connection: "registered", connectionId: connection.id });
       setVerifications((current) => ({ ...current, [connection.id]: next }));
       const kind = connectionVerificationKind(next);
-      setNotice(`已用固定短文本验证「${connection.name}」：${verificationLabels[kind].chip}。`
-        + "验证只证明当前配置能否连通，不代表任何任务已执行成功。");
+      setNotice(`已用固定短文本验证「${connection.name}」：${verificationLabels[kind].chip}。`);
     } catch (cause) {
       setError(describeLiveError(cause).message);
     } finally {
@@ -239,7 +238,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                 onClick={() => { void act(connection.id, async () => {
                   await client.setDefaultModelConnection(connection.id, createCommandId());
                   onDefaultsChanged?.();
-                  setNotice(`已把「${connection.name}」设为 Run 默认连接；已创建的 Run 不受影响。`);
+                  setNotice(`已把「${connection.name}」设为 Run 默认连接。`);
                 }); }}>设为 Run 默认</button>}
               {!isChatDefault && <button className="secondary-button" type="button"
                 data-testid={`model-connection-chat-default-${connection.id}`}
@@ -247,8 +246,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                 onClick={() => { void act(connection.id, async () => {
                   await client.setChatDefaultModelConnection(connection.id, createCommandId());
                   onDefaultsChanged?.();
-                  setNotice(`已把「${connection.name}」设为工作区聊天默认；没有显式会话选择的新消息`
-                    + "将使用它。已排队或正在生成的消息保持原连接。");
+                  setNotice(`已把「${connection.name}」设为工作区聊天默认。`);
                 }); }}>设为聊天默认</button>}
               {isChatDefault && <button className="secondary-button" type="button"
                 data-testid={`model-connection-chat-default-clear-${connection.id}`}
@@ -256,7 +254,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                 onClick={() => { void act(connection.id, async () => {
                   await client.setChatDefaultModelConnection(null, createCommandId());
                   onDefaultsChanged?.();
-                  setNotice("已取消工作区聊天默认；没有显式会话选择的新消息改为跟随进程默认。");
+                  setNotice("已取消工作区聊天默认。");
                 }); }}>取消聊天默认</button>}
               <button className="secondary-button" type="button"
                 data-testid={`model-connection-status-${connection.id}`}
@@ -319,8 +317,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
       ? <CreateConnectionForm client={client} busy={blocked}
         onCreated={async (name) => {
           setFormOpen(false);
-          setNotice(`已登记「${name}」。它还不是默认连接（聊天默认与 Run 默认都未改变），`
-            + "也不会自动用于执行；可在这一行点「验证」检查连通性。");
+          setNotice(`已登记「${name}」；它还不是默认连接。可在这一行点「验证」检查连通性。`);
           await load();
         }}
         onCancel={() => { setFormOpen(false); }} />

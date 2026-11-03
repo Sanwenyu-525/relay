@@ -173,6 +173,16 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
   - **断点写法**：新增媒体查询只用 design-system §9.6 的四档语义值（48／64／80／90rem）与 range 语法；`ReviewsView` 的 1120px／760px、`ProjectSkillView` 的 56rem、`TasksView` 的 52rem 已改为 64rem／48rem／64rem。断点守卫对照 HEAD：本任务新增 0 处、消除 1 处，剩余 14 处均为 HEAD 既有欠账（`protoPage.css` 1120/760 等原型值）。
 - **本轮验证**：26 路由 fixture 截图（`tmp/UI-PAGES-POLISH-20261103/final/`）与 390px 移动端（`final-390/`）；审计脚本 `apps/workbench/tmp/audit-pages.mjs` 前后 JSON（对比度 0、小于 11px 0、横向溢出 0）；`tsc --noEmit` 仅剩 HEAD 已存在的 `tests/scenarioFixtureContract.spec.ts` 错误（与本次无关）；受影响 `vitest` 5 个文件 59/59；`impeccable detect` 0 发现。分组轮补充：四组证据 `tmp/UI-PAGES-POLISH-20261103/agents/{pages-projects,pages-tasks,pages-goals,pages-ops}/`（before/after 1440 与 390、REPORT）；分组 Vitest 86／102／98 通过、集成 `navigation`／`settingsView`／`connectionsSettings`／`reviews`／`completionRecord` 100 通过；审计 1440／390／1024／768 各 26 路由对比度 0、小于 11px 0、横向溢出 0；`tmp/UI-PAGES-POLISH-20261103/guard-compare.txt` 记录断点守卫 HEAD 对照。均为实施者自检，未做逐像素对比，真实 Windows/WebView2 未复验，未 commit/push。本轮未处理的结构项（页面内容列左缘随路由变化、page-state 页仍整页替换页头/页签、行内链接当动作按钮、中性提示仍用琥珀色、表格与 kicker 细节）留作后续范围。
 
+2026-11-03 第二轮（同范围，按只读 critique 的剩余项收敛；仍不改业务语义、data-testid 与 live 分支行为）：
+
+- **示例态与警告分离**：新增 `components/FixtureNote`（`p.fixture-note`，中性底、1px separator 边、11px 辅助字色、`role="status"`），替换 `/connections`、项目连接、`/settings` 模型区、`/reviews`、完成凭据、产物来源关系的「示例数据」琥珀条；琥珀只留给真实警告（连接待授权、产物不可用、定时任务未连接）。fixture 卡片统一 `.pv-card.pv-fixture-card`（780px，错误态 `--error` 边框，错误标题用 `h2` 供屏幕阅读器定位）。
+- **空态页头回补**：`/goals`、`/goals/:id`、`/runs/:id`、`/working-directories/:id`、项目 planning／task-chains 的 fixture/loading/error 分支改为「`pv-page` + PageHeader（overline／h1／lede／动作）+ 780px 状态卡」，状态句从 h1 降为卡片标题；planning／task-chains 同时保留 7 项 `ProjectNav`。
+- **页头语法**：`TaskDetail`、`CreateScheduledTask`、项目连接补 overline；定时任务列表的「新建／刷新」移入 page-head 右侧动作区；项目连接的「返回原项目页」从页签下的行内链接移入 page-head actions（文本不变，测试选择器仍满足）。`/settings` 仍不套 `.pv-page`，因此没有 overline（既有例外）。
+- **设置页**：≥64rem 时「显示与界面」表单改两列（列宽 380、行距 24px），控件高度统一 40px；界面外观保持只读事实（浅色 + 说明），不伪装成可切换主题。首次实现误用未定义的 `--relay-space-5` 导致 gap 失效，已改为 `--relay-space-6` 并在注释记录。
+- **Reviews**：「查看判断条件／前往决定」由行内链接改次要按钮；列表标题在 fixture 下用目标产物版本号，详情事实两列。
+- **第二轮验证**：26 路由 fixture 审计 1440／390 全部对比度 0、小于 11px 0、横向溢出 0、右栏空白 0（`audit-round3-1440.json`／`audit-round3-390.json`）；受影响 `vitest` 12 文件 178 通过；`tests/browser/acceptance-projects-20261028.spec.ts` 22/22（4188 端口被占，改用 `RELAY_E2E_PORT=4190`）、`acceptance-tasks-20261028.spec.ts` 9/9；`tsc --noEmit` 仍只有 `scenarioFixtureContract` 5 处 HEAD 欠账。剩余限制：项目详情「页签行/入口按钮行」顺序与 4+7 两套项目导航未合并（测试同时依赖 `.skill-tab` 与 `.subnav-item--active`）、任务详情 390px 事实栏仍在概览之后、项目工作台 h1 仍是任务名、页面内容列左缘随路由变化、返回动作形状与日期/命名不统一；均为后续范围。
+
+
 2026-09-29，用户已选方向 1「对话主轴 · 双页工作桌」；[完整窗口修订图](../mockups/2026-09-29/collaboration-dialogue-window.png)补入用户指出遗漏的 Windows 标题栏，[原选稿](../mockups/2026-09-29/collaboration-dialogue-selected.png)保留选择依据。本轮已授权实施并在 `/agent` 落地（开发自检），**真实 Windows 窗口验收仍未完成**；本文只定义呈现规则，操作与状态以[工作台第 14 节](../workbench-design/part-03.md#14-以目标协作为中心的工作台改造)为准。
 
 - 主视觉优先给当前工作目标、可读产物、实际执行进展和必要判断。减少占据首屏的统计卡、概览大标题、重复状态块与长期空白面板；不靠机器人图标、发光装饰或聊天气泡数量表现 Agent 能力。

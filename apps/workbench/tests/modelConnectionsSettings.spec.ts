@@ -127,17 +127,17 @@ let unmount: (() => void) | null = null;
 afterEach(() => { unmount?.(); unmount = null; vi.restoreAllMocks(); });
 
 describe("模型连接登记卡片", () => {
-  it("折叠时不发任何请求，并写明作用域是「新的任务执行」", async () => {
+  it("折叠时不发任何请求，只给登记入口", async () => {
     const { client, calls } = stubClient({ items: [connection()] });
     const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
     unmount = mounted.unmount;
     await flush();
     expect(calls.list).toBe(0);
     const card = mounted.wrapper.get('[data-testid="model-connections"]');
-    expect(card.text()).toContain("聊天默认只影响没有显式会话选择的新消息");
-    expect(card.text()).toContain("Run 默认只影响新的任务执行");
-    expect(card.text()).toContain("已排队、生成中或已冻结的执行保持原连接");
+    expect(card.text()).toContain("模型连接");
+    expect(card.text()).toContain("凭据存系统凭据库");
     expect(card.text()).not.toContain("验证通过");
+    expect(card.find('[data-testid="model-connections-open"]').exists()).toBe(true);
   });
 
   it("展开后列出连接、默认徽标与凭据代数", async () => {
@@ -172,7 +172,7 @@ describe("模型连接登记卡片", () => {
     expect(setDefault.attributes("disabled")).toBeDefined();
   });
 
-  it("设为默认后刷新列表并给出「已创建的 Run 不受影响」的说明", async () => {
+  it("设为默认后刷新列表并给出确认", async () => {
     const { client, calls } = stubClient({ items: [connection()] });
     const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
     unmount = mounted.unmount;
@@ -183,8 +183,9 @@ describe("模型连接登记卡片", () => {
       .trigger("click");
     await flush();
     expect(calls.setDefault).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(calls.list).toBe(2);
     expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
-      .toContain("已创建的 Run 不受影响");
+      .toContain("设为 Run 默认连接");
   });
 
   it("停用连接时说明「已冻结的 Run 会停止」", async () => {
@@ -236,7 +237,7 @@ describe("模型连接登记卡片", () => {
     await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
     await flush();
     expect(mounted.wrapper.get('[data-testid="model-connections-empty"]').text())
-      .toContain("进程默认模型");
+      .toContain("跟随进程默认");
 
     await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
     await flush();
@@ -290,7 +291,7 @@ describe("模型连接登记卡片", () => {
     expect(calls.list).toBe(before + 1);
   });
 
-  it("聊天默认可独立设置与取消，只影响没有显式会话选择的新消息", async () => {
+  it("聊天默认可独立设置与取消", async () => {
     const id = "11111111-1111-4111-8111-111111111111";
     const { client, calls } = stubClient({ items: [connection()], chatDefaultId: id });
     const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
@@ -306,7 +307,7 @@ describe("模型连接登记卡片", () => {
     await flush();
     expect(calls.chatDefault).toEqual([null]);
     expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
-      .toContain("没有显式会话选择的新消息改为跟随进程默认");
+      .toContain("已取消工作区聊天默认");
   });
 
   it("按稳定连接 id 独立验证，结论来自重读到的目标级状态", async () => {
@@ -326,7 +327,7 @@ describe("模型连接登记卡片", () => {
     expect(mounted.wrapper.get(`[data-testid="model-connection-verification-${id}"]`).text())
       .toBe("验证通过");
     expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
-      .toContain("不代表任何任务已执行成功");
+      .toContain("验证通过");
   });
 
   it("编辑连接走 revision CAS，保留凭据并声明旧验证失效", async () => {

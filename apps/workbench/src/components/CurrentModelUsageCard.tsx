@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Info, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 
 import type { RelayApiClient, RelayModelPortStatus } from "../api/relayClient";
 import type { RelayDefaultModelConnection, RelayModelConnection } from "../api/dtos/information";
@@ -76,17 +76,16 @@ export function CurrentModelUsageCard({ client, status, refreshToken = 0 }: {
         <dt>聊天 · 新消息（无会话选择）</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.chatDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
-          <span className="helper-text">在「模型连接」里设置；只影响没有会话选择的新消息。</span></dd>
+        </dd>
       </div>
       <div data-testid="current-model-session">
-        <dt>聊天 · 会话显式选择</dt>        <dd>在输入器里选择，覆盖工作区默认；已排队与生成中的消息保持原连接。
-          <span className="helper-text"><Info aria-hidden="true" />只对该会话之后的新消息生效。</span></dd>
+        <dt>聊天 · 会话显式选择</dt>        <dd>在输入器里选择，只对该会话之后的新消息生效。</dd>
       </div>
       <div data-testid="current-model-run-default">
         <dt>任务执行 · 新 Run</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.runDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
-          <span className="helper-text">冻结后改默认不影响它；连接停用、凭据缺失或配置变化会让它停止并明确报错。</span></dd>
+          <span className="helper-text">连接停用、凭据缺失或配置变化会让它停止并明确报错。</span></dd>
       </div>
       <div data-testid="current-model-process">
         <dt>进程默认（环境变量）</dt>

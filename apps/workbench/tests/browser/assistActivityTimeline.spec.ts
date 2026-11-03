@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import fs from "node:fs";
+import path from "node:path";
 
 /**
  * 统一活动时间线的浏览器验收（2026-10-29 AI Response Experience V2 · 阶段 C）。
@@ -22,8 +23,8 @@ const sessionId = "66666666-6666-4666-8666-666666666666";
 const userMessageId = "c1111111-1111-4111-8111-111111111111";
 const assistantMessageId = "c2222222-2222-4222-8222-222222222222";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
-const resultsDir = "D:/Develop/Relay-Agent/apps/workbench/results";
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
+const resultsDir = path.resolve(process.cwd(), "results");
 
 const FINAL = [
   "## 结论",

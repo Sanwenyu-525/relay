@@ -4,6 +4,7 @@ import { RelayApiError, type RelayCompletionEvidence } from "../api/relayClient"
 import { describeLiveError } from "../lib/liveErrors";
 import ResponsiveRail from "../components/ResponsiveRail";
 import PageHeader from "../components/PageHeader";
+import FixtureNote from "../components/FixtureNote";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import "./CompletionRecordView.css";
@@ -48,7 +49,7 @@ export default function CompletionRecordView() {
     {client === null ? <section className="surface-panel completion-empty" aria-label="完成凭据">
       <h2>完成依据</h2>
       <div className="completion-empty-body">
-        <p className="warning-callout" role="status">示例数据没有真实完成凭据。</p>
+        <FixtureNote>示例数据没有真实完成凭据。</FixtureNote>
         <Link className="secondary-button" to="/tasks">返回任务列表</Link>
       </div>
     </section> : <>

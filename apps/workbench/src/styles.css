@@ -3074,6 +3074,23 @@ button.text-link:disabled {
   white-space: nowrap;
 }
 
+/* 示例数据 / 未连接说明：中性说明条。与 warning-callout 同骨架、不同语义，
+   避免把「没有真实数据」画成需要停顿的风险；警告色只留给真实风险。 */
+.fixture-note {
+  margin: var(--relay-space-4) 0 0;
+  padding: var(--relay-space-3) var(--relay-space-4);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-relaxed);
+}
+
+.fixture-note .inline-link {
+  white-space: nowrap;
+}
+
 /* 成功提示：与 warning-callout 同一骨架（色底 + 同族边框），现有用法是裸 <p>/<div>，
    不含图标位；需要图标时由页面自行渲染 svg，由 `> svg` 规则对齐。 */
 .success-callout {

@@ -38,12 +38,18 @@ export default function GoalListView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveGoalList key={`${connection.epoch}:${scope}`} client={connection.client} scope={scope} />
-    : <section className="page-state pv-page" data-testid="goal-list-fixture-gap">
-      <p className="eyebrow">Goals</p>
-      <h1>示例模式没有正式 Goal 列表</h1>
-      <p>Goal 是工作空间级事实，需要连接本机 API 才能读取。示例模式不生成目标、关联或进度。</p>
-      <Link className="secondary-button" to="/projects">返回项目</Link>
-    </section>;
+    : <div className="pv-page goals-page">
+      <PageHeader title="目标" testId="goal-list-head" overline="Goals"
+        lede="目标与聊天里的自主执行目标是两套事实。"
+        actions={<Link className="secondary-button" to="/projects" data-testid="goal-list-back-projects">返回项目</Link>} />
+      {/* 示例空态也保留页头与卡片框：示例模式不是另一种页面，只是这次没有可读事实。 */}
+      <section className="pv-card pv-fixture-card" data-testid="goal-list-fixture-gap">
+        <div className="pv-card-h"><strong>示例模式没有正式 Goal 列表</strong></div>
+        <div className="pv-card-b">
+          <p>Goal 是工作空间级事实，需要连接本机 API 才能读取。示例模式不生成目标、关联或进度。</p>
+        </div>
+      </section>
+    </div>;
 }
 
 function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalScope }) {
