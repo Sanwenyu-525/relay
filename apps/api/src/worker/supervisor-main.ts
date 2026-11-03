@@ -28,9 +28,11 @@ const desktopMode = process.env.RELAY_SUPERVISOR_DESKTOP_MODE === 'true';
 const once = process.argv.includes('--once');
 const controller = new AbortController();
 let child: ChildProcessWithoutNullStreams | undefined;
+/** 一轮内 Run 与 Assist 可同时运行，退出清理必须覆盖所有在跑子进程。 */
+const liveChildren = new Set<ChildProcessWithoutNullStreams>();
 const stop = (): void => {
   controller.abort();
-  child?.kill('SIGTERM');
+  for (const running of liveChildren) running.kill('SIGTERM');
 };
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
   process.on(signal, stop);
@@ -285,50 +287,44 @@ async function main(): Promise<void> {
       if (controller.signal.aborted) break;
       const pending = await createRepositories(database.executor).dispatch.listPending(1);
       if (controller.signal.aborted) break;
-      if (pending.length > 0) {
+      const assistRunnable = await createRepositories(database.executor).assist
+        .hasRunnableGeneration(new Date(Date.now() - workerLeaseMs));
+      if (controller.signal.aborted) break;
+      const dispatchLane = async (lane?: 'ASSIST'): Promise<void> => {
+        let running: ChildProcessWithoutNullStreams | undefined;
         const result = await runSupervisedWorkerOnce({
           db: database.executor, databaseUrl, dataRoot,
+          ...(lane === undefined ? {} : { task: lane }),
           ...(desktopFrame === undefined ? {} : {
             workerId: `worker:desktop:${desktopFrame.launchId}:${randomUUID()}`,
           }),
-          ...(process.env.NODE_ENV === 'test' ? {
+          ...(process.env.NODE_ENV === 'test' ? (lane === undefined ? {
             leaseMs: Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000'),
             testHoldMs: Number(process.env.RELAY_WORKER_TEST_HOLD_MS ?? '0'),
-          } : {}),
-          ...(testHoldAfterGatewayEffectMs === undefined ? {} : { testHoldAfterGatewayEffectMs }),
+          } : { leaseMs: workerLeaseMs }) : {}),
+          ...(lane === undefined || testHoldAfterGatewayEffectMs === undefined
+            ? {} : { testHoldAfterGatewayEffectMs }),
           onSpawn: (spawned, workerId) => {
+            running = spawned;
             child = spawned;
+            liveChildren.add(spawned);
             process.stdout.write(`${JSON.stringify({ type: 'worker_started',
               pid: spawned.pid, worker_id: workerId })}\n`);
           },
         });
+        if (running !== undefined) liveChildren.delete(running);
         child = undefined;
         process.stdout.write(`${JSON.stringify({ type: 'worker_exit', code: result.exitCode,
           requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds })}\n`);
         if (result.exitCode !== 0 && !controller.signal.aborted) throw new Error('worker failed');
-      }
-      if (controller.signal.aborted) break;
-      // One Run and one Assist delivery per pass keeps either backlog from starving the other.
-      if (await createRepositories(database.executor).assist
-        .hasRunnableGeneration(new Date(Date.now() - workerLeaseMs))) {
-        if (controller.signal.aborted) break;
-        const result = await runSupervisedWorkerOnce({
-          db: database.executor, databaseUrl, dataRoot, task: 'ASSIST',
-          ...(desktopFrame === undefined ? {} : {
-            workerId: `worker:desktop:${desktopFrame.launchId}:${randomUUID()}`,
-          }),
-          ...(process.env.NODE_ENV === 'test' ? { leaseMs: workerLeaseMs } : {}),
-          onSpawn: (spawned, workerId) => {
-            child = spawned;
-            process.stdout.write(`${JSON.stringify({ type: 'worker_started',
-              pid: spawned.pid, worker_id: workerId })}\n`);
-          },
-        });
-        child = undefined;
-        process.stdout.write(`${JSON.stringify({ type: 'worker_exit', code: result.exitCode,
-          requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds })}\n`);
-        if (result.exitCode !== 0 && !controller.signal.aborted) throw new Error('worker failed');
-      }
+      };
+      // Run 与 Assist 在同一轮内各自判定后**并发**派发（不是交换顺序）：长 Run
+      // 在跑时聊天仍能被派发，不再把 Run 的整个生命周期变成聊天的排队时间。
+      // 每条车道每轮仍只派发一份工作，不引入第二套调度状态。
+      const dispatched: Promise<void>[] = [];
+      if (pending.length > 0) dispatched.push(dispatchLane());
+      if (assistRunnable) dispatched.push(dispatchLane('ASSIST'));
+      if (dispatched.length > 0) await Promise.all(dispatched);
       if (controller.signal.aborted) break;
       // 控制意图收口（见上方 goalTickIntervalMs 注释）：放在 assist 派发之后，
       // 刚结算完的在途轮次能在同一个 pass 里把 PAUSING/CANCELLING 归一。
@@ -352,7 +348,7 @@ async function main(): Promise<void> {
       });
     }
   } finally {
-    child?.kill('SIGTERM');
+    for (const running of liveChildren) running.kill('SIGTERM');
     await database.close();
     process.stdin.pause();
   }
