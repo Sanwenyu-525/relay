@@ -1,6 +1,25 @@
 .lineage-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 .lineage-page > h1 { margin-bottom: var(--relay-space-3); }
 .lineage-page .page-lede { margin-bottom: var(--relay-space-6); }
+/* 示例模式没有来源关系时不把一句话悬在整页留白里：用与列表一致的卡片框住状态，动作留在框内。 */
+.lineage-page .lineage-empty {
+  margin-top: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: 0 3px 15px #22553506;
+}
+.lineage-page .lineage-empty > h2 {
+  margin: 0;
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf1ec;
+  font-size: 13px;
+  color: #294635;
+}
+.lineage-page .lineage-empty-body { padding: 14px 17px; }
+.lineage-page .lineage-empty-body .warning-callout { margin: 0; }
+.lineage-page .lineage-empty-body .secondary-button { margin-top: 11px; }
 .lineage-page > button { margin-bottom: var(--relay-space-4); }
 .lineage-summary, .lineage-parents, .lineage-content, .lineage-uses { margin-top: var(--relay-space-6); }
 .lineage-summary dl { display: grid; gap: var(--relay-space-3); margin-bottom: 0; }

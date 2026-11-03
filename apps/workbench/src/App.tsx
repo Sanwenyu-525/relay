@@ -195,7 +195,7 @@ export default function App() {
             : "这条命令已发给服务端，结果还没有确认。现在离开会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复创建。请留在本页查询回执收口后再离开。"}</p>
           {pendingCommandIds.map((commandId) => <p className="dialog-command-id" key={commandId}>
             原命令 ID <code className="hash-code">{commandId}</code></p>)}
-          {hasDraftChanges && <p>本页还有未提交草稿。命令核对状态与草稿分开处理；选择离开前必须明确丢弃草稿，待核对命令仍按原 ID 保留。</p>}
+          {hasDraftChanges && <p>本页还有未提交草稿：离开前必须明确丢弃；待核对命令仍按原 ID 保留。</p>}
         </>
         : <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>}
       <div className="dialog-actions">

@@ -155,7 +155,7 @@ export default function CollaborationView() {
   if (connection.mode !== "live" || !connection.client) {
     return <section className="page-state" data-testid="collab-fixture-gap">
       <p className="eyebrow">协作工作区</p><h1>示例模式没有真实工作</h1>
-      <p>连接本机 API 后，可以在这里恢复近期工作、讨论要推进的事、显式委托 Agent、阅读产物并作出判断。示例模式不生成模型回复、执行记录或完成凭据。</p>
+      <p>连接本机 API 后可恢复近期工作、委托 Agent、阅读产物。示例模式不生成模型回复与执行记录。</p>
       <Link className="text-link" to="/projects">返回项目列表</Link>
     </section>;
   }
@@ -896,13 +896,18 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
    * 但暂存/上传中的附件、首条草稿等不可恢复输入在场时，切换前先问一次
    * （2026-10-24 P0-2）——它们不在本机草稿持久化里，直接切走就是静默丢失。
    * 守卫必须先于 OpenWorkingDirectory，不能先登记新作用域再询问。
+   *
+   * 唯一例外（2026-11-03 用户指令「输入框里面有内容的时候切换工作区就直接切换就可以
+   * 了，不需要这个弹窗」）：换工作区/目录这条路不再因 `unsaved` 弹「有内容离开后无法
+   * 恢复」，直接切走。其余出口（新对话、选会话、切任务、Skill 目标、逐次复核选择）仍按
+   * 原样先问一次；跨页路由阻断与桌面关窗确认读的仍是 `hasUnsavedChanges`，不跟着放宽。
    */
-  function requestTransition(proceed: () => void) {
+  function requestTransition(proceed: () => void, options?: { readonly allowUnsaved?: boolean }) {
     const state = navigationRef.current;
     const guard = currentDraftGuard();
     const commandId = guard?.pendingCommandId?.() ?? state.pending?.commandId ?? null;
     if (commandId) { setTransition({ commandId, proceed }); return; }
-    if (state.unsaved) { setUnsavedTransition({ proceed }); return; }
+    if (state.unsaved && options?.allowUnsaved !== true) { setUnsavedTransition({ proceed }); return; }
     proceed();
   }
 
@@ -1334,6 +1339,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   /**
    * 换目录与选会话、切任务共用同一条出口：未决消息在核对前不得换目录；
    * 未发送草稿不再要求先确认，它按会话留在本机，切回原作用域时恢复。
+   * 2026-11-03：换工作区不再弹「有内容离开后无法恢复」——用户要求输入器里有内容时直接切；
+   * 这条放宽只给本函数（`allowUnsaved`），共用出口的其他调用方照旧拦一次。
    * 守卫必须先于 OpenWorkingDirectory，不能先登记新作用域再询问。
    */
   function requestFolderTransition(rootPath: string, projectId?: string | null) {
@@ -1343,7 +1350,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     requestTransition(() => {
       void openFolder(rootPath, { projectId,
         intent: watching === null ? "NEW_CONVERSATION" : "CHANGE_DIRECTORY", sessionId: watching });
-    });
+    }, { allowUnsaved: true });
   }
 
   /**
@@ -1467,7 +1474,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         <p className="inspector-overline">当前工作</p>
         <h3 className="inspector-title">暂无关联任务</h3>
         <p className="inspector-sub">这是一段独立讨论，尚未关联任务，也没有正在执行的运行。</p>
-        <p className="inspector-note">进展、成果与执行记录会在创建任务并开始执行后出现在这里。读取目录与文件只需绑定目录并通过读取权限检查，无需创建任务或 Run。</p>
+        <p className="inspector-note">创建任务并开始执行后，进展与成果会出现在这里。读取目录只需绑定目录并通过读取权限检查，无需创建任务或 Run。</p>
       </>}
       {conversationInspectorTab === "RESULTS" && <>
         <p className="inspector-overline">工作成果</p>

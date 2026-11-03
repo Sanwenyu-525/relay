@@ -318,3 +318,12 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 
 **验证出口。** jsdom `tests/composerDraftAssist.spec.tsx` **16/16**、`tests/collaborationWorkspace.spec.ts` 的 8 条缓存命中用例 **8/8**（三态无障碍名、禁用原因、悬停/聚焦提示、0% / 57% / 99.6% / 100% / 未上报、`aria-label` 与提示同源；该文件其余 15 条失败来自并行会话刚引入的 messages page `has_more` 与 `/activity` 契约，与本轮节点无关）；真实 Chromium `tests/browser/composerDraftAssist.spec.ts` **3/3**（32×32 命中区、16px 图标、悬停与聚焦提示、在途旋转环、撤销几何不变）、`tests/browser/composerCacheHitStability.spec.ts` **7/7**（860/1162/1280/1600 高度不变、长模型名不挤走发送键、缓存与圆环同中线）、`tests/browser/composerSourcePanel.spec.ts` **5/5**（工具行文档序）。截图在 `tmp/UI-COMPOSER-compact-controls/`（默认、悬停、已润色、窄栏、首条输入器、暗色 token 探针）。产品当前只有亮色主题；暗色仍按 §9.28 的实验室 token 反相做兼容探针，不宣称已交付暗色皮肤。未新增 token、未改后端 / API / Provider 用量口径。
 
+
+### 9.30 工具行分组的间距与断点（UI-COMPOSER-GROUPING-01，2026-11-03）
+
+§9.28 只约定了工具行尾部组与发送键的垂直对齐；本轮把工具行本身的间距写成契约：
+
+- `.agent-chat-composer-context-group` / `.agent-chat-composer-message-group`：`display:flex; align-items:center; flex-wrap:wrap; gap: var(--relay-space-1); min-width:0`。
+- `.agent-chat-composer-tools`：`gap: var(--relay-space-1) var(--relay-space-2)`——行 gap 沿用 space.1，列 gap 升为 space.2 作为组间唯一分隔手段。
+- **`@media (max-width: 64rem)` 里的 `gap: var(--relay-space-1)` 必须写成双值**：单值会把组间 8px 在窄栏压回 4px，分组当场失效。
+- 分组不使用任何颜色、背景、边框、阴影或分隔线 token；控件高度仍为 `control.height.compact`（32px），分组不改控件自身尺寸。

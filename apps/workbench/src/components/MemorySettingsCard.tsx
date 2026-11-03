@@ -138,7 +138,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
 
   return <section className="surface-panel settings-card" data-testid="memory-settings">
     <h2>长期与短期记忆</h2>
-    <p className="helper-text">这几项按工作空间生效；改动影响后续对话，不追溯已生成的回复。</p>
+    <p className="helper-text">按工作空间生效，只影响后续对话。</p>
 
     {loading && settings === null && <p role="status" data-testid="memory-settings-loading">正在读取记忆设置…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="memory-settings-error">
@@ -155,8 +155,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
             }} />
           <span>
             <strong>自动使用已确认记忆</strong>
-            <span className="helper-text">普通对话会按字面匹配自动召回最多 3 条当前有效的已确认记忆（全局与当前项目）。
-              关闭后不再自动召回，历史里依赖自动召回的旧摘要与答复也不会被匿名复用。</span>
+            <span className="helper-text">自动召回最多 3 条当前有效记忆（全局与本项目）；关闭后不再召回，旧摘要与答复也不会被复用。</span>
           </span>
         </label>
         <label className="memory-settings-switch">
@@ -166,8 +165,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
             }} />
           <span>
             <strong>自动整理会话历史</strong>
-            <span className="helper-text">已完成轮次累积到阈值时，把较早的历史压成摘要并保留最近原文。
-              关闭后不会自动整理，但会话里的「整理记忆」仍可手动使用。</span>
+            <span className="helper-text">较早历史压成摘要并保留最近原文；关闭后仍可在会话里手动整理。</span>
           </span>
         </label>
         <label className="memory-settings-switch">
@@ -177,9 +175,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
             }} />
           <span>
             <strong>自动记住有价值的约定</strong>
-            <span className="helper-text">每轮回复结算后由系统判断是否沉淀决定、约定、偏好或事实结论，一次最多 3 条；
-              它记的是模型判断，不是你的确认，来源会标为「自动记住」并区分用户原话与模型观察。
-              关闭后不再新增，已有条目仍可召回。</span>
+            <span className="helper-text">系统每轮判断是否沉淀决定、约定或偏好，最多 3 条；来源标为「自动记住」，是模型判断而不是你的确认；关闭后仍可召回已有条目。</span>
           </span>
         </label>
       </div>
@@ -193,7 +189,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
       </div>
       {conflict !== null && <div className="action-error" role="alert" data-testid="memory-settings-conflict">
         <p>保存冲突：{conflict}</p>
-        <p className="helper-text">已重新读取最新设置，你的改动仍保留在开关上。请核对后再保存一次，或丢弃改动。</p>
+        <p className="helper-text">已重读最新设置，改动仍保留在开关上；核对后再保存或丢弃。</p>
         <div className="memory-settings-actions">
           <button className="secondary-button" type="button" data-testid="memory-settings-conflict-save"
             disabled={saving} onClick={() => void save({ commandId: createCommandId(),

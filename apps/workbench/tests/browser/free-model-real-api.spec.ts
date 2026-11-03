@@ -49,7 +49,7 @@ test("免费模型真实界面闭环：首条选 A、上游限流后同消息接
   await page.getByTestId("model-selector-open").click();
   // 2026-10-17 用户指令：模型选择是一个锚定下拉，不是居中弹窗。
   const menu = page.getByTestId("model-selector-menu");
-  await expect(menu.getByText("最近成功同步：", { exact: false })).toBeVisible();
+  await expect(menu.getByText("最近成功同步：", { exact: false })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await menu.screenshot({ path: test.info().outputPath("free-model-menu.png") });
   await expect.poll(async () => (await evidence()).directoryRequests).toBeGreaterThan(0);
@@ -101,7 +101,7 @@ test("免费模型真实界面闭环：首条选 A、上游限流后同消息接
   // 调用事实只经上面的 model-runtime 投影核对。
   await expect(page.getByTestId("assist-model-runtime")).toHaveCount(0);
   await page.getByTestId("model-selector-open").click();
-  await expect(menu).toContainText("当前首选：fixture/a:free");
+  await expect(menu).not.toContainText("当前首选：");
   await menu.getByRole("option", { name: "Controlled free B · fixture/b:free", exact: true }).click();
   await expect(page.getByTestId("model-selector-open")).toContainText("Controlled free B");
   // 会话内点条目即按既有模型选择命令应用并收起：不再有「应用到后续消息」第二步（§27.5）。

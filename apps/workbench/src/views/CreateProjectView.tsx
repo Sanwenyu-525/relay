@@ -162,7 +162,7 @@ function FixtureCreateProjectView({ onCancel }: { onCancel: () => void }) {
   }
 
   return <div className="page-layout pv-page"><div className="page-primary"><PageHeader testId="create-project-page-head"
-    title="开始一个长期项目" lede="定义项目的基本信息，稍后可逐步完善。创建后即可开始规划任务、整理资料与开展工作。" />
+    title="开始一个长期项目" />
     <div className="warning-callout" role="status">{live
       ? "首次创建只需名称和项目类型，无需模型连接。当前 CreateProject 只保存这两项；目标和初始资料尚不能随创建命令保存。创建成功后会打开确切项目，再从任务与资料入口继续人工工作。"
       : "当前为示例数据预览；可体验人工创建流程，但不会写入真实工作空间。连接本机 API 后可创建持久项目，无需模型连接。"}</div>

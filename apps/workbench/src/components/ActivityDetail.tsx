@@ -52,7 +52,7 @@ export default function ActivityDetail({ item }: { readonly item: ActivityItem }
       {reasonLabel === reason ? "" : `（码 ${reason}）`}</p>}
     {/* 会话账本没有结果正文时，明确说清缺的是什么——不是「没有输出」，而是「这个账本不存」。 */}
     {detail.resultText === null && item.source === "SESSION_TOOL_CALL" && <p className="activity-detail-meta">
-      会话账本只记录请求与结算，不保存工具结果正文；实际结果（如有）在该 Run 的工具轨迹里按动作身份核对。
+      会话账本只记录请求与结算，不保存工具结果正文；实际结果在该 Run 的工具轨迹里核对。
     </p>}
   </div>;
 }

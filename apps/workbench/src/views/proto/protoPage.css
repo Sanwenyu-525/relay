@@ -16,8 +16,8 @@
   --pv-green: #23684b;
   --pv-line: #dfe9df;
   --pv-subtle: #f6faf7;
-  --pv-muted: #5c7665;
-  --pv-row-sub: #8b9a90;
+  --pv-muted: #566f5f;
+  --pv-row-sub: #5a7263;
   --pv-primary: #23704d;
   --pv-primary-hover: #165b3d;
   --pv-btn-border: #d6e4d8;
@@ -61,7 +61,7 @@
 .pv-page .page-head-overline {
   text-transform: uppercase;
   letter-spacing: .08em;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--pv-muted);
   font-weight: 700;
 }
@@ -78,7 +78,7 @@
 .pv-page .page-head-lede {
   font-size: 12px;
   line-height: 1.75;
-  color: #819287;
+  color: #5a7263;
   margin: 0;
   max-width: 730px;
 }
@@ -140,7 +140,7 @@
   gap: 12px;
 }
 .pv-card-h strong { font-size: 13px; color: #294635; display: flex; align-items: center; gap: 8px; }
-.pv-card-h small { color: #8b9c90; font-size: 11px; }
+.pv-card-h small { color: #5a7263; font-size: 11px; }
 .pv-card-b { padding: 15px 17px; }
 .pv-card.pad { padding: 17px; }
 .pv-card > .pv-card-b:first-child { padding-top: 15px; }
@@ -161,7 +161,7 @@
   border-radius: 12px;
   padding: 15px;
 }
-.pv-stat > span { display: block; font-size: 11px; color: #85998c; }
+.pv-stat > span { display: block; font-size: 11px; color: #5a7263; }
 .pv-stat strong { display: block; font-size: 22px; color: #286849; margin: 6px 0 3px; letter-spacing: -.02em; }
 .pv-stat strong.is-text { font-size: 18px; }
 
@@ -199,7 +199,7 @@
   border-radius: 7px;
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   align-items: center;
   gap: 5px;
@@ -277,8 +277,8 @@
 /* ── 步骤条（v528-steps） ── */
 .pv-steps { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pv-step {
-  font-size: 10px;
-  color: #66816e;
+  font-size: 11px;
+  color: #566f5f;
   border: 1px solid #d8e6da;
   padding: 6px 9px;
   border-radius: 7px;
@@ -291,7 +291,7 @@
 .pv-table th {
   text-align: left;
   font-weight: 650;
-  color: #7a8d80;
+  color: #566f5f;
   font-size: 11px;
   padding: 12px;
   border-bottom: 1px solid #e6eee7;
@@ -313,7 +313,12 @@
 
 /* ── 表单（v528-field） ── */
 .pv-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
-.pv-field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #5c7764; font-weight: 650; margin: 5px 0; }
+/* 网格里的字段由 gap 定距：全局 .field 自带 24px 顶距，进网格后会多出一倍行距。
+   跨整行的字段用 field--wide（原型 v528-field.wide）。 */
+.pv-form-grid > .field,
+.pv-form-grid > .pv-field { margin-top: 0; }
+.pv-form-grid > .field--wide { grid-column: 1 / -1; }
+.pv-field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #566f5f; font-weight: 650; margin: 5px 0; }
 .pv-field.wide { grid-column: 1 / -1; }
 .pv-field > span { display: block; }
 .pv-field input,
@@ -372,19 +377,19 @@
 /* rail 引言段与表单标签同样越档：全局 .rail-intro 用 reading(18px)、.field-label 用 body(16px)/500，
    pv 语言里分别是 lede(12px) 与表单 label(11px/650) 档。choice-option 单选标签被基座抬到 body(16px)、
    又从 .field 继承 650 字重，回原型单选行 12px/400 档。 */
-.pv-page .rail-intro { font-size: 12px; color: #819287; }
-.pv-page .field-label { font-size: 11px; font-weight: 650; color: #5c7764; }
+.pv-page .rail-intro { font-size: 12px; color: #5a7263; }
+.pv-page .field-label { font-size: 11px; font-weight: 650; color: #566f5f; }
 .pv-page .choice-option { font-size: 12px; font-weight: 400; }
 /* 全局 meta(14px) 档的辅助元素在 pv 上下文回小档：field-hint 跟随表单 label 档并
    去掉从 .field 继承的 650 字重；text-link / disabled-reason / hash-code 回 12px 行内 meta。 */
-.pv-page .field-hint { font-size: 10.5px; font-weight: 400; }
+.pv-page .field-hint { font-size: 11px; font-weight: 400; }
 .pv-page .text-link { font-size: 12px; }
 .pv-page .disabled-reason { font-size: 12px; }
 .pv-page .hash-code { font-size: 12px; }
 
 /* ── 键值明细（v528-proof-grid 的 dl 形态） ── */
 .pv-dl { margin: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; font-size: 11px; }
-.pv-dl dt { color: #899c8d; }
+.pv-dl dt { color: #566f5f; }
 .pv-dl dd { margin: 0; overflow-wrap: anywhere; color: #486452; }
 .pv-dl.wide { grid-template-columns: minmax(0, 1fr); }
 
@@ -405,8 +410,8 @@
 .pv-checklist input { margin-top: 3px; accent-color: #267a52; }
 
 /* ── 空态（v528-empty / v528-mini-empty） ── */
-.pv-empty { padding: 28px; text-align: center; color: #91a295; font-size: 12px; }
-.pv-mini-empty { font-size: 11px; color: #829588; border: 1px dashed #dce9de; padding: 13px; border-radius: 9px; text-align: center; }
+.pv-empty { padding: 28px; text-align: center; color: #5a7263; font-size: 12px; }
+.pv-mini-empty { font-size: 11px; color: #5a7263; border: 1px dashed #dce9de; padding: 13px; border-radius: 9px; text-align: center; }
 
 /* ── 进度条（V5.11 v511-progress 延续） ── */
 .pv-progress { height: 6px; border-radius: 999px; background: #e4eee5; overflow: hidden; }
@@ -434,11 +439,11 @@
 }
 .pv-banner .pv-banner-symbol svg { width: 20px; height: 20px; }
 .pv-banner strong { font-size: 13px; color: #294635; display: block; }
-.pv-banner p { margin: 3px 0 0; font-size: 11px; color: #7f948a; line-height: 1.65; }
+.pv-banner p { margin: 3px 0 0; font-size: 11px; color: #5a7263; line-height: 1.65; }
 
 /* ── 作用域内的共享辅助类微调：helper/error 等与原型字号对齐 ── */
 .pv-page .helper-text { font-size: 11px; color: var(--pv-muted); }
-.pv-page .eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); font-weight: 700; }
+.pv-page .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); font-weight: 700; }
 .pv-page .warning-callout {
   border: 1px solid #ecd8b5;
   background: #fffbf2;
@@ -497,7 +502,7 @@
   box-shadow: 0 4px 18px #203b2810;
 }
 .pv-goal-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pv-goal-card__rev { color: #91a096; font-size: 10px; }
+.pv-goal-card__rev { color: #5a7263; font-size: 11px; }
 .pv-goal-card__title {
   color: #2d4937;
   font-size: 13px;
@@ -507,7 +512,7 @@
   overflow-wrap: anywhere;
 }
 .pv-goal-card__title:hover { text-decoration: underline; text-underline-offset: .2em; }
-.pv-goal-card__desc { margin: 0; color: #84948a; font-size: 11px; line-height: 1.65; }
+.pv-goal-card__desc { margin: 0; color: #5a7263; font-size: 11px; line-height: 1.65; }
 .pv-goal-card__footer {
   display: flex;
   align-items: center;
@@ -516,7 +521,7 @@
   margin-top: auto;
   padding-top: 6px;
 }
-.pv-goal-card__footer small { color: #91a096; font-size: 10px; }
+.pv-goal-card__footer small { color: #5a7263; font-size: 11px; }
 .pv-goal-card__open {
   border: 0;
   background: none;
@@ -549,7 +554,7 @@
   font-weight: 700;
   color: #294635;
 }
-.pv-page .resume-section > h2 small { font-size: 11px; color: #8b9c90; font-weight: 400; }
+.pv-page .resume-section > h2 small { font-size: 11px; color: #5a7263; font-weight: 400; }
 .pv-page .resume-section .run-list > li {
   padding: 11px 0;
   border-bottom: 1px solid #f0f3f0;
@@ -559,8 +564,8 @@
 .pv-page .resume-section .run-list > li > small {
   display: block;
   margin-top: 2px;
-  color: #8b9a90;
-  font-size: 10.5px;
+  color: #5a7263;
+  font-size: 11px;
 }
 .pv-page .resume-section p { font-size: 12px; }
 .pv-page .resume-section .helper-text { font-size: 11px; }
@@ -568,6 +573,11 @@
 /* Goal 详情页：把「编辑目标」等分区间的空隙与页宽交给 pv 容器 */
 .pv-page .page-layout { max-width: none; padding: 0; margin: 0; }
 .pv-page .page-layout > .page-primary { max-width: none; }
+
+/* 只有主栏的 pv 页面不保留空右栏：全局 .page-layout 在 ≥80rem 仍按「主栏 + 320px」分列，
+   没有 rail 的页面（定时任务列表/新建）会在右侧留下一条 320px 空白。 */
+.pv-page.page-layout:has(> .page-primary:only-child),
+.pv-page .page-layout:has(> .page-primary:only-child) { grid-template-columns: minmax(0, 1fr); }
 
 /* ── 数据表（data-table 行列表在 pv 皮肤下收紧为原型的表格密度） ── */
 .pv-page .data-row {
@@ -587,13 +597,13 @@
   font-weight: 650;
   color: #33533d;
 }
-.pv-page .data-cell small { font-size: 10.5px; color: var(--pv-muted); }
+.pv-page .data-cell small { font-size: 11px; color: var(--pv-muted); }
 .pv-page .data-cell--meta { font-size: 11px; color: var(--pv-muted); }
 .pv-page .list-count-note,
 .pv-page .list-footer-note { font-size: 11px; color: var(--pv-muted); }
 
 /* ── 筛选与搜索控件（pv 皮肤对齐原型 12px 控件） ── */
-.pv-page .filter-field { font-size: 11px; color: #5c7764; font-weight: 650; }
+.pv-page .filter-field { font-size: 11px; color: #566f5f; font-weight: 650; }
 .pv-page .filter-field select {
   font-size: 12px;
   font-weight: 400;
@@ -608,7 +618,7 @@
 .pv-page .search-field input { font-size: 12px; }
 
 /* ── 通用表单控件（.field / .create-form 在 pv 皮肤下对齐原型 12px 控件） ── */
-.pv-page .field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #5c7764; font-weight: 650; }
+.pv-page .field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #566f5f; font-weight: 650; }
 .pv-page .field-label { display: block; }
 .pv-page .field input,
 .pv-page .field select,
@@ -640,7 +650,7 @@
   font-size: 12px;
 }
 .pv-page .rail-definition-list > div:last-child { border-bottom: 0; }
-.pv-page .rail-definition-list dt { flex: 0 0 120px; color: #899c8d; font-size: 11px; }
+.pv-page .rail-definition-list dt { flex: 0 0 120px; color: #566f5f; font-size: 11px; }
 .pv-page .rail-definition-list dd { margin: 0; color: #486452; overflow-wrap: anywhere; }
 
 /* ── 状态 chip（status-chip 在 pv 皮肤下用原型 chip 形态） ── */
@@ -651,7 +661,7 @@
   border-radius: 7px;
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   align-items: center;
@@ -661,6 +671,39 @@
 .pv-page .status-chip--warning { background: var(--pv-warn-bg); color: var(--pv-warn-ink); border-color: var(--pv-warn-border); }
 .pv-page .status-chip--danger { background: var(--pv-danger-bg); color: var(--pv-danger-ink); border-color: var(--pv-danger-border); }
 .pv-page .status-chip--neutral { background: var(--pv-subtle); color: var(--pv-muted); }
+
+/* ── 空态/错误态也保留页面框（2026-11-03） ──
+   示例模式与未连接状态此前只剩一行说明悬在整页空白里；knowledge 等页已用卡片承载空态，
+   其余页面统一同一张卡，说明留在卡内，不再直接铺在页面上。 */
+.pv-page.page-state,
+.pv-page .page-state {
+  max-width: 780px;
+  /* .pv-page 自身 margin:auto 会把空态卡片在内容区里居中；空态按页头左缘对齐，
+     不跟着内容宽度漂移。 */
+  margin: 0;
+  padding: 26px 28px;
+  border: 1px solid var(--pv-line);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 15px #22553506;
+}
+.pv-page.page-state h1,
+.pv-page .page-state h1 { font-size: 22px; letter-spacing: -.035em; color: #1e3529; margin: 8px 0 10px; }
+.pv-page.page-state p,
+.pv-page .page-state p { font-size: 12px; line-height: 1.75; color: #486452; }
+.pv-page.page-state--error { border-color: #f0d7d2; }
+.pv-page.page-state .secondary-button { margin-top: 13px; }
+
+/* 禁用按钮不再沿用主色底：pv 皮肤下主/次按钮的底色覆盖了全局 disabled 档，
+   留下浅绿底配浅字（对比度约 1.5:1）。不可用状态用中性底 + 可读灰字，原因交给旁边文案。 */
+.pv-page .primary-button:disabled,
+.pv-page .secondary-button:disabled,
+.pv-page .danger-button:disabled {
+  background: #f1f4f1;
+  border-color: #e2e9e2;
+  color: #5a7263;
+  box-shadow: none;
+}
 
 /* 内容缩放时视口媒体查询仍可能是宽屏，但页面实际可用宽度已不足以容纳侧栏。
    只给包含 pv 页的内容区建立容器，/agent 不参与此布局规则。 */
@@ -684,6 +727,10 @@
 }
 @media (max-width: 760px) {
   .pv-page { padding: 14px; }
+  /* 空态卡片直接就是 .pv-page 自身时（GoalListView / RunView / TasksView 等 11 处），
+     上面这条 0,1,0 的移动端内边距被 .pv-page.page-state 的 0,2,0 覆盖，且 margin:0
+     让卡片贴住视口左缘、左边框被裁；窄屏补回页边距并收紧卡片内边距。 */
+  .pv-page.page-state { width: auto; margin: 0 14px; padding: 18px 16px; }
   .pv-page .page-head { flex-direction: column; }
   .pv-grid, .pv-grid.three, .pv-form-grid { grid-template-columns: 1fr; }
   .pv-field.wide { grid-column: 1; }

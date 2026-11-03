@@ -120,8 +120,13 @@ export default function ReviewsView() {
       : projectArchivedAt !== null ? "项目已归档，不能提交新的 Review 决定。" : null;
 
   const visibleReviews = kind === "ALL" ? reviews : reviews.filter((review) => review.kind === kind);
+  // 请求标题优先用服务端读到的产物标题；示例模式没有标题读取，退回示例产物名，
+  // 避免列表标题、详情「请求事项」与「为何需要你」正文三处显示同一句理由。
   const title = (review: RelayReview) => labels?.reviewId === review.id && labels.targetTitle
-    ? labels.targetTitle : reviewReasonText(review.reason);
+    ? labels.targetTitle
+    : !live && typeof review.target.artifact_version_id === "string"
+      ? review.target.artifact_version_id
+      : reviewReasonText(review.reason);
   const status = (review: RelayReview) => {
     if (review.status === "EXPIRED") {
       const expiresAt = review.expiresAt === null ? Number.NaN : Date.parse(review.expiresAt);

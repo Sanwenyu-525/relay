@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import DesktopTitleBar from "../src/components/DesktopTitleBar";
 
 const startDragging = vi.fn(async () => undefined);
+const toggleMaximize = vi.fn(async () => undefined);
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
@@ -12,14 +13,14 @@ vi.mock("@tauri-apps/api/window", () => ({
     onFocusChanged: async () => () => undefined,
     isMaximized: async () => false,
     startDragging,
-    toggleMaximize: async () => undefined,
+    toggleMaximize,
     minimize: async () => undefined,
     close: async () => undefined
   })
 }));
 
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; startDragging.mockClear(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; startDragging.mockClear(); toggleMaximize.mockClear(); });
 
 it("工作区操作只回退应用内路由，搜索复用入口，新建任务保留当前项目", async () => {
   const onSearch = vi.fn();
@@ -86,4 +87,40 @@ it("服务未就绪时不挂载业务操作，窗口拖动仍可用", async () =
     container.querySelector(".desktop-titlebar__drag")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
   });
   expect(startDragging).toHaveBeenCalledOnce();
+});
+
+it("UI-NAV-01 titlebar 布局：导航条目之间的空白承担窗口拖拽，条目本身不触发", async () => {
+  localStorage.setItem("relay.workbench.navigationPlacement", "titlebar");
+  const router = createMemoryRouter([{ path: "*", element: createElement(DesktopTitleBar, { available: true, onSearch: vi.fn() }) }], { initialEntries: ["/today"] });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  cleanup = () => {
+    act(() => root.unmount()); container.remove();
+    localStorage.removeItem("relay.workbench.navigationPlacement");
+  };
+  await act(async () => { root.render(createElement(RouterProvider, { router })); });
+
+  // 导航进标题带中部，与左侧图标栏共存于同一窗口外壳，但不在同一布局里。
+  const navigation = container.querySelector(".titlebar-navigation");
+  expect(navigation).not.toBeNull();
+  // 空白单击：与 .desktop-titlebar__drag 同一条拖动处理。
+  await act(async () => {
+    navigation!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
+  });
+  expect(startDragging).toHaveBeenCalledOnce();
+  // 空白双击：沿用标题带的双击最大化/还原。
+  await act(async () => {
+    navigation!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 2 }));
+  });
+  expect(toggleMaximize).toHaveBeenCalledOnce();
+  // 链接与「更多」触发器是交互元素，不触发宿主拖动。
+  await act(async () => {
+    navigation!.querySelector("a")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
+  });
+  expect(startDragging).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    navigation!.querySelector("summary")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
+  });
+  expect(startDragging).toHaveBeenCalledTimes(1);
 });

@@ -89,7 +89,7 @@ export default function ArtifactTextLocksPanel({ client, lineage }:
     try { await refresh(); } catch (caught) { setError(describeLiveError(caught).message); }
   }
   return <section className="surface-panel" data-testid="artifact-text-locks"><h2>章节与段落原文锁定</h2>
-    <p className="helper-text">锁定只约束 AI 写入。人工可直接修订，保存为新版本后继续保护新原文；结构无法可靠映射时 AI 写入会被拒绝。</p>
+    <p className="helper-text">锁定只约束 AI 写入；人工可直接修订，新版本保存后继续受保护，结构无法可靠映射时 AI 写入被拒绝。</p>
     {error && <p className="action-error" role="alert">{error}</p>}
     {message && <p className="receipt-message" role="status">{message}</p>}
     <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryRead()}>刷新锁定事实</button>

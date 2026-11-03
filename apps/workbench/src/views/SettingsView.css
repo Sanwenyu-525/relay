@@ -194,6 +194,10 @@
   cursor: not-allowed;
 }
 
+/* 时区、动效这类短选项不铺满整列（宽屏下曾拉到 784px，读起来像一块空白控件）：
+   控件宽跟内容走，长文本输入仍可占满整列。 */
+.settings-field select { max-width: 22rem; }
+
 .settings-field select:focus-visible,
 .settings-field input:focus-visible,
 .settings-default-directory-manual input:focus-visible {
@@ -604,3 +608,8 @@
 }
 
 
+
+/* UI-NAV-01 导航栏位置双选：短选项不铺满整列，与时区/动效的 select 同档（22rem 上限）。 */
+.settings-field .settings-navigation-placement {
+  max-width: 22rem;
+}

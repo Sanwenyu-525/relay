@@ -284,7 +284,7 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
   }
 
   return <section className="surface-panel" data-testid="artifact-impact-check"><h2>手动检查修改影响</h2>
-    <p className="helper-text">只在点击后分析所选旧来源与当前来源的差异；明确引用是关系事实，不等于必须修改。AI 推测单独列出，未登记或间接下游不在本轮分析范围。</p>
+    <p className="helper-text">只在点击后分析旧来源与当前来源的差异；明确引用不等于必须修改。AI 推测单独列出，未登记或间接下游不在本轮范围。</p>
     {error && <p className="action-error" role="alert">{error}</p>}
     {notice && <p className="receipt-message" role="status">{notice}</p>}
     <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshEvidence()}>刷新产物与影响状态</button>
@@ -294,7 +294,7 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
         <option value="">选择旧版本</option>{artifact?.versions.filter((version) => version.artifactVersionId !== lineage.artifactVersionId).map((version) =>
           <option key={version.artifactVersionId} value={version.artifactVersionId}>v{version.versionNumber} · {version.artifactVersionId}</option>)}</select></label>
         <p className="helper-text">变化后来源：v{lineage.versionNumber} · {lineage.artifactVersionId}</p>
-        <p className="helper-text">本地先读取旧来源的已登记直接引用。勾选目标版本才把其正文摘录送入本次模型分析；未勾选项仍在明确引用组展示。</p>
+        <p className="helper-text">先读旧来源已登记的直接引用；勾选目标版本才把正文摘录送入模型分析。</p>
         {uses?.directUses.filter((edge) => edge.availability === "AVAILABLE" && edge.childArtifactVersionId).map((edge) =>
           <label key={edge.childArtifactVersionId}><input type="checkbox"
             checked={analysisTargets.includes(edge.childArtifactVersionId!)}
@@ -322,7 +322,7 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
       <h3>AI 推测可能相关 · {check.possiblyRelated.length}</h3>
       <p className="helper-text">仅在上述明确引用中展示推测与依据；推测本身不是确定事实或授权。</p>
       <h3>选入候选组</h3>
-      <p className="helper-text">候选组只登记所选的已登记直接引用目标版本，让一次审阅覆盖多个成果；它不调用模型、不代替逐项判断，也不承诺整组原子完成。</p>
+      <p className="helper-text">候选组只登记所选目标版本，让一次审阅覆盖多个成果；不调用模型、不代替逐项判断、不承诺整组原子完成。</p>
       {check.directTargets.filter((target) => target.availability === "AVAILABLE").map((target) =>
         <label key={target.targetVersionId}><input type="checkbox"
           checked={groupTargets.includes(target.targetVersionId)}
@@ -387,7 +387,7 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
       </li>)}</ol>}
       <button className="secondary-button" type="button" disabled={busy || pendingCommand !== null}
         onClick={() => void createCombinationCheck()}>保存组合检查单（来源 + 已应用项）</button>
-      <p className="helper-text">组合检查单只记录这组确切版本当时的覆盖情况；跨 Task 的集合不能保存，单项 PASS 也不会被相加。</p>
+      <p className="helper-text">组合检查单只记录这组确切版本当时的覆盖；跨 Task 的集合不能保存，单项 PASS 不会相加。</p>
     </div>}
     {combination && <div data-testid="impact-combination-check"><h3>组合检查单</h3>
       <p className="warning-callout">整体结论：{combination.overallResult} · {combination.overallNote}</p>

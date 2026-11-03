@@ -115,7 +115,7 @@
 .pv-page .review-list-item:hover { border-color: #c6ddcc; }
 .pv-page .review-list-item--selected { border-color: #9ccbab; background: #f7fcf8; }
 .pv-page .review-list-item strong { font-size: 12.5px; color: #33533d; }
-.pv-page .review-list-meta { font-size: 10.5px; color: var(--pv-muted); gap: 8px; }
+.pv-page .review-list-meta { font-size: 11px; color: var(--pv-muted); gap: 8px; }
 .pv-page .review-kind { text-transform: none; color: var(--pv-muted); font-weight: 650; }
 
 .pv-page .review-detail,
@@ -131,13 +131,18 @@
 .pv-page .review-request-facts dt { font-size: 11px; color: var(--pv-muted); }
 .pv-page .review-request-facts dd { font-size: 12px; color: #486452; }
 
-@media (max-width: 760px) {
-  .pv-page .review-columns { grid-template-columns: minmax(0, 1fr); }
-}
+/* pv 皮肤：评审页保留 pv 页面留白。此前 .review-page{padding:0} 让内容贴到容器边缘，
+   与其他 pv 页面左边距不一致（列表/详情卡都少 30px）。 */
+.pv-page.review-page { padding: 24px 30px 60px; }
+/* 详情卡恢复内边距（此前 0，标题与事实行直接贴卡片描边）。 */
+.pv-page.review-page .review-detail { padding: 15px 17px 20px; }
+/* 事实行在宽屏分两列，避免 dt/dd 竖排时右侧留下大片空白。 */
+.pv-page .review-request-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.pv-page .review-request-facts > div { padding-top: 12px; }
+.pv-page .review-reason { max-width: 72ch; }
 
 /* pv 容器接管留白，内层不再二次加 padding */
 .pv-page .review-primary,
-.pv-page.review-page .review-detail,
 .pv-page .review-reading { padding: 0; }
 .pv-page.review-page .review-detail { border-top: none; margin-top: 13px; }
 .pv-page .review-reading { padding: 15px 17px; margin-top: 13px; }
@@ -156,6 +161,16 @@
 .pv-page .review-facts dt { font-size: 11px; color: var(--pv-muted); }
 .pv-page .review-facts dd { font-size: 12px; color: #486452; }
 .pv-page .review-bound-summary > p { font-size: 12px; color: #486452; }
-.pv-page .review-list-item time { font-size: 10.5px; }
+.pv-page .review-list-item time { font-size: 11px; }
 .pv-page .review-raw-data summary { font-size: 12px; }
 .pv-page .review-raw-json { font-size: 11.5px; }
+
+/* 窄窗留白与事实列：断点用 design-system §9.6 的四档语义值（64rem/48rem），
+   且必须放在文件末尾——基础留白规则在下方，同特异性下后者会覆盖媒体查询内的值。 */
+@media (width < 64rem) {
+  .pv-page.review-page { padding: 18px 18px 48px; }
+}
+@media (width < 48rem) {
+  .pv-page.review-page { padding: 14px 14px 40px; }
+  .pv-page .review-request-facts { grid-template-columns: minmax(0, 1fr); }
+}

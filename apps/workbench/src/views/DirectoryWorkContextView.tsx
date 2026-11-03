@@ -21,8 +21,8 @@ export default function DirectoryWorkContextView() {
   const connection = useRelayConnection();
   return connection.client
     ? <LiveDirectoryContext key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
-    : <section className="page-state" data-testid="directory-context-fixture-gap">
-      <p className="eyebrow"><FolderOpen aria-hidden="true" />目录</p>
+    : <section className="page-state pv-page" data-testid="directory-context-fixture-gap">
+      <p className="eyebrow">目录</p>
       <h1>示例模式没有目录工作上下文</h1>
       <p>目录与普通会话来自本机 API 的受管资源事实；示例模式不生成目录或会话。</p>
       <Link className="secondary-button" to="/projects">返回项目</Link>
@@ -48,10 +48,10 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
     return () => { version.current++; };
   }, [client, id, reload]);
 
-  if (loading) return <section className="page-state" role="status">
+  if (loading) return <section className="page-state pv-page" role="status">
     <p className="eyebrow">目录</p><h1>正在读取目录工作上下文</h1>
     <p>只读查询目录、所属项目、关联 Goal 与会话，不会创建或重绑会话。</p></section>;
-  if (error || facts === null) return <section className="page-state page-state--error" role="alert">
+  if (error || facts === null) return <section className="page-state page-state--error pv-page" role="alert">
     <p className="eyebrow">目录</p><h1>暂时无法读取目录</h1>
     <p>{error ?? "目录事实不可用。"}</p>
     <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
@@ -68,7 +68,7 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
         meta={`${projectTypeLabels[project.projectType as keyof typeof projectTypeLabels] ?? project.projectType} · ${project.title} · 目录 v${directory.revision}`}
         status={<span className={`status-chip ${directory.status === "ACTIVE" ? "status-chip--success" : "status-chip--neutral"}`}>
           {directory.status === "ACTIVE" ? "目录可用" : "目录已停用"}</span>}
-        lede="这里只汇集精确绑定到该目录的普通会话；切换入口不会改变 Session ID、Project 绑定或历史。"
+        lede="只汇集精确绑定到该目录的普通会话；切换入口不改 Session ID、Project 绑定或历史。"
         actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
           <RotateCcw aria-hidden="true" />刷新</button>} />
       {project.archiveStatus === "ARCHIVED" && <p className="warning-callout" role="status">

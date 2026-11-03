@@ -153,6 +153,26 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 - **模块级（各视图 CSS 内加 pv 前缀）**：Reviews 决策面板分区 h3 13px/700（migrated-scoped 把 `.review-decision h3` 等定到 section 档，比页头 h1 还大）、`review-kind` 11px、`review-facts` dt 11/dd 12、bound-summary 说明 12px、列表 time 10.5px、原始依据 summary 12px/json 11.5px；Tasks 范围页签被 styles 基座 `.page-primary > .subnav .subnav-item`(0,3,0) 抬到 reading 档，pv 内以更高特异性回 12px；Settings `.settings-basic > h2` 13px/700、`.settings-basic-intro` 与 `.settings-explanation p` 12px #819287（`.settings-card > h2` 首轮已修）；Projects「开启一个新项目」空位卡标题 13.5px/700。`inbox-stat-value` 22px 与原型统计大数档一致，未动。
 - **本轮验证**：probe 前后对照＋19 路由截图（`results/pv-polish-20261027/`）、typecheck exit 0、workbench.spec 23/23（/agent 防回归）、impeccable detect 0 发现；均为实施者自检，真实 Windows/WebView2 未复验，未 commit/push。
 
+2026-11-03 精修轮（Skill 驱动：impeccable polish + design-taste-frontend app-screens 检查；范围是工作台 `/agent` 以外的全部页面）。先以 fixture 模式截 26 条路由做基线，再用 computed 探针（对比度、字号、横向溢出、右栏空白、圆角与边框/阴影混用）逐页审计后修复，全部仍 scope 在 `.pv-page` 下，不动语义类名与 data-testid：
+
+- **对比度**：pv 作用域内 muted 两档改为 `--pv-muted #566f5f`（白底 5.48:1）与 `--pv-row-sub #5a7263`（4.86:1）；page-head 的 meta/lede、rail-intro、pv-dl dt、rail-definition dt、pv-table th、pv-step、field 标签、goal-card 说明等原 2.7–3.5:1 的辅助色统一收进这两档。修复后 26 条路由对比度违规 0（修复前 14 条路由共 1–8 处）。
+- **字号下限**：pv 内 10px/10.5px 一律提到 11px（overline、pv-chip、status-chip、pv-step、eyebrow、field-hint、run-list small、data-cell small、goal-card rev/footer），并清理 12.5px/13.5px 越档。修复后 26 条路由小于 11px 的文本 0。
+- **空右栏**：全局 `.page-layout` 在 ≥80rem 恒按「主栏 + 320px」分列，只有主栏的 pv 页（定时任务列表、新建）右侧因此留 320px 空白。新增 `.pv-page .page-layout:has(> .page-primary:only-child){grid-template-columns:minmax(0,1fr)}`，横幅与表单回到全宽。
+- **page-state 卡片化**：空态/错误态不再裸标题+段落，统一进 780px 卡片（1px `--pv-line`、13px 圆角、与 `.pv-card` 同阴影、`margin:0` 与面包屑左对齐），h1 22px、正文 12px `#486452`，错误态边框 `#f0d7d2`；只作用于 pv 页，不改页面结构与文案。
+- **表单原语**：`.pv-form-grid` 增加 `.field--wide`（跨两列）与子项 `margin-top:0`；新建定时任务改为与原型同构的一张 `pv-card`「任务定义与执行边界」+ 两段两列表单 + 分隔线，保留 R2-06 已定的「时区、启动次数与授权到期」折叠；数字输入限宽 11rem。
+- **禁用态**：pv 页禁用按钮统一中性底 `#f1f4f1` / 边 `#e2e9e2` / 字 `#5a7263`，不再用低对比浅绿。
+- **Reviews**：`.review-page` 恢复与其它 pv 页一致的页内边距（原为 0，内容贴住视口左缘）；详情卡补 15px 17px 20px 内边距；`review-request-facts` 宽屏改两列、正文 `max-width:72ch`；fixture 列表标题改用目标产物版本号，避免与详情重复同一句。
+- **侧栏与右栏**：图标导航条目左右内边距归零，四字导航名（定时任务、开发工具）在 76px 栏内不再折行；完成凭据的 fixture 态不再渲染空右栏（live 分支不变）。
+- **子 Agent 分组轮（项目 / 任务 / 目标与空态 / 运维与设置四组并行）**：在不改业务语义与 data-testid 的前提下，把同类问题在组内收敛——
+  - **面包屑与左缘**：`AppShell` 补 `/goals`、`/goals/:id`、`/working-directories/:id`、`/completion-records/:id`、`/runs/:id`、`/settings/connections` 及项目 `planning`／`task-chains` 分支，不再只剩「工作空间」；≤48rem 隐藏末项分隔符，避免悬空「/」。
+  - **移动端 page-state**：≤48rem 时 `.pv-page.page-state` 左右各 14px 外边距、18px 16px 内边距，卡片不再贴视口裁掉圆角与描边。
+  - **项目页**：项目详情把「页签行 + 入口按钮行」合并为一条 `.project-scope-bar`（页签左、入口右、共用底边线，<64rem 折行），内容起点与 h1 对齐；右栏只留一个绿色主按钮；`/projects` 网格尾部空洞用「新建项目」卡跨列补齐；项目 planning／task-chains 的空态补 `.pv-page` 并改次要按钮。
+  - **任务页**：任务列表表格进 `.pv-card.task-table-card`、数据行统一 68.1px；<64rem 转三行列表（任务名 / 状态与原因 / 项目与执行者）替代横向裁列；任务详情右栏改为顶部对齐的事实卡，去掉贯穿整列的分隔线；新建任务表单与右栏卡片化。
+  - **中性示例态**：`/activity`、`/today` 的「示例数据」提示由琥珀 warning 改中性 `pv-card`（提示语义不是警告，且窄窗不再把链接竖排）；`/knowledge` fixture 卡限宽 780px；工作目录三处空态补 `.pv-page`；定时任务列表与详情的 fixture 离线提示进列表卡并用 `pv-warning`（live 分支仍是 `action-error`）。
+  - **运维页**：完成凭据恢复页内边距、「完成依据」卡片化并去掉重复返回链接；产物来源关系的琥珀条改卡片；`/runs/:id` 返回任务改次要按钮；`/settings` 补页头 lede；`/connections` 与 `/settings/connections` 用不同标题与返回目标区分。
+  - **断点写法**：新增媒体查询只用 design-system §9.6 的四档语义值（48／64／80／90rem）与 range 语法；`ReviewsView` 的 1120px／760px、`ProjectSkillView` 的 56rem、`TasksView` 的 52rem 已改为 64rem／48rem／64rem。断点守卫对照 HEAD：本任务新增 0 处、消除 1 处，剩余 14 处均为 HEAD 既有欠账（`protoPage.css` 1120/760 等原型值）。
+- **本轮验证**：26 路由 fixture 截图（`tmp/UI-PAGES-POLISH-20261103/final/`）与 390px 移动端（`final-390/`）；审计脚本 `apps/workbench/tmp/audit-pages.mjs` 前后 JSON（对比度 0、小于 11px 0、横向溢出 0）；`tsc --noEmit` 仅剩 HEAD 已存在的 `tests/scenarioFixtureContract.spec.ts` 错误（与本次无关）；受影响 `vitest` 5 个文件 59/59；`impeccable detect` 0 发现。分组轮补充：四组证据 `tmp/UI-PAGES-POLISH-20261103/agents/{pages-projects,pages-tasks,pages-goals,pages-ops}/`（before/after 1440 与 390、REPORT）；分组 Vitest 86／102／98 通过、集成 `navigation`／`settingsView`／`connectionsSettings`／`reviews`／`completionRecord` 100 通过；审计 1440／390／1024／768 各 26 路由对比度 0、小于 11px 0、横向溢出 0；`tmp/UI-PAGES-POLISH-20261103/guard-compare.txt` 记录断点守卫 HEAD 对照。均为实施者自检，未做逐像素对比，真实 Windows/WebView2 未复验，未 commit/push。本轮未处理的结构项（页面内容列左缘随路由变化、page-state 页仍整页替换页头/页签、行内链接当动作按钮、中性提示仍用琥珀色、表格与 kicker 细节）留作后续范围。
+
 2026-09-29，用户已选方向 1「对话主轴 · 双页工作桌」；[完整窗口修订图](../mockups/2026-09-29/collaboration-dialogue-window.png)补入用户指出遗漏的 Windows 标题栏，[原选稿](../mockups/2026-09-29/collaboration-dialogue-selected.png)保留选择依据。本轮已授权实施并在 `/agent` 落地（开发自检），**真实 Windows 窗口验收仍未完成**；本文只定义呈现规则，操作与状态以[工作台第 14 节](../workbench-design/part-03.md#14-以目标协作为中心的工作台改造)为准。
 
 - 主视觉优先给当前工作目标、可读产物、实际执行进展和必要判断。减少占据首屏的统计卡、概览大标题、重复状态块与长期空白面板；不靠机器人图标、发光装饰或聊天气泡数量表现 Agent 能力。
@@ -283,3 +303,16 @@ Inbox 快捷入口复用顶栏既有 `icon-button` 形态，提供可读的名�
 - 加载：首次读取可用静态 skeleton 或文字；普通刷新可保留已知内容并标识更新，涉及新写准入的父对象重读按页面门槛隐藏旧事实并禁新写，禁止假进度。
 - 浮层：使用单一层级表，focus ring 不被 overflow 裁掉；popover 不盖过 modal。
 
+
+## 全站文案密度规范（UI-CONTENT-DENSITY-01）
+
+面向日常使用的产品界面，文案只服务于当前状态与下一步，不承担产品说明书的职能。
+
+- **页头**：标题能说清页面是什么就不写 `lede`；`lede` 只承载标题表达不了的边界或事实，不超过一行。
+- **卡片**：标题 + 状态/内容 + 必要操作；不再在标题下复述卡片用途。
+- **字段**：标签直接说明要填什么；仅当存在易误限制、风险或生效规则时保留一行 `field-hint`。
+- **同一事实只解释一次**：模型作用域只在「当前使用的模型」说明；连接验证的含义只在「模型连接」说明。
+- **状态优先于叙述**：已有状态 chip 表达的不再写整句；chip 与解释不同时堆叠。
+- **技术详情**：内部 ID、修订号、配置指纹、Provider 错误分类、底层错误与命令 ID 进入现有 `details` / `tech-details`，保留数据与核对能力。
+- **必须保留并尽量精简**：权限与授权边界（含默认 DENY、连接≠授权、逐动作审批）、不可逆操作的后果、数据作用范围、失败原因与恢复动作、需用户介入的事项。
+- **禁止**：全局隐藏 `.helper-text` / `.field-hint` / `.page-head-lede`；用缩字号或降对比掩盖文案；删除状态与错误信息换取简洁。

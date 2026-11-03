@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayGatewayCapability,
@@ -275,6 +275,10 @@ async function readSnapshot(client: RelayApiClient, projectId: string): Promise<
 
 export default function ConnectionsView() {
   const [search] = useSearchParams();
+  const { pathname } = useLocation();
+  /** 同一视图承载两个入口：/connections 属于工作空间，/settings/connections 属于设置。
+      只调整页头范围与返回落点，路由与业务不在这里改变。 */
+  const viaSettings = pathname.startsWith("/settings/connections");
   const connection = useRelayConnection();
   const client = connection.client;
   const [projects, setProjects] = useState<readonly RelayProjectListItem[]>([]);
@@ -306,10 +310,15 @@ export default function ConnectionsView() {
     return () => { projectRequest.current++; };
   }, [client, connection.epoch]);
   return <section className="connections-page pv-page">
-    <PageHeader testId="connections-page-head" title="连接与权限" overline="Connections" meta="项目设置"
-      lede="按能力族查看授权边界；连接成功不代表拥有所有权限，文件写入与命令执行仍需独立授权。" />
+    <PageHeader testId="connections-page-head" title="连接与权限" overline="Connections" meta={viaSettings ? "设置" : "工作空间"} lede="连接成功不代表拥有权限；文件写入与命令执行需独立授权。" />
     <ReturnToConversation search={search} />
-    {connection.mode === "fixture" && <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>}
+    {connection.mode === "fixture" && <section className="surface-panel connections-empty" aria-label="本机 API 连接">
+      <h2>本机 API 连接</h2>
+      <div className="connections-empty-body">
+        <p className="warning-callout" role="status">当前为示例数据；连接设置只在显式连接本机 API 后可用。</p>
+        <Link className="secondary-button" to={viaSettings ? "/settings" : "/projects"}>{viaSettings ? "返回设置" : "返回项目入口"}</Link>
+      </div>
+    </section>}
     {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
       {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
       {!loading && !error && projects.length === 0 && <p className="helper-text">当前没有进行中项目。<Link to="/projects">打开项目列表</Link></p>}
@@ -320,7 +329,7 @@ export default function ConnectionsView() {
         <span className="helper-text">v{project.revision}</span></li>)}</ul>
       {nextCursor && <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</button>}
     </section>}
-    <Link className="inline-link" to="/projects">返回项目入口</Link>
+    {connection.mode !== "fixture" && <Link className="inline-link" to="/projects">返回项目入口</Link>}
   </section>;
 }
 
@@ -597,8 +606,7 @@ export function ProjectConnectionsView() {
   const activeResources = snapshot?.resources.filter((item) => item.status === "ACTIVE") ?? [];
   const busy = submitting || pending !== null;
   return <section className="connections-page pv-page">
-    <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置"
-      lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY。创建连接后仍默认拒绝。" />
+    <PageHeader testId="project-connections-page-head" title="连接与权限" meta="项目设置" lede="连接限定能力与目标；权限策略单独控制 AUTO、ASK、DENY，新建连接默认拒绝。" />
     <ProjectNav projectId={projectId} active="connections" />
     <ReturnToConversation search={search} />
     <p><Link className="inline-link" to={`/projects/${projectId}`}>返回原项目页</Link></p>
@@ -660,13 +668,13 @@ export function ProjectConnectionsView() {
               </div>
             </li>;
           })}</ul>
-          <p className="field-hint">「可用」表示这些动作在当前目标上能自动准入；「需审批」「只读可用」「部分可用」都是真实的收窄——写入、命令、桌面输入与表单提交按设计仍要逐次批准。撤销、停用与拒绝不会被这里的状态覆盖，最终准入仍由 Gateway 判定。</p>
+          <p className="field-hint">「可用」= 当前目标上自动准入；「需审批」「只读可用」「部分可用」是真实收窄：写入、命令、桌面输入与表单提交仍逐次批准。撤销、停用与拒绝优先于此状态，最终准入由 Gateway 判定。</p>
         </section>
         <details className="surface-panel connections-advanced" data-testid="connections-advanced">
           <summary>高级：逐动作配置（连接、受管目录与权限策略）</summary>
-          <p className="helper-text">只有排查异常、或需要精确控制某个动作时才用这里。日常打开目录已经自动完成读取与 Git 只读配置；测试能力只在地址带 <code className="hash-code">?dev-capabilities=1</code> 时出现。</p>
+          <p className="helper-text">日常打开目录已自动完成读取与 Git 只读配置；此处只用于排查异常或精确控制单个动作。测试能力仅在地址带 <code className="hash-code">?dev-capabilities=1</code> 时出现。</p>
         <section className="surface-panel"><h2>连接</h2>
-          <p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。状态与能力来自服务端；网页抓取（WEB_FETCH）只公开允许的主机，文件读取（FILE_READ）的连接目录未由此接口公开。连接本身不是授权。</p>
+          <p className="helper-text">本列表最多读取服务端前 100 条，无下一页。状态与能力来自服务端；WEB_FETCH 只公开允许的主机，FILE_READ 的连接目录未公开。连接本身不是授权。</p>
           {snapshot.connections.length === 0 ? <p className="helper-text">本项目尚无连接。</p> : <ul className="connections-list">{snapshot.connections.map((item) => {
             const healthState = health[item.id];
             return <li key={item.id}>

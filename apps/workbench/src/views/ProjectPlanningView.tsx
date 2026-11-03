@@ -82,9 +82,9 @@ function estimateDraftDirty(draft: EstimateDraft): boolean {
 export default function ProjectPlanningView() {
   const { id = "" } = useParams();
   const connection = useRelayConnection();
-  if (!connection.client) return <section className="page-state"><p className="eyebrow">下一段工作</p>
+  if (!connection.client) return <div className="pv-page"><section className="page-state"><p className="eyebrow">下一段工作</p>
     <h1>需要连接本机 API</h1><p>计划和范围推演读取真实项目任务、目标与用户声明的估时；示例数据不提供可写的计划事实。</p>
-    <Link className="text-link" to="/settings/connections">连接工作空间</Link></section>;
+    <Link className="secondary-button" to="/settings/connections">连接工作空间</Link></section></div>;
   return <LiveProjectPlanning key={`${connection.epoch}:${id}`} client={connection.client} projectId={id} />;
 }
 

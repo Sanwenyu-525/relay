@@ -624,8 +624,7 @@ export default function TodayView() {
   return <section className="today-page pv-page">
     <div className="today-body">
       <div className="today-main">
-    <PageHeader testId="today-page-head" title="今天" overline="Today" meta={`${longDate} · ${weekday}`}
-      lede="按可推进、受阻、等待中整理当前任务；优先显示原因与下一步。" />
+    <PageHeader testId="today-page-head" title="今天" overline="Today" meta={`${longDate} · ${weekday}`} />
     <div className="today-intro-note">
       <details className="today-arrange-note">
       <summary>安排说明</summary>
@@ -634,7 +633,11 @@ export default function TodayView() {
       {current && <p>当前选择版本 v{current.selectionRevision}。</p>}
       </details>
     </div>
-    {client === null ? <div className="warning-callout" role="status">当前为示例数据预览，没有真实 Today 投影。<Link to="/projects">打开项目</Link> 或 <Link to="/tasks">打开任务</Link> 继续人工工作。</div> : <>
+    {client === null ? <section className="pv-card today-fixture-card" role="status">
+      <div className="pv-card-b">
+        <p>当前为示例数据预览，没有真实 Today 投影。<Link className="inline-link" to="/projects">打开项目</Link> 或 <Link className="inline-link" to="/tasks">打开任务</Link> 继续人工工作。</p>
+      </div>
+    </section> : <>
       <div className="today-query" data-testid="today-query">
         <label className="today-query__field"><span className="today-query__label">日期</span>
           <input type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} /></label>

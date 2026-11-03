@@ -310,8 +310,7 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
     // 不再用一整块琥珀色警示区占住页签的大部分高度（2026-10-30 一致性检查）。
     return <section className="preview-panel" data-testid="browser-preview" aria-label="内置网页预览">
       <p className="preview-unavailable" data-testid="browser-preview-unavailable">
-        内置网页预览需要桌面应用提供原生网页容器。当前运行在浏览器预览模式，因此这里不提供网页标签，
-        也不会用 iframe 假装可用——外页放进 iframe 既拿不到真实地址，也无法保证与工作台隔离。
+        内置预览需要桌面应用的原生网页容器；当前浏览器模式不提供网页标签，也不用 iframe 假装可用。
       </p>
       <p className="preview-unavailable-note">要在内置面板里查看网页，请用 Relay Agent 桌面应用打开工作台。</p>
     </section>;
@@ -378,10 +377,8 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
       aria-labelledby={`${tabId}-tab-${current.key}`} data-testid="preview-surface">
       {current.status === "BLANK" && <div className="preview-start">
         <h3>在工具面板里查看网页</h3>
-        <p className="helper-text">只接受完整的 http 与 https 地址。内置预览使用独立浏览环境，不共享 Chrome 或工作台的登录态；
-          页面里的表单提交是真实的网站行为。</p>
-        <p className="helper-text">这里不会自动加载对话里的链接，也不会启动开发服务器。本地服务没起时会显示网页自己的错误页，
-          可以重新加载或在系统浏览器打开。</p>
+        <p className="helper-text">只接受完整的 http/https 地址。预览使用独立浏览环境，不共享 Chrome 或工作台登录态；页面里的表单提交是真实网站行为。</p>
+        <p className="helper-text">不会自动加载对话里的链接，也不启动开发服务器；本地服务未启动时显示网站自己的错误页。</p>
         {restorable.length > 0 && <div className="preview-restore" data-testid="preview-restore">
           <p className="preview-restore-head">上次在这个会话打开过 {restorable.length} 个网站</p>
           <p className="helper-text">只记住了来源，没有保存路径与参数。点一下会填进地址栏，按「打开」才加载。</p>

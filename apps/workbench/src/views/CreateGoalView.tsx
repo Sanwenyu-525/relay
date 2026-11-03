@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Info, Target } from "lucide-react";
+import { Info } from "lucide-react";
 import { createCommandId, goalCreationFrom, RelayApiError, type RelayApiClient,
   type RelayGoalCreation } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
@@ -222,7 +222,7 @@ export default function CreateGoalView({ client, onCancel }: {
   return <section className="skill-page pv-page" data-testid="goal-create-view">
     <div className="page-layout"><div className="page-primary">
       <header className="page-head">
-        <p className="eyebrow"><Target aria-hidden="true" />目标</p>
+        <p className="eyebrow">目标</p>
         <h1>想达到什么结果？</h1>
         <p className="page-lede">先用一句话说明想达到的结果。标题只是可修订的摘要，
           不会替你编造期限、完成条件或授权。</p>

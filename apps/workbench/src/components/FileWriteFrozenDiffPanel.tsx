@@ -59,7 +59,7 @@ export default function FileWriteFrozenDiffPanel({ diff, ledgers }: {
   const ledgerStatus = new Map(latestLedger?.files.map((file) => [file.relativePath, file.status]));
   return <section className="file-write-frozen-diff" data-testid="file-write-frozen-diff">
     <h3>冻结计划文本差异</h3>
-    <p className="helper-text">左侧来自准备动作时核验的冻结基线，右侧来自冻结目标；仅描述计划，不代表文件已应用。账本与当前磁盘状态仍以上方证据为准。</p>
+    <p className="helper-text">左侧是冻结基线，右侧是冻结目标；仅描述计划，不代表文件已应用。账本与磁盘状态仍以上方证据为准。</p>
     {diff.files.map((file) => {
       const rows = file.beforeText !== null && file.afterText !== null && file.availability === "AVAILABLE"
         ? alignedLines(file.beforeText, file.afterText) : null;

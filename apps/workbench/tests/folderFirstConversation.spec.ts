@@ -356,10 +356,10 @@ describe("文件夹入口与对话直接执行", () => {
     } finally { view.unmount(); }
   });
 
-  it("默认目录失效：提示说清风险未核实，且明说发送前还会再检查一次", async () => {
-    // BUG-CHAT-CONTEXT-CROSS-TALK：这一行此前写「仍可发送」，但发送入口实际会停在
-    // 风险确认条上等用户选「仍然发送 / 取消发送」。两处说法必须一致，也不得把
-    // 一次没扫成的审计说成「没有风险」。
+  it("默认目录失效：不再显示风险检查提示，且页面读取不产生任何写命令", async () => {
+    // 2026-11-03 用户要求：输入框下方不再显示「无法完成风险检查」这行提示。
+    // 审计判定与发送前的实际检查都没有改：没有结论时仍由发送前确认条等用户选
+    // 「仍然发送 / 取消发送」，这里只断言界面保持安静。
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
     const fetchMock = router({
@@ -372,10 +372,10 @@ describe("文件夹入口与对话直接执行", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = await mountWorkbench("/agent");
     try {
-      const notice = view.wrapper.get('[data-testid="context-risk-unavailable"]');
-      expect(notice.text()).toContain("无法完成风险检查：目录已不存在或无法核对真实路径。");
-      expect(notice.text()).toContain("发送前会再检查一次");
-      expect(notice.text()).not.toContain("仍可发送");
+      // 2026-11-03 用户要求：输入框下方不再显示「无法完成风险检查」这条提示。
+      expect(view.wrapper.find('[data-testid="context-risk-unavailable"]').exists()).toBe(false);
+      expect(view.wrapper.text()).not.toContain("无法完成风险检查");
+      expect(view.wrapper.text()).not.toContain("发送前会再检查一次");
       // 这只是读数提示：页面读取本身不产生任何写命令。
       expect(posts.length).toBe(0);
     } finally { view.unmount(); }
@@ -1396,9 +1396,10 @@ describe("文件夹入口与对话直接执行", () => {
         await flush();
 
         // 原响应仍在途：新实例必须已经能从共享 Owner 看到这条未决命令。
-        // 在途状态仍是「正在发送…」，查询回执是正文里的行内按钮，不经过核对弹窗。
+        // 在途状态仍是「正在发送…」；2026-11-03 用户指令删除了正文里的行内「查询回执」按钮，
+        // 在途状态行不再提供核对入口。
         expect(view.wrapper.get('[data-testid="assist-first-pending"]').exists()).toBe(true);
-        await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click");
+        expect(view.wrapper.find('[data-testid="assist-first-receipt"]').exists()).toBe(false);
         await flush();
         await flush();
         const afterCheck = posts.filter((post) => post.path.endsWith("/execution-requests")).length;

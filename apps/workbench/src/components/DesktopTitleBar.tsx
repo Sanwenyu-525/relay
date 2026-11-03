@@ -5,7 +5,9 @@ import { Link } from "react-router-dom";
 import { Copy, Inbox, Link2, Minus, Square, X } from "lucide-react";
 import InterventionNotifications from "./InterventionNotifications";
 import RelayConnectionDialog from "./RelayConnectionDialog";
+import TitlebarNavigation from "./TitlebarNavigation";
 import WorkbenchActions from "./WorkbenchActions";
+import { useNavigationPlacement } from "../lib/navigationPreferences";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import { useRelayConnection } from "../lib/relayConnection";
 
@@ -13,6 +15,8 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
   const desktop = isTauri();
   const connection = useRelayConnection();
   const { timeZone } = useDisplayPreferences();
+  // 导航栏位置是本设备展示偏好：titlebar 布局把全局导航放进标题带中部，与窗口控制同条。
+  const placement = useNavigationPlacement();
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -64,10 +68,20 @@ export default function DesktopTitleBar({ available, onSearch }: { available: bo
   const dataSourceLabel = connection.mode === "live" ? "已连接本机 API" : "示例数据";
 
   return <>
-    <div className="desktop-titlebar" data-testid="desktop-titlebar" data-source-mode={connection.mode}>
+    {/* data-navigation-placement 供 CSS 区分布局：titlebar 下拖拽区让位于横向导航。 */}
+    <div className="desktop-titlebar" data-testid="desktop-titlebar" data-source-mode={connection.mode}
+      data-navigation-placement={placement}>
+      {/* UI-NAV-01 效果图：titlebar 布局在标题带最左放简洁品牌标识（只复用现有文字品牌，
+          不引入图片资产，也不重复近期工作栏那句「Relay 工作空间」的全称）；sidebar 布局保持原样。 */}
+      {available && placement === "titlebar" && <>
+        <span className="desktop-titlebar__brand">Relay</span>
+        <span className="desktop-titlebar__separator" aria-hidden="true" />
+      </>}
       {/* 常用操作回到标题带左侧：这一组属于常驻窗口外壳，应用顶栏不再重复承载。
           连接中与服务失败页没有可用的应用内路由与命令面板，因此不渲染。 */}
       {available && <WorkbenchActions onSearch={onSearch} />}
+      {/* UI-NAV-01 titlebar 布局：全局导航在标题带中部，条目之间的空白仍是拖拽区。 */}
+      {available && placement === "titlebar" && <TitlebarNavigation onDragBlank={onDragMouseDown} />}
       <div className="desktop-titlebar__drag" onMouseDown={onDragMouseDown}>
         {error && <span className="desktop-titlebar__error" role="alert">窗口操作失败</span>}
       </div>

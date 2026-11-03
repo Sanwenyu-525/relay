@@ -66,7 +66,7 @@ export default function AssistSkillOutput({ client, output, currentTarget }: { c
           ? <Link className="inline-link" to={path}>{text(item?.ref_id)}</Link> : text(item?.ref_id)}</li>;
       })}</ul>
       <h5>模型文字建议的下一步</h5><ul>{nextSteps.map((value, index) => <li key={index}>{text(value)}</li>)}</ul>
-      <p className="helper-text">这些文字不是 Today 判定的合格 Task，也不是启动动作。只读速览没有比较基线，不表示自上次以来发生了变化。</p>
+      <p className="helper-text">只读速览：不是可执行 Task，也没有比较基线。</p>
     </>}
     {output.kind === "VERIFICATION_PLAN_SUGGESTION" && <>
       {additionalChecks.length > 0 ? <><h5>建议追加的检查</h5><ul>{additionalChecks.map((value, index) => {

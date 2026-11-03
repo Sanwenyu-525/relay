@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bell, BookOpen, CalendarClock, FlaskConical, FolderKanban, House, Inbox, Link2, ListChecks, LineChart, Menu, PanelLeft, PanelLeftClose, Settings, SquarePen } from "lucide-react";
+import { Menu, PanelLeft, PanelLeftClose, SquarePen } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import { FeedbackHost } from "./Feedback";
@@ -10,18 +10,10 @@ import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useActiveConversation } from "../lib/activeConversation";
+import { useNavigationPlacement } from "../lib/navigationPreferences";
+import { bottomWorkbenchNavigation, devToolsNavState, primaryWorkbenchNavigation,
+  secondaryWorkNavigation, workbenchNavTargetActive, type WorkbenchNavEntry } from "../lib/workbenchNavigation";
 import "./AppShell.css";
-
-/** 侧栏一条目的地：`title` 是悬停提示（入口名与提示可以不同，如「开发工具」→ 实验室全名），
- *  `state` 只用于把「进入前所在页」交给实验室，让「返回工作台」能回到原处而不是固定回某一页。 */
-interface NavEntry {
-  readonly label: string;
-  readonly to: string;
-  readonly icon: typeof House;
-  readonly count?: string;
-  readonly title?: string;
-  readonly state?: { readonly from: string };
-}
 
 // 可拖拽列宽是纯展示偏好，不是业务事实；localStorage 只保存这一个数值，读写失败时本次会话仍可调整。
 // 2026-10-02 共享壳栏位分离后，这个键归属「近期工作」栏；沿用同一键与同一钳制区间，
@@ -61,10 +53,11 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const pageFocused = ["/projects", "/reviews", "/activity", "/activities"].includes(path)
     || (import.meta.env.DEV && path === "/__dev/assist-scenarios");
   const inboxActive = path === "/tasks" && query.get("tab") === "inbox";
-  const isNavigationItemActive = (to: string) => to === "/inbox" ? inboxActive
-    : to === "/tasks" ? path === "/tasks" && !inboxActive
-    : to === "/scheduled-tasks" ? path === "/scheduled-tasks" || path.startsWith("/scheduled-tasks/")
-    : path === to;
+  // 导航栏位置是本设备展示偏好（navigationPreferences.ts 唯一读写入口）：
+  // 两种布局消费同一份入口数据，切换不换路由、不重建页面状态。
+  const placement = useNavigationPlacement();
+  const titlebarNavigation = placement === "titlebar";
+  const isNavigationItemActive = (to: string) => workbenchNavTargetActive(path, inboxActive, to);
   const connection = useRelayConnection();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(readStoredSidebarWidth);
@@ -98,20 +91,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     return () => document.removeEventListener("keydown", openCommand);
   }, [commandOpen, onCommandOpen]);
   useEffect(() => { onCommandClose(); }, [location.pathname, location.search]);
-  const primaryNavigation: readonly NavEntry[] = [
-    { label: "工作台", to: "/agent", icon: House, count: "" },
-    { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
-    { label: "待处理", to: "/reviews", icon: Bell, count: connection.mode === "live" ? "" : String(chrome.pendingReviewCount) },
-    { label: "资料", to: "/knowledge", icon: BookOpen, count: "" }
-  ];
-  /** 次级入口保留路由可达性；侧栏高度足够，四条常驻显示，不再折叠，也不与主导航争抢分隔线以外的注意力。 */
-  const secondaryWorkNavigation: readonly NavEntry[] = [
-    { label: "今日", to: "/today", icon: House, count: "" },
-    { label: "任务", to: "/tasks", icon: ListChecks, count: "" },
-    { label: "动态", to: "/activity", icon: LineChart, count: "" },
-    { label: "收件箱", to: "/inbox", icon: Inbox, count: "" },
-    { label: "定时任务", to: "/scheduled-tasks", icon: CalendarClock, count: "" }
-  ];
+  const primaryNavigation: readonly WorkbenchNavEntry[] = primaryWorkbenchNavigation({
+    pendingReviewCount: connection.mode === "live" ? "" : String(chrome.pendingReviewCount)
+  });
+  const secondaryWorkNavigationEntries: readonly WorkbenchNavEntry[] = secondaryWorkNavigation();
   const currentWorkId = path === "/agent" ? query.get("work") : null;
   /**
    * 全局「新对话」只有一个 URL 入口意图：每次不同的 `/agent?new=…`。
@@ -146,24 +129,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const newConversationHref = `/agent?new=${encodeURIComponent(newConversationKey)}${
     typeof activeSessionId === "string" && activeSessionId !== ""
       ? `&source_session=${encodeURIComponent(activeSessionId)}` : ""}`;
-  const secondaryNavigation: readonly NavEntry[] = [
-    // 开发工具入口只在开发构建里存在：路由本身是构建期隔离的，这里少一条入口只是不让它藏在侧栏外面。
-    // 悬停提示写实验室全名，入口名仍是一个不占宽度的「开发工具」。
-    // 带上进入前的 path+search：实验室的「返回工作台」按它回去（`location.state` 不跨刷新；
-    // 刷新后的回退由实验室自己记录的 `sessionStorage` 承担，这里不写第二份来源）；
-    // 已经在实验室里再点一次时原样保留现有来源（传空 state 会把它清掉，返回就只剩默认页），免返回时原地打转。
-    //
-    // 放在这一组的**第一**位：辅助导航整块是 `margin-top: auto` 贴底的，默认窗口高（780px）下
-    // 图标栏内容高过可视区，最后一条会落到折叠线以下——放末位就得先滚动才点得到。
-    ...(import.meta.env.DEV ? [{
-      label: "开发工具", to: "/__dev/assist-scenarios", icon: FlaskConical, title: "AI 回复场景实验室",
-      ...(path.startsWith("/__dev/")
-        ? (location.state === null ? {} : { state: location.state as { from: string } })
-        : { state: { from: `${path}${location.search}` } })
-    }] : []),
-    { label: "设置", to: "/settings", icon: Settings },
-    { label: "连接与同步", to: "/connections", icon: Link2 }
-  ];
+  const secondaryNavigation: readonly WorkbenchNavEntry[] = bottomWorkbenchNavigation({
+    includeDevTools: import.meta.env.DEV,
+    devToolsState: devToolsNavState(path, location.search, location.state)
+  });
   // 面包屑父级可点：只有存在语义上级路由的层级才带 to（任务链回任务列表与任务详情，项目链回项目列表与项目页）；
   // 末级保持纯文本，没有对应页面的层级（工作空间、产物版本）不硬造入口。链接复用全局 text-link 样式。
   const breadcrumb = ((): { label: string; to?: string }[] => {
@@ -178,12 +147,21 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       : query.get("tab") === "inbox" ? [{ label: "工作空间" }, { label: "任务", to: "/tasks" }, { label: "收件箱" }] : [{ label: "工作空间" }, { label: "任务" }];
     if (path === "/reviews") return [{ label: "工作空间" }, { label: "待处理" }];
     if (path === "/knowledge") return [{ label: "工作空间" }, { label: "资料" }];
+    // 目标/目录/完成凭据/Run 此前落到兜底只剩「工作空间」一级，与同层页面（资料、动态、今日）不一致。
+    // 只补有语义上级的层级：目标详情回目标列表，完成凭据与 Run 回任务列表，末级保持纯文本。
+    if (path === "/goals") return [{ label: "工作空间" }, { label: "目标" }];
+    if (/^\/goals\/[^/]+$/u.test(path)) return [{ label: "目标", to: "/goals" }, { label: "目标详情" }];
+    if (/^\/working-directories\/[^/]+$/u.test(path)) return [{ label: "工作空间" }, { label: "工作目录" }];
+    if (/^\/completion-records\/[^/]+$/u.test(path)) return [{ label: "任务", to: "/tasks" }, { label: "完成凭据" }];
+    if (/^\/runs\/[^/]+$/u.test(path)) return [{ label: "任务", to: "/tasks" }, { label: "执行记录" }];
     if (path === "/settings") return [{ label: "工作空间" }, { label: "设置" }];
     if (path === "/scheduled-tasks") return query.get("view") === "create"
       ? [{ label: "工作空间" }, { label: "定时任务", to: "/scheduled-tasks" }, { label: "新建定时任务" }]
       : [{ label: "工作空间" }, { label: "定时任务" }];
     if (/^\/scheduled-tasks\/[^/]+$/u.test(path)) return [{ label: "工作空间" }, { label: "定时任务", to: "/scheduled-tasks" }, { label: "定时任务详情" }];
-    if (path === "/connections" || path === "/settings/connections") return [{ label: "工作空间" }, { label: "连接与同步" }];
+    if (path === "/connections") return [{ label: "工作空间" }, { label: "连接与同步" }];
+    // 设置内的连接页从「设置」进入：面包屑跟随入口，避免与工作空间级 /connections 完全相同。
+    if (path === "/settings/connections") return [{ label: "设置", to: "/settings" }, { label: "连接与同步" }];
     // 开发工具的面包屑跟着路由一起只在开发构建里存在：不加这道折叠，生产产物里会留着
     // 一条指向不存在入口的「AI 回复场景实验室」（产物串搜由 scripts/check-scenario-lab-isolation.mjs 跑）。
     if (import.meta.env.DEV && path.startsWith("/__dev/")) return [{ label: "工作空间" }, { label: "开发工具" }, { label: "AI 回复场景实验室" }];
@@ -193,12 +171,13 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       const kind = workbench[2] === "thesis" ? "论文工作台" : workbench[2] === "development" ? "开发工作台" : "通用工作台";
       return [{ label: "项目", to: "/projects" }, { label: title ?? "当前项目", to: `/projects/${workbench[1] ?? ""}` }, { label: kind }];
     }
-    const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge|connections))?$/u.exec(path);
+    const project = /^\/projects\/([^/]+)(?:\/(tasks|knowledge|connections|planning|task-chains))?$/u.exec(path);
     if (project) {
       const title = connection.mode === "live" ? null : fixtureAdapter.getProjectTitle(project[1] ?? "");
       const requested = query.get("skill");
       const skill = requested === "blueprint" || requested === "resume" || requested === "assist" ? requested : "overview";
-      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接" : skillPageNames[skill];
+      const suffix = project[2] === "tasks" ? "任务" : project[2] === "knowledge" ? "资料" : project[2] === "connections" ? "连接"
+        : project[2] === "planning" ? "下一段工作" : project[2] === "task-chains" ? "任务链" : skillPageNames[skill];
       return [{ label: "项目", to: "/projects" }, { label: title ?? "当前项目", to: `/projects/${project[1] ?? ""}` }, { label: suffix }];
     }
     const task = /^\/tasks\/([^/]+)$/u.exec(path);
@@ -212,9 +191,11 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   })();
 
   return <>
-    <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}${pageFocused ? " app-frame--page-focused" : ""}`} data-context-collapsed={contextCollapsed ? "true" : "false"} style={frameStyle}>
-      {/* 2026-10-02 共享壳栏位分离：图标导航只承担定位，近期工作与主导航各有各的滚动 Owner 和宽度偏好。 */}
-      <aside className="app-navrail" aria-label="应用导航">
+    <div className={`app-frame${path === "/agent" ? " app-frame--collaboration" : ""}${pageFocused ? " app-frame--page-focused" : ""}`} data-context-collapsed={contextCollapsed ? "true" : "false"} data-navigation-placement={placement} style={frameStyle}>
+      {/* 2026-10-02 共享壳栏位分离：图标导航只承担定位，近期工作与主导航各有各的滚动 Owner 和宽度偏好。
+          UI-NAV-01：标题栏布局下全局导航由 DesktopTitleBar 的横向导航承担，这里不渲染图标栏；
+          近期工作栏与主内容照旧，近期工作栏不跟随导航布局移动。 */}
+      {!titlebarNavigation && <aside className="app-navrail" aria-label="应用导航">
         <nav className="navigation-list" aria-label="主导航">
           {primaryNavigation.map((item) => {
             const isActive = isNavigationItemActive(item.to);
@@ -225,7 +206,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
           })}
         </nav>
         <nav className="navigation-list navigation-list--secondary" aria-label="次级导航">
-          {secondaryWorkNavigation.map((item) => {
+          {secondaryWorkNavigationEntries.map((item) => {
             const isActive = isNavigationItemActive(item.to);
             return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined} className={`navigation-item${isActive ? " navigation-item--active" : ""}`}>
             {isActive && <span className="visually-hidden">当前页</span>}<item.icon aria-hidden="true" /><span className="navigation-label">{item.label}</span>
@@ -243,7 +224,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
             </Link>;
           })}
         </nav>
-      </aside>
+      </aside>}
       <aside className="app-context-rail" aria-label="近期工作上下文" data-testid="app-context-rail">
         <div className="context-rail-head">
           <p className="context-rail-brand">Relay<span className="context-rail-brand-tag">工作空间</span></p>
@@ -301,7 +282,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       {connection.mode === "live" && connection.client && <RecentWorkRail key={connection.epoch}
         client={connection.client} currentTaskId={currentWorkId} onOpen={() => setNavigationOpen(false)} />}
       <nav className="mobile-navigation-list" aria-label="完整导航">
-        {[...primaryNavigation, ...secondaryWorkNavigation, ...secondaryNavigation].map((item) => {
+        {[...primaryNavigation, ...secondaryWorkNavigationEntries, ...secondaryNavigation].map((item) => {
           const isActive = isNavigationItemActive(item.to);
           return <Link key={item.label} to={item.to} aria-current={isActive ? "page" : undefined}
             className={`mobile-navigation-item${isActive ? " mobile-navigation-item--active" : ""}`}

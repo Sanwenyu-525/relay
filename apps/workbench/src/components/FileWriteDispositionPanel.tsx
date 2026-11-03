@@ -229,7 +229,7 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
       <p>原 Operation：{enumText(statusLabels, preview.operationStatus)} · 停机证明：{preview.stopProofRecorded ? "已记录" : "未记录"}</p>
       <p className="helper-text">原 operation_id：{preview.operationId} · 原 invocation_id：{preview.invocationId ?? "服务端未返回"} · 观察模式 {preview.observationMode ?? "有执行回执"}。
         人工处置与重试只使用这两个既有身份，不会派生新的调用。</p>
-      {preview.observationMode === "NO_RECEIPT" && <p className="action-error">原助手没有留下执行回执。下列目标和候选残留只是当前磁盘观察，不能归因于原调用；程序不会自动移动或删除它们。</p>}
+      {preview.observationMode === "NO_RECEIPT" && <p className="action-error">原调用没有执行回执；下列残留只是当前磁盘观察，不能归因于原调用，程序也不会自动移动或删除。</p>}
       {preview.disposition ? <><p>人工处置：保留当时文件并结束旧 Run · {preview.disposition.createdAt} · 当时观察 sha256 {preview.disposition.observationSha256}。不能据此认定所有文件均已写入。</p>
         <ul className="run-list">{preview.disposition.observationFiles.map((file) => <li key={file.path}>
           {file.path} · 当时账本 {enumText(statusLabels, file.ledgerStatus)} · 当时文件 {file.currentSha256 ?? "不存在"}

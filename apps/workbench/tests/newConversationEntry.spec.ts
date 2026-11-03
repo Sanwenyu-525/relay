@@ -316,7 +316,7 @@ describe("新对话直接起步", () => {
     expect(view.posts).toHaveLength(2);
   });
 
-  it("核对首条回执后另开新对话，迟到原响应不清空新草稿", async () => {
+  it("未决首条命令收口前另开新对话：不静默新建，迟到原响应只收口一次", async () => {
     /* 顶栏改左右两翼后，工作空间级讨论不再有「新建会话」（与左栏「新对话」重复），
        本轮这颗键只在任务/目录归属的顶栏保留。此例因此改从左栏「新对话」另开——
        验证的仍是同一条不变量（迟到响应不得清空新草稿），但入口换了，不再覆盖
@@ -332,14 +332,22 @@ describe("新对话直接起步", () => {
     }));
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("原会话的首条消息");
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
-    await view.wrapper.get('[data-testid="assist-first-receipt"]').trigger("click"); await flush();
-    expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    // 2026-11-03 用户指令：行内「查询回执」按钮已删除，在途状态行不再提供核对入口，
+    // 因此本用例改为「未决首条命令仍在时另开新对话」：迟到原响应同样不得清空新草稿。
+    expect(view.wrapper.find('[data-testid="assist-first-receipt"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("新会话还没发送的草稿");
+    // 未决命令未收口：不静默另开新对话，弹层只给「留在本页核对回执」这一个出口。
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
+    expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
+    const keep = Array.from(document.querySelectorAll("button"))
+      .find(button => button.textContent === "留在本页核对回执");
+    expect(keep).toBeDefined();
+    await new DomWrapper(keep!).trigger("click"); await flush();
     release(); await flush(); await flush();
-    expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value)
-      .toBe("新会话还没发送的草稿");
-    expect(view.posts).toHaveLength(2);
+    // 迟到原响应照常收口：只解释一次，也不复活已收口的 pending。
+    expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    expect(view.posts.filter(post => post.path === `${root}/assist-sessions`)).toHaveLength(1);
+    expect(view.posts.filter(post => post.path.endsWith("/messages"))).toHaveLength(1);
   });
 
   it("新对话不丢未发送输入：直接进入空白新对话，不继承上一处正文", async () => {

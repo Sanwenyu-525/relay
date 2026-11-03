@@ -164,7 +164,11 @@ describe("首条消息提交相位（不闪、不异常变色）", () => {
       // 首条消息仍在途：只留一行安静状态，欢迎空态不出现。
       const pending = view.wrapper.get('[data-testid="assist-first-pending"]');
       expect(pending.attributes("data-state")).toBe("sending");
-      expect(pending.text()).toContain("正在发送首条消息");
+      // 2026-11-03 用户指令：这一行不再复述「正在发送首条消息…」（状态词由消息 meta 行的
+      // assist-first-transition-state = 发送中 承担）；行内「查询回执」按钮同日按用户指令删除，
+      // 在途状态行不再携带任何核对入口。
+      expect(pending.find('[data-testid="assist-first-receipt"]').exists()).toBe(false);
+      expect(pending.text()).not.toContain("正在发送首条消息");
       expect(document.querySelector('[data-testid="assist-empty-welcome"]')).toBeNull();
 
       // 列表读回后仍是同一张会话面板，没有第二次整页替换。

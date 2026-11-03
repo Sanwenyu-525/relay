@@ -330,8 +330,8 @@ export default function CreateScheduledTaskView() {
     finally { if (!disposed.current) setSubmitting(false); }
   }
 
-  const field = (key: keyof FieldErrors, label: string, node: ReactNode, hint?: string) => (
-    <label className={`field${fieldErrors[key] ? " field--invalid" : ""}`}>
+  const field = (key: keyof FieldErrors, label: string, node: ReactNode, hint?: string, wide = false) => (
+    <label className={`field${wide ? " field--wide" : ""}${fieldErrors[key] ? " field--invalid" : ""}`}>
       <span className="field-label">{label}</span>
       {node}
       {fieldErrors[key]
@@ -358,108 +358,121 @@ export default function CreateScheduledTaskView() {
   return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-create-head"
       title={editing ? "编辑定时任务" : "新建定时任务"}
-      meta={editing ? `编辑 · ${statusLabel}` : "到点自动创建并启动任务"}
       lede={editing
-        ? "修改会写入修改历史；只影响之后的新触发，已发生的触发保持原样。"
-        : "每次触发会新建一个任务并交给 AI 执行；重复执行的是这套设定，不是同一个任务。"} />
+        ? `编辑 · ${statusLabel}。修改会写入修改历史；只影响之后的新触发，已发生的触发保持原样。`
+        : "到点自动创建并启动任务：每次触发新建一个任务并交给 AI 执行；重复执行的是这套设定，不是同一个任务。"} />
     {editing && detail?.status === "EXPIRED" && <p className="warning-callout" role="alert">
       <Info aria-hidden="true" />
       这条定时任务已到期（授权到期或次数用尽）。编辑保存后仍保持「已到期」，需要延长授权或提高次数上限，
       再回详情页显式重新启用，不会因为保存而自动恢复。
     </p>}
     <form className="create-form" noValidate aria-busy={locked || undefined} onSubmit={(event) => void submit(event)}>
-      {editing
-        ? <label className="field"><span className="field-label">所属项目（不可修改）</span>
-            <input value={detail?.project?.title ?? detail?.projectId ?? ""} disabled data-testid="scheduled-task-edit-project-readonly" readOnly />
-            <span className="field-hint">定时任务不能迁移项目；需要换项目时停用后新建。</span></label>
-        : field("project", "所属项目", <select value={projectId} disabled={locked}
-            onChange={(event) => { projectTouched.current = true; setProjectId(event.target.value); }} data-testid="scheduled-task-project">
-            <option value="">请选择进行中的项目</option>
-            {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-          </select>, "定时任务只在一个项目内运行；项目归档后不再触发。")}
-
-      {field("title", "名称", <input ref={titleInput} value={title} maxLength={200} disabled={locked} required
-        onChange={(event) => { const next = event.target.value; setTitle(next); if (!taskTitleTouched) setTaskTitle(next); }} data-testid="scheduled-task-title" />,
-        "例如「每早整理昨日进展」。每次触发新建的任务默认也用这个名字。")}
-
-      {field("taskTitle", "每次任务的标题", <input value={taskTitle} maxLength={200} disabled={locked} required
-        onChange={(event) => { setTaskTitleTouched(true); setTaskTitle(event.target.value); }} data-testid="scheduled-task-task-title" />,
-        "默认与上面的名称相同；需要区分时可单独改写。")}
-
-      {field("objective", "每次任务要达成什么", <textarea value={objective} rows={3} maxLength={2000} disabled={locked} required
-        onChange={(event) => setObjective(event.target.value)} data-testid="scheduled-task-objective" />)}
-
-      {field("criteria", "验收标准（每行一条）", <textarea value={criteria} rows={3} maxLength={2000} disabled={locked} required
-        onChange={(event) => setCriteria(event.target.value)} data-testid="scheduled-task-criteria" />,
-        "没有可判断的验收标准时任务无法就绪，也就不会启动。")}
-
-      <fieldset className="field">
-        <legend className="field-label">重复规则</legend>
-        <div className="choice-list">
-          <label className="choice-option"><input type="radio" name="repeat-kind" checked={kind === "DAILY"} disabled={locked}
-            onChange={() => setKind("DAILY")} /><span>按天</span></label>
-          <label className="choice-option"><input type="radio" name="repeat-kind" checked={kind === "WEEKLY"} disabled={locked}
-            onChange={() => setKind("WEEKLY")} /><span>按周</span></label>
+      <section className="pv-card scheduled-task-form">
+        <div className="pv-card-h">
+          <strong>任务定义与执行边界</strong>
+          <small>保存后按这份设定重复创建任务</small>
         </div>
-        {kind === "DAILY"
-          ? <label className="field"><span className="field-label">每隔几天</span>
-            <input type="number" min={1} max={30} value={intervalDays} disabled={locked} data-testid="scheduled-task-interval"
-              onChange={(event) => setIntervalDays(Number(event.target.value))} />
-            <span className="field-hint">1–30 天。按天规则从首次触发日期起对齐，不会因关闭应用而漂移。</span></label>
-          : <div className="field"><span className="field-label">每周哪几天</span>
-            <div className="choice-list">{WEEKDAYS.map((label, index) => <label className="choice-option" key={label}>
-              <input type="checkbox" checked={weekdays.includes(index + 1)} disabled={locked} data-testid={`scheduled-task-weekday-${index + 1}`}
-                onChange={(event) => setWeekdays((current) => event.target.checked
-                  ? [...current, index + 1] : current.filter((day) => day !== index + 1))} /><span>{label}</span>
-            </label>)}</div>
-            {fieldErrors.repeat && <span className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors.repeat}</span>}
-          </div>}
-      </fieldset>
+        <div className="pv-card-b">
+          <div className="pv-form-grid">
+            {editing
+              ? <label className="field"><span className="field-label">所属项目（不可修改）</span>
+                  <input value={detail?.project?.title ?? detail?.projectId ?? ""} disabled data-testid="scheduled-task-edit-project-readonly" readOnly />
+                  <span className="field-hint">定时任务不能迁移项目；需要换项目时停用后新建。</span></label>
+              : field("project", "所属项目", <select value={projectId} disabled={locked}
+                  onChange={(event) => { projectTouched.current = true; setProjectId(event.target.value); }} data-testid="scheduled-task-project">
+                  <option value="">请选择进行中的项目</option>
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                </select>, "定时任务只在一个项目内运行；项目归档后不再触发。")}
 
-      <div className="scheduled-task-schedule-row">
-        {field("firstDate", "首次触发日期", <input type="date" value={firstDate} disabled={locked} required
-          onChange={(event) => setFirstDate(event.target.value)} data-testid="scheduled-task-first-date" />)}
-        {field("localTime", "本地时刻", <input type="time" value={localTime} disabled={locked} required
-          onChange={(event) => setLocalTime(event.target.value)} data-testid="scheduled-task-local-time" />,
-          "按下面的时区解释；跨夏令时仍是这个钟点。")}
-      </div>
+            {field("title", "名称", <input ref={titleInput} value={title} maxLength={200} disabled={locked} required
+              onChange={(event) => { const next = event.target.value; setTitle(next); if (!taskTitleTouched) setTaskTitle(next); }} data-testid="scheduled-task-title" />,
+              "例如「每早整理昨日进展」。每次触发新建的任务默认也用这个名字。")}
 
-      {/* 时区、次数与到期都有真实默认值：摆成摘要，改动才展开，但不会因此隐藏授权承诺。 */}
-      <details className="scheduled-task-advanced" data-testid="scheduled-task-advanced">
-        <summary>时区、启动次数与授权到期 · {timezone.trim() || "未填时区"} · 最多 {maxRuns} 次 · 到期 {expiresAt.replace("T", " ") || "未填"}</summary>
-        {(fieldErrors.timezone || fieldErrors.maxRuns || fieldErrors.expiresAt) &&
-          <p className="field-error" role="alert"><Info aria-hidden="true" />上面这些默认值有需要修正的项，展开后可看到具体原因。</p>}
-        <div className="scheduled-task-schedule-row">
-          {field("timezone", "时区", <input value={timezone} disabled={locked} required list="scheduled-task-timezones"
-            onChange={(event) => setTimezone(event.target.value)} data-testid="scheduled-task-timezone" />,
-            "例如 Asia/Shanghai。设备时区变化不会改动已确认的时刻。")}
-          <datalist id="scheduled-task-timezones">
-            {["Asia/Shanghai", "Asia/Tokyo", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
-              .map((zone) => <option key={zone} value={zone} />)}
-          </datalist>
-          {field("maxRuns", "最多启动次数", <input type="number" min={1} max={100} value={maxRuns} disabled={locked} required
-            onChange={(event) => setMaxRuns(Number(event.target.value))} data-testid="scheduled-task-max-runs" />,
-            "1–100 次。只统计真正启动的执行；上一轮未验收而被跳过的时段不占额度。")}
-          {field("expiresAt", "授权到期", <input type="datetime-local" value={expiresAt} disabled={locked} required
-            onChange={(event) => setExpiresAt(event.target.value)} data-testid="scheduled-task-expires-at" />,
-            "最长 90 天。到期后不再产生新的触发，已启动的执行不受影响。")}
+            {field("taskTitle", "每次任务的标题", <input value={taskTitle} maxLength={200} disabled={locked} required
+              onChange={(event) => { setTaskTitleTouched(true); setTaskTitle(event.target.value); }} data-testid="scheduled-task-task-title" />,
+              "默认与上面的名称相同；需要区分时可单独改写。", true)}
+
+            {field("objective", "每次任务要达成什么", <textarea value={objective} rows={3} maxLength={2000} disabled={locked} required
+              onChange={(event) => setObjective(event.target.value)} data-testid="scheduled-task-objective" />, undefined, true)}
+
+            {field("criteria", "验收标准（每行一条）", <textarea value={criteria} rows={3} maxLength={2000} disabled={locked} required
+              onChange={(event) => setCriteria(event.target.value)} data-testid="scheduled-task-criteria" />,
+              "没有可判断的验收标准时任务无法就绪，也就不会启动。", true)}
+          </div>
+
+          <div className="pv-sep" />
+
+          <div className="pv-form-grid">
+            <fieldset className="field">
+              <legend className="field-label">重复规则</legend>
+              <div className="choice-list">
+                <label className="choice-option"><input type="radio" name="repeat-kind" checked={kind === "DAILY"} disabled={locked}
+                  onChange={() => setKind("DAILY")} /><span>按天</span></label>
+                <label className="choice-option"><input type="radio" name="repeat-kind" checked={kind === "WEEKLY"} disabled={locked}
+                  onChange={() => setKind("WEEKLY")} /><span>按周</span></label>
+              </div>
+            </fieldset>
+            {kind === "DAILY"
+              ? <label className="field"><span className="field-label">每隔几天</span>
+                <input type="number" min={1} max={30} value={intervalDays} disabled={locked} data-testid="scheduled-task-interval"
+                  onChange={(event) => setIntervalDays(Number(event.target.value))} />
+                <span className="field-hint">1–30 天。按天规则从首次触发日期起对齐，不会因关闭应用而漂移。</span></label>
+              : <div className="field"><span className="field-label">每周哪几天</span>
+                <div className="choice-list">{WEEKDAYS.map((label, index) => <label className="choice-option" key={label}>
+                  <input type="checkbox" checked={weekdays.includes(index + 1)} disabled={locked} data-testid={`scheduled-task-weekday-${index + 1}`}
+                    onChange={(event) => setWeekdays((current) => event.target.checked
+                      ? [...current, index + 1] : current.filter((day) => day !== index + 1))} /><span>{label}</span>
+                </label>)}</div>
+                {fieldErrors.repeat && <span className="field-error" role="alert"><Info aria-hidden="true" />{fieldErrors.repeat}</span>}
+              </div>}
+          </div>
+
+          <div className="scheduled-task-schedule-row">
+            {field("firstDate", "首次触发日期", <input type="date" value={firstDate} disabled={locked} required
+              onChange={(event) => setFirstDate(event.target.value)} data-testid="scheduled-task-first-date" />)}
+            {field("localTime", "本地时刻", <input type="time" value={localTime} disabled={locked} required
+              onChange={(event) => setLocalTime(event.target.value)} data-testid="scheduled-task-local-time" />,
+              "按下面的时区解释；跨夏令时仍是这个钟点。")}
+          </div>
+
+          {/* 时区、次数与到期都有真实默认值：摆成摘要，改动才展开，但不会因此隐藏授权承诺。 */}
+          <details className="scheduled-task-advanced" data-testid="scheduled-task-advanced">
+            <summary>时区、启动次数与授权到期 · {timezone.trim() || "未填时区"} · 最多 {maxRuns} 次 · 到期 {expiresAt.replace("T", " ") || "未填"}</summary>
+            {(fieldErrors.timezone || fieldErrors.maxRuns || fieldErrors.expiresAt) &&
+              <p className="field-error" role="alert"><Info aria-hidden="true" />上面这些默认值有需要修正的项，展开后可看到具体原因。</p>}
+            <div className="scheduled-task-schedule-row">
+              {field("timezone", "时区", <input value={timezone} disabled={locked} required list="scheduled-task-timezones"
+                onChange={(event) => setTimezone(event.target.value)} data-testid="scheduled-task-timezone" />,
+                "例如 Asia/Shanghai。设备时区变化不会改动已确认的时刻。")}
+              <datalist id="scheduled-task-timezones">
+                {["Asia/Shanghai", "Asia/Tokyo", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
+                  .map((zone) => <option key={zone} value={zone} />)}
+              </datalist>
+              {field("maxRuns", "最多启动次数", <input type="number" min={1} max={100} value={maxRuns} disabled={locked} required
+                onChange={(event) => setMaxRuns(Number(event.target.value))} data-testid="scheduled-task-max-runs" />,
+                "1–100 次。只统计真正启动的执行；上一轮未验收而被跳过的时段不占额度。")}
+              {field("expiresAt", "授权到期", <input type="datetime-local" value={expiresAt} disabled={locked} required
+                onChange={(event) => setExpiresAt(event.target.value)} data-testid="scheduled-task-expires-at" />,
+                "最长 90 天。到期后不再产生新的触发，已启动的执行不受影响。")}
+            </div>
+          </details>
+
+          {editing && field("reason", "修改原因（必填）", <textarea value={reason} rows={2} maxLength={4000} disabled={locked} required
+            onChange={(event) => setReason(event.target.value)} data-testid="scheduled-task-edit-reason" />,
+            "会随修改一起写入修改历史，便于回看每次为什么改。", true)}
+
+          <p className="helper-text"><Info aria-hidden="true" />
+            授权在创建时一次性确认：到点只按这份授权准入，不会扩大权限。执行范围（可读资料、可用工具）在每次触发时按当时状态冻结，
+            依据失效则这一次不执行，并进入待处理。</p>
+          <div className="form-actions">
+            <button className="primary-button" type="submit" disabled={locked} data-testid="scheduled-task-submit">
+              {pending ? "结果待核对" : submitting ? (editing ? "正在保存" : "正在创建") : editing ? "保存修改" : "创建定时任务"}</button>
+            <button className="secondary-button" type="button" disabled={locked}
+              onClick={() => navigate(editing ? `/scheduled-tasks/${editId}` : "/scheduled-tasks")}>
+              {editing ? "返回详情（不保存）" : "返回列表"}</button>
+          </div>
         </div>
-      </details>
-
-      {editing && field("reason", "修改原因（必填）", <textarea value={reason} rows={2} maxLength={4000} disabled={locked} required
-        onChange={(event) => setReason(event.target.value)} data-testid="scheduled-task-edit-reason" />,
-        "会随修改一起写入修改历史，便于回看每次为什么改。")}
-
-      <p className="helper-text"><Info aria-hidden="true" />
-        授权在创建时一次性确认：到点只按这份授权准入，不会扩大权限。执行范围（可读资料、可用工具）在每次触发时按当时状态冻结，
-        依据失效则这一次不执行，并进入待处理。</p>
-      <div className="form-actions">
-        <button className="primary-button" type="submit" disabled={locked} data-testid="scheduled-task-submit">
-          {pending ? "结果待核对" : submitting ? (editing ? "正在保存" : "正在创建") : editing ? "保存修改" : "创建定时任务"}</button>
-        <button className="secondary-button" type="button" disabled={locked}
-          onClick={() => navigate(editing ? `/scheduled-tasks/${editId}` : "/scheduled-tasks")}>
-          {editing ? "返回详情（不保存）" : "返回列表"}</button>
-      </div>
+      </section>
       {pending && <div className="warning-callout" role="alert" data-testid="scheduled-task-pending">
         <Info aria-hidden="true" />
         <div>

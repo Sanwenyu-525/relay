@@ -187,7 +187,7 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
               <FileBrowsePanel client={client} projectId={projectId} resources={resources}
                 resourceLoading={loading} resourceError={resourceError} />
               <h3>本任务的受管产物</h3>
-              <p className="helper-text">受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。产物正文在右侧产物区按确切版本阅读。</p>
+              <p className="helper-text">受管产物是任务产物版本，工作目录文件是普通文件，两者不混成同一版本；产物正文在右侧按确切版本阅读。</p>
               {taskId === null
                 ? <p className="helper-text">当前没有关联任务，因此没有任务产物版本可读。</p>
                 : <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>打开任务产物版本</Link>}

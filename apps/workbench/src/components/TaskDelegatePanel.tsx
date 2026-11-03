@@ -299,7 +299,7 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
         <label className="field"><span className="field-label">Mock 写入内容</span><textarea value={mockContent}
           onChange={(event) => setMockContent(event.target.value)} maxLength={1024} rows={3}
           disabled={pendingDelegate !== null || delegating} data-testid="task-mock-content" /></label>
-        <p className="helper-text">连接、目录和写入权限须先在该项目登记。委托回执不会执行文件动作；审批回执也不代表写入已完成。</p>
+        <p className="helper-text">连接、目录与写入权限需先在项目登记。委托回执不执行文件动作；审批回执不代表写入已完成。</p>
         {mockActionBlockedReason && <p className="disabled-reason" data-testid="task-mock-blocked">{mockActionBlockedReason}</p>}
         {mockConfigError && <button className="secondary-button" type="button" disabled={pendingDelegate !== null || delegating}
           onClick={() => setMockConfigEpoch((value) => value + 1)}>重读动作配置</button>}

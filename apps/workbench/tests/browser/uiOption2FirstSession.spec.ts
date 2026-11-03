@@ -724,7 +724,7 @@ test.describe("方案 2 页面结构对齐（真实 Chromium）", () => {
       expect(chip.chevrons).toBe(1);
     }
     // 同一排的 chip 不再插竖分隔线：那会把同类控件切成两组。
-    const divider = await page.locator(".agent-chat-composer-tools > .agent-chat-options").evaluate(
+    const divider = await page.locator(".agent-chat-composer-message-group > .agent-chat-options").evaluate(
       (node) => getComputedStyle(node).borderLeftWidth);
     expect(divider).toBe("0px");
   });

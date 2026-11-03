@@ -179,7 +179,7 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
 
   return <section className="resume-section" aria-label="项目接续点" data-testid="continuation-panel">
     <h2>接续点</h2>
-    <p className="helper-text">接续点由你显式保存：它记录当时的 Project State 版本、未决任务与当前选用成果版本，不复制正文，也不会因为打开本页而改变当前事实。保存不停止正在执行的 Run。</p>
+    <p className="helper-text">接续点由你显式保存：记录当时的 Project State 版本、未决任务与选用成果版本，不复制正文。保存不停止正在执行的 Run。</p>
     {loading && <p role="status">正在读取已保存的接续点…</p>}
     {!factsReadable && <p className="helper-text">项目事实尚未读取确认，已隐藏接续点及对比。草稿与原命令回执仍保留。</p>}
     {/* 读取失败不是「还没有保存过」：接续点为空既可能真的没保存过，也可能是这次没读到。

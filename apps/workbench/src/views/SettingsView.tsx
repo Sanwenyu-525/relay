@@ -16,6 +16,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import { useRelayConnection } from "../lib/relayConnection";
 import { formatReadableDateTime, saveDisplayPreferences, useDisplayPreferences } from "../lib/displayPreferences";
+import { saveNavigationPlacement, useNavigationPlacement, type NavigationPlacement } from "../lib/navigationPreferences";
 import { applyMotionPreference, storeMotionPreference, storedMotionPreference,
   type MotionPreference } from "../lib/motionPreference";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
@@ -80,9 +81,8 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
     { key: "verified", label: "模型验证成功",
       tone: verifyMeta.tone, chip: verifyMeta.chip, detail: verifyMeta.detail },
   ];
-  return <section className="settings-card" data-testid="service-state">
-    <h2>连接与模型状态</h2>
-    <p className="helper-text">「连接验证通过」只表示固定短文本调用成功，不等于真实任务执行成功。</p>
+  return <section className="settings-card" data-testid="service-state">    <h2>连接与模型状态</h2>
+    <p className="helper-text">连接验证通过只表示固定短文本调用成功，不等于真实任务执行成功。</p>
     <dl className="settings-definition-list">
       {rows.map((row) => <div key={row.key} data-testid={`service-state-${row.key}`}>
         <dt>{row.label}</dt>
@@ -135,14 +135,12 @@ function ModelPortCard({ status, client, onSaved }: {
         : status.provider === "openai-compatible" ? "未自定义（使用内置默认端点）" : "—"}</dd></div>
       <div><dt>图片输入</dt><dd data-testid="model-port-image-input">{imageInputText(status)}</dd></div>
       {/* 2026-10-20（P1-5）：把「这条配置影响谁」写在页面上。 */}
-      <div><dt>生效范围</dt><dd data-testid="model-port-scope">本实例的所有会话共用；图片能力声明跟随
-        provider 与模型名，换模型后要为新的模型名单独声明。</dd></div>
+      <div><dt>生效范围</dt><dd data-testid="model-port-scope">本实例所有会话共用。</dd></div>
     </dl>
-    {status.provider === "fake" && <p className="helper-text"><Info aria-hidden="true" />当前服务实例未配置真实模型：任务委托与 Assist 使用确定性 Mock 模型，不调用外部服务。</p>}
+    {status.provider === "fake" && <p className="helper-text"><Info aria-hidden="true" />当前服务实例未配置真实模型：使用确定性 Mock 模型，不调用外部服务。</p>}
     {status.provider === "invalid" && <p className="action-error" role="alert">服务实例的模型配置残缺（例如缺少 API Key 或模型名）；真实模型调用不可用，也不会静默回退。请检查服务端启动配置后重启实例。</p>}
     {client !== null && status.provider === "openai-compatible" && status.model !== null &&
-      <ImageInputDeclaration client={client} model={status.model} onSaved={onSaved} />}
-    <p className="helper-text">配置来自服务实例的环境变量；API 密钥只保存在服务端配置中，本页面不读取、不显示、也不修改任何密钥。</p>
+      <ImageInputDeclaration client={client} model={status.model} onSaved={onSaved} />}    <p className="helper-text">配置来自服务实例环境变量；本页不读取、不显示、也不修改任何密钥。</p>
   </section>;
 }
 
@@ -177,8 +175,7 @@ function ImageInputDeclaration({ client, model, onSaved }: {
   };
   return <div className="settings-image-input" data-testid="model-image-input-declaration">
     <h3>图片输入能力声明</h3>
-    <p className="helper-text">模型目录里没有这个模型时（自建 Provider 常见），只有这条声明能让带图消息通过；
-      目录里有条目时以目录为准，声明不生效。</p>
+    <p className="helper-text">目录里没有这个模型时（自建 Provider 常见）以本声明为准；有目录条目时以目录为准。</p>
     <label className="field"><span className="field-label">声明依据（可选，最多 500 字）</span>
       <input value={note} maxLength={500} disabled={saving}
         onChange={(event) => { setNote(event.target.value); setSaved(null); }}
@@ -236,7 +233,7 @@ function VerificationDetailCard({ verification, verifying }: {
           {" "}{modelErrorGuides[last.errorCategory]}</dd></div>}
       </dl>}
     {verifying && <p role="status">正在验证…</p>}
-    <p className="helper-text">连接验证只使用固定短文本，不读取项目资料，也不代表真实任务执行成功或任何 Task/Run 结果。</p>
+    <p className="helper-text">连接验证只用固定短文本，不读取项目资料，也不代表真实任务执行成功。</p>
   </section>;
 }
 
@@ -259,8 +256,7 @@ function ModelAdvancedDiagnostics({ client, status, verification, verifying, onS
       {status !== null && <ModelPortCard status={status} client={client} onSaved={onSaved} />}
       {status?.configured === true && <VerificationDetailCard verification={verification}
         verifying={verifying} />}
-      <p className="helper-text" data-testid="worker-diagnostic">Worker 可执行性未探测：本页不探测 Worker 进程，
-        也不确认 Worker 与 API 是否使用同一配置来源。
+      <p className="helper-text" data-testid="worker-diagnostic">Worker 可执行性未探测：本页不探测 Worker 进程，也不确认它与 API 是否同源配置。
         {workerProbe === "OK"
           ? "（诊断：API 进程环境的配置启动校验通过，仅供核对，不代表 Worker 已执行。）"
           : workerProbe === "FAILED"
@@ -509,7 +505,7 @@ function DefaultWorkingDirectoryRow({ client, projection, loading, readError, re
 
   return <section className="settings-card settings-default-directory" data-testid="settings-default-directory">
     <h2>默认工作目录</h2>
-    <p className="helper-text">新会话沿用的目录；只引用已登记目录，不授予写权限，也不改变已有会话的作用域。</p>
+    <p className="helper-text">新会话沿用的目录；只引用已登记目录，不授予写权限。</p>
     <div className="settings-directory-body" role="group" aria-label="默认工作目录">
       <div className="settings-default-directory-value" data-testid="settings-default-directory-value"
         data-status={status ?? "LOADING"}>
@@ -631,6 +627,21 @@ function GeneralPreferencesCard() {
   const [error, setError] = useState<string | null>(null);
   const changed = () => { setSaved(false); setError(null); };
 
+  // 导航栏位置即时生效、独立保存，不随「保存显示偏好」表单提交——
+  // 切换是纯外壳布局，没有可「先草稿再确认」的事实要核对。
+  const placement = useNavigationPlacement();
+  const [placementError, setPlacementError] = useState<string | null>(null);
+  const changePlacement = (value: NavigationPlacement) => {
+    if (value === placement) return;
+    try {
+      saveNavigationPlacement(value);
+      setPlacementError(null);
+    } catch {
+      // 写失败时存储不变，useSyncExternalStore 读回的仍是旧值，单选框自动回弹。
+      setPlacementError("导航栏位置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。");
+    }
+  };
+
   return <section className="settings-card settings-basic" data-testid="settings-general-preferences">
     <h2>显示与界面</h2>
     <p className="helper-text">仅保存在本设备，不改变服务端事实或任务状态。</p>
@@ -663,6 +674,24 @@ function GeneralPreferencesCard() {
           <span className="status-chip status-chip--neutral">浅色</span>
           <span className="helper-text">当前仅支持浅色主题；深色与 Aurora Glass 仍在开发中。</span>
         </div>
+      </div>
+      {/* UI-NAV-01：导航栏位置是纯外壳布局偏好，即时生效并独立保存，不随「保存显示偏好」表单提交；
+          原生 radio 同名分组天然支持方向键切换，焦点环走 .segmented-option:focus-within。 */}
+      <div className="settings-field">
+        <span className="field-label" id="settings-navigation-placement-label">导航栏位置</span>
+        <div className="segmented settings-navigation-placement" role="radiogroup" aria-labelledby="settings-navigation-placement-label"
+          data-testid="settings-navigation-placement">
+          <label className={`segmented-option${placement === "sidebar" ? " segmented-option--selected" : ""}`}>
+            <input className="visually-hidden" type="radio" name="settings-navigation-placement"
+              value="sidebar" checked={placement === "sidebar"} onChange={() => changePlacement("sidebar")} />
+            左侧导航</label>
+          <label className={`segmented-option${placement === "titlebar" ? " segmented-option--selected" : ""}`}>
+            <input className="visually-hidden" type="radio" name="settings-navigation-placement"
+              value="titlebar" checked={placement === "titlebar"} onChange={() => changePlacement("titlebar")} />
+            标题栏导航</label>
+        </div>
+        <p className="helper-text">切换立即生效并保存在本设备；标题栏模式把全局导航移到窗口标题栏，为内容区腾出左侧空间。</p>
+        {placementError && <p role="alert" className="action-error" data-testid="settings-navigation-placement-error">{placementError}</p>}
       </div>
       <div className="settings-field">
         <label htmlFor="settings-motion">动效</label>
@@ -852,9 +881,8 @@ export default function SettingsView() {
   const groups: readonly (readonly [SettingsGroup, string])[] = [
     ["basic", "通用设置"], ["model", "AI 与模型"], ["execution", "权限与执行"], ["workbench", "工作台"]];
 
-  return <section className="settings-page" data-testid="settings-page">
-    <PageHeader testId="settings-page-head" title="设置"
-      lede="管理本设备偏好、默认工作目录、模型连接与执行权限；每项设置都标明生效范围。" />
+  return <section className="settings-page" data-testid="settings-page">    <PageHeader testId="settings-page-head" title="设置"
+      lede="显示偏好只保存在本机；模型、执行权限与工作目录各自独立保存，改哪一项只影响那一块。" />
     <div className="settings-layout">
       <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
         {groups.map(([value, label]) => <button key={value} type="button" data-testid={`settings-group-${value}`}
@@ -873,11 +901,8 @@ export default function SettingsView() {
           {visited.model && (client === null ? <div className="warning-callout" role="status">
             当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，
             或通过顶栏「数据来源」连接本机 API。
-          </div> : <>
-            <p className="settings-scope-note" data-testid="settings-ai-scope">
-              聊天：每个会话在输入器里选择连接；没有显式选择时跟随工作区聊天默认，再回落到进程默认。
-              任务执行按 Run 默认连接冻结。变更默认不会替换已排队/生成中的消息，也不会改写已冻结的 Run。
-              上下文长度与记忆按工作空间生效，不改变已有会话自己的选择。
+          </div> : <>            <p className="settings-scope-note" data-testid="settings-ai-scope">
+              以下设置按工作空间生效，只影响之后的新消息与新 Run；已排队、生成中或已冻结的执行保持原连接。
             </p>
             {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
             {error && <div className="action-error" role="alert">

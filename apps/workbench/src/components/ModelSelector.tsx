@@ -53,10 +53,10 @@ function entryTitle(entry: ModelEntry): string {
 }
 
 export default function ModelSelector({ client, open, onOpenChange, selectedModel, onChoose, disabled = false,
-  firstMessage = false, sessionId, selectedConnectionId = null, onChooseConnection }: {
+  sessionId, selectedConnectionId = null, onChooseConnection }: {
   client: RelayApiClient; open: boolean; onOpenChange: (open: boolean) => void;
   selectedModel: string | null; onChoose: (model: string) => void;
-  disabled?: boolean; firstMessage?: boolean;
+  disabled?: boolean;
   sessionId?: string;
   /** 会话当前选中的已登记连接：清单用它标记唯一选中项，不拿型号猜身份。 */
   selectedConnectionId?: string | null;
@@ -230,10 +230,8 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       title={selectedDetail === null ? "打开模型选择，核对本会话首选" : `首选模型：${selectedDetail}`}
       onClick={() => onOpenChange(!open)}><span className="model-selector-trigger-name">{selectedName ?? "模型"}</span><ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></button>
     {open && <div className="model-selector-menu" data-testid="model-selector-menu">
-      <p className="model-selector-note" data-testid="model-selector-current">{loading ? "正在读取模型目录…"
-        : error !== null ? error : `当前首选：${currentModel ?? "沿用应用默认"}`}
-        {!loading && error === null && <span className="model-selector-note-scope">{firstMessage
-          ? " · 发送首条消息时绑定所选模型" : " · 仅影响本会话后续新请求，活动 Run 保留原策略"}</span>}</p>
+      {(loading || error !== null) && <p className="model-selector-note" data-testid="model-selector-current">
+        {loading ? "正在读取模型目录…" : error}</p>}
       {error !== null && <button type="button" className="model-selector-action" disabled={loading || refreshing}
         data-testid="model-selector-retry" onClick={() => setRetry((value) => value + 1)}>重新读取</button>}
       {readWarnings.length > 0 && <p className="model-selector-note" role="alert">{readWarnings.join(" ")}
@@ -255,8 +253,7 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       {!loading && catalog !== null && catalog.models.length > 0 && visibleModels.length === 0 &&
         <p className="model-selector-note">没有匹配的免费模型，请修改搜索。</p>}
       {!loading && <p className="model-selector-foot">
-        <span className="model-selector-note"><span className="model-selector-foot-time">最近成功同步：{catalog?.lastSuccessAt ?? "尚无成功目录"}</span>
-          {catalog !== null && (catalog.cacheStale || !catalog.configured || !catalog.chatConfigured || catalog.lastFailureReason !== null) && " · "}{catalog?.cacheStale ? "目录已过期，仅供浏览" : ""}{catalog !== null && !catalog.configured ? "免费目录未启用" : ""}{catalog !== null && !catalog.chatConfigured ? "调用凭据未配置，免费模型暂不可调用" : ""}{catalog?.lastFailureReason ? `最近同步失败：${catalog.lastFailureReason}，保留上次成功结果` : ""}</span>
+        <span className="model-selector-note">{catalog?.cacheStale ? "目录已过期，仅供浏览" : ""}{catalog !== null && !catalog.configured ? "免费目录未启用" : ""}{catalog !== null && !catalog.chatConfigured ? "调用凭据未配置，免费模型暂不可调用" : ""}{catalog?.lastFailureReason ? `最近同步失败：${catalog.lastFailureReason}，保留上次成功结果` : ""}</span>
         <button type="button" className="model-selector-action" data-testid="model-selector-refresh"
           disabled={refreshing || !catalog?.configured} onClick={() => void refresh()}>{refreshing ? "正在刷新…" : "立即刷新"}</button>
       </p>}

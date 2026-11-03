@@ -117,7 +117,7 @@ export default function AssistSourcePicker({ projectId, selectedRefs, onChange, 
       <ul>
         <li>只检索当前获准范围内的知识、记忆与决定版本；规则类与已停用版本不进入候选。</li>
         <li>每次消息最多 {sourceLimit} 个资料版本；超限保留已选项，本次选择不部分生效。</li>
-        <li>发送时冻结所选版本的 kind / rootId / version 三元组，服务端仍会按权限与实际版本复核。</li>
+        <li>发送时冻结所选版本的 kind / rootId / version；服务端仍按权限与实际版本复核。</li>
         <li>切换项目或连接会清空本次选择，避免把上一个范围的引用带进新请求。</li>
         <li>本地文件选择尚未接入：桌面宿主当前只提供目录选择器，所以这里只列出已获准读取的资料版本。</li>
       </ul>

@@ -150,11 +150,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
 
   if (!expanded) {
     return <section className="surface-panel settings-card" data-testid="model-connections">
-      <h2>模型连接</h2>
-      <p className="helper-text">登记多条 OpenAI 兼容连接（端点、确切型号、调用预算），
-        凭据保存在系统凭据库，业务库里只有不透明引用。</p>
-      <p className="helper-text">聊天默认只影响没有显式会话选择的新消息；Run 默认只影响新的任务执行。
-        两类默认互不改写，已排队、生成中或已冻结的执行保持原连接。</p>
+      <h2>模型连接</h2>      <p className="helper-text">登记 OpenAI 兼容连接（端点、确切型号、调用预算）；凭据存系统凭据库，业务库只有不透明引用。</p>
       <p className="settings-verify-actions">
         <button className="secondary-button" type="button" data-testid="model-connections-open"
           onClick={() => { void open(); }}>
@@ -164,11 +160,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
   }
 
   return <section className="surface-panel settings-card" data-testid="model-connections">
-    <h2>模型连接</h2>
-    <p className="helper-text">每条连接可独立验证；验证通过只表示固定短文本调用成功，不等于任务执行成功。
-      编辑配置或轮换凭据后旧验证结论自动失效。</p>
-    <p className="helper-text">聊天默认与 Run 默认分列：前者只用于没有显式会话选择的新消息，
-      后者只用于新 Run 的冻结身份；已存在的会话与 Run 都不会被改写。</p>
+    <h2>模型连接</h2>    <p className="helper-text">每条连接可独立验证；改配置或轮换凭据后旧结论失效。</p>
     {loading && <p role="status">正在读取模型连接…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="model-connections-error">
       <p>{error}</p>
@@ -180,7 +172,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
 
     {!loading && error === null && connections.length === 0 &&
       <p className="helper-text" data-testid="model-connections-empty">
-        还没有登记任何连接。未登记时会话与新任务执行都跟随进程默认模型。</p>}
+        还没有登记任何连接；此时会话与新任务执行都跟随进程默认。</p>}
 
     {connections.length > 0 && <dl className="settings-definition-list">
       {connections.map((connection) => {
@@ -373,7 +365,7 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
     <label><span>服务端点（留空＝内置默认端点）</span>
       <input value={baseUrl} aria-label="服务端点" placeholder="https://…/v1"
         onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
-    <p className="helper-text">API Key 不变；要更换凭据请使用「轮换凭据」。保存配置后旧验证结论失效。</p>
+    <p className="helper-text">API Key 不变；更换凭据请用「轮换凭据」。保存后旧验证结论失效。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
       <button className="secondary-button" type="button" disabled={busy}
@@ -473,8 +465,7 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
     <label><span>API Key（只在此出现一次，保存后只留代数）</span>
       <input type="password" autoComplete="off" value={apiKey} aria-label="API Key"
         onChange={(event) => { setApiKey(event.target.value); }} /></label>
-    <p className="helper-text">当前阶段只保证 OpenAI-Compatible 路径；保存不等于验证通过，
-      登记后请在这一行点「验证」。</p>
+    <p className="helper-text">只保证 OpenAI-Compatible 路径；保存不等于验证通过，登记后点这一行的「验证」。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
       <button className="secondary-button" type="button" disabled={busy}

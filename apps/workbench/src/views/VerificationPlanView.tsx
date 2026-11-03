@@ -66,7 +66,6 @@ function FixtureVerificationPlanView() {
   if (!project) return <section className="page-state"><p className="eyebrow">验收方案</p><h1>尚未提供验收方案示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取或写入其他任务的检查建议。</p></section>;
   return <section className="skill-page pv-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="verification-plan-page-head"
     title="把完成标准，变成可核对的依据。" meta="生成验收方案"
-    lede="基于验收标准，梳理检查项与检查方式，便于后续实施与审查。"
     status={<span className={`status-chip status-chip--warning`}>{baselineStale ? "基线已过期" : "待确认"}</span>}>
     <p className="metadata-row">任务：v{project.verification.taskRevision} <span aria-hidden="true">|</span> 验收标准：v{project.verification.acceptanceRevision} <span aria-hidden="true">|</span> 方案建议：v{project.verification.proposalVersion}</p>
   </PageHeader>

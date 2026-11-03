@@ -1657,9 +1657,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         onOpen={() => setFirstPendingDialogOpen(true)} />
     : <p className="helper-text agent-first-transition-note" role="status"
         data-testid="assist-first-pending" data-state="sending">
-        正在发送首条消息…
-        <button type="button" className="text-link" data-testid="assist-first-receipt" disabled={creating}
-          onClick={() => void checkFirstReceipt()}>{creating ? "正在查询" : "查询回执"}</button></p>;
+        </p>;
   /**
    * 模式是**会话属性**：已在会话上的身份以会话为准；没有会话时由协作页持有的工作对象身份
    * 决定「新建哪一条」。工作对象身份缺省即普通档，不猜助手。
@@ -1896,146 +1894,154 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     </form>
     <div className="agent-chat-composer-actions">
       <div className="agent-chat-composer-tools">
-        <ComposerAttach
-          client={client} mode={wantedMode} hasSession={false}
-          onCommand={() => { updateFirst({ draft: first.draft.startsWith("/") ? first.draft : `/${first.draft}` });
-            firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
-          onPickCommand={(name) => { updateFirst({ draft: `${first.draft.match(/^\s*/u)?.[0] ?? ""}/${name} ` });
-            firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
-          onPickPlugin={(label) => { updateFirst({ draft: insertPluginMention(first.draft, label, firstDraftRef.current) });
-            firstDraftRef.current?.focus(); }}
-          onUploadAttachments={(files) => { stagedFirst.add(files); firstDraftRef.current?.focus(); }}
-          uploadDisabled={firstBusy || creating || pendingFirst !== null || firstAttaching}
-          workspace={executionScope?.association === null || executionScope?.association === undefined ? null
-            : { projectId: executionScope.association.projectId,
-              resourceId: executionScope.association.resourceId, displayName: executionScope.displayName }}
-          artifactTaskId={firstScope.taskId}
-          onInsertMention={(label) => { updateFirst({ draft: insertMention(first.draft, label, firstDraftRef.current) });
-            firstDraftRef.current?.focus(); }}
-          projectId={firstScope.projectId}
-          /* 首条消息也能选资料（DEV-0100）：候选来自项目资料与最近引用，
-             选中项随建会话载荷冻结，发送后由新会话的资料选择器清空本次选择。 */
-          selectedRefs={firstSourcesSelectable ? selectedRefs : []}
-          recentRefs={firstSourcesSelectable ? readRecentSourceRefs() : []}
-          onToggleSourceRef={firstSourcesSelectable ? toggleSourceRef : undefined}
-          /* 清单恒定全量（2026-10-18）：助手档与学习档服务端拒绝 skill_ref，只有这两个档不传。 */
-          skills={wantedMode === "AGENT" ? firstSkills : undefined}
-          skillContext={{ projectId: firstScope.projectId, taskId: firstScope.taskId,
-            resolveInPlace: onRequestSkillTarget !== undefined }}
-          selectedSkillKey={firstSkillKey || null}
-          onPickSkill={setFirstSkillKey}
-          notes={[...(firstSourcesNote === null ? [] : [{ text: firstSourcesNote, keys: ["sources"] }]),
-            /* 助手档与学习档服务端拒绝 skill_ref：清单根本不传，面板里要说明这是档位事实，
-               而不是「当前没有可用的 Skill」。 */
-            ...(wantedMode === "AGENT" ? [] : [{ text: wantedMode === "ASSISTANT"
-              ? "助手档没有 Skill；切到普通档后可选" : "学习档没有 Skill；切到普通档后可选",
-              keys: ["skill"] }]),
-            /* 缺上下文的 Skill 现在可点开、可选中，缺口由输入器里的工作对象芯片补齐；
-               这句只做悬停 title，说明「选中之后会发生什么」，不再宣称整类不可用。 */
-            ...(firstSkillScopeMissing && onRequestSkillTarget !== undefined
-              ? [{ text: "这个 Skill 需要任务或项目上下文；选完后在工具行指定任务或项目", keys: ["skill"] }] : []),
-            ...(firstSkillScopeMissing && onRequestSkillTarget === undefined
-              ? [{ text: "这个 Skill 需要任务或项目上下文；从对应任务或项目进入对话后可用", keys: ["skill"] }] : []),
-            /* 连接器按项目登记：没有项目归属时入口仍可点开，但菜单底就该先说明去哪看。 */
-            ...((executionScope?.association?.projectId ?? null) === null && client !== null
-              ? [{ text: connectorScopeNote, keys: ["connectors"] }] : [])]} />
-        {/* 本目录写档位（§18.1.3）：紧挨「+」常驻；没有绑定目录时显示未绑定态并说明缺什么。
-            档位同源上报给上方状态行。 */}
-        {wantedMode === "AGENT" && <WritePermissionControl client={client}
-          projectId={executionScope?.association?.projectId ?? null}
-          resourceId={executionScope?.association?.resourceId ?? null}
-          canonicalRoot={executionScope?.canonicalRoot ?? null}
-          disabled={firstBusy || creating || pendingFirst !== null || projectWriteBlockedReason !== null}
-          onTier={setFirstWriteTier} />}
-        {/* 选中的 Skill 缺上下文时，工具行直接给出补齐入口（工作台 §32.11）：不能让「选了
-            用不了」停在输入框里，也不能伪造归属——选定工作对象后由宿主把讨论带到该工作对象作用域。 */}
-        {firstSkill !== null && firstSkillScopeMissing && onRequestSkillTarget !== undefined &&
-          <ComposerTargetPicker client={client} need={firstSkill.target}
-            disabled={firstBusy || creating}
-            onPick={(choice) => onRequestSkillTarget({ ...choice, skillId: firstSkill.id })} />}
-        {modeSwitch}
-        <ComposerPolishButton assist={firstAssist} />
-        {/* 首条输入器的发送方式与资料合成一颗芯片一片浮层（2026-10-24 用户指令「这两个合成
-            一个芯片就好了」）。2026-11-01 UI-FEAT-01-R2 与已建会话对齐：芯片标签读当前选择
-            （选了 Skill 就显示 Skill 名，不再一律写「普通讨论」），资料收成浮层里的第二层，
-            删掉「Enter 发送 · Shift + Enter 换行」这类帮助文本。
-            **首条消息的真实能力**：服务端只接受 DISCUSS 与 skill_ref（见 sendFirst 的
-            `skillIntentPayload`），没有文档候选与任务提案，所以这里不摆那两行——
-            与已建会话「看起来一致」不等于把不支持的动作画出来。 */}
-        {wantedMode === "AGENT" && <details className="agent-chat-options" ref={firstOptionsRef}
-          data-testid="assist-first-send-options"
-          onToggle={(event) => { if (!event.currentTarget.open) setFirstSourcesView(false); }}
-          onKeyDown={(event) => {
-            // Esc 一次只吃一层：资料层开着就先退回发送方式，再按一次才收浮层。
-            if (!firstSourcesView || event.key !== "Escape" || event.nativeEvent.isComposing ||
-              event.nativeEvent.keyCode === 229 || event.altKey || event.ctrlKey ||
-              event.metaKey || event.shiftKey) return;
-            event.preventDefault(); event.stopPropagation();
-            setFirstSourcesView(false);
-            event.currentTarget.querySelector<HTMLElement>('[data-testid="assist-first-send-sources-toggle"]')
-              ?.focus({ preventScroll: true });
-          }}>
-          <summary data-testid="assist-first-send-mode">{firstSkill?.title ?? sendModeLabels.DISCUSS}
-            <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
-          <div className="agent-chat-options-panel">
-          {/* 2026-10-24 用户指令：默认目录就绪时不再复述（欢迎语与目录细条已承载）；
-              默认目录不可用与未选目录是用户无从预知的受阻/空态事实，保留。 */}
-          {workspaceDefault?.status !== "READY" && <p className="helper-text">
-            {workspaceDefault?.status === "UNAVAILABLE"
-              ? "设置里的默认目录当前不可用，读取文件前先选择文件夹。"
-              : "需要读取项目文件时，先选择文件夹。"}</p>}
-          <div className="agent-chat-send-modes-view" hidden={firstSourcesView}>
-          <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
-            <SendModeRow testId="assist-first-send-mode-DISCUSS" name="assist-first-send-mode" value="DISCUSS"
-              label={sendModeLabels.DISCUSS} checked={firstSkill === null}
-              disabled={firstBusy || creating || pendingFirst !== null}
-              title="自然语言协作，按需使用已授权工具；文档候选和任务提案请使用对应选项。"
-              onSelect={() => setFirstSkillKey("")} />
-            {firstSkills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
-            {firstSkills.map((skill, index) => {
-              /* 与「+」菜单同一份清单、同一处状态（`firstSkillKey`），不另立第二套选择结果。
-                 缺上下文但能在输入器里补工作对象时仍可选，补齐入口随后出现在工具行。 */
-              const blocked = !skill.callSupported || skill.missingCapabilities.length > 0;
-              const scopeLabel = skill.target === "TASK" ? "任务" : "项目";
-              const missingScope = skill.target === "TASK" ? firstScope.taskId === null
-                : firstScope.projectId === null;
-              const scopeFixed = missingScope && onRequestSkillTarget === undefined;
-              const hint = !skill.callSupported ? "仅查阅" : skill.missingCapabilities.length > 0 ? "缺能力"
-                : missingScope ? `需${scopeLabel}`
-                  : skill.availability === "CALLABLE_READ_ONLY" ? "只读" : "仅建议";
-              return <SendModeRow key={`${skill.id}@${skill.version}`} testId={`assist-first-send-skill-${index}`}
-                name="assist-first-send-mode" value={`${skill.id}@${skill.version}`} label={skill.title} hint={hint}
-                checked={firstSkillKey === `${skill.id}@${skill.version}`}
-                disabled={firstBusy || creating || pendingFirst !== null || blocked || scopeFixed}
-                title={`${skill.title} · ${skill.id} v${skill.version}${missingScope
+        {/* UI-COMPOSER-GROUPING-01（2026-11-03）：工具行拆成两个轻量分组——「上下文与权限」与「会话与消息操作」。
+            分组只靠间距：组内 space.1、组间 space.2（见 AssistView.css 同名注释）；不加标题、底色、边框、阴影与分隔线。 */}
+        <div className="agent-chat-composer-context-group">
+          <ComposerAttach
+            client={client} mode={wantedMode} hasSession={false}
+            onCommand={() => { updateFirst({ draft: first.draft.startsWith("/") ? first.draft : `/${first.draft}` });
+              firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
+            onPickCommand={(name) => { updateFirst({ draft: `${first.draft.match(/^\s*/u)?.[0] ?? ""}/${name} ` });
+              firstComposerBoxRef.current?.querySelector("textarea")?.focus(); }}
+            onPickPlugin={(label) => { updateFirst({ draft: insertPluginMention(first.draft, label, firstDraftRef.current) });
+              firstDraftRef.current?.focus(); }}
+            onUploadAttachments={(files) => { stagedFirst.add(files); firstDraftRef.current?.focus(); }}
+            uploadDisabled={firstBusy || creating || pendingFirst !== null || firstAttaching}
+            workspace={executionScope?.association === null || executionScope?.association === undefined ? null
+              : { projectId: executionScope.association.projectId,
+                resourceId: executionScope.association.resourceId, displayName: executionScope.displayName }}
+            artifactTaskId={firstScope.taskId}
+            onInsertMention={(label) => { updateFirst({ draft: insertMention(first.draft, label, firstDraftRef.current) });
+              firstDraftRef.current?.focus(); }}
+            projectId={firstScope.projectId}
+            /* 首条消息也能选资料（DEV-0100）：候选来自项目资料与最近引用，
+               选中项随建会话载荷冻结，发送后由新会话的资料选择器清空本次选择。 */
+            selectedRefs={firstSourcesSelectable ? selectedRefs : []}
+            recentRefs={firstSourcesSelectable ? readRecentSourceRefs() : []}
+            onToggleSourceRef={firstSourcesSelectable ? toggleSourceRef : undefined}
+            /* 清单恒定全量（2026-10-18）：助手档与学习档服务端拒绝 skill_ref，只有这两个档不传。 */
+            skills={wantedMode === "AGENT" ? firstSkills : undefined}
+            skillContext={{ projectId: firstScope.projectId, taskId: firstScope.taskId,
+              resolveInPlace: onRequestSkillTarget !== undefined }}
+            selectedSkillKey={firstSkillKey || null}
+            onPickSkill={setFirstSkillKey}
+            notes={[...(firstSourcesNote === null ? [] : [{ text: firstSourcesNote, keys: ["sources"] }]),
+              /* 助手档与学习档服务端拒绝 skill_ref：清单根本不传，面板里要说明这是档位事实，
+                 而不是「当前没有可用的 Skill」。 */
+              ...(wantedMode === "AGENT" ? [] : [{ text: wantedMode === "ASSISTANT"
+                ? "助手档没有 Skill；切到普通档后可选" : "学习档没有 Skill；切到普通档后可选",
+                keys: ["skill"] }]),
+              /* 缺上下文的 Skill 现在可点开、可选中，缺口由输入器里的工作对象芯片补齐；
+                 这句只做悬停 title，说明「选中之后会发生什么」，不再宣称整类不可用。 */
+              ...(firstSkillScopeMissing && onRequestSkillTarget !== undefined
+                ? [{ text: "这个 Skill 需要任务或项目上下文；选完后在工具行指定任务或项目", keys: ["skill"] }] : []),
+              ...(firstSkillScopeMissing && onRequestSkillTarget === undefined
+                ? [{ text: "这个 Skill 需要任务或项目上下文；从对应任务或项目进入对话后可用", keys: ["skill"] }] : []),
+              /* 连接器按项目登记：没有项目归属时入口仍可点开，但菜单底就该先说明去哪看。 */
+              ...((executionScope?.association?.projectId ?? null) === null && client !== null
+                ? [{ text: connectorScopeNote, keys: ["connectors"] }] : [])]} />
+          {/* 本目录写档位（§18.1.3）：紧挨「+」常驻；没有绑定目录时显示未绑定态并说明缺什么。
+              档位同源上报给上方状态行。 */}
+          {wantedMode === "AGENT" && <WritePermissionControl client={client}
+            projectId={executionScope?.association?.projectId ?? null}
+            resourceId={executionScope?.association?.resourceId ?? null}
+            canonicalRoot={executionScope?.canonicalRoot ?? null}
+            disabled={firstBusy || creating || pendingFirst !== null || projectWriteBlockedReason !== null}
+            onTier={setFirstWriteTier} />}
+        </div>
+        <div className="agent-chat-composer-message-group">
+          {modeSwitch}
+          <ComposerPolishButton assist={firstAssist} />
+          {/* 首条输入器的发送方式与资料合成一颗芯片一片浮层（2026-10-24 用户指令「这两个合成
+              一个芯片就好了」）。2026-11-01 UI-FEAT-01-R2 与已建会话对齐：芯片标签读当前选择
+              （选了 Skill 就显示 Skill 名，不再一律写「普通讨论」），资料收成浮层里的第二层，
+              删掉「Enter 发送 · Shift + Enter 换行」这类帮助文本。
+              **首条消息的真实能力**：服务端只接受 DISCUSS 与 skill_ref（见 sendFirst 的
+              `skillIntentPayload`），没有文档候选与任务提案，所以这里不摆那两行——
+              与已建会话「看起来一致」不等于把不支持的动作画出来。 */}
+          {wantedMode === "AGENT" && <details className="agent-chat-options" ref={firstOptionsRef}
+            data-testid="assist-first-send-options"
+            onToggle={(event) => { if (!event.currentTarget.open) setFirstSourcesView(false); }}
+            onKeyDown={(event) => {
+              // Esc 一次只吃一层：资料层开着就先退回发送方式，再按一次才收浮层。
+              if (!firstSourcesView || event.key !== "Escape" || event.nativeEvent.isComposing ||
+                event.nativeEvent.keyCode === 229 || event.altKey || event.ctrlKey ||
+                event.metaKey || event.shiftKey) return;
+              event.preventDefault(); event.stopPropagation();
+              setFirstSourcesView(false);
+              event.currentTarget.querySelector<HTMLElement>('[data-testid="assist-first-send-sources-toggle"]')
+                ?.focus({ preventScroll: true });
+            }}>
+            <summary data-testid="assist-first-send-mode">{firstSkill?.title ?? sendModeLabels.DISCUSS}
+              <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></summary>
+            <div className="agent-chat-options-panel">
+            {/* 2026-10-24 用户指令：默认目录就绪时不再复述（欢迎语与目录细条已承载）；
+                默认目录不可用与未选目录是用户无从预知的受阻/空态事实，保留。 */}
+            {workspaceDefault?.status !== "READY" && <p className="helper-text">
+              {workspaceDefault?.status === "UNAVAILABLE"
+                ? "设置里的默认目录当前不可用，读取文件前先选择文件夹。"
+                : "需要读取项目文件时，先选择文件夹。"}</p>}
+            <div className="agent-chat-send-modes-view" hidden={firstSourcesView}>
+            <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
+              <SendModeRow testId="assist-first-send-mode-DISCUSS" name="assist-first-send-mode" value="DISCUSS"
+                label={sendModeLabels.DISCUSS} checked={firstSkill === null}
+                disabled={firstBusy || creating || pendingFirst !== null}
+                title="自然语言协作，按需使用已授权工具；文档候选和任务提案请使用对应选项。"
+                onSelect={() => setFirstSkillKey("")} />
+              {firstSkills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
+              {firstSkills.map((skill, index) => {
+                /* 与「+」菜单同一份清单、同一处状态（`firstSkillKey`），不另立第二套选择结果。
+                   缺上下文但能在输入器里补工作对象时仍可选，补齐入口随后出现在工具行。 */
+                const blocked = !skill.callSupported || skill.missingCapabilities.length > 0;
+                const scopeLabel = skill.target === "TASK" ? "任务" : "项目";
+                const missingScope = skill.target === "TASK" ? firstScope.taskId === null
+                  : firstScope.projectId === null;
+                const scopeFixed = missingScope && onRequestSkillTarget === undefined;
+                const hint = !skill.callSupported ? "仅查阅" : skill.missingCapabilities.length > 0 ? "缺能力"
+                  : missingScope ? `需${scopeLabel}`
+                    : skill.availability === "CALLABLE_READ_ONLY" ? "只读" : "仅建议";
+                return <SendModeRow key={`${skill.id}@${skill.version}`} testId={`assist-first-send-skill-${index}`}
+                  name="assist-first-send-mode" value={`${skill.id}@${skill.version}`} label={skill.title} hint={hint}
+                  checked={firstSkillKey === `${skill.id}@${skill.version}`}
+                  disabled={firstBusy || creating || pendingFirst !== null || blocked || scopeFixed}
+                  title={`${skill.title} · ${skill.id} v${skill.version}${missingScope
                   ? ` · 需要${scopeLabel}上下文${scopeFixed ? "，从对应任务或项目进入对话后可用" : "，选完后在工具行指定"}` : ""}`}
-                onSelect={() => setFirstSkillKey(`${skill.id}@${skill.version}`)} />;
-            })}
-          </div>
-          </div>
-          {/* 资料入口行：与已建会话同一条结构——第一屏是入口（计数常驻），
-              点开后替换掉发送方式那一屏（选中项随建会话载荷冻结，DEV-0100）。
-              没有项目归属时换成一句禁用说明，不摆一行点了不亮的入口。 */}
-          {firstSourcesSelectable ? <button type="button" className="agent-chat-send-sources"
-            data-testid="assist-first-send-sources-toggle" aria-expanded={firstSourcesView}
-            data-active={firstSourcesView ? "true" : undefined}
-            title={firstSourcesView ? "返回发送方式" : "选择这次消息要引用的资料版本"}
-            onClick={() => setFirstSourcesView((value) => !value)}>
-            <span className="agent-chat-send-sources-label">资料</span>
-            <span className="agent-chat-send-sources-count" data-testid="assist-first-source-count">
-              已选 {selectedRefs.length} / {sendSourceLimit} 个版本</span>
-            <ChevronRight aria-hidden="true" className="agent-chat-send-sources-chevron" />
-          </button> : firstSourcesNote !== null && <div className="agent-chat-options-section">
-            <p className="helper-text">{firstSourcesNote}</p>
-          </div>}
-          {/* 第二屏：资料选择器。始终挂载、只切换可见性（挂载会按 projectId/client 重置选中项）。 */}
-          {firstSourcesSelectable ? <div className="agent-chat-send-sources-view" hidden={!firstSourcesView}>
-            <AssistSourcePicker projectId={firstScope.projectId} selectedRefs={selectedRefs}
-              onChange={setSelectedRefs} disabled={firstBusy || creating || pendingFirst !== null}
-              hideHeading />
-          </div> : null}
-          </div>
-        </details>}
+                  onSelect={() => setFirstSkillKey(`${skill.id}@${skill.version}`)} />;
+              })}
+            </div>
+            </div>
+            {/* 资料入口行：与已建会话同一条结构——第一屏是入口（计数常驻），
+                点开后替换掉发送方式那一屏（选中项随建会话载荷冻结，DEV-0100）。
+                没有项目归属时换成一句禁用说明，不摆一行点了不亮的入口。 */}
+            {firstSourcesSelectable ? <button type="button" className="agent-chat-send-sources"
+              data-testid="assist-first-send-sources-toggle" aria-expanded={firstSourcesView}
+              data-active={firstSourcesView ? "true" : undefined}
+              title={firstSourcesView ? "返回发送方式" : "选择这次消息要引用的资料版本"}
+              onClick={() => setFirstSourcesView((value) => !value)}>
+              <span className="agent-chat-send-sources-label">资料</span>
+              <span className="agent-chat-send-sources-count" data-testid="assist-first-source-count">
+                已选 {selectedRefs.length} / {sendSourceLimit} 个版本</span>
+              <ChevronRight aria-hidden="true" className="agent-chat-send-sources-chevron" />
+            </button> : firstSourcesNote !== null && <div className="agent-chat-options-section">
+              <p className="helper-text">{firstSourcesNote}</p>
+            </div>}
+            {/* 第二屏：资料选择器。始终挂载、只切换可见性（挂载会按 projectId/client 重置选中项）。 */}
+            {firstSourcesSelectable ? <div className="agent-chat-send-sources-view" hidden={!firstSourcesView}>
+              <AssistSourcePicker projectId={firstScope.projectId} selectedRefs={selectedRefs}
+                onChange={setSelectedRefs} disabled={firstBusy || creating || pendingFirst !== null}
+                hideHeading />
+            </div> : null}
+            </div>
+          </details>}
+          {/* UI-COMPOSER-GROUPING-01：补齐入口紧跟在发送选项芯片之后——Skill 决定本条消息用什么能力，
+              工作对象补这个 Skill 要求的任务或项目上下文，两者属同一条业务链路。 */}
+          {/* 选中的 Skill 缺上下文时，工具行直接给出补齐入口（工作台 §32.11）：不能让「选了
+              用不了」停在输入框里，也不能伪造归属——选定工作对象后由宿主把讨论带到该工作对象作用域。 */}
+          {firstSkill !== null && firstSkillScopeMissing && onRequestSkillTarget !== undefined &&
+            <ComposerTargetPicker client={client} need={firstSkill.target}
+              disabled={firstBusy || creating}
+              onPick={(choice) => onRequestSkillTarget({ ...choice, skillId: firstSkill.id })} />}
+        </div>
       </div>
       {/* 工具行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
           上下文计量环与模型下拉收在发送键左边，两枚同进同退；这一档取代 2026-10-19 的「行左端两枚」。
@@ -2054,7 +2060,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
           onChooseConnection={(connection: RelayModelConnection) => {
             // 连接身份与服务端将解析出的型号一起写入草稿；首条发送时按 connection_id 提交。
             updateFirst({ model: connection.defaultModel, connectionId: connection.id }); }}
-          firstMessage disabled={firstBusy || creating || pendingFirst !== null} />
+          disabled={firstBusy || creating || pendingFirst !== null} />
       </div>
       <button className="primary-button agent-chat-send" type="submit" data-testid="assist-first-send"
         data-busy={firstBusy || creating || pendingFirst !== null ? "true" : undefined}
@@ -2298,7 +2304,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       title="首条消息结果待核对"
       summary="会话已创建，但还没有拿到这条消息的送达回执。先查询回执；查不到时按原命令重试。"
       commandId={pendingFirst?.commandId ?? ""}
-      detail="两个出口都按原 command_id 与原载荷走，绝不重建会话或换新命令 ID；核对前这条消息不算已送达。"
+      detail="两个出口都按原 command_id 与原载荷走，不换新 ID；核对前这条消息不算已送达。"
       reason={firstPendingError ?? pendingFirst?.reason ?? null}
       busy={creating} checkLabel="查询首条回执" retryLabel="按原命令重试"
       onCheck={() => void checkFirstReceipt()}
@@ -6676,7 +6682,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       {/* 上下文缺口说清去哪补：会话归属建会话时冻结，本会话补不了，只能换一条从工作对象进入的会话。
           只在真的有这类 Skill 时出现一行，不常驻。 */}
       {skills.some((skill) => skill.target === "TASK" ? session.taskId === null : session.projectId === null) &&
-        <p className="helper-text">带「需任务 / 需项目」的 Skill 要回到对应任务或项目开始对话；这条会话的归属已在建立时固定。</p>}
+        <p className="helper-text">带「需任务 / 需项目」的 Skill 需回到对应任务或项目开始对话；本会话归属已固定。</p>}
       {/* 读不到 Skill 清单是错误事实，必须留在明面上（不塞进「详情」）。 */}
       {skillError && <p className="action-error" role="alert">Skill 清单暂不可读：{skillError}。
         对话仍可用。<button className="text-link" type="button" onClick={() => void loadSkills()}>重读 Skill</button></p>}
@@ -7062,70 +7068,76 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     </form>
       {standalone && <div className="agent-chat-composer-actions">
         <div className="agent-chat-composer-tools">
-          <ComposerAttach
-            client={client} mode={session.conversationMode} hasSession
-            selectedRefs={sources} conversationRefs={conversationRefs} recentRefs={recentRefs}
-            /* 助手档与只读档没有资料：把勾选入口一并收起，一级行才会保持禁用并给出原因。 */
-            onToggleSourceRef={!assistantMode && !readonlyMode ? onToggleSourceRef : undefined}
-            skillSelected={selectedSkill !== null}
-            onCommand={() => { setDraft(draft.startsWith("/") ? draft : `/${draft}`);
-              composerBoxRef.current?.querySelector("textarea")?.focus(); }}
-            onPickCommand={(name) => { setDraft(`${draft.match(/^\s*/u)?.[0] ?? ""}/${name} `);
-              composerBoxRef.current?.querySelector("textarea")?.focus(); }}
-            onPickPlugin={(label) => { setDraft(insertPluginMention(draft, label, draftRef.current));
-              draftRef.current?.focus(); }}
-            onUploadAttachments={(files) => { stagedSession.add(files); draftRef.current?.focus(); }}
-            uploadDisabled={pending !== null || busy || uploadingAttachments}
-            workspace={session.projectId === null || session.context?.workingDirectory === null ||
-              session.context?.workingDirectory === undefined ? null
-              : { projectId: session.projectId,
-                resourceId: session.context.workingDirectory.resourceId,
-                displayName: session.context.workingDirectory.canonicalRoot
-                  ?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "工作目录" }}
-            artifactTaskId={session.taskId}
-            onInsertMention={(label) => { setDraft(insertMention(draft, label, draftRef.current));
-              draftRef.current?.focus(); }}
-            /* 「+」二级里的两个入口都开同一枚合体浮层（2026-10-24 合并）：检索项目资料与
-               选择 Skill 分别是这片浮层的下节与上节，入口合一后不再有两颗芯片可分别打开。 */
-            onSources={!assistantMode && !readonlyMode ? () => setSendOptionsOpen(true) : undefined}
-            onSkill={!assistantMode && !readonlyMode ? () => setSendOptionsOpen(true) : undefined}
-            projectId={session.projectId}
-            skills={assistantMode || readonlyMode ? undefined : skills}
-            /* 会话归属已冻结：缺上下文的 Skill 只标注不可选，不在本面板里「补工作对象」。 */
-            skillContext={assistantMode || readonlyMode ? null
-              : { projectId: session.projectId, taskId: session.taskId, resolveInPlace: false }}
-            selectedSkillKey={selectedSkillKey}
-            onPickSkill={(key) => { setSelectedSkillKey(key); setSkillInputText(""); }}
-            notes={[
-              ...(assistantMode || readonlyMode ? [{ text: assistantMode
-                ? "助手档没有资料与 Skill" : "只读会话不能选资料与 Skill", keys: ["sources", "skill"] }] : []),
-            ]} />
-          {/* 会话档：档位属于「项目 × 这个目录」，所以只在智能体档、会话有项目归属时出现；
-              只读会话不写文件，不摆一颗点了没用的芯片。档位同源上报给上方状态行。 */}
-          {!assistantMode && !readonlyMode && <WritePermissionControl client={client}
-            projectId={session.projectId}
-            resourceId={session.context?.workingDirectory?.resourceId ?? null}
-            canonicalRoot={session.context?.workingDirectory?.canonicalRoot ?? null}
-            disabled={busy || pending !== null || writeBlockedReason !== null}
-            onTier={setSessionWriteTier} />}
-          {/* 0127 / DEV-0105：聊天行为模式只显示当前状态，不再摆下拉框（入口在「+ → 命令」
-              与 `/plan`、`/goal` 命令里）。普通模式不占位；计划/目标模式显示徽标与「退出」。 */}
-          <ChatModeSwitch mode={session.chatMode} busy={busy || pending !== null}
-            disabled={externalReadBlockedReason !== null}
-            lockedReason={null}
-            onChange={(next) => {
-              if (next === session.chatMode) return;
-              if (composerInflight) { setActionError("当前消息仍在生成，请先停止并等结算后再切换模式。"); return; }
-              void runAction({ kind: "chatMode", commandId: createCommandId(), mode: next });
-            }} />
-          {modeSwitch}
-          {/* 润色键与资料同一行（原型 #polishBtn 的位置）：同一键位三态，不另起一行。 */}
-          <ComposerPolishButton assist={assistant} />
-          {/* 助手档没有 intent 与 Skill 可选：隐藏「发送选项」而不是渲染成禁用，
-              让「这一档没有这条选择」本身可见。2026-10-24 起这枚芯片同时是资料入口
-              （合体浮层下节），助手档/只读档服务端对 skill_ref 与资料选择另有约束，
-              因此整枚隐藏，不摆一颗点了没用的芯片。 */}
-          {readonlyMode || sendOptionsPopup}
+          {/* UI-COMPOSER-GROUPING-01（2026-11-03）：工具行拆成两个轻量分组——「上下文与权限」与「会话与消息操作」。
+              分组只靠间距：组内 space.1、组间 space.2（见 AssistView.css 同名注释）；不加标题、底色、边框、阴影与分隔线。 */}
+          <div className="agent-chat-composer-context-group">
+            <ComposerAttach
+              client={client} mode={session.conversationMode} hasSession
+              selectedRefs={sources} conversationRefs={conversationRefs} recentRefs={recentRefs}
+              /* 助手档与只读档没有资料：把勾选入口一并收起，一级行才会保持禁用并给出原因。 */
+              onToggleSourceRef={!assistantMode && !readonlyMode ? onToggleSourceRef : undefined}
+              skillSelected={selectedSkill !== null}
+              onCommand={() => { setDraft(draft.startsWith("/") ? draft : `/${draft}`);
+                composerBoxRef.current?.querySelector("textarea")?.focus(); }}
+              onPickCommand={(name) => { setDraft(`${draft.match(/^\s*/u)?.[0] ?? ""}/${name} `);
+                composerBoxRef.current?.querySelector("textarea")?.focus(); }}
+              onPickPlugin={(label) => { setDraft(insertPluginMention(draft, label, draftRef.current));
+                draftRef.current?.focus(); }}
+              onUploadAttachments={(files) => { stagedSession.add(files); draftRef.current?.focus(); }}
+              uploadDisabled={pending !== null || busy || uploadingAttachments}
+              workspace={session.projectId === null || session.context?.workingDirectory === null ||
+                session.context?.workingDirectory === undefined ? null
+                : { projectId: session.projectId,
+                  resourceId: session.context.workingDirectory.resourceId,
+                  displayName: session.context.workingDirectory.canonicalRoot
+                    ?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "工作目录" }}
+              artifactTaskId={session.taskId}
+              onInsertMention={(label) => { setDraft(insertMention(draft, label, draftRef.current));
+                draftRef.current?.focus(); }}
+              /* 「+」二级里的两个入口都开同一枚合体浮层（2026-10-24 合并）：检索项目资料与
+                 选择 Skill 分别是这片浮层的下节与上节，入口合一后不再有两颗芯片可分别打开。 */
+              onSources={!assistantMode && !readonlyMode ? () => setSendOptionsOpen(true) : undefined}
+              onSkill={!assistantMode && !readonlyMode ? () => setSendOptionsOpen(true) : undefined}
+              projectId={session.projectId}
+              skills={assistantMode || readonlyMode ? undefined : skills}
+              /* 会话归属已冻结：缺上下文的 Skill 只标注不可选，不在本面板里「补工作对象」。 */
+              skillContext={assistantMode || readonlyMode ? null
+                : { projectId: session.projectId, taskId: session.taskId, resolveInPlace: false }}
+              selectedSkillKey={selectedSkillKey}
+              onPickSkill={(key) => { setSelectedSkillKey(key); setSkillInputText(""); }}
+              notes={[
+                ...(assistantMode || readonlyMode ? [{ text: assistantMode
+                  ? "助手档没有资料与 Skill" : "只读会话不能选资料与 Skill", keys: ["sources", "skill"] }] : []),
+              ]} />
+            {/* 会话档：档位属于「项目 × 这个目录」，所以只在智能体档、会话有项目归属时出现；
+                只读会话不写文件，不摆一颗点了没用的芯片。档位同源上报给上方状态行。 */}
+            {!assistantMode && !readonlyMode && <WritePermissionControl client={client}
+              projectId={session.projectId}
+              resourceId={session.context?.workingDirectory?.resourceId ?? null}
+              canonicalRoot={session.context?.workingDirectory?.canonicalRoot ?? null}
+              disabled={busy || pending !== null || writeBlockedReason !== null}
+              onTier={setSessionWriteTier} />}
+          </div>
+          <div className="agent-chat-composer-message-group">
+            {/* 0127 / DEV-0105：聊天行为模式只显示当前状态，不再摆下拉框（入口在「+ → 命令」
+                与 `/plan`、`/goal` 命令里）。普通模式不占位；计划/目标模式显示徽标与「退出」。 */}
+            <ChatModeSwitch mode={session.chatMode} busy={busy || pending !== null}
+              disabled={externalReadBlockedReason !== null}
+              lockedReason={null}
+              onChange={(next) => {
+                if (next === session.chatMode) return;
+                if (composerInflight) { setActionError("当前消息仍在生成，请先停止并等结算后再切换模式。"); return; }
+                void runAction({ kind: "chatMode", commandId: createCommandId(), mode: next });
+              }} />
+            {modeSwitch}
+            {/* 润色键与资料同一行（原型 #polishBtn 的位置）：同一键位三态，不另起一行。 */}
+            <ComposerPolishButton assist={assistant} />
+            {/* 助手档没有 intent 与 Skill 可选：隐藏「发送选项」而不是渲染成禁用，
+                让「这一档没有这条选择」本身可见。2026-10-24 起这枚芯片同时是资料入口
+                （合体浮层下节），助手档/只读档服务端对 skill_ref 与资料选择另有约束，
+                因此整枚隐藏，不摆一颗点了没用的芯片。 */}
+            {readonlyMode || sendOptionsPopup}
+          </div>
         </div>
         {/* 工具行右端一组（2026-10-20 用户指令「上下文和模型下拉按钮整体移动到发送按钮的左边」）：
             上下文计量环与模型下拉收在发送键左边，两枚同进同退，窄栏换行时不拆开；与首条输入器同位。 */}

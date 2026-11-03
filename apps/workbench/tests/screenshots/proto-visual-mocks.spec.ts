@@ -173,8 +173,9 @@ const shots: readonly { name: string; settle: string; nav: (page: Page) => Promi
     nav: async (page) => { await page.locator(".app-navrail").getByRole("link", { name: "资料" }).click(); } },
   { name: "activity-live", settle: ".activity-layout",
     nav: async (page) => { await page.locator(".app-navrail").getByRole("link", { name: "动态" }).click(); } },
+  // 2026-11-03：底部「连接与同步」入口按用户要求从侧栏移除（页面与路由保留），改为直接访问同一路由。
   { name: "connections-live", settle: '[data-testid="connections-page-head"]',
-    nav: async (page) => { await page.locator(".app-navrail").getByRole("link", { name: "连接与同步" }).click(); } },
+    nav: async (page) => { await page.goto("/connections"); } },
   { name: "settings-live", settle: '[data-testid="settings-page"]',
     nav: async (page) => { await page.locator(".app-navrail").getByRole("link", { name: "设置" }).click(); } }
 ];

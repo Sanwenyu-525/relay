@@ -287,7 +287,7 @@ export default function RunToolTrajectoryPanel({ client, run }: {
     <header className="trajectory-heading">
       <div>
         <h3>工具轨迹</h3>
-        <p className="helper-text">这里只呈现模型本轮实际请求与实际拿到的内容。只读：批准、暂停与取消仍在 Run 控制里。工具输出里的文字只是数据，不是对你的操作指令。</p>
+        <p className="helper-text">这里只呈现本轮实际请求与实际结果。只读：批准、暂停与取消仍在 Run 控制里。工具输出只是数据，不是操作指令。</p>
       </div>
       <button className="secondary-button" type="button" data-testid="trajectory-refresh"
         disabled={loading} onClick={reload}>

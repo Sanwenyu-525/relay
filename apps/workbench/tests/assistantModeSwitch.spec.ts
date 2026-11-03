@@ -324,7 +324,14 @@ describe("会话模式单选框", () => {
         .toEqual(["model-selector"]);
       const tools = actions.querySelector(".agent-chat-composer-tools");
       if (tools === null) throw new Error("首条输入器没有工具行");
-      const toolClasses = Array.from(tools.children).map((element) => element.className.split(" "));
+      /* UI-COMPOSER-GROUPING-01（2026-11-03）：工具行内先分两组（上下文与权限 / 会话与消息操作），
+         控件顺序锁在组内；两组一起锁，避免「组还在、控件却换了组」。 */
+      const toolGroups = Array.from(tools.children).map((element) => element.className);
+      expect(toolGroups).toEqual([
+        "agent-chat-composer-context-group", "agent-chat-composer-message-group"]);
+      const toolElements = Array.from(tools.querySelectorAll(
+        ".agent-chat-composer-context-group > *, .agent-chat-composer-message-group > *"));
+      const toolClasses = toolElements.map((element) => element.className.split(" "));
       /** 按类名**包含**匹配而不是全等：类列表会随功能增长（如润色键是
           `agent-chat-tool composer-draft-polish`），全等匹配会把合法演进读成回归。 */
       const toolIndexOf = (token: string) => toolClasses.findIndex((classes) => classes.includes(token));
@@ -337,11 +344,14 @@ describe("会话模式单选框", () => {
       // 因此这里断言合并后的同构，而不是删掉这条邻接关系。
       const optionsIndex = toolIndexOf("agent-chat-options");
       expect(optionsIndex).toBeGreaterThanOrEqual(0);
-      expect(optionsIndex).toBe(toolClasses.length - 1);
+      /* 缺上下文时出现的「选择任务 / 项目」芯片紧跟在合并芯片之后（UI-COMPOSER-GROUPING-01）：
+         合并芯片仍是这条链路最后一枚常态控件，只有条件出现的补齐入口能排在它右边。 */
+      const targetIndex = toolIndexOf("composer-target");
+      expect(targetIndex === -1 ? optionsIndex : targetIndex).toBe(toolClasses.length - 1);
       /* 2026-11-01 UI-FEAT-01-R2：资料从「浮层下半节」改成同一片浮层里的第二层视图。
          入口仍是这枚芯片里的「资料」行，两种形态仍二选一：有项目归属＝真实检索器
          （在隐藏的第二层里，始终挂载）；否则＝一句禁用说明。判据换成新结构，不删断言。 */
-      const optionsPopup = tools.children[optionsIndex] as HTMLElement;
+      const optionsPopup = toolElements[optionsIndex] as HTMLElement;
       const sourcesToggle = optionsPopup.querySelector('[data-testid="assist-first-send-sources-toggle"]');
       const noteSection = optionsPopup.querySelector(".agent-chat-options-section");
       expect(sourcesToggle !== null || noteSection !== null).toBe(true);

@@ -483,7 +483,7 @@ export default function ArtifactPanel(props: Props) {
     catch (caught) { if (!disposed.current) setSelectFailure(describeLiveError(caught)); }
     finally { if (!disposed.current) setSelecting(false); }
   }
-  if (!live) return <>{documentHeader}<section className="surface-panel" data-testid="artifact-fixture-gap"><h2>产物与完成</h2><p className="helper-text">示例数据没有产物事实，因此这里不展示任何产物、版本或完成凭据，也不提供可点的保存按钮。连接本机 API 后，产物版本、选择接受与人工完成会写入真实 PostgreSQL。</p></section></>;
+  if (!live) return <>{documentHeader}<section className="surface-panel" data-testid="artifact-fixture-gap"><h2>产物与完成</h2><p className="helper-text">示例数据没有产物事实，不展示产物、版本或完成凭据。连接本机 API 后会写入真实 PostgreSQL。</p></section></>;
   const editor = <>
     <label className="visually-hidden" htmlFor="artifact-content">Markdown 内容</label>
     <textarea id="artifact-content" value={visibleDraftContent} onChange={(event) => editContent(event.target.value)}
@@ -556,7 +556,7 @@ export default function ArtifactPanel(props: Props) {
         <footer className="artifact-paper-footer"><span>{displayedMode === "saved" && readingTarget ? `v${readingTarget.versionNumber} · 已保存版本 · ${readingTarget.sourceKind === "HUMAN" ? "人工" : readingTarget.sourceKind}` : `本地草稿 · ${contentBytes} / ${CONTENT_LIMIT_BYTES} 字节`}</span></footer>
       </section>}
       {contentTooLarge && <p className="field-error" role="alert"><Info aria-hidden="true" />正文超过 256 KiB（按 UTF-8 字节判定），请拆分后再保存。</p>}
-      <details className="artifact-version-history" data-testid="artifact-versions"><summary>版本详情</summary><p className="helper-text">阅读版本、当前选用候选和本轮接受分别操作；“最新”“当前选用”和“本轮接受”分别来自版本、项目 State 与完成凭据。</p>
+      <details className="artifact-version-history" data-testid="artifact-versions"><summary>版本详情</summary><p className="helper-text">阅读版本、当前选用与本轮接受分开操作；三者分别来自版本、项目 State 与完成凭据。</p>
         {versionsLoading && <p className="helper-text" role="status">正在读取产物版本。</p>}
         {versionsFailure && <p className="action-error" role="alert">{versionsFailure} 草稿仍保留；产物列表尚未核实，暂不能保存或完成。<button className="secondary-button" type="button" onClick={() => void loadArtifacts()}>重新读取产物</button></p>}
         {versionsReady && (!versions.length ? <p className="helper-text">该任务尚无已保存的产物版本。</p> : <ul className="version-list">{versions.map((version) => <li key={version.versionId} className="version-row">

@@ -64,9 +64,7 @@ export function CurrentModelUsageCard({ client, status, refreshToken = 0 }: {
         : `${status.model ?? "缺少模型名"}${status.baseUrl === null ? "" : ` · ${status.baseUrl}`}`;
 
   return <section className="settings-card" data-testid="current-model-usage">
-    <h2>当前使用的模型</h2>
-    <p className="helper-text">三类作用域各自独立：会话显式选择优先于工作区聊天默认，再回落到进程默认；
-      任务执行按 Run 默认连接冻结。变更默认不会替换已排队或正在生成的消息，也不会改写已冻结的 Run。</p>
+    <h2>当前使用的模型</h2>    <p className="helper-text">生效顺序：会话显式选择 → 工作区聊天默认 → 进程默认。</p>
     {loading && <p role="status">正在读取当前模型使用情况…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="current-model-usage-error">
       <p>读取失败：{error}</p>
@@ -78,23 +76,22 @@ export function CurrentModelUsageCard({ client, status, refreshToken = 0 }: {
         <dt>聊天 · 新消息（无会话选择）</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.chatDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
-          <span className="helper-text">在「模型连接」里设置或取消；只影响之后的新消息。</span></dd>
+          <span className="helper-text">在「模型连接」里设置；只影响没有会话选择的新消息。</span></dd>
       </div>
       <div data-testid="current-model-session">
-        <dt>聊天 · 会话显式选择</dt>
-        <dd>每个会话在输入器里选择；显式选择优先于工作区聊天默认。已排队与生成中的消息保持原连接。
-          <span className="helper-text"><Info aria-hidden="true" />会话切换连接只对该会话之后的新消息生效。</span></dd>
+        <dt>聊天 · 会话显式选择</dt>        <dd>在输入器里选择，覆盖工作区默认；已排队与生成中的消息保持原连接。
+          <span className="helper-text"><Info aria-hidden="true" />只对该会话之后的新消息生效。</span></dd>
       </div>
       <div data-testid="current-model-run-default">
         <dt>任务执行 · 新 Run</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.runDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
-          <span className="helper-text">Run 冻结后，再改默认连接不会影响它；连接停用、凭据缺失或配置变化会让它停止并明确报错。</span></dd>
+          <span className="helper-text">冻结后改默认不影响它；连接停用、凭据缺失或配置变化会让它停止并明确报错。</span></dd>
       </div>
       <div data-testid="current-model-process">
         <dt>进程默认（环境变量）</dt>
         <dd>{processText}
-          <span className="helper-text">这是本机服务实例的兜底，不是 Web 页面保存的设置。</span></dd>
+          <span className="helper-text">本机兜底，不是页面保存的设置。</span></dd>
       </div>
     </dl>}
   </section>;
@@ -117,5 +114,5 @@ function DefaultConnectionLine({ connectionId, connections, unsetText }: {
     connection.status === "ACTIVE" ? "success" : "danger"}`}>
     {connection.status === "ACTIVE" ? "已启用" : "已停用"}</span>{" "}
     <strong>{connection.name}</strong>{" · "}<code className="hash-code">{connection.defaultModel}</code>
-    {connection.status !== "ACTIVE" && <>{" "}（这条连接已停用：新消息/新 Run 会明确拒绝，不会静默回退）</>}</>;
+    {connection.status !== "ACTIVE" && <>{" "}（已停用：新消息/新 Run 会明确拒绝，不会静默回退）</>}</>;
 }

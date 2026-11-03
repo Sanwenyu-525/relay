@@ -254,7 +254,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item" to="/tasks">全部任务</Link>
       <Link className="subnav-item" to="/tasks?tab=inbox">未归属任务收件箱</Link>
       <Link className="subnav-item subnav-item--active" to="/tasks?tab=attention" aria-current="page">人工待处理</Link></nav>
-    <p className="helper-text">只汇总已读取的开放 Review、工作空间任务及其当前 Run。历史上已脱离 Task 指针的 Run 不在本次范围内；处理决定请进入原入口核对版本。</p>
+    <p className="helper-text">只汇总已读取的开放 Review、任务及其当前 Run；处理仍回原入口核对版本。</p>
     {loading && <p className="loading-text" role="status">正在读取 Review、全部任务页及当前 Run，完成前不显示空队列结论…</p>}
     {snapshot && <>
       <p className="helper-text">本次读取完成于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time>；各项可能在读取后继续变化，处理前请到原入口核对。</p>
@@ -264,7 +264,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
         {snapshot.taskPageFailure && <p className="action-error" data-testid="attention-continuation-error">续页失败：{snapshot.taskPageFailure.message}；已保留前面加载的结果，可按同一游标重试这一页。</p>}
         {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" data-testid="attention-continue-pages" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
       <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {visibleInterventions.length}</h2>
-        <p className="helper-text">来自当前服务端事实；普通收件箱与 READY 任务不会因此主动通知。进入原入口后重新核对是否仍待处理。</p>
+        <p className="helper-text">来自当前服务端事实；进入原入口后重新核对是否仍待处理。</p>
         {visibleInterventions.length ? <ul>{visibleInterventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}
           data-testid={`attention-intervention-${item.itemKey}`}>
           <strong>{item.title}</strong><p>{interventionReasonText(item)}</p>
@@ -330,7 +330,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
               <p>这个任务也出现在「必须介入」事项里，那里只是提醒，不等于任务已经交给别人。</p>}</details></li>)}</ul></section>
       {postponedEntries.length > 0 && <section className="surface-panel" data-testid="attention-postponed">
         <h2>稍后处理 · {postponedEntries.length}</h2>
-        <p className="helper-text">稍后只在本机隐藏条目，不改变任何服务端状态，也不表示已经处理；条目从待处理范围消失或身份变化后，稍后记录会自动清理。</p>
+        <p className="helper-text">稍后只在本机隐藏，不改服务端状态，也不表示已处理。</p>
         <ul>{postponedEntries.map((entry) => <li key={entry.id} data-testid={`attention-postponed-${entry.suffix}`}>
           <strong>{entry.group} · {entry.title}</strong>
           <p>下一步：<Link className="inline-link" to={entry.href}>打开原入口</Link>；

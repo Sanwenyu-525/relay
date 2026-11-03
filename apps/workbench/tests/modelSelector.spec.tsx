@@ -132,7 +132,7 @@ it("首条消息场景：点击清单条目直接写入本地选择并关闭", a
   function Harness() {
     const [open, setOpen] = useState(true);
     return <ModelSelector client={client} open={open} onOpenChange={setOpen}
-      selectedModel={null} onChoose={choose} firstMessage />;
+      selectedModel={null} onChoose={choose} />;
   }
   const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
   await clickItem("免费 A");

@@ -221,3 +221,7 @@
   padding: 13px 15px;
 }
 .pv-page .knowledge-body { font-size: 12px; line-height: 1.8; color: #34523b; }
+
+/* 示例模式空态：1062px 全宽卡片里只有一行约 360px 的说明，右侧 660px 是死区；
+   收到与 /goals、/activity、/today 空态卡相同的 780px 阅读宽，保持同一条左对齐边。 */
+.pv-page .knowledge-fixture-card { max-width: 780px; }

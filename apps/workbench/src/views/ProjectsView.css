@@ -23,7 +23,7 @@
 }
 
 .pv-page .projects-footnote { margin-top: 22px; border-top: none; padding-top: 0; }
-.pv-page .projects-footnote__note { font-size: 11px; color: #607568; }
+.pv-page .projects-footnote__note { font-size: 11px; color: #566f5f; }
 
 /* ── 推进摘要条 ─────────────────────────────────────────────────────────── */
 
@@ -212,6 +212,24 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* 创建卡是网格最后一项：项目数不被三整除时，末行右侧会留下整格空细胞（当前示例 4 个项目 → 右下 378px 空洞）。
+   按它的落位决定补法：落在第 2 列（项目数 3n+1）延到行尾；独占新行（项目数 3n，落在第 1 列）占满整行；
+   落在第 3 列时本来就在行尾，不动。单列（窄窗 / 列表视图）不加跨度，避免撑出横向溢出。 */
+@media (width >= 48rem) {
+  .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:nth-child(3n + 2) {
+    grid-column: span 2;
+  }
+
+  .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:nth-child(3n + 1) {
+    grid-column: 1 / -1;
+  }
+
+  /* 跨列后卡片远宽于 20rem，说明文字再按窄栏限宽就会在词中断行（“…专属空/间”），按卡宽单行排。 */
+  .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:is(:nth-child(3n + 1), :nth-child(3n + 2)) .project-card__new-desc {
+    max-width: none;
+  }
+}
+
 .pv-pcard {
   display: flex;
   flex-direction: column;
@@ -242,8 +260,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
-  color: #607568;
+  font-size: 11px;
+  color: #566f5f;
   margin-left: auto;
 }
 
@@ -264,7 +282,7 @@
   border: none;
   border-radius: 7px;
   background: none;
-  color: #84948a;
+  color: #5a7263;
   cursor: pointer;
 }
 
@@ -296,7 +314,7 @@
 
 .pv-pcard__caption {
   margin: 0;
-  color: #607568;
+  color: #566f5f;
   font-size: 11px;
   line-height: 1.65;
 }
@@ -306,7 +324,7 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   padding-top: 2px;
-  color: #607568;
+  color: #566f5f;
   font-size: 11px;
 }
 
@@ -428,8 +446,8 @@
 }
 
 .pv-page .projects-summary__main { font-size: 12.5px; color: #294635; }
-.pv-page .projects-summary__desc { font-size: 11px; color: #607568; }
-.pv-page .projects-summary__right { font-size: 11px; color: #607568; }
+.pv-page .projects-summary__desc { font-size: 11px; color: #566f5f; }
+.pv-page .projects-summary__right { font-size: 11px; color: #566f5f; }
 .pv-page .projects-summary__symbol {
   width: 32px;
   height: 32px;
@@ -450,7 +468,7 @@
 .pv-page .projects-view-toggle { background: #f1f6f1; border-radius: 9px; }
 .pv-page .projects-view-toggle__btn.is-active { background: #fff; color: #206846; }
 
-.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #607568; }
+.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #566f5f; }
 
 /* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
 @media (width < 48rem) {

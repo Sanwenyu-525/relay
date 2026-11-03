@@ -1,0 +1,75 @@
+/*
+ * 项目详情（总览 / 蓝图预览 / 继续项目）页壳私有样式。
+ *
+ * 背景：项目内页签与「打开项目工作台 / 下一段工作 / 有限任务链」三个跨页入口原本竖排两段，
+ * 页签之前先出现一整行右对齐按钮，页头之上多出约 54px 空行，而且入口按钮与页签各自对齐
+ * 到一条边。这里把它们收进同一条 scope 行：页签占左、入口贴右，共用一条底部分隔线；
+ * 左右内缩沿用 .pv-page 的 32px，与页内标题形成同一条左右对齐边。不改路由与文案。
+ */
+
+.pv-page .project-scope-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
+  min-width: 0;
+  border-bottom: 1px solid var(--pv-line);
+}
+
+.pv-page .project-scope-bar .skill-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 var(--relay-layout-main-padding);
+  border-bottom: 0;
+  flex-wrap: wrap;
+}
+
+/* 页签文字与页内标题同一条左缘（.page-primary 的 32px 内缩），点区靠行高维持。 */
+.pv-page .project-scope-bar .skill-tab {
+  min-height: 38px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.pv-page .project-scope-bar .project-workbench-entry {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 var(--relay-layout-main-padding) 9px;
+}
+
+/* 右栏动作下方的限制说明：原样贴着按钮（11px 注记像按钮副标题），补一行距。 */
+.pv-page .rail-content .primary-button + .disabled-reason,
+.pv-page .rail-content .secondary-button + .disabled-reason { margin-top: 10px; }
+
+/* 页签下的空态卡（蓝图预览 / 继续项目 / 读取中）自身没有内边距，会顶住分隔线；
+   概览页由 .page-primary 的 32px 内边距提供呼吸，这里补同等的上边距。 */
+.pv-page .project-scope-bar ~ .page-state { margin-top: 22px; }
+
+@media (width < 64rem) {
+  .pv-page .project-scope-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding-bottom: 10px;
+  }
+
+  .pv-page .project-scope-bar .project-workbench-entry {
+    justify-content: flex-start;
+    padding: 0 var(--relay-layout-main-compactPadding);
+  }
+}
+
+@media (width < 48rem) {
+  .pv-page .project-scope-bar .skill-tabs {
+    padding: 0 var(--relay-layout-main-smallPadding);
+  }
+
+  .pv-page .project-scope-bar .project-workbench-entry {
+    padding-inline: var(--relay-layout-main-smallPadding);
+  }
+}

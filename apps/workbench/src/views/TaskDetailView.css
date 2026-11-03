@@ -331,6 +331,41 @@
 
 /* V5.28 任务详情：页签与阅读区沿用 pv 层级，避免旧 reading/rowTitle 档漏入。 */
 .pv-page.task-detail-page .skill-tab { font-size: 12px; }
+
+/* 主区不再叠一层 relay 内边距：pv 页的 30px 已给足页面留白，标题左缘因此与收件箱、
+   任务列表统一到同一条边（336.4），右栏卡片右缘回到内容右缘（1398）。 */
+.pv-page.task-detail-page .page-primary { padding: 0; }
+
+/* 右栏事实列：改为顶部对齐的紧凑卡片。原实现用一条贯穿页高的分隔线框住整列，
+   4 行事实之后留出约 840px 空列（页面高 1239.8，rail 内容止于 y≈395）；卡片只包住
+   事实与说明，空白不再被画成“未填满的栏”。 */
+.pv-page.task-detail-page .task-detail-rail {
+  align-self: start;
+  align-content: start;
+  margin-left: var(--relay-space-6);
+  padding: 17px;
+  background: #fff;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+}
+
+/* 右栏辅助入口：与左侧页签同处一行，但按次级文字动作处理（无下划线，悬停出现底衬），
+   不再与激活页签的下划线抢同一套语言。 */
+.pv-page.task-detail-page .task-detail-quick-link {
+  padding: 3px 7px;
+  border-radius: 7px;
+  color: #53705b;
+  text-decoration: underline;
+  text-decoration-color: var(--pv-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.pv-page.task-detail-page .task-detail-quick-link:hover {
+  background: var(--pv-btn-hover-bg);
+  color: #206846;
+  text-decoration-color: currentColor;
+}
 .pv-page.task-detail-page .task-detail-section h2,
 .pv-page.task-detail-page .task-detail-section-heading h2 { font-size: 13px; }
 .pv-page.task-detail-page .task-detail-objective,
@@ -356,6 +391,7 @@
 
 @media (width < 80rem) {
   .task-detail-page .task-detail-rail { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
+  .pv-page.task-detail-page .task-detail-rail { margin: var(--relay-space-4) 0 0; border: 1px solid #dfe9df; border-radius: 13px; }
 }
 
 /* 并入 48rem 折行档，原 40rem：基础信息列表在窄屏降为单列。 */

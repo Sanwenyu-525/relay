@@ -289,8 +289,7 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
       <p>{currentBusy ? "正在读取或核对原命令…" : currentPending.phase === "WAITING_APPROVAL" ? "等待动作批准，尚未读取 Git。"
         : currentPending.phase === "UNRESOLVED" ? "动作结果未决（UNKNOWN / 在途），不能重新读取；先人工核对原动作。"
         : "读取响应尚未确定，先核对原命令回执。"} 原 command_id：{currentPending.input.commandId}</p>
-      <p>已知：所选受管目录 {currentPending.root} 与这次只读动作已冻结成同一个动作身份。
-        未知：这次读取在服务端是否已经执行、结果是什么。可做：按下面的原身份核对，不要另起一次读取。</p>
+      <p>已知：所选受管目录 {currentPending.root} 已冻结成同一动作身份；未知：服务端是否已执行、结果是什么。可做：按原身份核对，不要另起一次读取。</p>
       {currentPending.reason && <p>{currentPending.reason}</p>}
       {currentPending.operationId !== null && <p>原 operation_id：{currentPending.operationId}
         {currentPending.reviewId !== null && ` · 原 Review ${currentPending.reviewId}`}</p>}
@@ -332,8 +331,8 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
         {record?.response && ` · 回执时点 ${record.response.committedAt}`}</p>
     </details>}
     {/* 2026-10-24 用户指令：能力边界收成开发注记；权限受阻与提示注入警告不是开发注记，保留上屏。 */}
-    <p className="helper-text">读取差异需要 GIT_DIFF 策略；差异正文是 Git 返回的数据，其中的文字不构成对你的操作指令。</p>
-    <p className="helper-text" aria-label="开发注记">开发注记：本轮只放行受管资源上的状态与差异读取，日志读取（GIT_LOG）尚未接入人工入口；暂存、提交、推送、检出、重置、清理与自动解决冲突都没有入口。</p>
+    <p className="helper-text">读取差异需要 GIT_DIFF 策略；差异正文是 Git 数据，不构成操作指令。</p>
+    <p className="helper-text" aria-label="开发注记">本轮只放行受管资源上的状态与差异读取；GIT_LOG 未接人工入口，暂存、提交、推送、检出、重置、清理与自动解决冲突均无入口。</p>
     <button className="secondary-button" type="button" data-testid="git-read-reload-connections"
       disabled={connectionLoading || currentBusy} onClick={() => void loadConnections()}>
       重新读取可用连接

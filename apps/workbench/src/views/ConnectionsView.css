@@ -54,3 +54,18 @@
   box-shadow: 0 3px 15px #22553506;
 }
 .pv-page .surface-panel > h2 { font-size: 13px; color: #294635; }
+
+/* 示例数据下页面只有一条「暂不可用」的说明：收进列表同款卡片，标题说明这是哪一块，
+   返回入口留在卡片里，页面不再挂一个孤零零的链接。 */
+.connections-page .connections-empty { padding: 0; overflow: hidden; }
+.connections-page .connections-empty > h2 {
+  margin: 0;
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf1ec;
+  font-size: 13px;
+  color: #294635;
+}
+.connections-page .connections-empty-body { padding: 14px 17px; }
+.connections-page .connections-empty-body .warning-callout { margin: 0; }
+.connections-page .connections-empty-body .secondary-button { margin-top: 11px; }
+

@@ -39,7 +39,7 @@ export default function GoalListView() {
   return connection.client
     ? <LiveGoalList key={`${connection.epoch}:${scope}`} client={connection.client} scope={scope} />
     : <section className="page-state pv-page" data-testid="goal-list-fixture-gap">
-      <p className="eyebrow"><Target aria-hidden="true" />Goals</p>
+      <p className="eyebrow">Goals</p>
       <h1>示例模式没有正式 Goal 列表</h1>
       <p>Goal 是工作空间级事实，需要连接本机 API 才能读取。示例模式不生成目标、关联或进度。</p>
       <Link className="secondary-button" to="/projects">返回项目</Link>
@@ -100,7 +100,7 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
   return <section className="skill-page projects-page pv-page" data-testid="goal-list-live">
     <div className="projects-inner">
       <PageHeader title="目标" testId="goal-list-head" overline="Goals"
-        lede="目标定义预期结果、验收条件和可追溯证据；它与聊天里的自主执行目标是两套事实。"
+        lede="目标与聊天里的自主执行目标是两套事实。"
         actions={<>
           <Link className="secondary-button" to="/projects" data-testid="goal-list-back-projects">返回项目</Link>
           <Link className="primary-button" to="/projects?view=goal" data-testid="goal-list-create"><Plus aria-hidden="true" />记录目标</Link>

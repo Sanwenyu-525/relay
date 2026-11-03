@@ -998,7 +998,12 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    这里不再压 min-height：min-height:0 的圆键规则本来就赢过这条。 */
 .agent-chat-composer-actions .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--relay-space-2); }
 .agent-chat-composer-actions .primary-button svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
-.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-1); flex-wrap: wrap; flex: 1; min-width: 0; }
+.agent-chat-composer-tools { display: flex; align-items: center; gap: var(--relay-space-1) var(--relay-space-2); flex-wrap: wrap; flex: 1; min-width: 0; }
+/* UI-COMPOSER-GROUPING-01（2026-11-03）：工具行内两个轻量分组。
+   组内沿用 space.1（4px），组间用 space.2（8px）：换行优先发生在组与组之间，
+   组自身比容器还窄时才在组内换行。分组只靠间距，不加标题、底色、边框、阴影与分隔线。 */
+.agent-chat-composer-context-group,
+.agent-chat-composer-message-group { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1); min-width: 0; }
 /* 发送键只留图标：可访问名称与 title 仍说明当前动作，不靠四个字占宽度。
    字形用向上箭头（lucide ArrowUp），2026-10-16 按用户指令替换此前的纸飞机（Send）；
    只换字形，键的几何、配色与停止态同位替换规则不变。 */
@@ -2312,7 +2317,7 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
 .assist-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 64rem) {
-  .agent-chat-composer-tools { gap: var(--relay-space-1); }
+  .agent-chat-composer-tools { gap: var(--relay-space-1) var(--relay-space-2); }
 }
 /* 中栏变窄时快捷键提示先收起：它只解释发送方式，不承担操作；资料与意图两枚 chip 保持常驻。 */
 @container collaboration (max-width: 34rem) {

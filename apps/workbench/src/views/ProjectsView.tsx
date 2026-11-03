@@ -408,7 +408,6 @@ export default function ProjectsView() {
   return <section className="skill-page projects-page pv-page">
     <div className="projects-inner">
       <PageHeader title="项目" testId="projects-page-head" overline="Projects"
-        lede="长期工作以项目为上下文，关联会话、任务、目标和成果。"
         actions={<><Link className="secondary-button" data-testid="goal-list-open" to="/goals"><Target aria-hidden="true" />目标列表</Link>
           <Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
           <button className="primary-button" type="button" data-testid="project-create-open" onClick={() => navigate("/projects?view=create")}><Plus aria-hidden="true" />新建项目</button></>} />
@@ -778,7 +777,6 @@ function LiveProjectsListView({ client, scope, onCreate }: {
   return <section className="skill-page projects-page pv-page" data-testid="projects-live-list">
     <div className="projects-inner">
       <PageHeader title="项目" testId="projects-page-head" overline="Projects"
-        lede="长期工作以项目为上下文，关联会话、任务、目标和成果。"
         actions={<><Link className="secondary-button" data-testid="goal-list-open" to="/goals"><Target aria-hidden="true" />目标列表</Link>
           <Link className="secondary-button" data-testid="goal-create-open" to="/projects?view=goal"><Target aria-hidden="true" />记录目标</Link>
           <button className="primary-button" type="button" data-testid="project-create-open" onClick={onCreate}><Plus aria-hidden="true" />新建项目</button></>} />

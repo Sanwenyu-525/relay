@@ -149,7 +149,13 @@ async function measure(page: Page) {
       cardBox: box(root),
       toolsBox: box(node(".agent-chat-composer-tools")),
       // 工具行的文档序（类名）：位置换档只有量出来才锁得住，CSS 换行不改文档序。
-      toolOrder: Array.from(document.querySelector(".agent-chat-composer-tools")?.children ?? [])
+      // UI-COMPOSER-GROUPING-01（2026-11-03）：工具行内先分两个轻量分组（上下文与权限 /
+      // 会话与消息操作），控件顺序锁在组内；两条一起锁，避免「组还在、控件却换了组」。
+      toolGroups: Array.from(document.querySelector(".agent-chat-composer-tools")?.children ?? [])
+        .map((element) => element.className),
+      toolOrder: Array.from(document.querySelectorAll(
+        ".agent-chat-composer-tools > .agent-chat-composer-context-group > *, " +
+        ".agent-chat-composer-tools > .agent-chat-composer-message-group > *"))
         .map((element) => element.className),
       // 底栏的文档序与右端一组（计量 + 模型，2026-10-20 用户指令「整体移动到发送按钮的左边」）。
       actionsOrder: Array.from(document.querySelector(".agent-chat-composer-actions")?.children ?? [])
@@ -350,6 +356,8 @@ test.describe("CT-02 资料面板的职责、高度与可达性", () => {
       //     2026-10-24 合并后「普通讨论在左、资料在右」的两端比较失去对象（只剩一枚芯片），
       //     改锁当前真实文档序：合并芯片是工具行最右一枚，且仍在模式芯片右侧——原断言要锁的
       //     相对顺序（资料入口排在模式/说明之后、行尾之前）由这两条等值断言继续锁住。
+      expect(snapshot.toolGroups, `${where} · 工具行不是「上下文与权限 → 会话与消息操作」两组`).toEqual([
+        "agent-chat-composer-context-group", "agent-chat-composer-message-group"]);
       expect(snapshot.toolOrder[0], `${where} · 工具行左端不是「+」`).toBe("agent-chat-attach");
       expect(snapshot.actionsOrder, `${where} · 底栏不是「工具行 → 右端一组 → 发送键」`).toEqual([
         "agent-chat-composer-tools", "agent-chat-composer-tail", "primary-button agent-chat-send"]);

@@ -413,7 +413,7 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
 
   return <section data-testid="file-browse" className="file-browse">
     <h3>目录浏览</h3>
-    <p className="helper-text">浏览与读文件都是显式动作，产生服务端审计记录；这里只读，不写入、不上传、不执行。工作目录文件是受管目录下的普通文件，与任务产物版本不同源。</p>
+    <p className="helper-text">浏览与读取是显式动作，产生服务端审计记录；这里只读。工作目录文件与任务产物版本不同源。</p>
     {blocked && <p className={resourceError || connectionError ? "action-error" : "helper-text"} role="status"
       data-testid="file-browse-blocked">{blocked}</p>}
     {!blocked && <div className="file-browse-fields">
@@ -442,8 +442,7 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
         原 command_id：{currentPending.input.commandId}</p>
       <p>已知：目录 {currentPending.root} 与这次{currentPending.input.actionType === "LIST_DIRECTORY"
         ? `目录浏览（${currentPending.input.relativePath ?? "受管根"}）` : `文件读取（${currentPending.input.relativePath ?? ""}）`}
-        已冻结成同一个动作身份。未知：这次读取在服务端是否已经执行、结果是什么。
-        可做：按原身份核对，不要另起一次读取。</p>
+        已冻结成同一动作身份；未知：服务端是否已执行、结果是什么。可做：按原身份核对，不要另起一次读取。</p>
       {currentPending.reason && <p>{currentPending.reason}</p>}
       {currentPending.operationId !== null && <p>原 operation_id：{currentPending.operationId}
         {currentPending.reviewId !== null && ` · 原 Review ${currentPending.reviewId}`}</p>}

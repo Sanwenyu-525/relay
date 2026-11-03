@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowRight, Info, Link2, RotateCcw, Target, TriangleAlert } from "lucide-react";
+import { ArrowRight, Info, Link2, RotateCcw, TriangleAlert } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import ResponsiveRail from "../components/ResponsiveRail";
 import GoalProjectLinkPanel from "./GoalProjectLinkPanel";
@@ -194,7 +194,7 @@ export default function GoalDetailView() {
   return connection.client
     ? <LiveGoalDetail key={`${connection.epoch}:${id}`} id={id} client={connection.client} />
     : <section className="page-state pv-page" data-testid="goal-detail-fixture-gap">
-      <p className="eyebrow"><Target aria-hidden="true" />Goal Detail</p>
+      <p className="eyebrow">Goal Detail</p>
       <h1>示例模式没有正式 Goal 详情</h1>
       <p>Goal 的编辑、归档与项目关联都需要连接本机 API。示例模式不生成目标事实。</p>
       <Link className="secondary-button" to="/projects">返回项目</Link>
@@ -507,7 +507,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         lede={goal.description || "这个目标还没有说明。"}
         actions={<Link className="secondary-button" to="/goals">目标列表</Link>} />
       {archived && <p className="warning-callout" role="status" data-testid="goal-detail-archived-note">
-        <Info aria-hidden="true" />目标已归档：只能阅读历史，不能再编辑或新增关联；既有项目关系仍可按原命令解除。
+        <Info aria-hidden="true" />目标已归档：只能阅读历史，不能再编辑或新增关联；既有关系仍可按原命令解除。
       </p>}
       {receipt && <p className="receipt-message" role="status" data-testid="goal-detail-receipt">{receipt}</p>}
       {actionError && <p className="action-error" role="alert" data-testid="goal-detail-error">{actionError}</p>}
@@ -643,7 +643,7 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
 
       <section className="resume-section" data-testid="goal-work-context-section">
         <h2>工作上下文</h2>
-        <p className="helper-text">只读汇集关联项目的普通会话与受管目录；不创建、不重绑会话，也不授予文件或执行权限。</p>
+        <p className="helper-text">只读汇集关联项目的会话与受管目录；不创建、不重绑会话，也不授予权限。</p>
         {workContextError !== null ? <p className="warning-callout" role="alert">
           工作上下文本次读取失败：{workContextError}；下面不推断任何会话或目录。</p>
           : workContext === null ? null : <>

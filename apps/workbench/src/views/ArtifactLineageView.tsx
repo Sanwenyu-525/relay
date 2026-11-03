@@ -62,9 +62,14 @@ export default function ArtifactLineageView() {
   }
 
   return <section className="lineage-page pv-page" data-testid="artifact-lineage"><PageHeader testId="lineage-page-head"
-    title="来源追溯" meta="产物来源"
-    lede="这里展示这个版本在服务端确认过的直接来源；完整因果关系与正文仍以原版本和 Run 证据为准。" />
-    {client === null ? <p className="warning-callout" role="status">示例数据没有真实产物来源关系。<Link to="/tasks">返回任务</Link></p> : <>
+    title="来源追溯" meta="产物来源" lede="本版本在服务端确认过的直接来源；完整因果与正文以原版本和 Run 证据为准。" />
+    {client === null ? <section className="surface-panel lineage-empty" aria-label="产物来源关系">
+      <h2>产物来源关系</h2>
+      <div className="lineage-empty-body">
+        <p className="warning-callout" role="status">示例数据没有真实产物来源关系。</p>
+        <Link className="secondary-button" to="/tasks">返回任务列表</Link>
+      </div>
+    </section> : <>
       <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新来源</button>
       {loading && <p role="status">正在读取版本 {id} 的来源关系…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}

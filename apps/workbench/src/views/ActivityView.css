@@ -88,3 +88,10 @@
   margin-bottom: 9px;
 }
 .pv-page .activity-list > li:hover { border-color: #c6ddcc; }
+
+/* 示例模式空态：中性只读提示不是告警，改用 pv 卡片（白底/1px 边框/13px 圆角/780px 阅读宽），
+   与 /goals、/knowledge 的空态卡同一条左对齐边与同一宽度；原 1160px 的整行琥珀条只占文字约 350px。 */
+.pv-page .activity-fixture-card { max-width: 780px; margin: 0; }
+.pv-page .activity-fixture-card p { margin: 0; font-size: 12px; line-height: 1.75; color: #486452; }
+/* 390px 下链接曾逐字竖排（打开/项目）：链接与其后文字不得在中间断开。 */
+.pv-page .activity-fixture-card a { white-space: nowrap; }

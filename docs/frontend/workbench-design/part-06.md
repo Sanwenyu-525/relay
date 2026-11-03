@@ -148,6 +148,17 @@ UNKNOWN、PARTIAL、控制请求待安全点、执行失败、权限/归档写�
 - **断点档位与顶栏 token 的收敛回写（2026-10-10）**：宽度断点只允许四档语义值 `breakpoint.medium/large/rail/wide`（48/64/80/90rem），守卫见 `tests/responsiveTiers.spec.ts`，边界几何见 `tests/browser/responsiveFoldGeometry.spec.ts`。`layout.header.height` 自本节起专指 `.app-topbar` 实际高度（`control.height.comfort` + `border.width`）；桌面上方的固定区总高 = 原生标题栏 `control.nav.height` + 该 token，锚点滚动预留按此计算。`views/AssistView.css` 的一处旧式 `max-width: 64rem` 写法因该文件属其他在途任务暂缓归一，档位本身合规。
 - **UI 检查覆盖 Loading、错误、人工处理、暂停中/已暂停、冲突与恢复后的真实状态**，不只检查静态排版。
 
+### 17.16 双导航布局：左侧图标栏与标题栏横向导航（2026-11-03，已实施）
+
+用户可在 `设置 → 通用设置 → 导航栏位置` 选择全局导航的摆放：`sidebar` 左侧图标栏（默认，升级零变化）或 `titlebar` 标题栏横向导航（UI-NAV-01，按用户提供的横向导航效果图实施）。选择为本设备展示偏好，键 `relay.workbench.navigationPlacement`，由 `src/lib/navigationPreferences.ts` 唯一读写（非法值与存储故障一律回落 `sidebar`）；点击立即生效并持久化，与 `displayPreferences`（时区/默认工作台）分键互不覆盖。
+
+- **两套布局消费同一份导航数据**：入口名称、图标、路由、`location.state`、待处理计数与 `/tasks`、`/inbox` 互斥高亮全部来自 `src/lib/workbenchNavigation.ts` 唯一 Owner；布局只改变展示位置，不改导航行为、不新增路由机制。开发工具入口仍只在 DEV 构建出现。
+- **titlebar 布局**：标题带自左向右为品牌标识「Relay」（简洁文字标识，不复用近期工作栏的「Relay 工作空间」全称）→ 后退/前进/搜索/新建（既有 WorkbenchActions）→ 横向导航 → 日期/收件箱/通知/数据来源 → 窗口控制。近期工作栏不动，仍保留列宽拖拽（分隔条定位在两列口径下重算）。效果图中的「工作空间 ▾」下拉在现有系统无对应功能，未实现；条目名沿用现状（待处理/收件箱，不用效果图的待办/收藏箱）。
+- **宽度自适应**：按容器实测宽度从左到右整条收纳，放不下的入口整条折进「更多」菜单（复用 `useDetailsMenu` 的浮层关闭语义）；当前页落在折叠区时「更多」触发器带同一激活底色。测量把条目间 gap 与触发器宽度一并计入，字体就绪后补量一次。
+- **窗口拖拽**：横向导航条目之间的空白与 `desktop-titlebar__drag` 走同一条 mousedown 处理（单击拖动、双击最大化/还原），链接与「更多」触发器不触发拖动；真实 Windows/Tauri 窗口控制行为未见实机验收，标记待验证。
+- **切换不重建页面**：布局切换不换路由、不改 App 级 `key`、不重挂载协作页与创建表单，输入草稿保留；窄窗（`<48rem`）仍走既有抽屉与折叠档，两布局同一收纳。
+- 验证：`tests/navigationPlacement.spec.tsx`、`tests/desktop-titlebar.spec.ts`（拖拽归属）、`tests/browser/titlebarNavigation.spec.ts`（折叠/菜单/草稿保持/手柄几何/截图，产物在 `tmp/UI-NAV-01-dual-navigation/screenshots/`）。
+
 ## 19. 下一段工作计划（N04，已确认规划）
 
 2026-10-25 N04 UI 首片已实现并完成实施者自检：live 路由 `/projects/:id/planning` 读取真实项目、Goal、Task 分页和用户声明估时，支持按分钟录入/更新总耗时及执行、等待、Review、人工投入分项；要求填写来源说明并标为用户声明，按 Task revision 与估时 revision 做 CAS。保存后重读历史并显示当前版本、来源及适用状态；验收版本变化后旧估时继续可查但标为不适用；响应未知时保留原 command_id/载荷并核对原回执。页面可发起周期计划候选，逐项接受/拒绝和 ALL/SHRINK/DEFER 范围推演沿既有命令；提交后按回执身份回读并选中确切计划或推演。计划接受不创建执行授权、不启动 Run。`apps/workbench/tests/projectPlanningFlows.spec.tsx` 与真实 Chromium 受控 API 流程、真实临时 PG/HTTP 结果见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。尚未做真实 Provider 或 Windows/WebView2 验收；独立复核和定向证据见该验收表，不把实施者自检升级为完整 N04 验收。产品取舍只在[后续路线 N04](../../requirements/post-v1-roadmap/part-01.md#n04-周期计划与重排建议)维护，不继承 Today、Task 提案或旧页面的成绩。

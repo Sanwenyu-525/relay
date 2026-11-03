@@ -331,7 +331,7 @@ export default function ProjectWorkbenchView() {
         </div>) : <p>当前范围没有资料记录。</p>}
         {extra.knowledgeCount > extra.knowledge.length && <p className="helper-text">这里只展开前 {extra.knowledge.length} 项版本来源；其余资料请到资料页查看。</p>}
       </> : <p>{extraError ?? "资料尚未就绪。"}</p>}
-    <Link className="text-link" to={`/projects/${id}/knowledge`}>打开项目资料</Link>
+    <Link className="secondary-button secondary-button--compact" to={`/projects/${id}/knowledge`}>打开项目资料</Link>
   </section>;
   const draftDirectory = <section className="workbench-directory-group"><h2>{kind === "development" ? "产物版本" : "草稿版本"}</h2>
     {snapshot.source === "fixture" ? <p>真实草稿版本需连接本机 API 后按任务读取。</p> : <>
@@ -417,7 +417,7 @@ export default function ProjectWorkbenchView() {
     {kind === "development" && <>
       {client && selectedRun?.run && <WorkbenchRunEvidence key={`${id}:${selectedRun.id}:${reloadKey}`} client={client} projectId={id} taskId={selectedRun.taskId} runId={selectedRun.id} selectedVersion={reading?.target.kind === "artifact" ? { id: reading.target.id, sha256: reading.target.sha256 } : null} />}
       <section className="rail-section"><h3>项目待审</h3>{development?.reviews.length ? development.reviews.map((review) => <div className="workbench-review-card" key={review.id}><strong>{reviewKindLabels[review.kind]}</strong><p>{reviewReasonText(review.reason)}</p><small>请求 v{review.revision}</small><Link className="text-link" to={`/reviews?id=${review.id}`}>前往待审</Link><details className="workbench-source-metadata"><summary>请求身份</summary><p>{review.id}</p></details></div>) : <p>{snapshot.source === "fixture" ? "示例没有真实待审。" : extraLoading ? "正在读取待审…" : extraError ?? "当前没有项目范围内的待审记录。"}</p>}</section>
-      <section className="rail-section"><h3>Connection 能力声明</h3>{development?.connections.length ? development.connections.map((item) => <div className="workbench-connection" key={item.id}><strong>{item.id}</strong><small>状态：{item.status} · 能力：{item.capabilities.join("、") || "无"}</small></div>) : <p>{snapshot.source === "fixture" ? "示例模式没有真实 Connection 状态。" : extraLoading ? "正在读取 Connection…" : extraError ?? "当前项目没有 Connection。"}</p>}<p className="helper-text">能力声明不等于 Permission 已准许，也不表示工具已经实际连通。</p><Link className="text-link" to={`/projects/${id}/connections`}>配置项目连接与权限</Link></section>
+      <section className="rail-section"><h3>Connection 能力声明</h3>{development?.connections.length ? development.connections.map((item) => <div className="workbench-connection" key={item.id}><strong>{item.id}</strong><small>状态：{item.status} · 能力：{item.capabilities.join("、") || "无"}</small></div>) : <p>{snapshot.source === "fixture" ? "示例模式没有真实 Connection 状态。" : extraLoading ? "正在读取 Connection…" : extraError ?? "当前项目没有 Connection。"}</p>}<p className="helper-text">能力声明不等于 Permission 已准许，也不表示工具已经实际连通。</p><Link className="secondary-button secondary-button--compact" to={`/projects/${id}/connections`}>配置项目连接与权限</Link></section>
     </>}
     <section className="rail-section workbench-assist-entry"><h3>{kind === "thesis" ? "请求候选草稿" : "继续讨论"}</h3><p>在已有 Assist 中选择资料、发送消息并核对候选。</p>
       <Link className="primary-button" to={assistHref}><MessageSquareText aria-hidden="true" />{kind === "thesis" ? "打开 Assist 请求候选" : "打开 AI 辅助"}</Link>

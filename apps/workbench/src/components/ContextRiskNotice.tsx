@@ -140,31 +140,12 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
     } finally { setPreviewBusy(null); }
   }, [audit, client, resourceId]);
 
-  // 审计不可用 / 没有读取权限 / 没扫成：不能说成「没有风险」，也不能静默消失（P0-B 第 6 条）。
-  // 这里只是一行状态说明，不占输入卡也不阻止发送；真正的发送入口还会再跑一次审计，
-  // 仍然没有结论时由确认条等用户选「仍然发送 / 取消发送」——所以这行不能再写「仍可发送」。
-  if (audit === null) {
-    if (error === null) return null;
-    return <div className="context-risk context-risk-unavailable" data-testid="context-risk-unavailable">
-      <div role="status" aria-live="polite">
-        <span className="context-risk-mark" aria-hidden="true">!</span>
-        <span className="context-risk-text">{`无法完成风险检查：${error}`}</span>
-        <span className="context-risk-action">发送前会再检查一次</span>
-      </div>
-    </div>;
-  }
-  if (audit.state !== "OK") {
-    return <div className="context-risk context-risk-unavailable" data-testid="context-risk-unavailable"
-      data-state={audit.state}>
-      <div role="status" aria-live="polite">
-        <span className="context-risk-mark" aria-hidden="true">!</span>
-        <span className="context-risk-text">{audit.state === "NO_FILE_ACCESS"
-          ? "未扫描必读文件：这个目录没有生效的读取权限（不等于没有风险）"
-          : `无法完成风险检查：${audit.detail}`}</span>
-        <span className="context-risk-action">发送前会再检查一次</span>
-      </div>
-    </div>;
-  }
+  // 2026-11-03 用户要求（原话「不需要箭头指向的提示」）：输入框下方这行「无法完成风险检查：…」
+  // 连同警告图标与「发送前会再检查一次」一起不再显示。它的同类状态（审计超时、目录不可用、
+  // 无读取权限、没扫成）是同一处实现、同一个 data-testid，一并按用户意图停掉。
+  // 判定与发送前的实际检查都没有改动：审计仍会照跑，仍然没有结论时由发送前确认条
+  // （SendRiskGateNotice）等用户选「仍然发送 / 取消发送」，这里只是不再渲染这条状态说明。
+  if (audit === null || audit.state !== "OK") return null;
   if (audit.severity === "NONE") return null;
   if (dismissed !== null && dismissed === audit.fingerprint) return null;
 

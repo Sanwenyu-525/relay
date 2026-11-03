@@ -194,7 +194,8 @@ export default function ScheduledTaskDetailView() {
     <p role="status">正在读取定时任务…</p></div></div>;
   if (task === null) return <div className="page-layout scheduled-tasks-page pv-page"><div className="page-primary">
     <PageHeader testId="scheduled-task-detail-head" title="定时任务" meta="读取失败" lede="这条定时任务当前无法读取。" />
-    {error && <p className="action-error" role="alert">{error}</p>}
+    {error && (connection.mode === "live" ? <p className="action-error" role="alert">{error}</p>
+      : <p className="pv-warning" role="status" data-testid="scheduled-task-detail-offline">{error}</p>)}
     <div className="form-actions">
       <Link className="secondary-button" to="/scheduled-tasks">返回列表</Link>
       <button className="secondary-button" type="button" onClick={() => void load()} data-testid="scheduled-task-detail-reread">重新读取</button>

@@ -218,7 +218,7 @@
   align-items: center;
   gap: 7px;
   font-size: 11px;
-  color: #5c7764;
+  color: #566f5f;
   font-weight: 650;
   border: 1px dashed #dce9de;
   border-radius: 9px;
@@ -273,3 +273,33 @@
 @media (max-width: 760px) {
   .pv-page.today-page { padding: 14px; }
 }
+
+/* 示例模式空态：中性只读提示不是告警，改用 pv 卡片（白底/1px 边框/13px 圆角/780px 阅读宽），
+   与 /goals、/knowledge 的空态卡同一条左对齐边与同一宽度；原 1062px 的整行琥珀条只占文字约 400px。 */
+.pv-page .today-fixture-card { max-width: 780px; margin: 0; }
+.pv-page .today-fixture-card p { margin: 0; font-size: 12px; line-height: 1.75; color: #486452; }
+/* 390px 下「打开项目 / 打开任务」曾逐字竖排：链接自身不参与折行。 */
+.pv-page .today-fixture-card a { white-space: nowrap; }
+
+/* 「安排说明」是折叠说明而非常规小标题：补回可点击的折三角（同 .page-explanation 的画法，取 pv 墨色），
+   字号降到注释档，避免在 h1 与正文之间冒充分区标题。 */
+.pv-page .today-arrange-note { font-size: 12px; }
+.pv-page .today-arrange-note > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pv-muted);
+  list-style: none;
+}
+.pv-page .today-arrange-note > summary::-webkit-details-marker { display: none; }
+.pv-page .today-arrange-note > summary::before {
+  content: "";
+  width: .38rem;
+  height: .38rem;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .15s ease;
+}
+.pv-page .today-arrange-note[open] > summary::before { transform: rotate(45deg); }

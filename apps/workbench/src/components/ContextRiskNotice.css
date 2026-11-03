@@ -218,9 +218,8 @@
   .context-risk-line { transition: none; }
 }
 
-/* 审计不可用与发送前确认（2026-10-30）：复用同一条紧凑单行与同一列间距，不新造视觉语言。 */
-.context-risk-unavailable .context-risk-text { color: var(--text-muted, #6b7280); }
-.context-risk-unavailable .context-risk-mark,
+/* 发送前确认条（2026-10-30）：复用同一条紧凑单行与同一列间距，不新造视觉语言。
+   2026-11-03：「无法完成风险检查」提示已移除，.context-risk-unavailable 不再有引用。 */
 .context-risk-gate .context-risk-mark { color: var(--color-warning, #b45309); }
 .context-risk-gate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 6px 8px; border: 1px solid var(--border-strong, rgba(0, 0, 0, 0.16)); border-radius: 8px; }

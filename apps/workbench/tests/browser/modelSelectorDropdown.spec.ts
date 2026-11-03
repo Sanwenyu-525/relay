@@ -188,10 +188,10 @@ test.describe("模型选择下拉（2026-10-17 指令）", () => {
     await expect(page.getByTestId("model-selector-menu")).toHaveCount(0);
     await expect(trigger).toContainText("Controlled free 3");
     expect(posts, "点条目只发模型选择命令").toEqual([`${prefix}/assist-sessions/${sessionId}/chat-commands`]);
-    // 再开一次：当前首选已是刚选的那条，勾选标记留在它身上。
+    // 再开一次：当前首选已是刚选的那条，勾选标记留在它身上（2026-11-03：弹层顶部「当前首选」说明行已删除）。
     state.revision = "2";
     await trigger.click();
-    await expect(page.getByTestId("model-selector-menu")).toContainText("当前首选：fixture/m3:free");
+    await expect(page.getByTestId("model-selector-menu")).not.toContainText("当前首选：");
     await expect(page.locator('.model-selector-menu [role="option"][aria-selected="true"] .model-selector-option-name'))
       .toHaveText("Controlled free 3");
   });

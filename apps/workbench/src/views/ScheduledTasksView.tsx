@@ -169,8 +169,8 @@ export default function ScheduledTasksView() {
 
   return <div className="page-layout scheduled-tasks-page pv-page">
     <div className="page-primary">
-      <PageHeader testId="scheduled-tasks-head" title="定时任务" overline="Scheduled Tasks" meta="到点自动创建并启动任务"
-        lede="按天或按周重复：每次到点新建一个任务并交给 AI 执行。上一轮没有验收时，本轮不会启动。" />
+      <PageHeader testId="scheduled-tasks-head" title="定时任务" overline="Scheduled Tasks"
+        lede="到点自动创建并启动任务：按天或按周重复，每次到点新建一个任务并交给 AI 执行；上一轮没有验收时本轮不会启动。" />
       {items.length > 0 && <ul className="pv-stats" aria-label="定时任务统计" data-testid="scheduled-tasks-stats">
         <li className="pv-stat"><span>定时任务</span><strong>{items.length}</strong><span>当前已加载条目</span></li>
         <li className="pv-stat"><span>启用中</span><strong>{items.filter((task) => task.status === "ENABLED").length}</strong><span>到点即创建任务（应用运行期间）</span></li>
@@ -182,9 +182,17 @@ export default function ScheduledTasksView() {
         <button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>刷新</button>
       </div>
       <p className="helper-text" data-testid="scheduled-tasks-scope"><Info aria-hidden="true" />
-        只在应用运行期间生效：关闭应用后不会触发，错过的时段只形成一条待处理，由你决定是否补跑。</p>
-      {loading && <p role="status">正在读取定时任务…</p>}
-      {error && <p className="action-error" role="alert">{error}</p>}
+        只在应用运行期间触发；关闭应用后错过的时段形成一条待处理，由你决定是否补跑。</p>
+      {(loading || error) && <section className="surface-panel scheduled-list-state" aria-label="定时任务列表">
+        <h2>定时任务列表</h2>
+        <div className="scheduled-list-state-body">
+          {loading && <p role="status">正在读取定时任务…</p>}
+          {/* 示例模式未连接本机 API 是「读不到数据」的中性状态，不是执行失败：
+              用琥珀提示，避免把「没连上」渲染成红色错误。 */}
+          {error && (connection.mode === "live" ? <p className="action-error" role="alert">{error}</p>
+            : <p className="pv-warning" role="status" data-testid="scheduled-tasks-offline">{error}</p>)}
+        </div>
+      </section>}
       {notice && <p className="receipt-message" role="status">{notice}</p>}
       {pending && <div className="warning-callout" role="alert" data-testid="scheduled-status-pending">
         <Info aria-hidden="true" />

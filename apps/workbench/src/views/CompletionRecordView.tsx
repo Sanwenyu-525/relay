@@ -43,10 +43,15 @@ export default function CompletionRecordView() {
       timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     }).format(date);
   }
-  return <section className="completion-page pv-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary"><Link className="text-link completion-back" to="/tasks">返回任务列表</Link><PageHeader testId="completion-page-head"
-    title={evidence === null ? "完成凭据" : evidence.isCurrent ? "这项工作已完成" : "历史完成依据"}
-    lede="按这一次完成提交时的验收版本与证据读取；重开后旧凭据仍是历史记录，不用当前最新版替代。" />
-    {client === null ? <p className="warning-callout" role="status">示例数据没有真实完成凭据。<Link to="/tasks">返回任务</Link></p> : <>
+  return <section className="completion-page pv-page" data-testid="completion-record"><div className="page-layout"><div className="page-primary">{client !== null && <Link className="text-link completion-back" to="/tasks">返回任务列表</Link>}<PageHeader testId="completion-page-head"
+    title={evidence === null ? "完成凭据" : evidence.isCurrent ? "这项工作已完成" : "历史完成依据"} overline="Completion" lede="按提交时的验收版本与证据读取；重开后的旧凭据是历史记录，不用当前最新版替代。" />
+    {client === null ? <section className="surface-panel completion-empty" aria-label="完成凭据">
+      <h2>完成依据</h2>
+      <div className="completion-empty-body">
+        <p className="warning-callout" role="status">示例数据没有真实完成凭据。</p>
+        <Link className="secondary-button" to="/tasks">返回任务列表</Link>
+      </div>
+    </section> : <>
       <button className="secondary-button" type="button" onClick={() => { setLoaded(null); setFailure(null); setReload((value) => value + 1); }}>重读凭据</button>
       {!evidence && !error && <p role="status">正在读取完成凭据…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
@@ -102,7 +107,7 @@ export default function CompletionRecordView() {
       </>}
     </>}
     </div>
-    <ResponsiveRail label="查看完成凭据与操作" title={evidence?.isCurrent ? "结果已保存" : "历史记录"}><div className="rail-content">
+    {client !== null && <ResponsiveRail label="查看完成凭据与操作" title={evidence?.isCurrent ? "结果已保存" : "历史记录"}><div className="rail-content">
         {evidence && <section className="completion-section completion-actions"><h2>{evidence.isCurrent ? "结果已保存" : "历史记录"}</h2><p className="helper-text">{evidence.isCurrent ? "新的修改需从任务入口重开，历史依据继续保留。" : "这是先前完成周期的依据，不代表当前任务已经完成。"}</p>
           {evidence.artifactVersions.filter((version) => version.availability === "AVAILABLE" && version.artifactVersionId).map((version) => <Link key={version.artifactVersionId}
             className="primary-button" to={`/artifact-versions/${version.artifactVersionId}/lineage`}>查看已接受版本 v{version.versionNumber ?? "?"}</Link>)}
@@ -118,6 +123,6 @@ export default function CompletionRecordView() {
         <p className="helper-text" role="status">{client === null ? "当前是示例数据，没有真实完成凭据；右栏的完成依据与版本入口不可用。"
           : error !== null ? "完成凭据读取失败，右栏的完成依据与版本入口暂时不可用；请按上方错误重读。"
             : "正在读取完成凭据，右栏的完成依据与版本入口暂不可用。"}</p></section>}
-    </div></ResponsiveRail>
+    </div></ResponsiveRail>}
   </div></section>;
 }

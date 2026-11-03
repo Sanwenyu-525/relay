@@ -79,9 +79,9 @@ function usageValue(value: unknown): string {
 export default function ProjectTaskChainsView() {
   const { id = "" } = useParams();
   const connection = useRelayConnection();
-  if (!connection.client) return <section className="page-state"><p className="eyebrow">有限任务链</p>
+  if (!connection.client) return <div className="pv-page"><section className="page-state"><p className="eyebrow">有限任务链</p>
     <h1>需要连接本机 API</h1><p>任务链必须读取真实任务、验收版本和执行记录；示例数据不会模拟授权或运行状态。</p>
-    <Link className="text-link" to="/settings/connections">连接工作空间</Link></section>;
+    <Link className="secondary-button" to="/settings/connections">连接工作空间</Link></section></div>;
   return <LiveTaskChains key={`${connection.epoch}:${id}`} client={connection.client} projectId={id} />;
 }
 

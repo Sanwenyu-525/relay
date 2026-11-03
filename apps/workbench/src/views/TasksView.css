@@ -12,3 +12,63 @@
    reading(18px) 档，压过 protoPage 的 `.pv-page .subnav-item` 12px 档；这里以更高特异性回 12px 页签档。 */
 .pv-page .page-primary > .subnav .subnav-item,
 .pv-page .subnav-row .subnav-item { font-size: 12px; }
+
+/* 内容左右缘：pv 页由 .pv-page 的 30px 内边距给页面留白，page-primary 不再叠一层
+   relay 内边距。归零后本页内容（368.4→1366）与收件箱、定时任务页（336.4→1398）同一条边。 */
+.pv-page.task-list-page .page-primary { max-width: none; padding: 0; }
+
+/* 列表改用 pv 卡片承载：与收件箱任务卡同一套 1px 边框、13px 圆角与内边距，
+   表头行与最后一行不再额外画边框，避免卡片内出现第二条满宽横线。 */
+.pv-page.task-list-page .task-table-card { margin: 16px 0 0; }
+/* 列表页主区不再有 relay 内边距，范围说明入口随之对齐内容左缘（原 32px 偏移会凸出卡片左边）。 */
+.pv-page.task-list-page .rail-trigger { margin: 16px 0 0; justify-self: start; }
+.pv-page .task-table-card .table-scroll { margin-top: 0; }
+.pv-page .task-table-card .data-table { min-width: 0; border-top: 0; }
+.pv-page .task-table-card .data-row { padding: 12px 17px; }
+.pv-page .task-table-card .data-row--head { min-height: 40px; }
+.pv-page .task-table-card .data-list > li:last-child .data-row { border-bottom: 0; }
+
+/* 状态格：chip 与等待/阻塞原因同排，原因单行省略并保留完整 title。
+   行高因此由左侧「标题 + 修订」两行决定，各数据行同为 68.1px，不再 68.1/72.1 混排。 */
+.pv-page .task-table-card .data-row--tasks > .data-cell:nth-child(3) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.pv-page .task-table-card .data-cell-reason { flex: 1 1 6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 窄窗：表格转三行列表（任务名 / 状态与执行模式 / 项目与执行者），不再横向裁掉三列。 */
+@media (width < 64rem) {
+  /* 表头与数据行同用 .data-row--tasks，需以双类提特异性，否则被下面的 display:grid 覆盖。 */
+  .pv-page .task-table-card .data-row--head.data-row--tasks { display: none; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px 12px;
+    padding: 14px 17px;
+  }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(1) { grid-area: 1 / 1 / 2 / -1; }
+  /* 窄屏列表按「标题 / 状态 / 归属」三行收口：任务修订留在详情页，避免每行再撑高一层。 */
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(1) small { display: none; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(3) { grid-area: 2 / 1 / 3 / 2; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(4) { grid-area: 2 / 2 / 3 / 3; justify-self: end; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(2) { grid-area: 3 / 1 / 4 / 2; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(5) { grid-area: 3 / 2 / 4 / 3; justify-self: end; }
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(2)::before,
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(4)::before,
+  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(5)::before {
+    content: attr(data-label) "：";
+    color: var(--pv-muted);
+    font-size: 11px;
+  }
+  .pv-page.task-list-page .list-toolbar--compact {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .pv-page.task-list-page .list-toolbar--compact .filter-field { min-width: 0; }
+  .pv-page.task-list-page .list-toolbar--compact .filter-field select { min-width: 0; width: 100%; }
+  .pv-page.task-list-page .list-toolbar--compact .search-field { grid-column: 1 / -1; min-width: 0; }
+}

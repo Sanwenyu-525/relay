@@ -353,6 +353,163 @@ svg {
   .desktop-titlebar__button { width: 36px; min-width: 36px; }
 }
 
+/* UI-NAV-01 效果图：titlebar 布局标题带最左的简洁品牌标识，右侧隔一条既有分隔线
+   （.desktop-titlebar__separator 由 JSX 提供）。底色随标题带（bg-navigation），
+   文字用正文色 semibold；不承载语义，仅标识。 */
+.desktop-titlebar__brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding-left: var(--relay-space-3);
+  color: var(--relay-color-text-primary);
+  font-family: var(--relay-font-family-ui);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  user-select: none;
+}
+
+/* UI-NAV-01 标题栏横向导航（titlebar 布局）：全局导航移入标题带中部，与左侧图标栏
+   消费同一份入口数据（workbenchNavigation.ts），只改展示位置。几何与颜色全部取既有
+   token（标题带内放 control.height-compact 色块、selection 同族激活底色、radius.control
+   圆角），不引入第二套尺寸或色值。激活态与左侧导航同一读法：低饱和绿底色块 +
+   selection 文字 + 中字重；悬停比选中显眼一档（与左栏同一层级方向）。 */
+.titlebar-navigation {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  /* 对齐 UI-NAV-01 效果图：导航靠左、紧跟品牌与常用操作，右侧余白留给窗口拖拽区。 */
+  justify-content: flex-start;
+  min-width: 0;
+  /* 条目之间的空白是窗口拖拽区（空白 mousedown 走 DesktopTitleBar 的拖动处理）：
+     交互语义与 .desktop-titlebar__drag 一致，光标与文本行为也对齐。 */
+  user-select: none;
+  cursor: default;
+}
+
+.titlebar-navigation__list {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  /* 切换布局时的克制过渡（P2）：只对导航条淡入一拍，不移动布局，整壳无闪烁；
+     系统减少动态由全局 reduce 规则归零，本机关动效走 html[data-motion="off"] 覆盖。 */
+  animation: titlebar-navigation-in var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+@keyframes titlebar-navigation-in {
+  from { opacity: 0; }
+}
+
+html[data-motion="off"] .titlebar-navigation__list { animation: none; }
+
+.titlebar-navigation__item {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--relay-space-1);
+  height: var(--relay-control-height-compact);
+  padding: 0 var(--relay-space-2);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.titlebar-navigation__item > svg {
+  width: var(--relay-font-size-body);
+  height: var(--relay-font-size-body);
+  flex: none;
+}
+
+.titlebar-navigation__item:hover {
+  background: var(--relay-color-selection-hover);
+}
+
+.titlebar-navigation__item--active {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.titlebar-navigation__item:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: calc(-1 * var(--relay-focus-width));
+}
+
+.titlebar-navigation__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--relay-space-4);
+  height: var(--relay-space-4);
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-action-primary);
+  color: var(--relay-color-text-onAction);
+  font-size: var(--relay-font-size-caption);
+  line-height: 1;
+}
+
+.titlebar-navigation__more {
+  position: relative;
+  flex: none;
+}
+
+/* 折叠控制走 hidden 属性：类的 display:flex 会压过 UA 的 [hidden] 规则，必须显式归位，
+   否则「放进更多菜单」的条目仍渲染在条目行里。 */
+.titlebar-navigation__item[hidden],
+.titlebar-navigation__more[hidden] {
+  display: none;
+}
+
+.titlebar-navigation__more-trigger {
+  list-style: none;
+  cursor: pointer;
+}
+
+.titlebar-navigation__more-trigger::-webkit-details-marker { display: none; }
+
+/* 当前页落在折叠区时触发器带同一激活底色：位置状态不因条目被折叠而不可见。 */
+.titlebar-navigation__more[data-overflow-active] .titlebar-navigation__more-trigger {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-selection-text);
+}
+
+/* 溢出菜单沿用外壳浮层语言：separator 细边 + panel 圆角 + floating 投影。
+   面板从触发器左缘向右展开——触发器左侧至少有一组常用操作键，右缘不会越出窗口。 */
+.titlebar-navigation__menu {
+  position: absolute;
+  top: calc(100% + var(--relay-space-2));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-0-5);
+  min-width: 10rem;
+  padding: var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-floating);
+  background: var(--relay-color-bg-surface);
+}
+
+/* 菜单行是完整导航目的地：行高回到 control.height，计数徽标靠右与标签对齐。 */
+.titlebar-navigation__menu-item {
+  height: var(--relay-control-height);
+  padding: 0 var(--relay-space-3);
+}
+
+.titlebar-navigation__menu .titlebar-navigation__count { margin-left: auto; }
+
+/* titlebar 布局下横向导航占据标题带中部整段剩余空间（flex:1，条目在其中居中）：
+   拖拽区收缩为内容宽（错误提示仍在），窗口拖动由导航条目之间的空白承接
+   （TitlebarNavigation 的空白 mousedown 走同一条拖动处理），两侧不留死区。 */
+.desktop-titlebar[data-navigation-placement="titlebar"] .desktop-titlebar__drag {
+  flex: 0 0 auto;
+}
+
 /* 桌面态：外壳铺满视口且自身不滚动，只有主内容区滚动，避免窗口右缘出现网页式根滚动条。 */
 .desktop-window {
   display: flex;
@@ -438,6 +595,39 @@ svg {
     minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
+}
+
+/* UI-NAV-01 titlebar 布局：全局导航在标题栏，外壳退为两列（近期工作栏 + 主内容）。
+   列模板必须整体覆写：navrail 不渲染时，三列模板会把近期工作栏落进 4.75rem 的第一轨。
+   覆写收在 ≥48rem：更窄的折叠档两栏都隐藏走单列，与左侧布局同一收纳，不受 placement 影响。 */
+@media (width >= 48rem) {
+  .app-frame[data-navigation-placement="titlebar"] {
+    grid-template-columns: var(--relay-shell-sidebar-width) minmax(0, 1fr);
+  }
+
+  /* 近期工作栏收起的列覆写在两列口径下重算：把手列 + 主内容。 */
+  .app-frame[data-navigation-placement="titlebar"][data-context-collapsed="true"] {
+    grid-template-columns: var(--relay-control-height-comfort) minmax(0, 1fr);
+  }
+
+  /* 页面聚焦（近期工作栏不渲染）时 titlebar 布局只剩主内容一列。 */
+  .app-frame[data-navigation-placement="titlebar"].app-frame--page-focused {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 拖拽分隔条左侧不再有图标导航列：列边界只剩近期工作栏列宽，left 少加一项 railWidth。
+     原式与 .app-frame 的列模板同源（见 .sidebar-resize-handle 注释），这里同步改。 */
+  .app-frame[data-navigation-placement="titlebar"] .sidebar-resize-handle {
+    left: calc(var(--relay-shell-sidebar-width) - var(--relay-control-target-minimum) / 2);
+  }
+
+  /* 卡片（近期工作栏 + 内容）在 titlebar 布局下从窗口左缘起步：朝屏幕边缘的圆角收平，
+     参照物交给上方标题栏；page-focused 时由正文列自己承担卡片左缘，同样收平。 */
+  .app-frame[data-navigation-placement="titlebar"] .app-context-rail,
+  .app-frame[data-navigation-placement="titlebar"].app-frame--page-focused .app-content {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
 }
 
 /* 拖拽分隔条通用样式：所有 role="separator" 的列宽拖拽条共用同一交互与外观。
@@ -1355,8 +1545,12 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   z-index: var(--relay-zIndex-popover);
   display: grid;
   gap: var(--relay-space-1);
+  /* 2026-11-03 用户反馈：长标题把预览卡撑到横跨窗口、正文不换行。
+     与同排的 .recent-work-row-panel、行右键菜单取同一上限 15rem：宽度不再随内容无限增长，
+     文字靠 overflow-wrap 换行，高度由内容自然增长。 */
+  width: max-content;
   min-width: 10rem;
-  max-width: calc(100vw - var(--relay-space-4));
+  max-width: min(15rem, calc(100vw - var(--relay-space-4)));
   padding: var(--relay-space-2) var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
@@ -1565,7 +1759,9 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
   justify-content: center;
   gap: var(--relay-space-1);
   min-height: var(--relay-space-10);
-  padding: var(--relay-space-1) var(--relay-space-1);
+  /* 图标栏里入口可用宽度 52px：左右各留 4px 时，12px 的「定时任务」/「开发工具」四字
+     名称（约 48px）会被挤成两行；横向内边距归零，把整行宽度让给标签，纵向留白保持。 */
+  padding: var(--relay-space-1) 0;
   text-align: center;
 }
 
@@ -1581,7 +1777,7 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
      图标反成了行首装饰。原型是 9px，低于 §4 可读下限，不跟。 */
   font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-ui);
-  /* 窄栏里「连接与同步」这类较长名称允许折行，不横向撑破图标栏。 */
+  /* 窄栏里「定时任务」这类较长名称允许折行，不横向撑破图标栏。 */
   overflow-wrap: anywhere;
 }
 
@@ -1597,7 +1793,7 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 }
 
 /* 短窗口收紧竖排入口的单行高度：必须放在 .app-navrail .navigation-item 之后，同特异度下靠后生效。
-   十个入口全部常驻后，50rem（约 800px，覆盖常见 720px 视口）以内底部设置与连接与同步无需滚动即可到达。 */
+   十个入口全部常驻后，50rem（约 800px，覆盖常见 720px 视口）以内底部设置无需滚动即可到达。 */
 @media (max-height: 50rem) {
   .app-navrail .navigation-item {
     min-height: var(--relay-space-8);
@@ -4495,6 +4691,8 @@ fieldset.field {
   .breadcrumbs { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
   .breadcrumb-item:not(:last-child), .topbar-date { display: none; }
   .breadcrumb-item:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 分隔符渲染在每一级内部：只留末级时它会变成悬空前导「/」，这里一并隐藏。 */
+  .breadcrumb-item:last-child .breadcrumb-separator { display: none; }
   .data-source-button { padding: var(--relay-space-1); }
   .data-source-button > span { display: none; }
 }

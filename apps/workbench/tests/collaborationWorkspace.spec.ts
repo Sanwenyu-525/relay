@@ -2470,7 +2470,7 @@ describe("不可恢复输入的离页保护", () => {
         write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } } }, 200);
   }
 
-  it("暂存附件在页内切目录前先确认：保留留在原作用域，丢弃后清空芯片并完成切换", async () => {
+  it("暂存附件在页内切目录（换工作区）时直接切换：不再弹确认，正文与暂存附件随会话保留", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const mocked = router({});
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -2492,26 +2492,20 @@ describe("不可恢复输入的离页保护", () => {
         new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
       await flush();
       expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
-
-      // 切目录先被守卫拦下：确认弹层出现，目录还没切换。
-      await openWorkingDirectoryViaManual("D:/repo-other");
-      expect(dialogText()).toContain("无法恢复");
-      expect(folderStripName()).not.toBe("repo-other");
-      // 保留并继续编辑：留在原作用域，附件仍在。
-      await clickPortal("collab-unsaved-keep");
+      // 用户原话的场景：输入框里已有正文（截图里就是「你好」）。
+      await view.wrapper.get('[data-testid="assist-draft"]').setValue("你好");
       await flush();
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
-      expect(folderStripName()).not.toBe("repo-other");
 
-      // 丢弃并继续：附件被清（不再渲染芯片行），目录切换完成。
+      // 2026-11-03 用户指令「输入框里面有内容的时候切换工作区就直接切换就可以了」：
+      // 换工作区不再因输入器里的不可恢复输入弹确认，直接切走。
       await openWorkingDirectoryViaManual("D:/repo-other");
-      expect(dialogText()).toContain("无法恢复");
-      await clickPortal("collab-unsaved-discard");
       await flush(120);
       expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(view.wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
       expect(folderStripName()).toBe("repo-other");
+      // 换工作区（CHANGE_DIRECTORY）不换会话：输入器状态跟着同一条会话保留，没被静默丢掉。
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+      const draftAfterSwitch = view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement;
+      expect(draftAfterSwitch.value).toBe("你好");
     } finally { view.unmount(); }
   });
 

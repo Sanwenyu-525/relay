@@ -17,6 +17,45 @@
 .pv-page.create-task-page .summary-card p,
 .pv-page.create-task-page .suggestion-copy small { font-size: 12px; }
 
+/* 主区不再叠一层 relay 内边距（pv 页的 30px 已给足留白），标题与卡片左缘回到 336.4。 */
+.pv-page.create-task-page .page-primary { max-width: none; padding: 0; }
+
+/* 表单以 pv 卡片承载，与定时任务创建页的 .pv-card 语言一致：
+   1px 边框 + 13px 圆角 + 同一档阴影，字段仍按两列 label 布局排列。 */
+.pv-page.create-task-page .create-form {
+  margin-top: var(--relay-space-6);
+  padding: 17px;
+  background: #fff;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+}
+
+/* 右栏说明同样收成顶部对齐的卡片，与任务详情页的事实卡同一形态。 */
+.pv-page.create-task-page .review-rail {
+  align-self: start;
+  margin-left: var(--relay-space-6);
+  padding: 17px;
+  background: #fff;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+}
+
+/* 窄屏只剩 rail-trigger 按钮：不再绝对定位悬浮在标题右上角，回到流内作为页尾入口。 */
+@media (width < 80rem) {
+  .pv-page.create-task-page .rail-trigger {
+    position: static;
+    order: 1;
+    justify-self: start;
+    margin: 16px 0 0;
+  }
+}
+
+/* 三列单选在卡片内每列约 153px，「在我的主导下使用 AI 辅助」会把末字挤成单字孤行；
+   balance 让提示均分成两行，三列底边不再参差。 */
+.pv-page.create-task-page .choice-option small { text-wrap: balance; }
+
 /* 两列 label 布局与全局 .field--grid 同构（.field 标记已就位，只差 tsx 上的变体类）。
    CreateTaskView.tsx 不在本轮收编所有权内：组件侧给 .create-form > .field 加上
    field--grid 后，本媒体查询块即可整体删除，改由全局基座承担。 */

@@ -1244,7 +1244,7 @@ export default function KnowledgeView() {
           aria-pressed={memoryFilter === option.value} disabled={pendingCommand !== null}
           data-testid={`knowledge-memory-filter-${option.value}`}
           onClick={() => changeMemoryFilter(option.value)}>{option.label}</button>)}</div>
-      <p className="helper-text">状态由服务端按数据库时间判定；「有效」只表示未停用且未到期，不保证进入模型 Context。</p>
+      <p className="helper-text">「有效」只表示未停用且未到期，不保证进入模型 Context。</p>
     </div>}
     {/* 读取失败不能呈现为「还没有」：同一文件的详情空态已有正确的 error 分支（见下方
         data-testid="knowledge-detail-empty-state"），列表这里此前缺失，会把失败说成没有数据。 */}
@@ -1270,10 +1270,10 @@ export default function KnowledgeView() {
 
   return <section className={`knowledge-page pv-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
     {!reading && !capturing && <><PageHeader testId="knowledge-page-head" title="资料" overline="Knowledge"
-      meta={projectId ? "项目资料" : "工作空间资料"} lede="按资料、记忆、决定、规则组织内容，并保留项目归属和来源范围。" />
+      meta={projectId ? "项目资料" : "工作空间资料"} />
     {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
 
-    {!live ? <section className="surface-panel" data-testid="knowledge-fixture-gap">
+    {!live ? <section className="surface-panel knowledge-fixture-card" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
       <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
     </section> : <>
@@ -1428,7 +1428,7 @@ export default function KnowledgeView() {
               {captureCeremony ? <><h4>确切产物正文</h4>
                 {artifactPreviewMatches ? <div data-testid="knowledge-capture-body"><p className="helper-text">Markdown 阅读预览，可展开核对原文。</p><SafeMarkdown source={artifactPreview?.text ?? ""} />
                   <details className="knowledge-capture-text-preview"><summary>查看原始正文</summary><pre className="knowledge-capture-preview">{artifactPreview?.text}</pre></details></div>
-                  : <p className="helper-text">先在“来源与收录设置”中选择产物版本并读取正文，再核对本次收录内容。</p>}
+                  : <p className="helper-text">先在「来源与收录设置」选产物版本并读取正文。</p>}
               </> : <label className="field"><span className="field-label">正文</span><textarea value={text} onChange={(event) => setText(event.target.value)} data-testid="knowledge-text" rows={10} disabled={pendingCommand !== null} /></label>}
             </>}
             {kind === "MEMORY" && <>
@@ -1480,7 +1480,7 @@ export default function KnowledgeView() {
                   <div><dt>来源</dt><dd>确切产物版本 {artifactVersionId.trim() || "未选择"}</dd></div></dl>
                 <p className="helper-text">目标范围：{captureTargetLabel}。{revisionMode ? `追加到资料 ${knowledgeDraftBase?.id ?? "待核对"}；基于起草修订 v${knowledgeDraftBase?.revision ?? "待核对"}。` : "范围由当前入口确定。"}</p>
               </section>
-              <p className="warning-callout">收录只保存这份资料，不修改原产物，也不代表任务验收通过。</p>
+              <p className="warning-callout">收录只保存资料，不改原产物，也不代表验收通过。</p>
               {artifactPreviewMatches && <label className="knowledge-check"><input type="checkbox" checked={captureConfirmed}
                 disabled={pendingCommand !== null} onChange={(event) => setCaptureConfirmed(event.target.checked)} data-testid="knowledge-capture-confirmed" />我已核对正文、来源版本和目标范围；收录不修改原产物，也不代表通过验收。</label>}
               {!artifactPreviewMatches && <p className="helper-text">读取并核对确切产物正文后，才能确认收录。</p>}

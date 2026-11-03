@@ -1,6 +1,26 @@
 .completion-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; }
-.app-main .completion-page { padding: 0; }
+/* 与其他 pv 页共用同一条内容左边界（pv 的 30px），不让 page-primary 再叠一层 32px 内边距。 */
+.completion-page .page-primary { padding: 0; }
 .completion-back { display: inline-block; margin-bottom: var(--relay-space-6); }
+/* 示例模式只有一条状态说明：用与凭据区一致的卡片框住，动作收进卡内，不再「页头返回 + 提示内返回」重复。 */
+.completion-page .completion-empty {
+  margin-top: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #dfe9df;
+  border-radius: 13px;
+  box-shadow: 0 3px 15px #22553506;
+}
+.completion-page .completion-empty > h2 {
+  margin: 0;
+  padding: 14px 17px;
+  border-bottom: 1px solid #edf1ec;
+  font-size: 13px;
+  color: #294635;
+}
+.completion-page .completion-empty-body { padding: 14px 17px; }
+.completion-page .completion-empty-body .warning-callout { margin: 0; }
+.completion-page .completion-empty-body .secondary-button { margin-top: 11px; }
 .completion-page > h1 { margin-bottom: var(--relay-space-3); }
 .completion-page .page-lede { margin-bottom: var(--relay-space-6); }
 .completion-page > button { margin-bottom: var(--relay-space-4); }
