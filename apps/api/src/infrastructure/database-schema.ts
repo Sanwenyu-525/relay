@@ -306,7 +306,14 @@ export interface ExecutionContractRow {
 /** 工作区默认模型连接（迁移 0144）：决定新 Run 的冻结来源，不写回进程配置。 */
 export interface WorkspaceDefaultModelConnectionRow {
   readonly workspace_id: string;
-  readonly connection_id: string;
+  /** 0158 起可空：只设聊天默认时本列为 NULL。两列不得同时为空（表 CHECK）。 */
+  readonly connection_id: string | null;
+  /**
+   * 0158：工作区**聊天**默认连接。与 `connection_id`（Run 默认）分列且各自作用域——
+   * 把 Run 默认直接当聊天默认会让所有既有会话在无人操作时换 Provider。
+   * NULL 表示未设置，聊天继续走进程默认（0158 前的兼容行为）。
+   */
+  readonly chat_connection_id: string | null;
   readonly revision: bigint;
   readonly created_at: Date;
   readonly updated_at: Date;
@@ -1612,6 +1619,8 @@ export interface AssistMessageRow {
   readonly model_selection_snapshot: JsonObject | null;
   /** 0142：受理时所用凭据的单向身份；服务端比较用，不返回前端、不进上下文清单。 */
   readonly model_credential_fingerprint: string | null;
+  /** 0158：受理时冻结的模型连接身份；执行端据此解析，不重新读当前默认连接。 */
+  readonly model_connection_id: string | null;
   /** 0098: per-message candidate progress, CAS-updated independently of session selection. */
   readonly model_attempt_state: JsonObject | null;
   readonly provider_request_id: string | null;
@@ -1837,6 +1846,8 @@ export interface ModelCallRow {
   readonly config_fingerprint: string;
   /** 0142：本次外呼所用凭据的单向身份；本迁移之前的行是 NULL（未知，不冒充匹配）。 */
   readonly credential_fingerprint: string | null;
+  /** 0158：kind=VERIFY 且目标为已登记连接时的连接归属；其他调用为 NULL。 */
+  readonly connection_id: string | null;
   readonly input_sha256: string | null;
   readonly read_operation_id: string | null;
   readonly read_invocation_id: string | null;
@@ -1996,7 +2007,12 @@ export interface ModelCapabilityDeclarationRow {
  */
 export interface SessionModelSelectionRow {
   readonly session_id: string;
-  readonly connection: 'default' | 'openrouter';
+  /**
+   * 0158 起可选已登记连接。`registered` 时 `connection_id` 必非空且不带目录依据；
+   * 另两枚沿用 0089 语义。取值 CHECK 在库里兜住这个不变量。
+   */
+  readonly connection: 'default' | 'openrouter' | 'registered';
+  readonly connection_id: string | null;
   readonly model: string;
   readonly config_fingerprint: string;
   readonly free_only: boolean;

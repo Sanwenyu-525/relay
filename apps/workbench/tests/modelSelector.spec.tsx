@@ -184,3 +184,57 @@ it("会话显式选择优先于应用默认，本机记忆不冒充会话事实"
   const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
   expect(triggerName()).toBe("v/a:free");
 });
+
+/** 已登记连接的最小 DTO：界面只看身份、名称、型号与启停状态。 */
+function connection(id: string, name: string, model: string, status: "ACTIVE" | "DISABLED") {
+  return { id, name, providerKind: "openai-compatible", baseUrl: "https://fixture.invalid/v1",
+    defaultModel: model, budget: { timeoutMs: 1, maxOutputTokens: 1, maxCallTokens: 1,
+      maxScopeCalls: 1, maxScopeTokens: 1 }, credentialVersion: 1, status,
+    revision: "1", createdAt: "2026-11-02T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z" };
+}
+
+it("已登记连接独立成段：启用可选、停用禁用，点选按连接身份提交", async () => {
+  const choose = vi.fn(); const chooseConnection = vi.fn();
+  const client = { getModelCatalog: async () => directory,
+    refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getSessionModelSelection: async () => null,
+    listModelConnections: async () => [connection("conn-1", "团队网关", "vendor/registered", "ACTIVE"),
+      connection("conn-2", "停用网关", "vendor/old", "DISABLED")] } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(true);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={null} onChoose={choose} onChooseConnection={chooseConnection} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  expect(document.querySelector('[role="group"][aria-label="已登记连接"]')).not.toBeNull();
+  const disabled = document.querySelector<HTMLButtonElement>('[data-testid="model-selector-option-conn-2"]')!;
+  expect(disabled.disabled).toBe(true);
+  expect(disabled.getAttribute("aria-label")).toContain("已停用");
+  const active = document.querySelector<HTMLButtonElement>('[data-testid="model-selector-option-conn-1"]')!;
+  expect(active.disabled).toBe(false);
+  expect(active.title).toContain("型号：vendor/registered");
+  await clickItem("团队网关");
+  expect(chooseConnection).toHaveBeenCalledWith(expect.objectContaining({ id: "conn-1",
+    defaultModel: "vendor/registered" }));
+  expect(choose).not.toHaveBeenCalled();
+  expect(openMenu()).toBe(false);
+});
+
+it("连接读取失败只告警，不阻断目录型号选择", async () => {
+  const choose = vi.fn();
+  const client = { getModelCatalog: async () => directory,
+    refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getSessionModelSelection: async () => null,
+    listModelConnections: async () => { throw new Error("offline"); } } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(true);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={null} onChoose={choose} onChooseConnection={vi.fn()} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  expect(document.body.textContent).toContain("已登记连接读取失败");
+  await clickItem("免费 A");
+  expect(choose).toHaveBeenCalledWith("v/a:free");
+});

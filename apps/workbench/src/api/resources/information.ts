@@ -396,6 +396,9 @@ const VERIFY_TARGET_STATES: readonly RelayVerifyTargetState[] = ["NOT_CONFIGURED
 /** 目标查询串：缺省目标不带参数，旧服务端行为不变。 */
 function verifyTargetQuery(target: RelayVerifyTarget | undefined): string {
   if (target === undefined || target.connection === "default") return "";
+  if (target.connection === "registered") {
+    return `?connection=registered&connection_id=${encodeURIComponent(target.connectionId)}`;
+  }
   const model = target.model?.trim() ?? "";
   if (model === "") throw new Error("验证目标缺少确切型号。");
   return `?connection=openrouter&model=${encodeURIComponent(model)}`;
@@ -427,10 +430,13 @@ export async function getModelPortVerification(http: RelayHttp,
   const credential = row.credential_identity;
   const credentialIdentity = credential === "MATCH" || credential === "CHANGED" ||
     credential === "UNKNOWN" ? credential : "UNKNOWN" as const;
-  const connection = row.connection === "openrouter" ? "openrouter" as const : "default" as const;
+  const connection = row.connection === "openrouter" ? "openrouter" as const
+    : row.connection === "registered" ? "registered" as const : "default" as const;
   return {
     target: typeof row.target === "string" ? row.target : "default",
     connection,
+    connectionId: connection === "registered" && typeof row.connection_id === "string"
+      ? row.connection_id : null,
     model: row.model === undefined || row.model === null ? null
       : string(row, "model", "model-port verification"),
     currentConfigFingerprint: fingerprint, last, targetLast,
@@ -444,7 +450,9 @@ export async function getModelPortVerification(http: RelayHttp,
 export async function verifyModelPort(http: RelayHttp,
   target?: RelayVerifyTarget): Promise<RelayModelVerifyResult> {
   const body = target === undefined || target.connection === "default" ? undefined
-    : { connection: "openrouter", model: target.model };
+    : target.connection === "registered"
+      ? { connection: "registered" as const, connection_id: target.connectionId }
+      : { connection: "openrouter" as const, model: target.model };
   return modelVerifyResultFrom(object(await http.request(
     http.workspacePath("/model-port/verify"), {
       method: "POST",

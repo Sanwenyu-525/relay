@@ -325,3 +325,19 @@ Migration：`0150_assist_session_todo_scope_order.sql`，`assist_session_todo_sn
 
 兼容性：仅加列与回填，不改事件、快照与调用身份语义。历史事件 `request_digest IS NULL` 保持无摘要，重放按 `(content, status)` 序列比较兜底——服务端为请求里没带 id 的条目补的内部身份不参与比较，旧调用仍可按原身份恢复。回滚风险：删列后轮次顺序闸门失效，旧轮次写入可再次覆盖当前投影；应保留列。
 
+
+## 0158 会话与消息的模型连接身份（2026-11-02，ADR-036 阶段四）
+
+Migration：`0158_model_connection_session_selection.sql`。四处**纯追加**：
+
+**`session_model_selection`**：新增 `connection_id uuid NULL → model_connections`；`connection` 的取值 CHECK 由 `default|openrouter` 放宽为 `default|openrouter|registered`（先按 `pg_get_constraintdef` 文本定位 0089 的真实约束名，找不到即抛 `P0004`，不半应用）。新约束 `ck_session_model_selection_registered_identity` 两分支写全：`registered` 必须有 `connection_id`，且 `catalog_source` / `catalog_snapshot_seq` / `catalog_model_id` 全为 NULL、`free_only=false`；另两枚必须 `connection_id IS NULL`。绑定用稳定连接 ID，不用显示名。放开 `GRANT DELETE`，只服务用户显式「清除本会话选择、恢复跟随默认」；消息行仍保留受理时冻结的快照与连接身份。
+
+**`workspace_default_model_connection`**：新增 `chat_connection_id uuid NULL → model_connections`，表示工作区**聊天**默认；`connection_id`（0144，Run 默认）放开 `NOT NULL`。两枚默认分列、各自独立设置或取消，互不写回；两列都为 NULL 是合法状态——聊天与 Run 都回到进程默认，因此不加「至少一条非空」的 CHECK。不设 `ON DELETE`：连接不允许物理删除。
+
+**`assist_messages`**：新增 `model_connection_id uuid NULL → model_connections`；`ck_assist_messages_model_connection_requires_snapshot` 要求非空时必须同时有 `model_selection_snapshot`——单挂连接 ID 会让执行端无从核对配置是否已变。执行端只按冻结身份解析，不重新读当前默认连接。
+
+**`model_calls`**：新增 `connection_id uuid NULL → model_connections`，仅 `kind='VERIFY'` 的已登记连接目标填写，其他调用保持 NULL；部分索引 `idx_model_calls_verify_connection (connection_id, started_at DESC) WHERE kind='VERIFY' AND connection_id IS NOT NULL` 支持按连接读取最近验证。同一 `(provider, model)` 可被多条连接使用，只按型号汇总会把 A 的验证结论显示成 B 的。
+
+**兼容性。** 三列都可空、无回填：旧 `session_model_selection` 行仍是 `default|openrouter` 且 `connection_id` 为 NULL，天然满足新 CHECK；旧消息 `model_connection_id` 为 NULL，继续走进程默认解析；旧 `model_calls` 行 `connection_id` 为 NULL，不影响既有验证读取。凭据代数不重复冻结，消息行沿用 0142 的 `model_credential_fingerprint`。
+
+**权限。** `session_model_selection` 增 DELETE；其余三表只需既有 SELECT / INSERT / UPDATE 与新增列授权。**回滚。** DROP 新列与新约束、把取值 CHECK 改回两枚、`connection_id` 恢复 NOT NULL（前提是已无「只有聊天默认」的行）、REVOKE DELETE；无数据修复。**API Breaking Change: No**——纯新增列与新增可选响应字段。

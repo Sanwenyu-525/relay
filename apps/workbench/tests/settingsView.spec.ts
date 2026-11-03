@@ -99,6 +99,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "fake", configured: false, model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
         current_config_fingerprint: null, worker_startup_validation: "NOT_CONFIGURED" }));
@@ -138,6 +144,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1", api_key: "sk-leak-attempt" });
       if (url === `${root}/model-port/verification`) return response(stored ?? verificationBody());
@@ -187,6 +199,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1" });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
@@ -214,6 +232,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-rotated", base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
@@ -242,6 +266,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1" });
       if (url === `${root}/model-port/verification`) return response(verificationBody({ last: null, matches_current_config: false }));
@@ -267,6 +297,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "invalid", configured: false,
         model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
@@ -286,6 +322,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "fake", configured: false, model: null, base_url: null });
       if (url === `${root}/model-port/verification`) return response(verificationBody({
         current_config_fingerprint: null }));
@@ -349,6 +391,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible", configured: true,
         model: "gpt-test", base_url: "https://api.example.com/v1", api_key: "sk-leak-attempt" });
       if (url === `${root}/model-port/verification`) return response(verificationBody());
@@ -376,6 +424,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
         configured: true, model: "agnes-3.0-flash", base_url: "https://api.example.com/v1",
         image_input: imageInput,
@@ -414,6 +468,12 @@ describe("设置页模型端口状态", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port` || url === `${root}/model-port/verification`) {
         if (!healthy) return response({ code: "INTERNAL", detail: "读取失败" }, 500);
         return url.endsWith("/verification")
@@ -455,7 +515,8 @@ describe("验证六态解析", () => {
       { input: { status: configured, verification: null, verifying: true },
         expected: "VERIFYING" },
       { input: { status: configured,
-        verification: { target: "default", connection: "default", model: "gpt-test",
+        verification: { target: "default", connection: "default", connectionId: null,
+          model: "gpt-test",
           targetLast: null, credentialIdentity: "UNKNOWN", state: null,
           currentConfigFingerprint: fingerprint,
           last: { ok: true, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
@@ -465,7 +526,8 @@ describe("验证六态解析", () => {
         verifying: false },
         expected: "VERIFIED" },
       { input: { status: configured,
-        verification: { target: "default", connection: "default", model: "gpt-test",
+        verification: { target: "default", connection: "default", connectionId: null,
+          model: "gpt-test",
           targetLast: null, credentialIdentity: "UNKNOWN", state: null,
           currentConfigFingerprint: fingerprint,
           last: { ok: false, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
@@ -486,7 +548,8 @@ describe("验证六态解析", () => {
     }
     // 指纹不匹配：即使 last.ok 也不显示验证通过
     expect(resolveVerificationState({ status: configured,
-      verification: { target: "default", connection: "default", model: "gpt-test",
+      verification: { target: "default", connection: "default", connectionId: null,
+        model: "gpt-test",
         targetLast: null, credentialIdentity: "UNKNOWN", state: null,
         currentConfigFingerprint: "b".repeat(64),
         last: { ok: true, latencyMs: 1, provider: "openai-compatible", model: "gpt-test",
@@ -514,6 +577,12 @@ describe("验证六态解析", () => {
       vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/attention/interventions")) return response({ items: [] });
+        // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+        if (url === `${root}/model-connections`) return response({ items: [] });
+        if (url === `${root}/model-connections/default`
+          || url === `${root}/model-connections/chat-default`) {
+          return response({ connection_id: null, revision: null });
+        }
         if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
           configured: true, model: "gpt-test", base_url: "https://api.example.com/v1" });
         if (url === `${root}/model-port/verification`) return response(verificationBody({
@@ -546,6 +615,12 @@ describe("验证六态解析", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response({ items: [] });
+      // AI 页签的「当前使用的模型」读三类作用域：连接清单、Run 默认、聊天默认。
+      if (url === `${root}/model-connections`) return response({ items: [] });
+      if (url === `${root}/model-connections/default`
+        || url === `${root}/model-connections/chat-default`) {
+        return response({ connection_id: null, revision: null });
+      }
       if (url === `${root}/model-port`) return response({ provider: "openai-compatible",
         configured: true, model: "gpt-test", base_url: "https://api.example.com/v1" });
       if (url === `${root}/model-port/verification`) return response(verificationBody({

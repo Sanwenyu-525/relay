@@ -136,6 +136,12 @@ export class RelayApiClient {
   selectSessionModel(input: { sessionId: string; commandId: string; model: string }) {
     return modelSelectionApi.selectSessionModel(this.#http, input);
   }
+  selectSessionConnection(input: { sessionId: string; commandId: string; connectionId: string }) {
+    return modelSelectionApi.selectSessionConnection(this.#http, input);
+  }
+  clearSessionModelSelection(input: { sessionId: string; commandId: string }) {
+    return modelSelectionApi.clearSessionModelSelection(this.#http, input);
+  }
   createTaskChain(input:RelayTaskChainCreate){return taskChainsApi.createTaskChain(this.#http,input);}
   authorizeTaskChain(input:RelayTaskChainAuthorization){return taskChainsApi.authorizeTaskChain(this.#http,input);}
   stopTaskChain(input:RelayTaskChainControl){return taskChainsApi.stopTaskChain(this.#http,input);}
@@ -1336,6 +1342,16 @@ export class RelayApiClient {
 
   async getDefaultModelConnection(): Promise<RelayDefaultModelConnection> {
     return modelConnectionsApi.getDefaultModelConnection(this.#http);
+  }
+
+  /** 工作区聊天默认连接；与 Run 默认分列，未设置时 connectionId 为 null。 */
+  async getChatDefaultModelConnection(): Promise<RelayDefaultModelConnection> {
+    return modelConnectionsApi.getChatDefaultModelConnection(this.#http);
+  }
+
+  async setChatDefaultModelConnection(
+    connectionId: string | null, commandId: string): Promise<RelayDefaultModelConnection> {
+    return modelConnectionsApi.setChatDefaultModelConnection(this.#http, { connectionId, commandId });
   }
 
   /** 凭据是否还在系统凭据库里。只回布尔。 */

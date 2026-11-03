@@ -4,7 +4,8 @@ import type { FastifyInstance } from 'fastify';
 import { listChatCommands, resolveChatCommand } from '../application/chat-commands.js';
 import { detectMethodIntent, isMethodDiscussion } from '../application/method-intent.js';
 import { executeChatCommand } from '../application/execute-chat-command.js';
-import { readSessionModel } from '../application/select-session-model.js';
+import { clearSessionModelSelection, readSessionModel, selectSessionConnection }
+  from '../application/select-session-model.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 import { problemFromError, sendProblem, sendReadError, type RouteDependencies } from './envelope.js';
 
@@ -22,6 +23,8 @@ import { problemFromError, sendProblem, sendReadError, type RouteDependencies } 
  * 新请求所用模型，不动应用默认。带正文的 `/plan 内容`、`/goal 内容` 不走这里：模式随消息
  * 进同一命令，由消息 Owner 在同一事务里生效（见 assist-api 的 202 回执）。
  * GET 会话 model-selection 只读回显当前选择（无覆盖即 null），不发起调用、不写存储。
+ * POST 会话 model-selection（0158）选择一条已登记连接或清除覆盖：前者绑定稳定连接 ID，
+ * 后者恢复跟随工作区聊天默认；两者都只影响本会话后续新请求，在途消息的冻结快照不变。
  */
 
 const strict = { additionalProperties: false } as const;
@@ -38,7 +41,10 @@ const revision = Type.String({ pattern: '^(0|[1-9][0-9]*)$' });
 // 会话模型选择的可序列化字段：/model 回执结果与 GET 读取共用同一契约（bigint 一律十进制字符串）。
 const selectionFields = {
   session_id: Type.String({ format: 'uuid' }),
-  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter')]),
+  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter'),
+    Type.Literal('registered')]),
+  /** 仅 `connection=registered` 时非空；另两枚恒为 null。 */
+  connection_id: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   model: Type.String(),
   free_only: Type.Boolean(),
   config_fingerprint: Type.String({ pattern: '^[0-9a-f]{64}$' }),
@@ -73,6 +79,15 @@ const executeResult = Type.Union([
     session_id: Type.String({ format: 'uuid' }),
     chat_mode: Type.Union([Type.Literal('CHAT'), Type.Literal('PLAN'), Type.Literal('GOAL')]),
     goal_stopping: Type.Boolean() }, strict),
+]);
+
+// 切换会话模型选择：null 表示清除覆盖（回到工作区聊天默认/进程默认）。
+const connectionSelectionBody = Type.Object({ command_id: Type.String({ format: 'uuid' }),
+  connection_id: nullableUuid }, strict);
+const connectionSelectionResult = Type.Union([
+  Type.Object({ kind: Type.Literal('MODEL_SELECTION'), ...selectionFields }, strict),
+  Type.Object({ kind: Type.Literal('MODEL_SELECTION_CLEARED'),
+    session_id: Type.String({ format: 'uuid' }), cleared: Type.Boolean() }, strict),
 ]);
 
 const menuEntry = Type.Object({
@@ -145,8 +160,41 @@ export function registerChatCommandRoutes(app: FastifyInstance,
     }
   });
 
-  app.post('/chat-commands/resolve', {
-    schema: { params: base, body: resolveBody, response: { 200: resolutionDto } },
+  /**
+   * 切换本会话的模型选择：`connection_id` 为具体连接时选一条已登记连接（只影响本会话后续
+   * 新请求）；为 null 时清除覆盖、回到工作区/进程默认。两种形态各自是独立命令，沿用
+   * 会话模型选择 Owner 的 CAS 与幂等回执，不在这里重复事务。正在生成的消息不受影响——
+   * 它们的快照在建消息时已冻结。
+   */
+  app.post('/assist-sessions/:session_id/model-selection', {
+    schema: { params: executeParams, body: connectionSelectionBody,
+      response: { 200: commandEnvelopeSchema(connectionSelectionResult) } },
+  }, async (request, reply) => {
+    const params = request.params as { workspace_id: string; session_id: string };
+    const body = request.body as { command_id: string; connection_id: string | null };
+    try {
+      const commandId = body.command_id;
+      const links = { resource: `/api/v1/workspaces/${params.workspace_id}/assist-sessions/${params.session_id}` };
+      // 清除返回「删掉了没有」，选中返回新快照；两者分别来自各自命令，结果形状在此归一。
+      if (body.connection_id === null) {
+        const outcome = await clearSessionModelSelection(dependencies.database.executor, {
+          workspaceId: params.workspace_id, sessionId: params.session_id, commandId });
+        if (outcome.replayed) reply.header('command-replayed', 'true');
+        return { command_id: commandId, committed_at: outcome.committedAt.toISOString(),
+          result: { kind: 'MODEL_SELECTION_CLEARED' as const, ...outcome.result }, links };
+      }
+      const outcome = await selectSessionConnection(dependencies.database.executor, {
+        workspaceId: params.workspace_id, sessionId: params.session_id, commandId,
+        connectionId: body.connection_id, credentials: dependencies.credentials });
+      if (outcome.replayed) reply.header('command-replayed', 'true');
+      return { command_id: commandId, committed_at: outcome.committedAt.toISOString(),
+        result: { kind: 'MODEL_SELECTION' as const, ...outcome.result }, links };
+    } catch (error) {
+      return sendProblem(reply, problemFromError(error, body.command_id), request.id);
+    }
+  });
+
+  app.post('/chat-commands/resolve', { schema: { params: base, body: resolveBody, response: { 200: resolutionDto } },
   }, async (request) => {
     const body = request.body as { text: string };
     const resolution = resolveChatCommand(body.text);

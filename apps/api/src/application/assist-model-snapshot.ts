@@ -62,6 +62,12 @@ async function readContextBudget(repositories: Repositories,
   return configured?.context_budget_tokens ?? null;
 }
 
+/**
+ * 同一档位读法的公开入口：按连接冻结聊天计划时（`model-connection-runtime`）必须用
+ * 完全相同的口径，否则连接路径与进程默认路径会算出不同的预算，冻结即失真。
+ */
+export const readAssistContextBudget = readContextBudget;
+
 /** 预算来源的作用域：有会话按会话，没有会话按工作区。 */
 export interface AssistBudgetScope {
   readonly workspaceId: string;
@@ -161,12 +167,20 @@ export interface FrozenAssistModelPlan {
   readonly snapshot: JsonObject;
   readonly attemptState: JsonObject;
   readonly credentialFingerprint: string;
+  /**
+   * 0158：这次冻结绑定的是哪条已登记连接（没有则为 null）。
+   *
+   * 快照本身不写连接 ID——它回答「模型计划」，连接身份是解析依据。调用方把它写进
+   * `assist_messages.model_connection_id`，执行端据此解析，与 Run 的
+   * `execution_contracts.connection_id` 同形。非空必然同时有快照（表 CHECK 兜住）。
+   */
+  readonly connectionId: string | null;
 }
 
 function withCredential(plan: { readonly snapshot: JsonObject;
   readonly attemptState: JsonObject }, config: { readonly provider: string;
-  readonly apiKey: string }): FrozenAssistModelPlan {
-  return { ...plan, credentialFingerprint: readCredentialFingerprint(config) };
+  readonly apiKey: string }, connectionId: string | null = null): FrozenAssistModelPlan {
+  return { ...plan, credentialFingerprint: readCredentialFingerprint(config), connectionId };
 }
 
 export interface AssistModelCandidateSnapshot {
@@ -319,6 +333,9 @@ export function snapshotIdentityBudget(budget: ParsedAssistModelSnapshot['budget
 const ASSIST_MODEL_ROUTE_STOP_CODES: readonly string[] = [
   'ASSIST_MODEL_SNAPSHOT_INVALID', 'ASSIST_MODEL_CONFIG_CHANGED',
   'ASSIST_MODEL_CREDENTIAL_CHANGED',
+  // 0158：消息冻结在已登记连接上，解析端口时的五道闸门各自给精确停因。
+  'ASSIST_MODEL_CONNECTION_UNAVAILABLE', 'ASSIST_MODEL_CONNECTION_DISABLED',
+  'ASSIST_MODEL_CONNECTION_CREDENTIAL_MISSING', 'ASSIST_MODEL_CREDENTIAL_STORE_UNAVAILABLE',
 ];
 
 export function readAssistModelRouteStopCode(error: unknown): string | undefined {

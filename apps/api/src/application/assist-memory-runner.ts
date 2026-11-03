@@ -17,11 +17,15 @@ import { readAdmission } from './maintenance-admission.js';
 import { recheckAssistSources } from './assist-source-content.js';
 import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, resolveMemoryContextLimits,
   memoryHistoryFingerprint, memoryCompactionTurn, prepareMemoryCompaction, MEMORY_BATCH_MESSAGES } from './assist-memory.js';
+import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 
 export interface AssistMemoryWorkerOptions {
   workerId: string; leaseMs: number; storage: ManagedContentStore;
   modelPort: AssistModelPort; modelEnv?: NodeJS.ProcessEnv;
   modelFetchDependencies?: ModelFetchDependencies;
+  /** 0158：压缩请求冻结在已登记连接上时解析其凭据；缺省用进程默认存储。 */
+  credentials?: CredentialStore | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -33,6 +37,28 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
   }
   const snapshot = parseAssistModelSnapshot(request.model_snapshot);
   const candidate = snapshot.candidates[0]!;
+  // 0158：冻结在已登记连接上的会话，压缩按同一条连接解析（可见 / ACTIVE / 型号与配置指纹），
+  // 绝不退回进程默认。压缩尚未开始，凭据身份闸门不适用（请求只冻结了连接身份）。
+  const connectionId = request.model_snapshot.model_connection_id;
+  if (typeof connectionId === 'string') {
+    if (candidate.connection.provider !== 'openai-compatible') {
+      throw new AssistMemoryUnavailable('MEMORY_MODEL_CONFIG_CHANGED');
+    }
+    try {
+      return await resolveFrozenChatConnectionPort(createRepositories(db), {
+        workspaceId: request.workspace_id, connectionId,
+        frozenModel: candidate.connection.model,
+        frozenConfigFingerprint: candidate.connection.configFingerprint,
+        frozenCredentialFingerprint: null,
+        budget: snapshotIdentityBudget(snapshot.budget),
+        ...(options.modelFetchDependencies === undefined ? {}
+          : { transport: options.modelFetchDependencies }),
+        ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+      });
+    } catch {
+      throw new AssistMemoryUnavailable('MEMORY_MODEL_CONFIG_CHANGED');
+    }
+  }
   if (candidate.connection.provider === 'openai-compatible') {
     if (options.modelPort.identity.model !== candidate.connection.model ||
         options.modelPort.identity.configFingerprint !== candidate.connection.configFingerprint) {
@@ -63,7 +89,8 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
 
 /** Automatic requests are prepared while the claimed message's session is locked, then requeued. */
 export async function prepareAutomaticMemory(db: DbExecutor, sessionId: string, modelSnapshot: JsonObject | null,
-  options: AssistMemoryWorkerOptions, projectedInputBytes = 0): Promise<boolean> {
+  options: AssistMemoryWorkerOptions, projectedInputBytes = 0,
+  modelConnectionId: string | null = null): Promise<boolean> {
   return withTransaction(db, async (r) => {
     if ((await readAdmission(r, 'share')).mode !== 'NORMAL') return false;
     const session = await r.assist.readSession(sessionId, true);
@@ -72,7 +99,7 @@ export async function prepareAutomaticMemory(db: DbExecutor, sessionId: string, 
     const checkpoint = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
     const invalid = checkpoint !== undefined && !await checkpointAvailable(r, options.storage, session, checkpoint);
     const id = await prepareMemoryCompaction(r, session, 'AUTO', options.modelEnv ?? process.env, invalid,
-      modelSnapshot, projectedInputBytes);
+      modelSnapshot, projectedInputBytes, modelConnectionId);
     return id !== null;
   });
 }

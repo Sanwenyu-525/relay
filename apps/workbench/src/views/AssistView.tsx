@@ -16,6 +16,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelayWorkingDirectory, type RelayWorkingDirectorySource,
   type RelaySessionContextUsage, type RelayContextBudgetTokens, type RelayTokenUsage,
   type RelayWorkspaceDefaultDirectory, type RequiredContextAudit } from "../api/relayClient";
+import type { RelayModelConnection } from "../api/dtos/information";
 import { formatTokenUsageDetail, formatTokenUsageLine, legacyTokenUsage,
   tokenUsageTotal } from "../lib/tokenCount";
 import { generationStageDiagnostics, generationStageView } from "../lib/generationStage";
@@ -206,12 +207,29 @@ type PendingAction = { readonly kind: "send"; readonly commandId: string; readon
   /** `/compact`：与 restart 共用 chat-commands 通道，但只申请整理工作窗口，不新建会话。 */
   { readonly kind: "compact"; readonly commandId: string; readonly content: string } |
   { readonly kind: "model"; readonly commandId: string; readonly model: string } |
+  /** 选择一条已登记连接：身份是 connection_id，型号由服务端按连接当前声明解析。 */
+  { readonly kind: "connection"; readonly commandId: string; readonly connectionId: string;
+    readonly connectionName: string } |
   /** 0127：只切模式、不发消息（`/plan` 后面没有内容时走这条）。 */
   { readonly kind: "chatMode"; readonly commandId: string; readonly mode: RelayChatMode } |
   { readonly kind: "cancel" | "accept"; readonly commandId: string; readonly id: string } |
   { readonly kind: "acceptTask"; readonly commandId: string; readonly id: string;
     readonly taskId: string; readonly expectedTaskRevision: string;
     readonly expectedAcceptanceRevision: string; readonly payloadHash: string };
+/**
+ * 首条消息/新会话前的模型选择：要么按目录型号（`/model` 语义），要么按已登记连接。
+ * 连接分支只提交稳定 connection_id；`model` 只用于展示与回执核对，不是提交载荷。
+ */
+type SessionModelChoice =
+  | { readonly kind: "model"; readonly commandId: string; readonly model: string }
+  | { readonly kind: "connection"; readonly commandId: string; readonly connectionId: string;
+    readonly model: string };
+function firstModelChoice(process: Pick<FirstMessageProcess, "model" | "connectionId">): SessionModelChoice | undefined {
+  if (process.model === undefined) return undefined;
+  return process.connectionId == null
+    ? { kind: "model", commandId: createCommandId(), model: process.model }
+    : { kind: "connection", commandId: createCommandId(), connectionId: process.connectionId, model: process.model };
+}
 /**
  * 首条消息的未决命令：建会话与发消息是两个命令，各自保留原身份。
  * 这里保存首条消息那一条的命令身份、原始载荷与发送时绑定的确切目录资源，
@@ -221,7 +239,7 @@ type PendingAction = { readonly kind: "send"; readonly commandId: string; readon
  * 不能在核对时从当前目录作用域重新取值，否则换目录后会把原消息解释到别的资源上。
  */
 type PendingFirstMessage = { readonly sessionId: string; readonly commandId: string;
-  readonly modelSelection?: { readonly model: string; readonly commandId: string };
+  readonly modelSelection?: SessionModelChoice;
   readonly modelSelectionConfirmed?: boolean;
   readonly content: string; readonly conversationMode: RelayConversationMode;
   /** 0127：首条消息按哪种模式受理；缺省沿用会话的持久模式。 */
@@ -282,7 +300,7 @@ function snapshotOfPendingFirst(pending: PendingFirstMessage): FirstMessageSnaps
  * 否则「按原命令重试」会变成「建一条身份不同的新会话」。
  */
 type PendingCreate = { readonly commandId: string; readonly projectId: string | null;
-  readonly modelSelection?: { readonly model: string; readonly commandId: string };
+  readonly modelSelection?: SessionModelChoice;
   readonly taskId: string | null; readonly title: string;
   readonly firstContent: string; readonly resourceId: string | null;
   /**
@@ -325,6 +343,8 @@ type CreateSessionInput = { commandId: string; projectId: string | null; taskId:
 export type FirstMessageProcess = {
   /** 首条发送前的选择草稿；发送过程使用 PendingCreate 固定的选择命令。 */
   readonly model?: string;
+  /** 首条前选的已登记连接；有它时 model 只是这条连接当前声明的型号，不冒充目录型号。 */
+  readonly connectionId?: string | null;
   /** 首条输入原文。未发送时它就是未保存保护的对象，不因重挂载或换目录消失。 */
   readonly draft: string;
   readonly pending: PendingFirstMessage | null;
@@ -440,6 +460,10 @@ function targetMatches(session: RelayAssistSession, target: AssistTarget): boole
 function receiptMatches(receipt: RelayCommandReceipt, action: PendingAction, sessionId: string): boolean {
   if (action.kind === "model") return receipt.commandId === action.commandId &&
     receipt.commandType === "SelectSessionModel" && receipt.result.session_id === sessionId && receipt.result.model === action.model;
+  // 连接选择按稳定身份核对：另一条连接即使型号相同也不算本次成功。
+  if (action.kind === "connection") return receipt.commandId === action.commandId &&
+    receipt.commandType === "SelectSessionConnection" && receipt.result.session_id === sessionId &&
+    receipt.result.connection === "registered" && receipt.result.connection_id === action.connectionId;
   if (action.kind === "restart") return receipt.commandId === action.commandId &&
     receipt.commandType === "ExecuteChatCommand" && receipt.result.source_session_id === sessionId &&
     receipt.result.system === action.system && receipt.result.kind === "NEW_SESSION";
@@ -1047,7 +1071,8 @@ onExecutionPrepared?: (taskId: string) => void;
       pending: pendingFirst ? { commandId: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
           ? pendingFirst.modelSelection.commandId : pendingFirst.commandId,
           commandType: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
-            ? "SelectSessionModel" : "RequestAssistMessage", sessionId: pendingFirst.sessionId }
+            ? pendingFirst.modelSelection.kind === "connection" ? "SelectSessionConnection" : "SelectSessionModel"
+            : "RequestAssistMessage", sessionId: pendingFirst.sessionId }
         : pendingCreate ? { commandId: pendingCreate.commandId,
             commandType: "CreateAssistSession", sessionId: null }
           : sessionNavigation.pending,
@@ -1269,6 +1294,9 @@ onExecutionPrepared?: (taskId: string) => void;
     // CHECK (title <> '') 会拒绝空标题，而「新建会话」按钮绕过 sendFirst 的空内容早退，
     // 因此这条路径上 content 确实可能为空，必须单独兜底而不是直接取 target.title。
     const unassignedTitle = content.replace(/\s+/gu, " ").slice(0, 30);
+    // 首条前的选择按当时的身份冻结：已登记连接记 connection_id，目录型号记型号；
+    // 创建响应丢失后按原命令重试，提交的仍是这一份选择，不会按当前偏好重新解释。
+    const draftChoice = firstModelChoice(firstOwner.read());
     const action: PendingCreate = retry ?? { commandId: createCommandId(),
       projectId: target === null ? null : target.kind === "PROJECT" ? target.id : target.projectId,
       taskId: target === null ? null : target.kind === "TASK" ? target.id : null,
@@ -1277,7 +1305,7 @@ onExecutionPrepared?: (taskId: string) => void;
       firstContent: content, resourceId: executionScope?.association?.resourceId ?? null,
       ...(verified === undefined ? {} : { expectedDirectoryId: verified.scope.resourceId }),
       ...(chatModeOf === null ? {} : { chatMode: chatModeOf }),
-      ...(firstOwner.read().model ? { modelSelection: { model: firstOwner.read().model!, commandId: createCommandId() } } : {}),
+      ...(draftChoice === undefined ? {} : { modelSelection: draftChoice }),
       conversationMode: wantedMode, assistantProfileId: wantedMode === "ASSISTANT" ? wantedAssistantId : null,
       // 图片随建会话载荷一起固定：重试按同一份文件重传，不会捡用户后来新加的图。
       ...(stagedFirst.items.length === 0 ? {} : { attachmentFiles: stagedFirst.items.map((item) => item.file) }),
@@ -1377,7 +1405,12 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     try {
       let expectedModelSelectionRevision: string | undefined;
       if (pending.modelSelection !== undefined) {
-        const selection = await client.selectSessionModel({ sessionId: pending.sessionId, ...pending.modelSelection });
+        const choice = pending.modelSelection;
+        const selection = choice.kind === "connection"
+          ? await client.selectSessionConnection({ sessionId: pending.sessionId,
+            commandId: choice.commandId, connectionId: choice.connectionId })
+          : await client.selectSessionModel({ sessionId: pending.sessionId,
+            commandId: choice.commandId, model: choice.model });
         expectedModelSelectionRevision = selection.revision;
         if (firstOwner.read().pending?.commandId !== pending.commandId || client !== liveClient()) return;
         pending = { ...pending, modelSelectionConfirmed: true };
@@ -1468,9 +1501,15 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       const receipt = await client.getCommandReceipt(selectingModel ? pending.modelSelection!.commandId : pending.commandId);
       if (version !== requestVersion.current) return;
       if (selectingModel) {
+        const choice = pending.modelSelection!;
         const selection = sessionModelSelectionFrom(receipt.result);
-        if (receipt.commandId !== pending.modelSelection!.commandId || receipt.commandType !== "SelectSessionModel" ||
-            selection.sessionId !== pending.sessionId || selection.model !== pending.modelSelection!.model) {
+        // 连接分支只按 connection_id 核对：型号由服务端从连接声明解析，回执里的型号是结果不是载荷。
+        const matches = choice.kind === "connection"
+          ? selection.connection === "registered" && selection.connectionId === choice.connectionId
+          : selection.model === choice.model;
+        if (receipt.commandId !== choice.commandId ||
+            receipt.commandType !== (choice.kind === "connection" ? "SelectSessionConnection" : "SelectSessionModel") ||
+            selection.sessionId !== pending.sessionId || !matches) {
           throw new Error("首条模型选择回执与原命令不匹配。");
         }
         const continued = { ...pending, modelSelectionConfirmed: true };
@@ -1950,7 +1989,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             <SendModeRow testId="assist-first-send-mode-DISCUSS" name="assist-first-send-mode" value="DISCUSS"
               label={sendModeLabels.DISCUSS} checked={firstSkill === null}
               disabled={firstBusy || creating || pendingFirst !== null}
-              title="普通对话：只讨论，不产出文档候选或任务提案"
+              title="自然语言协作，按需使用已授权工具；文档候选和任务提案请使用对应选项。"
               onSelect={() => setFirstSkillKey("")} />
             {firstSkills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
             {firstSkills.map((skill, index) => {
@@ -2006,10 +2045,15 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       <div className="agent-chat-composer-tail">
         <ModelSelector client={client} open={firstModelPickerOpen} onOpenChange={setFirstModelPickerOpen}
           selectedModel={first.model ?? null}
-          onChoose={(model) => { updateFirst({ model });
+          selectedConnectionId={first.connectionId ?? null}
+          onChoose={(model) => { updateFirst({ model, connectionId: null });
             // 2026-10-20 用户指令「记住上一次选择的模型」：选中的那一刻就记住，
             // 下一个新对话的芯片直接显示它，不再从「模型」两个字开始。
+            // 只记目录/默认型号；已登记连接不写进本机偏好（下个会话的 /model 解析不到它）。
             if (client !== null) writeLastModel(client.workspaceId, model); }}
+          onChooseConnection={(connection: RelayModelConnection) => {
+            // 连接身份与服务端将解析出的型号一起写入草稿；首条发送时按 connection_id 提交。
+            updateFirst({ model: connection.defaultModel, connectionId: connection.id }); }}
           firstMessage disabled={firstBusy || creating || pendingFirst !== null} />
       </div>
       <button className="primary-button agent-chat-send" type="submit" data-testid="assist-first-send"
@@ -4984,11 +5028,15 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   /** 会话档写档位：由底栏 [权限] 芯片同源上报，上方状态行只读显示（助手档不显示写权限段）。 */
   const [sessionWriteTier, setSessionWriteTier] = useState<Tier | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  /** 会话选择若是已登记连接，这里保留稳定连接身份供选择器标记；型号文本不足以区分连接。 */
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    setSelectedModel(null);
+    setSelectedModel(null); setSelectedConnectionId(null);
     void client.getSessionModelSelection(session.id).then((selection) => {
-      if (active) setSelectedModel(selection?.model ?? null);
+      if (!active) return;
+      setSelectedModel(selection?.model ?? null);
+      setSelectedConnectionId(selection?.connectionId ?? null);
     }).catch(() => { /* 打开选择器时仍重新读取目录；不据此变更服务端选择。 */ });
     return () => { active = false; };
   }, [client, session.id]);
@@ -5492,8 +5540,16 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (action.kind === "model") {
         const selection = await client.selectSessionModel({ sessionId: session.id, commandId: action.commandId, model: action.model });
         if (disposed.current) return;
-        setSelectedModel(selection.model); setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
+        setSelectedModel(selection.model); setSelectedConnectionId(null);
+        setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
         setNotice(`后续新消息首选 ${selection.model}；活动 Run 保留原策略。`);
+      } else if (action.kind === "connection") {
+        const selection = await client.selectSessionConnection({ sessionId: session.id,
+          commandId: action.commandId, connectionId: action.connectionId });
+        if (disposed.current) return;
+        setSelectedModel(selection.model); setSelectedConnectionId(selection.connectionId);
+        setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
+        setNotice(`后续新消息首选已登记连接「${action.connectionName}」（型号 ${selection.model}）；活动 Run 保留原策略。`);
       } else if (action.kind === "restart") {
         const result = await client.restartAssistSession({ sessionId: session.id, commandId: action.commandId,
           text: action.content, system: action.system });
@@ -5611,7 +5667,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       const receipt = await client.getCommandReceipt(pending.commandId);
       if (disposed.current) return;
       if (!receiptMatches(receipt, pending, session.id)) throw new Error("回执与本次 Assist 命令不匹配。");
-      if (pending.kind === "model") setSelectedModel(sessionModelSelectionFrom(receipt.result).model);
+      if (pending.kind === "model" || pending.kind === "connection") {
+        const selection = sessionModelSelectionFrom(receipt.result);
+        setSelectedModel(selection.model); setSelectedConnectionId(selection.connectionId);
+      }
       if (pending.kind === "restart") {
         await finishChatSession(chatSessionResultFrom(receipt.result, session.id, pending.system));
         return;
@@ -6581,7 +6640,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
         <SendModeRow testId="assist-send-mode-DISCUSS" name={sendModeName} value="DISCUSS" disabled={sendModeLocked}
           label={sendModeLabels.DISCUSS} checked={sendModeChecked("DISCUSS")}
-          title="普通对话：只讨论，不产出文档候选或任务提案"
+          title="自然语言协作，按需使用已授权工具；文档候选和任务提案请使用对应选项。"
           onSelect={() => pickSendMode("DISCUSS")} />
         {/* 两个提案各自的可用条件不变：文档候选要有任务目标，任务提案要有项目归属。 */}
         {target?.kind === "TASK" ? <SendModeRow testId="assist-send-mode-PROPOSE_CANDIDATE"
@@ -7080,12 +7139,18 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             onSaved={() => setContextUsageRevision((revision) => revision + 1)} />
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
             sessionId={session.id}
-            selectedModel={selectedModel} disabled={busy || pending !== null || writeBlockedReason !== null}
+            selectedModel={selectedModel} selectedConnectionId={selectedConnectionId}
+            disabled={busy || pending !== null || writeBlockedReason !== null}
             onChoose={(model) => {
               // 会话级选择仍走原命令落服务端（唯一事实）；同时记住到本机偏好，
               // 下一个新对话的芯片初始就是它（2026-10-20 用户指令）。
               writeLastModel(client.workspaceId, model);
               void runAction({ kind: "model", commandId: createCommandId(), model });
+            }}
+            onChooseConnection={(connection) => {
+              // 已登记连接只按身份提交；型号由服务端按连接当前声明解析，不写进本机偏好。
+              void runAction({ kind: "connection", commandId: createCommandId(),
+                connectionId: connection.id, connectionName: connection.name });
             }} />
         </div>
         {/* 主按钮二态：位置与配色不动，只在有 RUNNING 回复时把字形换成停止方块。

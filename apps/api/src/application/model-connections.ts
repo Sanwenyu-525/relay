@@ -474,11 +474,13 @@ export async function setModelConnectionStatusCommand(
   });
 }
 
-/** 工作区默认连接（0144）。只表达「新 Run 从哪条连接冻结」，不写回进程配置。 */
+/** 工作区默认连接（0144）。只表达「新 Run 从哪条连接冻结」，不写回进程配置。
+ *  0158 起该列可空（两枚默认各自独立，Run 默认可能被单独清空），空即视为未设置。 */
 export async function readDefaultModelConnection(db: DbExecutor, workspaceId: string):
 Promise<{ readonly connectionId: string; readonly revision: bigint } | undefined> {
   const row = await new ModelConnectionRepository(db).readDefault(workspaceId);
-  return row === undefined ? undefined : { connectionId: row.connection_id, revision: row.revision };
+  if (row === undefined || row.connection_id === null) return undefined;
+  return { connectionId: row.connection_id, revision: row.revision };
 }
 
 export interface DefaultModelConnectionResult {
@@ -507,6 +509,47 @@ export async function setDefaultModelConnectionCommand(
         input.connectionId);
       if (updated === undefined) throw resourceNotFound('Model connection');
       return { connection_id: updated.connection_id, revision: updated.revision.toString() };
+    },
+  });
+}
+
+/** 工作区聊天默认连接（0158）。null 表示未设置：新会话按进程默认冻结。 */
+export async function readChatDefaultModelConnection(db: DbExecutor, workspaceId: string):
+Promise<{ readonly connectionId: string | null; readonly revision: bigint | null }> {
+  const row = await new ModelConnectionRepository(db).readDefault(workspaceId);
+  return { connectionId: row?.chat_connection_id ?? null,
+    revision: row === undefined ? null : row.revision };
+}
+
+export interface ChatDefaultModelConnectionResult {
+  readonly connection_id: string | null;
+  readonly revision: string;
+}
+
+/**
+ * 设置/取消工作区聊天默认连接。
+ *
+ * 与 Run 默认分列：这里只影响**新会话**在「无显式会话选择」时的冻结来源，既不改 Run 默认，
+ * 也不改任何既有会话的选择；已受理消息按自己的冻结快照执行。`connectionId=null` 是合法的
+ * 显式操作（恢复跟随进程默认），因此命令体必须有值区分「取消」与「漏传」。
+ */
+export async function setChatDefaultModelConnectionCommand(
+  dependencies: { readonly db: DbExecutor },
+  input: { readonly workspaceId: string; readonly commandId: string;
+    readonly connectionId: string | null },
+): Promise<CommandOutcome<ChatDefaultModelConnectionResult & JsonObject>> {
+  return runIdempotentCommand<ChatDefaultModelConnectionResult & JsonObject>(dependencies.db, {
+    scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId,
+    commandType: 'SetChatDefaultModelConnection',
+    target: { workspace_id: input.workspaceId, connection_id: input.connectionId },
+    body: { connection_id: input.connectionId },
+    execute: async (repositories) => {
+      const updated = await repositories.modelConnections.setChatDefault(input.workspaceId,
+        input.connectionId);
+      if (updated === undefined) throw resourceNotFound('Model connection');
+      return { connection_id: updated.chat_connection_id,
+        revision: updated.revision.toString() };
     },
   });
 }

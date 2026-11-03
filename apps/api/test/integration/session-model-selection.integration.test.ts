@@ -145,7 +145,7 @@ test('仓库层 CAS：基线 revision 不符返回 null，绝不覆盖更新的�
   const sessionId = await newSession(workspaceId);
   const repo = new SessionModelSelectionRepository(app.db);
   const base = {
-    sessionId, connection: 'default' as const, model: 'gpt-default',
+    sessionId, connection: 'default' as const, connectionId: null, model: 'gpt-default',
     configFingerprint: 'a'.repeat(64), freeOnly: false, catalogSource: null,
     catalogSnapshotSeq: null, catalogModelId: null, commandId: randomUUID(), now: new Date(),
   };

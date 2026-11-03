@@ -298,6 +298,8 @@ export async function createDelegation(db: DbExecutor, input: {
   readonly modelSelectionSnapshot: JsonObject | null;
   /** 0142：与快照同源的凭据身份；子会话沿用父消息身份，不重新解析当前凭据。 */
   readonly modelCredentialFingerprint?: string | null;
+  /** 0158：父消息冻结的连接身份；子轮次沿用同一条连接，不读当前默认。 */
+  readonly modelConnectionId?: string | null;
   readonly workerId: string;
   readonly maxAttempts?: number;
 }): Promise<CreatedDelegation> {
@@ -346,7 +348,8 @@ export async function createDelegation(db: DbExecutor, input: {
       ...(input.modelSelectionSnapshot === null ? {} : {
         modelSelectionSnapshot: input.modelSelectionSnapshot,
         modelAttemptState: freshAssistModelAttemptState(),
-        modelCredentialFingerprint: input.modelCredentialFingerprint ?? null }),
+        modelCredentialFingerprint: input.modelCredentialFingerprint ?? null,
+        modelConnectionId: input.modelConnectionId ?? null }),
     });
     const delegationId = randomUUID();
     const delegation = await repositories.subagents.insertDelegation({
@@ -482,6 +485,7 @@ async function createRetryAttempt(db: DbExecutor, input: {
       status: 'PENDING', intent: 'DISCUSS', content: null, sources: [], chatMode: 'CHAT',
       modelSelectionSnapshot: input.previousMessage.model_selection_snapshot,
       modelCredentialFingerprint: input.previousMessage.model_credential_fingerprint,
+      modelConnectionId: input.previousMessage.model_connection_id,
       ...(input.previousMessage.model_selection_snapshot === null ? {}
         : { modelAttemptState: freshAssistModelAttemptState() }) });
     const attemptId = randomUUID();
@@ -598,6 +602,7 @@ export async function settleDelegationToolCall(db: DbExecutor, context: Delegati
       parentToolCallId: row.id, request,
       modelSelectionSnapshot: context.parentMessage.model_selection_snapshot,
       modelCredentialFingerprint: context.parentMessage.model_credential_fingerprint,
+      modelConnectionId: context.parentMessage.model_connection_id,
       workerId: context.workerId });
   } catch (error) {
     if (error instanceof DelegationRefusedError) {

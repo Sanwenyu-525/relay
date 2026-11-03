@@ -94,6 +94,12 @@ function router(routes: Routes, calls: { method: string; path: string; body: Rec
     if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null,
       last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
     if (path.endsWith("/attention/interventions")) return response({ items: [] });
+    // AI 页签的「当前使用的模型」读三类作用域；这些用例只关心默认目录的读写边界。
+    if (path === `${prefix}/model-connections`) return response({ items: [] });
+    if (path === `${prefix}/model-connections/default`
+      || path === `${prefix}/model-connections/chat-default`) {
+      return response({ connection_id: null, revision: null });
+    }
 
     if (path.endsWith("/default-working-directory")) {
       const projection = routes.projection?.() ?? unset();
@@ -211,6 +217,12 @@ describe("设置页默认工作目录", () => {
       if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null,
         last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
       if (path.endsWith("/attention/interventions")) return response({ items: [] });
+    // AI 页签的「当前使用的模型」读三类作用域；这些用例只关心默认目录的读写边界。
+    if (path === `${prefix}/model-connections`) return response({ items: [] });
+    if (path === `${prefix}/model-connections/default`
+      || path === `${prefix}/model-connections/chat-default`) {
+      return response({ connection_id: null, revision: null });
+    }
       if (path.endsWith("/working-directories/open")) return response({ command_id: body?.command_id,
         committed_at: "2026-10-19T00:00:00Z", result: openResult() });
       if (path.endsWith("/default-working-directory/clear") && body !== null) {
@@ -366,6 +378,12 @@ describe("设置页默认工作目录", () => {
       const path = new URL(String(input)).pathname;
       const body = init?.method === "POST" ? JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> : null;
       if (path.endsWith("/attention/interventions")) return response({ items: [] });
+    // AI 页签的「当前使用的模型」读三类作用域；这些用例只关心默认目录的读写边界。
+    if (path === `${prefix}/model-connections`) return response({ items: [] });
+    if (path === `${prefix}/model-connections/default`
+      || path === `${prefix}/model-connections/chat-default`) {
+      return response({ connection_id: null, revision: null });
+    }
       if (path.endsWith("/working-directories/open")) return response({ command_id: body?.command_id,
         committed_at: "2026-10-19T00:00:00Z", result: openResult() });
       if (path.endsWith("/default-working-directory/clear") && body !== null) {
@@ -411,6 +429,12 @@ describe("设置页默认工作目录", () => {
       if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null,
         last: null, matches_current_config: false, worker_startup_validation: "NOT_CONFIGURED" });
       if (path.endsWith("/attention/interventions")) return response({ items: [] });
+    // AI 页签的「当前使用的模型」读三类作用域；这些用例只关心默认目录的读写边界。
+    if (path === `${prefix}/model-connections`) return response({ items: [] });
+    if (path === `${prefix}/model-connections/default`
+      || path === `${prefix}/model-connections/chat-default`) {
+      return response({ connection_id: null, revision: null });
+    }
       if (path.endsWith("/default-working-directory") && init?.method !== "POST") {
         reads += 1;
         if (workspace === workspaceId) { await gate; return response(ready("4")); }

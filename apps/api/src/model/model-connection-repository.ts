@@ -156,6 +156,13 @@ export class ModelConnectionRepository {
       connectionId);
   }
 
+  /** 0158：工作区聊天默认连接；与 Run 默认列互不写回。`null` 表示取消聊天默认。 */
+  async setChatDefault(workspaceId: string, connectionId: string | null):
+  Promise<WorkspaceDefaultModelConnectionRow | undefined> {
+    return new WorkspaceDefaultModelConnectionRepository(this.db).setChatDefault(workspaceId,
+      connectionId);
+  }
+
   async setStatus(workspaceId: string, id: string, expectedRevision: bigint,
     status: 'ACTIVE' | 'DISABLED'): Promise<ModelConnectionRow | undefined> {
     return (await sql<ModelConnectionRow>`update model_connections set
@@ -166,12 +173,14 @@ export class ModelConnectionRepository {
 }
 
 /**
- * 工作区默认模型连接（迁移 0144）。
+ * 工作区默认模型连接（迁移 0144；0158 起多一枚聊天默认列）。
  *
- * 只表达「新 Run 从哪条连接冻结」。它**不**写回进程配置，也**不**改会话选择——两者的作用域
- * 不同（会话选择是聊天用哪个模型），混写会让「为什么这个 Run 用了这个模型」无法回答。
+ * 只表达「新 Run 从哪条连接冻结」与「新会话聊天从哪条连接冻结」。它**不**写回进程配置，
+ * 也**不**改会话选择——三者的作用域不同（会话选择是聊天用哪个模型），混写会让
+ * 「为什么这个 Run 用了这个模型」无法回答。
  *
- * `setDefault` 是幂等的：指向同一条连接时不推进 revision，调用方无需先读后写。
+ * `setDefault` / `setChatDefault` 都是幂等的：指向同一条连接时不推进 revision，
+ * 调用方无需先读后写。两列各写各的，`setChatDefault` 绝不顺带改 Run 默认。
  */
 export class WorkspaceDefaultModelConnectionRepository {
   constructor(private readonly db: DbExecutor) {}
@@ -185,10 +194,9 @@ export class WorkspaceDefaultModelConnectionRepository {
   /** 设置默认连接；连接必须属于同一工作区（跨工作区一律按「连接不存在」处理）。 */
   async setDefault(workspaceId: string, connectionId: string):
   Promise<WorkspaceDefaultModelConnectionRow | undefined> {
-    const connection = await sql<{ id: string }>`select id from model_connections
-      where workspace_id = ${workspaceId} and id = ${connectionId}`
-      .execute(this.db);
-    if (connection.rows.length === 0) return undefined;
+    if (!await this.connectionVisible(workspaceId, connectionId)) return undefined;
+    // `is distinct from` 而不是 `<>`：0158 之后 connection_id 可空（只设了聊天默认），
+    // 三值比较会让「原本为 NULL」的行永远不进入更新分支，设置 Run 默认静默失效。
     const updated = await sql<WorkspaceDefaultModelConnectionRow>`
       insert into workspace_default_model_connection (workspace_id, connection_id)
       values (${workspaceId}, ${connectionId})
@@ -196,10 +204,38 @@ export class WorkspaceDefaultModelConnectionRepository {
         connection_id = excluded.connection_id,
         revision = workspace_default_model_connection.revision + 1,
         updated_at = now()
-      where workspace_default_model_connection.connection_id <> excluded.connection_id
+      where workspace_default_model_connection.connection_id
+        is distinct from excluded.connection_id
       returning *`.execute(this.db);
     if (updated.rows[0] !== undefined) return updated.rows[0];
     // 已经是这条连接：不推进 revision，直接回读当前行。
     return this.read(workspaceId);
+  }
+
+  /** 设置聊天默认连接；与 Run 默认列互不写回。`null` 表示取消聊天默认。 */
+  async setChatDefault(workspaceId: string, connectionId: string | null):
+  Promise<WorkspaceDefaultModelConnectionRow | undefined> {
+    if (connectionId !== null && !await this.connectionVisible(workspaceId, connectionId)) {
+      return undefined;
+    }
+    const updated = await sql<WorkspaceDefaultModelConnectionRow>`
+      insert into workspace_default_model_connection (workspace_id, connection_id, chat_connection_id)
+      values (${workspaceId}, null, ${connectionId})
+      on conflict (workspace_id) do update set
+        chat_connection_id = excluded.chat_connection_id,
+        revision = workspace_default_model_connection.revision + 1,
+        updated_at = now()
+      where workspace_default_model_connection.chat_connection_id
+        is distinct from excluded.chat_connection_id
+      returning *`.execute(this.db);
+    if (updated.rows[0] !== undefined) return updated.rows[0];
+    return this.read(workspaceId);
+  }
+
+  private async connectionVisible(workspaceId: string, connectionId: string): Promise<boolean> {
+    const connection = await sql<{ id: string }>`select id from model_connections
+      where workspace_id = ${workspaceId} and id = ${connectionId}`
+      .execute(this.db);
+    return connection.rows.length > 0;
   }
 }

@@ -231,6 +231,9 @@ const ALL_MIGRATIONS = [
   // 清单必须同步，否则真实库上会因多两条而失败。
   '0156_execution_activity_observation_times',
   '0157_assist_session_title_ownership',
+  // 0158（MODEL-SETTINGS-01）：会话选择可绑定已登记连接、工作区聊天默认、消息冻结连接
+  // 身份与 VERIFY 连接归属。清单必须同步，否则真实库上会因多一条而失败。
+  '0158_model_connection_session_selection',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -866,9 +869,11 @@ test('0149 marks legacy execution requests LEGACY_UNCLASSIFIED and the use case 
           title, conversation_mode, context_budget_tokens)
         values (${sessionId}, ${workspaceId}, ${projectId}, null,
           'Legacy execution', 'AGENT', 262144)`.execute(trx);
-      await repositories.assist.insertMessage({ id: messageId, sessionId, seq: 1n,
-        role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '把首页标题改一下',
-        sources: [] });
+      // 0158 的 `model_connection_id` 同样不在当时的 schema 里：消息也按当时的列直接播种。
+      await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
+          content)
+        values (${messageId}, ${sessionId}, 1, 'USER', 'COMPLETED', 'DISCUSS',
+          '把首页标题改一下')`.execute(trx);
     });
     // 0149 之前的请求行：没有 execution_kind / machine_capability 两列。
     await sql`insert into managed_resources (id, workspace_id, project_id, canonical_root,
@@ -947,10 +952,11 @@ test('0150 backfills scope_seq from the opening user message and keeps history r
           title, conversation_mode, chat_mode, context_budget_tokens)
         values (${sessionId}, ${workspaceId}, null, null,
           'Legacy order session', 'AGENT', 'CHAT', 262144)`.execute(trx);
-      // 作用域开启消息在第 7 位：0150 的回填依据就是这一位。
-      await repositories.assist.insertMessage({ id: userMessageId, sessionId, seq: 7n,
-        role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: '开始迁移',
-        sources: [] });
+      // 0158 的 `model_connection_id` 也不在当时的 schema 里：按当时的列直接播种。
+      await sql`insert into assist_messages (id, session_id, seq, role, status, intent,
+          content)
+        values (${userMessageId}, ${sessionId}, 7, 'USER', 'COMPLETED', 'DISCUSS',
+          '开始迁移')`.execute(trx);
     });
     // 0150 之前的快照与事件：有 scope_key，没有 scope_seq / request_digest。
     await sql`insert into assist_session_todo_snapshots (session_id, workspace_id, scope_key,

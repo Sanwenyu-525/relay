@@ -40,3 +40,42 @@ it("读取目录不推理，不选随机路由，未知生成配置保持不可�
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[0]?.[1]).not.toHaveProperty("method", "POST");
 });
+
+it("选择已登记连接只提交 connection_id，并按连接身份核对回执", async () => {
+  const posts: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)); posts.push(body);
+    return new Response(JSON.stringify({ command_id: body.command_id, committed_at: "2026-11-02T00:00:00Z",
+      result: { kind: "MODEL_SELECTION", session_id: "s1", connection: "registered",
+        connection_id: body.connection_id, model: "vendor/registered", free_only: false, revision: "3" } }));
+  }));
+  const selected = await api().selectSessionConnection({ sessionId: "s1", commandId: "choose-conn", connectionId: "conn-1" });
+  expect(posts).toEqual([{ command_id: "choose-conn", connection_id: "conn-1" }]);
+  expect(selected).toMatchObject({ connection: "registered", connectionId: "conn-1", model: "vendor/registered" });
+});
+
+it("另一条连接即使型号相同也不算本次选择成功", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ command_id: "choose-conn",
+    committed_at: "2026-11-02T00:00:00Z",
+    result: { kind: "MODEL_SELECTION", session_id: "s1", connection: "registered",
+      connection_id: "conn-2", model: "vendor/registered", free_only: false, revision: "3" } }))));
+  await expect(api().selectSessionConnection({ sessionId: "s1", commandId: "choose-conn",
+    connectionId: "conn-1" })).rejects.toBeInstanceOf(RelayTransportError);
+});
+
+it("清除会话选择返回服务端 cleared，不回推本地状态", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ command_id: "clear-1",
+    committed_at: "2026-11-02T00:00:00Z",
+    result: { kind: "MODEL_SELECTION_CLEARED", session_id: "s1", cleared: true } }))));
+  expect(await api().clearSessionModelSelection({ sessionId: "s1", commandId: "clear-1" })).toBe(true);
+});
+
+it("兼容旧服务的裸选择：缺 connection 按免费开关回推，空 model 视为未选择", async () => {
+  let body: unknown = { session_id: "s1", model: "v/a:free", free_only: true, revision: "7" };
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body))));
+  const client = api();
+  expect(await client.getSessionModelSelection("s1")).toMatchObject({ connection: "openrouter",
+    connectionId: null, model: "v/a:free" });
+  body = { model: null, revision: "0" };
+  expect(await client.getSessionModelSelection("s1")).toBeNull();
+});

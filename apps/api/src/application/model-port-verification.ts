@@ -1,16 +1,25 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { DbExecutor } from '../infrastructure/database.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
+import { CredentialStoreError } from '../credentials/credential-store.js';
 import { ModelCallRepository } from '../model/model-call-repository.js';
+import { ModelProviderCooldownRepository } from '../model/model-provider-cooldown-repository.js';
 import type { ModelUsage } from '../workflow/fake-model-port.js';
-import { computeModelConfigFingerprint } from '../workflow/model-port-config.js';
-import { readCredentialFingerprint } from '../workflow/credential-identity.js';
+import { computeModelConfigFingerprint, type ModelPortConfig } from
+  '../workflow/model-port-config.js';
+import { accountCooldownKey, compareCredentialIdentity, readCredentialFingerprint } from
+  '../workflow/credential-identity.js';
 import { classifyVerifyError, resolveVerifyTargetConfig, ModelVerifyTargetError,
-  VERIFY_PROMPT, VERIFY_TIMEOUT_MS,
-  type ModelVerifyResult, type VerifyCallPort } from '../workflow/model-port-verify.js';
-import { DEFAULT_VERIFY_TARGET, type VerifyTarget } from '../workflow/model-verify-target.js';
+  VERIFY_PROMPT, VERIFY_TIMEOUT_MS, verifyResultFromRow,
+  type ModelVerificationState, type ModelVerifyResult, type VerifyCallPort } from
+  '../workflow/model-port-verify.js';
+import { DEFAULT_VERIFY_TARGET, describeVerifyTarget, describeVerifyTargetState,
+  type VerifyTarget } from '../workflow/model-verify-target.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
+import { connectionCredentials, modelPortConfigFromConnection } from
+  './model-connection-runtime.js';
 import { createRepositories } from './unit-of-work.js';
 
 export interface RunModelPortVerificationInput {
@@ -21,6 +30,40 @@ export interface RunModelPortVerificationInput {
   readonly now?: () => Date;
   /** P1-4：验证目标；缺省为进程默认连接。OpenRouter 目录型号使用独立凭据与零价探针。 */
   readonly target?: VerifyTarget | undefined;
+  /** 0158：验证已登记连接时解析其系统凭据库引用；缺省用进程默认存储。 */
+  readonly credentials?: CredentialStore | undefined;
+}
+
+/**
+ * 已登记连接的验证配置解析（0158）。
+ *
+ * 型号、端点与预算都取连接行本身——不允许客户端另报型号，否则会造出「连接 A 的凭据跑
+ * 型号 B」的验证结果。凭据只从系统凭据库解析，既不读进程环境变量，也不回退其他连接；
+ * 缺失或存储不可用都在外呼前显式拒绝，不写一行看起来像「已验证」的账本。
+ */
+async function resolveRegisteredVerifyTarget(db: DbExecutor, credentials: CredentialStore | undefined,
+  workspaceId: string, connectionId: string): Promise<ModelPortConfig> {
+  const repository = createRepositories(db);
+  const row = await repository.modelConnections.read(workspaceId, connectionId);
+  if (row === undefined) {
+    throw new ModelVerifyTargetError('MODEL_VERIFY_CONNECTION_UNAVAILABLE',
+      'model connection is not visible in this workspace');
+  }
+  let apiKey: string | undefined;
+  try {
+    apiKey = await connectionCredentials(credentials).resolve(row.credential_ref);
+  } catch (error) {
+    if (error instanceof CredentialStoreError) {
+      throw new ModelVerifyTargetError('MODEL_VERIFY_CREDENTIAL_STORE_UNAVAILABLE',
+        `credential store is unavailable (${error.code})`);
+    }
+    throw error;
+  }
+  if (apiKey === undefined || apiKey.trim() === '') {
+    throw new ModelVerifyTargetError('MODEL_VERIFY_CREDENTIAL_MISSING',
+      'model connection has no stored credential');
+  }
+  return modelPortConfigFromConnection(row, apiKey);
 }
 
 /** Reserve new VERIFY work under the admission gate; network and settlement drain normally. */
@@ -50,7 +93,11 @@ export async function runModelPortVerification(
   input: RunModelPortVerificationInput,
 ): Promise<ModelVerifyResult> {
   const target = input.target ?? DEFAULT_VERIFY_TARGET;
-  const resolved = resolveVerifyTargetConfig(input.env, target);
+  // 已登记连接：凭据与配置来自连接行 + 系统凭据库，不经进程环境；其余目标沿用原解析。
+  const resolved = target.connection === 'registered'
+    ? { config: await resolveRegisteredVerifyTarget(input.db, input.credentials,
+      input.workspaceId, target.connectionId), guard: undefined }
+    : resolveVerifyTargetConfig(input.env, target);
   const config = resolved.config;
   const configFingerprint = computeModelConfigFingerprint(config);
   // 免费目录型号在探测前先确认「此刻仍然是可探测的免费文本型号」：目录过期或资格变化时
@@ -63,10 +110,11 @@ export async function runModelPortVerification(
   const inputHash = createHash('sha256').update(VERIFY_PROMPT, 'utf8').digest('hex');
   const calls = new ModelCallRepository(input.db);
   const callId = randomUUID();
+  const connectionId = target.connection === 'registered' ? target.connectionId : null;
   await input.db.transaction().execute(async (trx) => {
     requireNormalAdmission(await readAdmission(createRepositories(trx), 'share'));
     await new ModelCallRepository(trx).beginVerifyInTransaction(callId,
-      { workspaceId: input.workspaceId, inputHash },
+      { workspaceId: input.workspaceId, inputHash, connectionId },
       { provider: config.provider, model: config.model, configFingerprint,
         credentialFingerprint: readCredentialFingerprint(config) });
   });
@@ -121,4 +169,78 @@ export async function runModelPortVerification(
       verified_at: now().toISOString(),
     };
   }
+}
+
+/**
+ * 某条已登记连接的验证状态（0158，只读）。
+ *
+ * 与进程默认/OpenRouter 的 `readModelVerificationState` 同一套状态推导，差别只在事实来源：
+ *   * 配置来自连接行 + 系统凭据库，不读 `.env`；
+ *   * 最近一次验证按 `model_calls.connection_id` 精确归属，不让同型号的其他连接冒充；
+ *   * 凭据身份也用**本连接**的验证行比较——轮换后旧结论立即变成 `CREDENTIAL_CHANGED`；
+ *   * 没有目录依据（自建 Provider 不在目录里），catalog 恒为 null，不制造「免费资格」结论。
+ *
+ * 凭据存储或凭据缺失不在这里抛错（这是只读查询）：状态保守落在 NOT_CONFIGURED 之外的
+ * 既有无凭据语义上；`runModelPortVerification` 的显式错误才是可操作入口。
+ */
+export async function readModelConnectionVerificationState(input: {
+  readonly db: DbExecutor;
+  readonly workspaceId: string;
+  readonly connectionId: string;
+  readonly credentials?: CredentialStore | undefined;
+}): Promise<ModelVerificationState> {
+  const repository = createRepositories(input.db);
+  const row = await repository.modelConnections.read(input.workspaceId, input.connectionId);
+  if (row === undefined) {
+    throw new ModelVerifyTargetError('MODEL_VERIFY_CONNECTION_UNAVAILABLE',
+      'model connection is not visible in this workspace');
+  }
+  let config: ModelPortConfig | undefined;
+  try {
+    const apiKey = await connectionCredentials(input.credentials).resolve(row.credential_ref);
+    if (apiKey !== undefined && apiKey.trim() !== '') {
+      config = modelPortConfigFromConnection(row, apiKey);
+    }
+  } catch (error) {
+    if (!(error instanceof CredentialStoreError)) throw error;
+    // 存储不可用：仍返回可读状态，但绝不显示「已验证」；POST 验证会给出可操作错误。
+    config = undefined;
+  }
+  const currentFingerprint = config === undefined ? null : computeModelConfigFingerprint(config);
+  const calls = new ModelCallRepository(input.db);
+  const globalRow = await calls.latestVerify();
+  const targetRow = await calls.latestVerifyForConnection(input.workspaceId, input.connectionId);
+  const last = globalRow === undefined ? null : verifyResultFromRow(globalRow);
+  const targetLast = targetRow === undefined ? null : verifyResultFromRow(targetRow);
+  const credentialIdentity = config === undefined || targetRow === undefined
+    ? 'UNKNOWN' as const
+    : compareCredentialIdentity(targetRow.credential_fingerprint, readCredentialFingerprint(config));
+  const accountCooldownActive = config === undefined ? false
+    : await new ModelProviderCooldownRepository(input.db).readActive({ scope: 'ACCOUNT',
+      modelId: '', configFingerprint: accountCooldownKey(readCredentialFingerprint(config)),
+      now: new Date() }) !== undefined;
+  const state = describeVerifyTargetState({
+    configured: config !== undefined,
+    configIncomplete: false,
+    catalog: null,
+    accountCooldownActive,
+    credentialIdentity,
+    currentFingerprint,
+    last: targetRow === undefined ? null : { ok: targetRow.status === 'COMPLETED',
+      configFingerprint: targetRow.config_fingerprint, errorKind: targetRow.error_kind },
+  });
+  return {
+    target: describeVerifyTarget({ connection: 'registered', connectionId: input.connectionId }),
+    connection: 'registered',
+    connection_id: input.connectionId,
+    model: row.default_model,
+    current_config_fingerprint: currentFingerprint,
+    last,
+    target_last: targetLast,
+    matches_current_config: targetRow !== undefined && currentFingerprint !== null &&
+      targetRow.config_fingerprint === currentFingerprint && credentialIdentity !== 'CHANGED',
+    credential_identity: credentialIdentity,
+    state,
+    worker_startup_validation: 'NOT_CONFIGURED',
+  };
 }

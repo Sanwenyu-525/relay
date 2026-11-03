@@ -41,7 +41,9 @@ import { applyTaskSkillContractChange } from './task-contract-commands.js';
 import { skillOutputHash } from '../skills/skill-proposal.js';
 import { requireRevision } from './revisions.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
-import { freezeAssistModelSnapshot } from './assist-model-snapshot.js';
+import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { freezeChatModelSnapshot } from './model-connection-runtime.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { createGoalForMessage } from './assist-goals.js';
 import { assertChatModeSupportedForIdentity, parseChatModePrefix } from './chat-mode.js';
 import { parseNewTaskPrefix } from '../assist/session-todos.js';
@@ -556,6 +558,8 @@ export async function requestAssistMessage(
   db: DbExecutor,
   input: RequestAssistMessageInput,
   modelEnv: NodeJS.ProcessEnv = process.env,
+  /** 0158：冻结聊天默认/会话选定连接时解析其凭据；缺省用进程默认存储（DPAPI）。 */
+  credentials?: CredentialStore | undefined,
 ): Promise<CommandOutcome<RequestAssistMessageResult>> {
   if (input.expectedModelSelectionRevision !== undefined &&
       !/^[1-9][0-9]*$/u.test(input.expectedModelSelectionRevision)) {
@@ -832,11 +836,11 @@ export async function requestAssistMessage(
       const hasRuntimeTools = (session.conversation_mode === 'AGENT' ||
         session.conversation_mode === 'ASSISTANT') && intent === 'DISCUSS' && skill === null &&
         (await resolveSessionReadTools(repositories, session)).length > 0;
-      const modelSnapshot = await freezeAssistModelSnapshot(repositories, selection, modelEnv, {
+      const modelSnapshot = await freezeChatModelSnapshot(repositories, selection, modelEnv, {
         requiresTools: hasRuntimeTools,
         requiresJsonOutput: intent !== 'DISCUSS' || skill !== null ||
           session.conversation_mode === 'LEARNING',
-      }, { workspaceId: session.workspace_id, sessionId: session.id });
+      }, { workspaceId: session.workspace_id, sessionId: session.id }, credentials);
 
       const userSeq = await repositories.assist.nextMessageSeq(session.id);
       const userMessageId = randomUUID();
@@ -849,8 +853,15 @@ export async function requestAssistMessage(
         throw invalidTransition('免费模型会话仅支持文本消息。', { sessionId: session.id });
       }
       if (messageAttachments.length > 0) {
-        await assertChatModelAcceptsImages(repositories, input.chatModelName,
-          input.declaredImageInput === true, input.modelProvider);
+        // 用**冻结后的实际模型**判定；客户端报上来的模型名只在没有真实冻结计划时兜底。
+        const frozenCandidate = modelSnapshot === undefined ? undefined
+          : parseAssistModelSnapshot(modelSnapshot.snapshot).candidates[0];
+        await assertChatModelAcceptsImages(repositories,
+          frozenCandidate?.connection.model ?? input.chatModelName,
+          input.declaredImageInput === true, input.modelProvider,
+          // 兼容期环境变量只描述进程默认连接：OpenRouter 免费型号与已登记连接不继承它。
+          modelSnapshot === undefined ||
+            modelSnapshot.connectionId === null && selection?.connection !== 'openrouter');
       }
       await repositories.assist.insertMessage({
         id: userMessageId, sessionId: session.id, seq: userSeq, role: 'USER',
@@ -914,6 +925,8 @@ export async function requestAssistMessage(
           modelAttemptState: modelSnapshot.attemptState,
           // 0142：凭据身份与快照同事务写入，供执行端发现「换 Key 后不要静默转用新凭据」。
           modelCredentialFingerprint: modelSnapshot.credentialFingerprint,
+          // 0158：已登记连接的身份与快照同事务写入；执行端据此解析，不重新读当前默认。
+          modelConnectionId: modelSnapshot.connectionId,
         }),
       });
       return { session_id: session.id, user_message_id: userMessageId,
@@ -924,22 +937,19 @@ export async function requestAssistMessage(
 }
 
 /**
- * 0093：图片附件的模型能力闸门。当前聊天恒由进程默认连接服务（会话选择→端口接线
- * 属阶段 C-2b，落地后此处应改为读取冻结快照），因此按进程默认模型名在目录里查条目：
- * 无条目或 image_input 非 true 一律拒绝——未知不冒充可用，也不因带图就换模型、
- * 换连接或悄悄降级为纯文本。
+ * 0093：图片附件的模型能力闸门。
  *
- * 2026-10-18：目录里**没有**该模型条目时，允许运维用 `RELAY_MODEL_IMAGE_INPUT=true`
- * 显式声明（自建 Provider 不在 OpenRouter 目录里，这是唯一可核对的事实来源）。
- * 目录里有条目时目录仍是准绳，声明不能把目录判定为「不支持」改成支持。
- *
- * 2026-10-19：判定本身移到 `chat-image-input.ts`，与 `/model-port` 的只读投影共用；
- * 声明来源扩为「声明表（按 provider+模型）→ 环境变量（兼容期）」，所以这里先读声明表。
- * 本函数只负责按判定拒绝，不解释来源。
+ * 判定的模型必须是**这条消息实际冻结的模型**（会话选择 / 聊天默认连接 / 进程默认），
+ * 不是客户端报上来的模型名：界面说可以、发送被拒的根源就是两边各算一次。
+ * 目录里没有该模型条目、声明表也没有时：
+ *   * 进程默认连接仍可用 `RELAY_MODEL_IMAGE_INPUT=true`（兼容期，只对当前进程连接生效）；
+ *   * 会话显式选择与已登记连接**不**继承这条环境变量——它描述的是另一条连接。
+ * 无条目且无声明一律拒绝：未知不冒充可用，也不因带图就换模型、换连接或降级为纯文本。
  */
 async function assertChatModelAcceptsImages(
   repositories: Repositories, chatModelName: string | undefined,
-  declaredImageInput = false, provider = 'openai-compatible'): Promise<void> {
+  declaredImageInput = false, provider = 'openai-compatible',
+  envDeclarationApplies = true): Promise<void> {
   const model = chatModelName?.trim() ?? '';
   const entry = model === '' ? undefined
     : await repositories.modelCatalog.readEntryBySourceModelId(model);
@@ -948,7 +958,7 @@ async function assertChatModelAcceptsImages(
     : (await repositories.modelCapabilities.readDeclaration(provider, model))?.image_input;
   const decision = decideChatImageInput({ configured: model !== '',
     catalogEntry: entry === undefined ? undefined : { imageInput: entry.capabilities.image_input },
-    declaration, declared: declaredImageInput });
+    declaration, declared: envDeclarationApplies && declaredImageInput });
   if (chatImageInputAccepted(decision.state)) return;
   const message = chatImageInputRejection(decision.state);
   throw validationFailed([{ field: 'attachment_ids', message: message ?? '不能发送图片附件。' }]);

@@ -10,8 +10,11 @@ import type { AssistContentPart, AssistIntent, AssistModelPort, AssistTurn,
   ModelUsage, AssistRequest, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { invokeAssistWithFreeModelRouting } from './assist-free-model-routing.js';
-import { applySnapshotBudget, parseAssistModelSnapshot, readAssistModelRouteStopCode } from './assist-model-snapshot.js';
+import { applySnapshotBudget, parseAssistModelSnapshot, readAssistModelRouteStopCode,
+  snapshotIdentityBudget } from './assist-model-snapshot.js';
 import { compareCredentialIdentity } from '../workflow/credential-identity.js';
+import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { assistPayloadHash } from './assist-commands.js';
 import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
 import { contextUsageToJson, describeAssistRequestContext, type ContextUsageCategory }
@@ -94,6 +97,8 @@ export interface AssistGenerationOptions {
   /** Internal deterministic injection points; production uses process env and guarded fetch. */
   readonly modelEnv?: NodeJS.ProcessEnv;
   readonly modelFetchDependencies?: ModelFetchDependencies;
+  /** 0158：解析消息冻结的已登记连接所用凭据存储；缺省用进程默认（DPAPI）。 */
+  readonly credentials?: CredentialStore | undefined;
   readonly leaseMs: number;
   readonly signal?: AbortSignal | undefined;
   /** 每次 tick 最多处理的消息数；V1 为 1，保持与 Run 命令相同的单步节奏。 */
@@ -188,7 +193,8 @@ export async function runAssistGenerationTick(db: DbExecutor,
         errorCode: 'SESSION_MISSING', proposalIds: [] };
     }
     if (session.conversation_mode === 'AGENT' && !message.cancel_requested &&
-        await prepareAutomaticMemory(db, session.id, message.model_selection_snapshot, options)) {
+        await prepareAutomaticMemory(db, session.id, message.model_selection_snapshot, options, 0,
+          message.model_connection_id)) {
       if (!await r.assist.requeueForMemory(message.id, options.workerId)) {
         const job = await r.assistMemory.activeRequest(session.id);
         if (job?.reason === 'AUTO') await r.assistMemory.cancel(job.id);
@@ -197,7 +203,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
       }
       return { messageId: message.id, sessionId: session.id, status: 'DISCARDED', errorCode: null, proposalIds: [] };
     }
-    const modelRoute = resolveAssistModelRoute(db, message, session, options, options.workerId);
+    const modelRoute = await resolveAssistModelRoute(db, message, session, options, options.workerId);
 
     // B 档人设助手会话走只读工具轮次：领取身份、心跳租约、取消轮询与 Worker CAS 结算
     // 都是同一条既有机制，这里只换掉「模型拿到什么词表」与「结果落到哪张账本」。
@@ -599,6 +605,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
         try {
           await captureMemoriesForTurn(db, { sessionId: session.id,
             assistantMessageId: message.id, modelPort: modelRoute.modelPort,
+            ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
             ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
             ...(options.modelFetchDependencies === undefined ? {}
               : { modelFetchDependencies: options.modelFetchDependencies }),
@@ -710,12 +717,37 @@ interface AssistModelRoute {
     invoke: (port: AssistModelPort, callId: string) => Promise<AssistResult>) => Promise<AssistResult>;
 }
 
-function resolveAssistModelRoute(db: DbExecutor, message: AssistMessageRow,
-  session: AssistSessionRow, options: AssistGenerationOptions, workerId: string): AssistModelRoute {
+async function resolveAssistModelRoute(db: DbExecutor, message: AssistMessageRow,
+  session: AssistSessionRow, options: AssistGenerationOptions, workerId: string):
+Promise<AssistModelRoute> {
   if (message.model_selection_snapshot === null) return { modelPort: options.modelPort };
   const snapshot = parseAssistModelSnapshot(message.model_selection_snapshot);
   const selected = snapshot.candidates[0];
   if (selected === undefined) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  /*
+   * 0158：这条消息冻结的是**已登记连接**。
+   *
+   * 只按消息自己的 `model_connection_id` 解析，绝不重新读「当前默认连接」——改默认不能让
+   * 排队中或正在生成的消息悄悄换 Provider。五道闸门（可见 / ACTIVE / 型号与配置指纹未变 /
+   * 凭据仍在 / 凭据身份未变）任一不符即以精确停因码停下；停就是停，不退回进程默认。
+   */
+  if (message.model_connection_id !== null) {
+    if (selected.connection.provider !== 'openai-compatible') {
+      throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+    }
+    const modelPort = await resolveFrozenChatConnectionPort(createRepositories(db), {
+      workspaceId: session.workspace_id,
+      connectionId: message.model_connection_id,
+      frozenModel: selected.connection.model,
+      frozenConfigFingerprint: selected.connection.configFingerprint,
+      frozenCredentialFingerprint: message.model_credential_fingerprint,
+      budget: snapshotIdentityBudget(snapshot.budget),
+      ...(options.modelFetchDependencies === undefined ? {}
+        : { transport: options.modelFetchDependencies }),
+      ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+    });
+    return { modelPort };
+  }
   if (selected.connection.provider === 'openai-compatible') {
     if (selected.connection.model !== options.modelPort.identity.model ||
         selected.connection.configFingerprint !== options.modelPort.identity.configFingerprint) {
@@ -913,7 +945,8 @@ async function runSubagentChildGeneration(db: DbExecutor, context: {
   try {
     let route: AssistModelRoute;
     try {
-      route = resolveAssistModelRoute(db, childMessage, childSession, options, options.workerId);
+      route = await resolveAssistModelRoute(db, childMessage, childSession, options,
+        options.workerId);
     } catch (error) {
       return await settleChild({ status: 'FAILED',
         errorCode: error instanceof Error ? error.message : 'SUBAGENT_MODEL_ROUTE_FAILED',
@@ -1103,7 +1136,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     ...(context.chatMode === 'PLAN' || context.chatMode === 'GOAL_ROUND'
       ? { responseFormat: 'json_object' as const } : {}),
     allowTodo: context.chatMode !== 'PLAN',
-    availableTools, system, modelPort: options.modelPort, signal: controller.signal,
+    availableTools, system, modelPort: context.modelRoute.modelPort, signal: controller.signal,
     // GOAL_ROUND_CONTINUATION：调度请求不是新授权，也不能只接写上一轮助手正文。
     contextTurns: context.chatMode === 'GOAL_ROUND'
       ? [...memoryInput.turns, { role: 'user' as const, content:
@@ -1384,7 +1417,8 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       // 判定依据只来自数据库。
       try {
         await captureMemoriesForTurn(db, { sessionId: session.id,
-          assistantMessageId: message.id, modelPort: options.modelPort,
+          assistantMessageId: message.id, modelPort: context.modelRoute.modelPort,
+          ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
           ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
           ...(options.modelFetchDependencies === undefined ? {}
             : { modelFetchDependencies: options.modelFetchDependencies }),
@@ -1723,7 +1757,8 @@ class AssistMemoryRequeued extends Error {}
 
 async function requeueForContextPressure(db: DbExecutor, session: AssistSessionRow,
   message: AssistMessageRow, options: AssistGenerationOptions, bytes: number): Promise<boolean> {
-  if (!await prepareAutomaticMemory(db, session.id, message.model_selection_snapshot, options, bytes)) return false;
+  if (!await prepareAutomaticMemory(db, session.id, message.model_selection_snapshot, options, bytes,
+    message.model_connection_id)) return false;
   const r = createRepositories(db);
   if (!await r.assist.requeueForMemory(message.id, options.workerId)) {
     const job = await r.assistMemory.activeRequest(session.id);

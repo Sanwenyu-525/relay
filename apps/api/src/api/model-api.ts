@@ -10,7 +10,8 @@ import {
   type ModelVerifyResult,
   type VerifyCallPort,
 } from '../workflow/model-port-verify.js';
-import { runModelPortVerification } from '../application/model-port-verification.js';
+import { runModelPortVerification,
+  readModelConnectionVerificationState } from '../application/model-port-verification.js';
 import { DEFAULT_VERIFY_TARGET, VERIFY_TARGET_STATES, type VerifyTarget } from
   '../workflow/model-verify-target.js';
 import { ModelVerifyTargetError } from '../workflow/model-port-verify.js';
@@ -113,9 +114,12 @@ const VerifyTargetStateSchema = Type.Union(VERIFY_TARGET_STATES.map((state) =>
   Type.Literal(state)));
 
 const VerificationStateSchema = Type.Object({
-  /** P1-4：本次查询的验证目标（`default` 或 `openrouter:<确切型号>`）。 */
+  /** P1-4/0158：`default`、`openrouter:<确切型号>` 或 `registered:<连接 ID>`。 */
   target: Type.String(),
-  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter')]),
+  connection: Type.Union([Type.Literal('default'), Type.Literal('openrouter'),
+    Type.Literal('registered')]),
+  /** 0158：`connection=registered` 时为该连接 ID；另两种恒为 null。 */
+  connection_id: Type.Union([UuidSchema, Type.Null()]),
   model: Type.Union([Type.String(), Type.Null()]),
   current_config_fingerprint: Type.Union([Type.String(), Type.Null()]),
   last: Type.Union([VerifyResultSchema, Type.Null()]),
@@ -248,9 +252,12 @@ function catalogConfigProblem(error: ConfigError): ProblemDetails {
 }
 
 /**
- * 读取验证目标（P1-4）。缺省＝默认连接；`openrouter` 必须带确切型号。
+ * 读取验证目标（P1-4 / 0158）。缺省＝默认连接；`openrouter` 必须带确切型号；
+ * `registered` 必须带工作区连接的稳定 ID（型号由连接行提供，不接受客户端另报）。
  * 不猜型号、不把「目录里有某个免费模型」当成用户选了它。
  */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function readVerifyTargetFrom(raw: unknown): VerifyTarget {
   if (raw === undefined || raw === null) return DEFAULT_VERIFY_TARGET;
   if (typeof raw !== 'object' || Array.isArray(raw)) throw verifyTargetInvalid();
@@ -258,6 +265,11 @@ function readVerifyTargetFrom(raw: unknown): VerifyTarget {
   const connection = value.connection;
   if (connection === undefined || connection === null || connection === 'default') {
     return DEFAULT_VERIFY_TARGET;
+  }
+  if (connection === 'registered') {
+    const connectionId = typeof value.connection_id === 'string' ? value.connection_id : '';
+    if (!UUID_PATTERN.test(connectionId)) throw verifyTargetInvalid();
+    return { connection: 'registered', connectionId };
   }
   if (connection !== 'openrouter') throw verifyTargetInvalid();
   const model = typeof value.model === 'string' ? value.model.trim() : '';
@@ -268,7 +280,8 @@ function readVerifyTargetFrom(raw: unknown): VerifyTarget {
 function verifyTargetInvalid(): ProblemError {
   return new ProblemError({
     type: '/problems/model-verify-target-invalid', title: '验证目标无效', status: 400,
-    detail: '验证目标只接受 default，或 connection=openrouter 加 1–200 字符的确切型号。',
+    detail: '验证目标只接受 default，connection=registered 加 connection_id，'
+      + '或 connection=openrouter 加 1–200 字符的确切型号。',
     code: 'MODEL_VERIFY_TARGET_INVALID', retryable: false, retryAction: 'NONE',
   });
 }
@@ -279,6 +292,25 @@ function verifyTargetProblem(error: ModelVerifyTargetError): ProblemDetails {
       detail: '目录快照已过期，无法确认该型号的免费资格；请先刷新目录再验证。',
       code: 'MODEL_VERIFY_CATALOG_STALE', retryable: true,
       retryAction: 'REFRESH_AND_REDECIDE' };
+  }
+  if (error.code === 'MODEL_VERIFY_CONNECTION_UNAVAILABLE') {
+    return { type: '/problems/model-verify-connection-unavailable', title: '模型连接不可用',
+      status: 404,
+      detail: '这条模型连接在当前工作区中不可见；请刷新设置页后重新选择。',
+      code: 'MODEL_VERIFY_CONNECTION_UNAVAILABLE', retryable: false, retryAction: 'NONE' };
+  }
+  if (error.code === 'MODEL_VERIFY_CREDENTIAL_MISSING') {
+    return { type: '/problems/model-verify-credential-missing', title: '连接缺少凭据',
+      status: 409,
+      detail: '这条连接在系统凭据库里没有可用凭据；请先在设置里填写 API Key 再验证。',
+      code: 'MODEL_VERIFY_CREDENTIAL_MISSING', retryable: false, retryAction: 'NONE' };
+  }
+  if (error.code === 'MODEL_VERIFY_CREDENTIAL_STORE_UNAVAILABLE') {
+    return { type: '/problems/model-verify-credential-store-unavailable',
+      title: '凭据存储不可用', status: 503,
+      detail: '系统凭据库无法读取；本次验证未发起任何模型调用，请检查凭据存储后重试。',
+      code: 'MODEL_VERIFY_CREDENTIAL_STORE_UNAVAILABLE', retryable: true,
+      retryAction: 'CHECK_RECEIPT_THEN_RETRY' };
   }
   return { type: '/problems/model-verify-target-not-eligible', title: '目标型号不可验证',
     status: 409,
@@ -426,14 +458,23 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
   app.get('/model-port/verification', { schema: {
     params: ParamsSchema, response: { 200: VerificationStateSchema } } },  async (request, reply) => {
     try {
-      // P1-4：可选 `?connection=openrouter&model=<id>` 查询「所选型号」的状态；
-      // 缺省仍是进程默认连接，旧客户端行为不变。
+      // P1-4/0158：`?connection=openrouter&model=<id>` 或 `?connection=registered&connection_id=<id>`
+      // 查询所选目标的状态；缺省仍是进程默认连接，旧客户端行为不变。
+      const params = request.params as { workspace_id: string };
       const target = readVerifyTargetFrom(request.query);
-      const state = await readModelVerificationState(
-        dependencies.database.executor, process.env, target);
+      const state = target.connection === 'registered'
+        ? await readModelConnectionVerificationState({
+          db: dependencies.database.executor,
+          workspaceId: params.workspace_id,
+          connectionId: target.connectionId,
+          credentials: dependencies.credentials,
+        })
+        : await readModelVerificationState(
+          dependencies.database.executor, process.env, target);
       return {
         target: state.target,
         connection: state.connection,
+        connection_id: state.connection_id,
         model: state.model,
         current_config_fingerprint: state.current_config_fingerprint,
         last: state.last === null ? null : toVerifyResultBody(state.last),
@@ -445,6 +486,9 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
       };
     } catch (error) {
       if (error instanceof ProblemError) return sendProblem(reply, error.problem, request.id);
+      if (error instanceof ModelVerifyTargetError) {
+        return sendProblem(reply, verifyTargetProblem(error), request.id);
+      }
       return sendReadError(reply, error, request.id);
     }
   });
@@ -461,6 +505,7 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
         env: process.env,
         call: verifyCall,
         target,
+        credentials: dependencies.credentials,
       }));
       return toVerifyResultBody(result);
     } catch (error) {

@@ -65,6 +65,34 @@ Promise<RelayDefaultModelConnection> {
   };
 }
 
+/**
+ * 工作区聊天默认连接：只影响「没有显式会话选择」的新消息；与 Run 默认分列，互不写回。
+ * 未设置时 connection_id 为 null，表示继续跟随进程默认。
+ */
+export async function getChatDefaultModelConnection(http: RelayHttp):
+Promise<RelayDefaultModelConnection> {
+  const row = object(await http.request(http.workspacePath("/model-connections/chat-default")),
+    "chat default model connection");
+  return {
+    connectionId: nullableString(row, "connection_id", "chat default model connection"),
+    revision: nullableString(row, "revision", "chat default model connection")
+  };
+}
+
+export async function setChatDefaultModelConnection(http: RelayHttp, input: {
+  readonly commandId: string; readonly connectionId: string | null;
+}): Promise<RelayDefaultModelConnection> {
+  const envelope = commandEnvelopeFrom(await http.request(
+    http.workspacePath("/model-connections/chat-default"), {
+      method: "PUT",
+      body: JSON.stringify({ command_id: input.commandId, connection_id: input.connectionId })
+    }));
+  return {
+    connectionId: nullableString(envelope.result, "connection_id", "chat default model connection"),
+    revision: nullableString(envelope.result, "revision", "chat default model connection")
+  };
+}
+
 export async function getModelConnectionCredentialPresence(http: RelayHttp,
   connectionId: string): Promise<boolean> {
   const row = object(await http.request(http.workspacePath(

@@ -23,16 +23,27 @@ function response(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body } as Response;
 }
 async function mount(path = "/agent", withOldSession = false,
-  failure?: "CREATE_RESPONSE_LOST" | "MESSAGE_RESPONSE_LOST" | "MODEL_SELECTION_RESPONSE_LOST", withTaskSession = false, messageGate?: Promise<void>) {
+  failure?: "CREATE_RESPONSE_LOST" | "MESSAGE_RESPONSE_LOST" | "MODEL_SELECTION_RESPONSE_LOST", withTaskSession = false, messageGate?: Promise<void>,
+  withConnection = false) {
   activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "synthetic-token" });
   const posts: { path: string; body: Record<string, unknown> }[] = []; let created = false;
   const messages: unknown[] = [];
   const receipts = new Map<string, Record<string, unknown>>();
   let modelSelected = false;
+  /** 首条选择的已登记连接：型号由服务端按连接声明解析，客户端只报 connection_id。 */
+  const connectionId = "44444444-4444-4444-8444-444444444444";
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)); const path = url.pathname;
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>; posts.push({ path, body });
+      if (path === `${root}/assist-sessions/${sessionId}/model-selection`) {
+        const receipt = { command_id: body.command_id, command_type: "SelectSessionConnection", payload_hash: "a".repeat(64),
+          committed_at: "2026-11-02T00:00:00Z",
+          result: { kind: "MODEL_SELECTION", session_id: sessionId, connection: "registered",
+            connection_id: connectionId, model: "vendor/registered", free_only: false, revision: "3" } };
+        receipts.set(String(body.command_id), receipt);
+        return response(receipt);
+      }
       if (path.endsWith("/chat-commands")) {
         const firstSelection = !modelSelected; modelSelected = true;
         const receipt = { command_id: body.command_id, committed_at: "2026-10-17T00:00:00Z",
@@ -75,6 +86,13 @@ async function mount(path = "/agent", withOldSession = false,
     if (path.endsWith("/model-selection")) return response({ selection: modelSelected ? {
       session_id: sessionId, connection: "openrouter", model: "v/a:free", free_only: true, revision: "7" } : null });
     if (path.endsWith("/model-port")) return response({ provider: "fake", configured: false, model: null, base_url: null, max_call_tokens: null });
+    if (path.endsWith("/model-connections")) return response({ items: withConnection ? [{
+      id: connectionId, name: "团队网关", provider_kind: "openai-compatible",
+      base_url: "https://fixture.invalid/v1", default_model: "vendor/registered",
+      budget: { timeout_ms: 30000, max_output_tokens: 4096, max_call_tokens: 65536,
+        max_scope_calls: 30, max_scope_tokens: 512000 },
+      credential_version: 1, status: "ACTIVE", revision: "1",
+      created_at: "2026-11-02T00:00:00Z", updated_at: "2026-11-02T00:00:00Z" }] : [] });
     if (path.endsWith("/model-catalog")) return response({ configured: true, chat_configured: true,
       snapshot_seq: "9", last_success_at: "2026-10-17T00:00:00Z", last_failure_reason: null, cache_stale: false, free_count: 1,
       entries: [{ source_model_id: "v/a:free", display_name: "免费 A", context_window: 65536, is_free: true,
@@ -144,6 +162,27 @@ describe("新对话直接起步", () => {
     expect(selections[0]?.body).toMatchObject({ text: "/model v/a:free" });
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
       .toMatchObject({ expected_model_selection_revision: "7" });
+  });
+  it("首条选择已登记连接：只提交 connection_id，消息携带该连接声明的型号修订", async () => {
+    const view = await mount("/agent?new=conn", false, undefined, false, undefined, true);
+    const chip = () => document
+      .querySelector('[data-testid="model-selector-open"] .model-selector-trigger-name')?.textContent ?? "";
+    await view.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+    expect(document.body.textContent).toContain("已登记连接");
+    const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
+      .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "团队网关")!;
+    await act(async () => option.click()); await flush();
+    expect(chip()).toBe("vendor/registered");
+    // 连接选择不写本机偏好：下一条新会话不能用 /model 解析别的连接身份。
+    expect(readLastModel(workspaceId)).toBeNull();
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("首条走团队网关");
+    await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
+    const selections = view.posts.filter((post) => post.path.endsWith("/model-selection"));
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.body).toMatchObject({ connection_id: "44444444-4444-4444-8444-444444444444" });
+    expect(selections[0]?.body).not.toHaveProperty("model");
+    expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
+      .toMatchObject({ expected_model_selection_revision: "3" });
   });
   it("首条选择模型即写本机偏好；下一条新对话（重新挂载）从它开始", async () => {
     const first = await mount("/agent?new=entry");

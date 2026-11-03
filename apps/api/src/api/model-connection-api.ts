@@ -6,7 +6,9 @@ import { UuidSchema } from './domain-schemas.js';
 import { ProblemError } from './problem.js';
 import {
   createModelConnectionCommand,
+  readChatDefaultModelConnection,
   readDefaultModelConnection,
+  setChatDefaultModelConnectionCommand,
   setDefaultModelConnectionCommand,
   listModelConnections,
   readModelConnection,
@@ -19,12 +21,13 @@ import {
 } from '../application/model-connections.js';
 
 /**
- * 模型连接登记（P2 阶段一，ADR-036）。
+ * 模型连接登记与默认选择（P2 阶段一，ADR-036；MODEL-SETTINGS-01 接通执行链）。
  *
  * 边界（必须如实阅读）：
- *   * 这里只做**登记与凭据管理**。连接尚未参与模型解析——执行端仍只按 Run 冻结计划或
- *     进程默认解析。所以这些端点**不**声称「连接已可用于执行」；把连接接到会话选择与
- *     Run 冻结是下一阶段，需要新的冻结列，不是靠改这些端点。
+ *   * 这里只做**登记、凭据管理与默认指定**。连接如何参与解析由各自 Owner 决定：
+ *     会话聊天走 `session_model_selection`（可绑定稳定 connection_id），新会话在无显式
+ *     选择时走工作区聊天默认（`chat_connection_id`），新 Run 走 Run 默认
+ *     （0144 的 `connection_id`）。三类作用域互不写回，执行端按冻结身份解析。
  *   * 响应**永不包含** `credential_ref`、密钥、密文或凭据摘要。写入时 Key 只在请求体里
  *     出现一次，服务端落进系统凭据库后只保留不透明引用。
  *   * 写命令走统一命令处理器：回执与业务事实同事务，重放返回当时结果；更新一律
@@ -74,6 +77,18 @@ const DefaultConnectionSchema = Type.Object({
 const SetDefaultConnectionBodySchema = Type.Object({
   command_id: UuidSchema,
   connection_id: UuidSchema,
+}, { additionalProperties: false });
+
+const ChatDefaultConnectionSchema = Type.Object({
+  /** 未设置时为 null：新会话在无显式选择时走进程默认。 */
+  connection_id: Type.Union([UuidSchema, Type.Null()]),
+  revision: Type.Union([Type.String(), Type.Null()]),
+}, { additionalProperties: false });
+
+const SetChatDefaultConnectionBodySchema = Type.Object({
+  command_id: UuidSchema,
+  /** `null` 是显式取消聊天默认，不是漏传。 */
+  connection_id: Type.Union([UuidSchema, Type.Null()]),
 }, { additionalProperties: false });
 
 const CredentialPresenceSchema = Type.Object({
@@ -181,6 +196,36 @@ export function registerModelConnectionRoutes(app: FastifyInstance,
     bodySchema: SetDefaultConnectionBodySchema,
     execute: async ({ dependencies: deps, body, params }) => {
       const outcome = await setDefaultModelConnectionCommand({ db: deps.database.executor },
+        { workspaceId: params.workspace_id!, commandId: body.command_id,
+          connectionId: body.connection_id });
+      return { outcome, result: outcome.result };
+    },
+  }));
+
+  /**
+   * 工作区聊天默认连接（0158）。它决定**新会话**在没有显式会话选择时从哪条连接冻结；
+   * 既有会话的显式选择、排队中与正在生成的消息都不受影响（它们各自带冻结身份）。
+   */
+  app.get('/model-connections/chat-default', {
+    schema: { params: ParamsSchema, response: { 200: ChatDefaultConnectionSchema } },
+  }, async (request, reply) => {
+    try {
+      const params = request.params as { workspace_id: string };
+      const current = await readChatDefaultModelConnection(dependencies.database.executor,
+        params.workspace_id);
+      return { connection_id: current.connectionId,
+        revision: current.revision === null ? null : current.revision.toString() };
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.put('/model-connections/chat-default', {
+    schema: { params: ParamsSchema, body: SetChatDefaultConnectionBodySchema },
+  }, createCommandHandler(dependencies, {
+    commandType: 'SetChatDefaultModelConnection',
+    bodySchema: SetChatDefaultConnectionBodySchema,
+    execute: async ({ dependencies: deps, body, params }) => {
+      const outcome = await setChatDefaultModelConnectionCommand(
+        { db: deps.database.executor },
         { workspaceId: params.workspace_id!, commandId: body.command_id,
           connectionId: body.connection_id });
       return { outcome, result: outcome.result };

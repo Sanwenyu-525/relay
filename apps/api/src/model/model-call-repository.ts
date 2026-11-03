@@ -19,6 +19,8 @@ export interface ModelCallOrigin {
   readonly readInvocationId?: string;
   readonly criterionId?: string;
   readonly checkAttempt?: number;
+  /** 0158：VERIFY 的目标是已登记连接时记录连接归属；其他调用不填。 */
+  readonly connectionId?: string | null;
   /**
    * 0153：这次外呼的用途，缺省 `PRIMARY`。
    *
@@ -246,7 +248,7 @@ export class ModelCallRepository {
 
   /** Application owns the VERIFY admission transaction; never open a nested one. */
   async beginVerifyInTransaction(id: string,
-    origin: Pick<ModelCallOrigin, 'workspaceId' | 'inputHash'>,
+    origin: Pick<ModelCallOrigin, 'workspaceId' | 'inputHash' | 'connectionId'>,
     identity: ModelIdentity): Promise<void> {
     await this.insert(this.db, id, { ...origin, kind: 'VERIFY' }, identity);
   }
@@ -265,14 +267,16 @@ export class ModelCallRepository {
     identity: ModelIdentity): Promise<void> {
     await sql`insert into model_calls (id, workspace_id, kind, step_attempt_id,
       assist_message_id, member_message_id, manifest_id, criterion_id, check_attempt,
-      provider, model, config_fingerprint, credential_fingerprint, input_sha256,
-      read_operation_id, read_invocation_id, budget_reserved_tokens, context_usage, purpose)
+      provider, model, config_fingerprint, credential_fingerprint, connection_id,
+      input_sha256, read_operation_id, read_invocation_id, budget_reserved_tokens,
+      context_usage, purpose)
       values (${id}, ${origin.workspaceId}, ${origin.kind},
         ${origin.stepAttemptId ?? null}, ${origin.assistMessageId ?? null},
         ${origin.memberMessageId ?? null}, ${origin.manifestId ?? null},
         ${origin.criterionId ?? null},
         ${origin.checkAttempt ?? null}, ${identity.provider}, ${identity.model},
         ${identity.configFingerprint}, ${identity.credentialFingerprint ?? null},
+        ${origin.connectionId ?? null},
         ${origin.inputHash ?? null},
         ${origin.readOperationId ?? null}, ${origin.readInvocationId ?? null},
         ${identity.budget?.callReservationTokens ?? null},
@@ -403,6 +407,19 @@ export class ModelCallRepository {
     model: string): Promise<ModelCallRow | undefined> {
     return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
       and provider = ${provider} and model = ${model}
+      order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
+  }
+
+  /**
+   * 某条已登记连接的最近一次验证（0158）。
+   *
+   * 按 `connection_id` 精确归属：同一 provider + 型号可以被多条连接使用，取最新 VERIFY
+   * 会把别的连接的结论显示成这条连接的。工作区条件只作防御，连接 ID 本身已全局唯一。
+   */
+  async latestVerifyForConnection(workspaceId: string,
+    connectionId: string): Promise<ModelCallRow | undefined> {
+    return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
+      and workspace_id = ${workspaceId} and connection_id = ${connectionId}
       order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
   }
 }

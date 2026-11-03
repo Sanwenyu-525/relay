@@ -1062,7 +1062,7 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
         chatModelName: process.env.RELAY_MODEL_NAME,
         modelProvider: process.env.RELAY_MODEL_PROVIDER ?? 'openai-compatible',
         declaredImageInput: readDeclaredImageInput(process.env),
-      });
+      }, process.env, dependencies.credentials);
       return { outcome, result: outcome.result };
     } }));
 

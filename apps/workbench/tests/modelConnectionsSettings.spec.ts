@@ -36,6 +36,10 @@ function connection(overrides: Partial<RelayModelConnection> = {}): RelayModelCo
 interface StubCalls {
   list: number;
   setDefault: string[];
+  chatDefault: (string | null)[];
+  verify: { connection: string; connectionId?: string }[];
+  update: { id: string; expectedRevision: string; name?: string; baseUrl?: string | null;
+    defaultModel?: string }[];
   setStatus: { id: string; status: string }[];
   rotate: { id: string; apiKey: string }[];
   create: { name: string; apiKey: string }[];
@@ -44,9 +48,13 @@ interface StubCalls {
 function stubClient(input: {
   readonly items?: readonly RelayModelConnection[];
   readonly defaultId?: string | null;
+  readonly chatDefaultId?: string | null;
   readonly failList?: boolean;
 }): { client: RelayApiClient; calls: StubCalls } {
-  const calls: StubCalls = { list: 0, setDefault: [], setStatus: [], rotate: [], create: [] };
+  const calls: StubCalls = { list: 0, setDefault: [], chatDefault: [], verify: [], update: [],
+    setStatus: [], rotate: [], create: [] };
+  let verificationState: string = "UNVERIFIED";
+  let verificationLast: Record<string, unknown> | null = null;
   const client = {
     async listModelConnections() {
       calls.list += 1;
@@ -56,9 +64,48 @@ function stubClient(input: {
     async getDefaultModelConnection() {
       return { connectionId: input.defaultId ?? null, revision: "1" };
     },
+    async getChatDefaultModelConnection() {
+      return { connectionId: input.chatDefaultId ?? null, revision: "1" };
+    },
+    async setChatDefaultModelConnection(id: string | null) {
+      calls.chatDefault.push(id);
+      return { connectionId: id, revision: "2" };
+    },
+    async getModelConnectionCredentialPresence() {
+      return true;
+    },
+    /** 每条连接的目标级验证态；夹具只提供「已配置未验证」，让界面按服务端事实显示。 */
+    async getModelPortVerification(target?: { readonly connection?: string;
+      readonly connectionId?: string }) {
+      const connectionId = target?.connectionId ?? "";
+      return { target: `registered:${connectionId}`, connection: "registered", connectionId,
+        model: "synthetic/model-a", currentConfigFingerprint: null, last: verificationLast,
+        targetLast: verificationLast, matchesCurrentConfig: verificationLast !== null,
+        credentialIdentity: "UNKNOWN", state: verificationState,
+        workerStartupValidation: "OK" };
+    },
+    async verifyModelPort(target?: { readonly connection?: string; readonly connectionId?: string }) {
+      calls.verify.push({ connection: target?.connection ?? "default",
+        connectionId: target?.connectionId });
+      verificationState = "VERIFIED";
+      verificationLast = { ok: true, latencyMs: 12, provider: "openai-compatible",
+        model: "synthetic/model-a", configFingerprint: "f".repeat(64), errorCategory: null,
+        verifiedAt: "2026-11-02T00:00:00.000Z" };
+      return { ok: true, latencyMs: 12, provider: "openai-compatible",
+        model: "synthetic/model-a", configFingerprint: "f".repeat(64),
+        errorCategory: null, verifiedAt: "2026-11-02T00:00:00.000Z" };
+    },
     async setDefaultModelConnection(id: string) {
       calls.setDefault.push(id);
       return { connectionId: id, revision: "2" };
+    },
+    async updateModelConnection(id: string, args: { expectedRevision: string;
+      name?: string; baseUrl?: string | null; defaultModel?: string }) {
+      calls.update.push({ id, expectedRevision: args.expectedRevision,
+        name: args.name, baseUrl: args.baseUrl, defaultModel: args.defaultModel });
+      return connection({ name: args.name ?? "primary",
+        baseUrl: args.baseUrl === undefined ? null : args.baseUrl,
+        defaultModel: args.defaultModel ?? "synthetic/model-a", revision: "2" });
     },
     async setModelConnectionStatus(id: string, args: { status: string }) {
       calls.setStatus.push({ id, status: args.status });
@@ -87,8 +134,9 @@ describe("模型连接登记卡片", () => {
     await flush();
     expect(calls.list).toBe(0);
     const card = mounted.wrapper.get('[data-testid="model-connections"]');
-    expect(card.text()).toContain("默认连接只影响");
-    expect(card.text()).toContain("会话聊天仍按会话选择或进程默认");
+    expect(card.text()).toContain("聊天默认只影响没有显式会话选择的新消息");
+    expect(card.text()).toContain("Run 默认只影响新的任务执行");
+    expect(card.text()).toContain("已排队、生成中或已冻结的执行保持原连接");
     expect(card.text()).not.toContain("验证通过");
   });
 
@@ -240,5 +288,81 @@ describe("模型连接登记卡片", () => {
     await mounted.wrapper.get('[data-testid="model-connections-error"] button').trigger("click");
     await flush();
     expect(calls.list).toBe(before + 1);
+  });
+
+  it("聊天默认可独立设置与取消，只影响没有显式会话选择的新消息", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const { client, calls } = stubClient({ items: [connection()], chatDefaultId: id });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    const row = mounted.wrapper.get(`[data-testid="model-connection-${id}"]`);
+    expect(row.find('[data-testid="model-connection-chat-default-badge"]').exists()).toBe(true);
+    // 已经是聊天默认：不再提供「设为聊天默认」，只提供取消。
+    expect(row.find(`[data-testid="model-connection-chat-default-${id}"]`).exists()).toBe(false);
+    await mounted.wrapper.get(`[data-testid="model-connection-chat-default-clear-${id}"]`)
+      .trigger("click");
+    await flush();
+    expect(calls.chatDefault).toEqual([null]);
+    expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
+      .toContain("没有显式会话选择的新消息改为跟随进程默认");
+  });
+
+  it("按稳定连接 id 独立验证，结论来自重读到的目标级状态", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const { client, calls } = stubClient({ items: [connection()] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    const row = mounted.wrapper.get(`[data-testid="model-connection-${id}"]`);
+    // 初始验证态来自服务端；不是把「登记成功」当成「验证通过」。
+    expect(row.get(`[data-testid="model-connection-verification-${id}"]`).text())
+      .toBe("已配置未验证");
+    await mounted.wrapper.get(`[data-testid="model-connection-verify-${id}"]`).trigger("click");
+    await flush();
+    expect(calls.verify).toEqual([{ connection: "registered", connectionId: id }]);
+    expect(mounted.wrapper.get(`[data-testid="model-connection-verification-${id}"]`).text())
+      .toBe("验证通过");
+    expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
+      .toContain("不代表任何任务已执行成功");
+  });
+
+  it("编辑连接走 revision CAS，保留凭据并声明旧验证失效", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const { client, calls } = stubClient({ items: [connection()] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get(`[data-testid="model-connection-edit-${id}"]`).trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-edit-form"]');
+    // 编辑不碰凭据：表单里没有 API Key 输入框。
+    expect(form.findAll('input[type="password"]')).toHaveLength(0);
+    await form.get('input[aria-label="连接名称"]').setValue("primary-renamed");
+    await mounted.wrapper.get('[data-testid="model-connection-edit-submit"]').trigger("click");
+    await flush();
+    expect(calls.update).toEqual([{ id, expectedRevision: "1", name: "primary-renamed",
+      baseUrl: null, defaultModel: "synthetic/model-a" }]);
+    expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
+      .toContain("旧验证结果失效");
+  });
+
+  it("新增连接预设只填端点，确切型号仍由用户确认", async () => {
+    const { client } = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    await form.get('select[aria-label="服务预设"]').setValue("openrouter");
+    expect((form.get('input[aria-label="服务端点"]').element as HTMLInputElement).value)
+      .toBe("https://openrouter.ai/api/v1");
+    // 预设不代填型号：用户必须自己确认确切型号。
+    expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
   });
 });

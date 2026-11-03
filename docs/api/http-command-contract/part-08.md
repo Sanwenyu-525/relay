@@ -632,3 +632,24 @@ Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调�
 - **无法确认不推断**：`ACTIVE` 策略却读不到生效版本、或某行缺少服务端结论时，状态是 `UNKNOWN`，界面不回落到可用。
 
 **证据。** 单元 `tool-availability` **14/14**（只授权 read_file 时只读可用、只授权截图时电脑行只读、授权齐全但写入仍需审批、停用/撤销、DENY 不被其它策略掩盖、目标前缀不匹配、连接目录边界不覆盖、运行时不可用、策略版本缺失、未配置、仅站点授权、网页主机不一致、载荷上限过小）；真实 PG/HTTP `tool-availability.integration.test`（空项目全部未配置、只有连接时未授权、只授权 read_file 时只读可用、停用连接后立即变已停用、撤销策略后仍按连接状态、不存在项目 404）；组件 `connectionsSettings` **37/37**。
+
+### 10.134 会话与消息的模型连接身份：会话选择、聊天默认与按连接验证（2026-11-02 源码实现，迁移 0158，ADR-036 阶段四）
+
+**Breaking Change: No（纯新增列、新增可选响应字段与新增可选验证目标；既有端点响应只增不减）。** 本段把设置页登记的模型连接接进聊天与验证：会话可以选一条已登记连接，消息受理时冻结连接身份，执行端按冻结身份解析，验证按连接独立归属。
+
+**迁移 0158 四处追加。**
+
+1. `session_model_selection.connection_id uuid → model_connections`，并把 `connection` 取值 CHECK 从 `default|openrouter` 放宽到 `default|openrouter|registered`（先按 `pg_get_constraintdef` 文本定位 0089 的真实约束名，找不到即抛 `P0004`，不半应用）。新 CHECK 两分支写全：`registered` 必须有 `connection_id` 且目录依据全空、`free_only=false`；另两枚必须 `connection_id IS NULL`。
+2. `workspace_default_model_connection.chat_connection_id`：工作区**聊天**默认。0144 的 `connection_id` 只决定新 Run 从哪条连接冻结，不能直接当聊天默认（那会让所有既有会话在无人操作时换 Provider）。两枚默认分列、互不写回；`connection_id` 同时放开 NOT NULL，两列都为 NULL 是合法状态——聊天与 Run 各自可单独设置或取消，都回到进程默认。
+3. `GRANT DELETE ON session_model_selection`：只服务于用户显式「清除本会话选择、恢复跟随默认」；消息行仍带受理时冻结的快照与连接身份，历史归因不受影响。
+4. `assist_messages.model_connection_id`（非空必带冻结快照，CHECK 约束）与 `model_calls.connection_id`（仅 `kind='VERIFY'` 的已登记连接目标填写，附部分索引 `(connection_id, started_at DESC) WHERE kind='VERIFY' AND connection_id IS NOT NULL`）。凭据代数不重复冻结：消息行沿用 0142 的 `model_credential_fingerprint`。
+
+**会话模型选择。** `GET /assist-sessions/{session_id}/model-selection` 返回 `{selection}`（无覆盖为 `null`，前端据此显示「跟随默认」）。`POST /assist-sessions/{session_id}/model-selection` 体 `{command_id, connection_id: uuid|null}`：非空走 `SelectSessionConnection`，核对连接属于本工作区、`ACTIVE`、系统凭据库有可用凭据，分别以 409 `MODEL_CONNECTION_UNAVAILABLE` / `MODEL_CONNECTION_DISABLED` / `MODEL_CONNECTION_CREDENTIAL_MISSING` 拒绝；绑定稳定连接 ID 与 `connectionConfigFingerprint`，结果 `kind='MODEL_SELECTION'`。`null` 走 `ClearSessionModelSelection`，结果 `kind='MODEL_SELECTION_CLEARED'`。两条命令都沿用 `command_id` 幂等与 `expectedRevision` CAS，重放置 `command-replayed: true`。归档会话按「先重开」拒绝；**消息已经排队或正在生成时拒绝切换**（`INVALID_TRANSITION`），切换只作用于后续新消息——在途消息的快照在受理时已冻结。
+
+**工作区聊天默认。** `GET /model-connections/chat-default` 返回 `{connection_id, revision}`；`PUT /model-connections/chat-default` 体 `{command_id, connection_id: uuid|null}`，命令 `SetChatDefaultModelConnection`，`null` 是显式取消而不是恢复某条连接。它与 `GET/PUT /model-connections/default`（0144，Run 默认）互不影响：改聊天默认不动已冻结与新建的 Run，改 Run 默认不动聊天。
+
+**冻结优先级与执行端闸门。** 消息受理时按「**显式会话选择 → 工作区聊天默认 → 进程默认**」冻结；Run 仍按 0144 的 Run 默认冻结，两者不共享写回。冻结写入消息行 `model_connection_id`、`model_selection_snapshot` 与 `model_credential_fingerprint`。执行端只读冻结身份，**不重新读取当前默认连接**；六道闸门按序停：连接行不存在 → `ASSIST_MODEL_CONNECTION_UNAVAILABLE`；非 `ACTIVE` → `ASSIST_MODEL_CONNECTION_DISABLED`；型号或配置指纹不符 → `ASSIST_MODEL_CONFIG_CHANGED`；凭据库不可用 → `ASSIST_MODEL_CREDENTIAL_STORE_UNAVAILABLE`；凭据缺失 → `ASSIST_MODEL_CONNECTION_CREDENTIAL_MISSING`；凭据身份已换 → `ASSIST_MODEL_CREDENTIAL_CHANGED`。任何一道都**零外呼**，不静默回退其他连接或 Mock。
+
+**按连接验证。** `POST /model-port/verify` 与 `GET /model-port/verification` 新增可选目标 `{connection:'registered', connection_id}`（格式非法 400 `MODEL_VERIFY_TARGET_INVALID`，连接不存在 404 `MODEL_VERIFY_CONNECTION_UNAVAILABLE`）。验证仍只发送固定 `VERIFY_PROMPT`、非流式、带超时，不携带聊天、项目资料或工具上下文；外呼仍走 `guardedModelFetch`（HTTPS、DNS 与重定向防护），HTTP 可达不等于模型可调用。判定按连接归属：同 provider 同型号的两条连接各自有 `target_last` 与 `state`，成功互相不冒充；轮换 Key 后旧结论变 `CREDENTIAL_CHANGED` / `UNVERIFIED`，必须重新验证；缺凭据或凭据存储不可用时在**外呼前**显式拒绝且不写 VERIFY 账本。
+
+**证据。** 迁移 `migration` **14/14**；真实 PG18.6 + HTTP `chat-model-connection.integration.test` **8/8**（会话选择冻结连接身份并按连接外呼、改默认不影响在途；轮换 / 停用 / 改型号三种排队消息类型化停止且零外呼；同型号同 Provider 的两条连接验证互不冒充、轮换后失效、重验恢复；缺凭据与存储不可用不外呼不落账；聊天默认可写可读、命令重放不推进 revision、可取消且跨工作区不可见；聊天默认决定新会话冻结、显式选择优先、Run 默认独立、取消回进程默认）；`session-model-selection` **11/11**、`model-connections` **7/7**、`model-verify` **8/8**、`run-model-connection` **4/4**、`assist-model-runtime` **2/2**。规则归 [ADR-036](../../decisions/ADR-036-multi-provider-model-connections.md)、[工作台 §27.5](../../frontend/workbench-design/part-09.md#275-免费模型分组与模型选择)、[设置中心](../../frontend/workbench-design/part-02.md#7-视觉与可访问性基线)。

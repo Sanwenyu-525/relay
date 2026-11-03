@@ -15,7 +15,9 @@ import type { CredentialIdentityState } from './credential-identity.js';
 
 export type VerifyTarget =
   | { readonly connection: 'default' }
-  | { readonly connection: 'openrouter'; readonly model: string };
+  | { readonly connection: 'openrouter'; readonly model: string }
+  /** 0158：工作区已登记的连接，按稳定 ID 验证；型号取自连接行，不由客户端另报。 */
+  | { readonly connection: 'registered'; readonly connectionId: string };
 
 export const DEFAULT_VERIFY_TARGET: VerifyTarget = { connection: 'default' };
 
@@ -87,5 +89,9 @@ export function isFreeCatalogTarget(target: VerifyTarget): boolean {
 
 /** 稳定的目标标识：用于日志与响应，不含凭据。 */
 export function describeVerifyTarget(target: VerifyTarget): string {
-  return target.connection === 'default' ? 'default' : `openrouter:${target.model}`;
+  switch (target.connection) {
+    case 'default': return 'default';
+    case 'openrouter': return `openrouter:${target.model}`;
+    case 'registered': return `registered:${target.connectionId}`;
+  }
 }

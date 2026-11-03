@@ -15,7 +15,9 @@ import type { SessionModelSelectionRow } from '../infrastructure/database-schema
 
 export interface ApplySelectionInput {
   readonly sessionId: string;
-  readonly connection: 'default' | 'openrouter';
+  readonly connection: 'default' | 'openrouter' | 'registered';
+  /** `connection=registered` 时必填；另两枚恒为 null。 */
+  readonly connectionId: string | null;
   readonly model: string;
   readonly configFingerprint: string;
   readonly freeOnly: boolean;
@@ -47,10 +49,11 @@ export class SessionModelSelectionRepository {
     if (input.expectedRevision === null) {
       const inserted = await sql<SessionModelSelectionRow>`
         insert into session_model_selection
-          (session_id, connection, model, config_fingerprint, free_only, catalog_source,
+          (session_id, connection, connection_id, model, config_fingerprint, free_only, catalog_source,
            catalog_snapshot_seq, catalog_model_id, revision, selected_by_command_id, updated_at)
         values
-          (${input.sessionId}, ${input.connection}, ${input.model}, ${input.configFingerprint},
+          (${input.sessionId}, ${input.connection}, ${input.connectionId}, ${input.model},
+           ${input.configFingerprint},
            ${input.freeOnly}, ${input.catalogSource}, ${input.catalogSnapshotSeq}::bigint,
            ${input.catalogModelId}, 1, ${input.commandId}, ${input.now})
         on conflict (session_id) do nothing
@@ -60,7 +63,8 @@ export class SessionModelSelectionRepository {
     }
     const updated = await sql<SessionModelSelectionRow>`
       update session_model_selection
-      set connection = ${input.connection}, model = ${input.model},
+      set connection = ${input.connection}, connection_id = ${input.connectionId},
+        model = ${input.model},
         config_fingerprint = ${input.configFingerprint}, free_only = ${input.freeOnly},
         catalog_source = ${input.catalogSource}, catalog_snapshot_seq = ${input.catalogSnapshotSeq}::bigint,
         catalog_model_id = ${input.catalogModelId}, revision = revision + 1,
@@ -69,5 +73,19 @@ export class SessionModelSelectionRepository {
       returning *
     `.execute(this.db);
     return updated.rows[0] ?? null;
+  }
+
+  /**
+   * 清除本会话选择（恢复跟随默认）。返回是否真的删掉了行。
+   *
+   * 归档不删行是 0089 的规则；这里删的是**用户显式**恢复跟随默认的选择，与归档无关，
+   * 且已受理的消息各自带着自己的冻结快照与连接身份，历史归因不受影响。
+   */
+  async clearForSession(sessionId: string): Promise<boolean> {
+    const deleted = await sql<{ session_id: string }>`
+      delete from session_model_selection where session_id = ${sessionId}
+      returning session_id
+    `.execute(this.db);
+    return deleted.rows.length > 0;
   }
 }

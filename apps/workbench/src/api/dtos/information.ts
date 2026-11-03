@@ -166,17 +166,19 @@ export interface RelayDefaultModelConnection {
   readonly revision: string | null;
 }
 
-/** 验证目标：默认连接或 OpenRouter 目录里的一个确切型号。 */
-export interface RelayVerifyTarget {
-  readonly connection: "default" | "openrouter";
-  readonly model?: string;
-}
+/** 验证目标：默认连接、OpenRouter 目录里的一个确切型号，或一条已登记连接。 */
+export type RelayVerifyTarget =
+  | { readonly connection: "default" }
+  | { readonly connection: "openrouter"; readonly model: string }
+  | { readonly connection: "registered"; readonly connectionId: string };
 
 /** 最近一次验证 + 当前配置指纹匹配情况。 */
 export interface RelayModelVerificationState {
-  /** `default` 或 `openrouter:<型号>`；旧服务端缺省按 `default`。 */
+  /** `default`、`openrouter:<型号>` 或 `registered:<连接 id>`；旧服务端缺省按 `default`。 */
   readonly target: string;
-  readonly connection: "default" | "openrouter";
+  readonly connection: "default" | "openrouter" | "registered";
+  /** 仅 `connection=registered` 时非空。 */
+  readonly connectionId: string | null;
   readonly model: string | null;
   readonly currentConfigFingerprint: string | null;
   /** 本实例最近一次验证（任何目标），保持旧语义。 */

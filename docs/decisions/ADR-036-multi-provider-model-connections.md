@@ -2,7 +2,7 @@
 
 ## 状态与日期
 
-2026-10-27。**Proposed（仅设计，未实现、未验收）**。
+2026-10-27。**Proposed（设计阶段）→ 2026-11-02 阶段四已实现（实施者自检，未独立验收，未 commit/push）**。决策取舍仍按本文；实现进度以各阶段小节为准。
 
 本文件只记录 P2 的数据契约候选、取舍与被识别出的**前置阻塞项**。它不表示任何连接管理能力已经存在：当前实现仍只有「进程环境变量里的单一默认连接 + OpenRouter 独立免费凭据」，即 `RELAY_MODEL_*` 与 `RELAY_OPENROUTER_API_KEY`。本 ADR 不改变任何已实现行为。
 
@@ -90,6 +90,18 @@ P0/P1 已落地的相关事实（本轮之前或本轮完成，均可复核）�
 - 验证：`run-model-connection` 4/4（真实 PG + 受控 Provider）、`migration` 12/12（清单同步 0144）、Workbench `modelConnectionsSettings` 7/7 与设置页回归 33/33。
 
 **仍未做**：会话级选择接入连接（`session_model_selection.connection_id`，需新增列而非改枚举）、Assist 聊天按连接解析（目前仍走进程默认/会话选择）、连接级「验证」按钮（验证仍按进程默认与 OpenRouter 目标）、跨工作区共享连接。
+
+## 阶段四进度（2026-11-02）：会话选择、聊天默认与按连接验证已打通（MODEL-SETTINGS-01）
+
+- 迁移 `0158`：`session_model_selection.connection_id`（枚举放宽到 `registered`，两分支 CHECK 写全）、`workspace_default_model_connection.chat_connection_id`（聊天默认与 Run 默认分列，`connection_id` 放开 NOT NULL）、`assist_messages.model_connection_id`（非空必带冻结快照）、`model_calls.connection_id`（仅 VERIFY 已登记目标，附部分索引）；放开 `session_model_selection` 的 DELETE 以支持显式「跟随默认」。
+- 会话选择：`GET/POST /assist-sessions/{session_id}/model-selection`（§10.134）。非空选 `SelectSessionConnection`，只接受本工作区 `ACTIVE` 且凭据可用的连接；`null` 走 `ClearSessionModelSelection`。归档会话与在途消息拒绝切换；切换只作用于后续新消息。
+- 聊天冻结优先级：**显式会话选择 → 工作区聊天默认 → 进程默认**；Run 仍按 0144 的 Run 默认冻结。消息受理写入 `model_connection_id` + 快照 + 凭据指纹，执行端只读冻结身份，不重新读默认。
+- 执行端闸门：`ASSIST_MODEL_CONNECTION_UNAVAILABLE` / `ASSIST_MODEL_CONNECTION_DISABLED` / `ASSIST_MODEL_CONFIG_CHANGED` / `ASSIST_MODEL_CREDENTIAL_STORE_UNAVAILABLE` / `ASSIST_MODEL_CONNECTION_CREDENTIAL_MISSING` / `ASSIST_MODEL_CREDENTIAL_CHANGED`，任何一道零外呼，不静默回退其他连接或 Mock。
+- 按连接验证：验证目标新增 `{connection:'registered', connection_id}`，`model_calls.connection_id` 按 VERIFY 归属；同 provider 同型号的两条连接互不冒充，轮换 Key 后旧结论失效。
+- 设置页：`ModelConnectionsCard` 增加逐连接验证、设为聊天默认/取消、按连接显示验证与凭据状态；聊天默认与 Run 默认分开表述，密钥不出现在界面。
+- 验证：`chat-model-connection` 8/8（真实 PG + 真实 HTTP）、`session-model-selection` 11/11、`model-connections` 7/7、`model-verify` 8/8、`run-model-connection` 4/4、`assist-model-runtime` 2/2、`migration` 14/14；Workbench 定向用例与 typecheck 见验收表。
+
+**仍未做**：真实外部 Provider 调用（本轮无有效真实 API Key）、真实 Windows/WebView2 与安装态、独立验收、跨工作区共享连接（仍按「连接属工作区」不开放）。
 
 ## 未决问题
 

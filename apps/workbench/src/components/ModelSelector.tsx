@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import type { RelayApiClient, RelayCatalogModel, RelayModelCatalog } from "../api/relayClient";
+import type { RelayModelConnection } from "../api/dtos/information";
 import { describeLiveError } from "../lib/liveErrors";
 import { useMenuExclusive } from "../lib/popoverMenu";
 
@@ -15,15 +16,30 @@ import { useMenuExclusive } from "../lib/popoverMenu";
 
 /** 清单条目：来源未知（如会话选择已不在目录）时能力未知，只能按 ID 核对。 */
 interface ModelEntry {
+  /** 选择按目录型号还是按已登记连接提交：两者身份不同，不能只凭型号文本互认。 */
+  readonly kind: "model" | "connection";
   readonly id: string;
   readonly name: string;
   readonly model: RelayCatalogModel | null;
-  readonly group: "当前选择" | "已配置模型" | "免费模型 · OpenRouter";
+  readonly connection: RelayModelConnection | null;
+  readonly group: "当前选择" | "已配置模型" | "已登记连接" | "免费模型 · OpenRouter";
   readonly selectable: boolean;
   readonly note: string | null;
 }
 
 function entryTitle(entry: ModelEntry): string {
+  if (entry.connection !== null) {
+    const parts = [`${entry.connection.name} · ${entry.connection.id}`,
+      `型号：${entry.connection.defaultModel}`,
+      `状态：${entry.connection.status === "ACTIVE" ? "已启用" : "已停用"}`];
+    if (entry.model !== null) {
+      parts.push(`上下文：${entry.model.contextWindow?.toLocaleString() ?? "未知"}`);
+      parts.push(`工具：${entry.model.tools === null ? "未知" : entry.model.tools ? "支持" : "不支持"}`);
+    }
+    parts.push("选择后按这条连接当前声明的型号与端点调用；验证状态以设置页为准。");
+    if (entry.note !== null) parts.push(entry.note);
+    return parts.join(" · ");
+  }
   const parts = [`${entry.name} · ${entry.id}`];
   if (entry.model !== null) {
     parts.push(`上下文：${entry.model.contextWindow?.toLocaleString() ?? "未知"}`);
@@ -37,19 +53,28 @@ function entryTitle(entry: ModelEntry): string {
 }
 
 export default function ModelSelector({ client, open, onOpenChange, selectedModel, onChoose, disabled = false,
-  firstMessage = false, sessionId }: {
+  firstMessage = false, sessionId, selectedConnectionId = null, onChooseConnection }: {
   client: RelayApiClient; open: boolean; onOpenChange: (open: boolean) => void;
   selectedModel: string | null; onChoose: (model: string) => void;
   disabled?: boolean; firstMessage?: boolean;
   sessionId?: string;
+  /** 会话当前选中的已登记连接：清单用它标记唯一选中项，不拿型号猜身份。 */
+  selectedConnectionId?: string | null;
+  /**
+   * 提供这个回调才读取并展示「已登记连接」分组。选择按稳定 connection_id 提交，
+   * 与免费目录的型号选择互斥：连接自带端点/预算/凭据，不能混成「连接 A 跑型号 B」。
+   */
+  onChooseConnection?: (connection: RelayModelConnection) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [catalog, setCatalog] = useState<RelayModelCatalog | null>(null);
+  const [connections, setConnections] = useState<readonly RelayModelConnection[]>([]);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [choice, setChoice] = useState("");
   const [query, setQuery] = useState("");
   const [currentModel, setCurrentModel] = useState<string | null>(null);
+  const [currentConnectionId, setCurrentConnectionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,26 +105,32 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     setLoading(true); setError(null); setReadWarnings([]); setNotice(null); setQuery("");
     // 服务端 GET 负责打开时的 TTL 检查；浏览器不直接访问服务商。
     void Promise.allSettled([client.getModelCatalog(), client.getModelPortStatus(),
-      sessionId === undefined ? Promise.resolve(null) : client.getSessionModelSelection(sessionId)]).then(([directoryResult, statusResult, selectionResult]) => {
+      sessionId === undefined ? Promise.resolve(null) : client.getSessionModelSelection(sessionId),
+      onChooseConnection === undefined ? Promise.resolve([]) : client.listModelConnections()])
+      .then(([directoryResult, statusResult, selectionResult, connectionResult]) => {
       if (!active) return;
       if (selectionResult.status === "rejected") throw selectionResult.reason;
       const selection = selectionResult.value;
       const configuredDefault = statusResult.status === "fulfilled" && statusResult.value.configured
         ? statusResult.value.model : null;
       setCatalog(directoryResult.status === "fulfilled" ? directoryResult.value : null);
+      setConnections(connectionResult.status === "fulfilled" ? connectionResult.value : []);
       setDefaultModel(configuredDefault);
       setReadWarnings([
         ...(directoryResult.status === "rejected" ? [`免费目录读取失败：${describeLiveError(directoryResult.reason).message}`] : []),
         ...(statusResult.status === "rejected" ? [`应用默认配置读取失败：${describeLiveError(statusResult.reason).message}`] : []),
+        ...(connectionResult.status === "rejected" ? [`已登记连接读取失败：${describeLiveError(connectionResult.reason).message}`] : []),
       ]);
       // 目录变化不自动选第一个，也不替换原首选。
       const current = sessionId === undefined ? selectedModel : selection?.model ?? null;
+      const currentConnection = selectedConnectionId ?? (sessionId === undefined ? null : selection?.connectionId ?? null);
       setCurrentModel(current ?? configuredDefault);
-      setChoice(current ?? configuredDefault ?? "");
+      setCurrentConnectionId(currentConnection);
+      setChoice(currentConnection ?? current ?? configuredDefault ?? "");
     }).catch((caught) => { if (active) setError(describeLiveError(caught).message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [client, open, selectedModel, sessionId, retry]);
+  }, [client, open, selectedModel, selectedConnectionId, sessionId, retry]);
 
   /**
    * 下拉的收起语义：点清单外一次即收；Esc 收并把焦点还给触发键。
@@ -140,31 +171,43 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     finally { setRefreshing(false); }
   }
   const visibleModels = catalog?.models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(query.trim().toLowerCase())) ?? [];
+  const visibleConnections = connections.filter((connection) =>
+    `${connection.name} ${connection.defaultModel} ${connection.id}`.toLowerCase().includes(query.trim().toLowerCase()));
   /**
    * 「可调用」只有一份判据：条目不可选就画成禁用，点下去也不会发命令。
    * 目录过期、凭据未配置、非文本输入输出模型都在这里收口，应用默认始终可选。
    */
   const callable = (model: RelayCatalogModel | null): boolean => Boolean(catalog?.configured && catalog.chatConfigured &&
     !catalog.cacheStale && model !== null && model.textInput === true && model.textOutput === true);
-  /** 条目按身份分段：当前选择（即使已不在目录）、应用默认、免费目录；各段去重。 */
-  const staleCurrent = currentModel !== null && currentModel !== defaultModel &&
+  /** 条目按身份分段：当前选择（即使已不在目录）、已登记连接、应用默认、免费目录；各段去重。 */
+  const staleCurrent = currentConnectionId === null && currentModel !== null && currentModel !== defaultModel &&
     !catalog?.models.some((model) => model.id === currentModel);
   const directory = catalog?.models ?? [];
   const entries: ModelEntry[] = [];
-  if (staleCurrent && currentModel !== null) entries.push({ id: currentModel,
-    name: currentModel, model: null, group: "当前选择", selectable: false, note: "已不在目录中，不可继续调用" });
-  if (defaultModel !== null) entries.push({ id: defaultModel, name: defaultModel,
-    model: directory.find((model) => model.id === defaultModel) ?? null, group: "已配置模型",
+  // 已登记连接按稳定 connection_id 独立成段：它们自带端点/预算/凭据，不依赖免费目录资格。
+  // 停用的连接仍列出但不可选——用户能在原处看到「为什么它不在可选范围」，而不是凭空消失。
+  for (const connection of visibleConnections) entries.push({ kind: "connection",
+    id: connection.id, name: connection.name,
+    model: directory.find((model) => model.id === connection.defaultModel) ?? null,
+    connection, group: "已登记连接", selectable: connection.status === "ACTIVE",
+    note: connection.status === "ACTIVE" ? `型号：${connection.defaultModel}` : "已停用，选择前先在设置中启用" });
+  if (staleCurrent && currentModel !== null) entries.push({ kind: "model", id: currentModel,
+    name: currentModel, model: null, connection: null, group: "当前选择", selectable: false, note: "已不在目录中，不可继续调用" });
+  if (defaultModel !== null) entries.push({ kind: "model", id: defaultModel, name: defaultModel,
+    model: directory.find((model) => model.id === defaultModel) ?? null, connection: null, group: "已配置模型",
     selectable: true, note: "应用默认" });
-  for (const model of visibleModels) entries.push({ id: model.id, name: model.name, model,
-    group: "免费模型 · OpenRouter", selectable: callable(model),
+  for (const model of visibleModels) entries.push({ kind: "model", id: model.id, name: model.name, model,
+    connection: null, group: "免费模型 · OpenRouter", selectable: callable(model),
     note: catalog?.cacheStale ? "目录已过期，仅供浏览" : catalog?.chatConfigured === false ? "调用凭据未配置" : null });
-  const groups = "当前选择,已配置模型,免费模型 · OpenRouter".split(",")
+  // 已登记连接放在应用默认之前：用户刚在设置里建好的连接应当一眼可见。
+  const groups = "已登记连接,当前选择,已配置模型,免费模型 · OpenRouter".split(",")
     .filter((group) => entries.some((entry) => entry.group === group));
   function chooseEntry(entry: ModelEntry) {
     if (!entry.selectable || disabled || refreshing || error !== null) return;
     setChoice(entry.id);
-    onChoose(entry.id);
+    // 连接选择提交的是连接身份，型号由服务端按连接当前声明解析；不混用型号命令。
+    if (entry.kind === "connection" && entry.connection !== null) onChooseConnection?.(entry.connection);
+    else onChoose(entry.id);
     onOpenChange(false);
     triggerRef.current?.focus();
   }

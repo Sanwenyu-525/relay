@@ -5,6 +5,7 @@ import type { AssistMessageRow, AssistTitleGenerationRow } from
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { AssistModelPort, AssistResult } from '../workflow/fake-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { resolveFrozenAssistModel } from './memory-auto-capture.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import {
@@ -137,6 +138,8 @@ export interface TitleGenerationTickOptions {
   readonly modelPort?: AssistModelPort | undefined;
   readonly modelEnv?: NodeJS.ProcessEnv | undefined;
   readonly modelFetchDependencies?: ModelFetchDependencies | undefined;
+  /** 0158：锚点消息冻结在已登记连接上时，用它解析该连接的凭据；缺省用进程默认存储。 */
+  readonly credentials?: CredentialStore | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly leaseMs?: number | undefined;
   readonly now?: Date | undefined;
@@ -197,7 +200,9 @@ export async function runSessionTitleGenerationTick(db: DbExecutor,
     const resolved = anchor === undefined
       ? { port: options.modelPort, identity: options.modelPort.identity }
       : await resolveFrozenAssistModel(anchor, {
+        db, workspaceId: session.workspace_id,
         modelPort: options.modelPort,
+        ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
         ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
         ...(options.modelFetchDependencies === undefined ? {}
           : { modelFetchDependencies: options.modelFetchDependencies }),

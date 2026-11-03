@@ -11,6 +11,8 @@ import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { withTransaction, createRepositories } from './unit-of-work.js';
 import { recordModelInvocation } from './model-call-recorder.js';
 import { parseAssistModelSnapshot, snapshotIdentityBudget } from './assist-model-snapshot.js';
+import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
+import type { CredentialStore } from '../credentials/credential-store.js';
 import { MEMORY_AUTO_CAPTURE_DAILY_LIMIT, MEMORY_AUTO_CAPTURE_MAX_ITEMS,
   recordAutoCapture } from './memory-captures.js';
 
@@ -168,9 +170,12 @@ function settleExtractionCall(result: AssistResult) {
  * 记账预算取冻结快照（与 `assist-free-model-routing` 同一口径）。
  */
 export async function resolveFrozenAssistModel(message: AssistMessageRow, input: {
+  readonly db: DbExecutor;
+  readonly workspaceId: string;
   readonly modelPort: AssistModelPort;
   readonly modelEnv?: NodeJS.ProcessEnv;
   readonly modelFetchDependencies?: ModelFetchDependencies;
+  readonly credentials?: CredentialStore | undefined;
 }): Promise<{ port: AssistModelPort; identity: ModelIdentity }> {
   if (message.model_selection_snapshot === null) {
     return { port: input.modelPort, identity: input.modelPort.identity };
@@ -178,6 +183,24 @@ export async function resolveFrozenAssistModel(message: AssistMessageRow, input:
   const snapshot = parseAssistModelSnapshot(message.model_selection_snapshot);
   const candidate = snapshot.candidates[0];
   if (candidate === undefined) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  // 0158：消息冻结的是已登记连接时，按消息自己的连接身份重建端口（与主回复同一套闸门）。
+  if (message.model_connection_id !== null) {
+    if (candidate.connection.provider !== 'openai-compatible') {
+      throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+    }
+    const port = await resolveFrozenChatConnectionPort(createRepositories(input.db), {
+      workspaceId: input.workspaceId,
+      connectionId: message.model_connection_id,
+      frozenModel: candidate.connection.model,
+      frozenConfigFingerprint: candidate.connection.configFingerprint,
+      frozenCredentialFingerprint: message.model_credential_fingerprint,
+      budget: snapshotIdentityBudget(snapshot.budget),
+      ...(input.modelFetchDependencies === undefined ? {}
+        : { transport: input.modelFetchDependencies }),
+      ...(input.credentials === undefined ? {} : { credentials: input.credentials }),
+    });
+    return { port, identity: port.identity };
+  }
   if (candidate.connection.provider === 'openai-compatible') {
     if (input.modelPort.identity.model !== candidate.connection.model ||
         input.modelPort.identity.configFingerprint !== candidate.connection.configFingerprint) {
@@ -219,6 +242,7 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   readonly modelPort: AssistModelPort;
   readonly modelEnv?: NodeJS.ProcessEnv;
   readonly modelFetchDependencies?: ModelFetchDependencies;
+  readonly credentials?: CredentialStore | undefined;
   readonly signal?: AbortSignal | undefined;
 }): Promise<number> {
   const repositories = createRepositories(db);
@@ -246,7 +270,8 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
   // 用量，预算与归档闸门在 `begin` 里生效。预算不足时这里直接收口，不产生无账本调用。
   let result: AssistResult;
   try {
-    const captureModel = await resolveFrozenAssistModel(message, input);
+    const captureModel = await resolveFrozenAssistModel(message, { ...input,
+      db, workspaceId: session.workspace_id });
     result = (await recordModelInvocation<AssistResult>(db, {
       // 0153：辅助外呼——进账本与预算闸门，但不抢「最近一次调用」的读数，也不采对话分项。
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id,

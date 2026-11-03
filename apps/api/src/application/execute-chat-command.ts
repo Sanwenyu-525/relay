@@ -59,7 +59,9 @@ export type ExecuteChatCommandResult = {
   /** /model 落到会话模型选择 Owner 的当前结果（沿用其幂等回执，不重复记账）。 */
   readonly kind: 'MODEL_SELECTION';
   readonly session_id: string;
-  readonly connection: 'default' | 'openrouter';
+  readonly connection: 'default' | 'openrouter' | 'registered';
+  /** `connection=registered` 时指向的模型连接；另两枚恒为 null。 */
+  readonly connection_id: string | null;
   readonly model: string;
   readonly free_only: boolean;
   readonly config_fingerprint: string;

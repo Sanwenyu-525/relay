@@ -107,10 +107,15 @@ export class ModelVerifyCallError extends Error {
 /**
  * 目标侧拒绝（P1-4）：这个目标此刻不该被探测——不是目录里的免费型号、能力不足、
  * 或目录快照过期导致免费资格无法确认。同样不发起外呼、不写账本。
+ *
+ * 0158 增加两种已登记连接的目标侧拒绝：连接不在当前工作区、凭据库里没有可用凭据。
+ * 两者都用「可操作」的错误码，而不是退化成一次注定失败的外呼。
  */
 export class ModelVerifyTargetError extends Error {
   override readonly name = 'ModelVerifyTargetError';
-  constructor(readonly code: 'MODEL_VERIFY_TARGET_NOT_ELIGIBLE' | 'MODEL_VERIFY_CATALOG_STALE',
+  constructor(readonly code: 'MODEL_VERIFY_TARGET_NOT_ELIGIBLE' | 'MODEL_VERIFY_CATALOG_STALE'
+    | 'MODEL_VERIFY_CONNECTION_UNAVAILABLE' | 'MODEL_VERIFY_CREDENTIAL_MISSING'
+    | 'MODEL_VERIFY_CREDENTIAL_STORE_UNAVAILABLE',
     message: string) {
     super(message);
   }
@@ -134,6 +139,11 @@ export class ModelVerifyConfigError extends Error {
 export function resolveVerifyTargetConfig(env: NodeJS.ProcessEnv,
   target: VerifyTarget): { readonly config: ModelPortConfig;
     readonly guard?: ProviderRoutingGuard | undefined } {
+  if (target.connection === 'registered') {
+    // 已登记连接的凭据在系统凭据库，不在进程环境里；由应用层解析后直接给出 config。
+    throw new ModelVerifyConfigError('MODEL_PORT_NOT_CONFIGURED',
+      'registered connections must be resolved from the credential store');
+  }
   if (target.connection === 'openrouter') {
     const config = readOpenRouterModelPortConfig(env, target.model);
     return { config, guard: buildFreePriceGuard({ connection: { provider: 'openrouter',
@@ -303,9 +313,11 @@ export function createFakeVerifyCall(scenario: FakeVerifyScenario): VerifyCallPo
 }
 
 export interface ModelVerificationState {
-  /** 本次查询的验证目标：`default` 或 `openrouter:<确切型号>`。 */
+  /** 本次查询的验证目标：`default`、`openrouter:<确切型号>` 或 `registered:<连接 ID>`。 */
   readonly target: string;
-  readonly connection: 'default' | 'openrouter';
+  readonly connection: 'default' | 'openrouter' | 'registered';
+  /** 0158：`connection=registered` 时为该连接 ID；另两种恒为 null。 */
+  readonly connection_id: string | null;
   readonly model: string | null;
   readonly current_config_fingerprint: string | null;
   /**
@@ -420,6 +432,7 @@ export async function readModelVerificationState(
   return {
     target: describeVerifyTarget(target),
     connection: target.connection,
+    connection_id: null,
     model: target.connection === 'openrouter' ? target.model : currentConfig?.model ?? null,
     current_config_fingerprint: currentFingerprint,
     last,

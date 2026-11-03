@@ -11,7 +11,8 @@ import { DomainError, invalidTransition, resourceNotFound, revisionConflict } fr
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
-import { freezeAssistModelSnapshot, parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
+import { freezeChatModelSnapshot } from './model-connection-runtime.js';
 import { recheckAssistSources } from './assist-source-content.js';
 
 export const MEMORY_RECENT_MESSAGES = 8;
@@ -133,7 +134,8 @@ async function requireWritableMemorySession(r: Repositories, session: AssistSess
 
 export async function prepareMemoryCompaction(r: Repositories, session: AssistSessionRow,
   reason: 'MANUAL' | 'AUTO', env: NodeJS.ProcessEnv, forceRebuild = false,
-  modelSnapshot?: JsonObject | null, projectedInputBytes = 0): Promise<string | null> {
+  modelSnapshot?: JsonObject | null, projectedInputBytes = 0,
+  modelConnectionId: string | null = null): Promise<string | null> {
   const existing = await r.assistMemory.activeRequest(session.id);
   if (existing !== undefined) return existing.id;
   const settings = await r.information.readMemorySettings(session.workspace_id);
@@ -146,10 +148,14 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   const history = await r.assistMemory.history(session.id, after, undefined, MEMORY_BATCH_MESSAGES + 1);
   const delta = history;
   const selection = await r.modelSelection.readForSession(session.id);
-  const frozen = modelSnapshot === undefined ? await freezeAssistModelSnapshot(r, selection, env,
+  // 0158：没有随调用传入冻结计划时（手动整理、老调用），按**会话当前生效的模型**冻结 ——
+  // 显式选择 > 工作区聊天默认连接 > 进程默认。压缩是会话的又一次真实外呼，不能落到
+  // 另一套模型上；连接不可用/停用/缺凭据直接类型化失败，绝不退回进程默认。
+  const frozen = modelSnapshot === undefined ? await freezeChatModelSnapshot(r, selection, env,
     { requiresTools: false, requiresJsonOutput: true },
     { workspaceId: session.workspace_id, sessionId: session.id }) : undefined;
   const snapshot = modelSnapshot ?? frozen?.snapshot ?? { mock: true };
+  const connectionId = modelConnectionId ?? frozen?.connectionId ?? null;
   const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot, session.id);
   const bytes = delta.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
     forceRebuild ? 0 : Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
@@ -184,8 +190,11 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
     authorityRevision: authority.revision, contextRevision: authority.context_revision,
     settingsRevision: settings?.revision ?? 0n, throughSeq: anchor.seq, anchorMessageId: anchor.id,
     sourceMessageIds: covered.map((m) => m.id), sourceSha256: memoryHistoryFingerprint(covered),
-    modelSnapshot: { ...snapshot, memory_compaction: { after_seq: after.toString(),
-      base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null } }, reason });
+    modelSnapshot: { ...snapshot,
+      // 0158：压缩请求记住它冻结在哪条连接上；执行端据此解析，不重新读「当前默认」。
+      ...(connectionId === null ? {} : { model_connection_id: connectionId }),
+      memory_compaction: { after_seq: after.toString(),
+        base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null } }, reason });
   return id;
 }
 
