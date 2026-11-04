@@ -8,6 +8,12 @@ import { ModelCallRepository, type ModelCallOrigin,
 import type { ModelIdentity } from '../workflow/fake-model-port.js';
 import { classifyProviderError } from '../workflow/model-error-classification.js';
 
+/**
+ * 首个流事件证据写入的阻塞上限。超过后流回调继续处理正文，证据写入仍在后台完成；
+ * 这个值只限制「等待」时长，不改变已写入的事实。
+ */
+const FIRST_STREAM_EVIDENCE_TIMEOUT_MS = 500;
+
 /** The begin insert commits before invoking a Provider. A lost process leaves
  * STARTED as an unknown outcome and never silently invents zero usage. */
 export async function recordModelInvocation<T>(db: DbExecutor, input: {
@@ -70,6 +76,22 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
  * 重复包装时第二次是空操作。
  */
 export async function observeModelFirstStream(db: DbExecutor, callId: string): Promise<void> {
+  // 有界观测：这条证据写入位于 Provider 流回调内。正常情况下是几毫秒的条件 UPDATE；
+  // 数据库瞬时变慢时不能把它变成正文增量的阻塞点。超时后仍让原写入在后台完成，
+  // 只是不继续阻塞流读取；写失败/超时都不会改判业务调用。
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const write = recordFirstStreamEvidence(db, callId);
+  try {
+    await Promise.race([write, new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, FIRST_STREAM_EVIDENCE_TIMEOUT_MS);
+      timer.unref?.();
+    })]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function recordFirstStreamEvidence(db: DbExecutor, callId: string): Promise<void> {
   try {
     await new ModelCallRepository(db).recordFirstStreamEvent(callId, new Date());
   } catch (error) {
