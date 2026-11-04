@@ -77,6 +77,24 @@ test('工具续轮时只看最新一次调用，次数照实累计', () => {
   assert.equal(progress.latestCall?.status, 'STARTED');
 });
 
+test('没有调用时 DTO 也合法：call_count=0 且 latest_call=null', () => {
+  const dto = assistGenerationProgressDto(projectAssistGenerationProgress([]));
+  assert.deepEqual(dto, {
+    phase: 'PREPARING_CONTEXT',
+    call_count: 0,
+    latest_call: null,
+  });
+});
+
+test('已结算的失败与取消同样落到处理结果阶段', () => {
+  for (const status of ['FAILED', 'CANCELLED'] as const) {
+    const progress = projectAssistGenerationProgress([call({ status,
+      first_stream_event_at: T1, settled_at: T3 })]);
+    assert.equal(progress.phase, 'PROCESSING');
+    assert.equal(progress.latestCall?.status, status);
+  }
+});
+
 test('DTO 逐字转 ISO，缺失时间保持 null', () => {
   const dto = assistGenerationProgressDto(projectAssistGenerationProgress([call({
     first_stream_event_at: T1,

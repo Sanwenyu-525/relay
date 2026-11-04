@@ -239,7 +239,10 @@ const AssistUsageDto = Type.Object({
  */
 const AssistGenerationProgressDto = Type.Object({
   phase: Type.Union(ASSIST_GENERATION_PHASES.map((phase) => Type.Literal(phase))),
-  call_count: Type.Integer({ minimum: 1 }),
+  // 0 是合法值：消息已被 Worker 领取（RUNNING）、但尚未登记任何模型请求，
+  // 此时阶段为 PREPARING_CONTEXT 且 latest_call 为 null。旧下限 1 会让这类
+  // 回复在消息列表序列化时抛 TypeError（fast-json-stringify）并整页 500。
+  call_count: Type.Integer({ minimum: 0 }),
   latest_call: Type.Union([Type.Object({
     status: Type.Union([Type.Literal('STARTED'), Type.Literal('COMPLETED'),
       Type.Literal('FAILED'), Type.Literal('CANCELLED')]),

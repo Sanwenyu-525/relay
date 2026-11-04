@@ -1995,3 +1995,107 @@ test('stream observation times are persisted on the model call ledger', async ()
     progress!.latestCall!.firstStreamEventAt!.getTime());
   assert.ok(progress!.latestCall!.settledAt instanceof Date);
 });
+
+/**
+ * P0（AGENT-CORE-RELIABILITY-V2）：Worker 已领取（RUNNING）但还没登记模型请求时，
+ * 消息列表必须仍能序列化。历史 500 的现场是 DTO `call_count` 下限 1 与
+ * `PREPARING_CONTEXT` 的 0 冲突（fast-json-stringify 抛 TypeError，整页 500）。
+ * 这里用真实 PostgreSQL + 真实 HTTP 覆盖同一条投影的 0/1/多调用与终态边界。
+ */
+test('generation progress HTTP projection accepts call_count=0 and every bound', async () => {
+  const api = await startTestApi();
+  try {
+    const { createWorkspace } = await import('./api-harness.js');
+    const workspaceId = await createWorkspace(app.db);
+    const projectId = randomUUID();
+    const taskId = randomUUID();
+    await withTransaction(app.db, async (r) => {
+      await r.projects.insertProject({ id: projectId, workspaceId, title: 'Progress Project',
+        projectType: 'GENERAL' });
+      await r.projects.insertProjectState(projectId, 'PLANNING');
+      await r.tasks.insertTask({ id: taskId, workspaceId, projectId, title: 'Progress 任务',
+        status: 'IN_PROGRESS', mode: 'ME', acceptanceRevision: 1n, executorKind: 'HUMAN',
+        ownershipEpoch: 0n, currentCompletionId: null });
+      await r.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
+        objective: '形成 Markdown', requiredOutputSpec: {}, source: 'CREATE' });
+    });
+    const base = workspacePath(workspaceId);
+    const created = await api.post(`${base}/assist-sessions`, { command_id: randomUUID(),
+      task_id: taskId, title: '进度会话' });
+    assert.equal(created.status, 201);
+    const sessionId = (created.body as { result: { session_id: string } }).result.session_id;
+    const requested = await api.post(`${base}/assist-sessions/${sessionId}/messages`,
+      { command_id: randomUUID(), content: '请回答' });
+    assert.equal(requested.status, 202);
+    const assistantMessageId = (requested.body as
+      { result: { assistant_message_id: string } }).result.assistant_message_id;
+
+    const readProgress = async (): Promise<Record<string, unknown> | null> => {
+      const list = await api.get(`${base}/assist-sessions/${sessionId}/messages`);
+      assert.equal(list.status, 200, list.text);
+      const items = (list.body as
+        { items: { id: string; generation_progress: Record<string, unknown> | null }[] }).items;
+      return items.find((item) => item.id === assistantMessageId)!.generation_progress;
+    };
+    const calls = new ModelCallRepository(app.db);
+    const firstCallId = randomUUID();
+
+    // 领取后、登记前的窗口：这正是历史 500 的现场。
+    await sql`update assist_messages set status = 'RUNNING' where id = ${assistantMessageId}`
+      .execute(app.db);
+    assert.deepEqual(await readProgress(), { phase: 'PREPARING_CONTEXT',
+      call_count: 0, latest_call: null });
+
+    await calls.begin(firstCallId, { workspaceId, kind: 'ASSIST',
+      assistMessageId: assistantMessageId }, modelPort.identity);
+    const waiting = await readProgress();
+    assert.equal(waiting?.phase, 'WAITING_MODEL');
+    assert.equal(waiting?.call_count, 1);
+    assert.equal((waiting?.latest_call as { status: string }).status, 'STARTED');
+
+    await calls.recordFirstStreamEvent(firstCallId, new Date());
+    const streaming = await readProgress();
+    assert.equal(streaming?.phase, 'MODEL_STREAMING');
+    assert.equal((streaming?.latest_call as { first_text_delta_at: unknown })
+      .first_text_delta_at, null);
+
+    await calls.recordFirstTextDelta(firstCallId, new Date());
+    assert.equal((await readProgress())?.phase, 'MODEL_OUTPUT');
+
+    // 调用结算、消息仍 RUNNING：正在处理模型返回结果（接下来派发工具或续轮）。
+    await calls.settle(firstCallId, { status: 'COMPLETED', providerRequestId: null });
+    assert.equal((await readProgress())?.phase, 'PROCESSING');
+
+    // 工具续轮：第二次 PRIMARY 调用照实累计，最新调用决定阶段。
+    const secondCallId = randomUUID();
+    await calls.begin(secondCallId, { workspaceId, kind: 'ASSIST',
+      assistMessageId: assistantMessageId }, modelPort.identity);
+    const secondRound = await readProgress();
+    assert.equal(secondRound?.call_count, 2);
+    assert.equal(secondRound?.phase, 'WAITING_MODEL');
+
+    // 辅助外呼挂在同一消息上，但不能混进本轮 PRIMARY 进度。
+    await calls.begin(randomUUID(), { workspaceId, kind: 'ASSIST',
+      assistMessageId: assistantMessageId, purpose: 'MEMORY_CAPTURE' }, modelPort.identity);
+    assert.equal((await readProgress())?.call_count, 2);
+
+    await calls.settle(secondCallId, { status: 'COMPLETED', providerRequestId: null });
+    const settled = await readProgress();
+    assert.equal(settled?.call_count, 2);
+    assert.equal((settled?.latest_call as { status: string }).status, 'COMPLETED');
+    assert.equal(typeof (settled?.latest_call as { settled_at: unknown }).settled_at, 'string');
+
+    // 终态消息不再出现在「在途回复」投影里。
+    await sql`update assist_messages set status = 'CANCELLED' where id = ${assistantMessageId}`
+      .execute(app.db);
+    assert.equal(await readProgress(), null, 'CANCELLED 的 generation_progress 应为 null');
+    await sql`update assist_messages set status = 'FAILED', error_code = 'MODEL_FAILED'
+      where id = ${assistantMessageId}`.execute(app.db);
+    assert.equal(await readProgress(), null, 'FAILED 的 generation_progress 应为 null');
+    await sql`update assist_messages set status = 'COMPLETED', content = '已完成'
+      where id = ${assistantMessageId}`.execute(app.db);
+    assert.equal(await readProgress(), null, 'COMPLETED 的 generation_progress 应为 null');
+  } finally {
+    await api.stop();
+  }
+});
