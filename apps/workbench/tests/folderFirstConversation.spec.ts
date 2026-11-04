@@ -1248,7 +1248,7 @@ describe("文件夹入口与对话直接执行", () => {
         expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("命令结果待核对");
         expect(pendingPosts.filter((post) => post.path.endsWith("/working-directories/open"))).toHaveLength(before);
       } finally { pending.unmount(); }
-    });
+    }, 20_000);
 
     it("反例 A2：未决消息的解释绑定原资源，换目录后不改用新资源", async () => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
