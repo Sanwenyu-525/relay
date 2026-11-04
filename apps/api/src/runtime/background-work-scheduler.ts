@@ -8,7 +8,7 @@ import { runSessionTitleGenerationTick } from '../application/session-title-gene
 import { runWebImportTick } from '../application/web-import-runner.js';
 import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
-import { FakeModelPort, type AssistModelPort } from '../workflow/fake-model-port.js';
+import { FakeModelPort, isFakeModelPort, type AssistModelPort } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { createModelPort } from '../workflow/model-port-factory.js';
 
@@ -32,9 +32,9 @@ import { createModelPort } from '../workflow/model-port-factory.js';
  * 模型可用性（0157）：标题请求在没有真实配置时由 tick 内部的规则降级兜底，不外呼；
  * 配置残缺只停掉成员唤醒这一段，不让它拖死导入与执行推进。成员唤醒的模型端口在
  * 调用期抛出的 typed 不可用错误由成员唤醒本身按类型化失败落账（settleWakeupFailed
- * 持久 error.code、不重试外呼、不吞成成功）——「无配置不再回退 FakeModelPort」的
- * 端口层改动归模型侧（见 OVERALL-FIX-20261104-A HANDOFF），本调度器对两种世界都
- * 只做通用 typed 错误处理，不硬编码错误码。
+ * 持久 error.code、不重试外呼、不吞成成功）——「无配置不再回退 FakeModelPort」已
+ * 在本文件落地（无配置整段跳过，OVERALL-FIX-20261104-B HANDOFF §1.2），本调度器对
+ * typed 错误只做通用处理，不硬编码错误码。
  *
  * 并发准入（runtime-context §2.12「并发上限」）：每一拍先读系统级在途执行数，达到
  * `RELAY_MAX_CONCURRENT_EXECUTIONS` 上界时整拍让路（只记可观测事实，不重试领取）；
@@ -71,13 +71,28 @@ export function registerBackgroundWorkScheduler(
   // test 环境默认不启用并发闸（既有用例遗留的在途行会把闸变成抖动源）；
   // 显式设置 RELAY_MAX_CONCURRENT_EXECUTIONS 即为显式开启。
   const concurrencyGateActive = executionConcurrencyGateEnabled();
-  // 与 Worker 同一口径：未配置真实模型走离线 Mock；配置残缺只停掉成员唤醒这一段，
-  // 不让它拖死不需要模型的导入与执行推进。端口调用期的 typed 错误由成员唤醒落账，
-  // 不在这里吞掉（见文件头注释与 OVERALL-FIX-20261104-A HANDOFF 的分工说明）。
+  // 与 Worker 同一口径：无真实模型配置时成员唤醒整段跳过（B1 之后不再回退离线
+  // Fake——成员回信不能是 Mock 文本，OVERALL-FIX-20261104-B HANDOFF §1.2）；仅
+  // 测试进程可用 RELAY_TEST_ALLOW_FAKE_MODEL=1 显式放行离线 Fixture（与 Run 侧
+  // legacyAdmission 同一口径，生产绝不设置）。配置残缺只停掉成员唤醒这一段，不让
+  // 它拖死不需要模型的导入与执行推进。端口调用期的 typed 错误由成员唤醒落账，
+  // 不在这里吞掉（见文件头注释与两份 HANDOFF 分工）。
+  const allowTestFakeModelPort = process.env.RELAY_TEST_ALLOW_FAKE_MODEL === '1';
   let memberWakeupModelPort: AssistModelPort | undefined;
   try {
     const config = readModelPortConfig(process.env);
-    memberWakeupModelPort = config === undefined ? new FakeModelPort() : createModelPort(config);
+    if (config === undefined) {
+      if (allowTestFakeModelPort) {
+        memberWakeupModelPort = new FakeModelPort();
+      } else {
+        // 一次性可观测事实：MEMBER_WAKEUP 阶段对 undefined 本来就跳过（诚实排队），
+        // 这里避免「无配置」静默停摆。
+        app.log.warn({ code: 'BACKGROUND_MODEL_UNAVAILABLE' },
+          'background_member_wakeup_skipped_without_model_config');
+      }
+    } else {
+      memberWakeupModelPort = createModelPort(config);
+    }
   } catch {
     app.log.warn({ code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED', reason: 'MODEL_CONFIG_INVALID' },
       'background_member_wakeup_disabled_by_invalid_model_config');
@@ -135,7 +150,10 @@ export function registerBackgroundWorkScheduler(
         runConversationExecutionAutoStartTick(d.database.executor));
       if (memberWakeupModelPort !== undefined) {
         await runStage('MEMBER_WAKEUP', () => runMemberWakeupTick(d.database.executor,
-          { workerId, modelPort: memberWakeupModelPort, signal: controller.signal }));
+          { workerId, modelPort: memberWakeupModelPort, signal: controller.signal,
+            // 测试显式放行的 Fake 端口需配套放行（B1：生产调用方不设置该选项）。
+            ...(isFakeModelPort(memberWakeupModelPort)
+              ? { testOnlyAllowFakeModelPort: true } : {}) }));
       }
       // 0157：标题请求的推进者。放在最后：标题是异步展示事实，不能反过来推迟成员唤醒；
       // 没有在途请求时只多一条返回空集的领取查询，有请求时一次 tick 最多一次辅助外呼。

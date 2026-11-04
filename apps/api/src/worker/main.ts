@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 import { validateDatabaseUrl, DEFAULT_MAX_CONCURRENT_EXECUTIONS } from '../config/config.js';
 import { applyCredentialEnvFromStore, CredentialEnvError } from '../credentials/credential-env.js';
 import { validateModelPortConfig } from '../workflow/model-port-config.js';
-import { FakeModelPort } from '../workflow/fake-model-port.js';
+import { FakeModelPort, isFakeModelPort } from '../workflow/fake-model-port.js';
 import { createModelPort } from '../workflow/model-port-factory.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { RelayDatabase } from '../infrastructure/database.js';
@@ -101,9 +101,19 @@ async function main(): Promise<void> {
     });
     stopCatalogRefresh = catalogRefresh.stop;
     const modelConfig = readModelPortConfig(process.env);
+    // B1（OVERALL-FIX-20261104-B HANDOFF §1.2）：无真实模型配置不再构造离线 Fake——
+    // 聊天回复与成员回信都不能是 Mock 文本落成真实消息。无配置时两个模型 tick 跳过
+    // （消息留在 PENDING 的诚实排队态，配置后下一拍自然继续），启动时留一条一次性事实。
+    // 集成测试经 RELAY_TEST_ALLOW_FAKE_MODEL=1（run-integration.ps1 显式设置，生产绝不
+    // 设置）显式放行离线 Fixture，与 Run 侧 legacyAdmission 的测试放行同一口径。
+    const allowTestFakeModelPort = process.env.RELAY_TEST_ALLOW_FAKE_MODEL === '1';
     const assistModelPort = modelConfig === undefined
-      ? new FakeModelPort(fakeModelDelayMs)
+      ? (allowTestFakeModelPort ? new FakeModelPort(fakeModelDelayMs) : undefined)
       : createModelPort(modelConfig);
+    if (assistModelPort === undefined) {
+      process.stderr.write(`${JSON.stringify({ type: 'worker_model_unavailable',
+        code: 'BACKGROUND_MODEL_UNAVAILABLE' })}\n`);
+    }
     // test 环境默认不启用并发闸（既有崩溃用例遗留在途行会把闸变成抖动源）；
     // 显式设置 RELAY_MAX_CONCURRENT_EXECUTIONS 即为显式开启。
     const concurrencyGateActive = executionConcurrencyGateEnabled();
@@ -193,23 +203,28 @@ async function main(): Promise<void> {
           }
         } else {
           throttled = false;
-          const assist = await runAssistGenerationTick(database.executor, {
-            workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
-          });
-          if (assist !== undefined) {
-            process.stdout.write(`${JSON.stringify({ type: 'worker_assist_settled',
-              message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
-              ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
-          }
-          if (!assistOnce) {
-            // 0141 / ADR-034 包 C：成员消息唤醒。同一 tick 里有界推进——归档/停用/
-            // 外部成员不唤醒，租约清扫先于领取，回信只是协作记录不产生执行权。
-            const memberWakeup = await runMemberWakeupTick(database.executor, {
-              workerId, modelPort: assistModelPort, leaseMs, signal: controller.signal });
-            if (memberWakeup.processed.length > 0 || memberWakeup.requeued > 0 ||
-                memberWakeup.expiredFailed > 0) {
-              process.stdout.write(`${JSON.stringify({ type: 'worker_member_wakeup',
-                ...memberWakeup })}\n`);
+          if (assistModelPort !== undefined) {
+            const assist = await runAssistGenerationTick(database.executor, {
+              workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
+            });
+            if (assist !== undefined) {
+              process.stdout.write(`${JSON.stringify({ type: 'worker_assist_settled',
+                message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
+                ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
+            }
+            if (!assistOnce) {
+              // 0141 / ADR-034 包 C：成员消息唤醒。同一 tick 里有界推进——归档/停用/
+              // 外部成员不唤醒，租约清扫先于领取，回信只是协作记录不产生执行权。
+              // 测试显式放行的 Fake 端口需配套放行（B1：生产调用方不设置该选项）。
+              const memberWakeup = await runMemberWakeupTick(database.executor, {
+                workerId, modelPort: assistModelPort, leaseMs, signal: controller.signal,
+                ...(isFakeModelPort(assistModelPort)
+                  ? { testOnlyAllowFakeModelPort: true } : {}) });
+              if (memberWakeup.processed.length > 0 || memberWakeup.requeued > 0 ||
+                  memberWakeup.expiredFailed > 0) {
+                process.stdout.write(`${JSON.stringify({ type: 'worker_member_wakeup',
+                  ...memberWakeup })}\n`);
+              }
             }
           }
         }
