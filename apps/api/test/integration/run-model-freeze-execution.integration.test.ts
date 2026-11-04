@@ -295,7 +295,7 @@ test('a frozen free model stops when its credential configuration disappeared',
     assert.deepEqual(await modelCallsForRun(runId), []);
   });
 
-test('a Run without a frozen model plan keeps the legacy Fake execution path', async () => {
+test('a Run without a frozen model plan stops with MODEL_NOT_CONFIGURED unless the offline fixture is explicitly opted in (B1)', async () => {
   const fixture = await readyTask();
   const accepted = await delegateTask(app.db, { ...fixture, commandId: randomUUID() },
     { RELAY_MODEL_PROVIDER: 'fake' });
@@ -306,16 +306,41 @@ test('a Run without a frozen model plan keeps the legacy Fake execution path', a
   const provider = controlledProvider();
   const storage = new ManagedContentStore(await createDataRoot());
   const workerId = `legacy-fake-${randomUUID()}`;
-  const built = await advanceRunStep(app.db, { runId, workerId, storage,
+  // B1（OVERALL-FIX-20261104-B）：没有显式测试放行时，无配置的旧 Run 不再隐式回退
+  // 离线 Mock——生产里那会让一次合法委派「完成」出一份 Fake 交付物。
+  const stopped = await advanceRunStep(app.db, { runId, workerId, storage,
     modelEnv: { RELAY_MODEL_PROVIDER: 'fake' }, modelTransport: provider.dependencies });
-  assert.equal(built.status, 'STEP_SUCCEEDED');
+  assert.equal(stopped.status, 'STEP_SUCCEEDED');
   const draft = await advanceRunStep(app.db, { runId, workerId, storage,
     modelEnv: { RELAY_MODEL_PROVIDER: 'fake' }, modelTransport: provider.dependencies });
-  assert.equal(draft.status, 'STEP_SUCCEEDED');
-  assert.equal(draft.step_kind, 'DRAFT');
-  // 旧 Run 的 Fake 路径不产生真实外呼，也不伪造真实模型身份。
+  assert.equal(draft.status, 'RUN_FAILED');
+  assert.equal(draft.reason, 'MODEL_NOT_CONFIGURED');
   assert.equal(provider.requests.length, 0);
-  const calls = await modelCallsForRun(runId);
+  assert.deepEqual(await modelCallsForRun(runId), []);
+
+  // 显式放行（RELAY_TEST_ALLOW_FAKE_MODEL=1，集成脚本只对测试进程设置）：旧 Run 的
+  // Fake Fixture 路径保留——不产生真实外呼，也不伪造真实模型身份。失败后的原 Run 已
+  // 终态，放行路径用另一条同形委派验证。
+  const optedFixture = await readyTask();
+  const opted = await delegateTask(app.db, { ...optedFixture, commandId: randomUUID() },
+    { RELAY_MODEL_PROVIDER: 'fake' });
+  const optedRunId = opted.result.run_id;
+  const optedContract = await createRepositories(app.db).runs.readContract(optedRunId);
+  assert.ok(optedContract);
+  assert.equal('model_selection_snapshot' in optedContract.frozen_snapshot, false);
+  const optedBuilt = await advanceRunStep(app.db, { runId: optedRunId,
+    workerId: `legacy-fake-optin-${randomUUID()}`, storage,
+    modelEnv: { RELAY_MODEL_PROVIDER: 'fake', RELAY_TEST_ALLOW_FAKE_MODEL: '1' },
+    modelTransport: provider.dependencies });
+  assert.equal(optedBuilt.status, 'STEP_SUCCEEDED');
+  const draftOptedIn = await advanceRunStep(app.db, { runId: optedRunId,
+    workerId: `legacy-fake-optin-${randomUUID()}`, storage,
+    modelEnv: { RELAY_MODEL_PROVIDER: 'fake', RELAY_TEST_ALLOW_FAKE_MODEL: '1' },
+    modelTransport: provider.dependencies });
+  assert.equal(draftOptedIn.status, 'STEP_SUCCEEDED');
+  assert.equal(draftOptedIn.step_kind, 'DRAFT');
+  assert.equal(provider.requests.length, 0);
+  const calls = await modelCallsForRun(optedRunId);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.provider, 'fake');
 });
