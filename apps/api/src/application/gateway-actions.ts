@@ -16,6 +16,7 @@ import { DomainError, invalidTransition, resourceNotFound, validationFailed } fr
 import { lockTaskAndRun } from './lock-task-run.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
 import { createRepositories, withTransaction, type Repositories } from './unit-of-work.js';
+import { establishConversationDiffBaseline } from '../conversation-diff/net-diff-service.js';
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { hasCurrentRunContext } from './context-fence.js';
 import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
@@ -48,6 +49,8 @@ import { computeCheckTrustBasis, type CheckTrustBasis } from './check-trust-basi
 import { approvalCheckMaterialTarget, verifyApprovalCheckMaterial } from './approval-check-material.js';
 import { getAdapterDescriptor } from '../gateway/adapter-metadata.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
+import { readMessageSnapshotLimits } from './assist-file-baseline.js';
+import type { FileWritePreimageInput } from '../assist/message-recall-repository.js';
 import { COMPUTER_DESKTOP_TARGET } from '../computer/protocol.js';
 import { computerExecute, computerParamsForAction, planComputerActionForPrepare }
   from '../computer/computer-adapter.js';
@@ -889,6 +892,99 @@ async function captureAuthorizedFileWriteDiffs(db: DbExecutor, input: PrepareGat
   }) };
 }
 
+interface CapturedPreimageFile extends FileWritePreimageInput {
+  readonly action: FileChange['action'];
+}
+
+interface FileWritePreimageCapture {
+  readonly rootPath: string;
+  readonly files: readonly CapturedPreimageFile[];
+  readonly blobs: readonly { sha256: string; sizeBytes: bigint; content: Buffer }[];
+}
+
+/**
+ * 0159（AGENT-FILE-CONTEXT-V3）：在真正落盘之前冻结「实际写入目标」的前像。
+ *
+ * 与 `captureAuthorizedFileWriteDiffs` 的差异：后者只保留 ≤64 KiB 的文本用于差异展示，
+ * 这里保存撤销所需的完整字节（含二进制与更大文本），并绑定到产生它的 Operation。
+ * 文件读取在事务之外完成，随后的写行与动作身份在同一事务提交——落库失败就不产生
+ * Invocation，因此不存在「先写后补快照」。内容不可安全读取/超出容量时如实记录原因，
+ * 由 Prepare 对破坏性动作 fail-closed。
+ */
+async function captureFileWritePreimages(db: DbExecutor, input: PrepareGatewayActionInput,
+  root: string, target: string): Promise<FileWritePreimageCapture> {
+  const rawChanges: FileChange[] = input.actionType === 'APPLY_CHANGESET'
+    ? input.params.changes as unknown as FileChange[]
+    : [{
+      path: relative(root, target).replaceAll('\\', '/'),
+      action: isFrozenBaseline(typeof input.params.baseline_sha256 === 'string'
+        ? input.params.baseline_sha256 : null) ? 'MODIFY' : 'CREATE',
+      baselineSha256: typeof input.params.baseline_sha256 === 'string'
+        ? input.params.baseline_sha256 : null,
+    }];
+  const canonical = rawChanges.map((change) => ({
+    ...change,
+    path: input.actionType === 'APPLY_CHANGESET'
+      ? canonicalRelativePath(root, change.path) : change.path,
+  }));
+  const limits = readMessageSnapshotLimits();
+  const usage = await createRepositories(db).messageRecall.snapshotUsage(input.workspaceId);
+  let remaining = BigInt(limits.budgetBytes) - usage.bytes;
+  const files: CapturedPreimageFile[] = [];
+  const blobs: { sha256: string; sizeBytes: bigint; content: Buffer }[] = [];
+  for (const change of canonical) {
+    const action = input.actionType === 'WRITE_FILE'
+      ? (isFrozenBaseline(change.baselineSha256) ? 'MODIFY' as const : 'CREATE' as const)
+      : change.action;
+    // 受保护路径的写入会在执行前被拒绝；不在这里读取其内容。
+    if (isProtectedPath(change.path)) continue;
+    const absolute = resolve(root, change.path);
+    if (!absolute.startsWith(`${resolve(root)}${sep}`)) {
+      files.push({ relativePath: change.path, existed: false, blobSha256: null,
+        sizeBytes: null, unavailableReason: 'READ_FAILED', action });
+      continue;
+    }
+    let info;
+    try {
+      info = await lstat(absolute);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      files.push({ relativePath: change.path, existed: code === 'ENOENT' || code === 'ENOTDIR'
+        ? false : true, blobSha256: null, sizeBytes: null,
+      unavailableReason: code === 'ENOENT' || code === 'ENOTDIR' ? null : 'READ_FAILED', action });
+      continue;
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+      files.push({ relativePath: change.path, existed: true, blobSha256: null, sizeBytes: null,
+        unavailableReason: 'TARGET_NOT_REGULAR', action });
+      continue;
+    }
+    const size = BigInt(info.size);
+    if (size > BigInt(limits.maxFileBytes)) {
+      files.push({ relativePath: change.path, existed: true, blobSha256: null,
+        sizeBytes: null, unavailableReason: 'CONTENT_TOO_LARGE', action });
+      continue;
+    }
+    if (size > remaining) {
+      files.push({ relativePath: change.path, existed: true, blobSha256: null,
+        sizeBytes: null, unavailableReason: 'CAPACITY_FULL', action });
+      continue;
+    }
+    try {
+      const content = await readFile(absolute);
+      const sha256 = createHash('sha256').update(content).digest('hex');
+      files.push({ relativePath: change.path, existed: true, blobSha256: sha256,
+        sizeBytes: BigInt(content.byteLength), unavailableReason: null, action });
+      blobs.push({ sha256, sizeBytes: BigInt(content.byteLength), content });
+      remaining -= BigInt(content.byteLength);
+    } catch {
+      files.push({ relativePath: change.path, existed: true, blobSha256: null, sizeBytes: null,
+        unavailableReason: 'READ_FAILED', action });
+    }
+  }
+  return { rootPath: root, files, blobs };
+}
+
 /** Prepare persists one logical action; ASK creates Review, never an Invocation. */
 export async function prepareGatewayAction(db: DbExecutor, input: PrepareGatewayActionInput): Promise<PreparedGatewayAction> {
   if (!input.intentKey) throw validationFailed([{ field: 'intent_key', message: 'must not be empty' }]);
@@ -1130,6 +1226,23 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   const frozen = input.origin.kind === 'RUN' && resourceBefore !== undefined && fileWriteAction
     ? await captureAuthorizedFileWriteDiffs(db, input, resourceBefore, target, hash, payloadBytes)
     : { frozenDiffs: [] };
+  // 会话 Diff 的「写前基线」只在真实写入前冻结，不在消息准入时扫描目录：
+  // 普通聊天不需要 Diff，就不该为大仓库读一遍文件正文。失败只影响 Diff 视图
+  // （读取端按缺基线呈现），不能让本来可保护的写入失败。
+  if (fileWriteAction && resourceBefore !== undefined && isSessionWriteOrigin(input.origin)) {
+    try {
+      await establishConversationDiffBaseline(createRepositories(db), {
+        workspaceId: input.workspaceId, sessionId: input.origin.sessionId,
+      });
+    } catch {
+      // 见上：Diff 是派生视图，不能成为写入的前置条件。
+    }
+  }
+  // 0159：Run 与会话写共用同一套「落盘前前像」证据。读取失败/不可保护时在
+  // 同一事务内 fail-closed，绝不把「没有可恢复证据」的破坏性写入再放出去。
+  const preimages = fileWriteAction && resourceBefore !== undefined
+    ? await captureFileWritePreimages(db, input, resourceBefore.canonical_root, target)
+    : undefined;
   if (readChangeSet && input.origin.kind === 'RUN') {
     const owned = await createRepositories(db).gateway.readOperation(input.params.operation_id as string);
     if (owned?.run_id !== input.origin.runId || owned.capability_key !== 'FILE_WRITE') {
@@ -1346,6 +1459,21 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
         relative_path: evidence.relativePath, file_action: evidence.fileAction,
         baseline_sha256: evidence.baselineSha256, baseline_text: evidence.baselineText,
         unavailable_reason: evidence.unavailableReason });
+    }
+    if (preimages !== undefined) {
+      // 幂等重放复用首份证据：同一操作已有前像时不再按当前磁盘重新判定。
+      const existing = await repositories.messageRecall.listPreimagesForOperations([op.id]);
+      if (existing.length === 0) {
+        const blocking = preimages.files.find((file) =>
+          file.action !== 'CREATE' && file.existed && file.unavailableReason !== null);
+        if (blocking !== undefined) {
+          throw gatewayDenied('GATEWAY_PREIMAGE_UNAVAILABLE',
+            `无法在写入前保护 ${blocking.relativePath}（${blocking.unavailableReason}），已拒绝这次写入。`);
+        }
+        await repositories.messageRecall.registerBaselineBlobs(preimages.blobs);
+        await repositories.messageRecall.insertPreimages(op.id, preimages.rootPath,
+          preimages.files.map(({ action: _action, ...file }) => file));
+      }
     }
     if (input.audit !== undefined) {
       // 人工主体与动作身份在同一事务落库：把留痕放到调用方事务之外会留下「动作已存在但查不到
@@ -2370,9 +2498,50 @@ export async function dispatchGatewayAction(db: DbExecutor, input: DispatchGatew
   return settleGatewayInvocation(db, admitted, 'SUCCEEDED', result, input.origin);
 }
 
+/**
+ * 0159：执行前确认「这次破坏性写入仍有可用的写入前证据」。
+ * 返回 null 表示可继续；否则给出明确的失败原因（不产生任何落盘副作用）。
+ * 历史动作（迁移前 Prepare、尚未 Dispatch）没有前像行，沿用旧语义并如实标注不可自动撤销。
+ */
+async function checkFileWritePreimages(repositories: Repositories, op: LogicalOperationRow,
+  root: string, changes: readonly FileChange[]): Promise<string | null> {
+  const rows = await repositories.messageRecall.listPreimagesForOperations([op.id]);
+  if (rows.length === 0) return null;
+  // 前像按「Prepare 时的受管根」存相对路径；WRITE_FILE 执行端历史上按目标父目录取相对
+  // 路径。两者根不同（嵌套目标尤其明显），所以按**绝对路径**匹配，而不是直接比字符串。
+  const absoluteKey = (value: string) => process.platform === 'win32'
+    ? resolve(value).toLowerCase() : resolve(value);
+  const byPath = new Map(rows.map((row) => [
+    absoluteKey(resolve(row.rootPath, row.relativePath)), row]));
+  for (const change of changes) {
+    const path = canonicalRelativePath(root, change.path);
+    if (isProtectedPath(path)) continue;
+    const row = byPath.get(absoluteKey(resolve(root, change.path)));
+    if (row === undefined) return 'PREIMAGE_MISSING';
+    if (change.action !== 'CREATE' && row.existed && row.unavailableReason !== null) {
+      return 'PREIMAGE_UNAVAILABLE';
+    }
+  }
+  return null;
+}
+
 async function fileWriteExecute(db: DbExecutor, op: LogicalOperationRow, invocation: InvocationAttemptRow,
   signal?: AbortSignal): Promise<{ outcome: 'SUCCEEDED' | 'FAILED'; result: JsonObject }> {
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file write');
+  {
+    const repositories = createRepositories(db);
+    const root = op.action_type === 'APPLY_CHANGESET' ? op.normalized_target
+      : dirname(op.normalized_target);
+    const changes = op.action_type === 'APPLY_CHANGESET'
+      ? op.params.changes as unknown as FileChange[]
+      : fileWriteInputChanges(op, root);
+    const failure = await checkFileWritePreimages(repositories, op, root, changes);
+    if (failure !== null) {
+      return { outcome: 'FAILED', result: { operation_id: op.id, invocation_id: invocation.id,
+        reason: failure, changes: changes.map((change) => ({ path: change.path,
+          action: change.action, status: 'FAILED', error: failure })) as unknown as JsonObject[] } };
+    }
+  }
   /**
    * 0132：消息撤回的发送前文件前像。只在真正落盘前读取当前字节，首写优先；
    * 采集失败不阻断原写入——那条路径之后会如实显示为「缺少基线、不可恢复」。

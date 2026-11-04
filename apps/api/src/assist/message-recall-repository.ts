@@ -14,7 +14,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type {
   AssistMessageBaselineFileRow, AssistMessageBaselineRow, AssistMessageRecallFileRow,
   AssistMessageRecallFileStatus, AssistMessageRecallRow, AssistMessageRecallStatus,
-  AssistMessageRecallProtectionRow, AssistMessageRecallUndoRow,
+  AssistMessageRecallProtectionRow, AssistMessageRecallUndoRow, AssistRecallSnapshotSource,
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
@@ -22,6 +22,7 @@ export interface DirectWriteOperationRow {
   readonly message_id: string; readonly message_seq: bigint;
   readonly call_status: 'SETTLED' | 'UNKNOWN';
   readonly operation_status: string;
+  readonly operation_id: string;
   readonly root_path: string;
   readonly params: JsonObject;
   readonly result_ref: JsonObject | null;
@@ -33,6 +34,7 @@ export interface DelegatedWriteFileRow {
   /** 该委派执行绑定的 Task；请求尚未建 Task 时为 null。 */
   readonly task_id: string | null;
   readonly change_set_status: 'SUCCEEDED' | 'PARTIAL' | 'UNKNOWN';
+  readonly operation_id: string;
   readonly root_path: string; readonly relative_path: string;
   readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
   readonly file_status: 'APPLIED' | 'CONFLICT' | 'FAILED';
@@ -46,6 +48,22 @@ export interface RecallFileInput {
   readonly expectedCurrentSha256: string | null;
   readonly observedSha256: string | null; readonly status: AssistMessageRecallFileStatus;
   readonly reason: string | null;
+  /** 0159：恢复来源与精准证据所属动作；缺省按旧整目录基线（历史行兼容）。 */
+  readonly snapshotSource?: AssistRecallSnapshotSource;
+  readonly sourceOperationId?: string | null;
+}
+
+export interface FileWritePreimageInput {
+  readonly relativePath: string;
+  readonly existed: boolean;
+  readonly blobSha256: string | null;
+  readonly sizeBytes: bigint | null;
+  readonly unavailableReason: string | null;
+}
+
+export interface FileWritePreimageRowView extends FileWritePreimageInput {
+  readonly operationId: string;
+  readonly rootPath: string;
 }
 
 export class MessageRecallRepository {
@@ -159,10 +177,40 @@ export class MessageRecallRepository {
     }
   }
 
+  // ---- 0159：写入前精准保护证据（Prepare 阶段冻结，绑定动作身份）----
+
+  /** 同一动作重复 Prepare 复用首份证据；后来的读取不会刷新已冻结的前像。 */
+  async insertPreimages(operationId: string, rootPath: string,
+    files: readonly FileWritePreimageInput[]): Promise<void> {
+    for (const file of files) {
+      await sql`insert into file_write_preimages (operation_id, root_path, relative_path,
+          existed, blob_sha256, size_bytes, unavailable_reason)
+        values (${operationId}, ${rootPath}, ${file.relativePath}, ${file.existed},
+          ${file.blobSha256}, ${file.sizeBytes}, ${file.unavailableReason})
+        on conflict (operation_id, relative_path) do nothing`.execute(this.db);
+    }
+  }
+
+  async listPreimagesForOperations(operationIds: readonly string[]):
+  Promise<readonly FileWritePreimageRowView[]> {
+    if (operationIds.length === 0) return [];
+    const rows = (await sql<{
+      operation_id: string; root_path: string; relative_path: string; existed: boolean;
+      blob_sha256: string | null; size_bytes: string | null; unavailable_reason: string | null;
+    }>`select operation_id, root_path, relative_path, existed, blob_sha256, size_bytes,
+        unavailable_reason from file_write_preimages
+      where operation_id = any(${operationIds}::uuid[])
+      order by operation_id, relative_path`.execute(this.db)).rows;
+    return rows.map((row) => ({ operationId: row.operation_id, rootPath: row.root_path,
+      relativePath: row.relative_path, existed: row.existed, blobSha256: row.blob_sha256,
+      sizeBytes: row.size_bytes === null ? null : BigInt(row.size_bytes),
+      unavailableReason: row.unavailable_reason }));
+  }
+
   async listDirectWriteOperations(sessionId: string, minSeq: bigint):
   Promise<readonly DirectWriteOperationRow[]> {
     return (await sql<DirectWriteOperationRow>`select stc.message_id, m.seq as message_seq,
-        stc.status as call_status, op.status as operation_status,
+        stc.status as call_status, op.status as operation_status, op.id as operation_id,
         op.normalized_target as root_path, op.params, op.result_ref,
         coalesce(stc.settled_at, stc.requested_at) as observed_at
       from session_tool_calls stc
@@ -181,7 +229,7 @@ export class MessageRecallRepository {
   Promise<readonly DelegatedWriteFileRow[]> {
     return (await sql<DelegatedWriteFileRow>`select q.source_message_id as message_id,
         q.task_id, m.seq as message_seq, cs.status as change_set_status,
-        cs.canonical_root as root_path, f.relative_path, f.action,
+        cs.operation_id, cs.canonical_root as root_path, f.relative_path, f.action,
         f.status as file_status, f.target_sha256, f.actual_sha256, cs.created_at as observed_at
       from conversation_execution_requests q
       join assist_messages m on m.id = q.source_message_id
@@ -275,10 +323,11 @@ export class MessageRecallRepository {
     for (const file of input.files) {
       await sql`insert into assist_message_recall_files (recall_id, relative_path,
         baseline_existed, baseline_sha256, baseline_message_id, expected_current_sha256,
-        observed_sha256, status, reason)
+        observed_sha256, status, reason, snapshot_source, source_operation_id)
         values (${input.id}, ${file.relativePath}, ${file.baselineExisted}, ${file.baselineSha256},
           ${file.baselineMessageId}, ${file.expectedCurrentSha256}, ${file.observedSha256},
-          ${file.status}, ${file.reason})`
+          ${file.status}, ${file.reason},
+          ${file.snapshotSource ?? 'LEGACY_MESSAGE_BASELINE'}, ${file.sourceOperationId ?? null})`
         .execute(this.db);
     }
   }
@@ -451,6 +500,11 @@ export class MessageRecallRepository {
         from assist_message_recall_protections p
         join assist_message_recalls r on r.id = p.recall_id
         where r.workspace_id = ${workspaceId}
+        union all
+        select coalesce(sum(w.size_bytes), 0), count(*), min(w.created_at)
+        from file_write_preimages w
+        join logical_operations o on o.id = w.operation_id
+        where o.workspace_id = ${workspaceId}
       )
       select coalesce(sum(bytes), 0)::text as bytes, coalesce(sum(count), 0)::text as count,
         min(oldest) as oldest from usage`.execute(this.db);
@@ -476,12 +530,25 @@ export class MessageRecallRepository {
           where r.session_id = b.session_id and r.status = 'RUNNING')
         and not exists (select 1 from assist_message_recall_undos u
           where u.session_id = b.session_id and u.status = 'RUNNING')`.execute(this.db);
+    // 0159：写入前精准证据沿用同一保留期；工作区有在途撤回/撤销时整批保留。
+    const preimages = await sql`
+      delete from file_write_preimages p
+      using logical_operations o
+      where o.id = p.operation_id
+        and p.created_at < ${expiredAt}
+        and not exists (select 1 from assist_message_recalls r
+          where r.workspace_id = o.workspace_id and r.status = 'RUNNING')
+        and not exists (select 1 from assist_message_recall_undos u
+          join assist_message_recalls r2 on r2.id = u.source_recall_id
+          where r2.workspace_id = o.workspace_id and u.status = 'RUNNING')`.execute(this.db);
     // 字节库引用回收：删掉不再被任何条目引用的 blob（refcount 不再维护精确值，
     // 以「有无引用行」为准——同一事实只有条目一处，不冒充第二套计数）。
     const blobs = await sql`
       delete from assist_message_snapshot_blobs b
       where not exists (select 1 from assist_message_baseline_files f
-        where f.blob_sha256 = b.blob_sha256)`.execute(this.db);
+          where f.blob_sha256 = b.blob_sha256)
+        and not exists (select 1 from file_write_preimages p
+          where p.blob_sha256 = b.blob_sha256)`.execute(this.db);
     const protections = await sql`
       delete from assist_message_recall_protections p
       using assist_message_recalls r
@@ -490,8 +557,8 @@ export class MessageRecallRepository {
         and r.status <> 'RUNNING'
         and not exists (select 1 from assist_message_recall_undos u
           where u.source_recall_id = r.id and u.status = 'RUNNING')`.execute(this.db);
-    return Number((baselines.numAffectedRows ?? 0n) + (blobs.numAffectedRows ?? 0n)
-      + (protections.numAffectedRows ?? 0n));
+    return Number((baselines.numAffectedRows ?? 0n) + (preimages.numAffectedRows ?? 0n)
+      + (blobs.numAffectedRows ?? 0n) + (protections.numAffectedRows ?? 0n));
   }
 
   async finalizeUndo(id: string, status: AssistMessageRecallStatus,

@@ -215,18 +215,19 @@ test('RR-02 过期 RUNNING 按原回执接续恢复；未过期时拒绝并发�
     await assertRoundSettled(round.assistant_message_id, 'RR-02 第一轮');
     assert.equal(await readOrNull(env.root, 'r.md'), 'r1\n');
 
-    // 0132 改为发送前基线后，前像断言改为基线条目断言：目标消息的发送前字节
-    // 必须在准入时入库（内容寻址），恢复接续按同一基线工作。
-    const baseline = (await sql<{ message_id: string; id: string; status: string }>`
-      select message_id, id, status from assist_message_baselines
-      where message_id = ${round.user_message_id}`.execute(app.db)).rows[0];
-    assert.ok(baseline !== undefined, '发送前基线必须在消息准入时建立');
-    assert.equal(baseline.status, 'COMPLETE');
-    const baselineEntry = (await sql<{ blob_sha256: string }>`
-      select blob_sha256 from assist_message_baseline_files
-      where baseline_id = ${baseline.id} and relative_path = 'r.md'`.execute(app.db)).rows[0];
-    assert.ok(baselineEntry !== undefined, 'r.md 的发送前字节必须在基线里');
-    assert.equal(baselineEntry.blob_sha256, await sha256OfContent('r0\n'));
+    // V3（0159）：恢复目标来自动作级「写入前前像」，不再要求准入时扫整目录。
+    // 断言这条写入确实在落盘前冻结了 r0 的证据，并绑定到产生它的 Operation。
+    const preimage = (await sql<{ operation_id: string; blob_sha256: string }>`
+      select p.operation_id, p.blob_sha256 from file_write_preimages p
+      join logical_operations o on o.id = p.operation_id
+      where o.workspace_id = ${env.workspaceId} and p.relative_path = 'r.md'
+      order by p.created_at desc limit 1`.execute(app.db)).rows[0];
+    assert.ok(preimage !== undefined, '写入前必须已落库 r.md 的前像证据');
+    assert.equal(preimage.blob_sha256, await sha256OfContent('r0\n'));
+    const baselines = (await sql`
+      select 1 from assist_message_baselines
+      where message_id = ${round.user_message_id}`.execute(app.db)).rows;
+    assert.equal(baselines.length, 0, 'V3 不再为新消息建立整目录发送前基线');
 
     // 按一次「已预检、尚未恢复任何文件」的崩溃现场摆放回执。
     const recallId = await insertRunningRecall({ workspaceId: env.workspaceId,
@@ -235,9 +236,10 @@ test('RR-02 过期 RUNNING 按原回执接续恢复；未过期时拒绝并发�
     const expectedCurrent = await sha256OfContent('r1\n');
     await sql`insert into assist_message_recall_files (recall_id, relative_path,
       baseline_existed, baseline_sha256, baseline_message_id, expected_current_sha256,
-      observed_sha256, status)
-      values (${recallId}, 'r.md', true, ${baselineEntry.blob_sha256}, ${round.user_message_id},
-        ${expectedCurrent}, ${expectedCurrent}, 'PLANNED')`.execute(app.db);
+      observed_sha256, status, snapshot_source, source_operation_id)
+      values (${recallId}, 'r.md', true, ${preimage.blob_sha256}, ${round.user_message_id},
+        ${expectedCurrent}, ${expectedCurrent}, 'PLANNED', 'PRECISE_PREIMAGE',
+        ${preimage.operation_id})`.execute(app.db);
 
     const recallPath = workspacePath(env.workspaceId,
       `/assist-messages/${round.user_message_id}/recall`);

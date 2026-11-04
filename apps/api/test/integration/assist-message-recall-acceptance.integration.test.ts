@@ -419,10 +419,10 @@ test('RA-06 撤销预检：撤回后文件被外部修改则不写任何文件�
   }
 });
 
-test('RA-07 容量预算占满时如实降级：新基线 CAPACITY_FULL、保护副本不可用则整次撤回不执行（§27.3.4）', async () => {
+test('RA-07 写入前保护超出预算时 fail-closed：拒绝写入、绝不冒充可撤销（§27.3.4）', async () => {
   const { sql } = await import('kysely');
-  // 预算 22 字节：首条消息的基线字节（20B）可存；第二条消息的新内容字节（3B）与
-  // 撤回保护副本（3B）都会被预算闸挡下（去重下未变化内容不产生新字节）。
+  // 预算 22 字节：首条写入的前像 20B 可存；第二条写入的前像（当前 g1 3B）超预算，
+  // 必须在真正落盘之前拒绝，而不是先写再补证据。
   process.env.RELAY_MESSAGE_SNAPSHOT_BUDGET_BYTES = '22';
   const api = await startTestApi();
   try {
@@ -432,31 +432,29 @@ test('RA-07 容量预算占满时如实降级：新基线 CAPACITY_FULL、保护
       applyChangeset([{ path: 'g.md', action: 'MODIFY', content: 'g1\n',
         baselineSha256: seedSha }]), '第一次修改');
     await runRound(api, 'ra7-m1');
-    const msg2 = await sendScripted(api, env,
+    assert.equal(await readOrNull(env.root, 'g.md'), 'g1\n', '首条在预算内真实落盘');
+
+    // V3：只产生动作级前像，不再建立整目录发送前基线。
+    const preimages = (await sql<{ blob_sha256: string }>`
+      select p.blob_sha256 from file_write_preimages p
+      join logical_operations o on o.id = p.operation_id
+      where o.workspace_id = ${env.workspaceId} and p.relative_path = 'g.md'`.execute(app.db)).rows;
+    assert.equal(preimages.length, 1, '首条写入必须留下恰好一份前像');
+    assert.equal(preimages[0]?.blob_sha256, seedSha);
+    const baselines = (await sql`
+      select 1 from assist_message_baselines
+      where session_id = ${env.sessionId}`.execute(app.db)).rows;
+    assert.equal(baselines.length, 0, '新消息不再扫描整目录建立基线');
+
+    // 第二次写入的前像超预算 → Prepare 拒绝，文件保持 g1，不产生副作用。
+    await sendScripted(api, env,
       applyChangeset([{ path: 'g.md', action: 'MODIFY', content: 'g2\n',
         baselineSha256: await sha256OfContent('g1\n') }]), '第二次修改');
     await runRound(api, 'ra7-m2');
-    assert.equal(await readOrNull(env.root, 'g.md'), 'g2\n', 'RA-07：两轮真实落盘');
+    assert.equal(await readOrNull(env.root, 'g.md'), 'g1\n',
+      '无法在写入前保护时不得静默继续破坏性写入');
 
-    // 基线侧：首条消息的基线完整（20B 入库）；第二条消息的新内容字节超预算 →
-    // 基线 INCOMPLETE/CAPACITY_FULL，不冒充可恢复。
-    const baselines = (await sql<{ message_id: string; status: string; reason: string }>`
-      select b.message_id, b.status, b.reason from assist_message_baselines b
-      where b.session_id = ${env.sessionId} order by b.captured_at`.execute(app.db)).rows;
-    assert.equal(baselines.length, 2, describe(baselines));
-    assert.equal(baselines[0]?.status, 'COMPLETE', '首条基线在预算内应完整');
-    assert.equal(baselines[1]?.status, 'INCOMPLETE', describe(baselines));
-    assert.equal(baselines[1]?.reason, 'CAPACITY_FULL',
-      '超预算的基线必须降级并给出原因');
-
-    // 撤回 msg2：其基线 INCOMPLETE 且缺条目 → 预检按 BASELINE_UNKNOWN 阻塞，不写任何文件。
-    const blockedRecall = await api.post(workspacePath(env.workspaceId,
-      `/assist-messages/${msg2.user_message_id}/recall`), { command_id: randomUUID() });
-    assert.equal(blockedRecall.status, 409, blockedRecall.text);
-    assert.equal((blockedRecall.body as { code: string }).code, 'RECALL_PREFLIGHT_BLOCKED');
-    assert.equal(await readOrNull(env.root, 'g.md'), 'g2\n');
-
-    // 撤回 msg1：基线可用、预检通过，但保护副本超预算 → 整次撤回不执行（§27.3.3 前置）。
+    // 撤回 msg1：保护副本（当前 g1 的 3B）超预算 → 整次撤回不执行（§27.3.3 前置）。
     const recall = await api.post(workspacePath(env.workspaceId,
       `/assist-messages/${msg1.user_message_id}/recall`), { command_id: randomUUID() });
     assert.equal(recall.status, 200, recall.text);
@@ -467,7 +465,7 @@ test('RA-07 容量预算占满时如实降级：新基线 CAPACITY_FULL、保护
     assert.ok(receipt.files.every((file) => file.status === 'SKIPPED' &&
       file.reason !== null && file.reason.includes('PROTECTION_UNAVAILABLE')),
       `保护副本不可用必须整次不执行并说明原因；实际=${describe(receipt.files)}`);
-    assert.equal(await readOrNull(env.root, 'g.md'), 'g2\n', '撤回未写任何文件');
+    assert.equal(await readOrNull(env.root, 'g.md'), 'g1\n', '撤回未写任何文件');
   } finally {
     delete process.env.RELAY_MESSAGE_SNAPSHOT_BUDGET_BYTES;
     await api.stop();
@@ -525,11 +523,13 @@ test('RA-08 保留期清理后如实不可恢复；设置投影呈现生效配�
   }
 });
 
-test('RA-10 发送后、首写前的外部修改不被当作发送前状态（2026-10-24 拍板口径的判定性场景）', async () => {
+test('RA-10 撤销回到本次写入前的真实字节，而不是发消息那一刻（V3 语义判定场景）', async () => {
+  const { sql } = await import('kysely');
   const api = await startTestApi();
   try {
     const env = await openBoundSession(api, 'recall-sendtime', { 'x.md': 'orig' + String.fromCharCode(10) });
-    // 先发消息（发送前基线＝orig），再在会话首次写入前外部改掉文件。
+    // 发消息之后、会话首次写入之前，外部把文件改成 ext。撤销目标是「本次写入前」
+    // 的 ext，而不是发送前的 orig —— 否则会回滚用户/其他程序的真实修改。
     const msg1 = await sendScripted(api, env,
       applyChangeset([{ path: 'x.md', action: 'MODIFY', content: 'new' + String.fromCharCode(10),
         // 模型在写入前读到的是外部内容 ext：冻结基线必须是 ext 的摘要，写入才可能通过。
@@ -541,6 +541,16 @@ test('RA-10 发送后、首写前的外部修改不被当作发送前状态（20
     assert.equal(await readOrNull(env.root, 'x.md'), 'new' + String.fromCharCode(10),
       'RA-10：会话写入基于外部内容真实落盘');
 
+    const preimage = (await sql<{ blob_sha256: string }>`
+      select p.blob_sha256 from file_write_preimages p
+      join logical_operations o on o.id = p.operation_id
+      where o.workspace_id = ${env.workspaceId} and p.relative_path = 'x.md'`.execute(app.db)).rows[0];
+    assert.equal(preimage?.blob_sha256, await sha256OfContent('ext' + String.fromCharCode(10)),
+      '落盘前冻结的必须是首写前真实内容 ext');
+    assert.equal((await sql`select 1 from assist_message_baselines
+      where message_id = ${msg1.user_message_id}`.execute(app.db)).rows.length, 0,
+    '新语义不再建立整目录发送前基线');
+
     const recall = await api.post(workspacePath(env.workspaceId,
       `/assist-messages/${msg1.user_message_id}/recall`), { command_id: randomUUID() });
     assert.equal(recall.status, 200, recall.text);
@@ -549,8 +559,8 @@ test('RA-10 发送后、首写前的外部修改不被当作发送前状态（20
     assert.equal(receipt.status, 'COMPLETED', describe(recall.body));
     assert.deepEqual(receipt.files.map((file) => [file.path, file.status, file.baseline]),
       [['x.md', 'RESTORED', 'PRESENT']]);
-    assert.equal(await readOrNull(env.root, 'x.md'), 'orig' + String.fromCharCode(10),
-      '撤回必须恢复到消息发送前的字节（orig），不得把首写前的外部内容（ext）当作发送前状态');
+    assert.equal(await readOrNull(env.root, 'x.md'), 'ext' + String.fromCharCode(10),
+      '撤销恢复到本次写入前的 ext，不把发送前 orig 当作恢复目标');
   } finally {
     await api.stop();
   }

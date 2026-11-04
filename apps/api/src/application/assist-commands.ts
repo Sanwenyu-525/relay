@@ -20,8 +20,6 @@ import { detectMethodIntent } from './method-intent.js';
 import { checkAssistContent, checkRequiredText, normalizeText } from '../shared/text.js';
 import type { ContextSourceRef } from '../workflow/execution-contract.js';
 import { httpCommandScopeKey } from './actor.js';
-import { establishConversationDiffBaseline } from '../conversation-diff/net-diff-service.js';
-import { captureMessageBaseline } from './assist-file-baseline.js';
 import { frozenRoleSnapshot, requireActiveAssistantProfile } from './assistant-profile-commands.js';
 import { applyArtifactCreation, prepareArtifactCreation } from './artifact-commands.js';
 import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
@@ -674,16 +672,6 @@ export async function requestAssistMessage(
         throw invalidTransition('子 Agent 会话仅用于查看记录与追加补充，普通生成请返回主会话。',
           { sessionId: session.id });
       }
-      if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null &&
-          session.status === 'ACTIVE') {
-        try {
-          await establishConversationDiffBaseline(repositories, {
-            workspaceId: input.workspaceId, sessionId: session.id,
-          });
-        } catch {
-          // 基线采集不阻塞聊天：失权/超限/非 Git 根等按「缺基线」在读取端呈现。
-        }
-      }
       if (session.status !== 'ACTIVE') {
         throw invalidTransition('会话已归档，不能再发送消息。', { sessionId: session.id });
       }
@@ -880,26 +868,9 @@ export async function requestAssistMessage(
        */
       await repositories.todos.freezeTurnScope(session.id, userMessageId,
         { startsNewTask: newTaskPrefix !== null });
-      // 0132（§8.5，2026-10-24 拍板口径）：发送前文件基线在消息准入事务内建立——
-      // 提交后助手轮次才可能写文件，这里读到的就是「发送前」状态；采集失败/超限/预算
-      // 占满不阻塞消息，按 INCOMPLETE 基线如实降级（撤回时按不可恢复处理）。
-      if (session.conversation_mode === 'AGENT' && session.working_resource_id !== null
-          && session.status === 'ACTIVE') {
-        const snapshotResource = await repositories.gateway.readResource(
-          session.working_resource_id);
-        if (snapshotResource !== undefined
-            && snapshotResource.workspace_id === input.workspaceId
-            && snapshotResource.status === 'ACTIVE') {
-          try {
-            await captureMessageBaseline(repositories, {
-              workspaceId: input.workspaceId, session, messageId: userMessageId,
-              resourceId: snapshotResource.id,
-              rootPath: snapshotResource.canonical_root });
-          } catch {
-
-          }
-        }
-      }
+      // V3（0159）：不再在准入事务里扫描整份受管根。消息是否产生文件副作用，与
+      // 「发了什么」无关；保护证据改为真正写入前按变更路径冻结（file_write_preimages）。
+      // 旧 message baseline 只保留历史读取能力，不再为新消息生成整目录快照。
       if (messageAttachments.length > 0) {
         const bound = await repositories.assist.bindAttachments(session.id, userMessageId,
           messageAttachments.map((row) => row.id));

@@ -16,7 +16,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import type {
   AssistMessageBaselineFileRow, AssistMessageRecallFileRow, AssistMessageRecallFileStatus,
   AssistMessageRecallRow, AssistMessageRecallStatus, AssistMessageRecallProtectionRow,
-  AssistMessageRecallUndoRow, AssistMessageRow, AssistSessionRow,
+  AssistMessageRecallUndoRow, AssistMessageRow, AssistSessionRow, AssistRecallSnapshotSource,
 } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
@@ -25,7 +25,8 @@ import {
   canonicalRelativePath, executeFileChangeset, isFrozenBaseline, isProtectedPath,
   validateSafeRelativePath, type FileChange,
 } from '../files/file-changeset.js';
-import type { DirectWriteOperationRow } from '../assist/message-recall-repository.js';
+import type { DirectWriteOperationRow, FileWritePreimageRowView }
+  from '../assist/message-recall-repository.js';
 import { readMessageSnapshotLimits } from './assist-file-baseline.js';
 import { reopenTask } from './completion-commands.js';
 import { DomainError, invalidTransition, resourceNotFound } from './domain-error.js';
@@ -89,6 +90,8 @@ export interface AssistMessageRecallSummary {
 interface WriteEvent {
   readonly messageId: string;
   readonly messageSeq: bigint;
+  /** 产生这次写入的 LogicalOperation；撤回效果合成的折叠事件为 null。 */
+  readonly operationId: string | null;
   readonly relativePath: string;
   readonly action: 'CREATE' | 'MODIFY' | 'DELETE';
   readonly expectedSha256: string | null;
@@ -113,6 +116,9 @@ interface BaselineFacts {
   readonly expectedSha256: string | null;
   readonly expectedKnown: boolean;
   readonly unavailableReason: string | null;
+  /** 0159：恢复目标来源——精准写入前证据 / 旧整目录基线 / 无证据。 */
+  readonly snapshotSource: AssistRecallSnapshotSource;
+  readonly sourceOperationId: string | null;
 }
 
 interface RecallPlanFile extends BaselineFacts {
@@ -209,6 +215,7 @@ export async function recallAssistMessage(db: DbExecutor,
           baselineSha256: file.baselineSha256, baselineMessageId: file.baselineMessageId,
           expectedCurrentSha256: file.expectedSha256,
           observedSha256: file.observedSha256, status: 'PLANNED', reason: null,
+          snapshotSource: file.snapshotSource, sourceOperationId: file.sourceOperationId,
         })),
       });
     });
@@ -729,7 +736,7 @@ async function collectWriteEvents(r: Repositories, session: AssistSessionRow,
   // 这些恢复效果按结算时序折进期望态，否则会把已被撤回的写入当作当前内容判冲突。
   for (const effect of await r.messageRecall.listRecallEffectsForFold(session.id, minSeq)) {
     events.push({ messageId: effect.messageId, messageSeq: effect.messageSeq,
-      relativePath: effect.relativePath,
+      operationId: null, relativePath: effect.relativePath,
       action: effect.exists ? 'MODIFY' : 'DELETE',
       expectedSha256: effect.sha256, expectedKnown: true,
       rootPath: effect.rootPath, observedAt: effect.settledAt });
@@ -744,7 +751,8 @@ async function collectWriteEvents(r: Repositories, session: AssistSessionRow,
     const expected = row.action === 'DELETE' ? null
       : (row.actual_sha256 ?? row.target_sha256)?.toLowerCase() ?? null;
     events.push({ messageId: row.message_id, messageSeq: row.message_seq,
-      relativePath: path, action: row.action, expectedSha256: expected,
+      operationId: row.operation_id, relativePath: path, action: row.action,
+      expectedSha256: expected,
       expectedKnown: row.action === 'DELETE' || expected !== null,
       rootPath: row.root_path, observedAt: row.observed_at });
   }
@@ -770,7 +778,7 @@ function directEvents(row: DirectWriteOperationRow): readonly WriteEvent[] {
         : typeof rawChange.content === 'string'
           ? createHash('sha256').update(rawChange.content, 'utf8').digest('hex') : null;
     events.push({ messageId: row.message_id, messageSeq: row.message_seq,
-      relativePath: path, action, expectedSha256: expected,
+      operationId: row.operation_id, relativePath: path, action, expectedSha256: expected,
       expectedKnown: action === 'DELETE' || expected !== null,
       rootPath: row.root_path, observedAt: row.observed_at });
   });
@@ -794,6 +802,10 @@ async function buildRecallPlan(r: Repositories, targetMessageId: string,
     list.push(event);
     grouped.set(key, list);
   }
+  const preimageByKey = new Map((await r.messageRecall.listPreimagesForOperations(
+    [...new Set(events.map((event) => event.operationId)
+      .filter((id): id is string => id !== null))])
+  ).map((row) => [preimageKey(row.operationId, row.relativePath), row]));
 
   const plan: RecallPlanFile[] = [];
   for (const key of [...grouped.keys()].sort()) {
@@ -806,9 +818,16 @@ async function buildRecallPlan(r: Repositories, targetMessageId: string,
         || (left.messageSeq < right.messageSeq ? -1 : 1));
     const earliest = pathEvents[0]!;
     const latest = pathEvents[pathEvents.length - 1]!;
-    const entry = baselineFiles.get(earliest.relativePath);
-    const facts = await baselineFacts(r, targetMessageId, baseline?.status ?? null,
-      earliest.relativePath, entry, latest);
+    // 0159：恢复目标是「该路径第一次被 Relay 写入之前」的真实前像。动作级证据
+    // 在 Prepare 阶段已冻结；只有历史动作/撤回折叠效果才退回旧整目录基线。
+    const precise = earliest.operationId === null ? undefined
+      : preimageByKey.get(preimageKey(earliest.operationId, earliest.relativePath));
+    const facts = precise !== undefined
+      ? await preimageFacts(r, targetMessageId, precise, earliest)
+      : earliest.operationId === null
+        ? await effectFacts(r, earliest)
+        : await baselineFacts(r, targetMessageId, baseline?.status ?? null,
+          earliest.relativePath, baselineFiles.get(earliest.relativePath), latest);
     const current = rootPath === null
       ? { exists: false, sha256: null, reason: 'ROOT_UNAVAILABLE' }
       : await readCurrentState(rootPath, earliest.relativePath);
@@ -818,20 +837,68 @@ async function buildRecallPlan(r: Repositories, targetMessageId: string,
   return plan;
 }
 
+function preimageKey(operationId: string, relativePath: string): string {
+  const path = process.platform === 'win32' ? relativePath.toLowerCase() : relativePath;
+  return `${operationId}\u0000${path}`;
+}
+
+/** 0159：动作级「写入前前像」直接给出恢复目标，不再依赖发送前目录扫描。 */
+async function preimageFacts(r: Repositories, targetMessageId: string,
+  row: FileWritePreimageRowView, latest: WriteEvent): Promise<BaselineFacts> {
+  const expected = { expectedSha256: latest.expectedSha256, expectedKnown: latest.expectedKnown,
+    snapshotSource: 'PRECISE_PREIMAGE' as const, sourceOperationId: row.operationId };
+  if (!row.existed) {
+    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+      baselineContent: null, unavailableReason: null, ...expected };
+  }
+  if (row.unavailableReason !== null || !isFrozenBaseline(row.blobSha256)) {
+    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+      baselineContent: null, unavailableReason: row.unavailableReason ?? 'BASELINE_MISSING',
+      ...expected };
+  }
+  const content = await r.messageRecall.readBaselineBlob(row.blobSha256!);
+  if (content === undefined) {
+    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+      baselineContent: null, unavailableReason: 'BASELINE_BLOB_MISSING', ...expected };
+  }
+  return { baselineExisted: true, baselineSha256: row.blobSha256,
+    baselineMessageId: targetMessageId, baselineContent: content,
+    unavailableReason: null, ...expected };
+}
+
+/** 更早消息的撤回效果本身定义了「这条消息写入前」的状态。 */
+async function effectFacts(r: Repositories, earliest: WriteEvent): Promise<BaselineFacts> {
+  const expected = { expectedSha256: earliest.expectedSha256, expectedKnown: earliest.expectedKnown,
+    snapshotSource: 'PRECISE_PREIMAGE' as const, sourceOperationId: null };
+  const sha = earliest.expectedSha256;
+  if (sha === null) {
+    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+      baselineContent: null, unavailableReason: null, ...expected };
+  }
+  const content = await r.messageRecall.readBaselineBlob(sha);
+  if (content === undefined) {
+    return { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
+      baselineContent: null, unavailableReason: 'BASELINE_BLOB_MISSING', ...expected };
+  }
+  return { baselineExisted: true, baselineSha256: sha, baselineMessageId: null,
+    baselineContent: content, unavailableReason: null, ...expected };
+}
+
 async function baselineFacts(r: Repositories, targetMessageId: string,
   baselineStatus: 'COMPLETE' | 'INCOMPLETE' | null, relativePath: string,
   entry: AssistMessageBaselineFileRow | undefined, latest: WriteEvent): Promise<BaselineFacts> {
   const expected = { expectedSha256: latest.expectedSha256, expectedKnown: latest.expectedKnown };
+  const legacy = { snapshotSource: 'LEGACY_MESSAGE_BASELINE' as const, sourceOperationId: null };
   const missing = (reason: string): BaselineFacts => ({
     baselineExisted: false, baselineSha256: null, baselineMessageId: null,
-    baselineContent: null, ...expected, unavailableReason: reason });
+    baselineContent: null, ...expected, ...legacy, unavailableReason: reason });
   if (baselineStatus === null) return missing('BASELINE_MISSING');
   if (entry === undefined) {
     // COMPLETE 基线下无条目＝发送前不存在（整份覆盖已核对）；INCOMPLETE 下
     // 无条目分不清「不存在」与「没扫到」，如实按不可恢复。
     return baselineStatus === 'COMPLETE'
       ? { baselineExisted: false, baselineSha256: null, baselineMessageId: null,
-        baselineContent: null, ...expected, unavailableReason: null }
+        baselineContent: null, ...expected, ...legacy, unavailableReason: null }
       : missing('BASELINE_UNKNOWN');
   }
   if (entry.unavailable_reason !== null || !isFrozenBaseline(entry.blob_sha256)) {
@@ -840,7 +907,7 @@ async function baselineFacts(r: Repositories, targetMessageId: string,
   const content = await r.messageRecall.readBaselineBlob(entry.blob_sha256!);
   if (content === undefined) return missing('BASELINE_BLOB_MISSING');
   return { baselineExisted: true, baselineSha256: entry.blob_sha256,
-    baselineMessageId: targetMessageId, baselineContent: content, ...expected,
+    baselineMessageId: targetMessageId, baselineContent: content, ...expected, ...legacy,
     unavailableReason: null };
 }
 
@@ -1074,8 +1141,18 @@ async function storedFacts(r: Repositories, file: AssistMessageRecallFileRow,
     // 落库前预检已确认过期望摘要；null 只表示「最后写入是删除」。
     expectedKnown: true,
     unavailableReason: null as string | null,
+    snapshotSource: file.snapshot_source,
+    sourceOperationId: file.source_operation_id,
   };
   if (!file.baseline_existed) return base;
+  if (file.snapshot_source === 'PRECISE_PREIMAGE') {
+    // 精准前像与旧基线共用同一内容寻址库，恢复时不依赖旧的整目录基线行。
+    const sha = file.baseline_sha256;
+    if (sha === null) return { ...base, unavailableReason: 'BASELINE_MISSING' };
+    const content = await r.messageRecall.readBaselineBlob(sha);
+    if (content === undefined) return { ...base, unavailableReason: 'BASELINE_BLOB_MISSING' };
+    return { ...base, baselineContent: content };
+  }
   if (entry === undefined || entry.unavailable_reason !== null
       || entry.blob_sha256 !== file.baseline_sha256) {
     return { ...base, unavailableReason: 'BASELINE_MISSING' };
