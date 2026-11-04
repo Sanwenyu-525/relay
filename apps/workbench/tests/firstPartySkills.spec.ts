@@ -247,7 +247,9 @@ describe("M04 第一方 Skill 与 Pack", () => {
     await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click"); await flush();
     expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("当前速览");
     expect(view.wrapper.get('[data-testid="assist-skill-output"] .assist-skill-details').attributes("open")).toBeUndefined();
-    expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("不是 Today 判定的合格 Task");
+    // 2026-11-03 文案精修（42db5928）把旧句「这些文字不是 Today 判定的合格 Task…」收成
+    // 折叠区内的一句短边界说明；事实边界语义未变，断言跟随当前组件文案。
+    expect(view.wrapper.get('[data-testid="assist-skill-output"]').text()).toContain("不是可执行 Task，也没有比较基线");
     expect(view.wrapper.find(`a[href="/tasks/${taskId}"]`).exists()).toBe(true);
     expect(view.wrapper.find(`a[href="/knowledge?kind=KNOWLEDGE&item=${sourceId}"]`).exists()).toBe(true);
     messages = [message("77777777-7777-4777-8777-777777777777", "ASSISTANT", null, {
