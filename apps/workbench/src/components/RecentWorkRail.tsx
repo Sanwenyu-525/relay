@@ -172,10 +172,15 @@ function withoutConfirmedDeletes<T extends { readonly id: string }>(
  * 那个面板读的是与本列相同的两个端点（任务仅第一页、无搜索翻页），能显示的这里都能显示，
  * 翻页后这里更多，是更弱的重复入口；这一列（搜索＋「更早的任务」）是任务与会话的唯一导航入口。
  */
-export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
+export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshToken = 0 }: {
   client: RelayApiClient;
   currentTaskId: string | null;
   onOpen?: () => void;
+  /**
+   * 外壳「清空工作区会话」成功后的重读信号（2026-11-04）。
+   * 只增不减；0 表示还没触发过，首次挂载沿用原有读取，不重复打请求。
+   */
+  refreshToken?: number;
 }) {
   const navigate = useNavigate();
   const active = useActiveConversation();
@@ -222,6 +227,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   const [batchUncertain, setBatchUncertain] = useState(false);
   const request = useRef(0);
   const archivedRequest = useRef(0);
+  /** 外壳清空成功后已经消费过的重读信号：同一信号不因归档区状态变化再打第二趟请求。 */
+  const lastRailRefresh = useRef(refreshToken);
   /** 本次挂载里已由服务端确认删除的会话身份，只用于挡住删除之前发出的旧读数（见 withoutConfirmedDeletes）。 */
   const confirmedDeleted = useRef(new Set<string>());
   /** 拖拽松手那一拍：浏览器补发的 click 不当作「打开会话」。 */
@@ -315,6 +322,17 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       if (version === archivedRequest.current) setArchivedLoading(false);
     }
   }, [client]);
+
+  /**
+   * 外壳「清空工作区会话」只传一个递增信号：这里按服务端事实整列重读，不靠本地删行制造
+   * 「已经清空」的假象。归档区若已经打开过，也一并重读，避免清空后仍留着旧的归档行。
+   */
+  useEffect(() => {
+    if (refreshToken === lastRailRefresh.current) return;
+    lastRailRefresh.current = refreshToken;
+    void load(null);
+    if (archived !== null) void loadArchived();
+  }, [refreshToken, archived, load, loadArchived]);
 
   /**
    * 行内命令之后按身份重读那一条：改名、置顶、归档、重开都重读这一条，分叉重读那次新建的

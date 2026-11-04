@@ -733,6 +733,15 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   margin-bottom: var(--relay-space-1);
 }
 
+/* 栏头右侧的两枚图标（清空会话 + 收起）共用一条动作组：保持与折叠把手同尺寸、同间距，
+   不让新入口把品牌行挤成两行。 */
+.context-rail-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
+}
+
 .context-rail-brand {
   display: flex;
   align-items: baseline;
@@ -833,6 +842,23 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   overflow-wrap: anywhere;
 }
 
+/* 清空会话：栏头按钮的进行态与确认框里的结果分组。图标只在读列表/逐条删除时转，
+   与既有加载指示同一动效 token；结果分组沿用文字层级，不新造配色。 */
+.workspace-clear-spin { animation: workspace-clear-rotate var(--relay-motion-loop-spin) linear infinite; }
+@keyframes workspace-clear-rotate { to { transform: rotate(1turn); } }
+.workspace-clear-list {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding-left: var(--relay-space-3);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  overflow-wrap: anywhere;
+}
+.workspace-clear-list span { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-semibold); }
+.workspace-clear-diagnostics { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.workspace-clear-diagnostics code { overflow-wrap: anywhere; }
+
 /* 2026-10-15 收起/折叠近期工作栏（原型 toggle-side）：外壳单入口把这一栏收成一条窄把手列，
    只留折叠按钮；图标导航与主内容不受影响。列宽取 control.height-comfort，与顶部把手同档。
    grid-template 只在 ≥48rem 覆写：<48rem 两栏都 display:none 走单列，硬套三列会空占两道轨。 */
@@ -859,6 +885,13 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
 .app-frame[data-context-collapsed="true"] .recent-work {
   display: none;
 }
+.app-frame[data-context-collapsed="true"] .context-rail-head-actions {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+/* 收起后只剩再展开的把手：清空入口在这条窄轨里没有空间，也不该在折叠态误触。 */
+.app-frame[data-context-collapsed="true"] .context-rail-clear-sessions { display: none; }
 .app-frame[data-context-collapsed="true"] .context-rail-collapse {
   width: var(--relay-control-height-comfort);
   min-width: var(--relay-control-height-comfort);
