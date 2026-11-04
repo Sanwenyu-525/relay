@@ -4,6 +4,7 @@ import {
   type RelayDecisionReview, type RelayHypothesis, type RelayKnowledge
 } from "../api/relayClient";
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import "./DecisionReviewPanel.css";
 
 /**
@@ -118,6 +119,27 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
   const [confirmed, setConfirmed] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [reasons, setReasons] = useState<Readonly<Record<string, string>>>({});
+  /**
+   * 已发出、尚未确认结果的命令身份（2026-11-04）。
+   *
+   * 在途请求在响应前就离开页面会同时丢掉 command_id 与冻结载荷；复用现有导航守卫
+   * 拦住离页，而不是新建第二套恢复存储。结果未知后改由面板内部核对回执，
+   * 守卫保持 UNRESOLVED 直到成功、明确失败或用户主动放弃核对。
+   */
+  const commandRef = useRef<{ readonly id: string; readonly state: "IN_FLIGHT" | "UNRESOLVED" } | null>(null);
+  const guard = useRef<DraftGuard>({
+    hasUnsavedChanges: () => commandRef.current !== null,
+    pendingCommandId: () => commandRef.current?.id ?? null,
+    pendingCommandState: () => commandRef.current?.state ?? null,
+    // 命令不是可丢弃的草稿：只有回执核对完成或用户明确放弃才解除保护。
+    discard: () => undefined,
+    pendingRecoversAfterLeave: () => false,
+    pendingRecoversAfterRestart: () => false
+  });
+  useEffect(() => {
+    setDraftGuard(guard.current);
+    return () => clearDraftGuard(guard.current);
+  }, []);
 
   useEffect(() => {
     disposed.current = false;
@@ -151,6 +173,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
   useEffect(() => {
     setPremises([]);
     setReviews([]);
+    commandRef.current = null;
     setPending(null);
     setReceiptNote(null);
     setNotice(null);
@@ -284,6 +307,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
     setActionError(null);
     setNotice(null);
     setReceiptNote(null);
+    commandRef.current = { id: commandId, state: "IN_FLIGHT" };
     try {
       await client.registerDecisionPremise({
         decisionId: draft.decisionId, commandId, expectedDecisionRevision: draft.expectedDecisionRevision,
@@ -293,6 +317,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
           : { hypothesisId: draft.source.hypothesisId, expectedHypothesisRevision: draft.source.expectedRevision })
       });
       if (disposed.current) return;
+      commandRef.current = null;
       setPending(null);
       setNotice("已登记依据。来源版本或假设变化后，服务端会生成复核候选，不会自动改变决定。");
       resetPremiseForm();
@@ -301,10 +326,12 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
       if (disposed.current) return;
       const failure = commandFailure(commandId, caught);
       if (!failure.uncertain) {
+        commandRef.current = null;
         setPending(null);
         setActionError(failure.message);
         return;
       }
+      commandRef.current = { id: commandId, state: "UNRESOLVED" };
       const unknown: UnknownCommand = { kind: "PREMISE", id: commandId, draft, reason: failure.message };
       setPending(unknown);
       await checkReceipt(unknown);
@@ -329,10 +356,12 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
     setActionError(null);
     setNotice(null);
     setReceiptNote(null);
+    commandRef.current = { id: commandId, state: "IN_FLIGHT" };
     try {
       await client.resolveDecisionReview({ candidateId: draft.candidateId, commandId,
         expectedRevision: draft.expectedRevision, action: draft.action, reason: draft.reason });
       if (disposed.current) return;
+      commandRef.current = null;
       setPending(null);
       setNotice(draft.action === "KEEP_DECISION"
         ? "已确认依据仍支持决定；核对基线推进到本次来源。"
@@ -342,10 +371,12 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
       if (disposed.current) return;
       const failure = commandFailure(commandId, caught);
       if (!failure.uncertain) {
+        commandRef.current = null;
         setPending(null);
         setActionError(failure.message);
         return;
       }
+      commandRef.current = { id: commandId, state: "UNRESOLVED" };
       const unknown: UnknownCommand = { kind: "RESOLVE", id: commandId, draft, reason: failure.message };
       setPending(unknown);
       await checkReceipt(unknown);
@@ -381,6 +412,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
           setReceiptNote("原命令回执属于另一个决定或项目，不能当作本次登记已生效。");
           return;
         }
+        commandRef.current = null;
         setPending(null);
         setNotice("原命令回执已核对：依据已登记，服务端后续会按来源变化生成复核候选。");
         resetPremiseForm();
@@ -399,6 +431,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
         setReceiptNote("原命令回执与本次候选或处理动作不一致，不能当作本次处理已生效。");
         return;
       }
+      commandRef.current = null;
       setPending(null);
       setNotice(target.draft.action === "KEEP_DECISION"
         ? "原命令回执已核对：依据仍支持决定，核对基线已推进。"
@@ -425,6 +458,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
   /** 明确放弃核对时，下一次提交会生成新 command_id；界面先把可能的重复风险说清楚。 */
   function abandonPending(): void {
     if (busy || checking || pending === null) return;
+    commandRef.current = null;
     setPending(null);
     setReceiptNote(null);
     setNotice("已放弃核对原命令；原命令仍可能已在服务端提交。下一次提交会生成新的 command_id，请先确认不会因此重复登记前提或重复处理候选。");

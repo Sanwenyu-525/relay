@@ -87,6 +87,14 @@ test('资料更新自动准备候选：重复来源命令不重复，保留决�
   const stale = await api.post(path(`/decision-reviews/${older.id}/resolutions`), {
     command_id: randomUUID(), expected_revision: older.revision, action: 'KEEP_DECISION', reason: '旧依据' });
   assert.equal(stale.status, 409, stale.text);
+  // 用正确 revision 提交也必须命中候选适用性拒绝，而不是修订冲突。
+  const staleProblem = JSON.parse(stale.text) as { code?: string; type?: string };
+  assert.equal(staleProblem.code, 'INVALID_TRANSITION', stale.text);
+  assert.equal(staleProblem.type, '/problems/invalid-transition');
+  const staleAfter = (await reviews(f.reviewsPath)).items.find((c) => c.id === older.id)!;
+  assert.equal(staleAfter.status, 'PENDING');
+  assert.equal(staleAfter.applicable, false);
+  assert.equal(staleAfter.revision, older.revision);
   const latest = all.items.find((c) => c.applicable)!;
   await post(`/decision-reviews/${latest.id}/resolutions`, { expected_revision: latest.revision, action: 'DISMISS', reason: '本次不处理' });
   assert.equal((await reviews(f.reviewsPath)).pending_count, 0);

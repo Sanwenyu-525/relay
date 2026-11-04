@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { RelayApiClient } from "../src/api/relayClient";
 import type { RelayDecision } from "../src/api/dtos/information";
 import DecisionReviewPanel from "../src/components/DecisionReviewPanel";
+import { currentDraftGuard, hasUnsavedDraft } from "../src/lib/draftGuard";
 import { flush, mountReact } from "./mountApp";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -352,6 +353,60 @@ it("复核处理结果未知时冻结理由：等待期间改理由，重试仍�
     action: "KEEP_DECISION", reason: "原始处理理由" });
   expect(wrapper.get('[data-testid="decision-review-notice"]').text()).toContain("核对基线推进");
   unmount();
+});
+
+it("在途或结果未知的命令注册导航守卫：离页会拦，回执收口或明确放弃后才解除", async () => {
+  let rejectPost!: (reason: unknown) => void;
+  const posts: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    const path = new URL(target, "http://127.0.0.1").pathname;
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      posts.push(body);
+      return await new Promise<Response>((_, reject) => { rejectPost = reject; });
+    }
+    if (target.includes("/commands/")) return problem(404, "COMMAND_NOT_FOUND", "命令回执不存在。");
+    if (path.endsWith("/knowledge/k1/versions")) return json([knowledgeVersion("kv2", "k1", "2")]);
+    if (path.endsWith("/knowledge")) return json([knowledge("k1", "访谈样本")]);
+    if (path.endsWith("/hypotheses")) return json({ project_id: "p1", items: [] });
+    if (path.endsWith("/premises")) return json({ decision_id: "d1", items: [] });
+    if (path.endsWith("/decision-reviews")) return json({ project_id: "p1", pending_count: 0, items: [] });
+    return json(decisionRow());
+  }));
+
+  const { wrapper, unmount } = await mountReact(
+    <DecisionReviewPanel client={client()} projectId="p1" decision={decision} />);
+  await flush();
+  await wrapper.get('[data-testid="decision-premise-open"]').trigger("click");
+  await flush(80);
+  await wrapper.get('[data-testid="decision-premise-knowledge"]').setValue("k1");
+  await flush();
+  await wrapper.get('[data-testid="decision-premise-statement"]').setValue("命令发出后等待结果");
+  await wrapper.get('[data-testid="decision-premise-confirmed"]').setValue(true);
+  await flush();
+  await wrapper.get('[data-testid="decision-premise-submit"]').trigger("click");
+  await flush(80);
+
+  // 在途：命令身份已注册，导航守卫必须拦住离页，避免丢掉 command_id 与冻结载荷。
+  expect(posts).toHaveLength(1);
+  const commandId = String(posts[0]!["command_id"]);
+  expect(hasUnsavedDraft()).toBe(true);
+  expect(currentDraftGuard()?.pendingCommandId?.()).toBe(commandId);
+  expect(currentDraftGuard()?.pendingCommandState?.()).toBe("IN_FLIGHT");
+
+  rejectPost(new TypeError("fetch failed"));
+  await flush(80);
+  expect(wrapper.get('[data-testid="decision-review-pending"]').text()).toContain("已冻结提交载荷");
+  expect(currentDraftGuard()?.pendingCommandId?.()).toBe(commandId);
+  expect(currentDraftGuard()?.pendingCommandState?.()).toBe("UNRESOLVED");
+
+  await wrapper.get('[data-testid="decision-review-abandon"]').trigger("click");
+  await flush();
+  expect(currentDraftGuard()?.pendingCommandId?.()).toBeNull();
+  expect(hasUnsavedDraft()).toBe(false);
+  unmount();
+  expect(currentDraftGuard()).toBeNull();
 });
 
 it("资料版本请求乱序返回时只采用当前选中资料的版本，提交也引用该版本", async () => {
