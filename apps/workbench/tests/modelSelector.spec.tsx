@@ -15,6 +15,7 @@ async function render(catalog = directory, directoryUnavailable = false) {
   const client = { getModelCatalog: async () => { if (directoryUnavailable) throw new Error("offline"); return catalog; }, refreshModelCatalog: refresh,
     getSessionModelSelection: async () => ({ model: "removed:free" }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     requestAssistMessage: write, selectSessionModel: write } as unknown as RelayApiClient;
   function Harness() {
     const [open, setOpen] = useState(false);
@@ -128,6 +129,7 @@ it("首条消息场景：点击清单条目直接写入本地选择并关闭", a
   const choose = vi.fn();
   const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => null } as unknown as RelayApiClient;
   function Harness() {
     const [open, setOpen] = useState(true);
@@ -145,9 +147,10 @@ function triggerName(): string | null {
   return document.querySelector(".model-selector-trigger-name")?.textContent ?? null;
 }
 
-it("没有显式选择时芯片显示应用默认型号，不是「模型」占位（2026-10-21）", async () => {
+it("没有显式选择时芯片说「跟随默认」，不是「模型」占位（2026-11-04 取代 2026-10-21 的写法）", async () => {
   const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => null } as unknown as RelayApiClient;
   function Harness() {
     const [open, setOpen] = useState(false);
@@ -155,13 +158,15 @@ it("没有显式选择时芯片显示应用默认型号，不是「模型」占�
       selectedModel={null} onChoose={vi.fn()} />;
   }
   const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
-  expect(triggerName()).toBe("default-model");
-  expect(document.querySelector('[data-testid="model-selector-open"]')?.getAttribute("title")).toContain("default-model");
+  expect(triggerName()).toBe("跟随默认");
+  expect(document.querySelector('[data-testid="model-selector-open"]')?.getAttribute("title"))
+    .toContain("跟随工作区默认");
 });
 
 it("服务端没有应用默认时才退回「模型」占位，不谎报型号", async () => {
   const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: false, model: null }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => null } as unknown as RelayApiClient;
   function Harness() {
     const [open, setOpen] = useState(false);
@@ -169,12 +174,13 @@ it("服务端没有应用默认时才退回「模型」占位，不谎报型号"
       selectedModel={null} onChoose={vi.fn()} />;
   }
   const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
-  expect(triggerName()).toBe("模型");
+  expect(triggerName()).toBe("跟随默认");
 });
 
 it("会话显式选择优先于应用默认，本机记忆不冒充会话事实", async () => {
   const client = { getModelCatalog: async () => directory, refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => ({ model: "v/a:free" }) } as unknown as RelayApiClient;
   function Harness() {
     const [open, setOpen] = useState(false);
@@ -198,6 +204,7 @@ it("已登记连接独立成段：启用可选、停用禁用，点选按连接�
   const client = { getModelCatalog: async () => directory,
     refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => null,
     listModelConnections: async () => [connection("conn-1", "团队网关", "vendor/registered", "ACTIVE"),
       connection("conn-2", "停用网关", "vendor/old", "DISABLED")] } as unknown as RelayApiClient;
@@ -226,6 +233,7 @@ it("连接读取失败只告警，不阻断目录型号选择", async () => {
   const client = { getModelCatalog: async () => directory,
     refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
     getModelPortStatus: async () => ({ configured: true, model: "default-model" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: null, revision: null }),
     getSessionModelSelection: async () => null,
     listModelConnections: async () => { throw new Error("offline"); } } as unknown as RelayApiClient;
   function Harness() {
@@ -237,4 +245,58 @@ it("连接读取失败只告警，不阻断目录型号选择", async () => {
   expect(document.body.textContent).toContain("已登记连接读取失败");
   await clickItem("免费 A");
   expect(choose).toHaveBeenCalledWith("v/a:free");
+});
+
+it("「跟随工作区默认」清掉显式选择，并如实显示聊天默认的型号来源", async () => {
+  const followDefault = vi.fn();
+  const client = { getModelCatalog: async () => directory,
+    refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "process-default" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: "conn-chat", revision: "3" }),
+    getSessionModelSelection: async () => ({ model: "v/a:free", connectionId: null }),
+    listModelConnections: async () => [connection("conn-chat", "聊天默认", "chat-default-model", "ACTIVE")]
+  } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(true);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={"v/a:free"} onChoose={vi.fn()} onChooseConnection={vi.fn()}
+      onFollowDefault={followDefault} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  const entry = document.querySelector<HTMLButtonElement>(
+    '[data-testid="model-selector-option-follow-default"]')!;
+  expect(entry).not.toBeNull();
+  expect(entry.textContent).toContain("跟随工作区默认");
+  // 说明里写的是**聊天默认连接**的型号，不是进程默认——两者不能互相冒充。
+  expect(entry.title).toContain("chat-default-model");
+  expect(entry.title).not.toContain("process-default");
+  await clickItem("跟随工作区默认");
+  expect(followDefault).toHaveBeenCalledTimes(1);
+  expect(document.querySelector(".model-selector-menu")).toBeNull();
+});
+
+it("没有显式选择时芯片说「跟随默认」；打开后写清解析到的聊天默认型号，不拿进程默认顶替", async () => {
+  const client = { getModelCatalog: async () => directory,
+    refreshModelCatalog: async () => ({ status: "PUBLISHED", reason: null }),
+    getModelPortStatus: async () => ({ configured: true, model: "process-default" }),
+    getChatDefaultModelConnection: async () => ({ connectionId: "conn-chat", revision: "3" }),
+    getSessionModelSelection: async () => null,
+    listModelConnections: async () => [connection("conn-chat", "聊天默认", "chat-default-model", "ACTIVE")]
+  } as unknown as RelayApiClient;
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <ModelSelector client={client} sessionId="s1" open={open} onOpenChange={setOpen}
+      selectedModel={null} onChoose={vi.fn()} onChooseConnection={vi.fn()}
+      onFollowDefault={vi.fn()} />;
+  }
+  const view = await mountReact(<Harness />); dispose = view.unmount; await flush();
+  // 收起状态不猜型号，只说自己跟随默认。
+  expect(triggerName()).toBe("跟随默认");
+  await view.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+  // 打开后读到的是聊天默认连接声明的型号，不是进程默认。
+  expect(triggerName()).toBe("跟随默认 · chat-default-model");
+  const entry = document.querySelector<HTMLButtonElement>(
+    '[data-testid="model-selector-option-follow-default"]')!;
+  expect(entry.title).toContain("chat-default-model");
+  expect(entry.title).not.toContain("process-default");
 });

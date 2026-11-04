@@ -26,8 +26,9 @@ function budgetFrom(value: unknown, where: string): RelayModelConnectionBudget {
 export function modelConnectionFrom(value: unknown, where = "model connection"): RelayModelConnection {
   const row = object(value, where);
   const providerKind = string(row, "provider_kind", where);
-  if (providerKind !== "openai-compatible") {
-    throw new Error("服务端返回了无法识别的模型连接类型。");
+  if (providerKind !== "openai-compatible" && providerKind !== "anthropic-messages") {
+    // 不按品牌/URL 猜协议：服务端说了一条本客户端不认识的协议，就明确拒绝。
+    throw new Error("服务端返回了无法识别的模型连接协议。");
   }
   const status = string(row, "status", where);
   if (status !== "ACTIVE" && status !== "DISABLED") {
@@ -103,6 +104,8 @@ export async function getModelConnectionCredentialPresence(http: RelayHttp,
 export interface CreateModelConnectionInput {
   readonly commandId: string;
   readonly name: string;
+  /** API 协议；省略时服务端按 openai-compatible 处理。 */
+  readonly protocol?: "openai-compatible" | "anthropic-messages";
   readonly baseUrl: string | null;
   readonly defaultModel: string;
   /**
@@ -110,8 +113,60 @@ export interface CreateModelConnectionInput {
    * 不动其他 Provider 的全局超时。
    */
   readonly timeoutMs?: number;
+  /** 只改这条连接的输出上限；省略时服务端用默认 8192。 */
+  readonly maxOutputTokens?: number;
   /** 只在这一处出现一次：服务端落进系统凭据库，之后只保留不透明引用。 */
   readonly apiKey: string;
+}
+
+export interface ProbeModelConnectionInput {
+  readonly protocol: "openai-compatible" | "anthropic-messages";
+  readonly baseUrl: string | null;
+  readonly defaultModel: string;
+  /** 只在这一个请求里出现；服务端用完即弃，不写凭据库也不落业务表。 */
+  readonly apiKey: string;
+  readonly timeoutMs?: number;
+}
+
+export interface ProbeModelConnectionResult {
+  readonly ok: boolean;
+  readonly latencyMs: number;
+  readonly protocol: "openai-compatible" | "anthropic-messages";
+  readonly model: string;
+  readonly errorCategory: string | null;
+  readonly message: string | null;
+}
+
+/**
+ * 「测试连接」：对尚未保存的草稿做一次真实短探针。
+ *
+ * 它**不是**连接验证：不写 model_calls、不写凭据库，也不产生「这条连接已验证」的事实。
+ * 保存后仍需按连接身份验证（设置页每一行的「验证」）。
+ */
+export async function probeModelConnection(http: RelayHttp,
+  input: ProbeModelConnectionInput): Promise<ProbeModelConnectionResult> {
+  const row = object(await http.request(http.workspacePath("/model-connections/probe"), {
+    method: "POST",
+    body: JSON.stringify({
+      protocol: input.protocol,
+      ...(input.baseUrl === null ? {} : { base_url: input.baseUrl }),
+      default_model: input.defaultModel,
+      api_key: input.apiKey,
+      ...(input.timeoutMs === undefined ? {} : { timeout_ms: input.timeoutMs })
+    })
+  }), "model connection probe");
+  const protocol = string(row, "protocol", "model connection probe");
+  if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
+    throw new Error("服务端返回了无法识别的模型连接协议。");
+  }
+  return {
+    ok: row.ok === true,
+    latencyMs: integer(row, "latency_ms", "model connection probe"),
+    protocol,
+    model: string(row, "model", "model connection probe"),
+    errorCategory: nullableString(row, "error_category", "model connection probe"),
+    message: nullableString(row, "message", "model connection probe")
+  };
 }
 
 export async function createModelConnection(http: RelayHttp,
@@ -121,9 +176,16 @@ export async function createModelConnection(http: RelayHttp,
     body: JSON.stringify({
       command_id: input.commandId,
       name: input.name,
+      ...(input.protocol === undefined ? {} : { protocol: input.protocol }),
       ...(input.baseUrl === null ? {} : { base_url: input.baseUrl }),
       default_model: input.defaultModel,
-      ...(input.timeoutMs === undefined ? {} : { budget: { timeout_ms: input.timeoutMs } }),
+      ...(input.timeoutMs === undefined && input.maxOutputTokens === undefined ? {} : {
+        budget: {
+          ...(input.timeoutMs === undefined ? {} : { timeout_ms: input.timeoutMs }),
+          ...(input.maxOutputTokens === undefined
+            ? {} : { max_output_tokens: input.maxOutputTokens })
+        }
+      }),
       api_key: input.apiKey
     })
   }));
@@ -134,6 +196,8 @@ export interface UpdateModelConnectionInput {
   readonly commandId: string;
   readonly expectedRevision: string;
   readonly name?: string;
+  /** 改协议会改变配置指纹；旧冻结快照与旧验证结论随之失效。 */
+  readonly protocol?: "openai-compatible" | "anthropic-messages";
   readonly baseUrl?: string | null;
   readonly defaultModel?: string;
   /** 只更新这条连接的调用超时；省略表示不改。 */
@@ -149,6 +213,7 @@ export async function updateModelConnection(http: RelayHttp, connectionId: strin
         command_id: input.commandId,
         expected_revision: input.expectedRevision,
         ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.protocol === undefined ? {} : { protocol: input.protocol }),
         ...(input.baseUrl === undefined ? {} : { base_url: input.baseUrl }),
         ...(input.defaultModel === undefined ? {} : { default_model: input.defaultModel }),
         ...(input.timeoutMs === undefined ? {} : { budget: { timeout_ms: input.timeoutMs } })

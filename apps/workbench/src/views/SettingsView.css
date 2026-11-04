@@ -638,3 +638,50 @@
 .settings-field .settings-navigation-placement {
   max-width: 22rem;
 }
+
+/* MODEL-SETTINGS-03：新增模型表单的紧凑双列布局。
+   只复用既有 token 与控件高度；两列在窄屏退回单列，不新造密度档位。 */
+.settings-inline-form .settings-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--relay-space-3);
+}
+
+.settings-inline-form select {
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  font-size: var(--relay-font-size-meta);
+}
+
+.settings-inline-form .settings-preset-field {
+  max-width: 22rem;
+}
+
+.settings-inline-form .settings-advanced {
+  padding: var(--relay-space-3);
+  border: var(--relay-border-width) solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+}
+
+.settings-inline-form .settings-advanced > summary {
+  cursor: pointer;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.settings-inline-form .settings-advanced[open] > summary {
+  margin-bottom: var(--relay-space-2);
+}
+
+@media (max-width: 720px) {
+  .settings-inline-form .settings-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

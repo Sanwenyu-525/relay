@@ -145,10 +145,13 @@ export interface RelayModelConnectionBudget {
  * 服务端**不返回**凭据引用、密钥或摘要，因此这里也没有对应字段；「凭据是否还在」走单独的
  * 只读端点，只回布尔。连接当前只影响**新 Run** 的冻结来源，不参与会话聊天选模。
  */
+export type RelayModelConnectionProtocol = "openai-compatible" | "anthropic-messages";
+
 export interface RelayModelConnection {
   readonly id: string;
   readonly name: string;
-  readonly providerKind: "openai-compatible";
+  /** API 协议（迁移 0160）：连接显式声明的协议，不是品牌。 */
+  readonly providerKind: RelayModelConnectionProtocol;
   readonly baseUrl: string | null;
   readonly defaultModel: string;
   readonly budget: RelayModelConnectionBudget;

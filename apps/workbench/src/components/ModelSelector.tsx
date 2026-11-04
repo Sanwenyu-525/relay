@@ -17,17 +17,20 @@ import { useMenuExclusive } from "../lib/popoverMenu";
 /** 清单条目：来源未知（如会话选择已不在目录）时能力未知，只能按 ID 核对。 */
 interface ModelEntry {
   /** 选择按目录型号还是按已登记连接提交：两者身份不同，不能只凭型号文本互认。 */
-  readonly kind: "model" | "connection";
+  readonly kind: "model" | "connection" | "default";
   readonly id: string;
   readonly name: string;
   readonly model: RelayCatalogModel | null;
   readonly connection: RelayModelConnection | null;
-  readonly group: "当前选择" | "已配置模型" | "已登记连接" | "免费模型 · OpenRouter";
+  readonly group: "默认" | "当前选择" | "已配置模型" | "已登记连接" | "免费模型 · OpenRouter";
   readonly selectable: boolean;
   readonly note: string | null;
 }
 
 function entryTitle(entry: ModelEntry): string {
+  if (entry.kind === "default") {
+    return entry.note ?? "清除本会话的显式选择，恢复跟随工作区聊天默认；没有聊天默认时跟随进程默认。";
+  }
   if (entry.connection !== null) {
     const parts = [`${entry.connection.name} · ${entry.connection.id}`,
       `型号：${entry.connection.defaultModel}`,
@@ -53,7 +56,7 @@ function entryTitle(entry: ModelEntry): string {
 }
 
 export default function ModelSelector({ client, open, onOpenChange, selectedModel, onChoose, disabled = false,
-  sessionId, selectedConnectionId = null, onChooseConnection, switching = false }: {
+  sessionId, selectedConnectionId = null, onChooseConnection, onFollowDefault, switching = false }: {
   client: RelayApiClient; open: boolean; onOpenChange: (open: boolean) => void;
   selectedModel: string | null; onChoose: (model: string) => void;
   disabled?: boolean;
@@ -67,12 +70,22 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
    * 与免费目录的型号选择互斥：连接自带端点/预算/凭据，不能混成「连接 A 跑型号 B」。
    */
   onChooseConnection?: (connection: RelayModelConnection) => void;
+  /**
+   * 「跟随工作区默认」：清除本会话的显式选择（服务端 ClearSessionModelSelection）。
+   * 首条输入器没有会话行可清，宿主传进来的回调只需清掉草稿里的显式选择。
+   */
+  onFollowDefault?: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [catalog, setCatalog] = useState<RelayModelCatalog | null>(null);
   const [connections, setConnections] = useState<readonly RelayModelConnection[]>([]);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  /** 工作区聊天默认连接声明的型号；null 表示未设置（新会话按进程默认）。 */
+  const [chatDefaultModel, setChatDefaultModel] = useState<string | null>(null);
+  const [chatDefaultDisabled, setChatDefaultDisabled] = useState(false);
+  /** 打开过一次下拉、读全了默认来源（聊天默认 + 进程默认）之后才在芯片上写具体型号。 */
+  const [defaultSourceRead, setDefaultSourceRead] = useState(false);
   const [choice, setChoice] = useState("");
   const [query, setQuery] = useState("");
   const [currentModel, setCurrentModel] = useState<string | null>(null);
@@ -89,10 +102,9 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
   // 打开别的浮层（「+」菜单、档位菜单）时收起本下拉：输入器工具行上的多个 chip 弹层
   // 不允许同时打开互相压。自身的外部按下与 Esc 由下面那个 effect 负责。
   useMenuExclusive(open, () => { if (!refreshingRef.current) onOpenChange(false); });
-  // 挂载即读应用默认（2026-10-21 用户指令「记住上一次选择的模型，不要每个会话都先显示
-  // 『模型』两个字」）：没有显式选择的会话（服务端 model-selection 为空）与新对话（本机
-  // 偏好为空）都沿用应用默认，芯片要显示这个具体型号而不是占位文案。打开下拉时下面的
-  // effect 会再读一次并覆盖同一个 state；读取失败保持 null，芯片退回占位但不谎报型号。
+  // 挂载即读进程默认（2026-10-21 用户指令：没有显式选择时芯片不要显示「模型」两个字）。
+  // 工作区聊天默认的型号在**打开下拉时**再读：芯片在收起状态只需要如实说「跟随默认」，
+  // 不必为它额外发一次请求；打开后的默认条目会写出解析到的具体型号（P0-4/P0-5）。
   useEffect(() => {
     if (client === null) return;
     let active = true;
@@ -108,16 +120,26 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     // 服务端 GET 负责打开时的 TTL 检查；浏览器不直接访问服务商。
     void Promise.allSettled([client.getModelCatalog(), client.getModelPortStatus(),
       sessionId === undefined ? Promise.resolve(null) : client.getSessionModelSelection(sessionId),
-      onChooseConnection === undefined ? Promise.resolve([]) : client.listModelConnections()])
-      .then(([directoryResult, statusResult, selectionResult, connectionResult]) => {
+      onChooseConnection === undefined ? Promise.resolve([]) : client.listModelConnections(),
+      client.getChatDefaultModelConnection()])
+      .then(([directoryResult, statusResult, selectionResult, connectionResult, chatDefaultResult]) => {
       if (!active) return;
       if (selectionResult.status === "rejected") throw selectionResult.reason;
       const selection = selectionResult.value;
       const configuredDefault = statusResult.status === "fulfilled" && statusResult.value.configured
         ? statusResult.value.model : null;
       setCatalog(directoryResult.status === "fulfilled" ? directoryResult.value : null);
-      setConnections(connectionResult.status === "fulfilled" ? connectionResult.value : []);
+      const loadedConnections = connectionResult.status === "fulfilled" ? connectionResult.value : [];
+      setConnections(loadedConnections);
       setDefaultModel(configuredDefault);
+      // 工作区聊天默认是「新会话没有显式选择时」的真实来源，必须显式读出来再显示，
+      // 不能拿进程默认冒充它（P0-4）。
+      const chatDefaultId = chatDefaultResult.status === "fulfilled"
+        ? chatDefaultResult.value.connectionId : null;
+      const chatDefaultConnection = chatDefaultId === null ? undefined
+        : loadedConnections.find((item) => item.id === chatDefaultId);
+      setChatDefaultModel(chatDefaultConnection?.defaultModel ?? null);
+      setChatDefaultDisabled(chatDefaultConnection?.status === "DISABLED");
       setReadWarnings([
         ...(directoryResult.status === "rejected" ? [`免费目录读取失败：${describeLiveError(directoryResult.reason).message}`] : []),
         ...(statusResult.status === "rejected" ? [`应用默认配置读取失败：${describeLiveError(statusResult.reason).message}`] : []),
@@ -126,9 +148,10 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       // 目录变化不自动选第一个，也不替换原首选。
       const current = sessionId === undefined ? selectedModel : selection?.model ?? null;
       const currentConnection = selectedConnectionId ?? (sessionId === undefined ? null : selection?.connectionId ?? null);
-      setCurrentModel(current ?? configuredDefault);
+      setCurrentModel(current ?? null);
       setCurrentConnectionId(currentConnection);
-      setChoice(currentConnection ?? current ?? configuredDefault ?? "");
+      setChoice(currentConnection ?? current ?? "");
+      setDefaultSourceRead(true);
     }).catch((caught) => { if (active) setError(describeLiveError(caught).message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -186,6 +209,17 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     !catalog?.models.some((model) => model.id === currentModel);
   const directory = catalog?.models ?? [];
   const entries: ModelEntry[] = [];
+  // 跟随工作区默认：显式选择的对立面。它不需要选一个具体型号——清掉选择后，服务端按
+  // 「会话显式选择 > 工作区聊天默认 > 进程默认」解析（P0-4/P0-5）。
+  const effectiveDefaultModel = chatDefaultModel ?? defaultModel;
+  if (onFollowDefault !== undefined) {
+    entries.push({ kind: "default", id: "follow-default", name: "跟随工作区默认",
+      model: null, connection: null, group: "默认", selectable: !disabled,
+      note: chatDefaultModel === null
+        ? (defaultModel === null ? "当前没有可用的默认模型。"
+          : `没有设置工作区聊天默认；新消息跟随进程默认 ${defaultModel}。`)
+        : `${chatDefaultDisabled ? "聊天默认连接已停用；" : ""}新消息跟随工作区聊天默认 ${chatDefaultModel}。` });
+  }
   // 已登记连接按稳定 connection_id 独立成段：它们自带端点/预算/凭据，不依赖免费目录资格。
   // 停用的连接仍列出但不可选——用户能在原处看到「为什么它不在可选范围」，而不是凭空消失。
   for (const connection of visibleConnections) entries.push({ kind: "connection",
@@ -202,10 +236,17 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     connection: null, group: "免费模型 · OpenRouter", selectable: callable(model),
     note: catalog?.cacheStale ? "目录已过期，仅供浏览" : catalog?.chatConfigured === false ? "调用凭据未配置" : null });
   // 已登记连接放在应用默认之前：用户刚在设置里建好的连接应当一眼可见。
-  const groups = "已登记连接,当前选择,已配置模型,免费模型 · OpenRouter".split(",")
+  const groups = "默认,已登记连接,当前选择,已配置模型,免费模型 · OpenRouter".split(",")
     .filter((group) => entries.some((entry) => entry.group === group));
   function chooseEntry(entry: ModelEntry) {
     if (!entry.selectable || disabled || refreshing || error !== null) return;
+    // 跟随默认不是一个「型号」：清选择由宿主调用服务端命令，本组件不猜型号。
+    if (entry.kind === "default") {
+      onFollowDefault?.();
+      onOpenChange(false);
+      triggerRef.current?.focus();
+      return;
+    }
     setChoice(entry.id);
     // 连接选择提交的是连接身份，型号由服务端按连接当前声明解析；不混用型号命令。
     if (entry.kind === "connection" && entry.connection !== null) onChooseConnection?.(entry.connection);
@@ -221,8 +262,17 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
   // 显示链：会话显式选择 → 打开下拉时读到的当前值 → 挂载读到的应用默认。
   // 三级都空才退回「模型」占位（服务端没配默认、本机没选过，此刻确实没有可显示的型号）。
   // 应用默认只来自服务端 model-port，不是本地推断，因此不冒充会话事实。
-  const selectedId = selectedModel ?? currentModel ?? defaultModel;
+  // 显式选择才显示具体型号；没有显式选择时如实显示「跟随默认」，并把解析出的默认型号
+  // 写在旁边——芯片不能拿进程默认冒充「本会话首选」（P0-4）。
+  const explicitId = selectedModel ?? currentModel ?? (selectedConnectionId === null ? null : selectedConnectionId);
+  // 没读过默认来源时只说「跟随默认」：此时唯一知道的是进程默认，拿它冒充工作区聊天
+  // 默认会撒谎（P0-4）。打开下拉读到聊天默认后再写具体型号。
+  const resolvedDefault = defaultSourceRead ? effectiveDefaultModel : null;
+  const selectedId = explicitId ?? resolvedDefault;
   const selectedName = catalog?.models.find((model) => model.id === selectedId)?.name ?? selectedId;
+  const triggerName = explicitId === null
+    ? (resolvedDefault === null ? "跟随默认" : `跟随默认 · ${selectedName ?? resolvedDefault}`)
+    : (selectedName ?? selectedId);
   const selectedDetail = selectedId === null ? null
     : selectedName === selectedId ? selectedId : `${selectedName} · ${selectedId}`;
   return <div className="model-selector" ref={rootRef}>
@@ -230,8 +280,12 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
       data-testid="model-selector-open" disabled={disabled} aria-busy={switching || undefined}
       aria-label={switching ? "模型切换中" : "选择模型"} aria-haspopup="listbox" aria-expanded={open} aria-controls="model-selector-list"
       title={switching ? "模型切换中，等待服务端回执"
-        : selectedDetail === null ? "打开模型选择，核对本会话首选" : `首选模型：${selectedDetail}`}
-      onClick={() => onOpenChange(!open)}><span className="model-selector-trigger-name">{selectedName ?? "模型"}</span>
+        : explicitId === null
+          ? (resolvedDefault === null
+            ? "跟随工作区默认；打开可查看默认来源与可选项"
+            : `跟随默认：新消息按 ${resolvedDefault}；打开可切换`)
+          : `首选模型：${selectedDetail}`}
+      onClick={() => onOpenChange(!open)}><span className="model-selector-trigger-name">{triggerName}</span>
       {/* 在途指示占用与 chevron 相同的 16px 槽，避免正常切换时聊天区宽度跳一下。 */}
       {switching ? <span className="model-selector-switch-dot" role="status" aria-label="模型切换中" />
         : <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />}</button>

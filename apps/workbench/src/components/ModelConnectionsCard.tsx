@@ -149,7 +149,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
 
   if (!expanded) {
     return <section className="surface-panel settings-card" data-testid="model-connections">
-      <h2>模型连接</h2>      <p className="helper-text">登记 OpenAI 兼容连接（端点、确切型号、调用预算）；凭据存系统凭据库，业务库只有不透明引用。</p>
+      <h2>模型连接</h2>      <p className="helper-text">登记 OpenAI 兼容或 Anthropic 连接（协议、端点、确切型号、调用预算）；凭据存系统凭据库，业务库只有不透明引用。</p>
       <p className="settings-verify-actions">
         <button className="secondary-button" type="button" data-testid="model-connections-open"
           onClick={() => { void open(); }}>
@@ -211,6 +211,8 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                 data-testid={`model-connection-verification-${connection.id}`}
                 title={label.detail}>{label.chip}</span>}
             {" "}
+            <code className="hash-code">{protocolLabels[connection.providerKind]}</code>
+            {" · "}
             <code className="hash-code">{connection.defaultModel}</code>
             {" · "}
             {connection.baseUrl === null ? "内置默认端点" : connection.baseUrl}
@@ -344,40 +346,52 @@ function connectionVerificationKind(verification: RelayModelVerificationState): 
 function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
   readonly connection: RelayModelConnection;
   readonly busy: boolean;
-  readonly onSubmit: (changes: { readonly name: string; readonly baseUrl: string | null;
+  readonly onSubmit: (changes: { readonly name: string;
+    readonly protocol: ConnectionProtocol; readonly baseUrl: string | null;
     readonly defaultModel: string; readonly timeoutMs?: number }) => Promise<void>;
   readonly onCancel: () => void;
 }) {
   const [name, setName] = useState(connection.name);
+  const [protocol, setProtocol] = useState<ConnectionProtocol>(connection.providerKind);
   const [model, setModel] = useState(connection.defaultModel);
   const [baseUrl, setBaseUrl] = useState(connection.baseUrl ?? "");
   const [timeoutSeconds, setTimeoutSeconds] = useState(String(Math.round(connection.budget.timeoutMs / 1_000)));
   const [localError, setLocalError] = useState<string | null>(null);
   return <div className="settings-inline-form" data-testid="model-connection-edit-form">
-    <label><span>名称</span>
-      <input value={name} aria-label="连接名称" maxLength={60}
-        onChange={(event) => { setName(event.target.value); }} /></label>
-    <label><span>确切型号</span>
-      <input value={model} aria-label="确切型号" maxLength={200}
-        onChange={(event) => { setModel(event.target.value); }} /></label>
-    <label><span>服务端点（留空＝内置默认端点）</span>
-      <input value={baseUrl} aria-label="服务端点" placeholder="https://…/v1"
-        onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
+    <div className="settings-form-row">
+      <label><span>连接名称</span>
+        <input value={name} aria-label="连接名称" maxLength={60}
+          onChange={(event) => { setName(event.target.value); }} /></label>
+      <label><span>API 格式</span>
+        <select value={protocol} aria-label="API 格式" data-testid="model-connection-edit-protocol"
+          onChange={(event) => { setProtocol(event.target.value as ConnectionProtocol); }}>
+          <option value="openai-compatible">OpenAI-Compatible</option>
+          <option value="anthropic-messages">Anthropic</option>
+        </select></label>
+    </div>
+    <div className="settings-form-row">
+      <label><span>Model ID</span>
+        <input value={model} aria-label="Model ID" maxLength={200}
+          onChange={(event) => { setModel(event.target.value); }} /></label>
+      <label><span>Base URL（留空＝该协议默认端点）</span>
+        <input value={baseUrl} aria-label="Base URL" placeholder="https://…/v1"
+          onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
+    </div>
     <label><span>调用超时（秒，1–600）</span>
       <input value={timeoutSeconds} aria-label="调用超时秒数" inputMode="numeric" placeholder="30"
         onChange={(event) => { setTimeoutSeconds(event.target.value); }} /></label>
-    <p className="helper-text">只改这条连接的预算，不动其他 Provider 的全局超时。API Key 不变；更换凭据请用「轮换凭据」。保存后旧验证结论失效。</p>
+    <p className="helper-text">API Key 不变；更换凭据请用「轮换凭据」。改协议会改变配置指纹：旧验证结论失效，冻结在旧协议上的在途执行会停止。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
       <button className="secondary-button" type="button" disabled={busy}
         data-testid="model-connection-edit-submit"
         onClick={() => {
           if (name.trim() === "") { setLocalError("请填写连接名称。"); return; }
-          if (model.trim() === "") { setLocalError("请填写确切型号。"); return; }
+          if (model.trim() === "") { setLocalError("请填写 Model ID。"); return; }
           const timeoutMs = timeoutMsFromSeconds(timeoutSeconds);
           if (timeoutMs === null) { setLocalError("调用超时需为 1–600 的整数秒。"); return; }
           setLocalError(null);
-          void onSubmit({ name: name.trim(), defaultModel: model.trim(),
+          void onSubmit({ name: name.trim(), protocol, defaultModel: model.trim(),
             baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), timeoutMs });
         }}>保存设置</button>
       <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
@@ -418,20 +432,32 @@ function RotateCredentialForm({ connection, busy, onSubmit, onCancel }: {
   </div>;
 }
 
-/** 第一阶段只保证已实现的 OpenAI-Compatible 路径；预设只填端点，不代替用户选择确切型号。 */
+/**
+ * 可选预设只负责**预填已确认的配置**（协议 + 端点 + 名称建议），不代替用户确认型号，
+ * 也不按品牌猜协议：协议是用户可见、可改的字段。
+ */
 const connectionPresets = [
-  { id: "openai", label: "OpenAI", baseUrl: "", modelHint: "例如 gpt-4o-mini" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1",
-    modelHint: "例如 openai/gpt-4o-mini" },
-  // 2026-11-03：星火只是自定义 OpenAI 兼容连接的预置模板，不新增枚举、不写死型号；
-  // 端点预填，型号由用户按账号订阅填写（当前 MaaS 账号仅有 spark-x2.6）。
-  { id: "spark", label: "讯飞星火（MaaS）", baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2",
-    modelHint: "例如 spark-x2.6" },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1",
-    modelHint: "例如 deepseek-chat" },
-  { id: "custom", label: "自定义", baseUrl: "", modelHint: "例如 provider/model-id" }
+  { id: "openai", label: "OpenAI", protocol: "openai-compatible",
+    baseUrl: "https://api.openai.com/v1", modelHint: "例如 gpt-4o-mini" },
+  { id: "anthropic", label: "Anthropic", protocol: "anthropic-messages",
+    baseUrl: "https://api.anthropic.com/v1", modelHint: "例如 claude-sonnet-4-5" },
+  { id: "deepseek", label: "DeepSeek", protocol: "openai-compatible",
+    baseUrl: "https://api.deepseek.com/v1", modelHint: "例如 deepseek-chat" },
+  { id: "openrouter", label: "OpenRouter", protocol: "openai-compatible",
+    baseUrl: "https://openrouter.ai/api/v1", modelHint: "例如 openai/gpt-4o-mini" },
+  // 星火只是自定义 OpenAI 兼容连接的预置模板，不新增枚举、不写死型号。
+  { id: "spark", label: "讯飞星火（MaaS）", protocol: "openai-compatible",
+    baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2", modelHint: "例如 spark-x2.6" },
+  { id: "custom", label: "自定义", protocol: "openai-compatible", baseUrl: "",
+    modelHint: "例如 provider/model-id" }
 ] as const;
 type ConnectionPresetId = typeof connectionPresets[number]["id"];
+type ConnectionProtocol = "openai-compatible" | "anthropic-messages";
+
+const protocolLabels: Record<ConnectionProtocol, string> = {
+  "openai-compatible": "OpenAI-Compatible",
+  "anthropic-messages": "Anthropic"
+};
 
 /** 秒 → 毫秒；空串表示沿用服务端默认/原值，非法值返回 null 由表单报错。与迁移 CHECK 的 1–600 秒一致。 */
 function timeoutMsFromSeconds(value: string): number | undefined | null {
@@ -442,75 +468,183 @@ function timeoutMsFromSeconds(value: string): number | undefined | null {
   return seconds * 1_000;
 }
 
-/** 新增连接：服务端会先落秘密再落行；失败时不会留下孤儿凭据。 */
+/**
+ * 新增模型（MODEL-SETTINGS-03）：默认只问五件事——连接名称、API 格式、API Key、
+ * Base URL、Model ID。超时与输出上限收进「高级设置」，默认值由服务端给出。
+ *
+ * 两条硬约束：
+ *   1. **测试与保存互相独立**：测试只发一次草稿探针（不落任何事实），保存才建连接；
+ *      两者的成功/失败各自反馈，谁也不冒充谁。
+ *   2. **失败不清空已填内容**：只有保存成功才清空表单，失败时保留全部输入供重试。
+ *      API Key 只在这个密码框里存在，不写 localStorage / sessionStorage。
+ */
 function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
   readonly client: RelayApiClient;
   readonly busy: boolean;
   readonly onCreated: (name: string) => Promise<void>;
   readonly onCancel: () => void;
 }) {
-  const [preset, setPreset] = useState<ConnectionPresetId>("openai");
+  const [preset, setPreset] = useState<ConnectionPresetId>("custom");
+  const [protocol, setProtocol] = useState<ConnectionProtocol>("openai-compatible");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  // 星火等长延迟模型预填 120 秒；只作用于这一条连接，其他 Provider 仍用服务端默认 30 秒。
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [timeoutSeconds, setTimeoutSeconds] = useState("");
+  const [maxOutputTokens, setMaxOutputTokens] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-  const selectedPreset = connectionPresets.find((item) => item.id === preset) ?? connectionPresets[0];
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [probing, setProbing] = useState(false);
+  /** 草稿探针的独立反馈；与保存结果分开显示，避免「测试通过」被读成「已保存」。 */
+  const [probe, setProbe] = useState<{ readonly ok: boolean;
+    readonly message: string } | null>(null);
+  const selectedPreset = connectionPresets.find((item) => item.id === preset)
+    ?? connectionPresets[connectionPresets.length - 1];
+
+  const timeoutValue = (): number | undefined | null => timeoutMsFromSeconds(timeoutSeconds);
+  const maxOutputValue = (): number | undefined | null => {
+    const trimmed = maxOutputTokens.trim();
+    if (trimmed === "") return undefined;
+    const value = Number(trimmed);
+    return Number.isInteger(value) && value >= 256 && value <= 65_536 ? value : null;
+  };
+  const checkCommon = (): boolean => {
+    if (model.trim() === "") { setLocalError("请填写 Model ID。"); return false; }
+    if (apiKey.trim() === "") { setLocalError("请填写 API Key。"); return false; }
+    if (timeoutValue() === null) { setLocalError("调用超时需为 1–600 的整数秒。"); return false; }
+    if (maxOutputValue() === null) {
+      setLocalError("最大输出 Token 需为 256–65536 的整数。"); return false;
+    }
+    return true;
+  };
+  const draft = {
+    protocol,
+    baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(),
+    defaultModel: model.trim(),
+    apiKey: apiKey.trim(),
+    ...(timeoutValue() === undefined || timeoutValue() === null
+      ? {} : { timeoutMs: timeoutValue() as number })
+  };
+
   return <div className="settings-inline-form" data-testid="model-connection-create-form">
-    <label><span>服务预设</span>
+    <div className="settings-form-row">
+      <label><span>连接名称</span>
+        <input value={name} aria-label="连接名称" maxLength={60} placeholder="例如 工作区主力模型"
+          onChange={(event) => { setName(event.target.value); }} /></label>
+      <label><span>API 格式</span>
+        <select value={protocol} aria-label="API 格式" data-testid="model-connection-protocol"
+          onChange={(event) => {
+            const next = event.target.value as ConnectionProtocol;
+            setProtocol(next);
+            // 换协议时端点若仍是另一协议的默认值，同步换成新协议的默认值；
+            // 用户自填的端点保持不动。
+            const previous = connectionPresets.find((item) =>
+              item.protocol === protocol && item.baseUrl === baseUrl.trim());
+            if (previous !== undefined) {
+              const nextPreset = connectionPresets.find((item) => item.protocol === next);
+              if (nextPreset !== undefined) setBaseUrl(nextPreset.baseUrl);
+            }
+            setProbe(null);
+          }}>
+          <option value="openai-compatible">OpenAI-Compatible</option>
+          <option value="anthropic-messages">Anthropic</option>
+        </select></label>
+    </div>
+    <div className="settings-form-row">
+      <label><span>Base URL</span>
+        <input value={baseUrl} aria-label="Base URL" placeholder="https://…/v1"
+          onChange={(event) => { setBaseUrl(event.target.value); setProbe(null); }} /></label>
+      <label><span>Model ID</span>
+        <input value={model} aria-label="Model ID" maxLength={200}
+          placeholder={selectedPreset.modelHint}
+          onChange={(event) => { setModel(event.target.value); setProbe(null); }} /></label>
+    </div>
+    <label><span>API Key</span>
+      <input type="password" autoComplete="off" value={apiKey} aria-label="API Key"
+        placeholder="只在保存时写入系统凭据库"
+        onChange={(event) => { setApiKey(event.target.value); setProbe(null); }} /></label>
+    <details className="settings-advanced" open={advancedOpen}
+      onToggle={(event) => { setAdvancedOpen((event.target as HTMLDetailsElement).open); }}>
+      <summary>高级设置</summary>
+      <div className="settings-form-row">
+        <label><span>调用超时（秒，默认 30）</span>
+          <input value={timeoutSeconds} aria-label="调用超时秒数" inputMode="numeric"
+            placeholder="30"
+            onChange={(event) => { setTimeoutSeconds(event.target.value); }} /></label>
+        <label><span>最大输出 Token（默认 8192）</span>
+          <input value={maxOutputTokens} aria-label="最大输出 Token" inputMode="numeric"
+            placeholder="8192"
+            onChange={(event) => { setMaxOutputTokens(event.target.value); }} /></label>
+      </div>
+    </details>
+    <label className="settings-preset-field"><span>从预设填入（可选）</span>
       <select value={preset} aria-label="服务预设"
         onChange={(event) => {
           const nextId = event.target.value as ConnectionPresetId;
-          const next = connectionPresets.find((item) => item.id === nextId) ?? connectionPresets[0];
+          const next = connectionPresets.find((item) => item.id === nextId)
+            ?? connectionPresets[connectionPresets.length - 1];
           setPreset(nextId);
+          setProtocol(next.protocol);
           setBaseUrl(next.baseUrl);
-          // 2026-11-04：星火实测一次 43 秒，30 秒预算会误判 MODEL_TIMEOUT；按连接预算放宽到 120 秒。
-          setTimeoutSeconds(next.id === "spark" ? "120" : "");
+          // 星火实测一次 43 秒，30 秒预算会误判 MODEL_TIMEOUT；按连接预算放宽到 120 秒。
+          if (next.id === "spark") setTimeoutSeconds("120");
           if (next.id !== "custom" && name.trim() === "") setName(next.label);
         }}>
         {connectionPresets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select></label>
-    <label><span>名称</span>
-      <input value={name} aria-label="连接名称" maxLength={60}
-        onChange={(event) => { setName(event.target.value); }} /></label>
-    <label><span>确切型号（由你确认，不由预设代填）</span>
-      <input value={model} aria-label="确切型号" maxLength={200}
-        placeholder={selectedPreset.modelHint}
-        onChange={(event) => { setModel(event.target.value); }} /></label>
-    <label><span>服务端点（留空＝内置默认端点）</span>
-      <input value={baseUrl} aria-label="服务端点" placeholder="https://…/v1"
-        onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
-    <label><span>调用超时（秒，1–600，留空＝默认 30）</span>
-      <input value={timeoutSeconds} aria-label="调用超时秒数" inputMode="numeric" placeholder="30"
-        onChange={(event) => { setTimeoutSeconds(event.target.value); }} /></label>
-    <label><span>API Key（只在此出现一次，保存后只留代数）</span>
-      <input type="password" autoComplete="off" value={apiKey} aria-label="API Key"
-        onChange={(event) => { setApiKey(event.target.value); }} /></label>
-    <p className="helper-text">只保证 OpenAI-Compatible 路径；保存不等于验证通过，登记后点这一行的「验证」。超时只作用于这条连接。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
+    {probe !== null && <p className={probe.ok ? "helper-text" : "action-error"} role="status"
+      data-testid="model-connection-probe-result">{probe.message}</p>}
+    {saveError !== null && <p className="action-error" role="alert"
+      data-testid="model-connection-create-error">{saveError}</p>}
     <p className="settings-verify-actions">
-      <button className="secondary-button" type="button" disabled={busy}
+      <button className="secondary-button" type="button" disabled={busy || probing || saving}
+        data-testid="model-connection-probe"
+        onClick={() => {
+          setLocalError(null); setSaveError(null); setProbe(null);
+          if (!checkCommon()) return;
+          setProbing(true);
+          void client.probeModelConnection(draft)
+            .then((result) => {
+              setProbe({ ok: result.ok, message: result.ok
+                ? `连接可用（${result.protocol === "anthropic-messages" ? "Anthropic" : "OpenAI 兼容"}，${result.latencyMs} ms）。这只是测试，尚未保存。`
+                : `测试未通过：${result.errorCategory ?? "未知错误"}${result.message === null ? "" : ` · ${result.message}`}。已填内容保留，可修改后重试。` });
+            })
+            .catch((cause: unknown) => {
+              setProbe({ ok: false, message: cause instanceof RelayApiError
+                ? cause.message : "测试连接失败，请稍后重试。" });
+            })
+            .finally(() => { setProbing(false); });
+        }}>{probing ? "测试中…" : "测试连接"}</button>
+      <button className="primary-button" type="button" disabled={busy || probing || saving}
         data-testid="model-connection-create-submit"
         onClick={() => {
+          setLocalError(null); setSaveError(null);
           if (name.trim() === "") { setLocalError("请填写连接名称。"); return; }
-          if (model.trim() === "") { setLocalError("请填写确切型号。"); return; }
-          if (apiKey.trim() === "") { setLocalError("请填写 API Key。"); return; }
-          const timeoutMs = timeoutMsFromSeconds(timeoutSeconds);
-          if (timeoutMs === null) { setLocalError("调用超时需为 1–600 的整数秒。"); return; }
-          setLocalError(null);
-          const created = { name: name.trim(), model: model.trim(),
-            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), apiKey: apiKey.trim(), timeoutMs };
-          setName(""); setModel(""); setBaseUrl(""); setApiKey(""); setTimeoutSeconds("");
+          if (!checkCommon()) return;
+          setSaving(true);
+          const created = { name: name.trim(), protocol, model: model.trim(),
+            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), apiKey: apiKey.trim(),
+            timeoutMs: timeoutValue() as number | undefined,
+            maxOutputTokens: maxOutputValue() as number | undefined };
           void client.createModelConnection({ commandId: createCommandId(),
-            name: created.name, baseUrl: created.baseUrl, defaultModel: created.model,
-            timeoutMs: created.timeoutMs, apiKey: created.apiKey })
-            .then(() => onCreated(created.name))
+            name: created.name, protocol: created.protocol, baseUrl: created.baseUrl,
+            defaultModel: created.model, timeoutMs: created.timeoutMs,
+            maxOutputTokens: created.maxOutputTokens, apiKey: created.apiKey })
+            .then(async () => {
+              // 只有成功才清空：失败时用户还要按原值重试。
+              setName(""); setModel(""); setBaseUrl(""); setApiKey("");
+              setTimeoutSeconds(""); setMaxOutputTokens(""); setProbe(null);
+              await onCreated(created.name);
+            })
             .catch((cause: unknown) => {
-              setLocalError(cause instanceof RelayApiError ? cause.message : "创建连接失败。");
-            });
-        }}>创建连接</button>
+              setSaveError(cause instanceof RelayApiError ? cause.message
+                : "创建连接失败；已填内容保留，可直接重试。");
+            })
+            .finally(() => { setSaving(false); });
+        }}>{saving ? "保存中…" : "保存模型"}</button>
       <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
     </p>
   </div>;

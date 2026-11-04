@@ -97,7 +97,7 @@ import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayProjectToolAvailability, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
 import type { RelayDecision, RelayDefaultModelConnection, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelCapabilityDeclaration, RelayModelConnection, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
-import type { CreateModelConnectionInput, UpdateModelConnectionInput } from "./resources/modelConnections";
+import type { CreateModelConnectionInput, ProbeModelConnectionInput, ProbeModelConnectionResult, UpdateModelConnectionInput } from "./resources/modelConnections";
 import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 import type { RelayReadiness } from "./dtos/readiness";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -497,8 +497,8 @@ export class RelayApiClient {
     return tasksApi.startHumanTask(this.#http, input);
   }
 
-  async getCommandReceipt(commandId: string): Promise<RelayCommandReceipt> {
-    return runApi.getCommandReceipt(this.#http, commandId);
+  async getCommandReceipt(commandId: string, signal?: AbortSignal): Promise<RelayCommandReceipt> {
+    return runApi.getCommandReceipt(this.#http, commandId, signal);
   }
 
   async getKnowledge(projectId: string | null = null): Promise<readonly RelayKnowledge[]> {
@@ -1357,6 +1357,11 @@ export class RelayApiClient {
   /** 凭据是否还在系统凭据库里。只回布尔。 */
   async getModelConnectionCredentialPresence(connectionId: string): Promise<boolean> {
     return modelConnectionsApi.getModelConnectionCredentialPresence(this.#http, connectionId);
+  }
+
+  /** 草稿「测试连接」：真实短探针，不写账本、不写凭据。 */
+  async probeModelConnection(input: ProbeModelConnectionInput): Promise<ProbeModelConnectionResult> {
+    return modelConnectionsApi.probeModelConnection(this.#http, input);
   }
 
   async createModelConnection(input: CreateModelConnectionInput): Promise<RelayModelConnection> {

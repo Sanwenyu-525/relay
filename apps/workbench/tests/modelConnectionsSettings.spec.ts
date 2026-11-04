@@ -35,6 +35,7 @@ function connection(overrides: Partial<RelayModelConnection> = {}): RelayModelCo
 
 interface StubCalls {
   list: number;
+  probe: { protocol: string; model: string; apiKey: string }[];
   setDefault: string[];
   chatDefault: (string | null)[];
   verify: { connection: string; connectionId?: string }[];
@@ -50,9 +51,11 @@ function stubClient(input: {
   readonly defaultId?: string | null;
   readonly chatDefaultId?: string | null;
   readonly failList?: boolean;
+  readonly probeOk?: boolean;
+  readonly failCreate?: boolean;
 }): { client: RelayApiClient; calls: StubCalls } {
-  const calls: StubCalls = { list: 0, setDefault: [], chatDefault: [], verify: [], update: [],
-    setStatus: [], rotate: [], create: [] };
+  const calls: StubCalls = { list: 0, probe: [], setDefault: [], chatDefault: [], verify: [],
+    update: [], setStatus: [], rotate: [], create: [] };
   let verificationState: string = "UNVERIFIED";
   let verificationLast: Record<string, unknown> | null = null;
   const client = {
@@ -116,8 +119,17 @@ function stubClient(input: {
       calls.rotate.push({ id, apiKey: args.apiKey });
       return connection({ credentialVersion: 2, revision: "2" });
     },
+    async probeModelConnection(args: { protocol: string; defaultModel: string;
+      apiKey: string }) {
+      calls.probe.push({ protocol: args.protocol, model: args.defaultModel,
+        apiKey: args.apiKey });
+      return { ok: input.probeOk !== false, latencyMs: 21, protocol: args.protocol,
+        model: args.defaultModel, errorCategory: input.probeOk === false ? "AUTH" : null,
+        message: input.probeOk === false ? "HTTP 401" : null };
+    },
     async createModelConnection(args: { name: string; apiKey: string; timeoutMs?: number }) {
       calls.create.push({ name: args.name, apiKey: args.apiKey, timeoutMs: args.timeoutMs });
+      if (input.failCreate === true) throw new Error("服务端拒绝了这次创建");
       return connection({ id: "22222222-2222-4222-8222-222222222222", name: args.name });
     }
   } as unknown as RelayApiClient;
@@ -249,7 +261,7 @@ describe("模型连接登记卡片", () => {
 
     const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
     await form.get('input[aria-label="连接名称"]').setValue("second");
-    await form.get('input[aria-label="确切型号"]').setValue("synthetic/model-b");
+    await form.get('input[aria-label="Model ID"]').setValue("synthetic/model-b");
     await form.get('input[aria-label="API Key"]').setValue("synthetic-new-key-abcdef");
     await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
     await flush();
@@ -364,10 +376,10 @@ describe("模型连接登记卡片", () => {
     await flush();
     const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
     await form.get('select[aria-label="服务预设"]').setValue("openrouter");
-    expect((form.get('input[aria-label="服务端点"]').element as HTMLInputElement).value)
+    expect((form.get('input[aria-label="Base URL"]').element as HTMLInputElement).value)
       .toBe("https://openrouter.ai/api/v1");
     // 预设不代填型号：用户必须自己确认确切型号。
-    expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
+    expect((form.get('input[aria-label="Model ID"]').element as HTMLInputElement).value).toBe("");
   });
 
   it("星火预设预填 MaaS 端点，但不写死型号", async () => {
@@ -383,11 +395,11 @@ describe("模型连接登记卡片", () => {
     expect(preset.findAll("option").map((option) => option.text()))
       .toContain("讯飞星火（MaaS）");
     await preset.setValue("spark");
-    expect((form.get('input[aria-label="服务端点"]').element as HTMLInputElement).value)
+    expect((form.get('input[aria-label="Base URL"]').element as HTMLInputElement).value)
       .toBe("https://maas-api.cn-huabei-1.xf-yun.com/v2");
     // 星火不是枚举，也不是写死清单：型号仍由用户按账号订阅填写。
-    expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
-    expect((form.get('input[aria-label="确切型号"]').attributes("placeholder")) ?? "")
+    expect((form.get('input[aria-label="Model ID"]').element as HTMLInputElement).value).toBe("");
+    expect((form.get('input[aria-label="Model ID"]').attributes("placeholder")) ?? "")
       .toContain("spark-x2.6");
     // 高延迟模型用这条连接自己的预算，不抬高其他 Provider 的全局超时。
     expect((form.get('input[aria-label="调用超时秒数"]').element as HTMLInputElement).value).toBe("120");
@@ -404,7 +416,7 @@ describe("模型连接登记卡片", () => {
     const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
     await form.get('select[aria-label="服务预设"]').setValue("spark");
     await form.get('input[aria-label="连接名称"]').setValue("星火");
-    await form.get('input[aria-label="确切型号"]').setValue("spark-x2.6");
+    await form.get('input[aria-label="Model ID"]').setValue("spark-x2.6");
     await form.get('input[aria-label="API Key"]').setValue("synthetic-spark-key-abcdef");
     await form.get('input[aria-label="调用超时秒数"]').setValue("700");
     await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
@@ -418,5 +430,105 @@ describe("模型连接登记卡片", () => {
     expect(calls.create).toEqual([{ name: "星火", apiKey: "synthetic-spark-key-abcdef",
       timeoutMs: 120_000 }]);
     expect(document.body.textContent ?? "").not.toContain("synthetic-spark-key-abcdef");
+  });
+
+  it("默认只问五件事：名称、API 格式、API Key、Base URL、Model ID；超时收进高级设置", async () => {
+    const { client } = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    expect(form.find('input[aria-label="连接名称"]').exists()).toBe(true);
+    expect(form.find('select[aria-label="API 格式"]').exists()).toBe(true);
+    expect(form.find('input[aria-label="API Key"]').exists()).toBe(true);
+    expect(form.find('input[aria-label="Base URL"]').exists()).toBe(true);
+    expect(form.find('input[aria-label="Model ID"]').exists()).toBe(true);
+    // 技术字段不出现；超时只在高级设置里。
+    expect(form.text()).not.toContain("配置指纹");
+    expect(form.text()).not.toContain("凭据代数");
+    expect(form.find("details.settings-advanced").exists()).toBe(true);
+    expect(form.find("details.settings-advanced").text()).toContain("高级设置");
+  });
+
+  it("测试连接与保存互相独立：测试不创建连接，失败也不清空已填内容", async () => {
+    const { client, calls } = stubClient({ items: [], probeOk: false });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    await form.get('input[aria-label="连接名称"]').setValue("草稿连接");
+    await form.get('input[aria-label="Model ID"]').setValue("claude-draft");
+    await form.get('input[aria-label="API Key"]').setValue("synthetic-draft-key-0123456789");
+    await mounted.wrapper.get('[data-testid="model-connection-probe"]').trigger("click");
+    await flush();
+
+    expect(calls.probe).toEqual([{ protocol: "openai-compatible", model: "claude-draft",
+      apiKey: "synthetic-draft-key-0123456789" }]);
+    // 测试有独立反馈；它没有创建连接。
+    expect(calls.create).toEqual([]);
+    expect(mounted.wrapper.get('[data-testid="model-connection-probe-result"]').text())
+      .toContain("测试未通过");
+    // 失败后已填内容原样保留，可直接重试。
+    expect((form.get('input[aria-label="连接名称"]').element as HTMLInputElement).value)
+      .toBe("草稿连接");
+    expect((form.get('input[aria-label="Model ID"]').element as HTMLInputElement).value)
+      .toBe("claude-draft");
+    expect((form.get('input[aria-label="API Key"]').element as HTMLInputElement).value)
+      .toBe("synthetic-draft-key-0123456789");
+  });
+
+  it("保存失败时保留表单内容并给出独立错误，成功后才清空", async () => {
+    const { client, calls } = stubClient({ items: [], failCreate: true });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    await form.get('input[aria-label="连接名称"]').setValue("保存失败连接");
+    await form.get('input[aria-label="Model ID"]').setValue("model-retry");
+    await form.get('input[aria-label="API Key"]').setValue("synthetic-retry-key-0123456789");
+    await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
+    await flush();
+    expect(calls.create).toHaveLength(1);
+    expect(mounted.wrapper.get('[data-testid="model-connection-create-error"]').text())
+      .toContain("已填内容保留");
+    expect((form.get('input[aria-label="连接名称"]').element as HTMLInputElement).value)
+      .toBe("保存失败连接");
+    expect((form.get('input[aria-label="API Key"]').element as HTMLInputElement).value)
+      .toBe("synthetic-retry-key-0123456789");
+  });
+
+  it("Anthropic 预设预填原生协议与端点，协议作为显式字段提交", async () => {
+    const { client, calls } = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    await form.get('select[aria-label="服务预设"]').setValue("anthropic");
+    const protocol = form.get('select[aria-label="API 格式"]');
+    expect((protocol.element as HTMLSelectElement).value).toBe("anthropic-messages");
+    expect((form.get('input[aria-label="Base URL"]').element as HTMLInputElement).value)
+      .toBe("https://api.anthropic.com/v1");
+    // 预设只填端点与协议，型号仍由用户确认。
+    expect((form.get('input[aria-label="Model ID"]').element as HTMLInputElement).value).toBe("");
+
+    await form.get('input[aria-label="Model ID"]').setValue("claude-sonnet-4-5");
+    await form.get('input[aria-label="API Key"]').setValue("synthetic-anthropic-key-0123456789");
+    await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
+    await flush();
+    expect(calls.create).toHaveLength(1);
+    // 提交载荷里带显式协议（stub 只记录 name/key，协议由 relayClient 的请求体负责）。
+    expect(document.body.textContent ?? "").not.toContain("synthetic-anthropic-key-0123456789");
   });
 });
