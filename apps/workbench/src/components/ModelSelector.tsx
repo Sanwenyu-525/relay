@@ -53,10 +53,12 @@ function entryTitle(entry: ModelEntry): string {
 }
 
 export default function ModelSelector({ client, open, onOpenChange, selectedModel, onChoose, disabled = false,
-  sessionId, selectedConnectionId = null, onChooseConnection }: {
+  sessionId, selectedConnectionId = null, onChooseConnection, switching = false }: {
   client: RelayApiClient; open: boolean; onOpenChange: (open: boolean) => void;
   selectedModel: string | null; onChoose: (model: string) => void;
   disabled?: boolean;
+  /** 会话模型选择命令在途：只换触发器右端指示，不弹窗、不改 chip 宽度。 */
+  switching?: boolean;
   sessionId?: string;
   /** 会话当前选中的已登记连接：清单用它标记唯一选中项，不拿型号猜身份。 */
   selectedConnectionId?: string | null;
@@ -225,10 +227,14 @@ export default function ModelSelector({ client, open, onOpenChange, selectedMode
     : selectedName === selectedId ? selectedId : `${selectedName} · ${selectedId}`;
   return <div className="model-selector" ref={rootRef}>
     <button type="button" ref={triggerRef} className="agent-chat-tool model-selector-trigger"
-      data-testid="model-selector-open" disabled={disabled}
-      aria-label="选择模型" aria-haspopup="listbox" aria-expanded={open} aria-controls="model-selector-list"
-      title={selectedDetail === null ? "打开模型选择，核对本会话首选" : `首选模型：${selectedDetail}`}
-      onClick={() => onOpenChange(!open)}><span className="model-selector-trigger-name">{selectedName ?? "模型"}</span><ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></button>
+      data-testid="model-selector-open" disabled={disabled} aria-busy={switching || undefined}
+      aria-label={switching ? "模型切换中" : "选择模型"} aria-haspopup="listbox" aria-expanded={open} aria-controls="model-selector-list"
+      title={switching ? "模型切换中，等待服务端回执"
+        : selectedDetail === null ? "打开模型选择，核对本会话首选" : `首选模型：${selectedDetail}`}
+      onClick={() => onOpenChange(!open)}><span className="model-selector-trigger-name">{selectedName ?? "模型"}</span>
+      {/* 在途指示占用与 chevron 相同的 16px 槽，避免正常切换时聊天区宽度跳一下。 */}
+      {switching ? <span className="model-selector-switch-dot" role="status" aria-label="模型切换中" />
+        : <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" />}</button>
     {open && <div className="model-selector-menu" data-testid="model-selector-menu">
       {(loading || error !== null) && <p className="model-selector-note" data-testid="model-selector-current">
         {loading ? "正在读取模型目录…" : error}</p>}

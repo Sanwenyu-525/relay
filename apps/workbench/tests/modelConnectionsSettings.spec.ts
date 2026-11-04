@@ -39,10 +39,10 @@ interface StubCalls {
   chatDefault: (string | null)[];
   verify: { connection: string; connectionId?: string }[];
   update: { id: string; expectedRevision: string; name?: string; baseUrl?: string | null;
-    defaultModel?: string }[];
+    defaultModel?: string; timeoutMs?: number }[];
   setStatus: { id: string; status: string }[];
   rotate: { id: string; apiKey: string }[];
-  create: { name: string; apiKey: string }[];
+  create: { name: string; apiKey: string; timeoutMs?: number }[];
 }
 
 function stubClient(input: {
@@ -100,9 +100,10 @@ function stubClient(input: {
       return { connectionId: id, revision: "2" };
     },
     async updateModelConnection(id: string, args: { expectedRevision: string;
-      name?: string; baseUrl?: string | null; defaultModel?: string }) {
+      name?: string; baseUrl?: string | null; defaultModel?: string; timeoutMs?: number }) {
       calls.update.push({ id, expectedRevision: args.expectedRevision,
-        name: args.name, baseUrl: args.baseUrl, defaultModel: args.defaultModel });
+        name: args.name, baseUrl: args.baseUrl, defaultModel: args.defaultModel,
+        timeoutMs: args.timeoutMs });
       return connection({ name: args.name ?? "primary",
         baseUrl: args.baseUrl === undefined ? null : args.baseUrl,
         defaultModel: args.defaultModel ?? "synthetic/model-a", revision: "2" });
@@ -115,8 +116,8 @@ function stubClient(input: {
       calls.rotate.push({ id, apiKey: args.apiKey });
       return connection({ credentialVersion: 2, revision: "2" });
     },
-    async createModelConnection(args: { name: string; apiKey: string }) {
-      calls.create.push({ name: args.name, apiKey: args.apiKey });
+    async createModelConnection(args: { name: string; apiKey: string; timeoutMs?: number }) {
+      calls.create.push({ name: args.name, apiKey: args.apiKey, timeoutMs: args.timeoutMs });
       return connection({ id: "22222222-2222-4222-8222-222222222222", name: args.name });
     }
   } as unknown as RelayApiClient;
@@ -343,10 +344,12 @@ describe("模型连接登记卡片", () => {
     // 编辑不碰凭据：表单里没有 API Key 输入框。
     expect(form.findAll('input[type="password"]')).toHaveLength(0);
     await form.get('input[aria-label="连接名称"]').setValue("primary-renamed");
+    // 编辑表单把已有连接预算回填为秒；保存时原样带回，不用全局默认覆盖。
+    expect((form.get('input[aria-label="调用超时秒数"]').element as HTMLInputElement).value).toBe("30");
     await mounted.wrapper.get('[data-testid="model-connection-edit-submit"]').trigger("click");
     await flush();
     expect(calls.update).toEqual([{ id, expectedRevision: "1", name: "primary-renamed",
-      baseUrl: null, defaultModel: "synthetic/model-a" }]);
+      baseUrl: null, defaultModel: "synthetic/model-a", timeoutMs: 30_000 }]);
     expect(mounted.wrapper.get('[data-testid="model-connections-notice"]').text())
       .toContain("旧验证结果失效");
   });
@@ -386,5 +389,34 @@ describe("模型连接登记卡片", () => {
     expect((form.get('input[aria-label="确切型号"]').element as HTMLInputElement).value).toBe("");
     expect((form.get('input[aria-label="确切型号"]').attributes("placeholder")) ?? "")
       .toContain("spark-x2.6");
+    // 高延迟模型用这条连接自己的预算，不抬高其他 Provider 的全局超时。
+    expect((form.get('input[aria-label="调用超时秒数"]').element as HTMLInputElement).value).toBe("120");
+  });
+
+  it("星火创建带走这条连接的超时预算，校验 1–600 秒", async () => {
+    const { client, calls } = stubClient({ items: [] });
+    const mounted = await mountReact(createElement(ModelConnectionsCard, { client }));
+    unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="model-connections-open"]').trigger("click");
+    await flush();
+    await mounted.wrapper.get('[data-testid="model-connection-add"]').trigger("click");
+    await flush();
+    const form = mounted.wrapper.get('[data-testid="model-connection-create-form"]');
+    await form.get('select[aria-label="服务预设"]').setValue("spark");
+    await form.get('input[aria-label="连接名称"]').setValue("星火");
+    await form.get('input[aria-label="确切型号"]').setValue("spark-x2.6");
+    await form.get('input[aria-label="API Key"]').setValue("synthetic-spark-key-abcdef");
+    await form.get('input[aria-label="调用超时秒数"]').setValue("700");
+    await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
+    await flush();
+    expect(calls.create).toEqual([]);
+    expect(form.text()).toContain("调用超时需为 1–600 的整数秒。");
+
+    await form.get('input[aria-label="调用超时秒数"]').setValue("120");
+    await mounted.wrapper.get('[data-testid="model-connection-create-submit"]').trigger("click");
+    await flush();
+    expect(calls.create).toEqual([{ name: "星火", apiKey: "synthetic-spark-key-abcdef",
+      timeoutMs: 120_000 }]);
+    expect(document.body.textContent ?? "").not.toContain("synthetic-spark-key-abcdef");
   });
 });

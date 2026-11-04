@@ -175,6 +175,10 @@ export default function App() {
   const pendingCommandIds = currentDraftGuard()?.pendingCommandIds?.() ??
     (pendingCommandId === null ? [] : [pendingCommandId]);
   const pendingRecovers = pendingCommandId !== null && (currentDraftGuard()?.pendingRecoversAfterLeave?.() ?? false);
+  // 在途与结果未知分开说：没有回执时不能告诉用户「去查回执」，更不能提前吓唬结果已丢。
+  const pendingCommandState = pendingCommandId === null ? null
+    : (currentDraftGuard()?.pendingCommandState?.() ?? "UNRESOLVED");
+  const pendingInFlight = pendingCommandState === "IN_FLIGHT";
   const pendingRestarts = pendingCommandId !== null && (currentDraftGuard()?.pendingRecoversAfterRestart?.() ?? false);
   const hasDraftChanges = currentDraftGuard()?.hasDraftChanges?.() ?? false;
   return <div className="desktop-window">
@@ -185,14 +189,17 @@ export default function App() {
     <AppShell desktopStatus={desktopStatus} commandOpen={commandOpen} onCommandOpen={() => setCommandOpen(true)} onCommandClose={() => setCommandOpen(false)}>
       <div key={`${preserveDraftCreation ? "draft-creation" : connection.epoch}:${location.pathname}${location.search}`}><Outlet /></div>
     </AppShell>
-    <AppDialog open={blocker.state === "blocked"} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"}
+    <AppDialog open={blocker.state === "blocked"}
+      title={pendingCommandId ? pendingInFlight ? "命令正在提交" : "命令结果待核对" : "保留未保存的修改"}
       subtitle={pendingCommandId ? "离开不会取消这条命令" : undefined}
       onClose={() => blocker.reset?.()}>
       {pendingCommandId
         ? <>
-          <p>{pendingRecovers
-            ? "这条命令已发给服务端，结果还没有确认。留在本页可以立即查询回执收口；离开也不会取消它——本页会保留原命令 ID，回来可继续核对，期间不会创建第二个。"
-            : "这条命令已发给服务端，结果还没有确认。现在离开会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复创建。请留在本页查询回执收口后再离开。"}</p>
+          <p>{pendingInFlight
+            ? "这条命令还在提交中，还没有回执可查。现在离开会丢失它的命令身份，之后无法确认它是否已生效；请留在本页等结果落地后再离开。"
+            : pendingRecovers
+              ? "这条命令已发给服务端，结果还没有确认。留在本页可以立即查询回执收口；离开也不会取消它——本页会保留原命令 ID，回来可继续核对，期间不会创建第二个。"
+              : "这条命令已发给服务端，结果还没有确认。现在离开会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复创建。请留在本页查询回执收口后再离开。"}</p>
           {pendingCommandIds.map((commandId) => <p className="dialog-command-id" key={commandId}>
             原命令 ID <code className="hash-code">{commandId}</code></p>)}
           {hasDraftChanges && <p>本页还有未提交草稿：离开前必须明确丢弃；待核对命令仍按原 ID 保留。</p>}
@@ -202,7 +209,7 @@ export default function App() {
         <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
           data-testid="keep-editing"
           onClick={() => { keepEditingFocus.current = true; blocker.reset?.(); }}>
-          {pendingCommandId ? "留在本页核对回执" : "保留并继续编辑"}</button>
+          {pendingCommandId ? pendingInFlight ? "留在本页等待结果" : "留在本页核对回执" : "保留并继续编辑"}</button>
         {pendingCommandId && pendingRecovers && !hasDraftChanges && <button className="secondary-button" type="button"
           data-testid="pending-keep-and-leave" onClick={() => blocker.proceed?.()}>离开并保留待核对</button>}
         {pendingCommandId && hasDraftChanges && <button className="danger-button" type="button"
@@ -212,14 +219,16 @@ export default function App() {
         {!pendingCommandId && <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>}
       </div>
     </AppDialog>
-    <AppDialog open={closeDialogOpen} title={pendingCommandId ? "命令结果待核对" : "保留未保存的修改"}
+    <AppDialog open={closeDialogOpen} title={pendingCommandId ? pendingInFlight ? "命令正在提交" : "命令结果待核对" : "保留未保存的修改"}
       subtitle={pendingCommandId ? "关闭不会取消这条命令" : undefined}
       onClose={() => setCloseDialogOpen(false)}>
       {pendingCommandId
         ? <>
-          <p>{pendingRestarts
-            ? "这条命令已发给服务端，结果还没有确认。关闭窗口不会取消它；重新打开后返回原工作空间的对应页面，可继续核对原命令。"
-            : "这条命令已发给服务端，结果还没有确认。关闭窗口不会取消它，但本机核对入口可能无法恢复；请先记录原命令 ID 并查询回执。"}</p>
+          <p>{pendingInFlight
+            ? "这条命令还在提交中，关闭窗口会丢失它的命令身份，之后无法确认它是否已生效。建议留在本页等结果落地。"
+            : pendingRestarts
+              ? "这条命令已发给服务端，结果还没有确认。关闭窗口不会取消它；重新打开后返回原工作空间的对应页面，可继续核对原命令。"
+              : "这条命令已发给服务端，结果还没有确认。关闭窗口不会取消它，但本机核对入口可能无法恢复；请先记录原命令 ID 并查询回执。"}</p>
           {hasDraftChanges && <p>{pendingRestarts
             ? "此外还有未提交草稿。关闭前会丢弃草稿并保留待核对命令。"
             : "此外还有未提交草稿。关闭前会丢弃草稿，命令的本机核对入口可能无法恢复。"}</p>}
@@ -230,7 +239,7 @@ export default function App() {
       <div className="dialog-actions">
         <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
           onClick={() => setCloseDialogOpen(false)}>
-          {pendingCommandId ? "留在本页核对回执" : "保留并继续编辑"}</button>
+          {pendingCommandId ? pendingInFlight ? "留在本页等待结果" : "留在本页核对回执" : "保留并继续编辑"}</button>
         {pendingCommandId && <button className="danger-button" type="button"
           data-testid="pending-close-anyway" onClick={() => void closeWithPending()}>{hasDraftChanges ? "丢弃草稿并仍要关闭窗口" : "仍要关闭窗口"}</button>}
         {!pendingCommandId && <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>}

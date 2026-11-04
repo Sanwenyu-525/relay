@@ -345,12 +345,13 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
   readonly connection: RelayModelConnection;
   readonly busy: boolean;
   readonly onSubmit: (changes: { readonly name: string; readonly baseUrl: string | null;
-    readonly defaultModel: string }) => Promise<void>;
+    readonly defaultModel: string; readonly timeoutMs?: number }) => Promise<void>;
   readonly onCancel: () => void;
 }) {
   const [name, setName] = useState(connection.name);
   const [model, setModel] = useState(connection.defaultModel);
   const [baseUrl, setBaseUrl] = useState(connection.baseUrl ?? "");
+  const [timeoutSeconds, setTimeoutSeconds] = useState(String(Math.round(connection.budget.timeoutMs / 1_000)));
   const [localError, setLocalError] = useState<string | null>(null);
   return <div className="settings-inline-form" data-testid="model-connection-edit-form">
     <label><span>名称</span>
@@ -362,7 +363,10 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
     <label><span>服务端点（留空＝内置默认端点）</span>
       <input value={baseUrl} aria-label="服务端点" placeholder="https://…/v1"
         onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
-    <p className="helper-text">API Key 不变；更换凭据请用「轮换凭据」。保存后旧验证结论失效。</p>
+    <label><span>调用超时（秒，1–600）</span>
+      <input value={timeoutSeconds} aria-label="调用超时秒数" inputMode="numeric" placeholder="30"
+        onChange={(event) => { setTimeoutSeconds(event.target.value); }} /></label>
+    <p className="helper-text">只改这条连接的预算，不动其他 Provider 的全局超时。API Key 不变；更换凭据请用「轮换凭据」。保存后旧验证结论失效。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
       <button className="secondary-button" type="button" disabled={busy}
@@ -370,9 +374,11 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
         onClick={() => {
           if (name.trim() === "") { setLocalError("请填写连接名称。"); return; }
           if (model.trim() === "") { setLocalError("请填写确切型号。"); return; }
+          const timeoutMs = timeoutMsFromSeconds(timeoutSeconds);
+          if (timeoutMs === null) { setLocalError("调用超时需为 1–600 的整数秒。"); return; }
           setLocalError(null);
           void onSubmit({ name: name.trim(), defaultModel: model.trim(),
-            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim() });
+            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), timeoutMs });
         }}>保存设置</button>
       <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
     </p>
@@ -427,6 +433,15 @@ const connectionPresets = [
 ] as const;
 type ConnectionPresetId = typeof connectionPresets[number]["id"];
 
+/** 秒 → 毫秒；空串表示沿用服务端默认/原值，非法值返回 null 由表单报错。与迁移 CHECK 的 1–600 秒一致。 */
+function timeoutMsFromSeconds(value: string): number | undefined | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  const seconds = Number(trimmed);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) return null;
+  return seconds * 1_000;
+}
+
 /** 新增连接：服务端会先落秘密再落行；失败时不会留下孤儿凭据。 */
 function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
   readonly client: RelayApiClient;
@@ -439,6 +454,8 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  // 星火等长延迟模型预填 120 秒；只作用于这一条连接，其他 Provider 仍用服务端默认 30 秒。
+  const [timeoutSeconds, setTimeoutSeconds] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const selectedPreset = connectionPresets.find((item) => item.id === preset) ?? connectionPresets[0];
   return <div className="settings-inline-form" data-testid="model-connection-create-form">
@@ -449,6 +466,8 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
           const next = connectionPresets.find((item) => item.id === nextId) ?? connectionPresets[0];
           setPreset(nextId);
           setBaseUrl(next.baseUrl);
+          // 2026-11-04：星火实测一次 43 秒，30 秒预算会误判 MODEL_TIMEOUT；按连接预算放宽到 120 秒。
+          setTimeoutSeconds(next.id === "spark" ? "120" : "");
           if (next.id !== "custom" && name.trim() === "") setName(next.label);
         }}>
         {connectionPresets.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -463,10 +482,13 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
     <label><span>服务端点（留空＝内置默认端点）</span>
       <input value={baseUrl} aria-label="服务端点" placeholder="https://…/v1"
         onChange={(event) => { setBaseUrl(event.target.value); }} /></label>
+    <label><span>调用超时（秒，1–600，留空＝默认 30）</span>
+      <input value={timeoutSeconds} aria-label="调用超时秒数" inputMode="numeric" placeholder="30"
+        onChange={(event) => { setTimeoutSeconds(event.target.value); }} /></label>
     <label><span>API Key（只在此出现一次，保存后只留代数）</span>
       <input type="password" autoComplete="off" value={apiKey} aria-label="API Key"
         onChange={(event) => { setApiKey(event.target.value); }} /></label>
-    <p className="helper-text">只保证 OpenAI-Compatible 路径；保存不等于验证通过，登记后点这一行的「验证」。</p>
+    <p className="helper-text">只保证 OpenAI-Compatible 路径；保存不等于验证通过，登记后点这一行的「验证」。超时只作用于这条连接。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
       <button className="secondary-button" type="button" disabled={busy}
@@ -475,13 +497,15 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
           if (name.trim() === "") { setLocalError("请填写连接名称。"); return; }
           if (model.trim() === "") { setLocalError("请填写确切型号。"); return; }
           if (apiKey.trim() === "") { setLocalError("请填写 API Key。"); return; }
+          const timeoutMs = timeoutMsFromSeconds(timeoutSeconds);
+          if (timeoutMs === null) { setLocalError("调用超时需为 1–600 的整数秒。"); return; }
           setLocalError(null);
           const created = { name: name.trim(), model: model.trim(),
-            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), apiKey: apiKey.trim() };
-          setName(""); setModel(""); setBaseUrl(""); setApiKey("");
+            baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), apiKey: apiKey.trim(), timeoutMs };
+          setName(""); setModel(""); setBaseUrl(""); setApiKey(""); setTimeoutSeconds("");
           void client.createModelConnection({ commandId: createCommandId(),
             name: created.name, baseUrl: created.baseUrl, defaultModel: created.model,
-            apiKey: created.apiKey })
+            timeoutMs: created.timeoutMs, apiKey: created.apiKey })
             .then(() => onCreated(created.name))
             .catch((cause: unknown) => {
               setLocalError(cause instanceof RelayApiError ? cause.message : "创建连接失败。");

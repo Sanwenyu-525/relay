@@ -2,6 +2,8 @@
  * 局部导航（如 skill 查询切换）不触发路由离开守卫，
  * 同页讨论、编辑与判断可以同时存在，各自注册保护，供页壳统一检查。
  */
+export type PendingCommandState = "IN_FLIGHT" | "UNRESOLVED";
+
 export interface DraftGuard {
   hasUnsavedChanges: () => boolean;
   /** 可由用户明确丢弃的普通草稿；pending 命令不是草稿。未提供时，仅在本守卫没有 pending 时回落到 hasUnsavedChanges。 */
@@ -11,6 +13,11 @@ export interface DraftGuard {
   discardDrafts?: () => void;
   pendingCommandId?: () => string | null;
   pendingCommandIds?: () => readonly string[];
+  /**
+   * pending 的生命周期位置：请求仍在途，还是结果未知需查原回执。
+   * 页面外壳据此区分「命令正在提交」与「结果待核对」；未提供时按未知保守处理。
+   */
+  pendingCommandState?: () => PendingCommandState | null;
   /**
    * 待核对命令已按 API/Workspace 作用域持久化、回到本页（或本页的恢复区）仍能继续
    * 核对时为 true。App 守卫弹层据此提供「离开并保留待核对」出口；默认 false：
@@ -56,6 +63,14 @@ const combinedGuard: DraftGuard = {
     const ids = guard.pendingCommandIds?.() ?? [guard.pendingCommandId?.() ?? null];
     return ids.filter((id): id is string => id !== null && id !== "");
   }))],
+  // 有任一未决命令就按「待核对」呈现：只有全部在途时才说「正在提交」，
+  // 不用在途文案盖住已经丢了回执的命令。
+  pendingCommandState: () => {
+    const pending = [...guards].filter((guard) => guard.pendingCommandId?.() != null);
+    if (pending.length === 0) return null;
+    return pending.some((guard) => (guard.pendingCommandState?.() ?? "UNRESOLVED") === "UNRESOLVED")
+      ? "UNRESOLVED" : "IN_FLIGHT";
+  },
   // 离开出口只对「所有在拦的待核对命令都能在离开后继续核对」的情况开放：
   // 任一守卫没有恢复途径，就保持整体只拦不放。
   pendingRecoversAfterLeave: () => {

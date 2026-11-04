@@ -68,7 +68,11 @@ function writeCarryDismissal(client: RelayApiClient, conversationKey: string): v
 }
 
 type RecoveryRecord = { readonly commandId: string; readonly commandType: string;
-  readonly sessionId: string | null; readonly targetKind: "PROJECT" | "TASK"; readonly targetId: string };
+  /**
+   * SESSION 是尚未归属工作/任务的普通讨论会话：恢复入口只能按会话 id 回去，
+   * 不能因为拿不到 workId 就放弃记录，否则这类会话的未决命令没有任何安全离开出口。
+   */
+  readonly sessionId: string | null; readonly targetKind: "PROJECT" | "TASK" | "SESSION"; readonly targetId: string };
 
 function readRecovery(client: RelayApiClient): readonly RecoveryRecord[] {
   try {
@@ -77,7 +81,10 @@ function readRecovery(client: RelayApiClient): readonly RecoveryRecord[] {
     return value.filter((item): item is RecoveryRecord => item && typeof item === "object" &&
       typeof item.commandId === "string" && typeof item.commandType === "string" &&
       (item.sessionId === null || typeof item.sessionId === "string") &&
-      (item.targetKind === "PROJECT" || item.targetKind === "TASK") && typeof item.targetId === "string");
+      (item.targetKind === "PROJECT" || item.targetKind === "TASK" || item.targetKind === "SESSION") &&
+      typeof item.targetId === "string" &&
+      // SESSION 记录没有 work 可回，必须带会话 id，否则无法恢复到原命令所在会话。
+      (item.targetKind !== "SESSION" || typeof item.sessionId === "string"));
   } catch { return []; }
 }
 
@@ -422,10 +429,17 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     const previous = navigationRef.current.pending;
     navigationRef.current = state;
     if (previous && !state.pending) updateRecoveries((current) => current.filter((item) => item.commandId !== previous.commandId));
-    if (state.pending && workIdRef.current) {
-      const targetId = workIdRef.current;
-      updateRecoveries((current) => current.some((item) => item.commandId === state.pending?.commandId)
-        ? current : [...current, { ...state.pending!, targetKind: "TASK", targetId }]);
+    // 只有结果未知才写恢复记录：在途命令仍在原命令自己的 Promise 上，写进恢复区会让
+    // 正常切换也提前显示「待核对」。失败/5xx 之后才需要按原 command_id 回去核对。
+    if (state.pending && state.pending.unresolved !== false) {
+      // 没有 workId 的普通讨论会话按 sessionId 记录，不能因为拿不到任务就放弃恢复入口。
+      const target = workIdRef.current
+        ? { targetKind: "TASK" as const, targetId: workIdRef.current }
+        : state.pending.sessionId
+          ? { targetKind: "SESSION" as const, targetId: state.pending.sessionId }
+          : null;
+      if (target) updateRecoveries((current) => current.some((item) => item.commandId === state.pending?.commandId)
+        ? current : [...current, { ...state.pending!, ...target }]);
     }
   }, [updateRecoveries]);
   const reportReviewNavigation = useCallback((state: ReviewNavigationState) => {
@@ -442,6 +456,8 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
        */
       hasUnsavedChanges: () => navigationRef.current.unsaved,
       pendingCommandId: () => navigationRef.current.pending?.commandId ?? null,
+      // 未声明时按未知处理；只有明确在途（unresolved === false）才说「正在提交」。
+      pendingCommandState: () => navigationRef.current.pending?.unresolved === false ? "IN_FLIGHT" : "UNRESOLVED",
       // 本页恢复区（collab-recovery）按 sessionStorage 持久化命令身份：pending 已进
       // 恢复区时离开页面不丢核对入口，App 守卫弹层据此提供「离开并保留待核对」。
       pendingRecoversAfterLeave: () => {
@@ -1406,12 +1422,17 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       const receipt = await client.getCommandReceipt(record.commandId);
       if (version !== taskRequest.current || currentWorkId !== workIdRef.current) return;
       if (receipt.commandId !== record.commandId || receipt.commandType !== record.commandType ||
-        record.commandType === "RequestAssistMessage" && receipt.result.session_id !== record.sessionId) {
+        // 会话级命令必须落在原会话上：同型号/同连接换到别的会话也是另一次事实。
+        (record.commandType === "RequestAssistMessage" || record.commandType === "SelectSessionModel" ||
+          record.commandType === "SelectSessionConnection") && receipt.result.session_id !== record.sessionId) {
         throw new Error("原命令回执与记录的身份不匹配。");
       }
       updateRecoveries((current) => current.filter((item) => item.commandId !== record.commandId));
       requestTransition(() => {
-        setSessionId(record.sessionId); setSearch({ work: record.targetId });
+        setSessionId(record.sessionId);
+        // 普通讨论没有 work：按会话种子回去，由 AssistView 重挂载后从服务端读回真实模型，
+        // 不在这里用记录里的猜测冒充已应用结果。
+        setSearch(record.targetKind === "SESSION" ? { session: record.sessionId ?? record.targetId } : { work: record.targetId });
       });
     } catch (caught) {
       if (version === taskRequest.current && currentWorkId === workIdRef.current)
@@ -1501,12 +1522,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
 
   /** 切换出口只对已进恢复区的待核对命令开放；其余（如页内面板的命令）保持只拦不放。 */
   const transitionRecovers = transition !== null && recoveries.some((item) => item.commandId === transition.commandId);
+  /** 请求仍在途：还没有回执可查，此时不能给「待核对」的出口，也不能假装已经丢了结果。 */
+  const transitionInFlight = transition !== null && navigationRef.current.pending?.unresolved === false;
   return <section className="collab-page" data-testid="collab-page">
     <div className="collab-main">
       {recoveries.length > 0 && <section className="collab-recovery" role="status" data-testid="collab-recovery">
         <strong>待核对的原命令</strong>
         {recoveries.map((record) => <div key={record.commandId}>
-          <span>{record.commandType} · {record.targetKind === "PROJECT" ? "项目" : "任务"} {record.targetId} · {record.commandId}</span>
+          <span>{record.commandType} · {record.targetKind === "PROJECT" ? "项目" : record.targetKind === "SESSION" ? "会话" : "任务"} {record.targetId} · {record.commandId}</span>
           <button className="secondary-button" type="button" disabled={checkingId !== null}
             data-testid={`collab-recovery-${record.commandId}`} onClick={() => void checkRecovery(record)}>
             {checkingId === record.commandId ? "正在查询" : "查询原命令回执"}</button></div>)}
@@ -1851,12 +1874,14 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
       </div>
     </div>
 
-    <AppDialog open={transition !== null} title="命令结果待核对"
-      subtitle="切换不会取消这条命令"
+    <AppDialog open={transition !== null} title={transitionInFlight ? "命令正在提交" : "命令结果待核对"}
+      subtitle={transitionInFlight ? "离开会丢失这条命令的核对入口" : "切换不会取消这条命令"}
       onClose={() => setTransition(null)}>
-      <p>{transitionRecovers
-        ? "这条命令已发给服务端，结果还没有确认。留在当前工作区可以立即查询回执收口；切换工作不会取消它——命令 ID 会留在本页的待核对区，随时回来查回执，期间不会以新命令重试。"
-        : "这条命令已发给服务端，结果还没有确认。现在切换会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复提交。请留在当前工作区查询回执收口。"}</p>
+      <p>{transitionInFlight
+        ? "这条命令还在提交中，还没有回执可查。现在离开会丢失它的命令身份，之后无法确认它是否已生效；请留在当前工作区等结果落地后再切换。"
+        : transitionRecovers
+          ? "这条命令已发给服务端，结果还没有确认。留在当前工作区可以立即查询回执收口；切换工作不会取消它——命令 ID 会留在本页的待核对区，随时回来查回执，期间不会以新命令重试。"
+          : "这条命令已发给服务端，结果还没有确认。现在切换会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复提交。请留在当前工作区查询回执收口。"}</p>
       <p className="dialog-command-id">原命令 ID <code className="hash-code">{transition?.commandId ?? ""}</code></p>
       <div className="form-actions">
         <button className="primary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>

@@ -105,6 +105,11 @@ export interface CreateModelConnectionInput {
   readonly name: string;
   readonly baseUrl: string | null;
   readonly defaultModel: string;
+  /**
+   * 只改这条连接的调用预算。省略时服务端用默认 30 秒；高延迟模型可单独放宽，
+   * 不动其他 Provider 的全局超时。
+   */
+  readonly timeoutMs?: number;
   /** 只在这一处出现一次：服务端落进系统凭据库，之后只保留不透明引用。 */
   readonly apiKey: string;
 }
@@ -118,6 +123,7 @@ export async function createModelConnection(http: RelayHttp,
       name: input.name,
       ...(input.baseUrl === null ? {} : { base_url: input.baseUrl }),
       default_model: input.defaultModel,
+      ...(input.timeoutMs === undefined ? {} : { budget: { timeout_ms: input.timeoutMs } }),
       api_key: input.apiKey
     })
   }));
@@ -130,6 +136,8 @@ export interface UpdateModelConnectionInput {
   readonly name?: string;
   readonly baseUrl?: string | null;
   readonly defaultModel?: string;
+  /** 只更新这条连接的调用超时；省略表示不改。 */
+  readonly timeoutMs?: number;
 }
 
 export async function updateModelConnection(http: RelayHttp, connectionId: string,
@@ -142,7 +150,8 @@ export async function updateModelConnection(http: RelayHttp, connectionId: strin
         expected_revision: input.expectedRevision,
         ...(input.name === undefined ? {} : { name: input.name }),
         ...(input.baseUrl === undefined ? {} : { base_url: input.baseUrl }),
-        ...(input.defaultModel === undefined ? {} : { default_model: input.defaultModel })
+        ...(input.defaultModel === undefined ? {} : { default_model: input.defaultModel }),
+        ...(input.timeoutMs === undefined ? {} : { budget: { timeout_ms: input.timeoutMs } })
       })
     }));
   return modelConnectionFrom(envelope.result.connection, "updated model connection");

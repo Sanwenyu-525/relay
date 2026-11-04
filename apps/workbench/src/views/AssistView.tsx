@@ -217,6 +217,28 @@ type PendingAction = { readonly kind: "send"; readonly commandId: string; readon
     readonly taskId: string; readonly expectedTaskRevision: string;
     readonly expectedAcceptanceRevision: string; readonly payloadHash: string };
 /**
+ * PendingAction 到服务端命令类型的唯一映射。
+ *
+ * 导航恢复记录用它绑定原命令；映射错一次，查询回执就会因 command_type 不匹配而永远
+ * 对不上原命令（2026-11-04：connection 曾被默认分支写成 AcceptAssistProposal）。
+ * 用穷尽性检查收口：新增 PendingAction 分支而没补映射时，这里直接类型报错，
+ * 不允许再回落到某个“看起来能用”的默认类型。
+ */
+function pendingCommandType(action: PendingAction): string {
+  switch (action.kind) {
+    case "send": return "RequestAssistMessage";
+    case "restart": return "ExecuteChatCommand";
+    case "compact": return "RequestMemoryCompaction";
+    case "model": return "SelectSessionModel";
+    case "connection": return "SelectSessionConnection";
+    case "chatMode": return "SetChatMode";
+    case "cancel": return "CancelAssistMessage";
+    case "accept": case "acceptTask": return "AcceptAssistProposal";
+  }
+  const unhandled: never = action;
+  return unhandled;
+}
+/**
  * 首条消息/新会话前的模型选择：要么按目录型号（`/model` 语义），要么按已登记连接。
  * 连接分支只提交稳定 connection_id；`model` 只用于展示与回执核对，不是提交载荷。
  */
@@ -397,7 +419,12 @@ export type AssistNavigationState = {
   readonly unsaved: boolean;
   readonly discard?: () => void;
   readonly pending: { readonly commandId: string; readonly commandType: string;
-    readonly sessionId: string | null } | null;
+    readonly sessionId: string | null;
+    /**
+     * true = 结果未知，需要按原 command_id 查回执；false = 请求仍在途。
+     * 缺省按未知保守处理：旧调用方没有声明时，宁可说「待核对」也不谎称仍在提交。
+     */
+    readonly unresolved?: boolean } | null;
   /**
    * 「保留并继续编辑」的编辑焦点恢复：由页壳守卫在弹层关闭并完成默认回焦后调用。
    * 实现内部只作用于仍存活、可编辑的编辑器，失效时兜底或放弃（见 restoreComposerFocus）。
@@ -1072,14 +1099,18 @@ onExecutionPrepared?: (taskId: string) => void;
           ? pendingFirst.modelSelection.commandId : pendingFirst.commandId,
           commandType: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
             ? pendingFirst.modelSelection.kind === "connection" ? "SelectSessionConnection" : "SelectSessionModel"
-            : "RequestAssistMessage", sessionId: pendingFirst.sessionId }
+            : "RequestAssistMessage", sessionId: pendingFirst.sessionId,
+          // reason 只在结果丢失/失败后写入；null 表示命令已确认发出或仍在途。
+          unresolved: pendingFirst.reason !== null }
         : pendingCreate ? { commandId: pendingCreate.commandId,
-            commandType: "CreateAssistSession", sessionId: null }
+            commandType: "CreateAssistSession", sessionId: null,
+            // 创建请求仍在跑时是在途；停下后仍有错误才是结果未知（4xx 已在原处解除 pending）。
+            unresolved: !creating && createError !== null }
           : sessionNavigation.pending,
       // 首条输入器挂载时它就是触发保护的编辑器；未挂载（已有会话/读被挡）时交给会话输入器的恢复回调。
       restoreFocus: firstDraftRef.current !== null ? restoreFirstDraftFocus : sessionNavigation.restoreFocus });
   }, [standalone, embedded, sessionNavigation, selectedRefs, pendingCreate, pendingFirst, first.draft, firstSkillKey,
-    stagedFirst, updateFirst, onNavigationStateChange, restoreFirstDraftFocus]);
+    creating, createError, stagedFirst, updateFirst, onNavigationStateChange, restoreFirstDraftFocus]);
 
   /**
    * 工作空间级会话：没有 target 可读，只有 project_id 为空的会话属于这里。
@@ -4880,6 +4911,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const [proposals, setProposals] = useState<readonly RelayAssistProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // 选择器附近的失败出口：明确拒绝才给「重新选择」，未知结果交给原命令核对弹窗。
+  const [selectionRejected, setSelectionRejected] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /**
    * 会话消息的首屏加载提示延迟出现：换工作区或换会话时本面板按 key 重挂载，
@@ -5210,12 +5243,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         Boolean(skillInputText.trim() || (standalone && (selectedSkillKey || intent !== "DISCUSS"))),
       discard: () => { discardDraft(); learningNavigation.discard?.(); },
       pending: pending ? { commandId: pending.commandId,
-        commandType: pending.kind === "send" ? "RequestAssistMessage" : pending.kind === "cancel"
-          ? "CancelAssistMessage" : pending.kind === "restart" ? "ExecuteChatCommand"
-          : pending.kind === "model" ? "SelectSessionModel"
-          : "AcceptAssistProposal", sessionId: session.id } : learningNavigation.pending,
+        commandType: pendingCommandType(pending), sessionId: session.id,
+        unresolved: pendingUnresolved } : learningNavigation.pending,
       restoreFocus: restoreDraftFocus });
-  }, [standalone, embedded, draft, skillInputText, selectedSkillKey, intent, pending, session.id,
+  }, [standalone, embedded, draft, skillInputText, selectedSkillKey, intent, pending, pendingUnresolved, session.id,
     stagedSession.items.length, uploadingAttachments, onNavigationStateChange, discardDraft,
     restoreDraftFocus, learningNavigation]);
 
@@ -5541,7 +5572,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     setBusy(true); setPending(action);
     if (retry) setPendingUnresolved(true);
     else { setPendingUnresolved(false); setPendingDialogOpen(false); }
-    setActionError(null); setNotice(null);
+    setActionError(null); setSelectionRejected(false); setNotice(null);
     try {
       if (action.kind === "model") {
         const selection = await client.selectSessionModel({ sessionId: session.id, commandId: action.commandId, model: action.model });
@@ -5656,6 +5687,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       setActionError(described.kind === "conflict" && action.kind === "acceptTask"
         ? `${described.message} 原提案仍保留供核对，不能覆盖当前验收；请重新生成提案。`
         : described.message);
+      // 只有明确拒绝才是「重选一次就能改」的失败；未知结果必须先把原命令核对完。
+      setSelectionRejected(!unresolved && (action.kind === "model" || action.kind === "connection"));
       // §33.2：上传成功但命令被明确拒绝时，把暂存图片还给输入框；传输失败不还原——
       // 那时命令可能已入库，恢复芯片会诱导同一组文件被再次发送。
       const rejectedFiles = action.kind === "send" ? action.attachmentFiles : undefined;
@@ -7152,6 +7185,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
             sessionId={session.id}
             selectedModel={selectedModel} selectedConnectionId={selectedConnectionId}
+            switching={busy && pending !== null && (pending.kind === "model" || pending.kind === "connection")}
             disabled={busy || pending !== null || writeBlockedReason !== null}
             onChoose={(model) => {
               // 会话级选择仍走原命令落服务端（唯一事实）；同时记住到本机偏好，
@@ -7216,13 +7250,23 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           ? goalView.goal.status : null} />
       {notice && <Toast testId="assist-receipt-notice">{notice}</Toast>}
     </>}
-    {actionError && !pendingUnresolved && <Notice testId="assist-action-error">{actionError}</Notice>}
+    {actionError && !pendingUnresolved && <Notice testId="assist-action-error"
+      action={selectionRejected ? { label: "重新选择", onSelect: () => {
+        setSelectionRejected(false); setActionError(null); setModelPickerOpen(true);
+      } } : undefined}>{actionError}</Notice>}
     {pending && pendingUnresolved && <UnresolvedCommandStrip testId="assist-pending"
-      className="assist-pending unresolved-command-strip" busy={busy} label="命令结果待核对。"
+      className="assist-pending unresolved-command-strip" busy={busy}
+      /* MODEL-SWITCH-RECEIPT-RECOVERY：模型/连接的未决只影响后续消息的选择，
+         不能把「连接选择成功」说成「模型推理成功」。 */
+      label={pending.kind === "model" || pending.kind === "connection"
+        ? "模型切换结果未确认。" : "命令结果待核对。"}
       onOpen={() => setPendingDialogOpen(true)} />}
     <UnresolvedCommandDialog open={pending !== null && pendingDialogOpen} testId="assist-pending"
-      title="命令结果待核对"
-      summary="这次命令没有拿到回执。先查询原命令回执；查不到时按原命令重试。"
+      title={pending !== null && (pending.kind === "model" || pending.kind === "connection")
+        ? "模型切换结果未确认" : "命令结果待核对"}
+      summary={pending !== null && (pending.kind === "model" || pending.kind === "connection")
+        ? "这次模型切换没有拿到回执。先查询原命令回执；查不到时按原命令重试。它只影响后续消息使用的模型，不代表已有回复失败。"
+        : "这次命令没有拿到回执。先查询原命令回执；查不到时按原命令重试。"}
       commandId={pending?.commandId ?? ""}
       detail="先查回执；未找到时只能用原命令 ID 和原载荷重试。核对前不重复提交，也不换命令 ID。"
       reason={actionError}
