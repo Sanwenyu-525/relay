@@ -1,16 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { sql } from 'kysely';
-
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { RunInvocationRow } from '../infrastructure/database-schema.js';
-import { ManagedContentStore } from '../storage/managed-content-store.js';
-import { recoverStoppedWorker } from '../application/recover-run.js';
-import { reconcileGatewayInvocation } from '../application/gateway-actions.js';
-import { applySafeControl } from '../application/control-requests.js';
+import { recoverStoppedClaim as recoverStoppedClaimCore } from '../application/recover-run.js';
 import { createRepositories, withTransaction } from '../application/unit-of-work.js';
 
 const WORKER_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), 'main.js');
@@ -77,24 +72,17 @@ export async function recoverStrandedFencedClaim(input: {
 async function recoverStoppedClaim(db: DbExecutor, dataRoot: string, claim: RunInvocationRow,
   evidence: string, desktop?: { launchId: string; stopEvidence: DesktopStopEvidence },
 ): Promise<'REQUEUED' | 'BLOCKED' | 'SKIPPED'> {
-  if (claim.worker_id === null || claim.command_id === null) return 'BLOCKED';
-  const workerId = claim.worker_id;
-  const commandId = claim.command_id;
-  // Session lock spans the external content check without holding a business
-  // transaction open. A second supervisor rechecks the claim after this lock.
-  const key = createHash('sha256').update(`relay:stopped-run:${claim.run_id}`).digest().readBigInt64BE(0);
-  return db.connection().execute(async (connection) => {
-    await sql`select pg_advisory_lock(${key})`.execute(connection);
-    try {
-      const current = await createRepositories(db).dispatch.readInvocation(claim.run_id);
-      if (current?.worker_id !== workerId || current.epoch !== claim.epoch ||
-          current.command_id !== commandId ||
-          (current.status !== 'ACTIVE' && current.status !== 'STOP_REQUIRED')) return 'SKIPPED';
-      if (desktop !== undefined) {
-        // The host confirmed the old launch's whole Job is stopped. Persist the
-        // exact FILE_WRITE identity while the outer claim still has its session
-        // lock and before recoverStoppedWorker fences the inner Run worker.
-        const proofReady = await withTransaction(db, async (tx) => {
+  // 恢复 Owner（锁复核 → fence → 效果核对 → 重投）在 application/recover-run.ts，
+  // 与受控 API 的人工停机核对共用同一实现；这里只补充桌面宿主特有的 FILE_WRITE
+  // 停机证明：宿主已确认旧 launch 的整个 Job 停止，在 fence 之前把确切写入身份落库。
+  return recoverStoppedClaimCore(db, {
+    dataRoot, claim, evidence,
+    ...(desktop === undefined ? {} : {
+      beforeFence: async () => {
+        const workerId = claim.worker_id;
+        const commandId = claim.command_id;
+        if (workerId === null || commandId === null) return false;
+        return withTransaction(db, async (tx) => {
           const run = await tx.runs.lockRun(claim.run_id);
           const lockedClaim = await tx.dispatch.lockInvocation(claim.run_id);
           if (run === undefined || lockedClaim?.worker_id !== workerId ||
@@ -131,50 +119,8 @@ async function recoverStoppedClaim(db: DbExecutor, dataRoot: string, claim: RunI
           }
           return true;
         });
-        if (!proofReady) return 'BLOCKED';
-      }
-      const recovered = await recoverStoppedWorker(db, {
-        runId: claim.run_id, stoppedWorkerId: workerId, stoppedEvidence: evidence,
-        storage: new ManagedContentStore(dataRoot),
-      });
-      let gatewayBlocked = false;
-      const gateway = createRepositories(db).gateway;
-      for (const operation of await gateway.listUnresolvedRunOperations(claim.run_id)) {
-        if (!['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(operation.status)) continue;
-        const invocation = await gateway.lastInvocation(operation.id);
-        if (invocation === undefined || invocation.worker_id !== workerId ||
-            invocation.worker_epoch === null ||
-            !['PREPARED', 'DISPATCHING', 'UNKNOWN'].includes(invocation.status)) {
-          gatewayBlocked = true;
-          continue;
-        }
-        const result = await reconcileGatewayInvocation(db, {
-          workspaceId: operation.workspace_id, operationId: operation.id,
-          invocationId: invocation.id, stoppedWorkerId: workerId,
-          stoppedWorkerEpoch: invocation.worker_epoch, oldProcessStopped: true,
-        });
-        if (result.status === 'UNKNOWN') gatewayBlocked = true;
-      }
-      if (gatewayBlocked || recovered.unresolved_operation_ids.length > 0) return 'BLOCKED';
-      await applySafeControl(db, claim.run_id);
-      const requeued = await withTransaction(db, async (repositories) => {
-        await repositories.runs.lockRun(claim.run_id);
-        const locked = await repositories.dispatch.lockInvocation(claim.run_id);
-        if (locked?.worker_id !== workerId || locked.epoch !== claim.epoch ||
-            locked.command_id !== commandId) return false;
-        await repositories.dispatch.lockOutbox(commandId);
-        await repositories.dispatch.requeueStoppedClaim(
-          claim.run_id, workerId, claim.epoch, commandId, evidence);
-        return true;
-      });
-      if (requeued) await applySafeControl(db, claim.run_id);
-      return requeued ? 'REQUEUED' : 'SKIPPED';
-    } finally {
-      const unlocked = await sql<{ unlocked: boolean }>`
-        select pg_advisory_unlock(${key}) as unlocked
-      `.execute(connection);
-      if (!unlocked.rows[0]?.unlocked) throw new Error('stopped Run recovery lock was lost');
-    }
+      },
+    }),
   });
 }
 
