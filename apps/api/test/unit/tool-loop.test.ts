@@ -89,6 +89,30 @@ test('the target and the Gateway parameters come from the frozen envelope, not t
     { path: 'src', cached: true });
   assert.deepEqual(gatewayParamsFor(search, { query: 'x', limit: 5 }), { query: 'x', limit: 5 });
   assert.deepEqual(gatewayParamsFor(readInternalTool('read_file')!, { relative_path: 'a.ts' }), {});
+  assert.deepEqual(gatewayParamsFor(readInternalTool('read_file')!,
+    { relative_path: 'a.ts', offset: 10, limit: 20 }), { offset: 10, limit: 20 });
+});
+
+test('read_file 只接受 UTF-8 字节范围，非法范围在校验层就被拒', () => {
+  const readSpec = declaredToolSpecs(['read_file'])[0]!;
+  assert.deepEqual(validateToolArguments(readSpec,
+    { relative_path: 'a.ts', offset: 0, limit: 10 }), { relative_path: 'a.ts', offset: 0, limit: 10 });
+  const outOfRange = (args: JsonObject): boolean => {
+    try {
+      validateToolArguments(readSpec, args);
+      return false;
+    } catch (error) {
+      return (error as ToolRequestRejected).reason === 'TOOL_ARGUMENT_OUT_OF_RANGE';
+    }
+  };
+  assert.equal(outOfRange({ relative_path: 'a.ts', offset: -1 }), true);
+  assert.equal(outOfRange({ relative_path: 'a.ts', limit: 0 }), true);
+  assert.equal(outOfRange({ relative_path: 'a.ts', limit: 128 * 1024 + 1 }), true);
+  assert.throws(() => validateToolArguments(readSpec, { relative_path: 'a.ts', limit: 1.5 }),
+    (error: unknown) => (error as ToolRequestRejected).reason === 'TOOL_ARGUMENT_INVALID');
+  // 词表是闭集：范围之外多带的字段不会变成动作参数。
+  assert.throws(() => validateToolArguments(readSpec, { relative_path: 'a.ts', path: 'x' }),
+    (error: unknown) => (error as ToolRequestRejected).reason === 'TOOL_ARGUMENT_UNKNOWN');
 });
 
 test('the catalog is a closed list: every entry maps to a declared Gateway action', () => {
@@ -158,13 +182,24 @@ test('declared required arguments survive the hop into Gateway parameters', () =
   }
 });
 
-test('a bounded tool result is marked truncated instead of passing a partial body as complete', () => {
+test('a bounded tool result keeps both ends and is marked truncated', () => {
   const small = projectToolResult('SETTLED', { entries: [{ path: 'a.ts' }] }, null);
   assert.equal(small.includes('truncated'), false);
   const large = projectToolResult('SETTLED', { content: 'x'.repeat(MAX_TOOL_RESULT_BYTES * 2) }, null);
-  assert.ok(Buffer.byteLength(large, 'utf8') <= MAX_TOOL_RESULT_BYTES + 64);
-  assert.ok(large.includes('"truncated":true'));
+  assert.ok(Buffer.byteLength(large, 'utf8') <= MAX_TOOL_RESULT_BYTES);
+  assert.ok(large.includes('"tool_result_truncated":true'));
   assert.ok(large.includes('omitted_bytes'));
+  // 头部结构仍在、尾部内容仍可见：长日志结尾的失败信息不再随截断丢失。
+  assert.ok(large.startsWith('{"content":"xxxx'));
+  assert.ok(large.endsWith('xxxx"}'));
+});
+
+test('a bounded tool result cuts on UTF-8 boundaries without replacement characters', () => {
+  const large = projectToolResult('SETTLED', { content: '中'.repeat(12_000) }, null);
+  assert.ok(Buffer.byteLength(large, 'utf8') <= MAX_TOOL_RESULT_BYTES);
+  assert.equal(large.includes('\uFFFD'), false);
+  assert.ok(large.startsWith('{"content":"中'));
+  assert.ok(large.endsWith('中"}'));
 });
 
 test('a rejected or missing result is typed, never an empty success', () => {

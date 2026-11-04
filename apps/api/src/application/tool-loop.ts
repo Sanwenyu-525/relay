@@ -16,6 +16,7 @@ import { RunToolCallRepository } from '../run/run-tool-call-repository.js';
 import { createRepositories } from './unit-of-work.js';
 import { invalidTransition } from './domain-error.js';
 import { resolveFrozenCheck, RunScopeGrantRepository } from './run-scope-grant.js';
+import { boundToolResultText } from './tool-result-text.js';
 
 /**
  * 模型工具循环的应用层（docs/architecture/runtime-context.md §2.3）。
@@ -615,7 +616,11 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
     return { ...(typeof args.relative_path === 'string' ? { relative_path: args.relative_path } : {}),
       ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) };
   }
-  if (definition.actionType === 'READ_FILE') return {};
+  if (definition.actionType === 'READ_FILE') {
+    // 路径在 target 里，动作参数只允许范围：offset/limit 都是 UTF-8 字节。
+    return { ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
+      ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) };
+  }
   if (definition.actionType === 'GIT_DIFF') {
     return { ...(typeof args.path === 'string' ? { path: args.path } : {}),
       ...(args.staged === true ? { cached: true } : {}) };
@@ -681,8 +686,9 @@ export function gatewayParamsFor(definition: InternalToolDefinition,
 /**
  * 把已结算的动作结果投影成回传模型的文本。
  *
- * 上限是硬字节数：超出就按完整字符截断并显式标注 truncated=true，因此模型能区分
- * 「读到了全部」与「只读到一段」。REJECTED 行只回传类型化原因。
+ * 上限是硬字节数：超出时保留首尾、截去中间并显式标注 tool_result_truncated=true 与
+ * omitted_bytes，因此模型既能区分「读到了全部」与「只读到一段」，也不会漏掉长日志尾部的失败信息。
+ * REJECTED 行只回传类型化原因。
  */
 export function projectToolResult(status: RunToolCallRow['status'],
   operationResult: JsonObject | null, rejection: JsonObject | null): string {
@@ -692,17 +698,7 @@ export function projectToolResult(status: RunToolCallRow['status'],
     return JSON.stringify({ ok: false, reason, detail });
   }
   if (operationResult === null) return JSON.stringify({ ok: false, reason: 'TOOL_RESULT_MISSING' });
-  const ok = !('reason' in operationResult) ||
-    typeof operationResult.reason !== 'string';
-  const body = JSON.stringify(operationResult);
-  const bytes = Buffer.byteLength(body, 'utf8');
-  if (bytes <= MAX_TOOL_RESULT_BYTES) return body;
-  let truncated = body;
-  while (Buffer.byteLength(truncated, 'utf8') > MAX_TOOL_RESULT_BYTES - 64) {
-    truncated = truncated.slice(0, Math.floor(truncated.length / 2));
-  }
-  return `${truncated}${JSON.stringify({ truncated: true, omitted_bytes: bytes -
-    Buffer.byteLength(truncated, 'utf8') })}`;
+  return boundToolResultText(JSON.stringify(operationResult), MAX_TOOL_RESULT_BYTES).text;
 }
 
 /**

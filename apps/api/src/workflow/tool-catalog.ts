@@ -56,6 +56,12 @@ export type InternalToolName =
   | 'browser_submit_form'
   | 'browser_upload_file';
 
+/**
+ * 单次 `read_file` 的文件上限。范围参数只在这份上限之内切片，不放宽「整个文件」的
+ * 读取预算；因此完整文件的 SHA-256 始终可以基于同一份完整内容计算。
+ */
+export const FILE_READ_MAX_BYTES = 128 * 1024;
+
 export interface InternalToolDefinition {
   readonly name: InternalToolName;
   /** 对应的 Gateway 逻辑动作；写入类工具在后续片加入同一张表。 */
@@ -93,8 +99,8 @@ export const INTERNAL_TOOL_DEFINITIONS: readonly InternalToolDefinition[] = [
           content: { type: 'string',
             description: '新建或修改后的完整文件内容；DELETE 不给这一项。' },
           baselineSha256: { type: 'string',
-            description: 'MODIFY/DELETE 必填：read_file 读到的那份内容对应的 64 位 SHA-256；' +
-              'CREATE 不给这一项。' },
+            description: 'MODIFY/DELETE 必填：read_file 返回的 sha256（完整文件的 64 位摘要，' +
+              '与是否只读了片段无关）；CREATE 不给这一项。' },
         },
         required: ['path', 'action'] } } }, ['changes']),
   definition('read_change_set', 'READ_CHANGE_SET', 'FILE_WRITE',
@@ -120,8 +126,16 @@ export const INTERNAL_TOOL_DEFINITIONS: readonly InternalToolDefinition[] = [
       relative_path: RELATIVE_PATH_PROPERTY,
       limit: { type: 'integer', minimum: 1 } }, ['query']),
   definition('read_file', 'READ_FILE', 'FILE_READ',
-    '读取受管根内一个既有普通文件的完整文本。最多 128 KiB；不支持的格式返回类型化失败。',
-    { relative_path: { type: 'string', description: '受管根内必填的相对文件路径。' } },
+    '读取受管根内一个既有普通文件的文本。最多 128 KiB；不支持的格式返回类型化失败。' +
+    '默认整读；可用 offset/limit 按 UTF-8 字节取片段（不是行号），便于分段读完全文或' +
+    '避开回传截断。返回里的 sha256 始终是完整文件的摘要，即使只返回片段，可直接作为' +
+    '写动作的 baselineSha256。',
+    { relative_path: { type: 'string', description: '受管根内必填的相对文件路径。' },
+      offset: { type: 'integer', minimum: 0, maximum: FILE_READ_MAX_BYTES,
+        description: '片段起始的 UTF-8 字节偏移，缺省 0。落在多字节字符内部时向前对齐到该字符起点。' },
+      limit: { type: 'integer', minimum: 1, maximum: FILE_READ_MAX_BYTES,
+        description: '片段最多返回的 UTF-8 字节数，缺省到文件末尾。终点落在完整码点边界；' +
+          '即使首个码点超过 limit，也会至少返回该码点。' } },
     ['relative_path']),
   definition('git_status', 'GIT_STATUS', 'GIT_READ',
     '读取受管根的 Git 工作区状态：分支、HEAD、已暂存/未暂存/未跟踪。',

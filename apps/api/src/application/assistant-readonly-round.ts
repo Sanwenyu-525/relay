@@ -36,6 +36,7 @@ import { ModelCallBudgetError, ModelOutputBudgetError, ModelTimeoutError,
 import { classifyProviderError, classifyRoutingStop, type ModelErrorCategory } from
   '../workflow/model-error-classification.js';
 import { ModelScopeBudgetError } from '../model/model-call-repository.js';
+import { boundToolResultText } from './tool-result-text.js';
 
 /**
  * 会话读取工具轮次（迁移 0060 起 B 档人设助手；0087 起普通 Agent 主流程，ADR-022）。
@@ -415,7 +416,7 @@ export const DEFAULT_MAX_TOOL_CALLS = 12;
  * 建立时的 0/N。给一个小的独立额度，只用于把已经发生的事实写回去。
  */
 const MAX_TODO_SETTLEMENT_CALLS = 6;
-const RESULT_TEXT_LIMIT = 16_000;
+const MAX_ASSIST_TOOL_RESULT_BYTES = 16 * 1024;
 
 /**
  * 预算用尽前的收尾指令。
@@ -1168,7 +1169,7 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
         : '【GATEWAY_RESULT_UNRESOLVED】这次读取的结果未知，需要人工核对后再继续。',
       isError: true };
   }
-  const content = projectToolResult(definition.actionType, dispatched.result_ref);
+  const content = projectAssistantToolResult(definition.actionType, dispatched.result_ref);
   const digest = createHash('sha256').update(content, 'utf8').digest('hex');
   // ENG-OBS-02：Gateway 已明确返回 FAILED（文件过大/二进制/目标被替换等）是**已知失败**，
   // 与 UNKNOWN 不同；账本必须落 SETTLED + 失败结果摘要，模型与界面都能看到原因。
@@ -1181,8 +1182,9 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
     isError: dispatched.status !== 'SUCCEEDED' };
 }
 
-/** 结果投影成给模型看的正文：有界截断 + 摘要，不把整棵目录树塞进上下文。 */
-function projectToolResult(actionType: GatewayActionType, resultRef: JsonObject | null): string {
+/** 结果投影成给模型看的正文：有界截断（保留首尾）+ 摘要，不把整棵目录树塞进上下文。 */
+export function projectAssistantToolResult(actionType: GatewayActionType,
+  resultRef: JsonObject | null): string {
   const failure = typeof resultRef?.reason === 'string' && resultRef.reason !== ''
     ? resultRef.reason
     : typeof resultRef?.failure_kind === 'string' && resultRef.failure_kind !== ''
@@ -1190,9 +1192,7 @@ function projectToolResult(actionType: GatewayActionType, resultRef: JsonObject 
   if (failure !== undefined) {
     return `【${failure}】${typeof resultRef?.error === 'string' ? resultRef.error : '本次读取没有结果。'}`;
   }
-  const text = JSON.stringify(resultRef ?? {});
-  return text.length <= RESULT_TEXT_LIMIT ? text
-    : `${text.slice(0, RESULT_TEXT_LIMIT)}\n【截断：完整结果 ${text.length} 字符】`;
+  return boundToolResultText(JSON.stringify(resultRef ?? {}), MAX_ASSIST_TOOL_RESULT_BYTES).text;
 }
 
 /**

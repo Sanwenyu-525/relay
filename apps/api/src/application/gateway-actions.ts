@@ -19,6 +19,10 @@ import { createRepositories, withTransaction, type Repositories } from './unit-o
 import { requireCurrentRuleSnapshot } from './rule-fence.js';
 import { hasCurrentRunContext } from './context-fence.js';
 import { readFrozenActionOperationIds } from '../workflow/execution-contract.js';
+import { FILE_READ_MAX_BYTES } from '../workflow/tool-catalog.js';
+import {
+  FileReadRangeValidationError, readFileRangeParams, sliceUtf8Range,
+} from './file-read-range.js';
 import { readWebFetchConfig, webFetchExecute, type WebFetchLimits } from '../web/web-fetch.js';
 import {
   executeFileChangeset, reconcileFileChangeset, canonicalRelativePath,
@@ -1100,9 +1104,21 @@ export async function prepareGatewayAction(db: DbExecutor, input: PrepareGateway
   if (input.actionType === 'WRITE_MARKER' && typeof input.params.content !== 'string') {
     throw validationFailed([{ field: 'params.content', message: 'must be a string' }]);
   }
-  if ((input.actionType === 'READ_PUBLIC' || input.actionType === 'READ_FILE' ||
-      input.actionType === 'WEB_FETCH') && Object.keys(input.params).length !== 0) {
+  if ((input.actionType === 'READ_PUBLIC' || input.actionType === 'WEB_FETCH') &&
+      Object.keys(input.params).length !== 0) {
     throw validationFailed([{ field: 'params', message: 'read actions take no parameters' }]);
+  }
+  if (input.actionType === 'READ_FILE') {
+    // READ_FILE 只额外接受 offset/limit（UTF-8 字节范围）；其它键与非法值都在这里拒绝，
+    // 因此读动作仍不进入审批路径，范围参数也不会变成任意动作参数。
+    try {
+      readFileRangeParams(input.params);
+    } catch (error) {
+      if (error instanceof FileReadRangeValidationError) {
+        throw validationFailed([{ field: error.field, message: error.message }]);
+      }
+      throw error;
+    }
   }
   const hash = paramsHash(input, target);
   const payloadBytes = Buffer.byteLength(canonicalizeJson(input.params));
@@ -2555,8 +2571,6 @@ async function cliExecute(op: LogicalOperationRow, invocation: InvocationAttempt
 
 import { assessReadRisk } from './required-context-files.js';
 
-const FILE_READ_MAX_BYTES = 128 * 1024;
-
 /** Reads are idempotent and side-effect free: a typed failure settles FAILED
  * (nothing happened) instead of UNKNOWN, and reconcile can safely re-read. */
 export async function fileReadExecute(op: LogicalOperationRow, invocation: InvocationAttemptRow,
@@ -2567,6 +2581,16 @@ export async function fileReadExecute(op: LogicalOperationRow, invocation: Invoc
   if (signal?.aborted) throw new Error('Gateway dispatch aborted before file read');
   if (deadline !== undefined && deadline !== null && deadline.getTime() <= Date.now()) {
     return { outcome: 'FAILED', result: { reason: 'GATEWAY_DEADLINE_EXCEEDED', target: op.normalized_target } };
+  }
+  // 范围参数在 prepare 已校验并冻结；这里再解析一次是防御性的（账本被手工改坏时给类型化失败，
+  // 而不是读取一个语义不明的片段）。没有 offset/limit 时保持整读行为。
+  let range: ReturnType<typeof readFileRangeParams>;
+  try {
+    range = readFileRangeParams(op.params ?? {});
+  } catch (error) {
+    return { outcome: 'FAILED', result: { reason: 'READ_FILE_RANGE_INVALID',
+      target: op.normalized_target,
+      detail: error instanceof Error ? error.message : 'invalid read range' } };
   }
   // The frozen path is pinned by realpath at prepare; re-verify before use so a
   // swapped link cannot retarget the read after admission.
@@ -2602,17 +2626,39 @@ export async function fileReadExecute(op: LogicalOperationRow, invocation: Invoc
   // 交给模型与轨迹面板；准入（能不能读、要不要批准）仍由 Gateway 与审批决定，本函数不改这个结果。
   // 「发送前提醒」由 `required-context-files` 的必读文件审计承担；两者共享同一套阈值
   // （`assessReadRisk`），因此不会出现「审计说严重、读取说正常」的两套结论。
+  const slice = range === undefined ? undefined : sliceUtf8Range(bytes, range);
   const readRisk = typeof contextBudgetTokens === 'number' && contextBudgetTokens > 0
-    ? assessReadRisk({ bytes: stat.size, effectiveInputTokens: contextBudgetTokens }) : null;
+    ? assessReadRisk({ bytes: slice?.returnedBytes ?? stat.size,
+      effectiveInputTokens: contextBudgetTokens }) : null;
+  // sha256 始终基于完整文件：范围只改变回传正文，不改变写动作的 baseline 校验语义。
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  if (slice === undefined || range === undefined) {
+    return { outcome: 'SUCCEEDED', result: { target: op.normalized_target, size: stat.size,
+      sha256, truncated: false,
+      content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id,
+      ...(readRisk === null ? {} : { context_risk: { severity: readRisk.severity,
+        ratio: readRisk.ratio, tokens: readRisk.tokens, budget_tokens: contextBudgetTokens ?? null,
+        // 一句话读数：高/严重时把「这次读取本身有多贵」说清楚，免得只剩一个百分比。
+        ...(readRisk.severity !== 'HIGH' && readRisk.severity !== 'SEVERE' ? {}
+          : { notice: `这次读取约占本轮有效输入预算的 ${String(Math.round((readRisk.ratio ?? 0) * 100))}%，` +
+            '正文已进入上下文。' }) } }) } };
+  }
+  const wholeFile = slice.offset === 0 && slice.nextOffset === null;
   return { outcome: 'SUCCEEDED', result: { target: op.normalized_target, size: stat.size,
-    sha256: createHash('sha256').update(bytes).digest('hex'), truncated: false,
-    content: bytes.toString('utf8'), invocation_id: invocation.id, operation_id: op.id,
+    sha256, truncated: !wholeFile, content: slice.content,
+    invocation_id: invocation.id, operation_id: op.id,
     ...(readRisk === null ? {} : { context_risk: { severity: readRisk.severity,
       ratio: readRisk.ratio, tokens: readRisk.tokens, budget_tokens: contextBudgetTokens ?? null,
-      // 一句话读数：高/严重时把「这次读取本身有多贵」说清楚，免得只剩一个百分比。
       ...(readRisk.severity !== 'HIGH' && readRisk.severity !== 'SEVERE' ? {}
         : { notice: `这次读取约占本轮有效输入预算的 ${String(Math.round((readRisk.ratio ?? 0) * 100))}%，` +
-          '正文已进入上下文。' }) } }) } };
+          '片段正文已进入上下文。' }) } }),
+    // 片段元数据放在最后：工具结果的中间截断保留首尾，因此这段「总共多大、下次从哪继续」
+    // 不会随正文一起消失。范围读取与回传截断是两层不同的省略，键名不重叠。
+    range: { offset: slice.offset, limit: range.limit, total_bytes: stat.size,
+      returned_bytes: slice.returnedBytes, next_offset: slice.nextOffset,
+      has_more_before: slice.hasMoreBefore, has_more_after: slice.hasMoreAfter,
+      ...(range.offset === slice.offset ? {} : { requested_offset: range.offset }),
+      ...(slice.offsetBeyondEnd ? { note: 'OFFSET_BEYOND_END' } : {}) } } };
 }
 
 /**

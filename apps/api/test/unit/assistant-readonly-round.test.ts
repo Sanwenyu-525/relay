@@ -5,6 +5,7 @@ import { originAllows, type GatewayOrigin } from '../../src/application/gateway-
 import { assistantSystemPrompt, assistantToolNames, actionSignature, DEFAULT_MAX_ROUNDS,
   DEFAULT_MAX_TOOL_CALLS, delegateToolDeclared,
   isEffectfulToolCall, isWithdrawnActionBlocked, shouldWrapUpReadonlyRound, toolBudgetNotice,
+  projectAssistantToolResult,
   type WithdrawnActionGuard } from '../../src/application/assistant-readonly-round.js';
 import { childSessionScope, delegationResultText, readSubagentEnvelope,
   type DelegationChildRunner, type SubagentChildOutcome }
@@ -295,6 +296,24 @@ test('动作签名忽略基线摘要：模型重读一次不该变成另一个�
     arguments: { changes: [{ content: 'green', action: 'MODIFY', path: 'src/index.ts',
       baselineSha256: 'a'.repeat(64) }] } };
   assert.equal(actionSignature(first), actionSignature(reordered));
+});
+
+/* ------------------------- 长工具结果保留首尾 ------------------------- */
+
+test('会话工具结果超限时保留首尾：尾部字段不随截断丢失', () => {
+  const result = {
+    stdout: 'x'.repeat(40_000),
+    exit_code: 1,
+    failure_summary: '末尾的失败摘要必须仍然可见',
+  };
+  const text = projectAssistantToolResult('CLI_RUN', result);
+  assert.ok(Buffer.byteLength(text, 'utf8') <= 16 * 1024);
+  assert.ok(text.includes('"tool_result_truncated":true'));
+  assert.ok(text.includes('"exit_code":1'));
+  assert.ok(text.includes('末尾的失败摘要必须仍然可见'));
+  // 失败原因走原有类型化摘要，不进入截断分支。
+  assert.equal(projectAssistantToolResult('READ_FILE',
+    { reason: 'FILE_TOO_LARGE', error: '文件超过读取上限' }), '【FILE_TOO_LARGE】文件超过读取上限');
 });
 
 test('只有有副作用的工具才进撤回守卫：读文件重试是正常的新判断', () => {
