@@ -13,7 +13,10 @@ import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ModelCallRepository } from '../../src/model/model-call-repository.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import type { ModelErrorCategory } from '../../src/workflow/model-error-classification.js';
+import type { ModelFetchDependencies } from '../../src/workflow/model-endpoint-policy.js';
 import type { ModelPortConfig } from '../../src/workflow/model-port-config.js';
+import { AnthropicMessagesModelPort } from '../../src/workflow/anthropic-messages-model-port.js';
+import { cancelAssistMessage } from '../../src/application/assist-commands.js';
 import { ModelToolOutputError, OpenAiCompatibleModelPort } from '../../src/workflow/openai-compatible-model-port.js';
 import { createWorkspace, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATIONS_DIRECTORY, MIGRATION_DATABASE_URL,
@@ -33,14 +36,20 @@ let api: TestApi | undefined;
 let storage: ManagedContentStore;
 let localOrigin: string;
 let totalRequests = 0;
-let active: { category: ModelErrorCategory | 'NATIVE_TOOL_CALL' | 'NATIVE_TOOL_AFTER_TEXT' | 'OVERSIZED_SSE'; requests: number; body: string;
-  loopback: boolean; closedBeforeHeaders: boolean; responseClosed: boolean } | null = null;
+let active: { category: ModelErrorCategory | 'NATIVE_TOOL_CALL' | 'NATIVE_TOOL_AFTER_TEXT' |
+    'OVERSIZED_SSE' | 'SUCCESS' | 'HANG_AFTER_START' | 'ANTHROPIC_SUCCESS' |
+    'ANTHROPIC_TOOL_CALL' | 'ANTHROPIC_HANG'; requests: number; body: string;
+  loopback: boolean; closedBeforeHeaders: boolean; responseClosed: boolean;
+  url: string; xApiKey: string | null } | null = null;
 
 const server = createServer((request, response) => {
   totalRequests += 1;
   const evidence = active;
   if (evidence === null) { response.writeHead(503).end(); return; }
   evidence.requests += 1;
+  evidence.url = request.url ?? '';
+  const rawApiKey = request.headers['x-api-key'];
+  evidence.xApiKey = typeof rawApiKey === 'string' ? rawApiKey : null;
   evidence.loopback = request.socket.localAddress === '127.0.0.1' &&
     request.socket.remoteAddress === '127.0.0.1' && request.method === 'POST' &&
     request.url === '/v1/chat/completions' && request.headers.authorization === undefined;
@@ -82,6 +91,86 @@ const server = createServer((request, response) => {
           choices: [{ index: 0, delta: { role: 'assistant', content: '# Unfinished synthetic reply' },
             finish_reason: null }] })}\n\n`); // Legal fragment, clean EOF, no [DONE].
         return;
+      case 'SUCCESS': {
+        const chunk = (delta: object, finishReason: string | null = null,
+          extra: object = {}): string =>
+          `data: ${JSON.stringify({ id: 'chatcmpl-controlled-success',
+            object: 'chat.completion.chunk', created: 1, model: 'controlled-model',
+            choices: [{ index: 0, delta, finish_reason: finishReason }], ...extra })}
+
+`;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(chunk({ role: 'assistant', content: 'controlled-success-reply' }) +
+          chunk({}, 'stop', { usage: { prompt_tokens: 43, completion_tokens: 8,
+            total_tokens: 51,
+            prompt_tokens_details: { cached_tokens: 30 } } }) +
+          'data: [DONE]\n\n');
+        return;
+      }
+      case 'HANG_AFTER_START':
+        response.once('close', () => { evidence.responseClosed = true; });
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write(`data: ${JSON.stringify({ id: 'chatcmpl-controlled-hang',
+          object: 'chat.completion.chunk', created: 1, model: 'controlled-model',
+          choices: [{ index: 0, delta: { role: 'assistant', content: '' },
+            finish_reason: null }] })}
+
+`);
+        return; // Keep the stream open until the caller aborts.
+      case 'ANTHROPIC_SUCCESS': {
+        const event = (name: string, payload: object): string =>
+          `event: ${name}
+data: ${JSON.stringify(payload)}
+
+`;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(
+          event('message_start', { type: 'message_start', message: {
+            id: 'msg_controlled_success',
+            usage: { input_tokens: 43, cache_read_input_tokens: 30,
+              cache_creation_input_tokens: 5, output_tokens: 1 } } }) +
+          event('content_block_start', { type: 'content_block_start', index: 0,
+            content_block: { type: 'text', text: '' } }) +
+          event('content_block_delta', { type: 'content_block_delta', index: 0,
+            delta: { type: 'text_delta', text: 'controlled-anthropic-reply' } }) +
+          event('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+          event('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' },
+            usage: { output_tokens: 8 } }) +
+          event('message_stop', { type: 'message_stop' }));
+        return;
+      }
+      case 'ANTHROPIC_TOOL_CALL': {
+        const event = (name: string, payload: object): string =>
+          `event: ${name}
+data: ${JSON.stringify(payload)}
+
+`;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(
+          event('message_start', { type: 'message_start', message: {
+            id: 'msg_controlled_tool', usage: { input_tokens: 21, output_tokens: 1 } } }) +
+          event('content_block_start', { type: 'content_block_start', index: 0,
+            content_block: { type: 'tool_use', id: 'toolu_controlled_1',
+              name: 'todo_write' } }) +
+          event('content_block_delta', { type: 'content_block_delta', index: 0,
+            delta: { type: 'input_json_delta',
+              partial_json: '{"todos":[{"title":"controlled","status":"PENDING"}]}' } }) +
+          event('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+          event('message_delta', { type: 'message_delta', delta: { stop_reason: 'tool_use' },
+            usage: { output_tokens: 12 } }) +
+          event('message_stop', { type: 'message_stop' }));
+        return;
+      }
+      case 'ANTHROPIC_HANG':
+        response.once('close', () => { evidence.responseClosed = true; });
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write(`event: message_start
+data: ${JSON.stringify({ type: 'message_start',
+          message: { id: 'msg_controlled_hang',
+            usage: { input_tokens: 9, output_tokens: 1 } } })}
+
+`);
+        return; // Keep the stream open until the caller aborts.
       default: {
         const status = evidence.category === 'AUTH' ? 401
           : evidence.category === 'RATE_LIMIT' ? 429 : 422;
@@ -95,6 +184,9 @@ server.on('connection', (socket) => {
   sockets.add(socket);
   socket.once('close', () => { sockets.delete(socket); });
 });
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => { setTimeout(resolve, ms); });
 
 async function closeSockets(): Promise<void> {
   await Promise.all([...sockets].map((socket) => new Promise<void>((resolve) => {
@@ -123,8 +215,8 @@ for (const scenario of [
     let originalCallId: string | undefined;
     const identity = new OpenAiCompatibleModelPort({ provider: 'openai-compatible',
       model: 'controlled-metadata', apiKey: dummyKey, baseUrl: 'https://models.vendor.com/v1',
-      timeoutMs: 500, maxOutputTokens: 256, maxCallTokens: 4096,
-      maxScopeCalls: 32, maxScopeTokens: 262144 }).identity;
+      timeoutMs: 500, maxOutputTokens: 4_096, maxCallTokens: 65_536,
+      maxScopeCalls: 32, maxScopeTokens: 262_144 }).identity;
     // Explicit error-envelope seam, not a real Provider or unread SSE usage.
     const outcome = await runAssistGenerationTick(app.db, { workerId: `metadata-${randomUUID()}`,
       storage, leaseMs: 30_000, modelPort: { identity,
@@ -138,7 +230,7 @@ for (const scenario of [
       } });
     assert.equal(outcome?.messageId, messageId);
     assert.equal(outcome?.status, 'FAILED');
-    assert.equal(outcome?.errorCode, 'MODEL_FAILED');
+    assert.equal(outcome?.errorCode, 'MODEL_TOOL_OUTPUT_INVALID');
     assert.deepEqual(outcome?.proposalIds, []);
     const settled = await calls.listForAssistMessage(messageId);
     assert.equal(settled.length, 1);
@@ -184,6 +276,272 @@ for (const scenario of [
   });
 }
 
+
+/* ---------------------------------------------------------------------------
+ * B6 (OVERALL-FIX-20261104-B): the controlled provider service also covers the
+ * success stream with wire usage, a client abort mid-stream, and the Anthropic
+ * Messages protocol (native headers, path, usage, tool call, abort, ledger).
+ * OpenAI-compatible error/timeout/broken-stream faults are covered above.
+ * ------------------------------------------------------------------------ */
+
+const ANTHROPIC_CONFIG: ModelPortConfig = { provider: 'anthropic-messages',
+  protocol: 'anthropic-messages', model: 'controlled-anthropic', apiKey: dummyKey,
+  baseUrl: 'https://models.vendor.com/v1', timeoutMs: 5_000, maxOutputTokens: 4_096,
+  maxCallTokens: 65_536, maxScopeCalls: 32, maxScopeTokens: 262_144 };
+
+function anthropicTransport(): { readonly dependencies: ModelFetchDependencies } {
+  return { dependencies: {
+    lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+    fetch: (async (input, init) => {
+      const logicalUrl = new URL(input instanceof Request ? input.url : String(input));
+      const headers = new Headers(init?.headers);
+      headers.delete('x-api-key'); // Credential never reaches the owned socket.
+      const physical = await fetch(`${localOrigin}${logicalUrl.pathname}`,
+        { ...init, headers });
+      return new Response(physical.body, { status: physical.status,
+        statusText: physical.statusText, headers: physical.headers });
+    }) as typeof fetch,
+  } };
+}
+
+
+/** 本套件只关心「一次调用 → 一行账本」：关掉会话记忆，避免自动提取增加第二次外呼。 */
+async function disableSessionMemory(sessionId: string): Promise<void> {
+  await sql`update assist_sessions set remember = false where id = ${sessionId}`.execute(app.db);
+}
+
+function evidenceBodyIncludes(fragment: string): boolean {
+  return active !== null && active.body.includes(fragment);
+}
+
+test('controlled success stream persists provider usage into the ledger and the message projection (B6)',
+  { timeout: 30_000 }, async () => {
+    assert.ok(api);
+    const workspaceId = await createWorkspace(app.db);
+    const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+      title: 'Controlled success usage' });
+    await disableSessionMemory(session.result.session_id);
+    const requested = await requestAssistMessage(app.db, { workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: prompt });
+    const messageId = requested.result.assistant_message_id;
+    const calls = new ModelCallRepository(app.db);
+    active = { category: 'SUCCESS', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const modelPort = new OpenAiCompatibleModelPort({ provider: 'openai-compatible',
+      model: 'controlled-model', apiKey: dummyKey, baseUrl: 'https://models.vendor.com/v1',
+      timeoutMs: 5_000, maxOutputTokens: 4_096, maxCallTokens: 65_536,
+      maxScopeCalls: 32, maxScopeTokens: 262_144 }, {
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      fetch: (async (input, init) => {
+        const logicalUrl = new URL(input instanceof Request ? input.url : String(input));
+        assert.equal(logicalUrl.href, 'https://models.vendor.com/v1/chat/completions');
+        const headers = new Headers(init?.headers);
+        headers.delete('authorization');
+        const physical = await fetch(`${localOrigin}${logicalUrl.pathname}`,
+          { ...init, headers });
+        return new Response(physical.body, { status: physical.status,
+          statusText: physical.statusText, headers: physical.headers });
+      }) as typeof fetch,
+    });
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'controlled-success',
+      storage, modelPort, leaseMs: 30_000 });
+    assert.ok(outcome);
+    assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+    assert.ok(evidenceBodyIncludes(prompt), 'the prompt must reach the controlled provider');
+    const settled = await calls.listForAssistMessage(messageId);
+    assert.equal(settled.length, 1);
+    assert.equal(settled[0]!.status, 'COMPLETED');
+    assert.equal(settled[0]!.provider, 'openai-compatible');
+    assert.equal(settled[0]!.usage_input_tokens, 43,
+      'wire usage must reach the ledger without double counting');
+    assert.equal(settled[0]!.usage_output_tokens, 8);
+    assert.equal(settled[0]!.usage_cache_read_tokens, 30,
+      'prompt_tokens_details.cached_tokens maps to cache_read usage');
+    const message = await new AssistRepository(app.db).readMessage(messageId);
+    assert.ok(message);
+    assert.equal(message.status, 'COMPLETED');
+    assert.ok(message.content!.includes('controlled-success-reply'));
+    assert.equal(message.usage_input_tokens, 43);
+    assert.equal(message.usage_output_tokens, 8);
+    const response = await api.get(workspacePath(workspaceId,
+      `/assist-sessions/${session.result.session_id}/messages`));
+    assert.equal(response.status, 200);
+    const projected = (response.body as { items: { id: string;
+      usage: { input_tokens: number | null; output_tokens: number | null } }[] }).items
+      .find((item) => item.id === messageId);
+    assert.ok(projected);
+    assert.deepEqual(projected.usage, { input_tokens: 43, output_tokens: 8, cache_read_tokens: 30, cache_creation_tokens: null });
+  });
+
+test('controlled client abort mid-stream settles CANCELLED and closes the owned socket (B6)',
+  { timeout: 30_000 }, async () => {
+    assert.ok(api);
+    const workspaceId = await createWorkspace(app.db);
+    const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+      title: 'Controlled client abort' });
+    const requested = await requestAssistMessage(app.db, { workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: prompt });
+    const messageId = requested.result.assistant_message_id;
+    const calls = new ModelCallRepository(app.db);
+    active = { category: 'HANG_AFTER_START', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const modelPort = new OpenAiCompatibleModelPort({ provider: 'openai-compatible',
+      model: 'controlled-model', apiKey: dummyKey, baseUrl: 'https://models.vendor.com/v1',
+      timeoutMs: 30_000, maxOutputTokens: 4_096, maxCallTokens: 65_536,
+      maxScopeCalls: 32, maxScopeTokens: 262_144 }, {
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      fetch: (async (input, init) => {
+        const logicalUrl = new URL(input instanceof Request ? input.url : String(input));
+        const headers = new Headers(init?.headers);
+        headers.delete('authorization');
+        const physical = await fetch(`${localOrigin}${logicalUrl.pathname}`,
+          { ...init, headers });
+        return new Response(physical.body, { status: physical.status,
+          statusText: physical.statusText, headers: physical.headers });
+      }) as typeof fetch,
+    });
+    const pending = runAssistGenerationTick(app.db, { workerId: 'controlled-abort',
+      storage, modelPort, leaseMs: 30_000 });
+    for (let waited = 0; waited < 100; waited += 1) {
+      const rows = await calls.listForAssistMessage(messageId);
+      if (rows.length === 1 && rows[0]!.status === 'STARTED') break;
+      await delay(50);
+    }
+    const started = await calls.listForAssistMessage(messageId);
+    assert.equal(started.length, 1);
+    assert.equal(started[0]!.status, 'STARTED');
+    await cancelAssistMessage(app.db, { workspaceId, messageId, commandId: randomUUID() });
+    const outcome = await pending;
+    assert.ok(outcome);
+    assert.equal(outcome.messageId, messageId);
+    assert.equal(outcome.status, 'CANCELLED', JSON.stringify(outcome));
+    assert.equal(outcome.errorCode, null);
+    const settled = await calls.listForAssistMessage(messageId);
+    assert.equal(settled.length, 1);
+    assert.equal(settled[0]!.status, 'CANCELLED');
+    const message = await new AssistRepository(app.db).readMessage(messageId);
+    assert.ok(message);
+    assert.equal(message.status, 'CANCELLED');
+    assert.equal(message.content, null);
+    for (let waited = 0; waited < 40 && (active === null || active.responseClosed !== true); waited += 1) {
+      await delay(50);
+    }
+    assert.ok(active !== null && active.responseClosed, 'abort must close the owned socket');
+  });
+
+test('anthropic-messages controlled success: native auth headers, path and usage (B6)',
+  { timeout: 30_000 }, async () => {
+    const port = new AnthropicMessagesModelPort(ANTHROPIC_CONFIG, anthropicTransport().dependencies);
+    active = { category: 'ANTHROPIC_SUCCESS', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const result = await port.assist({ intent: 'DISCUSS', system: 'controlled system prompt',
+      turns: [{ role: 'user', content: prompt }] });
+    assert.equal(result.kind, 'CONTENT', JSON.stringify(result));
+    if (result.kind !== 'CONTENT') return;
+    assert.equal(result.content, 'controlled-anthropic-reply');
+    assert.equal(result.providerRequestId, 'msg_controlled_success');
+    assert.deepEqual(result.usage, { inputTokens: 43, outputTokens: 8,
+      cacheReadTokens: 30, cacheCreationTokens: 5 });
+    assert.equal(active !== null ? active.url : '', '/v1/messages',
+      'anthropic protocol must POST {base}/messages');
+    assert.ok(active !== null && active.body.includes('"model":"controlled-anthropic"'));
+    assert.ok(active !== null && active.body.includes('"stream":true'),
+      'anthropic port must stream');
+    assert.ok(active !== null && !active.body.includes(dummyKey),
+      'request body must not carry the credential');
+    assert.equal(active !== null ? active.xApiKey : 'missing', null,
+      'credential must be stripped before the owned socket');
+  });
+
+test('anthropic-messages controlled tool call returns a full parsed request (B6)',
+  { timeout: 30_000 }, async () => {
+    const port = new AnthropicMessagesModelPort(ANTHROPIC_CONFIG, anthropicTransport().dependencies);
+    active = { category: 'ANTHROPIC_TOOL_CALL', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const result = await port.assist({ intent: 'DISCUSS', system: 'controlled system prompt',
+      turns: [{ role: 'user', content: prompt }],
+      tools: [{ name: 'todo_write', description: 'controlled todos', parameters: {
+        type: 'object', properties: {} } }] });
+    assert.equal(result.kind, 'TOOL_CALLS', JSON.stringify(result));
+    if (result.kind !== 'TOOL_CALLS') return;
+    assert.equal(result.calls.length, 1);
+    assert.equal(result.calls[0]!.name, 'todo_write');
+    assert.equal(result.calls[0]!.providerToolCallId, 'toolu_controlled_1');
+    assert.deepEqual(result.calls[0]!.arguments, { todos: [{ title: 'controlled',
+      status: 'PENDING' }] });
+    assert.equal(result.usage.inputTokens, 21);
+    assert.equal(result.usage.outputTokens, 12);
+  });
+
+test('anthropic-messages controlled 401 maps to a typed HTTP error with bounded detail (B6)',
+  { timeout: 30_000 }, async () => {
+    const port = new AnthropicMessagesModelPort(ANTHROPIC_CONFIG, anthropicTransport().dependencies);
+    active = { category: 'AUTH', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    await assert.rejects(() => port.assist({ intent: 'DISCUSS', system: 'controlled system prompt',
+      turns: [{ role: 'user', content: prompt }] }),
+      (error: unknown) => {
+        assert.equal((error as { status?: number }).status, 401);
+        assert.match((error as Error).message, /HTTP 401/u);
+        assert.doesNotMatch((error as Error).message, new RegExp(dummyKey),
+          'typed error must not leak the credential');
+        return true;
+      });
+  });
+
+test('anthropic-messages client abort mid-stream returns CANCELLED and closes the socket (B6)',
+  { timeout: 30_000 }, async () => {
+    const port = new AnthropicMessagesModelPort(ANTHROPIC_CONFIG, anthropicTransport().dependencies);
+    active = { category: 'ANTHROPIC_HANG', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const controller = new AbortController();
+    const pending = port.assist({ intent: 'DISCUSS', system: 'controlled system prompt',
+      turns: [{ role: 'user', content: prompt }], signal: controller.signal });
+    for (let waited = 0; waited < 100 && (active === null || active.requests === 0); waited += 1) {
+      await delay(20);
+    }
+    assert.ok(active !== null && active.requests === 1, 'abort must not duplicate the HTTP request');
+    controller.abort();
+    const result = await pending;
+    assert.equal(result.kind, 'CANCELLED', JSON.stringify(result));
+    for (let waited = 0; waited < 40 && (active === null || active.responseClosed !== true); waited += 1) {
+      await delay(50);
+    }
+    assert.ok(active !== null && active.responseClosed, 'abort must close the owned socket');
+  });
+
+test('anthropic-messages assist loop persists usage into the ledger (B6)',
+  { timeout: 30_000 }, async () => {
+    assert.ok(api);
+    const workspaceId = await createWorkspace(app.db);
+    const session = await createAssistSession(app.db, { workspaceId, commandId: randomUUID(),
+      title: 'Controlled anthropic ledger' });
+    await disableSessionMemory(session.result.session_id);
+    const requested = await requestAssistMessage(app.db, { workspaceId,
+      sessionId: session.result.session_id, commandId: randomUUID(), content: prompt });
+    const messageId = requested.result.assistant_message_id;
+    active = { category: 'ANTHROPIC_SUCCESS', requests: 0, body: '', loopback: false,
+      closedBeforeHeaders: false, responseClosed: false, url: '', xApiKey: null };
+    const modelPort = new AnthropicMessagesModelPort(ANTHROPIC_CONFIG,
+      anthropicTransport().dependencies);
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'controlled-anthropic',
+      storage, modelPort, leaseMs: 30_000 });
+    assert.ok(outcome);
+    assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+    const settled = await new ModelCallRepository(app.db).listForAssistMessage(messageId);
+    assert.equal(settled.length, 1);
+    assert.equal(settled[0]!.provider, 'anthropic-messages');
+    assert.equal(settled[0]!.status, 'COMPLETED');
+    assert.equal(settled[0]!.usage_input_tokens, 43);
+    assert.equal(settled[0]!.usage_cache_read_tokens, 30);
+    assert.equal(settled[0]!.usage_cache_creation_tokens, 5);
+    assert.equal(settled[0]!.usage_output_tokens, 8);
+    const message = await new AssistRepository(app.db).readMessage(messageId);
+    assert.ok(message);
+    assert.equal(message.status, 'COMPLETED');
+    assert.ok(message.content!.includes('controlled-anthropic-reply'));
+  });
+
 before(async () => {
   await runMigrations({ connectionString: MIGRATION_DATABASE_URL, directory: MIGRATIONS_DIRECTORY });
   api = await startTestApi();
@@ -215,7 +573,7 @@ after(async () => {
     assert.ok(stopped.status === 'fulfilled');
     assert.equal(stopped.value, 0, 'separate API did not stop cleanly');
   }
-  assert.equal(totalRequests, 9, 'unexpected HTTP requests outside controlled faults and tool refusals');
+  assert.equal(totalRequests, 16, 'unexpected HTTP requests outside controlled faults and tool refusals');
   console.log('controlled_provider_cleanup listener_closed=true sockets=0 api_exit=0');
 });
 
@@ -230,7 +588,8 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         sessionId: session.result.session_id, commandId: randomUUID(), content: prompt });
       const messageId = requested.result.assistant_message_id;
       const calls = new ModelCallRepository(app.db);
-      active = { category, requests: 0, body: '', loopback: false, closedBeforeHeaders: false, responseClosed: false };
+      active = { category, requests: 0, body: '', loopback: false, closedBeforeHeaders: false,
+        responseClosed: false, url: '', xApiKey: null };
       const evidence = active;
       const toolRefusal = category === 'NATIVE_TOOL_CALL' || category === 'NATIVE_TOOL_AFTER_TEXT';
       const expectedCategory = category === 'OVERSIZED_SSE' ? 'STREAM_BROKEN' : category;
@@ -238,8 +597,9 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
       let originalCallId: string | undefined;
       const dispatch: { signal: AbortSignal | null } = { signal: null };
       const config: ModelPortConfig = { provider: 'openai-compatible', model: 'controlled-model',
-        apiKey: dummyKey, baseUrl: 'https://models.vendor.com/v1', timeoutMs: 500,
-        maxOutputTokens: 256, maxCallTokens: 4096, maxScopeCalls: 32, maxScopeTokens: 262144 };
+        apiKey: dummyKey, baseUrl: 'https://models.vendor.com/v1',
+        timeoutMs: category === 'TIMEOUT' ? 500 : 5_000,
+        maxOutputTokens: 4_096, maxCallTokens: 65_536, maxScopeCalls: 32, maxScopeTokens: 262_144 };
       const modelPort = new OpenAiCompatibleModelPort(config, {
         lookup: async () => [{ address: '8.8.8.8', family: 4 }],
         fetch: async (input, init) => {
@@ -269,8 +629,10 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
           storage, modelPort, leaseMs: 30_000 });
         assert.ok(outcome);
         assert.equal(outcome.messageId, messageId);
+        const expectedErrorCode = toolRefusal ? 'MODEL_TOOL_OUTPUT_INVALID'
+          : category === 'TIMEOUT' ? 'MODEL_TIMEOUT' : 'MODEL_FAILED';
         assert.equal(outcome.status, 'FAILED');
-        assert.equal(outcome.errorCode, 'MODEL_FAILED');
+        assert.equal(outcome.errorCode, expectedErrorCode);
         assert.deepEqual(outcome.proposalIds, []);
         assert.equal(bridgeRequests, 1, 'Adapter automatically retried');
         assert.equal(evidence.requests, 1, 'HTTP request was duplicated or never dispatched');
@@ -291,8 +653,9 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         const message = await new AssistRepository(app.db).readMessage(messageId);
         assert.ok(message);
         assert.equal(message.status, 'FAILED');
-        assert.equal(message.provider_error_kind, toolRefusal ? null : expectedCategory);
-        assert.equal(message.error_code, 'MODEL_FAILED');
+        assert.equal(message.provider_error_kind,
+          toolRefusal || category === 'TIMEOUT' ? null : expectedCategory);
+        assert.equal(message.error_code, expectedErrorCode);
         assert.equal(message.content, null);
         assert.equal(message.cancel_requested, false);
         const facts = await sql<{ proposals: number; previews: number }>`select
@@ -326,8 +689,9 @@ for (const category of ['AUTH', 'RATE_LIMIT', 'TIMEOUT', 'STREAM_BROKEN', 'PROTO
         const projected = items.find((item) => item.id === messageId);
         assert.ok(projected);
         assert.equal(projected.status, 'FAILED');
-        assert.equal(projected.provider_error_kind, toolRefusal ? null : expectedCategory);
-        assert.equal(projected.error_code, 'MODEL_FAILED');
+        assert.equal(projected.provider_error_kind,
+          toolRefusal || category === 'TIMEOUT' ? null : expectedCategory);
+        assert.equal(projected.error_code, expectedErrorCode);
         assert.equal(projected.content, null);
         if (toolRefusal) {
           assert.equal(projected.provider_request_id, settled[0]!.provider_request_id);

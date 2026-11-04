@@ -194,6 +194,10 @@ try {
   $env:RELAY_TEST_ADMIN_DATABASE_URL = "postgresql://relay_api_admin@127.0.0.1:$port/$databaseName"
   $env:RELAY_TEST_MIGRATION_DATABASE_URL = "postgresql://relay_migrator@127.0.0.1:$port/$databaseName"
   $env:RELAY_TEST_DATABASE_URL = "postgresql://relay_app@127.0.0.1:$port/$databaseName"
+  # B1 (OVERALL-FIX-20261104-B): legacy runs (no frozen model snapshot) may keep using the
+  # offline Fake fixture under integration tests. Production never sets this variable; a
+  # production legacy run without model config stops with MODEL_NOT_CONFIGURED instead.
+  $env:RELAY_TEST_ALLOW_FAKE_MODEL = '1'
   Write-Host "Test database: $databaseName on 127.0.0.1:$port (roles relay_migrator / relay_app)"
 
   # Business migrations precede the separate, trusted official Saver setup.

@@ -15,6 +15,7 @@ import { linkProjectGoal } from '../../src/application/project-goal-links.js';
 import { addTaskDependency, editTaskPresentation, markTaskReady, setTaskPlanningMetadata,
   startHumanTask } from
   '../../src/application/task-commands.js';
+import { DomainError } from '../../src/application/domain-error.js';
 import { createRepositories } from '../../src/application/unit-of-work.js';
 import { ConversationStateRepository } from '../../src/assist/conversation-state-repository.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -1957,4 +1958,39 @@ test('复验5-1b：多条已生效调整按类型化歧义失败；没有可撤�
   const noneRows = await changeRows(none.result.request.id);
   assert.equal((noneRows[0]!.error as { code: string } | null)?.code,
     'UNDO_TARGET_NOT_FOUND');
+});
+
+test('B1: 无模型配置且未注入端口时，状态维护解释按 MODEL_NOT_CONFIGURED 失败，不回退 Fake（OVERALL-FIX-20261104-B）', async () => {
+  const ws = await freshWorkspace();
+  const project = await createProject(ws);
+  const session = await sessionIn(ws, project.projectId, '把阶段推进到施工');
+  const saved = ['RELAY_MODEL_PROVIDER', 'RELAY_MODEL_API_KEY', 'RELAY_MODEL_NAME',
+    'SPARK_API_KEY'].map((key) => [key, process.env[key]] as const);
+  for (const [key] of saved) delete process.env[key];
+  try {
+    await assert.rejects(() => interpretStateMaintenance(app.db, {
+      workspaceId: ws, sessionId: session.sessionId,
+      sourceMessageId: session.userMessageId, commandId: randomUUID() }),
+      (error: unknown) => {
+        assert.ok(error instanceof DomainError, `期望 DomainError，得到 ${String(error)}`);
+        assert.equal((error as DomainError).code, 'MODEL_NOT_CONFIGURED');
+        return true;
+      });
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+  const requests = await createRepositories(app.db).conversationState
+    .listSessionRequests(ws, session.sessionId);
+  assert.equal(requests.length, 1, '解释请求行必须已经落库');
+  assert.equal(requests[0]!.status, 'FAILED', JSON.stringify(requests[0]!.status));
+  assert.equal(requests[0]!.candidate_status, 'INVALID');
+  const questions = (requests[0]!.clarification as { questions?: unknown } | null)?.questions;
+  assert.ok(Array.isArray(questions) && questions.some((q) =>
+    typeof q === 'string' && q.includes('解释没能完成')),
+    `澄清问题应携带失败原因，得到 ${JSON.stringify(questions)}`);
+  const calls = await sql<{ count: string }>`
+    select count(*)::text as count from model_calls`.execute(app.db);
+  assert.equal(calls.rows[0]!.count, '0', '无配置解释不得产生任何模型调用行');
 });

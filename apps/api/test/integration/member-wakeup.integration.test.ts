@@ -65,7 +65,9 @@ async function fixture() {
       content, intent: 'DISCUSS', ...extra,
     }, 200) as Promise<unknown> as Promise<Message>;
   const tick = (workerId: string, options: Record<string, unknown> = {}) =>
-    runMemberWakeupTick(app.db, { workerId, modelPort: fakePort, leaseMs: 60_000, ...options });
+    // 显式测试放行：本套件用受控 FakeModelPort 作为成员模型 Fixture（B1 契约）。
+    runMemberWakeupTick(app.db, { workerId, modelPort: fakePort, leaseMs: 60_000,
+      testOnlyAllowFakeModelPort: true, ...options });
   return { workspaceId, projectId, path, command, createMember, openConversation, send, tick };
 }
 
@@ -91,6 +93,31 @@ async function memberCallCount(messageId: string): Promise<{ total: string; comp
     from model_calls where kind = 'MEMBER' and member_message_id = ${messageId}`
     .execute(app.db)).rows[0]!;
 }
+
+test('B1: 未显式放行时，Fake 端口不产生成员回信，按 MODEL_NOT_CONFIGURED 失败结算（OVERALL-FIX-20261104-B）', async () => {
+  const f = await fixture();
+  const coordinator = await f.createMember('协调成员', 'COORDINATION');
+  await f.command(`/projects/${f.projectId}/coordinator-assignments`, {
+    member_id: coordinator.agent_member_id, reason: '指派协调者',
+  }, 200);
+  const group = await f.openConversation('GROUP');
+  const sent = await f.send(group.conversation_id, '这个需求怎么拆？');
+
+  // 同一个 Fake 端口，但没有 testOnlyAllowFakeModelPort：生产调度器的形态。
+  const outcome = await runMemberWakeupTick(app.db, { workerId: 'worker-no-optin',
+    modelPort: fakePort, leaseMs: 60_000 });
+  assert.equal(outcome.processed.length, 1);
+  assert.equal(outcome.processed[0]!.status, 'FAILED');
+  assert.equal(outcome.processed[0]!.reason, 'MODEL_NOT_CONFIGURED');
+
+  const row = await messageRow(sent.message_id);
+  assert.equal(row.processing_status, 'FAILED');
+  assert.equal(row.failure_reason, 'MODEL_NOT_CONFIGURED');
+  const messages = await conversationMessages(group.conversation_id);
+  assert.equal(messages.length, 1, '绝不把 Mock 文本落成真实成员回信');
+  const calls = await memberCallCount(sent.message_id);
+  assert.equal(calls.total, '0', '拒绝 Fake 端口时零模型调用');
+});
 
 test('唤醒裁决：私聊唤醒对方、群聊定向唤醒指定成员、未定向由协调者接住，一次只唤醒一个', async () => {
   const f = await fixture();

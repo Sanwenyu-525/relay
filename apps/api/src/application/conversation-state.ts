@@ -12,7 +12,7 @@ import { computePayloadHash } from '../receipt/payload-hash.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { interpretationStateMaintenanceSystemPrompt }
   from '../workflow/prompts/interpretation-prompts.js';
-import { FakeModelPort, type AssistModelPort, type AssistResult,
+import { type AssistModelPort, type AssistResult,
   type ConversationInterpretationRequest } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { createModelPort } from '../workflow/model-port-factory.js';
@@ -595,9 +595,24 @@ function interpretationUnavailable(code: string, detail: string): DomainError {
     detail, retryable: false, retryAction: 'CHECK_RECEIPT_THEN_RETRY' });
 }
 
+/**
+ * 状态维护解释的默认端口：只在进程默认配置存在时构造真实端口。
+ *
+ * B1（OVERALL-FIX-20261104-B）：没有配置时不再隐式回退 FakeModelPort——那会把一次
+ * 离线 Mock 的确定性候选当成模型解释落库。改为类型化不可用（零外呼、零模拟输出）；
+ * `interpretStateMaintenance` 的失败结算会把请求行落成 FAILED 并保留原因。
+ * 测试经 `input.modelPort` 显式注入，不经这里。
+ */
 function defaultModelPort(): AssistModelPort {
   const config = readModelPortConfig(process.env);
-  return config === undefined ? new FakeModelPort() : createModelPort(config);
+  if (config === undefined) {
+    throw new DomainError({ code: 'MODEL_NOT_CONFIGURED', status: 409,
+      type: '/problems/model-not-configured', title: '没有可用的真实模型',
+      detail: '当前实例没有配置任何可用模型（也没有已登记连接可解析）；'
+        + '状态维护解释不会用离线 Mock 代替模型输出。请在设置里配置模型后重试。',
+      retryable: false, retryAction: 'NONE' });
+  }
+  return createModelPort(config);
 }
 
 async function readSourceMessage(db: DbExecutor, messageId: string): Promise<string> {

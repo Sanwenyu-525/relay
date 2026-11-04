@@ -18,6 +18,7 @@ import { readWorkingDirectoryWriteReadiness } from '../../src/application/open-w
 import { openWorkingDirectory } from '../../src/application/open-working-directory.js';
 import { advanceRunStep } from '../../src/application/run-steps.js';
 import type { FrozenCheck } from '../../src/application/run-scope-grant.js';
+import { DomainError } from '../../src/application/domain-error.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { RunToolCallRepository } from '../../src/run/run-tool-call-repository.js';
@@ -1337,3 +1338,35 @@ async function driveToolLoop(runId: string, workspaceId: string,
     return new RunToolCallRepository(app.db).listByAttempt(attempts.at(-1)!.id);
   });
 }
+
+test('B1: 无模型配置且未注入端口时，执行请求解释按 MODEL_NOT_CONFIGURED 拒绝，不产生 Fake 候选（OVERALL-FIX-20261104-B）', async () => {
+  const workspaceId = await workspace('no-model-config-interpret');
+  const root = await tempRoot();
+  const opened = await openWorkingDirectory(app.db, { workspaceId, commandId: randomUUID(), rootPath: root });
+  const { project_id: projectId, resource_id: resourceId } = opened.result.association!;
+  const asked = await sessionIn(workspaceId, projectId, '读取目录并整理现状');
+  const saved = ['RELAY_MODEL_PROVIDER', 'RELAY_MODEL_API_KEY', 'RELAY_MODEL_NAME',
+    'SPARK_API_KEY'].map((key) => [key, process.env[key]] as const);
+  for (const [key] of saved) delete process.env[key];
+  // 套件共享一个库：按差值断言「这次拒绝没有产生任何模型调用」，不与既有用例的行数耦合。
+  const before = await sql<{ count: string }>`
+    select count(*)::text as count from model_calls`.execute(app.db);
+  try {
+    await assert.rejects(() => interpretConversationMessage(app.db, { workspaceId,
+      sessionId: asked.sessionId, sourceMessageId: asked.userMessageId, resourceId,
+      commandId: randomUUID() }),
+      (error: unknown) => {
+        assert.ok(error instanceof DomainError, `期望 DomainError，得到 ${String(error)}`);
+        assert.equal((error as DomainError).code, 'MODEL_NOT_CONFIGURED');
+        return true;
+      });
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+  const after = await sql<{ count: string }>`
+    select count(*)::text as count from model_calls`.execute(app.db);
+  assert.equal(after.rows[0]!.count, before.rows[0]!.count,
+    '无配置解释不得产生任何模型调用行');
+});
