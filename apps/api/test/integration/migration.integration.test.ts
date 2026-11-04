@@ -234,6 +234,12 @@ const ALL_MIGRATIONS = [
   // 0158（MODEL-SETTINGS-01）：会话选择可绑定已登记连接、工作区聊天默认、消息冻结连接
   // 身份与 VERIFY 连接归属。清单必须同步，否则真实库上会因多一条而失败。
   '0158_model_connection_session_selection',
+  // 0159（AGENT-FILE-CONTEXT-V3）：文件写入预映像改由 Gateway prepare 在写入前按
+  // logical_operations 采集（file_write_preimages），撤回行带 snapshot_source；
+  // 0160：已登记连接按 API 协议派发（protocol 字段）。清单必须同步，
+  // 否则真实库上会因多两条而失败。
+  '0159_file_write_preimages',
+  '0160_model_connection_protocol',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
