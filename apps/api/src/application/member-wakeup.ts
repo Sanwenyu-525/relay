@@ -7,6 +7,7 @@ import type { MemberConversationRow, MemberMessageRow } from '../team/member-con
 import type {
   AssistModelPort, AssistRequest, AssistResult, AssistTurn, ModelUsage,
 } from '../workflow/fake-model-port.js';
+import { isFakeModelPort } from '../workflow/fake-model-port.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
 import { DomainError } from './domain-error.js';
 import { lockWritableProjectInWorkspace } from './guards.js';
@@ -53,6 +54,13 @@ export interface MemberWakeupOptions {
   readonly signal?: AbortSignal | undefined;
   /** 注入时钟；缺省墙钟。 */
   readonly now?: Date;
+  /**
+   * 仅测试放行：显式注入的 FakeModelPort 允许驱动成员回信（既有用例的受控 Fixture）。
+   * 生产调用方**不得**设置；调度器在无模型配置时构造的 Fake 会被拒绝并按
+   * `MODEL_NOT_CONFIGURED` 失败结算，绝不把 Mock 文本落成真实成员消息
+   * （OVERALL-FIX-20261104-B B1）。
+   */
+  readonly testOnlyAllowFakeModelPort?: boolean | undefined;
 }
 
 export interface MemberWakeupOutcome {
@@ -106,9 +114,17 @@ async function adjudicateWakeupTarget(r: Repositories, message: MemberMessageRow
  * 存储的型号与指纹必须与当前端口一致，否则按类型化失败如实报告——绝不静默降级
  * 到别的型号。openrouter 连接的成员路由未接入（免费模型路由绑定 assist 消息行），
  * 同样类型化报告不可用。
+ *
+ * B1（OVERALL-FIX-20261104-B）：默认端口是离线 Fake 且调用方没有显式测试放行时，
+ * 按 `MODEL_NOT_CONFIGURED` 失败结算——成员回信绝不能是 Mock 文本冒充的真实消息。
+ * 生产调度器不应再构造 Fake 端口（见 HANDOFF §1.2）；这里是从源头堵住的第二道闸。
  */
 function resolveMemberModelPort(member: AgentMemberRow,
-  defaultPort: AssistModelPort): { readonly port?: AssistModelPort; readonly error?: string } {
+  defaultPort: AssistModelPort, allowFake: boolean):
+  { readonly port?: AssistModelPort; readonly error?: string } {
+  if (isFakeModelPort(defaultPort) && !allowFake) {
+    return { error: 'MODEL_NOT_CONFIGURED' };
+  }
   const selection = member.model_selection;
   if (selection.mode !== 'EXPLICIT') return { port: defaultPort };
   if (selection.connection === 'openrouter') return { error: 'MEMBER_MODEL_ROUTE_UNAVAILABLE' };
@@ -209,7 +225,8 @@ async function processClaimedWakeup(db: DbExecutor, context: {
   const { message, conversation, member } = claim;
   const base = { messageId: message.id, conversationId: conversation.id, memberId: member.id };
 
-  const modelRoute = resolveMemberModelPort(member, options.modelPort);
+  const modelRoute = resolveMemberModelPort(member, options.modelPort,
+    options.testOnlyAllowFakeModelPort === true);
   if (modelRoute.error !== undefined) {
     await withTransaction(db, (tx) => tx.memberConversations
       .settleWakeupFailed(message.id, options.workerId, now, modelRoute.error!));

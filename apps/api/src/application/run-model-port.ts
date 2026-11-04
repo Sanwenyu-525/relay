@@ -89,6 +89,13 @@ export interface ResolveRunModelPortInput {
   readonly transport?: ModelFetchDependencies | undefined;
   /** 凭据存储；缺省用进程默认（按存放根缓存的 DPAPI 存储）。测试可注入替代。 */
   readonly credentials?: CredentialStore | undefined;
+  /**
+   * 仅测试放行：旧 Run（无冻结快照）在**没有任何模型配置**时允许 FakeModelPort 承载。
+   * 生产（Worker/API）绝不设置它；无配置的旧 Run 一律按 `MODEL_NOT_CONFIGURED` 停止，
+   * 不再隐式回退离线 Mock（OVERALL-FIX-20261104-B B1）。
+   * 集成测试经 `RELAY_TEST_ALLOW_FAKE_MODEL=1` 打开同一放行（含 worker 子进程）。
+   */
+  readonly testOnlyAllowLegacyFakeModel?: boolean | undefined;
 }
 
 export async function resolveRunModelPort(db: DbExecutor,
@@ -126,12 +133,26 @@ export async function resolveRunModelPort(db: DbExecutor,
     provider: candidate.connection.provider });
 }
 
-/** 旧 Run / Fake Run：没有冻结计划时保留进程默认，但显式标注来源，不冒充冻结身份。 */
+/**
+ * 旧 Run / Fake Run：没有冻结计划时保留进程默认，但显式标注来源，不冒充冻结身份。
+ *
+ * B1（OVERALL-FIX-20261104-B）：兼容条件是**进程默认配置存在**。没有配置时生产业务
+ * 不再隐式回退离线 Mock——那会让一次合法委派在无模型实例上「完成」出一份 Fake 交付物；
+ * 改为 `MODEL_NOT_CONFIGURED` 类型化停止（零外呼、零模拟输出，配置好模型后重跑即可）。
+ * Fake 只保留给显式测试放行（`testOnlyAllowLegacyFakeModel` 注入或
+ * `RELAY_TEST_ALLOW_FAKE_MODEL=1`），两者缺一不可。
+ */
 function legacyAdmission(input: ResolveRunModelPortInput): RunModelAdmission {
   const config = readModelPortConfig(input.env);
   if (config === undefined) {
+    const testOptIn = input.testOnlyAllowLegacyFakeModel === true ||
+      input.env.RELAY_TEST_ALLOW_FAKE_MODEL === '1';
+    if (!testOptIn) {
+      return stopped('MODEL_NOT_CONFIGURED', { reason: 'MODEL_NOT_CONFIGURED',
+        basis: 'LEGACY_ENV' });
+    }
     return { kind: 'READY', port: new FakeModelPort(), external: false, basis: 'LEGACY_ENV',
-      evidence: { basis: 'LEGACY_ENV', provider: 'fake' } };
+      evidence: { basis: 'LEGACY_ENV', provider: 'fake', test_only: true } };
   }
   const port = createModelPort(config, input.transport ?? {});
   return { kind: 'READY', port, external: true, basis: 'LEGACY_ENV',

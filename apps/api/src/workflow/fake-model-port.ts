@@ -17,6 +17,19 @@ import {
  * 真实 SDK 接入属 P12。
  */
 
+/**
+ * FakeModelPort 在账本/身份词表里的 provider 值。
+ *
+ * B1（OVERALL-FIX-20261104-B）：生产代码用 `isFakeModelPort()` 判别「这是离线 Mock」，
+ * 不要再各自硬编码 `'fake'` 字符串；判别结果是拒绝执行（typed 不可用），不是静默换模型。
+ */
+export const FAKE_MODEL_PROVIDER = 'fake';
+
+/** 判别一个模型端口是不是离线 Fake Fixture（按身份词表，不做 instanceof）。 */
+export function isFakeModelPort(port: { readonly identity: ModelIdentity }): boolean {
+  return port.identity.provider === FAKE_MODEL_PROVIDER;
+}
+
 export interface ModelUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
