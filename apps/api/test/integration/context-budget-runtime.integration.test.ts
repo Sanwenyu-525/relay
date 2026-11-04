@@ -145,7 +145,10 @@ test('256K compacts at its pressure threshold while 512K and 1024K retain the sa
       seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
       content: 'x'.repeat(42_000), sources: [] });
     const modelPort = new FakeModelPort();
-    modelPort.assist = async () => ({ kind: 'CONTENT', content: JSON.stringify({ summary: 'retained goal and next step' }),
+    modelPort.assist = async () => ({ kind: 'CONTENT', content: JSON.stringify({ summary:
+      ['【当前目标与范围】retained goal and next step', '【有效约束与偏好】无', '【已确认决策】无',
+        '【已验证进展与证据】无', '【未完成事项与下一步】无', '【未决问题、失败与 UNKNOWN】无',
+        '【被替代或已撤回的要求】无', '【来源】integration fixture'].join('\n') }),
       providerRequestId: randomUUID(), usage: { inputTokens: 100, outputTokens: 20 } });
     const options = { workerId: randomUUID(), leaseMs: 60_000, storage: new ManagedContentStore(dataRoot), modelPort };
     const prepared = await prepareAutomaticMemory(app.db, f.sessionId, null, options);

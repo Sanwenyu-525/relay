@@ -502,8 +502,18 @@ export class FakeModelPort implements AssistModelPort {
    * 应用层 schema 校验的 JSON。`FAKE_ASSIST_*` 触发串只服务测试断言。 */
   async assist(request: AssistRequest): Promise<AssistResult> {
     if (request.system.includes('MEMORY_COMPACTION_V1')) {
-      const content = JSON.stringify({ summary: '【Mock 摘要，仅用于工程验证】\n' +
-        request.turns.map((turn) => turn.content).join('\n').slice(0, 8000) });
+      // 质量门要求固定分段；Mock 只回显一半输入，保证摘要确实比压缩输入短。
+      const raw = request.turns.map((turn) => turn.content).join('\n');
+      const excerpt = raw.slice(0, Math.min(4000, Math.floor(raw.length / 2)));
+      const statuses = ['FAILED', 'CANCELLED', 'WITHDRAWN', 'SOURCE_UNAVAILABLE']
+        .filter((token) => raw.includes(`"status":"${token}"`));
+      const content = JSON.stringify({ summary: [
+        '【当前目标与范围】Mock 摘要，仅用于工程验证。',
+        '【有效约束与偏好】无', '【已确认决策】无', '【已验证进展与证据】', excerpt,
+        '【未完成事项与下一步】无',
+        `【未决问题、失败与 UNKNOWN】${statuses.join('、') || '无'}`,
+        '【被替代或已撤回的要求】无', '【来源】Mock 输入回显',
+      ].join('\n') });
       return { kind: 'CONTENT', content, providerRequestId: 'fake-memory-compaction',
         usage: { inputTokens: 1, outputTokens: 1 } };
     }

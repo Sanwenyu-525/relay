@@ -68,6 +68,10 @@ export async function checkpointAvailable(r: Repositories, storage: ManagedConte
       checkpoint.authority_revision !== authority.revision ||
       checkpoint.context_revision !== authority.context_revision) return false;
   const settings = await r.information.readMemorySettings(session.workspace_id);
+  // P0：撤回只写 assist_messages.withdrawn_at，不会 bump session/authority revision。已发布的
+  // checkpoint 覆盖被撤回消息时，摘要里仍可能保留用户已撤销的要求；此时必须视为失效，回退到
+  // 原始消息（撤回轮次在上下文中只留占位），不能继续把旧摘要当作有效事实。
+  if (await r.assistMemory.withdrawnAfter(session.id, checkpoint.through_seq, checkpoint.created_at)) return false;
   if (settings?.recall_enabled === false && checkpoint.sources.some((source) =>
       typeof source === 'object' && source !== null && !Array.isArray(source) &&
       (source as JsonObject).selection === 'AUTO_MEMORY')) return false;

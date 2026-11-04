@@ -50,12 +50,19 @@ async function fixture(rounds = 12, sources: Parameters<ReturnType<typeof create
     path: (suffix = '') => workspacePath(workspaceId, `/assist-sessions/${sessionId}/memory${suffix}`) };
 }
 
+/** 质量门要求固定分段；测试用 marker 放进「当前目标」，其余分段写「无」。 */
+function structuredSummary(marker: string): string {
+  return ['【当前目标与范围】' + marker, '【有效约束与偏好】无', '【已确认决策】无',
+    '【已验证进展与证据】无', '【未完成事项与下一步】无', '【未决问题、失败与 UNKNOWN】无',
+    '【被替代或已撤回的要求】无', '【来源】integration fixture'].join('\n');
+}
+
 function port(summary: string, bad = false) {
   const model = new FakeModelPort(); const inputs: AssistRequest[] = [];
   model.assist = async (input) => {
     inputs.push(input);
     return { kind: 'CONTENT', content: input.system.includes('MEMORY_COMPACTION_V1')
-      ? bad ? 'invalid summary' : JSON.stringify({ summary }) : 'continued',
+      ? bad ? 'invalid summary' : JSON.stringify({ summary: structuredSummary(summary) }) : 'continued',
     providerRequestId: randomUUID(), usage: { inputTokens: 7, outputTokens: 3 } };
   };
   return { model, inputs, options: { workerId: randomUUID(), leaseMs: 60000, storage, modelPort: model } };
@@ -205,7 +212,7 @@ test('manual HTTP compaction is replayable; restart uses persisted summary plus 
   assert.ok(p.inputs[0]?.turns[0]?.content.includes(f.marker));
   const read = await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId);
   assert.equal(read.checkpoint?.through_seq, '16');
-  assert.equal(read.checkpoint?.summary, f.marker);
+  assert.ok(read.checkpoint?.summary?.includes(f.marker));
   assert.equal(read.revision, '1');
   const calls = await sql<{ status: string }>`select status from model_calls where id = ${read.checkpoint!.model_call_id}`.execute(app.db);
   assert.equal(calls.rows[0]?.status, 'COMPLETED');
@@ -213,7 +220,7 @@ test('manual HTTP compaction is replayable; restart uses persisted summary plus 
   await api.stop(); api = await startTestApi();
   const persisted = await api.get(f.path());
   assert.equal(persisted.status, 200, persisted.text);
-  assert.equal((persisted.body as { checkpoint: { summary: string } }).checkpoint.summary, f.marker);
+  assert.ok((persisted.body as { checkpoint: { summary: string } }).checkpoint.summary.includes(f.marker));
   // A new pool/worker has no process-local transcript or summary cache.
   const restarted = openDatabase(APP_DATABASE_URL, 'relay-memory-restarted');
   try {
@@ -304,6 +311,90 @@ test('source invalidation hides summary and removes derived historical answers f
   assert.ok(!JSON.stringify(next.inputs).includes(marker));
 });
 
+test('covering checkpoint is invalidated by withdrawal and rebuild excludes the withdrawn original', async () => {
+  const f = await fixture();
+  await compact(f);
+  const r = createRepositories(app.db);
+  const first = (await r.assistMemory.checkpoint((await r.assistMemory.state(f.sessionId))!.checkpoint_id!))!;
+  assert.equal(first.through_seq, 16n);
+  await sql`update assist_messages set withdrawn_at = now() where session_id = ${f.sessionId} and seq = 1`.execute(app.db);
+  const invalidated = await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId);
+  assert.equal(invalidated.checkpoint?.available, false);
+  assert.equal(invalidated.checkpoint?.summary, null);
+  // 生成回退到原始消息；撤回轮只留占位，旧摘要与撤回原文都不进入输入。
+  await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue-after-withdraw' });
+  const generation = port('unused');
+  assert.equal((await runAssistGenerationTick(app.db, generation.options))?.status, 'COMPLETED');
+  const generationInput = JSON.stringify(generation.inputs);
+  assert.ok(!generationInput.includes(f.marker));
+  assert.ok(generationInput.includes('该轮已撤回'));
+  // 手动整理以原始历史重建；压缩输入与最终摘要都不再包含撤回原文。
+  const revision = (await r.assist.readSession(f.sessionId))!.revision.toString();
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID(), expectedRevision: revision }, storage);
+  const rebuild = port('unused');
+  rebuild.model.assist = async (input) => {
+    rebuild.inputs.push(input);
+    return { kind: 'CONTENT', content: JSON.stringify({ summary: structuredSummary('继续当前目标')
+      .replace('【被替代或已撤回的要求】无', '【被替代或已撤回的要求】seq 1 已撤回（WITHDRAWN）') }),
+      providerRequestId: randomUUID(), usage: { inputTokens: 7, outputTokens: 3 } };
+  };
+  assert.equal((await runAssistMemoryTick(app.db, rebuild.options))?.status, 'COMPLETED');
+  const compactionTurn = rebuild.inputs[0]!.turns[0]!.content;
+  assert.ok(compactionTurn.includes('WITHDRAWN'));
+  assert.ok(!compactionTurn.includes(f.marker));
+  const rebuilt = await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId);
+  assert.equal(rebuilt.checkpoint?.available, true);
+  assert.ok(!rebuilt.checkpoint?.summary?.includes(f.marker));
+  assert.equal((await r.assist.listMessages(f.sessionId)).length, 26);
+});
+
+test('withdrawal during the compaction model call blocks publication', async () => {
+  const f = await fixture();
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID(), expectedRevision: '0' }, storage);
+  const p = port('继续');
+  const original = p.model.assist;
+  p.model.assist = async (input) => {
+    await sql`update assist_messages set withdrawn_at = now()
+      where session_id = ${f.sessionId} and seq <= 16`.execute(app.db);
+    return original(input);
+  };
+  const result = await runAssistMemoryTick(app.db, p.options);
+  assert.equal(result?.status, 'FAILED');
+  assert.equal(result?.errorCode, 'MEMORY_SOURCE_CHANGED');
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId)).checkpoint, null);
+  assert.equal((await createRepositories(app.db).assist.listMessages(f.sessionId)).length, 24);
+});
+
+test('summary quality gate refuses unreliable output without publishing or deleting originals', async () => {
+  const f = await fixture(0);
+  const r = createRepositories(app.db);
+  for (let i = 1; i <= 16; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
+    content: 'q'.repeat(400), sources: [] });
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
+  const longer = port('unused');
+  longer.model.assist = async (input) => {
+    longer.inputs.push(input);
+    return { kind: 'CONTENT', content: JSON.stringify({ summary: `${structuredSummary('继续')}${'z'.repeat(8000)}` }),
+      providerRequestId: randomUUID(), usage: { inputTokens: 7, outputTokens: 3 } };
+  };
+  const rejected = await runAssistMemoryTick(app.db, longer.options);
+  assert.equal(rejected?.status, 'FAILED');
+  assert.equal(rejected?.errorCode, 'MEMORY_SUMMARY_NOT_COMPRESSED');
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId)).checkpoint, null);
+  assert.equal((await r.assist.listMessages(f.sessionId)).length, 16);
+  // 失败状态必须在摘要里保留，不能只写「无」。
+  await sql`update assist_messages set status = 'FAILED', error_code = 'PATH_WRITE_FAILED'
+    where session_id = ${f.sessionId} and seq = 2`.execute(app.db);
+  await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
+  const lost = port('继续');
+  const lostResult = await runAssistMemoryTick(app.db, lost.options);
+  assert.equal(lostResult?.status, 'FAILED');
+  assert.equal(lostResult?.errorCode, 'MEMORY_SUMMARY_STATUS_LOST');
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId)).checkpoint, null);
+  assert.equal((await r.assist.listMessages(f.sessionId)).length, 16);
+});
+
 test('clear and one-off mode preserve original history and long-term memory; in-flight controls reject', async () => {
   const f = await fixture(); await compact(f);
   const reset = await resetSessionMemory(app.db, { ...f, commandId: randomUUID(), expectedRevision: '1', expectedSessionRevision: '0', remember: false });
@@ -374,13 +465,16 @@ test('transitive history and fork retain source invalidation; stale derived repl
   const f = await fixture(0);
   const marker = `SECRET-${randomUUID()}`;
   const original = await createMemory(app.db, { workspaceId: f.workspaceId, projectId: null,
-    commandId: randomUUID(), title: 'original', text: marker, confirmed: true });
+    commandId: randomUUID(), title: 'original', text: `${marker} first`, confirmed: true });
   const echo = port('unused');
   echo.model.assist = async (input) => {
     echo.inputs.push(input);
     return { kind: 'CONTENT', content: JSON.stringify(input.turns).includes(marker) ? marker : 'safe',
       providerRequestId: randomUUID(), usage: { inputTokens: 1, outputTokens: 1 } };
   };
+  // 长期记忆按字面命中召回（BUG-CHAT-CONTEXT-CROSS-TALK 的修复）：首轮用户消息必须真的
+  // 带着 M 的token（first），M 才会被召回，助手回复里的 marker 才算「经历史派生」。
+  // 用户原话本身不含 marker，这样 marker 只可能从派生的助手回复传播，被测的才是失效传播。
   await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'first' });
   await runAssistGenerationTick(app.db, echo.options);
   for (let i = 0; i < 3; i++) await createMemory(app.db, { workspaceId: f.workspaceId, projectId: null,

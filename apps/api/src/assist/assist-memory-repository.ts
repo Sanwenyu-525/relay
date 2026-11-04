@@ -57,6 +57,18 @@ export class AssistMemoryRepository {
       order by seq limit ${limit}`.execute(this.db)).rows;
   }
 
+  /** Database clock for comparing against `withdrawn_at` without trusting process time. */
+  async now(): Promise<Date> {
+    return (await sql<{ at: Date }>`select now() as at`.execute(this.db)).rows[0]!.at;
+  }
+
+  /** A withdrawal inside an already summarized prefix invalidates that checkpoint. */
+  async withdrawnAfter(sessionId: string, throughSeq: bigint, since: Date): Promise<boolean> {
+    return (await sql<{ id: string }>`select id from assist_messages where session_id = ${sessionId}
+      and seq <= ${throughSeq} and withdrawn_at is not null and withdrawn_at > ${since}
+      limit 1`.execute(this.db)).rows.length > 0;
+  }
+
   async latestHistorySeq(sessionId: string): Promise<bigint> {
     return (await sql<{ seq: bigint }>`select seq from assist_messages where session_id = ${sessionId}
       and status in ('COMPLETED', 'FAILED', 'CANCELLED')
@@ -118,6 +130,19 @@ export class AssistMemoryRepository {
       lease_until = now() + ${leaseMs} * interval '1 millisecond', updated_at = now()
       where id = ${id} and status = 'RUNNING' and worker_id = ${workerId}
         and claim_epoch = ${epoch} and lease_until > now() and cancel_requested = false returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 所有权已核对仍属于自己时续租，不要求旧租约尚未过期。
+   * 只用于「status=RUNNING + worker_id + claim_epoch 仍未变」的场景：claim 只领取 PENDING，
+   * 不会抢占 RUNNING；租约过期只可能来自本进程停顿（长批处理/系统暂停），不是被接管。
+   * 已被 expireLeases 判 FAILED、或已被其他 worker/epoch 接管时，这里必须返回 false。
+   */
+  async renewLease(id: string, workerId: string, epoch: bigint, leaseMs: number): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_memory_requests set
+      lease_until = now() + ${leaseMs} * interval '1 millisecond', updated_at = now()
+      where id = ${id} and status = 'RUNNING' and worker_id = ${workerId}
+        and claim_epoch = ${epoch} and cancel_requested = false returning id`.execute(this.db)).rows.length === 1;
   }
 
   async bindCall(id: string, workerId: string, epoch: bigint, callId: string): Promise<boolean> {

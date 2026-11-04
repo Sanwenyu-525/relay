@@ -4,7 +4,7 @@ import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistModelPort, AssistResult } from '../workflow/fake-model-port.js';
 import type { AssistMemoryRequestRow } from '../assist/assist-memory-repository.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { computeModelConfigFingerprint, readOpenRouterModelPortConfig } from '../workflow/model-port-config.js';
 import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
 import { selectRuntimeSystemPrompt } from '../workflow/prompts/index.js';
@@ -18,6 +18,7 @@ import { recheckAssistSources } from './assist-source-content.js';
 import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, resolveMemoryContextLimits,
   memoryHistoryFingerprint, memoryCompactionTurn, prepareMemoryCompaction, MEMORY_BATCH_MESSAGES } from './assist-memory.js';
 import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
+import { assessMemorySummary } from './assist-memory-quality.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
 
 export interface AssistMemoryWorkerOptions {
@@ -41,7 +42,9 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
   // 绝不退回进程默认。压缩尚未开始，凭据身份闸门不适用（请求只冻结了连接身份）。
   const connectionId = request.model_snapshot.model_connection_id;
   if (typeof connectionId === 'string') {
-    if (candidate.connection.provider !== 'openai-compatible') {
+    // 压缩按连接自己的协议重建端口（OpenAI 兼容或 Anthropic Messages 都走同一入口）。
+    if (candidate.connection.provider !== 'openai-compatible' &&
+        candidate.connection.provider !== 'anthropic-messages') {
       throw new AssistMemoryUnavailable('MEMORY_MODEL_CONFIG_CHANGED');
     }
     try {
@@ -81,7 +84,7 @@ async function resolveCompactionPort(db: DbExecutor, request: AssistMemoryReques
   if (computeModelConfigFingerprint(config) !== candidate.connection.configFingerprint) {
     throw new AssistMemoryUnavailable('MEMORY_MODEL_CONFIG_CHANGED');
   }
-  return new OpenAiCompatibleModelPort(config, options.modelFetchDependencies ?? {}, buildFreePriceGuard({
+  return createModelPort(config, options.modelFetchDependencies ?? {}, buildFreePriceGuard({
     connection: candidate.connection, freeOnly: candidate.freeOnly,
     catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
     snapshotIdentityBudget(snapshot.budget));
@@ -135,7 +138,19 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     if (polling) return;
     polling = true;
     void repository.heartbeat(job.id, options.workerId, job.claim_epoch, options.leaseMs)
-      .then((owned) => { if (!owned) { lost = true; controller.abort(); } })
+      .then(async (owned) => {
+        if (owned) return;
+        // 租约过期不等于被接管：claim 只领取 PENDING，不会抢占 RUNNING。事件循环被长批处理
+        // 或系统暂停拖过 60s 租约时，只要 status/worker/claim_epoch 仍是自己就续租继续，
+        // 不能把整批已完成的工作按「丢失」丢弃；已被 expireLeases 判 FAILED、被他人接管或
+        // 用户已请求取消时保持原有丢失语义。
+        const row = await repository.request(job.id);
+        if (row?.status === 'COMPLETED') return;
+        if (row?.status === 'RUNNING' && row.worker_id === options.workerId &&
+            row.claim_epoch === job.claim_epoch && row.cancel_requested === false &&
+            await repository.renewLease(job.id, options.workerId, job.claim_epoch, options.leaseMs)) return;
+        lost = true; controller.abort();
+      })
       .catch(() => { lost = true; controller.abort(); }).finally(() => { polling = false; });
   }, Math.max(100, Math.min(1000, Math.floor(options.leaseMs / 3))));
   try {
@@ -162,6 +177,9 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
         batch.base_checkpoint_id === null && after !== (state?.cleared_through_seq ?? 0n))) {
       throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
     }
+    // P0：先取数据库时钟，再读历史。发布前若期间发生撤回（只写 withdrawn_at，不 bump
+    // revision），这份摘要就不能发布——它可能仍带着用户已撤销的要求。
+    const historyReadAt = await r.assistMemory.now();
     const history = await r.assistMemory.history(session.id, after, job.through_seq,
       batch === null ? 10001 : MEMORY_BATCH_MESSAGES + 1);
     if (history.length > 10000 || memoryHistoryFingerprint(history) !== job.source_sha256 ||
@@ -233,6 +251,9 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     if ((await repository.request(job.id))?.cancel_requested) throw new AssistMemoryUnavailable('MEMORY_CANCELLED');
     if (lost || options.signal?.aborted) return { requestId: job.id, status: 'DISCARDED', errorCode: null };
     const summary = parseSummary(recorded.result);
+    // P1：摘要发布前的确定性质量门。失败即请求 FAILED、原始消息全部保留，不静默发布。
+    const quality = assessMemorySummary({ summary, previousSummary: previous?.summary ?? null, content });
+    if (!quality.ok) throw new AssistMemoryUnavailable(quality.code);
     const checkpointId = randomUUID();
     const committed = await withTransaction(db, async (tx) => {
       if ((await readAdmission(tx, 'share')).mode !== 'NORMAL') return false;
@@ -247,6 +268,9 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
           currentSession.revision !== job.session_revision || (currentState?.revision ?? 0n) !== job.memory_revision ||
           (settings?.revision ?? 0n) !== job.settings_revision || authority?.revision !== job.authority_revision ||
           authority.context_revision !== job.context_revision) return false;
+      if (await tx.assistMemory.withdrawnAfter(session.id, job.through_seq, historyReadAt)) {
+        throw new AssistMemoryUnavailable('MEMORY_SOURCE_CHANGED');
+      }
       for (let offset = 0; offset < sources.size; offset += 20) {
         if (!(await recheckAssistSources(tx, options.storage, currentSession,
           [...sources.values()].slice(offset, offset + 20))).available) return false;
