@@ -13,7 +13,9 @@ serde_json = "=1.0.149"
 # `unstable` 只解锁 `Window::add_child` / `WebviewBuilder`（Tauri 官方标注的实验 API），
 # 不引入新 crate：tauri-runtime-wry 的同名 feature 是空列表，锁文件不变。
 # 内置网页预览依赖它创建原生子 WebView，见 src/preview_webview.rs。
-tauri = { version = "=2.11.6", features = ["unstable"] }
+# `tray-icon` 是 Tauri 2 的可选 feature：不开启时 `tauri::tray` 模块整体不存在，
+# 系统托盘也不会被创建（Windows 通知区域看不到 Relay 图标）。见 src/lib.rs 的 create_tray。
+tauri = { version = "=2.11.6", features = ["unstable", "tray-icon"] }
 tauri-plugin-dialog = "=2.7.2"
 uuid = { version = "=1.20.0", features = ["v4"] }
 

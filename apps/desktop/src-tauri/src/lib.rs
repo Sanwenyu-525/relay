@@ -1110,6 +1110,75 @@ fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), Str
     Ok(())
 }
 
+/// 系统托盘：进程存活期间常驻。左键单击还原并聚焦主窗口，右键菜单提供显示/退出。
+///
+/// 图标必须用接近通知区域实际像素的位图：`default_window_icon()` 在 Windows 上取
+/// `icon.ico` 的第一个条目（256×256），Windows 会把 256 px 硬缩到 16/20 px，边缘严重插值发糊。
+/// 这里按窗口缩放因子从 ICO 的 16/20/24/32 变体（icons/tray-*.rgba）选最接近的原始 RGBA，
+/// 使 100%/125%/150%/200% 缩放下的托盘位图不需要被系统重采样。
+fn create_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let scale_factor = app
+        .get_webview_window("main")
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0);
+    let icon = tray_icon(scale_factor);
+    let show = MenuItem::with_id(app, "tray-show-main", "显示主窗口", true, None::<&str>)
+        .map_err(|_| "cannot build the tray menu item".to_owned())?;
+    let quit = MenuItem::with_id(app, "tray-quit", "退出", true, None::<&str>)
+        .map_err(|_| "cannot build the tray menu item".to_owned())?;
+    let menu = Menu::with_items(app, &[&show, &quit])
+        .map_err(|_| "cannot build the tray menu".to_owned())?;
+    TrayIconBuilder::with_id("relay-tray")
+        .icon(icon)
+        .tooltip(WINDOW_TITLE)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray-show-main" => reveal_main_window(app),
+            "tray-quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left, button_state: MouseButtonState::Up, ..
+            } = event {
+                reveal_main_window(tray.app_handle());
+            }
+        })
+        .build(app)
+        .map(|_| ())
+        .map_err(|_| "cannot create the Relay Agent tray icon".to_owned())
+}
+
+/// Windows 通知区域以 16 px 逻辑尺寸渲染：100% → 16 px、125% → 20 px、150% → 24 px、200% → 32 px。
+/// 选不小于目标尺寸的最小变体，避免系统对托盘位图做重采样。
+fn tray_icon(scale_factor: f64) -> tauri::image::Image<'static> {
+    const VARIANTS: [(u32, &[u8]); 4] = [
+        (16, include_bytes!("../icons/tray-16.rgba")),
+        (20, include_bytes!("../icons/tray-20.rgba")),
+        (24, include_bytes!("../icons/tray-24.rgba")),
+        (32, include_bytes!("../icons/tray-32.rgba")),
+    ];
+    let target = (16.0 * scale_factor).round().max(1.0) as u32;
+    let (size, rgba) = VARIANTS
+        .iter()
+        .find(|(size, _)| *size >= target)
+        .copied()
+        .unwrap_or(VARIANTS[VARIANTS.len() - 1]);
+    tauri::image::Image::new(rgba, size, size)
+}
+
+fn reveal_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg(windows)]
 fn show_error(message: &str) {
     unsafe {
@@ -1150,6 +1219,10 @@ pub fn run() {
                 .ok_or_else(|| "invalid API port".to_owned())?;
             app.manage(preview_webview::PreviewHost::new(api_port, state.data_root.clone()));
             create_window(&handle, &state)?;
+            // 托盘失败不阻断主窗口：只记录原因，避免托盘问题把整个桌面应用拖垮。
+            if let Err(error) = create_tray(&handle) {
+                eprintln!("Relay Agent tray icon: {error}");
+            }
             // 电脑操控 Overlay（migration 0096）：轮询 API 的操控状态并驱动透明
             // 置顶穿透窗口与全局 Esc。轮询失败只降级为不显示，不影响主窗口。
             control_overlay::spawn(handle.clone(), state.base_url.clone(),
