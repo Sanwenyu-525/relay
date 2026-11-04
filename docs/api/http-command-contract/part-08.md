@@ -124,16 +124,17 @@ Windows 安装应用与真实 Provider 未验。
 
 - **撤回范围**：目标用户消息及其后本会话关联、已确认 APPLIED 的文件效果，按路径归并到各自**最早写入前像**；直接会话写（`session_tool_calls` → `logical_operations`）与委派执行（`conversation_execution_requests` → Run → `change_set_files`）都计入。目标消息与其直接助手回复在终态同时写 `withdrawn_at`；原文、工具记录与原回复仍可读取。
 - **只允许完成态**：消息须为 USER、`COMPLETED`、未撤回，会话 `ACTIVE`，存在直接助手回复，目标 seq 之后没有非终态消息/未结算工具调用/在途 Run。否则 409 `INVALID_TRANSITION`。方向规则已按 2026-10-24 用户拍板**放开**（§27.3.5）：完成一次撤回后可再撤更早消息，预检把已结算撤回的恢复效果按结算时序折入「当前仍生效状态」重算（`conflict.recallPaths` 仍逐路径给出冲突原因）。
-- **前像与预检**：前像在每次写入真正落盘前按消息采集、首写优先；`CREATE` 且此前不存在时可用「不存在」事实作基线。预检对每个路径比较当前态、最近一次已确认写入的期望态与基线态；任一 `CONFLICT`/`UNAVAILABLE`/`UNCERTAIN` 时整组不写，返回 409 `RECALL_PREFLIGHT_BLOCKED`，`conflict.recallPaths` 逐路径给出 `path｜status｜reason`。单文件前像上限 8 MiB（`MAX_MESSAGE_PREIMAGE_BYTES`），超限/读取失败/非普通文件只把该路径标为不可恢复，不改变原写入准入。
+- **写前保护（2026-11-04 AGENT-FILE-CONTEXT-V3，迁移 0159）**：撤回与恢复的事实来源是「Relay 自己每次真实写入前的前像」，不再是「每条消息发送前整目录基线」。消息准入不再扫描受管根、不再建立整目录快照。每次写入在 Gateway prepare 内按 `logical_operations` 采集：确认真实目标 → 路径在受管根内 → 取当前版本 → 完整 SHA-256 → 与 Operation 行同事务持久化 `file_write_preimages`（`operation_id + relative_path` 一行；`CREATE` 记 `existed=false`），落库成功后才允许执行写入，**不存在「先写后补快照」**。读取在事务外完成（文件 I/O 不进长事务），持久化与 fail-closed 判定在同一事务内。`MODIFY`/`DELETE` 等非 `CREATE` 路径无法保护（`CONTENT_TOO_LARGE`/`TARGET_NOT_REGULAR`/`READ_FAILED`/`CAPACITY_FULL`/`ROOT_UNAVAILABLE`）时拒绝写入（409 `GATEWAY_PREIMAGE_UNAVAILABLE`）；派发前按 Operation 复核每路径前像（`PREIMAGE_MISSING`/`PREIMAGE_UNAVAILABLE`），不明确即保持 UNKNOWN，不盲重试。字节仍进内容寻址库 `assist_message_snapshot_blobs`，不建第二套文件写入账本；预算沿用消息快照的文件数与容量限额，不与模型 Token 档位绑定。
+- **撤回预检**：预检对每个路径比较当前态、最近一次已确认写入的期望态与前像态；任一 `CONFLICT`/`UNAVAILABLE`/`UNCERTAIN` 时整组不写，返回 409 `RECALL_PREFLIGHT_BLOCKED`，`conflict.recallPaths` 逐路径给出 `path｜status｜reason`。单文件上限沿用 `MAX_MESSAGE_PREIMAGE_BYTES`（8 MiB），超限/读取失败/非普通文件只把该路径标为不可恢复（`PREIMAGE_UNAVAILABLE`），不改变原写入准入，但该路径不再声称「可自动撤销」。
 - **执行与终态**：首个恢复写入前按路径保存当前字节作为保护副本；保护副本不可用（含工作区快照预算占满）则整次撤回不执行并逐文件标 `SKIPPED`，不写半个回退。恢复经既有 `executeFileChangeset`（`contentBytes` 支持二进制），逐文件状态为 `RESTORED / ALREADY_RESTORED / CONFLICT / UNAVAILABLE / FAILED / SKIPPED`；回执状态为 `RUNNING / COMPLETED / PARTIAL / FAILED`。执行中首个失败后剩余路径标 `SKIPPED`，不继续写。
 - **幂等与接续**：同一 `workspace_id + command_id` 重放原回执（`replayed=true`）；同一消息已有撤回时返回该回执；并发 RUNNING 返回 409 `RECALL_IN_PROGRESS`；RUNNING 心跳超过 60 秒（`RECALL_STALE_RUNNING_MS`）可按同一回执认领接续，不新建第二次撤回。过期 RUNNING 也挡新消息，按原回执重发即可续接。
 - **单层撤销**：只接受 `COMPLETED` 且仍有保护副本的最近一次成功撤回；范围仅限该次实际 `RESTORED` 的文件。预检按「目标态＝保护副本态 / 期望态＝撤回结果态 / 其余＝冲突」三分，任一冲突或副本缺失即 409 `RECALL_UNDO_PREFLIGHT_BLOCKED` 且不写文件；并发 409 `RECALL_UNDO_IN_PROGRESS`；同一命令/同一撤回重放原回执。撤销是新的受控动作，不复活旧 Run、DONE、批准或 PASS，也不提供对撤销的再撤销。
 - **快照设置**：`retention_days` 与 `capacity_bytes` 读取进程环境 `RELAY_MESSAGE_SNAPSHOT_RETENTION_DAYS` / `RELAY_MESSAGE_SNAPSHOT_BUDGET_BYTES`（默认 30 天 / 5 GiB）；`per_file_cap_bytes` 为 8 MiB；`usage_bytes` 统计该工作区前像＋保护副本的实际字节，`oldest_snapshot_at` 是可恢复时段的当前最旧快照。撤回/撤销入口会先触发**全局**过期清理（超过保留期且不被在途撤回/撤销引用）；容量占满时停止新增快照并如实降级，不删既有快照腾空间。数值仍是推荐默认，未经真实 Windows 项目测量校准。
-- **基线语义（2026-10-24 用户拍板后已返工）**：恢复目标读**发送前基线**——目标用户消息在准入事务内对受管根建立的字节基线（`assist_message_baselines`，条目在 `assist_message_baseline_files`，字节在内容寻址库 `assist_message_snapshot_blobs`，同内容跨消息去重）；COMPLETE 基线下无条目＝发送前不存在，INCOMPLETE（采集超限/预算占满/存储失败）下缺条目按 `BASELINE_UNKNOWN`/不可恢复如实处理。发送后、首写前的外部修改不再被当作发送前状态（RA-10 判定性场景通过）。前像表已移除。另：一次撤回只接受单一受管根（跨根 409 `RECALL_MULTIPLE_ROOTS`，会话根不可用/变化分别为 `RECALL_ROOT_UNAVAILABLE` / `RECALL_ROOT_CHANGED`）；目标 seq 之前已写入、之后未再次写入的路径不在本次范围；受影响 DONE 任务重开（BC-16）服务侧已接线（撤回结算后按「实际恢复路径 ∩ 委派写入」判定、仅 DONE 沿既有 `reopenTask` 入口进新验收周期、失败逐项写 `detail.task_reopens`），e2e 因委派执行链的存量回归（#140 计量包裹，`conversation-diff-attribution` 同红）暂以带因 skip 跟踪；工作台撤销按钮尚未接线。
+- **历史整目录基线（只读兼容）**：迁移 0159 之前按「发送前基线」建立的记录原样保留（`assist_message_baselines`、`assist_message_baseline_files`，字节仍在 `assist_message_snapshot_blobs`，同内容跨消息去重），仅用于**历史消息**的读取与恢复；不删除历史字节，也不把旧「发送前快照」当成新的「变更前快照」。撤回行以 `assist_message_recall_files.snapshot_source` 区分 `PRECISE_PREIMAGE`（新）与 `LEGACY_MESSAGE_BASELINE`（旧）；COMPLETE 基线下无条目＝发送前不存在，INCOMPLETE（采集超限/预算占满/存储失败）下缺条目按 `BASELINE_UNKNOWN`/不可恢复如实处理。无恢复证据的历史操作只能显示「无法自动恢复」，不得声称可撤销。发送后、首写前的外部修改不再被当作发送前状态（RA-10 判定性场景通过）。一次撤回只接受单一受管根（跨根 409 `RECALL_MULTIPLE_ROOTS`，会话根不可用/变化分别为 `RECALL_ROOT_UNAVAILABLE` / `RECALL_ROOT_CHANGED`）；目标 seq 之前已写入、之后未再次写入的路径不在本次范围；受影响 DONE 任务重开（BC-16）服务侧已接线（撤回结算后按「实际恢复路径 ∩ 委派写入」判定、仅 DONE 沿既有 `reopenTask` 入口进新验收周期、失败逐项写 `detail.task_reopens`），e2e 因委派执行链的存量回归（#140 计量包裹，`conversation-diff-attribution` 同红）暂以带因 skip 跟踪；工作台撤销按钮尚未接线。
 - **消息投影**：会话消息 DTO 增加 `withdrawn_at`（ISO 或 null）与 `recall` 摘要（`id/message_id/assistant_message_id/status/planned_files/restored_files/skipped_files/completed_at`，无撤回为 null）。原文和附件仍返回，客户端按 `withdrawn_at` 显示撤回占位。
 - **模型上下文**：撤回终态后，下一轮输入把被撤回的用户/助手消息替换为成对占位，并追加撤回回执事实行（实际恢复结果、未决项）；旧回复与旧摘要只作为历史来源，不再作为当前文件事实。恢复期间新消息被原命令入口的同一道闸拒绝（返回 409 `RECALL_IN_PROGRESS`）。
 
-**错误码汇总**：`RECALL_PREFLIGHT_BLOCKED`、`RECALL_EFFECT_UNCERTAIN`（存在 UNKNOWN 工具调用/变更集）、`RECALL_IN_PROGRESS`、`RECALL_MULTIPLE_ROOTS`、`RECALL_ROOT_UNAVAILABLE`、`RECALL_ROOT_CHANGED`、`RECALL_UNDO_PREFLIGHT_BLOCKED`、`RECALL_UNDO_IN_PROGRESS`、`COMMAND_ID_REUSED`、`INVALID_TRANSITION`。除重放外均不改变文件；响应沿用统一 problem 形状。
+**错误码汇总**：`RECALL_PREFLIGHT_BLOCKED`、`RECALL_EFFECT_UNCERTAIN`（存在 UNKNOWN 工具调用/变更集）、`RECALL_IN_PROGRESS`、`RECALL_MULTIPLE_ROOTS`、`RECALL_ROOT_UNAVAILABLE`、`RECALL_ROOT_CHANGED`、`RECALL_UNDO_PREFLIGHT_BLOCKED`、`RECALL_UNDO_IN_PROGRESS`、`COMMAND_ID_REUSED`、`INVALID_TRANSITION`、`GATEWAY_PREIMAGE_UNAVAILABLE`（写前无法保护前像时拒绝破坏性写入）、`PREIMAGE_MISSING`／`PREIMAGE_UNAVAILABLE`（派发前前像复核失败，动作不执行）。除重放外均不改变文件；响应沿用统一 problem 形状。
 
 
 ### 10.112 人工受管目录浏览与文件读取（2026-10-24 源码实现，迁移 0134）
@@ -231,6 +232,7 @@ ADR-034 包 B 的服务端记录面：消息只是协作记录，投递不等于
 | `PATCH /model-connections/{connection_id}` | `UpdateModelConnection`，revision CAS |
 | `POST /model-connections/{connection_id}/credential` | `RotateModelConnectionCredential` |
 | `POST /model-connections/{connection_id}/status` | `SetModelConnectionStatus`（`ACTIVE`/`DISABLED`） |
+| `POST /model-connections/probe` | 草稿「测试连接」：真实短探针，不落连接、不落账本、不落凭据（见 [§10.135](#10135-模型配置极简化与双协议支持2026-11-04-源码实现迁移-0160)） |
 
 - **凭据永不入库**：请求体的 `api_key` 只出现一次，服务端落进操作系统凭据库（Windows DPAPI，当前用户作用域），业务表只保留不透明引用 `credential_ref`。响应、列表、错误详情、命令回执都**不含**密钥、密文、摘要或引用；`command_id` 的载荷摘要也不含 `api_key`。
 - **轮换覆盖同一引用**：`credential_version + 1`、`revision + 1` 与秘密覆盖在同一次调用完成。代数变化是「凭据已换」的权威信号（冻结在旧代上的调用据此停止），而不是靠「文件不存在」这种含糊信号；不换引用就没有孤儿 blob 要清理。
@@ -545,7 +547,7 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
   }
 }
 ```
-`latest_call` 在没有 PRIMARY 调用行时为 `null`；`call_count` 是该消息已登记的 PRIMARY 调用次数（工具续轮各算一次）。辅助外呼（`purpose='MEMORY_CAPTURE'|'MEMORY_COMPACT'`）按既有记账口径排除，不冒充本轮回复。
+`latest_call` 在没有 PRIMARY 调用行时为 `null`；`call_count` 是该消息已登记的 PRIMARY 调用次数（工具续轮各算一次），**`call_count=0` 是合法值**：消息已 `RUNNING`、上下文/记忆准备尚未登记模型请求时就返回 0 与 `latest_call=null`，DTO 最小值因此为 0（2026-11-04 AGENT-CORE-RELIABILITY-V2 修复：此前 schema `minimum: 1` 会让「生成已 RUNNING 但调用未登记」的消息列表响应 500）。辅助外呼（`purpose='MEMORY_CAPTURE'|'MEMORY_COMPACT'`）按既有记账口径排除，不冒充本轮回复。
 
 **阶段规则（全部由既有事实派生）。**
 - 消息已 `RUNNING`、还没有 PRIMARY 调用行 → `PREPARING_CONTEXT`：Worker 已领取，上下文/记忆准备尚未登记模型请求。`PENDING` 不属于这个阶段——它由消息状态表达「等待处理」。
@@ -554,7 +556,7 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
 - 最新调用 `STARTED`，有首文字增量 → `MODEL_OUTPUT`：结构化信封可能仍在等待安全投影，界面只说「已收到模型输出」，不提前形成业务结论。
 - 最新调用已结算而消息仍 `RUNNING` → `PROCESSING`：正在派发工具或准备续轮；工具成败仍只由 `session_tool_calls`/Gateway 账本说话。
 
-**首流事件接线。** 默认兼容端口的 A 档、普通主循环、工具续轮、人设助手只读轮次（B 档）、子 Agent 与学习轮次现在每次真实调用都传 `onStreamEvent`，写 `first_stream_event_at`；B 档同时补 `model_calls` 行（此前默认端口直接调用 `modelPort.assist`，没有调用计量）。免费路由已有自己的包装，重复观测因 `first_stream_event_at is null` 的条件 UPDATE 成为空操作。证据写入失败只丢这一枚时间，不把成功调用改判为失败，也不吞掉业务异常。
+**首流事件接线。** 默认兼容端口的 A 档、普通主循环、工具续轮、人设助手只读轮次（B 档）、子 Agent 与学习轮次现在每次真实调用都传 `onStreamEvent`，写 `first_stream_event_at`；B 档同时补 `model_calls` 行（此前默认端口直接调用 `modelPort.assist`，没有调用计量）。免费路由已有自己的包装，重复观测因 `first_stream_event_at is null` 的条件 UPDATE 成为空操作。证据写入失败只丢这一枚时间，不把成功调用改判为失败，也不吞掉业务异常。该观测位于 Provider 流回调内：2026-11-04 起**有界化**（500 ms 上限，超时后原写入在后台继续完成），数据库瞬时变慢时不再把观测写入变成正文增量的阻塞点；超时/失败都不改判业务调用，审计仍以最终落库结果为准。
 
 **诊断口径。** 客户端在阶段行下就地展开只读读数：提交→模型请求登记（含排队与上下文准备）、请求→首流、首流→首正文、首正文→预览可见、请求→调用结算；Worker 领取时刻为「未记录（排队与上下文准备合并计算）」，前端首次绘制为「本机未观测」。**不得把消息总耗时当作模型推理耗时**，也不混算服务端与本机时钟。
 
@@ -562,7 +564,7 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
 
 Breaking Change: **No**——纯追加可选只读字段；旧客户端忽略即可，命令、表、权限、结算与恢复语义均不变。
 
-**证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` 追加的流式观测用例 **1/1**（`run-integration.ps1 -TestFile assist -TestNamePattern "stream observation times"`，临时集群 PASSED 并清理）核对首流、首文本、首预览、结算四枚时间落库且辅助外呼不混入；组件 `generationStage` **8/8**、`assistStage` **3/3**（阶段文案、诊断、PENDING、草稿接管、取消）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、诊断展开、窄窗无溢出、减少动效三点静止）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。
+**证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间；2026-11-04 追加 `call_count=0` 与 FAILED/CANCELLED 结算投影）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` **53/53**（含「`generation_progress` 接受 `call_count=0` 及全部边界」与流式观测：首流、首文本、首预览、结算四枚时间落库，辅助外呼不混入；临时集群 PASSED 并清理，日志 `tmp/AGENT-CORE-RELIABILITY-V2/integration-assist.log`）；组件 `generationStage` **8/8**、`assistStage` **3/3**（阶段文案、诊断、PENDING、草稿接管、取消）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、诊断展开、窄窗无溢出、减少动效三点静止）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。
 
 ### 10.132 会话标题的来源与系统命名（2026-11-01 源码实现，迁移 0157）
 
@@ -653,3 +655,25 @@ Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调�
 **按连接验证。** `POST /model-port/verify` 与 `GET /model-port/verification` 新增可选目标 `{connection:'registered', connection_id}`（格式非法 400 `MODEL_VERIFY_TARGET_INVALID`，连接不存在 404 `MODEL_VERIFY_CONNECTION_UNAVAILABLE`）。验证仍只发送固定 `VERIFY_PROMPT`、非流式、带超时，不携带聊天、项目资料或工具上下文；外呼仍走 `guardedModelFetch`（HTTPS、DNS 与重定向防护），HTTP 可达不等于模型可调用。判定按连接归属：同 provider 同型号的两条连接各自有 `target_last` 与 `state`，成功互相不冒充；轮换 Key 后旧结论变 `CREDENTIAL_CHANGED` / `UNVERIFIED`，必须重新验证；缺凭据或凭据存储不可用时在**外呼前**显式拒绝且不写 VERIFY 账本。
 
 **证据。** 迁移 `migration` **14/14**；真实 PG18.6 + HTTP `chat-model-connection.integration.test` **8/8**（会话选择冻结连接身份并按连接外呼、改默认不影响在途；轮换 / 停用 / 改型号三种排队消息类型化停止且零外呼；同型号同 Provider 的两条连接验证互不冒充、轮换后失效、重验恢复；缺凭据与存储不可用不外呼不落账；聊天默认可写可读、命令重放不推进 revision、可取消且跨工作区不可见；聊天默认决定新会话冻结、显式选择优先、Run 默认独立、取消回进程默认）；`session-model-selection` **11/11**、`model-connections` **7/7**、`model-verify` **8/8**、`run-model-connection` **4/4**、`assist-model-runtime` **2/2**。规则归 [ADR-036](../../decisions/ADR-036-multi-provider-model-connections.md)、[工作台 §27.5](../../frontend/workbench-design/part-09.md#275-免费模型分组与模型选择)、[设置中心](../../frontend/workbench-design/part-02.md#7-视觉与可访问性基线)。
+
+### 10.135 模型配置极简化与双协议支持（2026-11-04 源码实现，迁移 0160）
+
+**Breaking Change: Yes（受限）。** `model_connections.provider_kind` 的取值域从 `{openai-compatible}` 扩大为 `{openai-compatible, anthropic-messages}`；`POST/PATCH /model-connections` 新增可选 `protocol`；新增 `POST /model-connections/probe`。既有 `openai-compatible` 行、指纹算法与端点语义不变。
+
+**协议是显式持久化字段，不猜。** 迁移 0160 只扩充 `provider_kind` 的 CHECK，并把注释改成「API 协议（不是品牌）」：`openai-compatible` = POST `{base}/chat/completions` + `Authorization: Bearer`；`anthropic-messages` = POST `{base}/messages` + `x-api-key` + `anthropic-version: 2023-06-01`、顶层 `system`、`max_tokens` 必填、工具声明用 `input_schema`、流以 `message_stop` 结束（没有 `data: [DONE]`）。协议**不**由品牌、Base URL 或型号推断；创建、编辑、探针都要求调用方给出 `protocol`（缺省仍是 `openai-compatible`，旧客户端行为不变）。
+
+**指纹包含协议。** `computeModelConfigFingerprint` 对 `anthropic-messages` 把 `protocol` 写进哈希输入；`openai-compatible` 保持历史哈希形状，因此既有冻结快照与会话选择不因本迁移失效。两种取值间切换必然改指纹：执行端以 `MODEL_CONFIG_CHANGED`（`scope=PROTOCOL`）停止，旧快照不会被重新解释成另一种协议。冻结快照的候选连接新增可选 `protocol` 键，解析时要求它与 `provider` 一致。
+
+**双协议共用一套执行系统。** `createModelPort()` 按 `protocolOf(config)` 分派 `OpenAiCompatibleModelPort` 或 `AnthropicMessagesModelPort`；聊天、Run 执行、压缩/自动提取、草稿辅助与连接验证都走同一个入口，API 进程与 Worker 因此使用同一冻结协议与同一份凭据。两种端口共享 `ModelPort`/`AssistModelPort`/`ComposerDraftPort` 接口、预算/超时/工具输出错误类、系统提示词与工具声明。Anthropic 端口支持文本、流式增量、图片输入、工具调用（含流式参数增量）、取消、超时/HTTP 错误分类与 Token 用量（含缓存读写）。
+
+**能力边界（明确拒绝，不静默降级）。** Anthropic Messages 没有 `response_format=json_object`：提案 JSON、学习信封、草稿辅助、请求解释在**外呼之前**抛 `ModelCapabilityUnsupportedError`，不假装设置过格式约束。语义验收改用提示词约束 + 严格解析（解析失败是检查器故障，不等于 PASS）。
+
+**验证边界（P0）。**
+- 已登记连接的验证状态只读**本工作区**的最近 VERIFY（`latestVerifyForWorkspace`），另一个工作区的探测结论不会出现在这条连接上；`target_last` 仍按 `connection_id` 精确归属。
+- 停用连接在外呼与记账之前以 409 `MODEL_VERIFY_CONNECTION_DISABLED` 拒绝：**零外呼、零新 VERIFY 账本**。
+
+**草稿探针。** `POST /model-connections/probe` 体 `{protocol, base_url?, default_model, api_key, timeout_ms?}`，返回 `{ok, latency_ms, protocol, model, error_category, message}`。它只发一次固定短文本、非流式探针：不写 `model_connections`、不写系统凭据库、**不写 `model_calls`**（草稿没有连接身份，写进去会被读成某条连接的验证结论）。同名实例同时只允许一次探针，重复请求 409 `MODEL_VERIFY_IN_FLIGHT`。测试通过不等于「这条连接已验证」；保存后仍按连接身份验证。
+
+**优先级统一。** 会话显式选择 > 工作区聊天默认 > 进程默认；本机「上次使用的模型」不再参与发送，也不在新建会话时提交 `SelectSessionModel`。模型选择器新增「跟随工作区默认」条目，复用 `ClearSessionModelSelection`；芯片在没有显式选择时显示「跟随默认」，打开后写出解析到的默认来源（聊天默认连接声明的型号，未设置时为进程默认）。
+
+**证据。** 真实 PG18.6：`model-settings-03` **7/7**（协议持久化与指纹、改协议后旧快照 `ASSIST_MODEL_CONFIG_CHANGED`、停用验证零外呼零账本、跨工作区验证隔离、优先级与清除后回聊天默认、探针不落账本不落凭据）；既有 `model-connections` **7/7**、`chat-model-connection` **9/9**、`model-verify` **8/8**、`model-verify-target` **4/4**、`run-model-connection` **4/4**、`session-model-selection` **11/11**、`model-call-budget` **5/5**、`run-model-freeze*` **10/10**、`assist-free-model-routing` **3/3**。单元：`anthropic-messages-model-port` **15/15**、`model-verify-protocol` **3/3**、`model-port-config` 增补 3 项。前端：`modelConnectionsSettings` **18/18**、`modelSelector` **16/16**、`newConversationEntry` **17/17**、`assistantModeSwitch` **50/50**（受影响 spec 串行运行）。规则归 [ADR-036](../../decisions/ADR-036-multi-provider-model-connections.md)、[工作台 §27.5](../../frontend/workbench-design/part-09.md#275-免费模型分组与模型选择)。
