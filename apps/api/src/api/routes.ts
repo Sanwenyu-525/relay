@@ -109,7 +109,11 @@ export function registerRoutes(
   registerProjectReminderScheduler(app, dependencies);
   const taskChainRuntimeId=registerTaskChainScheduler(app,dependencies);
   registerScheduledTaskScheduler(app, dependencies);
-  registerBackgroundWorkScheduler(app, dependencies);
+  registerBackgroundWorkScheduler(app, {
+    database: dependencies.database, schemaReadiness: dependencies.schemaReadiness,
+    // 配置校验后的系统级执行并发上界（RELAY_MAX_CONCURRENT_EXECUTIONS，默认 4）。
+    concurrencyCap: dependencies.config.maxConcurrentExecutions,
+  });
   const apiDependencies: RouteDependencies = {
     database: dependencies.database,
     storage: new ManagedContentStore(dependencies.dataRoot),

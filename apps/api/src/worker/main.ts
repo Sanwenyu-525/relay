@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 
-import { validateDatabaseUrl } from '../config/config.js';
+import { validateDatabaseUrl, DEFAULT_MAX_CONCURRENT_EXECUTIONS } from '../config/config.js';
 import { applyCredentialEnvFromStore, CredentialEnvError } from '../credentials/credential-env.js';
 import { validateModelPortConfig } from '../workflow/model-port-config.js';
 import { FakeModelPort } from '../workflow/fake-model-port.js';
@@ -21,6 +21,8 @@ import { runConversationExecutionAutoStartTick }
   from '../application/conversation-execution-autostart.js';
 import { runAssistGoalTick } from '../application/goal-advance.js';
 import { runMemberWakeupTick } from '../application/member-wakeup.js';
+import { planExecutionAdmission, executionConcurrencyGateEnabled }
+  from '../application/execution-concurrency.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import { runOneCommand } from './run-command.js';
 import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
@@ -63,6 +65,10 @@ async function main(): Promise<void> {
   const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
   const pollMs = readInteger('RELAY_WORKER_POLL_MS', 250, 20, 60_000);
   const leaseMs = readInteger('RELAY_WORKER_LEASE_MS', 30_000, 100, 600_000);
+  // 系统级执行并发上界（runtime-context §2.12「并发上限」）：与常驻 API 同一 env，
+  // 非法值按配置错误拒绝（与其余 RELAY_WORKER_* 整数一致）。
+  const maxConcurrentExecutions = readInteger('RELAY_MAX_CONCURRENT_EXECUTIONS',
+    DEFAULT_MAX_CONCURRENT_EXECUTIONS, 1, 64);
   const fakeModelDelayMs = process.env.NODE_ENV === 'test'
     ? readInteger('RELAY_WORKER_TEST_MODEL_DELAY_MS', 0, 0, 60_000) : 0;
   const fileWriteEffectHoldMs = process.env.NODE_ENV === 'test' &&
@@ -98,6 +104,10 @@ async function main(): Promise<void> {
     const assistModelPort = modelConfig === undefined
       ? new FakeModelPort(fakeModelDelayMs)
       : createModelPort(modelConfig);
+    // test 环境默认不启用并发闸（既有崩溃用例遗留在途行会把闸变成抖动源）；
+    // 显式设置 RELAY_MAX_CONCURRENT_EXECUTIONS 即为显式开启。
+    const concurrencyGateActive = executionConcurrencyGateEnabled();
+    let throttled = false;
     while (!controller.signal.aborted) {
       const result = assistOnce ? undefined : await runOneCommand(database.executor, {
         workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,
@@ -168,13 +178,40 @@ async function main(): Promise<void> {
       }
       // 两种一次性入口各自只领取其对应的工作，持续 Worker 则处理两者。
       if (!once) {
-        const assist = await runAssistGenerationTick(database.executor, {
-          workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
-        });
-        if (assist !== undefined) {
-          process.stdout.write(`${JSON.stringify({ type: 'worker_assist_settled',
-            message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
-            ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
+        // 系统级并发闸（runtime-context §2.12「并发上限」）：只约束**新领取的执行**
+        // （会话生成、成员唤醒这两类模型调用）；控制意图收口（goal tick）与候选推进
+        // 不被闸住——用户取消不能排在容量后面。读不到在途数按不可执行处理，宁可
+        // 少一拍；被闸住的候选下一拍自然再试，这里只留一条可观测事实（状态变化时）。
+        const admission = concurrencyGateActive
+          ? await planExecutionAdmission(database.executor, maxConcurrentExecutions)
+          : { admitted: true as const, active: 0, cap: maxConcurrentExecutions };
+        if (!admission.admitted) {
+          if (!throttled) {
+            throttled = true;
+            process.stderr.write(`${JSON.stringify({ type: 'worker_execution_throttled',
+              active_executions: admission.active, concurrency_cap: admission.cap })}\n`);
+          }
+        } else {
+          throttled = false;
+          const assist = await runAssistGenerationTick(database.executor, {
+            workerId, storage, modelPort: assistModelPort, leaseMs, signal: controller.signal,
+          });
+          if (assist !== undefined) {
+            process.stdout.write(`${JSON.stringify({ type: 'worker_assist_settled',
+              message_id: assist.messageId, session_id: assist.sessionId, status: assist.status,
+              ...(assist.errorCode === null ? {} : { error_code: assist.errorCode }) })}\n`);
+          }
+          if (!assistOnce) {
+            // 0141 / ADR-034 包 C：成员消息唤醒。同一 tick 里有界推进——归档/停用/
+            // 外部成员不唤醒，租约清扫先于领取，回信只是协作记录不产生执行权。
+            const memberWakeup = await runMemberWakeupTick(database.executor, {
+              workerId, modelPort: assistModelPort, leaseMs, signal: controller.signal });
+            if (memberWakeup.processed.length > 0 || memberWakeup.requeued > 0 ||
+                memberWakeup.expiredFailed > 0) {
+              process.stdout.write(`${JSON.stringify({ type: 'worker_member_wakeup',
+                ...memberWakeup })}\n`);
+            }
+          }
         }
         if (!assistOnce) {
           const webImport = await runWebImportTick(database.executor, { signal: controller.signal });
@@ -205,15 +242,6 @@ async function main(): Promise<void> {
             process.stdout.write(`${JSON.stringify({ type: 'worker_goal_tick',
               advanced: goalTick.advanced, settled: goalTick.settled,
               controls: goalTick.controls })}\n`);
-          }
-          // 0141 / ADR-034 包 C：成员消息唤醒。同一 tick 里有界推进——归档/停用/
-          // 外部成员不唤醒，租约清扫先于领取，回信只是协作记录不产生执行权。
-          const memberWakeup = await runMemberWakeupTick(database.executor, {
-            workerId, modelPort: assistModelPort, leaseMs, signal: controller.signal });
-          if (memberWakeup.processed.length > 0 || memberWakeup.requeued > 0 ||
-              memberWakeup.expiredFailed > 0) {
-            process.stdout.write(`${JSON.stringify({ type: 'worker_member_wakeup',
-              ...memberWakeup })}\n`);
           }
         }
       }

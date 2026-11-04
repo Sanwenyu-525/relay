@@ -24,6 +24,8 @@ export interface ApiConfig {
   readonly dataRoot: string;
   readonly logLevel: LogLevel;
   readonly stopOnStdinEof: boolean;
+  /** 系统级执行并发上界（runtime-context §2.12「并发上限」缺口的最小准入）。 */
+  readonly maxConcurrentExecutions: number;
   readonly desktopMode?: boolean;
 }
 
@@ -32,6 +34,14 @@ const LOOPBACK_ORIGIN_HOSTS: readonly string[] = ['127.0.0.1', '[::1]', 'localho
 const LOG_LEVELS: readonly LogLevel[] = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'];
 const MINIMUM_BEARER_TOKEN_LENGTH = 32;
 const PLACEHOLDER_TOKEN_PREFIX = /^(replace|change|example|placeholder|your)/iu;
+/**
+ * 系统级执行并发上界的默认值。
+ *
+ * 设计拓扑本身的结构性宽度约为 3–6（API 的串行 tick + Supervisor 的两条派发车道），
+ * 默认上界设在它之上：正常拓扑不被闸扰动，异常的多进程/多 Worker 配置则被卡住。
+ * 需要更紧的预算时用 RELAY_MAX_CONCURRENT_EXECUTIONS 显式收紧。
+ */
+export const DEFAULT_MAX_CONCURRENT_EXECUTIONS = 8;
 
 export class ConfigError extends Error {
   readonly issues: readonly string[];
@@ -214,6 +224,35 @@ function readBoolean(
   return raw === 'true';
 }
 
+/** 可选整数：未设置返回 undefined（由调用方给默认值），设置了但不合法记 issue。 */
+function readOptionalInteger(
+  env: Record<string, string | undefined>,
+  name: string,
+  minimum: number,
+  maximum: number,
+  issues: string[],
+): number | undefined {
+  const raw = env[name];
+
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+
+  if (!/^\d+$/u.test(raw.trim())) {
+    issues.push(`${name} must be an integer between ${minimum} and ${maximum}`);
+    return undefined;
+  }
+
+  const value = Number.parseInt(raw.trim(), 10);
+
+  if (value < minimum || value > maximum) {
+    issues.push(`${name} must be an integer between ${minimum} and ${maximum}`);
+    return undefined;
+  }
+
+  return value;
+}
+
 interface PendingConfig {
   bindHost: string | undefined;
   port: number | undefined;
@@ -225,6 +264,7 @@ interface PendingConfig {
   dataRoot: string | undefined;
   logLevel: LogLevel | undefined;
   stopOnStdinEof: boolean | undefined;
+  maxConcurrentExecutions: number | undefined;
 }
 
 type ValidatedConfig = { readonly [Key in keyof PendingConfig]: NonNullable<PendingConfig[Key]> };
@@ -247,6 +287,7 @@ export function loadConfig(
     dataRoot: undefined,
     logLevel: undefined,
     stopOnStdinEof: undefined,
+    maxConcurrentExecutions: undefined,
   };
 
   const bindHost = readRequired(env, 'RELAY_API_BIND_HOST', issues);
@@ -345,6 +386,11 @@ export function loadConfig(
   }
 
   config.stopOnStdinEof = readBoolean(env, 'RELAY_API_STOP_ON_STDIN_EOF', issues);
+
+  // 未设置时给默认上界；设置了但越界按配置错误拒绝（与其余 RELAY_* 整数一致）。
+  config.maxConcurrentExecutions =
+    readOptionalInteger(env, 'RELAY_MAX_CONCURRENT_EXECUTIONS', 1, 64, issues) ??
+    DEFAULT_MAX_CONCURRENT_EXECUTIONS;
 
   if (issues.length > 0) {
     throw new ConfigError(issues);

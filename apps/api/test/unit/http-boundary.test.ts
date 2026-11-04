@@ -8,7 +8,7 @@ test('IPv6 loopback requests pass Host and Origin checks while other hosts and p
     bindHost: '::1', port: 8787, allowedOrigins: ['http://[::1]:5173'],
     bearerToken: 'a'.repeat(48), logLevel: 'fatal', dataRoot: '',
     databaseUrl: '', databasePoolMax: 1, databaseConnectTimeoutMs: 1000,
-    stopOnStdinEof: false,
+    stopOnStdinEof: false, maxConcurrentExecutions: 4,
   });
   app.get('/probe', async () => ({ ok: true }));
   try {
