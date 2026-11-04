@@ -398,6 +398,19 @@ export class ModelCallRepository {
   }
 
   /**
+   * 某工作区内最近的 VERIFY（MODEL-SETTINGS-03，P0-2）。
+   *
+   * 已登记连接是**工作区作用域**的事实：它的「最近一次验证」不能读到别的工作区的行，
+   * 否则 A 工作区的探测结果会出现在 B 工作区的连接卡片上。实例级 `latestVerify()`
+   * 只继续服务进程默认目标（那里实例本身就是作用域）。
+   */
+  async latestVerifyForWorkspace(workspaceId: string): Promise<ModelCallRow | undefined> {
+    return (await sql<ModelCallRow>`select * from model_calls where kind = 'VERIFY'
+      and workspace_id = ${workspaceId}
+      order by started_at desc, id desc limit 1`.execute(this.db)).rows[0];
+  }
+
+  /**
    * 指定验证目标（P1-4）的最近一行：按 provider + 确切型号过滤，**不**按配置指纹过滤。
    *
    * 这样「同一个型号、端点/预算变了」仍能读到上一行并显示为「指纹不符、需重新验证」；

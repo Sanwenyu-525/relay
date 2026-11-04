@@ -5,11 +5,13 @@ import { ModelCallRepository } from '../model/model-call-repository.js';
 import type { ModelUsage } from './fake-model-port.js';
 import {
   computeModelConfigFingerprint,
+  protocolOf,
   readModelPortConfig,
   readOpenRouterModelPortConfig,
   type ModelPortConfig,
 } from './model-port-config.js';
 import {
+  DEFAULT_ANTHROPIC_BASE_URL,
   DEFAULT_MODEL_BASE_URL,
   guardedModelFetch,
   parseModelBaseUrl,
@@ -109,12 +111,16 @@ export class ModelVerifyCallError extends Error {
  * 或目录快照过期导致免费资格无法确认。同样不发起外呼、不写账本。
  *
  * 0158 增加两种已登记连接的目标侧拒绝：连接不在当前工作区、凭据库里没有可用凭据。
+ * 0160（MODEL-SETTINGS-03）再加一种：连接已停用。停用连接不得被探测——「零外呼、零新
+ * VERIFY 账本」，而不是先发一次请求再解释失败。
+ *
  * 两者都用「可操作」的错误码，而不是退化成一次注定失败的外呼。
  */
 export class ModelVerifyTargetError extends Error {
   override readonly name = 'ModelVerifyTargetError';
   constructor(readonly code: 'MODEL_VERIFY_TARGET_NOT_ELIGIBLE' | 'MODEL_VERIFY_CATALOG_STALE'
-    | 'MODEL_VERIFY_CONNECTION_UNAVAILABLE' | 'MODEL_VERIFY_CREDENTIAL_MISSING'
+    | 'MODEL_VERIFY_CONNECTION_UNAVAILABLE' | 'MODEL_VERIFY_CONNECTION_DISABLED'
+    | 'MODEL_VERIFY_CREDENTIAL_MISSING'
     | 'MODEL_VERIFY_CREDENTIAL_STORE_UNAVAILABLE',
     message: string) {
     super(message);
@@ -173,6 +179,24 @@ export function resolveVerifyConfig(env: NodeJS.ProcessEnv): ModelPortConfig {
 
 export function classifyVerifyError(error: unknown): ModelVerifyErrorCategory {
   return classifyProviderErrorOrProtocol(error);
+}
+
+/**
+ * 生产验证外呼：按连接的**显式协议**分派，两种协议各发各自的原生请求。
+ *
+ * 这是 API 进程默认注入的验证端口；OpenAI 兼容走 `/chat/completions` + Bearer，
+ * Anthropic Messages 走 `/messages` + `x-api-key` / `anthropic-version`。两条路径都
+ * 非流式、固定短文本、短超时，并共用同一套错误分类与有界读取。
+ */
+export function createModelVerifyCall(
+  transport: ModelFetchDependencies = {},
+): VerifyCallPort {
+  const openAiCompatible = createOpenAiCompatibleVerifyCall(transport);
+  return {
+    call: async (input) => protocolOf(input.config) === 'anthropic-messages'
+      ? callAnthropicMessagesVerify(input, transport)
+      : openAiCompatible.call(input),
+  };
 }
 
 /**
@@ -239,6 +263,100 @@ export function createOpenAiCompatibleVerifyCall(
         usage: extractUsage(payload),
       };
     },
+  };
+}
+
+/**
+ * Anthropic Messages 的验证探针：POST {base}/messages，非流式短请求。
+ *
+ * 认证头与请求体都按 Anthropic 自己的协议发送——不把 Messages 请求伪装成
+ * Chat Completions，也不复用 OpenAI 的响应解析。
+ */
+async function callAnthropicMessagesVerify(input: {
+  readonly config: ModelPortConfig;
+  readonly prompt: string;
+  readonly timeoutMs: number;
+  readonly guard?: ProviderRoutingGuard | undefined;
+}, transport: ModelFetchDependencies): Promise<VerifyCallSuccess> {
+  const baseUrl = parseModelBaseUrl(input.config.baseUrl ?? DEFAULT_ANTHROPIC_BASE_URL);
+  const guarded = guardedModelFetch(baseUrl, transport,
+    { terminator: 'ANTHROPIC_MESSAGE_STOP' });
+  const fetchFn = input.guard === undefined ? guarded : withProviderGuard(guarded, input.guard);
+  let response: Response;
+  try {
+    response = await fetchFn(`${baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': input.config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: input.config.model,
+        messages: [{ role: 'user', content: input.prompt }],
+        stream: false,
+        max_tokens: VERIFY_MAX_OUTPUT_TOKENS,
+      }),
+      signal: AbortSignal.timeout(input.timeoutMs),
+      redirect: 'error',
+    });
+  } catch (error) {
+    if (error instanceof Error &&
+        (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      throw new ModelVerifyCallError('TIMEOUT', 'verify call timed out');
+    }
+    throw error;
+  }
+  if (!response.ok) {
+    throw new ModelVerifyCallError(categoryOfProviderStatus(response.status),
+      `verify call failed with HTTP ${response.status}`, '',
+      undefined, response.status === 404 ? 'MODEL_NOT_FOUND' : undefined);
+  }
+  let payload: unknown;
+  try {
+    payload = await readBoundedJson(response, VERIFY_RESPONSE_MAX_BYTES);
+  } catch (error) {
+    if (error instanceof BoundedResponseError) {
+      throw new ModelVerifyCallError('PROTOCOL', 'verify response exceeds the size limit');
+    }
+    throw new ModelVerifyCallError('PROTOCOL', 'verify response is not valid JSON');
+  }
+  if (extractAnthropicText(payload) === null) {
+    throw new ModelVerifyCallError('PROTOCOL', 'verify response is missing completion text');
+  }
+  return {
+    providerRequestId: extractProviderRequestId(payload),
+    usage: extractAnthropicUsage(payload),
+  };
+}
+
+/** Anthropic 的正文在 `content[]` 的 text 块里；没有任何 text 块即协议错误。 */
+function extractAnthropicText(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
+  const content = (payload as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null || Array.isArray(block)) continue;
+    const record = block as { type?: unknown; text?: unknown };
+    if (record.type === 'text' && typeof record.text === 'string') return record.text;
+  }
+  return null;
+}
+
+function extractAnthropicUsage(payload: unknown): ModelUsage {
+  const empty: ModelUsage = { inputTokens: null, outputTokens: null,
+    cacheReadTokens: null, cacheCreationTokens: null };
+  if (typeof payload !== 'object' || payload === null) return empty;
+  const usage = (payload as { usage?: unknown }).usage;
+  if (typeof usage !== 'object' || usage === null) return empty;
+  const count = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const record = usage as Record<string, unknown>;
+  return {
+    inputTokens: count(record.input_tokens),
+    outputTokens: count(record.output_tokens),
+    cacheReadTokens: count(record.cache_read_input_tokens),
+    cacheCreationTokens: count(record.cache_creation_input_tokens),
   };
 }
 

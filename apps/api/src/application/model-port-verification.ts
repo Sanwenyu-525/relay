@@ -49,6 +49,14 @@ async function resolveRegisteredVerifyTarget(db: DbExecutor, credentials: Creden
     throw new ModelVerifyTargetError('MODEL_VERIFY_CONNECTION_UNAVAILABLE',
       'model connection is not visible in this workspace');
   }
+  // MODEL-SETTINGS-03（P0-3）：停用连接不得被探测。
+  //
+  // 这里必须在任何记账与外呼之前拒绝：停用是用户的显式决定，为它发一次请求会让
+  // 「已停用」在账本上产生一条新的 VERIFY 结论，也会真的花用户的额度。零外呼、零新账本。
+  if (row.status !== 'ACTIVE') {
+    throw new ModelVerifyTargetError('MODEL_VERIFY_CONNECTION_DISABLED',
+      'model connection is disabled; no provider call is allowed for a disabled connection');
+  }
   let apiKey: string | undefined;
   try {
     apiKey = await connectionCredentials(credentials).resolve(row.credential_ref);
@@ -208,9 +216,11 @@ export async function readModelConnectionVerificationState(input: {
   }
   const currentFingerprint = config === undefined ? null : computeModelConfigFingerprint(config);
   const calls = new ModelCallRepository(input.db);
-  const globalRow = await calls.latestVerify();
+  // P0-2：已登记连接是工作区作用域的事实。`last` 只读**本工作区**的最近 VERIFY，
+  // 不读跨 Workspace 的全局行——否则别的工作区的探测结论会出现在这条连接的状态里。
+  const workspaceRow = await calls.latestVerifyForWorkspace(input.workspaceId);
   const targetRow = await calls.latestVerifyForConnection(input.workspaceId, input.connectionId);
-  const last = globalRow === undefined ? null : verifyResultFromRow(globalRow);
+  const last = workspaceRow === undefined ? null : verifyResultFromRow(workspaceRow);
   const targetLast = targetRow === undefined ? null : verifyResultFromRow(targetRow);
   const credentialIdentity = config === undefined || targetRow === undefined
     ? 'UNKNOWN' as const

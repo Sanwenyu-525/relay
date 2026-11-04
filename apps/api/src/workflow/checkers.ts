@@ -286,8 +286,8 @@ register(new HumanEvidenceChecker());
 // otherwise HARD SEMANTIC rules stay blocked at delegate time (no silent downgrade).
 const semanticModelConfig = readModelPortConfig(process.env);
 if (semanticModelConfig !== undefined) {
-  const { OpenAiCompatibleModelPort } = await import('./openai-compatible-model-port.js');
-  const modelPort = new OpenAiCompatibleModelPort(semanticModelConfig);
+  const { createModelPort } = await import('./model-port-factory.js');
+  const modelPort = createModelPort(semanticModelConfig);
   register(new ModelSemanticChecker(async ({ statement, content }, signal) =>
     modelPort.evaluate({ statement, content }, signal), modelPort.identity));
 }

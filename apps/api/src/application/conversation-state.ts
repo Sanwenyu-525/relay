@@ -15,7 +15,7 @@ import { interpretationStateMaintenanceSystemPrompt }
 import { FakeModelPort, type AssistModelPort, type AssistResult,
   type ConversationInterpretationRequest } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { listTaskArtifacts } from './artifact-queries.js';
 import { runIdempotentCommand, CommandIdReusedError, resolveExistingReceipt,
@@ -597,7 +597,7 @@ function interpretationUnavailable(code: string, detail: string): DomainError {
 
 function defaultModelPort(): AssistModelPort {
   const config = readModelPortConfig(process.env);
-  return config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+  return config === undefined ? new FakeModelPort() : createModelPort(config);
 }
 
 async function readSourceMessage(db: DbExecutor, messageId: string): Promise<string> {

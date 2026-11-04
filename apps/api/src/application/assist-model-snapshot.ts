@@ -2,11 +2,12 @@ import type { JsonObject } from '../infrastructure/json.js';
 import type { ModelCatalogEntryRow, SessionModelSelectionRow } from
   '../infrastructure/database-schema.js';
 import type { Repositories } from './unit-of-work.js';
-import { computeModelConfigFingerprint, readModelPortConfig,
-  readOpenRouterModelPortConfig, type ModelPortConfig } from '../workflow/model-port-config.js';
+import { computeModelConfigFingerprint, protocolOf, readModelPortConfig,
+  readOpenRouterModelPortConfig, type ModelPortConfig, type ModelProtocol } from
+  '../workflow/model-port-config.js';
 import { readCredentialFingerprint } from '../workflow/credential-identity.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
-import { OpenAiCompatibleModelPort, type ModelCallBudget } from
+import type { ModelCallBudget } from
   '../workflow/openai-compatible-model-port.js';
 import type { AssistModelPort } from '../workflow/fake-model-port.js';
 
@@ -151,7 +152,10 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
 export function freezeSingleCandidatePlan(config: ModelPortConfig,
   requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
   workspaceTokens: number | null): FrozenAssistModelPlan {
-  const candidate = candidateSnapshot({ provider: 'openai-compatible', model: config.model,
+  // 协议随配置一起冻结：执行端据此选择同一种协议的端口，且配置指纹已经把协议算进去，
+  // 因此改协议后旧快照必然失配（不会被重新解释成另一种协议）。
+  const candidate = candidateSnapshot({ provider: config.provider, model: config.model,
+    protocol: protocolOf(config),
     configFingerprint: computeModelConfigFingerprint(config) }, false, null);
   return withCredential(frozen([candidate], config, 1, requirements,
     planAssistModelBudget(config, workspaceTokens, null)), config);
@@ -185,6 +189,11 @@ function withCredential(plan: { readonly snapshot: JsonObject;
 
 export interface AssistModelCandidateSnapshot {
   readonly connection: { readonly provider: string; readonly model: string;
+    /**
+     * 协议（MODEL-SETTINGS-03）。`openai-compatible` 快照可以省略它（0143–0159 的既有
+     * 快照没有这个键）；`anthropic-messages` 必须显式出现，读不到就当快照无效。
+     */
+    readonly protocol?: ModelProtocol | undefined;
     readonly configFingerprint: string };
   readonly freeOnly: boolean;
   readonly catalogBasis: { readonly source: 'openrouter'; readonly snapshotSeq: string;
@@ -238,8 +247,19 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
         candidateConnection.model.toLowerCase() === 'openrouter/free') {
       throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
     }
-    if ((candidateConnection.provider !== 'openrouter' &&
-         candidateConnection.provider !== 'openai-compatible') ||
+    // MODEL-SETTINGS-03：协议是快照的一部分。provider 只决定解析路径与账本分组，
+    // 协议决定端口；两者不一致的快照直接判无效，不做「按 provider 猜协议」的兼容。
+    const declaredProtocol = candidateConnection.protocol;
+    const protocol = declaredProtocol === undefined
+      ? (candidateConnection.provider === 'anthropic-messages' ? 'anthropic-messages'
+        : 'openai-compatible')
+      : declaredProtocol;
+    if ((protocol !== 'openai-compatible' && protocol !== 'anthropic-messages') ||
+        (protocol === 'anthropic-messages') !==
+          (candidateConnection.provider === 'anthropic-messages') ||
+        (candidateConnection.provider !== 'openrouter' &&
+         candidateConnection.provider !== 'openai-compatible' &&
+         candidateConnection.provider !== 'anthropic-messages') ||
         typeof candidateConnection.model !== 'string' ||
         candidateConnection.model.trim() === '' || candidateConnection.model.length > 200 ||
         typeof candidateConnection.config_fingerprint !== 'string' ||
@@ -268,7 +288,7 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
     }
     return {
       connection: { provider: candidateConnection.provider, model: candidateConnection.model,
-        configFingerprint: candidateConnection.config_fingerprint },
+        protocol, configFingerprint: candidateConnection.config_fingerprint },
       freeOnly: object.free_only,
       catalogBasis,
     };
@@ -284,7 +304,8 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
       normalized.some((candidate) => candidate.connection.provider !==
         normalized[0]!.connection.provider) ||
       new Set(normalized.map((candidate) => candidate.connection.model)).size !== normalized.length ||
-      normalized[0]!.connection.provider === 'openai-compatible' &&
+      (normalized[0]!.connection.provider === 'openai-compatible' ||
+        normalized[0]!.connection.provider === 'anthropic-messages') &&
         (normalized.length !== 1 || maxAttempts !== 1) ||
       normalized[0]!.connection.provider === 'openrouter' &&
         normalized.some((candidate) => candidate.catalogBasis?.snapshotSeq !==
@@ -353,8 +374,11 @@ export function readAssistModelRouteStopCode(error: unknown): string | undefined
  */
 export function applySnapshotBudget(port: AssistModelPort,
   budget: ParsedAssistModelSnapshot['budget']): AssistModelPort {
-  if (!(port instanceof OpenAiCompatibleModelPort)) return port;
-  return port.withBudget(snapshotIdentityBudget(budget));
+  // 两种协议端口都实现 withBudget；按能力判断，Anthropic 连接也要按冻结档位外呼。
+  const budgeted = port as AssistModelPort & { withBudget?: (input:
+    ReturnType<typeof snapshotIdentityBudget>) => AssistModelPort };
+  return typeof budgeted.withBudget === 'function'
+    ? budgeted.withBudget(snapshotIdentityBudget(budget)) : port;
 }
 
 function frozen(candidates: readonly AssistModelCandidateSnapshot[],
@@ -370,6 +394,9 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
       minimum_context_window: config.maxCallTokens },
     candidates: candidates.map((candidate) => ({
       connection: { provider: candidate.connection.provider, model: candidate.connection.model,
+        // 只在非默认协议时写入：既有 openai 快照的键集保持不变，旧冻结不被改写。
+        ...(protocolOf(candidate.connection) === 'openai-compatible'
+          ? {} : { protocol: protocolOf(candidate.connection) }),
         config_fingerprint: candidate.connection.configFingerprint },
       free_only: candidate.freeOnly,
       catalog_basis: candidate.catalogBasis === null ? null : {

@@ -15,7 +15,7 @@ import {
   type ComposerDraftOperation,
 } from '../workflow/composer-draft.js';
 import type { ComposerDraftPort, ComposerDraftResult } from '../workflow/fake-model-port.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { readModelPortConfig, type ModelPortConfig } from '../workflow/model-port-config.js';
 import { DomainError } from './domain-error.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
@@ -243,5 +243,5 @@ function resolveComposerPort(env: NodeJS.ProcessEnv): ComposerDraftPort {
     throw composerDraftError('MODEL_PORT_NOT_CONFIGURED',
       '当前服务实例使用 Mock 模型端口，没有可用的真实模型配置；草稿与发送不受影响。');
   }
-  return new OpenAiCompatibleModelPort(config);
+  return createModelPort(config);
 }

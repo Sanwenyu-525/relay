@@ -5,7 +5,7 @@ import { describeModelPortStatus, hasOpenRouterChatConfig, readDeclaredImageInpu
 import {
   MODEL_VERIFY_ERROR_CATEGORIES,
   ModelVerifyConfigError,
-  createOpenAiCompatibleVerifyCall,
+  createModelVerifyCall,
   readModelVerificationState,
   type ModelVerifyResult,
   type VerifyCallPort,
@@ -299,6 +299,14 @@ function verifyTargetProblem(error: ModelVerifyTargetError): ProblemDetails {
       detail: '这条模型连接在当前工作区中不可见；请刷新设置页后重新选择。',
       code: 'MODEL_VERIFY_CONNECTION_UNAVAILABLE', retryable: false, retryAction: 'NONE' };
   }
+  if (error.code === 'MODEL_VERIFY_CONNECTION_DISABLED') {
+    return { type: '/problems/model-verify-connection-disabled', title: '连接已停用',
+      status: 409,
+      detail: '这条连接已停用，不会为它发起真实验证调用，也不写验证账本；'
+        + '请先启用连接再验证。',
+      code: 'MODEL_VERIFY_CONNECTION_DISABLED', retryable: false,
+      retryAction: 'REFRESH_AND_REDECIDE' };
+  }
   if (error.code === 'MODEL_VERIFY_CREDENTIAL_MISSING') {
     return { type: '/problems/model-verify-credential-missing', title: '连接缺少凭据',
       status: 409,
@@ -402,7 +410,7 @@ function capabilityJson(row: { readonly provider: string; readonly source_model_
  * 任何持本实例 Bearer 的客户端可见/可触发。响应永不包含密钥。
  */
 export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDependencies,
-  verifyCall: VerifyCallPort = createOpenAiCompatibleVerifyCall()): void {
+  verifyCall: VerifyCallPort = createModelVerifyCall()): void {
   const gate = new VerifyGate();
   app.get('/model-port', { schema: { params: ParamsSchema, response: { 200: StatusSchema } } },
     async (request, reply) => {

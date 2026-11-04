@@ -3,7 +3,7 @@ import type { DbExecutor } from '../infrastructure/database.js';
 import type { AssistMessageRow, MemorySourceKind } from '../infrastructure/database-schema.js';
 import type { AssistModelPort, AssistResult, ModelIdentity } from '../workflow/fake-model-port.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
 import { computeModelConfigFingerprint, readOpenRouterModelPortConfig } from
   '../workflow/model-port-config.js';
@@ -185,7 +185,9 @@ export async function resolveFrozenAssistModel(message: AssistMessageRow, input:
   if (candidate === undefined) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
   // 0158：消息冻结的是已登记连接时，按消息自己的连接身份重建端口（与主回复同一套闸门）。
   if (message.model_connection_id !== null) {
-    if (candidate.connection.provider !== 'openai-compatible') {
+    // 已登记连接可能是 OpenAI 兼容或 Anthropic Messages；协议由连接行与冻结指纹共同钉住。
+    if (candidate.connection.provider !== 'openai-compatible' &&
+        candidate.connection.provider !== 'anthropic-messages') {
       throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
     }
     const port = await resolveFrozenChatConnectionPort(createRepositories(input.db), {
@@ -211,8 +213,12 @@ export async function resolveFrozenAssistModel(message: AssistMessageRow, input:
       throw new Error('ASSIST_MODEL_CREDENTIAL_CHANGED');
     }
     // 0135：提取与主回复共用同一次冻结预算——工作区档位也要决定这一次外呼的实际上限。
-    const port = input.modelPort instanceof OpenAiCompatibleModelPort
-      ? input.modelPort.withBudget(snapshotIdentityBudget(snapshot.budget)) : input.modelPort;
+    // 两种协议端口都提供 withBudget；按能力判断而不是具体类，避免 Anthropic 端口在这里
+    // 被当成「没有预算能力」而静默沿用旧闸门。
+    const budgeted = input.modelPort as AssistModelPort & {
+      withBudget?: (budget: ReturnType<typeof snapshotIdentityBudget>) => AssistModelPort };
+    const port = typeof budgeted.withBudget === 'function'
+      ? budgeted.withBudget(snapshotIdentityBudget(snapshot.budget)) : input.modelPort;
     return { port, identity: port.identity };
   }
   const config = readOpenRouterModelPortConfig(input.modelEnv ?? process.env,
@@ -220,7 +226,7 @@ export async function resolveFrozenAssistModel(message: AssistMessageRow, input:
   if (computeModelConfigFingerprint(config) !== candidate.connection.configFingerprint) {
     throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
   }
-  const port = new OpenAiCompatibleModelPort(config, input.modelFetchDependencies ?? {},
+  const port = createModelPort(config, input.modelFetchDependencies ?? {},
     buildFreePriceGuard({ connection: candidate.connection, freeOnly: candidate.freeOnly,
       catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
     snapshotIdentityBudget(snapshot.budget));

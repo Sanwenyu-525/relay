@@ -1740,8 +1740,26 @@ export interface AssistMessageRecallFileRow {
   readonly observed_sha256: string | null;
   readonly status: AssistMessageRecallFileStatus;
   readonly reason: string | null;
+  /** 0159：该文件的恢复来源，精准写入前证据 / 旧整目录基线 / 无证据。 */
+  readonly snapshot_source: AssistRecallSnapshotSource;
+  /** 0159：精准证据所属写入动作。 */
+  readonly source_operation_id: string | null;
   readonly created_at: Date;
   readonly updated_at: Date;
+}
+
+export type AssistRecallSnapshotSource = 'PRECISE_PREIMAGE' | 'LEGACY_MESSAGE_BASELINE' | 'NONE';
+
+/** 0159：Prepare 阶段冻结的写入前精准保护证据（按动作 + 路径唯一）。 */
+export interface FileWritePreimageRow {
+  readonly operation_id: string;
+  readonly root_path: string;
+  readonly relative_path: string;
+  readonly existed: boolean;
+  readonly blob_sha256: string | null;
+  readonly size_bytes: bigint | null;
+  readonly unavailable_reason: string | null;
+  readonly created_at: Date;
 }
 
 /** 0132（§27.3.3）：撤回首个恢复写入前保存的当前内容（保护副本，单层撤销依据）。 */
@@ -1950,7 +1968,8 @@ export interface ModelConnectionRow {
   readonly id: string;
   readonly workspace_id: string;
   readonly name: string;
-  readonly provider_kind: 'openai-compatible';
+  /** API 协议（迁移 0160）：连接显式声明的协议，不是品牌。 */
+  readonly provider_kind: 'openai-compatible' | 'anthropic-messages';
   readonly base_url: string | null;
   readonly default_model: string;
   readonly timeout_ms: number;
@@ -2048,6 +2067,7 @@ export interface RelayDatabaseSchema {
   assist_message_snapshot_blobs: AssistMessageSnapshotBlobRow;
   assist_message_recalls: AssistMessageRecallRow;
   assist_message_recall_files: AssistMessageRecallFileRow;
+  file_write_preimages: FileWritePreimageRow;
   assist_message_recall_protections: AssistMessageRecallProtectionRow;
   assist_message_recall_undos: AssistMessageRecallUndoRow;
   run_draft_previews: RunDraftPreviewRow;

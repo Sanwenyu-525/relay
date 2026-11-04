@@ -30,6 +30,8 @@ export interface NewModelConnection {
   readonly id: string;
   readonly workspaceId: string;
   readonly name: string;
+  /** API 协议（迁移 0160）：连接自己声明的协议，不由品牌/URL 推断。 */
+  readonly providerKind: 'openai-compatible' | 'anthropic-messages';
   readonly baseUrl: string | null;
   readonly defaultModel: string;
   readonly timeoutMs: number;
@@ -43,6 +45,7 @@ export interface NewModelConnection {
 /** 可改字段。`undefined` 表示「本次不改」，与「改成 null」区分。 */
 export interface ModelConnectionPatch {
   readonly name?: string | undefined;
+  readonly providerKind?: 'openai-compatible' | 'anthropic-messages' | undefined;
   readonly baseUrl?: string | null | undefined;
   readonly defaultModel?: string | undefined;
   readonly timeoutMs?: number | undefined;
@@ -80,7 +83,7 @@ export class ModelConnectionRepository {
         timeout_ms, max_output_tokens, max_call_tokens, max_scope_calls, max_scope_tokens,
         credential_ref
       ) values (
-        ${input.id}, ${input.workspaceId}, ${input.name}, 'openai-compatible', ${input.baseUrl},
+        ${input.id}, ${input.workspaceId}, ${input.name}, ${input.providerKind}, ${input.baseUrl},
         ${input.defaultModel}, ${input.timeoutMs}, ${input.maxOutputTokens},
         ${input.maxCallTokens}, ${input.maxScopeCalls}, ${input.maxScopeTokens},
         ${input.credentialRef}
@@ -101,6 +104,7 @@ export class ModelConnectionRepository {
     patch: ModelConnectionPatch): Promise<ModelConnectionRow | undefined> {
     const sets = [sql`revision = revision + 1`, sql`updated_at = now()`];
     if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
+    if (patch.providerKind !== undefined) sets.push(sql`provider_kind = ${patch.providerKind}`);
     if (patch.baseUrl !== undefined) sets.push(sql`base_url = ${patch.baseUrl}`);
     if (patch.defaultModel !== undefined) sets.push(sql`default_model = ${patch.defaultModel}`);
     if (patch.timeoutMs !== undefined) sets.push(sql`timeout_ms = ${patch.timeoutMs}`);

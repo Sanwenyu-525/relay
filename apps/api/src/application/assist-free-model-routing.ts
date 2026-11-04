@@ -9,7 +9,7 @@ import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
 import { accountCooldownKey, compareCredentialIdentity, readCredentialFingerprint } from
   '../workflow/credential-identity.js';
 import { readBoundedJson } from '../workflow/bounded-response.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort, type RuntimeModelPort } from '../workflow/model-port-factory.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
 import type { AssistModelPort, AssistRequest, AssistResult, ModelIdentity, ModelToolTurn }
@@ -259,7 +259,7 @@ async function resolveOpenRouterCandidate(context: AssistFreeModelRoutingContext
   }
   const entry = await repositories.modelCatalog.readEntryBySourceModelId(candidate.connection.model);
   if (!isCurrentlyEligible(entry, snapshot)) return { kind: 'INVALID' };
-  const port = new OpenAiCompatibleModelPort(config, context.modelFetchDependencies,
+  const port = createModelPort(config, context.modelFetchDependencies,
     buildFreePriceGuard({ connection: candidate.connection, freeOnly: true,
       catalogBasis: candidate.catalogBasis, budget: snapshot.budget }),
     snapshotIdentityBudget(snapshot.budget));
@@ -268,7 +268,7 @@ async function resolveOpenRouterCandidate(context: AssistFreeModelRoutingContext
 
 type CandidateResolution =
   | { readonly kind: 'READY'; readonly value: {
-    readonly port: OpenAiCompatibleModelPort; readonly config: ModelPortConfig } }
+    readonly port: RuntimeModelPort; readonly config: ModelPortConfig } }
   | { readonly kind: 'INVALID' }
   | { readonly kind: 'COOLDOWN'; readonly cooldown: import('../infrastructure/database-schema.js').ModelProviderCooldownRow };
 

@@ -15,7 +15,7 @@ import { evaluateExecutableAdmission } from './cli-executable-admission.js';
 import { FakeModelPort, type AssistModelPort, type AssistResult,
   type ConversationInterpretationRequest } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { interpretationExecutionSystemPrompt }
   from '../workflow/prompts/interpretation-prompts.js';
 import { INTERNAL_TOOL_DEFINITIONS } from '../workflow/tool-catalog.js';
@@ -351,7 +351,7 @@ export interface InterpretConversationMessageInput {
 
 function defaultModelPort(): AssistModelPort {
   const config = readModelPortConfig(process.env);
-  return config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+  return config === undefined ? new FakeModelPort() : createModelPort(config);
 }
 
 /**

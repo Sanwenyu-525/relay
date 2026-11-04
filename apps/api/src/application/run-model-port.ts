@@ -5,7 +5,7 @@ import type { JsonObject } from '../infrastructure/json.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
 import type { ModelIdentity, ModelPort, ModelUsage } from '../workflow/fake-model-port.js';
 import { FakeModelPort } from '../workflow/fake-model-port.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort, type RuntimeModelPort } from '../workflow/model-port-factory.js';
 import {
   computeModelConfigFingerprint,
   readModelPortConfig,
@@ -120,6 +120,8 @@ export async function resolveRunModelPort(db: DbExecutor,
     return resolveFreeConnection(db, input, plan, candidate.connection.model,
       candidate.connection.configFingerprint, plan.budget);
   }
+  // anthropic-messages 只可能来自已登记连接；没有 connection_id 就没有可解析的凭据来源，
+  // 不猜、不回退进程默认。
   return stopped('MODEL_SNAPSHOT_INVALID', { reason: 'MODEL_SNAPSHOT_INVALID',
     provider: candidate.connection.provider });
 }
@@ -131,7 +133,7 @@ function legacyAdmission(input: ResolveRunModelPortInput): RunModelAdmission {
     return { kind: 'READY', port: new FakeModelPort(), external: false, basis: 'LEGACY_ENV',
       evidence: { basis: 'LEGACY_ENV', provider: 'fake' } };
   }
-  const port = new OpenAiCompatibleModelPort(config, input.transport ?? {});
+  const port = createModelPort(config, input.transport ?? {});
   return { kind: 'READY', port, external: true, basis: 'LEGACY_ENV',
     evidence: { basis: 'LEGACY_ENV', provider: config.provider, model: config.model,
       config_fingerprint: computeModelConfigFingerprint(config) },
@@ -169,6 +171,14 @@ Promise<RunModelAdmission> {
       connection_id: connectionId, frozen_credential_version: frozenVersion,
       current_credential_version: row.credential_version });
   }
+  // MODEL-SETTINGS-03：冻结快照写下的协议必须与连接行当前声明的协议一致。
+  // 指纹已经包含协议（改协议必然失配），这里再显式判一次，给出精确的停因与 scope，
+  // 让「旧快照被重新解释成另一种协议」在代码层不可能发生。
+  if (candidate.protocol !== undefined && candidate.protocol !== row.provider_kind) {
+    return stopped('MODEL_CONFIG_CHANGED', { reason: 'MODEL_CONFIG_CHANGED',
+      connection_id: connectionId, scope: 'PROTOCOL',
+      frozen_protocol: candidate.protocol, current_protocol: row.provider_kind });
+  }
   if (connectionConfigFingerprint(row) !== candidate.configFingerprint) {
     return stopped('MODEL_CONFIG_CHANGED', { reason: 'MODEL_CONFIG_CHANGED',
       connection_id: connectionId, frozen_config_fingerprint: candidate.configFingerprint,
@@ -185,10 +195,10 @@ Promise<RunModelAdmission> {
   if (budgetMismatch !== undefined) return budgetMismatch;
   const credentialStop = credentialMismatch(input.contract, config);
   if (credentialStop !== undefined) return credentialStop;
-  const port = new OpenAiCompatibleModelPort(config, input.transport ?? {}, undefined,
+  const port = createModelPort(config, input.transport ?? {}, undefined,
     snapshotIdentityBudget(plan.budget));
   return { kind: 'READY', port, external: true, basis: 'FROZEN',
-    evidence: { ...frozenEvidence('openai-compatible', row.default_model,
+    evidence: { ...frozenEvidence(row.provider_kind, row.default_model,
       candidate.configFingerprint), connection_id: connectionId,
       connection_credential_version: row.credential_version },
     semantic: semanticOf(port) };
@@ -217,7 +227,7 @@ function resolveDefaultConnection(input: ResolveRunModelPortInput,
   const credentialStop = credentialMismatch(input.contract, config);
   if (credentialStop !== undefined) return credentialStop;
   // 0135：Run 的外呼闸门也按冻结档位执行，不能回落到进程默认预算。
-  const port = new OpenAiCompatibleModelPort(config, input.transport ?? {}, undefined,
+  const port = createModelPort(config, input.transport ?? {}, undefined,
     snapshotIdentityBudget(plan.budget));
   return { kind: 'READY', port, external: true, basis: 'FROZEN',
     evidence: frozenEvidence(connection.provider, connection.model, connection.configFingerprint),
@@ -272,7 +282,7 @@ async function resolveFreeConnection(db: DbExecutor, input: ResolveRunModelPortI
   // `context_window` 才能和冻结值比较；只在读不到条目时才判为不合格，不拿猜测的窗口重算。
   const budgetMismatch = budgetDiffers(budget, config, entry.context_window);
   if (budgetMismatch !== undefined) return budgetMismatch;
-  const port = new OpenAiCompatibleModelPort(config, input.transport ?? {},
+  const port = createModelPort(config, input.transport ?? {},
     buildFreePriceGuard({ connection: { provider: 'openrouter', model,
       configFingerprint }, freeOnly: true,
       catalogBasis: { source: 'openrouter', snapshotSeq: sync.snapshot_seq.toString(),
@@ -335,7 +345,7 @@ function frozenEvidence(provider: string, model: string, configFingerprint: stri
   return { basis: 'FROZEN', provider, model, config_fingerprint: configFingerprint };
 }
 
-function semanticOf(port: OpenAiCompatibleModelPort): RunSemanticModel {
+function semanticOf(port: RuntimeModelPort): RunSemanticModel {
   return { identity: port.identity, evaluate: (input, signal) => port.evaluate(input, signal) };
 }
 

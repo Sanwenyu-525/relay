@@ -3,8 +3,8 @@ import { defaultCredentialStore } from '../credentials/default-credential-store.
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { ModelConnectionRow, SessionModelSelectionRow } from '../infrastructure/database-schema.js';
 import type { ModelFetchDependencies } from '../workflow/model-endpoint-policy.js';
-import { OpenAiCompatibleModelPort, type ModelCallBudget } from
-  '../workflow/openai-compatible-model-port.js';
+import { type ModelCallBudget } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort, type RuntimeModelPort } from '../workflow/model-port-factory.js';
 import { compareCredentialIdentity, readCredentialFingerprint } from '../workflow/credential-identity.js';
 import { WorkspaceDefaultModelConnectionRepository } from '../model/model-connection-repository.js';
 import { computeModelConfigFingerprint, type ModelPortConfig } from '../workflow/model-port-config.js';
@@ -29,8 +29,12 @@ import type { Repositories } from './unit-of-work.js';
  */
 export function modelPortConfigFromConnection(row: ModelConnectionRow, apiKey: string):
 ModelPortConfig {
+  // 协议来自连接行自己的显式声明（`provider_kind`），不由 URL、型号或品牌推断。
+  // 账本 provider 与协议同值：`model_calls.provider` 因此能直接回答「这次是哪一路协议」。
+  const protocol = row.provider_kind;
   return {
-    provider: 'openai-compatible',
+    provider: protocol,
+    protocol,
     model: row.default_model,
     apiKey,
     baseUrl: row.base_url ?? undefined,
@@ -279,7 +283,7 @@ export async function resolveFrozenChatConnectionPort(repositories: Repositories
   readonly budget: ModelCallBudget;
   readonly transport?: ModelFetchDependencies | undefined;
   readonly credentials?: CredentialStore | undefined;
-}): Promise<OpenAiCompatibleModelPort> {
+}): Promise<RuntimeModelPort> {
   const row = await repositories.modelConnections.read(input.workspaceId, input.connectionId);
   if (row === undefined) throw new Error('ASSIST_MODEL_CONNECTION_UNAVAILABLE');
   if (row.status !== 'ACTIVE') throw new Error('ASSIST_MODEL_CONNECTION_DISABLED');
@@ -305,5 +309,5 @@ export async function resolveFrozenChatConnectionPort(repositories: Repositories
     readCredentialFingerprint(config)) === 'CHANGED') {
     throw new Error('ASSIST_MODEL_CREDENTIAL_CHANGED');
   }
-  return new OpenAiCompatibleModelPort(config, input.transport ?? {}, undefined, input.budget);
+  return createModelPort(config, input.transport ?? {}, undefined, input.budget);
 }

@@ -8,7 +8,7 @@ import type { RelayDatabase } from '../infrastructure/database.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { FakeModelPort, type AssistModelPort } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 
 /**
  * 后台工作项的常驻推进 Owner（ENG-SA-01）。
@@ -47,7 +47,7 @@ export function registerBackgroundWorkScheduler(
   let titleModelPort: AssistModelPort | undefined;
   try {
     const config = readModelPortConfig(process.env);
-    modelPort = config === undefined ? new FakeModelPort() : new OpenAiCompatibleModelPort(config);
+    modelPort = config === undefined ? new FakeModelPort() : createModelPort(config);
     titleModelPort = config === undefined ? undefined : modelPort;
   } catch {
     app.log.warn({ code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED' },

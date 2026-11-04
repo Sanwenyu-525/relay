@@ -9,7 +9,7 @@ import { validateDatabaseUrl } from '../config/config.js';
 import { applyCredentialEnvFromStore, CredentialEnvError } from '../credentials/credential-env.js';
 import { validateModelPortConfig } from '../workflow/model-port-config.js';
 import { FakeModelPort } from '../workflow/fake-model-port.js';
-import { OpenAiCompatibleModelPort } from '../workflow/openai-compatible-model-port.js';
+import { createModelPort } from '../workflow/model-port-factory.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     const modelConfig = readModelPortConfig(process.env);
     const assistModelPort = modelConfig === undefined
       ? new FakeModelPort(fakeModelDelayMs)
-      : new OpenAiCompatibleModelPort(modelConfig);
+      : createModelPort(modelConfig);
     while (!controller.signal.aborted) {
       const result = assistOnce ? undefined : await runOneCommand(database.executor, {
         workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,

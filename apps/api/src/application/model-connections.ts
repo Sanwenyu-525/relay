@@ -53,11 +53,17 @@ const BUDGET_BOUNDS = {
   maxScopeTokens: [1_024, 2_000_000],
 } as const satisfies Record<keyof ModelConnectionBudget, readonly [number, number]>;
 
+/** 连接的 API 协议（迁移 0160）。登记时显式声明，不由品牌、URL 或型号推断。 */
+export type ModelConnectionProtocol = 'openai-compatible' | 'anthropic-messages';
+
+export const MODEL_CONNECTION_PROTOCOLS: readonly ModelConnectionProtocol[] =
+  ['openai-compatible', 'anthropic-messages'];
+
 export interface ModelConnectionView {
   readonly id: string;
   readonly workspaceId: string;
   readonly name: string;
-  readonly providerKind: 'openai-compatible';
+  readonly providerKind: ModelConnectionProtocol;
   readonly baseUrl: string | null;
   readonly defaultModel: string;
   readonly budget: ModelConnectionBudget;
@@ -126,7 +132,8 @@ export function toModelConnectionJson(view: ModelConnectionView): JsonObject {
 }
 
 type ModelConnectionField =
-  | 'name' | 'base_url' | 'default_model' | 'api_key' | keyof ModelConnectionBudget;
+  | 'name' | 'provider_kind' | 'base_url' | 'default_model' | 'api_key'
+  | keyof ModelConnectionBudget;
 
 function invalidConnection(issues: readonly { readonly field: ModelConnectionField;
   readonly message: string }[]): DomainError {
@@ -177,6 +184,15 @@ function validateName(raw: string): string {
       message: 'must be 1-60 characters after trimming' }]);
   }
   return name;
+}
+
+function validateProtocol(raw: string | undefined): ModelConnectionProtocol {
+  if (raw === undefined) return 'openai-compatible';
+  if (!(MODEL_CONNECTION_PROTOCOLS as readonly string[]).includes(raw)) {
+    throw invalidConnection([{ field: 'provider_kind',
+      message: `must be one of ${MODEL_CONNECTION_PROTOCOLS.join(', ')}` }]);
+  }
+  return raw as ModelConnectionProtocol;
 }
 
 function validateModel(raw: string): string {
@@ -287,6 +303,8 @@ export async function createModelConnectionCommand(
     readonly workspaceId: string;
     readonly commandId: string;
     readonly name: string;
+    /** API 协议；缺省按 OpenAI 兼容处理（0143–0159 的既有调用方不受影响）。 */
+    readonly protocol?: string | undefined;
     readonly baseUrl?: string | null | undefined;
     readonly defaultModel: string;
     readonly budget?: Partial<ModelConnectionBudget> | undefined;
@@ -299,10 +317,12 @@ export async function createModelConnectionCommand(
     commandType: 'CreateModelConnection',
     target: { workspace_id: input.workspaceId },
     // 载荷不含 api_key：回执摘要会随结果一起留在库里，秘密不能进摘要输入。
-    body: { name: input.name, base_url: input.baseUrl ?? null,
+    body: { name: input.name, provider_kind: input.protocol ?? 'openai-compatible',
+      base_url: input.baseUrl ?? null,
       default_model: input.defaultModel, budget: input.budget ?? null },
     execute: async (repositories) => {
       const name = validateName(input.name);
+      const providerKind = validateProtocol(input.protocol);
       const defaultModel = validateModel(input.defaultModel);
       const baseUrl = validateBaseUrl(input.baseUrl);
       const budget = validateBudget(input.budget);
@@ -312,7 +332,8 @@ export async function createModelConnectionCommand(
       await storeCredential(dependencies.credentials, reference, input.apiKey);
       try {
         const row = await repositories.modelConnections.create({
-          id: randomUUID(), workspaceId: input.workspaceId, name, baseUrl, defaultModel,
+          id: randomUUID(), workspaceId: input.workspaceId, name, providerKind,
+          baseUrl, defaultModel,
           timeoutMs: budget.timeoutMs, maxOutputTokens: budget.maxOutputTokens,
           maxCallTokens: budget.maxCallTokens, maxScopeCalls: budget.maxScopeCalls,
           maxScopeTokens: budget.maxScopeTokens, credentialRef: reference,
@@ -336,6 +357,8 @@ export async function updateModelConnectionCommand(
     readonly id: string;
     readonly expectedRevision: bigint;
     readonly name?: string | undefined;
+    /** 改协议会改变配置指纹：旧冻结快照与旧验证结论因此失效（不会被重新解释）。 */
+    readonly protocol?: string | undefined;
     readonly baseUrl?: string | null | undefined;
     readonly defaultModel?: string | undefined;
     readonly budget?: Partial<ModelConnectionBudget> | undefined;
@@ -347,7 +370,8 @@ export async function updateModelConnectionCommand(
     commandType: 'UpdateModelConnection',
     target: { workspace_id: input.workspaceId, connection_id: input.id },
     body: { expected_revision: input.expectedRevision.toString(),
-      name: input.name ?? null, base_url: input.baseUrl ?? null,
+      name: input.name ?? null, provider_kind: input.protocol ?? null,
+      base_url: input.baseUrl ?? null,
       default_model: input.defaultModel ?? null, budget: input.budget ?? null },
     execute: async (repositories) => {
       const current = await repositories.modelConnections.read(input.workspaceId, input.id);
@@ -358,6 +382,8 @@ export async function updateModelConnectionCommand(
           actualRevision: current.revision.toString() });
       }
       const name = input.name === undefined ? undefined : validateName(input.name);
+      const providerKind = input.protocol === undefined
+        ? undefined : validateProtocol(input.protocol);
       const defaultModel = input.defaultModel === undefined
         ? undefined : validateModel(input.defaultModel);
       const baseUrl = input.baseUrl === undefined ? undefined : validateBaseUrl(input.baseUrl);
@@ -375,6 +401,7 @@ export async function updateModelConnectionCommand(
         updated = await repositories.modelConnections.update(input.workspaceId, input.id,
           input.expectedRevision, {
             ...(name === undefined ? {} : { name }),
+            ...(providerKind === undefined ? {} : { providerKind }),
             ...(baseUrl === undefined ? {} : { baseUrl }),
             ...(defaultModel === undefined ? {} : { defaultModel }),
             ...(budget === undefined ? {} : {

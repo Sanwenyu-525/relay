@@ -732,7 +732,10 @@ Promise<AssistModelRoute> {
    * 凭据仍在 / 凭据身份未变）任一不符即以精确停因码停下；停就是停，不退回进程默认。
    */
   if (message.model_connection_id !== null) {
-    if (selected.connection.provider !== 'openai-compatible') {
+    // 已登记连接可能是 OpenAI 兼容或 Anthropic Messages；协议由连接行与冻结指纹共同钉住，
+    // 端口由工厂按协议构造。这里只拒绝「既不是连接也不是两种协议」的畸形快照。
+    if (selected.connection.provider !== 'openai-compatible' &&
+        selected.connection.provider !== 'anthropic-messages') {
       throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
     }
     const modelPort = await resolveFrozenChatConnectionPort(createRepositories(db), {

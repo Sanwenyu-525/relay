@@ -4,6 +4,8 @@ import { Type } from '@sinclair/typebox';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { UuidSchema } from './domain-schemas.js';
 import { ProblemError } from './problem.js';
+import { probeModelConnection } from '../application/model-connection-probe.js';
+import { createModelVerifyCall, type VerifyCallPort } from '../workflow/model-port-verify.js';
 import {
   createModelConnectionCommand,
   readChatDefaultModelConnection,
@@ -48,11 +50,15 @@ const BudgetSchema = Type.Object({
   max_scope_tokens: Type.Integer(),
 }, { additionalProperties: false });
 
+const ProtocolSchema = Type.Union([Type.Literal('openai-compatible'),
+  Type.Literal('anthropic-messages')]);
+
 const ConnectionSchema = Type.Object({
   id: UuidSchema,
   workspace_id: UuidSchema,
   name: Type.String(),
-  provider_kind: Type.Literal('openai-compatible'),
+  /** API 协议（迁移 0160）：openai-compatible 或 anthropic-messages。 */
+  provider_kind: ProtocolSchema,
   base_url: Type.Union([Type.String(), Type.Null()]),
   default_model: Type.String(),
   budget: BudgetSchema,
@@ -107,7 +113,9 @@ const BudgetBodySchema = Type.Optional(Type.Object({
 const CreateConnectionBodySchema = Type.Object({
   command_id: UuidSchema,
   name: Type.String({ minLength: 1, maxLength: 60 }),
-  /** 缺省/空串＝使用内置默认端点。 */
+  /** API 协议；缺省 openai-compatible（旧客户端行为不变）。 */
+  protocol: Type.Optional(ProtocolSchema),
+  /** 缺省/空串＝使用该协议的默认端点。 */
   base_url: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
   default_model: Type.String({ minLength: 1, maxLength: 200 }),
   budget: BudgetBodySchema,
@@ -119,6 +127,8 @@ const UpdateConnectionBodySchema = Type.Object({
   command_id: UuidSchema,
   expected_revision: Type.String({ pattern: '^[0-9]{1,18}$' }),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })),
+  /** 改协议会改变配置指纹，旧冻结快照与旧验证结论随之失效。 */
+  protocol: Type.Optional(ProtocolSchema),
   base_url: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
   default_model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   budget: BudgetBodySchema,
@@ -134,6 +144,24 @@ const SetStatusBodySchema = Type.Object({
   command_id: UuidSchema,
   expected_revision: Type.String({ pattern: '^[0-9]{1,18}$' }),
   status: Type.Union([Type.Literal('ACTIVE'), Type.Literal('DISABLED')]),
+}, { additionalProperties: false });
+
+const ProbeBodySchema = Type.Object({
+  /** 显式声明的 API 协议；不按 Base URL 或型号推断。 */
+  protocol: ProtocolSchema,
+  base_url: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  default_model: Type.String({ minLength: 1, maxLength: 200 }),
+  api_key: Type.String({ minLength: 1, maxLength: 8192 }),
+  timeout_ms: Type.Optional(Type.Integer()),
+}, { additionalProperties: false });
+
+const ProbeResultSchema = Type.Object({
+  ok: Type.Boolean(),
+  latency_ms: Type.Integer(),
+  protocol: ProtocolSchema,
+  model: Type.String(),
+  error_category: Type.Union([Type.String(), Type.Null()]),
+  message: Type.Union([Type.String(), Type.Null()]),
 }, { additionalProperties: false });
 
 function budgetOf(raw: Record<string, number | undefined> | undefined):
@@ -161,8 +189,17 @@ function revisionOf(raw: string): bigint {
   }
 }
 
+export interface ModelConnectionRouteOptions {
+  /** 仅测试注入：草稿探针的外呼边界。生产用真实协议分派。 */
+  readonly probeCall?: VerifyCallPort | undefined;
+}
+
 export function registerModelConnectionRoutes(app: FastifyInstance,
-  dependencies: RouteDependencies): void {
+  dependencies: RouteDependencies,
+  options: ModelConnectionRouteOptions = {}): void {
+  const probeCall = options.probeCall ?? createModelVerifyCall();
+  // 同一实例同时只允许一次草稿探针：它是真实外呼，不能被并发点击放大成洪水。
+  let probeInFlight = false;
   app.get('/model-connections', {
     schema: { params: ParamsSchema, response: { 200: ConnectionListSchema } },
   }, async (request, reply) => {
@@ -265,6 +302,44 @@ export function registerModelConnectionRoutes(app: FastifyInstance,
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
 
+  /**
+   * 「测试连接」（MODEL-SETTINGS-03）：对尚未保存的草稿做一次真实短探针。
+   *
+   * 与「保存模型」是两个独立动作、两份独立反馈：
+   *   * 不写 model_connections、不写系统凭据库、不写 model_calls；
+   *   * 测试通过不等于这条连接已通过验证——保存后仍按连接身份验证；
+   *   * Key 只在本请求内出现，响应与日志都不回显。
+   */
+  app.post('/model-connections/probe', {
+    schema: { params: ParamsSchema, body: ProbeBodySchema,
+      response: { 200: ProbeResultSchema } },
+  }, async (request, reply) => {
+    try {
+      const body = request.body as { protocol: 'openai-compatible' | 'anthropic-messages';
+        base_url?: string | null; default_model: string; api_key: string;
+        timeout_ms?: number };
+      if (probeInFlight) {
+        return sendReadError(reply, new ProblemError({
+          type: '/problems/model-verify-in-flight', title: '已有验证在进行', status: 409,
+          detail: '上一次测试连接尚未结束；请等它返回后再试。',
+          code: 'MODEL_VERIFY_IN_FLIGHT', retryable: true,
+          retryAction: 'CHECK_RECEIPT_THEN_RETRY',
+        }), request.id);
+      }
+      probeInFlight = true;
+      try {
+        return await probeModelConnection({
+          protocol: body.protocol,
+          baseUrl: body.base_url ?? null,
+          defaultModel: body.default_model,
+          apiKey: body.api_key,
+          ...(body.timeout_ms === undefined ? {} : { timeoutMs: body.timeout_ms }),
+          call: probeCall,
+        });
+      } finally { probeInFlight = false; }
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
   app.post('/model-connections', {
     schema: { params: ParamsSchema, body: CreateConnectionBodySchema },
   }, createCommandHandler(dependencies, {
@@ -274,6 +349,7 @@ export function registerModelConnectionRoutes(app: FastifyInstance,
       const outcome = await createModelConnectionCommand(
         { db: deps.database.executor, credentials: deps.credentials },
         { workspaceId: params.workspace_id!, commandId: body.command_id, name: body.name,
+          protocol: body.protocol,
           baseUrl: body.base_url ?? null, defaultModel: body.default_model,
           budget: budgetOf(body.budget), apiKey: body.api_key });
       return { outcome, result: outcome.result };
@@ -291,6 +367,7 @@ export function registerModelConnectionRoutes(app: FastifyInstance,
         { workspaceId: params.workspace_id!, commandId: body.command_id,
           id: params.connection_id!, expectedRevision: revisionOf(body.expected_revision),
           ...(body.name === undefined ? {} : { name: body.name }),
+          ...(body.protocol === undefined ? {} : { protocol: body.protocol }),
           ...(body.base_url === undefined ? {} : { baseUrl: body.base_url }),
           ...(body.default_model === undefined ? {} : { defaultModel: body.default_model }),
           ...(body.budget === undefined ? {} : { budget: budgetOf(body.budget) }) });

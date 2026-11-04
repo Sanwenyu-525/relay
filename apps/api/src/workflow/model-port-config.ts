@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import { ConfigError } from '../config/config.js';
-import { DEFAULT_MODEL_BASE_URL, parseModelBaseUrl } from './model-endpoint-policy.js';
+import { DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MODEL_BASE_URL,
+  parseModelBaseUrl } from './model-endpoint-policy.js';
 
 /**
  * 真实模型端口的配置（M04）：模型、endpoint、密钥全部外置，密钥只经环境变量
@@ -12,8 +13,29 @@ import { DEFAULT_MODEL_BASE_URL, parseModelBaseUrl } from './model-endpoint-poli
  * 残缺配置：启动校验直接失败，不让 Worker 在缺少关键输入的情况下静默回退 Fake。
  */
 
+/**
+ * API 协议（MODEL-SETTINGS-03）。它是**显式声明**，不由品牌、URL 或型号推断。
+ *
+ *   * `openai-compatible`：POST {base}/chat/completions + `Authorization: Bearer`；
+ *   * `anthropic-messages`：POST {base}/messages + `x-api-key` + `anthropic-version`。
+ */
+export type ModelProtocol = 'openai-compatible' | 'anthropic-messages';
+
+/**
+ * 账本 / 验证分组里的 provider 身份。
+ *
+ * `openrouter` 是「目录免费路由」的既有分组键（协议仍是 OpenAI 兼容）；已登记连接
+ * 直接用它的 API 协议作为 provider，避免再造一套品牌词表。
+ */
+export type ModelProviderKind = ModelProtocol | 'openrouter';
+
 export interface ModelPortConfig {
-  readonly provider: 'openai-compatible' | 'openrouter';
+  readonly provider: ModelProviderKind;
+  /**
+   * 本次外呼的协议。生产构造点（进程配置 / 已登记连接）都会显式写入；缺省值只服务
+   * 既有测试里手工构造的 `openai-compatible` 配置，读取时统一走 `protocolOf()`。
+   */
+  readonly protocol?: ModelProtocol | undefined;
   readonly model: string;
   readonly apiKey: string;
   readonly baseUrl: string | undefined;
@@ -22,6 +44,19 @@ export interface ModelPortConfig {
   readonly maxCallTokens: number;
   readonly maxScopeCalls: number;
   readonly maxScopeTokens: number;
+}
+
+/** 协议缺省即 OpenAI 兼容：0143–0159 的配置与连接行都只有这一种协议。 */
+export function protocolOf(config: { readonly protocol?: ModelProtocol | undefined;
+  readonly provider: string }): ModelProtocol {
+  if (config.protocol !== undefined) return config.protocol;
+  return config.provider === 'anthropic-messages' ? 'anthropic-messages' : 'openai-compatible';
+}
+
+/** 未配置 base URL 时的协议默认根，指纹与端口必须用同一个。 */
+export function defaultBaseUrlFor(protocol: ModelProtocol): string {
+  return protocol === 'anthropic-messages' ? DEFAULT_ANTHROPIC_BASE_URL
+    : DEFAULT_MODEL_BASE_URL;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -90,7 +125,8 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
     : (sparkFallback ? SPARK_CHAT_BASE_URL : env.RELAY_MODEL_BASE_URL);
   const parsedBaseUrl = baseUrl === undefined || baseUrl === '' ? undefined
     : parseModelBaseUrl(baseUrl);
-  return { provider: 'openai-compatible', model: model!.trim(), apiKey: apiKey!.trim(),
+  return { provider: 'openai-compatible', protocol: 'openai-compatible',
+    model: model!.trim(), apiKey: apiKey!.trim(),
     baseUrl: parsedBaseUrl, timeoutMs: timeoutMs!, maxOutputTokens: maxOutputTokens!,
     maxCallTokens: maxCallTokens!, maxScopeCalls: maxScopeCalls!,
     maxScopeTokens: maxScopeTokens! };
@@ -146,7 +182,8 @@ export function readDeclaredImageInput(env: NodeJS.ProcessEnv): boolean {
     issues.push('RELAY_MODEL_MAX_SCOPE_TOKENS must cover RELAY_MODEL_MAX_CALL_TOKENS');
   }
   if (issues.length > 0) throw new ConfigError(issues);
-  return { provider: 'openrouter', model: model.trim(), apiKey: apiKey!.trim(),
+  return { provider: 'openrouter', protocol: 'openai-compatible', model: model.trim(),
+    apiKey: apiKey!.trim(),
     baseUrl: OPENROUTER_CHAT_BASE_URL, timeoutMs: timeoutMs!,
     maxOutputTokens: maxOutputTokens!, maxCallTokens: maxCallTokens!,
     maxScopeCalls: maxScopeCalls!, maxScopeTokens: maxScopeTokens! };
@@ -169,17 +206,27 @@ export function validateModelPortConfig(env: NodeJS.ProcessEnv): void {
 
 /**
  * 配置指纹：与 ModelIdentity.configFingerprint 同一算法（不含密钥明文）。
- * 配置（模型/端点/限额）变化后指纹变化，旧验证结果按不匹配处理。
+ * 配置（协议/型号/端点/限额）变化后指纹变化，旧验证结果按不匹配处理。
+ *
+ * **协议必须进入指纹**：否则把一行连接的协议从 OpenAI 兼容改成 Anthropic 后，
+ * 旧冻结快照会带着同一个指纹被执行端重新解释成另一种协议。
+ *
+ * 兼容取舍：`openai-compatible` 是 0143–0159 唯一存在的协议，指纹算法对它保持历史
+ * 形状（不新增键），既有冻结快照与会话选择不因本迁移失效；`anthropic-messages`
+ * 才把 `protocol` 写进哈希输入。协议在两种取值间切换必然改变哈希。
  */
 export function computeModelConfigFingerprint(config: Pick<ModelPortConfig,
   'provider' | 'model' | 'baseUrl' | 'timeoutMs' | 'maxOutputTokens' |
-  'maxCallTokens' | 'maxScopeCalls' | 'maxScopeTokens'>): string {
-  const baseUrl = parseModelBaseUrl(config.baseUrl ?? DEFAULT_MODEL_BASE_URL);
+  'maxCallTokens' | 'maxScopeCalls' | 'maxScopeTokens'> &
+  { readonly protocol?: ModelProtocol | undefined }): string {
+  const protocol = protocolOf(config);
+  const baseUrl = parseModelBaseUrl(config.baseUrl ?? defaultBaseUrlFor(protocol));
   return createHash('sha256').update(JSON.stringify({
     provider: config.provider, model: config.model, baseUrl,
     timeoutMs: config.timeoutMs, maxOutputTokens: config.maxOutputTokens,
     maxCallTokens: config.maxCallTokens, maxScopeCalls: config.maxScopeCalls,
     maxScopeTokens: config.maxScopeTokens,
+    ...(protocol === 'openai-compatible' ? {} : { protocol }),
   })).digest('hex');
 }
 

@@ -121,6 +121,34 @@ P0/P1 已落地的相关事实（本轮之前或本轮完成，均可复核）�
   - 自动化覆盖：`model-port-config` 单测锁定 `SPARK_API_KEY` 仅在 `RELAY_MODEL_API_KEY` 缺失时生效；`chat-model-connection` 集成测试断言连接声明的 `base_url`/`model`/Bearer 凭据，并显式断言其压过 `SPARK_API_KEY` 回退；Workbench 用例覆盖预设预填与「已登记连接」分组。真实外呼只作一次性证据，不进常规测试。
 - **回滚风险**：无迁移、无新表列，回滚只需回退本次代码提交；既有连接行与 DPAPI 凭据仍可被原链路读取，`agnes-3.0-flash` 默认路径未改。
 
+## 阶段六进度（2026-11-04）：API 协议成为显式字段，接入 Anthropic Messages（MODEL-SETTINGS-03）
+
+**决定：协议是连接行上的显式事实，不是从品牌/URL/型号推断的属性。**
+
+- **持久化**：迁移 0160 只扩充 `model_connections.provider_kind` 的 CHECK 为
+  `('openai-compatible','anthropic-messages')`，并把列注释改成「API 协议（不是品牌）」。
+  不新增第二个协议列——两列并存必然出现互相矛盾的一行。`provider` 在账本/验证分组里与协议同值；
+  `openrouter` 仍是「目录免费路由」的既有分组键（协议为 OpenAI 兼容）。
+- **指纹兼容**：`computeModelConfigFingerprint` 对 `anthropic-messages` 把 `protocol`
+  写进哈希输入；`openai-compatible` 保持历史形状。因此既有冻结快照/会话选择不因迁移失效，
+  而协议切换必然改变指纹 → 执行端以 `MODEL_CONFIG_CHANGED`（`scope=PROTOCOL`）停止。
+- **一套执行系统**：`createModelPort()` 是唯一构造入口；两种端口共享接口、错误类、提示词与
+  工具声明。Anthropic 使用原生 `/messages`、`x-api-key`、`anthropic-version`、顶层 `system`、
+  `input_schema` 与 `message_stop` 终止的 SSE；OpenAI 兼容路径保持 `/chat/completions` + Bearer。
+- **明确拒绝**：Anthropic 没有 `response_format=json_object`。依赖它的请求（提案、学习信封、
+  草稿辅助、请求解释）在外呼前抛 `ModelCapabilityUnsupportedError`；语义验收用提示词 + 严格解析，
+  解析失败按检查器故障处理。没有「看起来设置了格式」的静默降级。
+- **验证边界**：已登记连接的验证状态只读本工作区 VERIFY；停用连接零外呼、零新账本
+  （409 `MODEL_VERIFY_CONNECTION_DISABLED`）。
+- **草稿探针**：`POST /model-connections/probe` 只做一次短探针，不落连接、不落凭据、不落
+  `model_calls`。测试与保存是两份独立事实，探针通过不冒充「连接已验证」。
+- **优先级**：显式会话选择 > 工作区聊天默认 > 进程默认。本机「上次模型」不再参与发送；
+  选择器以 `ClearSessionModelSelection` 提供「跟随工作区默认」。
+- **代价与限制**：Anthropic 上的 JSON 类功能当前不可用（明确报错）；两种协议未在真实外部
+  Provider 上联调（只有受控 Fake 的协议级测试），真实账号、限流与计费口径未验。
+- **回滚**：先确认没有 `anthropic-messages` 行需要保留，再恢复原 CHECK；代码回退到只构造
+  `OpenAiCompatibleModelPort` 不影响既有 openai 行与凭据。
+
 ## 未决问题
 
 1. 秘密存储选型（DPAPI 与 Credential Manager 的实际打包行为需在目标机器验证）。

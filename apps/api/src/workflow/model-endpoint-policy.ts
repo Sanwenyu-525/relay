@@ -5,6 +5,14 @@ import { ConfigError } from '../config/config.js';
 
 export const DEFAULT_MODEL_BASE_URL = 'https://api.openai.com/v1';
 
+/**
+ * Anthropic Messages 的默认 API 根（含版本段）。
+ *
+ * 与 OpenAI 兼容路径同一约定：端口在根后面追加协议自身的资源路径（`/messages`），
+ * 因此自建网关只要把 base URL 配到它的 `/v1` 根即可，不另造第二套地址规则。
+ */
+export const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
+
 /** A process-configured compatible endpoint is a single HTTPS origin and API path. */
 export function parseModelBaseUrl(raw: string): string {
   let url: URL;
@@ -77,12 +85,26 @@ async function lookupWithinBudget(
   }
 }
 
+/**
+ * 流式响应的终止标记词表。
+ *
+ * OpenAI 兼容流以 `data: [DONE]` 结束；Anthropic Messages 流以 `message_stop` 事件结束，
+ * **不会**发 `[DONE]`。两者都要求看到自己的终止标记，才能把「干净 EOF」当成完整响应——
+ * 用错词表会把一种协议的正常结束判成断流。
+ */
+export type StreamTerminator = 'OPENAI_DONE' | 'ANTHROPIC_MESSAGE_STOP';
+
+export interface StreamCompletionPolicy {
+  readonly terminator: StreamTerminator;
+}
+
 /** Redirects are rejected before fetch follows them; every SDK request must stay
  * under the configured API path. DNS is rechecked immediately before fetch.
  * The resolution and socket connect are not atomic, so this does not claim to
  * defend an operator-configured hostile DNS name against rebinding. */
 export function guardedModelFetch(baseUrl: string,
-  dependencies: ModelFetchDependencies = {}): typeof fetch {
+  dependencies: ModelFetchDependencies = {},
+  policy: StreamCompletionPolicy = { terminator: 'OPENAI_DONE' }): typeof fetch {
   const allowed = new URL(baseUrl);
   const pathPrefix = allowed.pathname.replace(/\/$/u, '');
   return async (input, init) => {
@@ -112,25 +134,34 @@ export function guardedModelFetch(baseUrl: string,
     }
     return response.body !== null && response.headers.get('content-type')
       ?.toLowerCase().includes('text/event-stream') === true
-      ? requireCompleteSse(response) : response;
+      ? requireCompleteSse(response, policy.terminator) : response;
   };
 }
 
 /** The SDK's ChatOpenAI.stream can otherwise accept a clean EOF with only a
  * partial SSE reply. Require the protocol's terminal marker before exposing
  * the stream as a completed model response. */
-function requireCompleteSse(response: Response): Response {
+function requireCompleteSse(response: Response,
+  terminator: StreamTerminator): Response {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   const maxLineChars = 2 * 1024 * 1024;
   let pending = '';
   let doneMarker = false;
+  const isTerminator = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (terminator === 'OPENAI_DONE') return trimmed === 'data: [DONE]';
+    // Anthropic：`event: message_stop` 与 data 里的 `"type":"message_stop"` 任一出现即可；
+    // 两者都由同一条流给出，任一可见就足以证明这不是半截响应。
+    return trimmed === 'event: message_stop' ||
+      (trimmed.startsWith('data:') && trimmed.includes('"message_stop"'));
+  };
   const scan = (text: string): void => {
     pending += text;
     let newline = pending.indexOf('\n');
     while (newline !== -1) {
       if (newline > maxLineChars) throw new Error('MODEL_SSE_LINE_TOO_LARGE');
-      if (pending.slice(0, newline).trim() === 'data: [DONE]') doneMarker = true;
+      if (isTerminator(pending.slice(0, newline))) doneMarker = true;
       pending = pending.slice(newline + 1);
       newline = pending.indexOf('\n');
     }
@@ -142,7 +173,7 @@ function requireCompleteSse(response: Response): Response {
         const next = await reader.read();
         if (next.done) {
           scan(decoder.decode());
-          if (pending.trim() === 'data: [DONE]') doneMarker = true;
+          if (isTerminator(pending)) doneMarker = true;
           if (!doneMarker) throw new Error('MODEL_STREAM_INCOMPLETE');
           reader.releaseLock();
           controller.close();

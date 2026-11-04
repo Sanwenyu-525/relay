@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { ConfigError } from '../../src/config/config.js';
-import { OPENROUTER_CHAT_BASE_URL, readModelPortConfig,
-  readOpenRouterModelPortConfig, validateModelPortConfig }
+import { computeModelConfigFingerprint, OPENROUTER_CHAT_BASE_URL, protocolOf,
+  readModelPortConfig, readOpenRouterModelPortConfig, validateModelPortConfig }
   from '../../src/workflow/model-port-config.js';
+import { createHash } from 'node:crypto';
 
 test('no provider env keeps the Fake ModelPort path', () => {
   assert.equal(readModelPortConfig({}), undefined);
@@ -49,7 +50,8 @@ test('a complete openai-compatible configuration parses every field', () => {
     RELAY_MODEL_MAX_SCOPE_CALLS: '12',
     RELAY_MODEL_MAX_SCOPE_TOKENS: '131072',
   });
-  assert.deepEqual(config, { provider: 'openai-compatible', model: 'agnes-3.0-flash',
+  assert.deepEqual(config, { provider: 'openai-compatible',
+    protocol: 'openai-compatible', model: 'agnes-3.0-flash',
     apiKey: 'secret', baseUrl: 'https://model.vendor.com/v1', timeoutMs: 45000,
     maxOutputTokens: 2048, maxCallTokens: 8192,
     maxScopeCalls: 12, maxScopeTokens: 131072 });
@@ -137,4 +139,57 @@ test('SPARK_API_KEY fills the model credential only when RELAY_MODEL_API_KEY is 
   }), ConfigError);
   // provider 缺省 / fake 时回退也不改变 Fake 路径。
   assert.equal(readModelPortConfig({ SPARK_API_KEY: 'spark-key' }), undefined);
+});
+
+
+/**
+ * MODEL-SETTINGS-03：配置指纹必须包含 API 协议。
+ *
+ * 兼容取舍被钉在这里：`openai-compatible` 保持 0143–0159 的历史哈希形状（不新增键），
+ * 既有冻结快照与会话选择不因迁移失效；`anthropic-messages` 把 protocol 写进哈希输入。
+ * 两种取值之间切换必然改哈希——旧冻结快照不能被重新解释成另一种协议。
+ */
+test('配置指纹包含协议，且不破坏既有 openai 快照的哈希', () => {
+  const base = {
+    provider: 'openai-compatible' as const, model: 'vendor-model',
+    baseUrl: 'https://model.vendor.com/v1', timeoutMs: 30_000,
+    maxOutputTokens: 4_096, maxCallTokens: 65_536, maxScopeCalls: 32,
+    maxScopeTokens: 262_144,
+  };
+  // 历史算法的等价实现：不含 protocol 键。
+  const historical = createHash('sha256').update(JSON.stringify({
+    provider: 'openai-compatible', model: base.model, baseUrl: base.baseUrl,
+    timeoutMs: base.timeoutMs, maxOutputTokens: base.maxOutputTokens,
+    maxCallTokens: base.maxCallTokens, maxScopeCalls: base.maxScopeCalls,
+    maxScopeTokens: base.maxScopeTokens,
+  })).digest('hex');
+  assert.equal(computeModelConfigFingerprint(base), historical);
+  assert.equal(computeModelConfigFingerprint({ ...base,
+    protocol: 'openai-compatible' }), historical);
+
+  const anthropic = computeModelConfigFingerprint({ ...base,
+    provider: 'anthropic-messages', protocol: 'anthropic-messages' });
+  assert.notEqual(anthropic, historical);
+  // 同一个 provider/model/端点/预算，只换协议就必须换指纹。
+  assert.notEqual(computeModelConfigFingerprint({ ...base,
+    protocol: 'anthropic-messages' }), historical);
+});
+
+test('未配置 base URL 时按协议取默认根，指纹与端口同一口径', () => {
+  const openai = { provider: 'openai-compatible' as const, model: 'm',
+    baseUrl: undefined, timeoutMs: 30_000, maxOutputTokens: 1_024,
+    maxCallTokens: 4_096, maxScopeCalls: 32, maxScopeTokens: 262_144 };
+  assert.equal(computeModelConfigFingerprint(openai),
+    computeModelConfigFingerprint({ ...openai, baseUrl: 'https://api.openai.com/v1' }));
+  assert.equal(computeModelConfigFingerprint({ ...openai,
+    provider: 'anthropic-messages', protocol: 'anthropic-messages' }),
+  computeModelConfigFingerprint({ ...openai, provider: 'anthropic-messages',
+    protocol: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1' }));
+});
+
+test('protocolOf：显式声明优先，历史配置缺省为 OpenAI 兼容', () => {
+  assert.equal(protocolOf({ provider: 'openai-compatible' }), 'openai-compatible');
+  assert.equal(protocolOf({ provider: 'anthropic-messages' }), 'anthropic-messages');
+  assert.equal(protocolOf({ provider: 'openai-compatible',
+    protocol: 'anthropic-messages' }), 'anthropic-messages');
 });
