@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { delegateTask } from '../application/delegate-task.js';
+import { recoverRunByHumanAttestation } from '../application/recover-run.js';
 import { readRunById } from '../application/run-queries.js';
 import { readRunDraftPreview } from '../application/run-draft-preview.js';
 import { readRunToolCalls } from '../application/run-tool-call-projection.js';
@@ -14,6 +15,8 @@ import {
   RunControlRequestBodySchema,
   RunControlRequestResultSchema,
   RunControlRequestSchema,
+  RunRecoveryBodySchema,
+  RunRecoveryResultSchema,
   RunResumeBodySchema,
   RunResumeResultSchema,
   RunToolCallsSchema,
@@ -198,6 +201,26 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
       const outcome = await resumeRun(executor, { workspaceId: params.workspace_id ?? '',
         runId: params.run_id ?? '', commandId: body.command_id,
         expectedTaskRevision: body.expected_task_revision, expectedRunRevision: body.expected_run_revision });
+      return { outcome, result: outcome.result };
+    },
+  }));
+
+  // 受控恢复路由（runtime-context §2.12：无 fence 的孤儿领取此前没有公开恢复入口）。
+  // 调用方必须提供人工/OS 停机核对依据；服务端校验滞留领取、租约过期与 Worker 归属后
+  // 走与 Supervisor 相同的恢复 Owner（命令幂等 → 会话锁 → fence → 效果核对 → 重投），
+  // 不绕过 Worker fence。BLOCKED 时如实列出仍需人工核对的外部操作。
+  app.post('/runs/:run_id/recovery', {
+    schema: { params: WorkspaceRunParamsSchema, body: RunRecoveryBodySchema,
+      response: { 200: commandEnvelopeSchema(RunRecoveryResultSchema) } },
+  }, createCommandHandler(dependencies, {
+    commandType: 'RecoverRun', bodySchema: RunRecoveryBodySchema,
+    execute: async ({ dependencies: routeDependencies, executor, body, params }) => {
+      const outcome = await recoverRunByHumanAttestation(executor, {
+        workspaceId: params.workspace_id ?? '', runId: params.run_id ?? '',
+        commandId: body.command_id, stoppedWorkerId: body.stopped_worker_id,
+        stopEvidence: body.stop_evidence,
+        dataRoot: routeDependencies.storage.dataRoot,
+      });
       return { outcome, result: outcome.result };
     },
   }));

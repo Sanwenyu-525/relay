@@ -8,6 +8,8 @@ export interface BoundaryConfig {
   readonly port: number;
   readonly allowedOrigins: readonly string[];
   readonly bearerToken: string;
+  /** 系统级执行并发上界（background-work 调度器的准入读数用）。 */
+  readonly maxConcurrentExecutions: number;
   readonly desktopMode?: boolean;
 }
 

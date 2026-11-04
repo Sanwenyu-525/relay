@@ -23,6 +23,10 @@ import { registerBackgroundWorkScheduler } from '../../src/runtime/background-wo
  */
 
 const TICK_INTERVAL_MS = 1000;
+
+// 本文件只测调度器自身，不spawn子进程；显式声明 test 形态，让「test 环境默认不启用
+// 并发闸」的判定成立（并发闸用例自己显式设置 RELAY_MAX_CONCURRENT_EXECUTIONS 开启）。
+process.env.NODE_ENV ??= 'test';
 /** 一轮 tick 的间隔是 1s，观察两轮要留出抖动余量。 */
 const TWO_TICKS_MS = TICK_INTERVAL_MS * 2 + 700;
 
@@ -167,6 +171,62 @@ test('探针抛错：记为 BACKGROUND_WORK_TICK_CRASHED，不产生 unhandledRe
   } finally {
     await scheduler.stop();
     process.off('unhandledRejection', onRejection);
+  }
+});
+
+test('首拍探针抛错：onReady 不被击穿，记 BACKGROUND_WORK_TICK_CRASHED 后照常重排', async () => {
+  const rejections: unknown[] = [];
+  const onRejection = (reason: unknown): void => { rejections.push(reason); };
+  process.on('unhandledRejection', onRejection);
+
+  // 第一次探针就抛：这是 onReady 里的首拍，收口缺失会让 API 启动失败。
+  let probes = 0;
+  const database = fakeDatabase(async () => {
+    probes += 1;
+    throw new Error('first probe exploded');
+  });
+
+  const scheduler = start(database);
+  try {
+    await scheduler.fake.runHook('onReady');
+    await waitUntil(() => probes >= 3, TWO_TICKS_MS * 2, 'retry after first-tick crash');
+
+    const crashed = scheduler.fake.logs.filter((entry) =>
+      entry.fields.code === 'BACKGROUND_WORK_TICK_CRASHED');
+    assert.ok(crashed.length >= 1, 'first-tick crash must be logged');
+    assert.equal(crashed[0]!.fields.error_message, 'first probe exploded');
+    assert.ok(probes >= 3, `scheduler must keep ticking after a first-tick crash (probes=${String(probes)})`);
+    assert.deepEqual(rejections, [], 'first-tick crash must not surface as unhandledRejection');
+  } finally {
+    await scheduler.stop();
+    process.off('unhandledRejection', onRejection);
+  }
+});
+
+test('并发闸显式开启时先于各阶段读取：让路时不进入任何工作阶段', async () => {
+  // test 环境默认不启用闸；显式设置 env 即为显式开启（生产由 loadConfig 传入同值）。
+  process.env.RELAY_MAX_CONCURRENT_EXECUTIONS = '1';
+  try {
+    let probes = 0;
+    const database = fakeDatabase(async () => { probes += 1; return readinessUp(); });
+    const scheduler = start(database);
+    try {
+      await scheduler.fake.runHook('onReady');
+      await waitUntil(() => scheduler.fake.logs.length > 0, TWO_TICKS_MS, 'gate stage log');
+      const failed = scheduler.fake.logs.filter((entry) =>
+        entry.fields.code === 'BACKGROUND_WORK_TICK_FAILED');
+      const stages = new Set(failed.map((entry) => String(entry.fields.stage)));
+      // executor 是守卫对象：闸的准入读数必然失败并被收口；关键不变量是
+      // 准入失败后**不再进入任何工作阶段**（WEB_IMPORT/EXECUTION_AUTOSTART 等无日志）。
+      assert.ok(stages.has('CONCURRENCY_ADMISSION'), 'gate admission must be consulted first');
+      for (const stage of ['WEB_IMPORT', 'EXECUTION_AUTOSTART', 'MEMBER_WAKEUP', 'SESSION_TITLE']) {
+        assert.ok(!stages.has(stage), `stage ${stage} must not run when admission is unresolved`);
+      }
+    } finally {
+      await scheduler.stop();
+    }
+  } finally {
+    delete process.env.RELAY_MAX_CONCURRENT_EXECUTIONS;
   }
 });
 

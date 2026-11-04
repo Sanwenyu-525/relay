@@ -139,6 +139,7 @@ export function resourcePathOf(commandType: string, result: JsonObject): string 
     case 'DelegateTask':
     case 'RequestRunControl':
     case 'ResumeRun':
+    case 'RecoverRun':
       return typeof result.run_id === 'string' ? `runs/${result.run_id}` : undefined;
     case 'ResolveReview':
       return typeof result.review_id === 'string' ? `reviews/${result.review_id}` : undefined;

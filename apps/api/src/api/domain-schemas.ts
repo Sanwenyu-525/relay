@@ -633,6 +633,25 @@ export const RunResumeResultSchema = Type.Object({
   run_revision: DecimalSchema,
 }, strict);
 
+/**
+ * 受控恢复路由（POST /runs/:run_id/recovery）。调用方提供人工/OS 停机核对依据与
+ * 被核对停止的 Worker 身份（RUN_RECOVERY_REQUIRED 事实里的 worker_id）；服务端
+ * 在租约过期与会话锁复核之后才允许 fence，绝不绕过 Worker fence。
+ */
+export const RunRecoveryBodySchema = Type.Object({
+  command_id: CommandIdField,
+  stopped_worker_id: Type.String({ minLength: 1, maxLength: 200 }),
+  stop_evidence: Type.String({ minLength: 8, maxLength: 2000 }),
+}, strict);
+
+export const RunRecoveryResultSchema = Type.Object({
+  run_id: UuidSchema,
+  outcome: Type.Union(['REQUEUED', 'BLOCKED', 'SKIPPED'].map((value) => Type.Literal(value))),
+  fenced: Type.Boolean(),
+  unresolved_operation_ids: Type.Array(UuidSchema),
+  blocked_reason: Type.Union([Type.String(), Type.Null()]),
+}, strict);
+
 export const RunPendingControlSchema = Type.Object({
   id: UuidSchema,
   type: RunControlTypeSchema,

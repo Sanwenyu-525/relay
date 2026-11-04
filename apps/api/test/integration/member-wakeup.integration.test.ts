@@ -8,7 +8,7 @@ import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDat
 import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 import { runMemberWakeupTick } from '../../src/application/member-wakeup.js';
 import { withTransaction } from '../../src/application/unit-of-work.js';
-import { FakeModelPort } from '../../src/workflow/fake-model-port.js';
+import { FakeModelPort, type AssistModelPort } from '../../src/workflow/fake-model-port.js';
 
 /**
  * P1-C 第一片：成员消息唤醒与消费结算（ADR-034 包 C，迁移 0141）。
@@ -262,6 +262,79 @@ test('准入：停用/外部成员、关闭会话、归档项目不唤醒，消�
   const afterArchive = await archivedProject.tick('worker-a');
   assert.equal(afterArchive.processed.length, 0);
   assert.equal((await messageRow(archivedMessage.message_id)).processing_status, 'RECORDED');
+});
+
+test('HANDOFF 交接载荷被接收方消费：进入唤醒轮次、来源身份保留、回信不成为新交接', async () => {
+  const f = await fixture();
+  const developer = await f.createMember('接手成员');
+  const dm = await f.openConversation('DIRECT', developer.agent_member_id);
+  const handoff = await f.send(dm.conversation_id, '请接手。', {
+    intent: 'HANDOFF',
+    handoff: {
+      baseline_note: '存储层迁移已完成一半',
+      open_questions: ['0159 之后预映像由谁采集？'],
+      next_actions: ['跑 recovery 集成回归'],
+      artifact_version_id: randomUUID(),
+    },
+  });
+
+  const outcome = await f.tick('worker-a');
+  assert.equal(outcome.processed.length, 1);
+  assert.equal(outcome.processed[0]!.status, 'PROCESSED');
+
+  const messages = await conversationMessages(dm.conversation_id);
+  const reply = messages.find((row) => row.sender_kind === 'MEMBER');
+  assert.ok(reply !== undefined, '存在成员回信');
+  // FakeModelPort 对 DISCUSS 回显最后一条用户轮——交接载荷确实进入了唤醒轮次。
+  assert.ok(reply!.content.includes('交接载荷'), '交接载荷进入模型轮次');
+  assert.ok(reply!.content.includes('存储层迁移已完成一半'), '基线说明被消费');
+  assert.ok(reply!.content.includes('0159 之后预映像由谁采集？'), '未决问题被消费');
+  assert.ok(reply!.content.includes('跑 recovery 集成回归'), '下一步动作被消费');
+  assert.ok(reply!.content.includes('消息序号'), '来源身份（消息序号）随载荷保留');
+  // 回信只是协作记录：不带 handoff_payload、未定向、DISCUSS——交接消费一条链后终止。
+  const replyRow = (await sql<{ handoff_payload: unknown; intent: string }>`
+    select handoff_payload, intent from project_member_messages where id = ${reply!.message_id}
+  `.execute(app.db)).rows[0]!;
+  assert.equal(replyRow.handoff_payload, null);
+  assert.equal(replyRow.intent, 'DISCUSS');
+  // 重复唤醒不重复推进：FAILED/PROCESSED 都不回候选，回信也不进候选。
+  const idle = await f.tick('worker-b');
+  assert.equal(idle.processed.length, 0);
+  assert.equal((await messageRow(handoff.message_id)).attempts, 1);
+});
+
+test('模型端口抛 typed 不可用错误：只持久化失败事实，不重试外呼、不提交 Fake 回复', async () => {
+  const f = await fixture();
+  const developer = await f.createMember('开发成员');
+  const dm = await f.openConversation('DIRECT', developer.agent_member_id);
+  // DomainError 形态的 typed 不可用（非 generic Error）：code 必须原样落到 failure_reason。
+  const typedPort: AssistModelPort = {
+    identity: { provider: 'unavailable', model: 'none',
+      configFingerprint: 'f'.repeat(64) },
+    assist: async () => {
+      throw Object.assign(new Error('模型连接不可用'), { name: 'ModelError',
+        code: 'MODEL_ENDPOINT_UNAVAILABLE' });
+    },
+  };
+  const message = await f.send(dm.conversation_id, '这条会撞上 typed 不可用。');
+  const outcome = await runMemberWakeupTick(app.db, { workerId: 'worker-typed',
+    modelPort: typedPort, leaseMs: 60_000 });
+  assert.equal(outcome.processed.length, 1);
+  assert.equal(outcome.processed[0]!.status, 'FAILED');
+  assert.equal(outcome.processed[0]!.reason, 'MODEL_ENDPOINT_UNAVAILABLE',
+    'typed 错误码不吞成 generic MODEL_FAILED');
+  const row = await messageRow(message.message_id);
+  assert.equal(row.processing_status, 'FAILED');
+  assert.equal(row.failure_reason, 'MODEL_ENDPOINT_UNAVAILABLE');
+  assert.equal((await memberCallCount(message.message_id)).total, '1', '失败调用也在账本');
+  const replies = (await conversationMessages(dm.conversation_id))
+    .filter((entry) => entry.sender_kind === 'MEMBER');
+  assert.equal(replies.length, 0, '不把任何回复提交为真实成员消息');
+  // FAILED 终态不回候选：第二个 tick 不重试外呼。
+  const retry = await runMemberWakeupTick(app.db, { workerId: 'worker-typed-2',
+    modelPort: typedPort, leaseMs: 60_000 });
+  assert.equal(retry.processed.length, 0);
+  assert.equal((await memberCallCount(message.message_id)).total, '1');
 });
 
 test('成员模型（PT-08）：EXPLICIT 不匹配或未接路由类型化失败，模型失败不自动重试', async () => {
