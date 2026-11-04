@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { configureCommandRecoveryForTest, resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 import { clickPortal, dialogText, flush, mountWorkbench, openUnresolvedDialog, pressEscape } from "./mountApp";
 
 /**
@@ -161,8 +162,18 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   document.documentElement.dataset.motion = "on";
+  resetCommandRecoveryForTest();
+  // 每次挂载只给一轮自动核对：既保留「进入页面自动查一次」的真实行为，也让断言不依赖
+  // 长时间退避。退避与上限由 tests/commandRecovery.spec.ts 用确定性时钟单独覆盖。
+  configureCommandRecoveryForTest({ delaysMs: [0], maxAttempts: 1, jitterRatio: 0 });
 });
-afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.clear(); window.sessionStorage.clear(); });
+afterEach(() => {
+  resetCommandRecoveryForTest();
+  resetRelayConnectionForTest();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+});
 
 async function mount(harnessValue: Harness) {
   vi.stubGlobal("fetch", stubFetch(harnessValue));
@@ -197,6 +208,8 @@ describe("模型切换命令与回执恢复", () => {
       // 成功即在服务端确认，本地不残留未决、也不写恢复区。
       expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(false);
       expect(storedRecoveries()).toEqual([]);
+      // 正常成功不需要任何回执查询：自动核对只由失败或既有未决触发。
+      expect(h.receipts).toEqual([]);
       // 成功后导航不设阻：保护只属于未决命令。
       await view.router.attempt("/settings");
       expect(view.router.currentRoute.value.path).toBe("/settings");
@@ -266,14 +279,38 @@ describe("模型切换命令与回执恢复", () => {
     } finally { view.unmount(); }
   });
 
-  it("5xx/网络中断：保留原 command_id，普通无任务会话写入 SESSION 恢复记录并允许安全离开", async () => {
+  it("5xx/网络中断但服务端已提交：自动查原命令回执，无需点击即更新模型并清记录", async () => {
     const h = harness({ postMode: "network", commitDespiteFailure: true });
     const view = await mount(h);
     try {
       await chooseSpark(view);
       const commandId = String(h.posts[0]!.body.command_id);
-      expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(true);
-      expect(view.wrapper.get('[data-testid="assist-pending"]').text()).toContain("模型切换结果未确认");
+      // 自动核对只查原 command_id，一次即可，不产生第二条写命令。
+      expect(h.receipts).toEqual([commandId]);
+      expect(h.posts).toHaveLength(1);
+      expect(view.wrapper.get('[data-testid="model-selector-open"]').text()).toContain(sparkModel);
+      expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(false);
+      expect(storedRecoveries()).toEqual([]);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.body.textContent).not.toContain(commandId);
+
+      await view.router.attempt("/settings");
+      expect(view.router.currentRoute.value.path).toBe("/settings");
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    } finally { view.unmount(); }
+  });
+
+  it("自动核对失败：保留原 command_id 与 SESSION 恢复记录，输入区与恢复区只有一个主入口", async () => {
+    const h = harness({ postMode: "network", receiptMode: "missing" });
+    const view = await mount(h);
+    try {
+      await chooseSpark(view);
+      const commandId = String(h.posts[0]!.body.command_id);
+      const strip = view.wrapper.find('[data-testid="assist-pending"]');
+      expect(strip.exists()).toBe(true);
+      expect(strip.text()).toContain("模型切换暂未确认");
+      // 同一命令在输入区已有主恢复入口，跨页恢复区不再重复铺一条。
+      expect(view.wrapper.find(`[data-testid="collab-recovery-${commandId}"]`).exists()).toBe(false);
       const records = storedRecoveries();
       expect(records).toHaveLength(1);
       expect(records[0]).toMatchObject({ commandId, commandType: "SelectSessionConnection",
@@ -284,30 +321,33 @@ describe("模型切换命令与回执恢复", () => {
       const text = dialogText();
       expect(text).toContain("命令结果待核对");
       expect(text).toContain(commandId);
-      const leave = document.querySelector('[data-testid="pending-keep-and-leave"]');
-      expect(leave).not.toBeNull();
       await clickPortal("pending-keep-and-leave"); await flush();
       expect(view.router.currentRoute.value.path).toBe("/settings");
-      expect(storedRecoveries()[0]).toMatchObject({ commandId });
 
-      // 重新进入原会话：未决身份还在，芯片由服务端读回的真实选择恢复，期间不再发命令。
+      // 离开原会话后改由跨页恢复区承载；重新进入时自动继续核对并落到服务端确认的模型。
+      h.receiptMode = "success";
+      h.selection = "spark";
       await view.router.push(`/agent?session=${sessionId}`); await flush(120);
-      expect(view.wrapper.find(`[data-testid="collab-recovery-${commandId}"]`).exists()).toBe(true);
+      expect(h.receipts).toContain(commandId);
       expect(view.wrapper.get('[data-testid="model-selector-open"]').text()).toContain(sparkModel);
+      expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(false);
+      expect(storedRecoveries()).toEqual([]);
       expect(h.posts).toHaveLength(1);
     } finally { view.unmount(); }
   });
 
   it("查询回执成功：按原 ID 核对，更新实际模型并清理恢复记录与阻断", async () => {
-    const h = harness({ postMode: "network", commitDespiteFailure: true });
+    const h = harness({ postMode: "network", commitDespiteFailure: true, receiptMode: "missing" });
     const view = await mount(h);
     try {
       await chooseSpark(view);
       const commandId = String(h.posts[0]!.body.command_id);
       expect(view.wrapper.get('[data-testid="model-selector-open"]').text()).not.toContain(sparkModel);
       await openUnresolvedDialog("assist-pending");
-      expect(dialogText()).toContain("模型切换结果未确认");
+      expect(dialogText()).toContain("模型切换暂未确认");
       expect(dialogText()).toContain("不代表已有回复失败");
+      h.receiptMode = "success";
+      h.receipts.length = 0;
       await clickPortal("assist-pending-receipt"); await flush(120);
       expect(h.receipts).toEqual([commandId]);
       expect(view.wrapper.get('[data-testid="model-selector-open"]').text()).toContain(sparkModel);
@@ -324,6 +364,7 @@ describe("模型切换命令与回执恢复", () => {
       await chooseSpark(view);
       const commandId = String(h.posts[0]!.body.command_id);
       await openUnresolvedDialog("assist-pending");
+      h.receipts.length = 0;
       await clickPortal("assist-pending-receipt"); await flush(80);
       expect(h.receipts).toEqual([commandId]);
       expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(true);
@@ -348,14 +389,14 @@ describe("模型切换命令与回执恢复", () => {
       await openUnresolvedDialog("assist-pending");
       await clickPortal("assist-pending-receipt"); await flush(80);
       expect(view.wrapper.find('[data-testid="assist-pending"]').exists()).toBe(true);
-      expect(document.body.textContent).toContain("回执与本次 Assist 命令不匹配。");
+      expect(document.body.textContent).toContain("回执身份与记录不匹配；未清除命令身份。");
       expect(view.wrapper.get('[data-testid="model-selector-open"]').text()).not.toContain(sparkModel);
       expect(storedRecoveries()[0]).toMatchObject({ commandId });
     } finally { view.unmount(); }
   });
 
   it("核对弹窗的键盘与焦点：焦点进入弹层，Escape 关闭但不清除未决事实", async () => {
-    const h = harness({ postMode: "network" });
+    const h = harness({ postMode: "network", receiptMode: "missing" });
     const view = await mount(h);
     try {
       await chooseSpark(view);
@@ -371,7 +412,7 @@ describe("模型切换命令与回执恢复", () => {
       expect(storedRecoveries()[0]).toMatchObject({ commandId });
       // 关闭弹窗不等于取消命令：芯片仍可再次打开核对。
       await openUnresolvedDialog("assist-pending");
-      expect(dialogText()).toContain("模型切换结果未确认");
+      expect(dialogText()).toContain("模型切换暂未确认");
       expect(dialogText()).toContain(commandId);
     } finally { view.unmount(); }
   });
@@ -385,18 +426,23 @@ describe("模型切换命令与回执恢复", () => {
       { commandId: secondCommandId, commandType: "SelectSessionConnection", sessionId: otherSessionId,
         targetKind: "SESSION", targetId: otherSessionId },
     ]));
-    const h = harness({ selection: "spark" });
+    const h = harness({ selection: "spark", receiptMode: "missing" });
     const view = await mount(h);
     try {
-      expect(view.wrapper.find(`[data-testid="collab-recovery-${firstCommandId}"]`).exists()).toBe(true);
-      expect(view.wrapper.find(`[data-testid="collab-recovery-${secondCommandId}"]`).exists()).toBe(true);
-      await view.wrapper.get(`[data-testid="collab-recovery-${firstCommandId}"]`).trigger("click");
+      // 恢复入口是顶栏紧凑 chip，详情按需打开；打开后每条命令仍保留各自的 command_id。
+      await view.wrapper.get('[data-testid="collab-recovery"]').trigger("click");
+      await flush(40);
+      expect(document.querySelector(`[data-testid="collab-recovery-${firstCommandId}"]`)).not.toBeNull();
+      expect(document.querySelector(`[data-testid="collab-recovery-${secondCommandId}"]`)).not.toBeNull();
+      h.receiptMode = "success";
+      h.receipts.length = 0;
+      await clickPortal(`collab-recovery-${firstCommandId}`);
       await flush(120);
       expect(h.receipts).toEqual([firstCommandId]);
       const records = storedRecoveries();
       expect(records).toHaveLength(1);
       expect(records[0]).toMatchObject({ commandId: secondCommandId });
-      expect(view.wrapper.find(`[data-testid="collab-recovery-${secondCommandId}"]`).exists()).toBe(true);
+      expect(document.querySelector(`[data-testid="collab-recovery-${secondCommandId}"]`)).not.toBeNull();
     } finally { view.unmount(); }
   });
 });

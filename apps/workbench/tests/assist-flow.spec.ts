@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { configureCommandRecoveryForTest, resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 import { clickPortal, flush, mountWorkbench, openUnresolvedDialog, pageText } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -36,7 +37,12 @@ function proposal(status: string) {
       expected_outputs: { kind: "MARKDOWN_DOCUMENT" } }, payload_hash: "abc123", status };
 }
 
-afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  resetCommandRecoveryForTest();
+  // 既有用例断言失败后立即出现未决与手动重试入口；只留一轮自动核对，不让后台退避占住这段窗口。
+  configureCommandRecoveryForTest({ delaysMs: [0], maxAttempts: 1, jitterRatio: 0 });
+});
+afterEach(() => { resetCommandRecoveryForTest(); resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("M04 Assist 真实路由与命令", () => {
   it("Provider 六类失败显示中文处理指引，历史与业务失败不猜类别，也不自动重试", async () => {

@@ -114,8 +114,38 @@
 .collab-notices { padding-inline: var(--relay-space-3); }
 .collab-notices:empty { display: none; }
 .collab-notices p { margin: 0; }
-.collab-recovery { flex: none; margin: var(--relay-space-2) var(--relay-space-3) 0; padding: var(--relay-space-2); border: var(--relay-border-width) solid var(--relay-color-border-control); border-radius: var(--relay-radius-control); overflow-wrap: anywhere; }
-.collab-recovery > div { display: grid; gap: var(--relay-space-2); margin-top: var(--relay-space-2); }
+/* RECOVERY-ENTRY-ANCHOR（2026-11-04）：未决命令的常驻入口只占顶栏一颗紧凑状态键，
+   不参与聊天区布局；详情在按需对话框内展开。 */
+.collab-recovery-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  max-width: 14rem;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-status-warning-text);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-status-warning-bg);
+  color: var(--relay-color-status-warning-text);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.collab-recovery-chip:hover { color: var(--relay-color-status-warning-text); }
+.collab-recovery-chip__pulse {
+  width: var(--relay-space-2);
+  height: var(--relay-space-2);
+  border-radius: var(--relay-radius-round);
+  background: currentColor;
+  animation: collab-recovery-pulse 1.4s ease-in-out infinite;
+}
+@keyframes collab-recovery-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .collab-recovery-chip__pulse { animation: none; } }
+.collab-recovery-list { display: grid; gap: var(--relay-space-3); }
+.collab-recovery-row { display: grid; gap: var(--relay-space-1); padding: var(--relay-space-2); border: var(--relay-border-width) solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); overflow-wrap: anywhere; }
+.collab-recovery-row__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--relay-space-2); }
+.collab-recovery-row__scope { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
+.collab-recovery-row__actions { display: flex; justify-content: flex-end; }
 
 .collab-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-left: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .collab-side > [hidden] { display: none; }
@@ -621,6 +651,9 @@
 /* 两件作用域事实各自成立：16px 间隔在 12px 字号下黏成一串，放到 space.6。 */
 .collab-toolbar-crumb.collab-toolbar-crumb--scope { display: flex; flex: 0 1 auto; gap: var(--relay-space-6); min-width: 0; }
 .collab-toolbar-crumb--scope > span { display: flex; align-items: center; min-width: 0; max-width: 50%; white-space: nowrap; }
+/* P1（2026-11-04）：普通讨论不再渲染「尚未关联目标」占位；上一行的 display:flex 会压过
+   UA 的 [hidden]，这里显式收口。元素仍留在 DOM，密度用例继续量它的颜色与类名。 */
+.collab-toolbar-crumb--scope > span[hidden] { display: none; }
 .collab-toolbar-scope-label { flex: none; }
 .collab-toolbar-scope-value { overflow: hidden; text-overflow: ellipsis; color: var(--relay-color-text-secondary); }
 /* 占位状态（尚未关联目标／目录待核对…）不是取值：降到 muted 档，别与目录名这类真实取值同重。 */

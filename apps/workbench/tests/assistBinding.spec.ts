@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { clickPortal, flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory } from "./mountApp";
+import { flush, folderStripName, mountWorkbench, openWorkingDirectory, toolbarSessionTitle } from "./mountApp";
 
 /**
- * 同会话接续：先做普通讨论（workspace-level 会话，project_id 为空），再选择目录并把它归入项目。
+ * 已有会话里切换工作目录（P0-D，2026-11-04）。
  *
- * 断言的是客户端行为本身：归属走真实服务端身份与回执核对，迟到响应只更新它原本那次绑定，
- * 归属失败如实呈现服务端拒绝并保留用户输入；归属不等于授权，不产生执行或提案。
- * 真实 Windows 取证与真实 API 事务仍由后端测试覆盖。
+ * 产品行为变了：输入卡下方的目录选择器不再是「把当前会话改绑到另一个目录」，而是
+ * 「切换工作上下文 → 进入该目录的新对话」。这里锁四件事：
+ *   1. 旧会话不收到任何归属/目录绑定写命令；
+ *   2. 新对话有独立的导航身份（`?new=` + `?dir=` + `?source_session=`），
+ *      同一次选择只发一条 OpenWorkingDirectory；
+ *   3. 选中的就是当前会话已绑定的同一目录时保留原页面，不乱建新对话；
+ *   4. 目录打不开时留在旧会话并显示可行动的原因。
+ *
+ * 真实 API、数据库身份与首条消息建会话/绑目录由浏览器验收覆盖；这里只锁客户端行为。
  */
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -53,20 +59,6 @@ function message(over: Record<string, unknown> = {}) {
 
 interface Routes {
   open?: (body: Record<string, unknown>) => Response;
-  /** 自定义归属命令响应；缺省为成功。 */
-  binding?: (body: Record<string, unknown>) => Response;
-  /** 受控故障：归属命令已提交但响应丢失。 */
-  loseBindingResponse?: boolean;
-  /** 归属命令在响应前先等这个闸，用来验证在途/迟到场景。 */
-  bindingGate?: Promise<void>;
-  /** 自定义目录绑定命令响应；缺省为成功。 */
-  directory?: (body: Record<string, unknown>) => Response;
-  /** 受控故障：目录绑定已提交但响应丢失。 */
-  loseDirectoryResponse?: boolean;
-  /** 让目录绑定回执晚于切换会话时顺带发出的那几次读取落地，用来验证绑定之后有没有再重读。 */
-  slowDirectoryResponse?: number;
-  /** GET /commands/:id —— 只按原 command_id 返回回执。 */
-  receipt?: (commandId: string) => Response;
   messages?: () => Response;
   workspaceSessions?: () => Response;
 }
@@ -74,12 +66,8 @@ interface Routes {
 interface Harness {
   readonly posts: { readonly path: string; readonly body: Record<string, unknown> }[];
   readonly gets: string[];
-  readonly created: { value: boolean };
-  readonly bound: { value: boolean; projectId: string | null };
-  /** 0087：会话行上已绑定的受管目录；null = 未绑定。 */
+  /** 会话行上已绑定的受管目录；null = 未绑定。 */
   readonly directory: { value: string | null };
-  /** 按发生顺序记录目录绑定命令与「带 include_context 的会话重读」，用来核对先后。 */
-  readonly scopeReads: string[];
 }
 
 function router(routes: Routes, harness: Harness) {
@@ -87,7 +75,6 @@ function router(routes: Routes, harness: Harness) {
     const url = new URL(String(input));
     const path = url.pathname;
     const method = init?.method ?? "GET";
-    // include_context 投影：绑定落地之后服务端才说得出这条会话读哪个目录，未落地就是 null。
     const contextOf = () => url.searchParams.get("include_context") === "true"
       ? { context: { project_goals: [], working_directory: harness.directory.value === null ? null
         : { resource_id: harness.directory.value, canonical_root: root } } } : {};
@@ -97,66 +84,28 @@ function router(routes: Routes, harness: Harness) {
       if (path === `${prefix}/working-directories/open`) return routes.open?.(body) ?? response({
         command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z", result: readyDirectory(),
         links: { resource: "" } }, 200);
-      if (path === `${prefix}/assist-sessions`) {
-        harness.created.value = true; harness.bound.value = false; harness.bound.projectId = null;
-        return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
-          result: { ...session(), session_id: sessionId, project_id: null, task_id: null },
-          links: { resource: "" } }, 201);
-      }
-      if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return response({
-        command_id: body.command_id, committed_at: "2026-10-02T00:00:00Z",
-        result: { session_id: sessionId, user_message_id: "msg-1", assistant_message_id: "msg-2" },
-        links: { resource: "" } }, 202);
-      if (path === `${prefix}/assist-sessions/${sessionId}/binding`) {
-        if (routes.bindingGate) await routes.bindingGate;
-        if (routes.loseBindingResponse) throw new TypeError("response lost after commit");
-        if (routes.binding) return routes.binding(body);
-        harness.bound.value = true; harness.bound.projectId = String(body.project_id);
-        return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:01Z",
-          result: { session_id: sessionId, project_id: body.project_id, revision: "2" },
-          links: { resource: "" } }, 200);
-      }
-      // 0087：目录绑定与归属是两条命令，身份、回执与撤回入口都分开记账。
-      if (path === `${prefix}/assist-sessions/${sessionId}/working-directory`) {
-        if (routes.loseDirectoryResponse) throw new TypeError("response lost after commit");
-        if (routes.slowDirectoryResponse) await new Promise((resolve) => setTimeout(resolve, routes.slowDirectoryResponse));
-        // 记在回执真正产出这一拍：之前落地的读取都还是绑定前的旧事实。
-        harness.scopeReads.push("BIND");
-        if (routes.directory) return routes.directory(body);
-        harness.directory.value = String(body.resource_id);
-        return response({ command_id: body.command_id, committed_at: "2026-10-02T00:00:01Z",
-          result: { session_id: sessionId, working_resource_id: body.resource_id, revision: "2" },
-          links: { resource: "" } }, 200);
-      }
       throw new Error(`unexpected POST ${path}`);
     }
     harness.gets.push(path);
     const receipt = /\/commands\/([^/]+)$/u.exec(path);
-    if (receipt) return routes.receipt?.(receipt[1]!) ?? response({ code: "NOT_FOUND", detail: "命令回执不存在" }, 404);
+    if (receipt) return response({ code: "COMMAND_NOT_FOUND", detail: "命令回执不存在" }, 404);
     if (path === `${prefix}/assist-sessions`) {
       const projectFilter = url.searchParams.get("project_id");
-      if (projectFilter !== null) return response({ items: harness.bound.value && harness.bound.projectId === projectFilter
-        ? [session({ project_id: projectFilter, ...contextOf() })] : [] });
-      // 工作空间级列表默认为空：首条消息建会话后才返回它，与真实服务端一致。
-      return routes.workspaceSessions?.() ?? response({ items: harness.created.value && !harness.bound.value
-        ? [session(contextOf())] : [] });
+      if (projectFilter !== null) return response({ items: [] });
+      return routes.workspaceSessions?.() ?? response({ items: [] });
     }
     if (path === `${prefix}/assist-sessions/${sessionId}`) {
-      if (url.searchParams.get("include_context") === "true") harness.scopeReads.push("READ");
-      return response(session({ project_id: harness.bound.value ? harness.bound.projectId : null,
-        working_resource_id: harness.directory.value, ...contextOf() }));
+      return response(session({ working_resource_id: harness.directory.value, ...contextOf() }));
     }
-    if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return routes.messages?.() ?? response({ items: [message()] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/messages`) {
+      return routes.messages?.() ?? response({ items: [message()] });
+    }
     if (path === `${prefix}/conversation-execution-requests`) return response({ items: [] });
     if (path === `${prefix}/assist-proposals`) return response({ items: [] });
     if (path === `${prefix}/skill-definitions`) return response({ items: [] });
     if (path === `${prefix}/assistant-profiles`) return response({ items: [] });
     if (path === `${prefix}/projects/${projectId}`) return response(project());
-    if (path === `${prefix}/projects`) return response({ items: [{ ...project(), archive_status: "ACTIVE",
-      phase_key: "GENERAL", next_action_task_id: null, created_at: "2026-10-02T00:00:00Z",
-      updated_at: "2026-10-02T00:00:00Z" }], next_cursor: null });
-    if (path === `${prefix}/projects/${projectId}/state`) return response({ project_id: projectId, revision: "1",
-      phase_key: "GENERAL", next_action_task_id: null, selected_artifact_version_refs: [], completed_highlight_refs: [] });
+    if (path === `${prefix}/projects`) return response({ items: [], next_cursor: null });
     if (path === `${prefix}/model-port`) return response({ provider: "fake", configured: false, model: null,
       base_url: null, max_call_tokens: null });
     if (path === `${prefix}/model-port/verification`) return response({ current_config_fingerprint: null, last: null,
@@ -168,450 +117,106 @@ function router(routes: Routes, harness: Harness) {
 }
 
 function harness(): Harness {
-  return { posts: [], gets: [], created: { value: false }, bound: { value: false, projectId: null },
-    directory: { value: null }, scopeReads: [] };
+  return { posts: [], gets: [], directory: { value: null } };
 }
 
-async function startDiscussion(view: Awaited<ReturnType<typeof mountWorkbench>>, text: string) {
-  await view.wrapper.get('[data-testid="assist-first-draft"]').setValue(text);
-  await flush();
-  await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
-  await flush();
-  await flush();
+async function mountSession(h: Harness, overrides: Partial<Routes> = {}) {
+  activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+  vi.stubGlobal("fetch", router({ ...overrides,
+    workspaceSessions: overrides.workspaceSessions
+      ?? (() => response({ items: [session({ working_resource_id: h.directory.value })] })) }, h));
+  const view = await mountWorkbench(`/agent?session=${sessionId}`);
+  await flush(); await flush(); await flush();
+  return view;
 }
 
-async function openFolder() {
-  await openWorkingDirectory(root);
-  await flush();
-  await flush();
-}
-
-function bindingPosts(h: Harness) {
-  return h.posts.filter((post) => post.path === `${prefix}/assist-sessions/${sessionId}/binding`);
-}
-
-function directoryPosts(h: Harness) {
-  return h.posts.filter((post) =>
-    post.path === `${prefix}/assist-sessions/${sessionId}/working-directory`);
+function openPosts(h: Harness) {
+  return h.posts.filter((post) => post.path === `${prefix}/working-directories/open`);
 }
 
 beforeEach(() => { window.localStorage.clear(); });
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
-describe("会话工作目录绑定（0087）", () => {
-  it("打开目录同时把这条会话绑定到该受管资源：作用域是服务端事实，刷新后仍在", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+describe("已有会话里切换工作目录：进入新对话，不改写旧会话", () => {
+  it("选另一个目录：跳到该目录的欢迎页，旧会话不收到归属/目录绑定写命令", async () => {
     const h = harness();
-    vi.stubGlobal("fetch", router({}, h));
-    const view = await mountWorkbench("/agent");
+    const view = await mountSession(h);
     try {
-      await startDiscussion(view, "看一下这个目录下面的文件");
-
-      await openFolder();
-
-      // 目录绑定是独立于归属的**第二条**命令：它带目录解析出的确切受管资源，
-      // 回执按原 command_id 与原 resource_id 逐字核对。
-      const directory = directoryPosts(h);
-      expect(directory).toHaveLength(1);
-      expect(directory[0]!.body.resource_id).toBe("res-1");
-      expect((directory[0]!.body as { command_id?: string }).command_id)
-        .toMatch(/^[0-9a-f-]{36}$/u);
-      // 2026-11-01 P1-2：绑定成功不再常驻一条回执。这条命令的身份仍要被界面确认收到，
-      // 确认的方式是把事实写进目录细条（服务端读回的那条会话作用域），而不是在输入卡上方
-      // 再摆一句同样的话——那一句会一直留在那儿，包括用户切到别的会话之后。
-      expect(view.wrapper.find('[data-testid="collab-directory-binding"]').exists()).toBe(false);
-      await flush();
-      expect(folderStripName()).toBe("MyProject");
-      // 未确认的绑定不能显示成已绑定：回执清空的前提是服务端确实读回了这个资源。
-      expect(h.directory.value).toBe("res-1");
-
-      // 再打开同一个目录不重复发命令：已绑到同一资源时不制造第二次写入。
-      await openFolder();
-      expect(directoryPosts(h)).toHaveLength(1);
-    } finally { view.unmount(); }
-  });
-
-  it("目录绑定确认后顶栏与左栏按服务端重读更新，不停在绑定发生前那份事实", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    // 回执压晚 120ms：切换会话与重挂载顺带发出的那几次读取全部落在绑定之前，
-    // 顶栏与左栏因此拿到的是「还没绑」那份事实——这正是用户实机看到的矛盾。
-    vi.stubGlobal("fetch", router({ slowDirectoryResponse: 120 }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "看一下这个目录下面的文件");
+      expect(toolbarSessionTitle()).toBe("关于这个目录");
       await openWorkingDirectory(root);
-      for (let i = 0; i < 12 && h.directory.value === null; i++) await flush();
-      // 成功回执已退场（P1-2），这里的同步锚点改成服务端事实本身：绑定落账 + 作用域重读回来。
-      expect(view.wrapper.find('[data-testid="collab-directory-binding"]').exists()).toBe(false);
-
-      // 绑定改的是服务端事实：回执之后必须还有一次带 include_context 的重读，两处投影才会跟上。
-      expect(h.scopeReads.lastIndexOf("READ")).toBeGreaterThan(h.scopeReads.indexOf("BIND"));
-
       await flush(); await flush();
-      // 绝对路径的承载面从原生 title 换成悬停/聚焦浮层（2026-10-20 用户要求：WebView2 的 title
-      // 延迟约 1 秒且只在带 title 的元素上出现）。这句话本身没有变，仍由可访问名称承担，
-      // 所以这条「顶栏按服务端重读更新」的事实改读 aria-label，期望值一字未动。
-      expect(document.querySelector('[data-testid="collab-current-directory"]')?.getAttribute("aria-label"))
-        .toBe(`会话目录：${root}`);
-      const rail = document.querySelector('[data-testid="recent-work-directories"]')?.textContent ?? "";
-      expect(rail).toContain("MyProject");
-      expect(rail).not.toContain("未绑定目录");
-    } finally { view.unmount(); }
-  });
 
-  it("目录绑定结果未知时保留原 command_id，不换 ID 重试", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({ loseDirectoryResponse: true }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "看一下这个目录下面的文件");
-      await openFolder();
-      const notice = view.wrapper.get('[data-testid="collab-directory-binding"]');
-      expect(notice.attributes("data-status")).toBe("UNKNOWN");
-      expect(notice.text()).toContain("不要换 ID 重试");
-      // 绑定未知不得被当成已绑定：读取仍按「未绑定目录」处理，界面不能显示成功。
-      expect(h.directory.value).toBeNull();
-      expect(directoryPosts(h)).toHaveLength(1);
-    } finally { view.unmount(); }
-  });
-
-  it("目录绑定被服务端拒绝时如实呈现，不阻断对话，也不显示成已绑定", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({ directory: () => response({
-      code: "STATE_CONFLICT", status: 409,
-      detail: "这段讨论还有消息在途，等它结束再换目录。" }, 409) }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "看一下这个目录下面的文件");
-      await openFolder();
-      const notice = view.wrapper.get('[data-testid="collab-directory-binding"]');
-      expect(notice.attributes("data-status")).toBe("FAILED");
-      expect(notice.text()).toContain("这段讨论还有消息在途");
-      // 对话本身继续可用：拒绝的是作用域绑定，不是这条讨论。
-      expect(view.wrapper.find('[data-testid="assist-transcript"]').exists()).toBe(true);
-    } finally { view.unmount(); }
-  });
-});
-
-describe("普通讨论归入项目（同会话接续）", () => {
-  it("打开目录把既有普通讨论归入项目：只改归属，不新建会话、不产生执行或提案", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({}, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      // 首条讨论建了一条 project_id 为空的会话；此刻还没有任何归属命令。
-      expect(bindingPosts(h)).toHaveLength(0);
-
-      await openFolder();
-
-      // 归属命令带真实会话身份与目录解析出的确切项目，回执只核对原 command_id。
-      const binding = bindingPosts(h);
-      expect(binding).toHaveLength(1);
-      expect((binding[0]!.body as { command_id?: string }).command_id).toMatch(/^[0-9a-f-]{36}$/u);
-      expect(binding[0]!.body.project_id).toBe(projectId);
-      // 归属成功后不再留一条常驻回执（P1-2）；持久的说法只有细条那一句，它读的是
-      // 服务端重回来的会话归属，因此「已归入项目」说的确实是这条会话。
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-      await flush();
-      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
-      // 归属不等于授权：不进入执行链、不产生提案、不新建第二个会话。
-      expect(h.posts.some((post) => post.path.endsWith("/execution-requests"))).toBe(false);
-      expect(h.posts.some((post) => post.path.includes("/applications"))).toBe(false);
-      expect(h.posts.some((post) => post.path === `${prefix}/assist-proposals`)).toBe(false);
-      expect(h.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
-      // 既有历史续读：仍按原会话读取消息，中文原文保留。
-      expect(h.gets).toContain(`${prefix}/assist-sessions/${sessionId}/messages`);
-      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("先讨论一下这个目录");
-    } finally { view.unmount(); }
-  });
-
-  it("当前没有可绑定的既有会话时只登记目录，不虚构归属", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({ workspaceSessions: () => response({ items: [] }) }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      // 用户尚未发首条：没有会话可接续，打开目录只做本地目录选择。
-      await openFolder();
-      expect(bindingPosts(h)).toHaveLength(0);
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-      // 只读了目录列表，没有按会话身份读取，也就没有虚构「已归属」。
-      expect(h.gets).toContain(`${prefix}/assist-sessions`);
-      expect(h.gets).not.toContain(`${prefix}/assist-sessions/${sessionId}`);
-    } finally { view.unmount(); }
-  });
-
-  it.each([[409, "INVALID_TRANSITION", "这段讨论还有消息在途，等它结束再归入项目。"],
-    [403, "PERMISSION_DENIED", "请求来源未被允许。"],
-    [404, "RESOURCE_NOT_FOUND", "Assist session在当前作用域中不可见或不存在。"]])(
-    "归属被服务端拒绝（%i）时如实分类，并保留在途时输入的中文草稿", async (status, code, detail) => {
-      activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-      const h = harness();
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => { release = resolve; });
-      vi.stubGlobal("fetch", router({
-        bindingGate: gate,
-        binding: () => response({ code, detail }, status) }, h));
-      const view = await mountWorkbench("/agent");
-      try {
-        await startDiscussion(view, "先讨论一下这个目录");
-        // 归属命令在途：用户继续在输入区写下中文草稿。
-        await openFolder();
-        // 目录打开成功不等于归属成功：在途期间原会话历史保持可读，
-        // 用户继续在原会话的讨论输入区写下中文草稿。
-        expect(view.wrapper.get('[data-testid="assist-transcript"]').exists()).toBe(true);
-        await view.wrapper.get('[data-testid="assist-draft"]').setValue("这段中文草稿不能丢");
-        await flush();
-        release();
-        await flush();
-        await flush();
-
-        const notice = view.wrapper.get('[data-testid="collab-binding"]');
-        expect(notice.attributes("data-status")).toBe("FAILED");
-        expect(notice.text()).toContain(String(status));
-        expect(notice.text()).toContain("未归入项目");
-        // 归属失败不改写会话：原会话仍按项目为空呈现，讨论草稿原样保留。
-        expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
-          .toBe("这段中文草稿不能丢");
-        // 拒绝后不切换作用域：原历史与会话面板保持可读，无归属的执行入口仍被禁用并说明原因。
-        expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("先讨论一下这个目录");
-        expect(view.wrapper.get('[data-testid="assist-session"]').exists()).toBe(true);
-        expect(view.wrapper.get('[data-testid="collab-unassigned-execution-hint"]').text()).toContain("不能进入执行");
-        // 会话身份不变：通知仍指向原会话，失败说明给出下一步，没有新建第二个会话。
-        expect(notice.attributes("data-session")).toBe(sessionId);
-        expect(notice.text()).toContain("重新选择目录");
-        expect(bindingPosts(h)).toHaveLength(1);
-        expect(h.posts.some((post) => post.path.endsWith("/execution-requests"))).toBe(false);
-      } finally { release(); view.unmount(); }
-    });
-});
-
-describe("归属命令的结果未知与迟到响应", () => {
-  it("响应丢失时按原 command_id 核对，不换新 ID 重试", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({
-      loseBindingResponse: true,
-      receipt: (commandId) => response({ command_id: commandId, command_type: "BindAssistSessionProject",
-        committed_at: "2026-10-02T00:00:02Z",
-        result: { session_id: sessionId, project_id: projectId, revision: "2" } }) }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-
-      const commandId = (bindingPosts(h)[0]!.body as { command_id?: string }).command_id;
-      expect(commandId).toMatch(/^[0-9a-f-]{36}$/u);
-      const unknown = view.wrapper.get('[data-testid="collab-binding"]');
-      expect(unknown.attributes("data-status")).toBe("UNKNOWN");
-      expect(unknown.text()).toContain(commandId!);
-      expect(view.wrapper.get('[data-testid="collab-binding-receipt"]').exists()).toBe(true);
-      // 结果未知期间不切换作用域：原历史与消息身份保持可读，等回执核对后再决定下一步。
-      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("先讨论一下这个目录");
-
-      await view.wrapper.get('[data-testid="collab-binding-receipt"]').trigger("click");
-      await flush();
-      await flush();
-
-      // 只按原 command_id 查询，且没有换新 ID 重发归属命令。
-      expect(h.gets).toContain(`${prefix}/commands/${commandId}`);
-      expect(bindingPosts(h)).toHaveLength(1);
-      // 核对回来的同样是成功：回执与那颗核对键一起收干净，不留常驻文案，也不停在「待核对」。
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-      expect(view.wrapper.find('[data-testid="collab-binding-receipt"]').exists()).toBe(false);
-    } finally { view.unmount(); }
-  });
-
-  /**
-   * P0-2（2026-11-01 用户截图指认的一类矛盾）：归属命令是按**那条会话**发的，
-   * 提示却过去只看「有没有记录」。在途期间新开一段讨论，输入卡上方不能把上一段讨论的
-   * 在途状态说成「这段讨论正在归入项目」。
-   */
-  it("归属命令在途时新开一段讨论，那句在途提示不会跟着搬到新对话上方", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-      // 还在原来那段讨论上时，在途提示说的是它自己：这一刻它应当可见。
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("PENDING");
-
-      await openFolderDialog();
-      await clickPortal("collab-new-conversation");
-      await flush();
-      // 换到用户新开的这段讨论之后，那句话不再属于屏上的会话，因此整块不渲染。
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-      release();
-      await flush();
-      await flush();
-      // 迟到的成功只落它自己那条会话：新对话上方仍然没有归属提示。
-      expect(bindingPosts(h)).toHaveLength(1);
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-    } finally { release(); view.unmount(); }
-  });
-
-  it("归属命令在途时离页不产生重复归属", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-      expect(bindingPosts(h)).toHaveLength(1);
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("PENDING");
-
-      await view.wrapper.get('nav[aria-label="主导航"]').get('[href="/projects"]').trigger("click");
-      await flush();
-      expect(view.router.currentRoute.value.path).toBe("/projects");
-      release();
-      await flush();
-      await flush();
-      // 离开后原命令仍只发了一次，没有换新 ID 重发。
-      expect(bindingPosts(h)).toHaveLength(1);
-    } finally { release(); view.unmount(); }
-  });
-
-  it("迟到的归属成功不把界面拉回旧会话或旧项目", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-      expect(bindingPosts(h)).toHaveLength(1);
-
-      // 归属仍在途时用户显式新开一段讨论：不沿用旧会话，也不停在旧项目。
-      // 「新对话」随目录控件一起迁进了细条的更换目录浮层（协作页 §3.3），因此先开浮层再点。
-      await openFolderDialog();
-      await clickPortal("collab-new-conversation");
-      await flush();
-      release();
-      await flush();
-      await flush();
-
-      expect(view.router.currentRoute.value.query.new).toBeTruthy();
-      // 当前是用户新开的这段讨论：输入区是空白首条，旧会话的原文没有被拉回来。
-      expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value).toBe("");
-      expect(view.wrapper.text()).not.toContain("先讨论一下这个目录");
-      expect(bindingPosts(h)).toHaveLength(1);
-    } finally { release(); view.unmount(); }
-  });
-
-  /**
-   * 最常见的「普通讨论开始」其实不是发首条，而是打开 /agent 时应用自动续上最近一条
-   * 未归属会话。此前 AssistView 只在用户显式切换时才把会话回报给协作页，这条路径下
-   * 协作页始终不知道当前会话，归属命令就永远发不出去。
-   */
-  it("自动续上既有未归属会话（未发新消息）后打开目录，也把这段讨论归入项目", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    vi.stubGlobal("fetch", router({ workspaceSessions: () => response({ items: [session()] }) }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await flush(); await flush();
-      // 用户只是打开协作页续上最近一段讨论，没有发新消息。
-      expect(view.wrapper.text()).toContain("先讨论一下这个目录");
-
-      await openFolder();
-
-      const binding = bindingPosts(h);
-      expect(binding).toHaveLength(1);
-      expect(binding[0]!.body.project_id).toBe(projectId);
-      expect(view.wrapper.find('[data-testid="collab-binding"]').exists()).toBe(false);
-      // 归属后按项目身份重读同一会话，历史仍可读，没有新建第二个会话。
-      expect(h.gets).toContain(`${prefix}/assist-sessions/${sessionId}/messages`);
-      expect(h.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
-      // 归属确认后这一句说的是**这条会话**的项目：与会话指向同一个项目时可以直接用目录回执里的标题。
-      await flush();
-      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
-    } finally { view.unmount(); }
-  });
-});
-
-/**
- * 细条上「已归入项目」与「还没有归入项目」不能并存（2026-10-22，DEV-0117）。
- *
- * 用户报的「目录不匹配」在这一行上有两种说法同时成立：输入卡上方写「MyProject 已归入项目：
- * MyProject」，顶栏与左栏按会话事实写未绑定目录／未归入项目。根因是这一句取自**目录的关联项目**
- * （本页刚好打开过哪个目录），而不是**这条讨论的归属**。归属是服务端事实，被拒或在途时
- * 目录仍在、讨论却没归入，两句话就撞在一起。
- */
-describe("细条的归属文案跟随会话事实（DEV-0117）", () => {
-  it("归属被服务端拒掉后，细条不再替这条会话宣称「已归入项目：目录的那个项目」", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
-    const h = harness();
-    const rejected = () => response({ code: "STATE_CONFLICT", status: 409,
-      detail: "这段讨论还有消息在途，等它结束再换目录。" }, 409);
-    vi.stubGlobal("fetch", router({ binding: rejected, directory: rejected }, h));
-    const view = await mountWorkbench("/agent");
-    try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-
-      // 两条命令都被拒：这条会话既没有归属也没有目录，这是服务端事实。
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("FAILED");
-      expect(view.wrapper.get('[data-testid="collab-directory-binding"]').attributes("data-status")).toBe("FAILED");
-      expect(h.bound.value).toBe(false);
-      expect(h.directory.value).toBeNull();
-      // 目录本身仍然打开着（用户选的就是它），但归属那一格说这条讨论：未归入项目。
+      const query = view.router.currentRoute.value.query;
+      expect(query.new).toBeTruthy();
+      expect(query.dir).toBe(root);
+      expect(query.source_session).toBe(sessionId);
+      // 欢迎页已经有新对话自己的输入器与目录事实。
+      expect(document.querySelector('[data-testid="assist-first-draft"]')).not.toBeNull();
       expect(folderStripName()).toBe("MyProject");
-      expect(folderStripAssociation()).toBe("未归入项目");
-      // 同一行紧随其后的告警与这一句是同一件事，不再出现「已归入项目」与「还没有归入项目」并存。
-      expect(document.querySelector('[data-testid="collab-unassigned-execution-hint"]')).not.toBeNull();
-      expect(view.wrapper.get('[data-testid="folder-scope-strip"]').text()).not.toContain("已归入项目");
+      // 旧会话一个字都不改：没有归属命令，也没有目录绑定命令。
+      expect(h.posts.filter((post) => post.path.endsWith("/binding"))).toHaveLength(0);
+      expect(h.posts.filter((post) => post.path.endsWith("/working-directory"))).toHaveLength(0);
+      // 同一次目录选择只发一条 OpenWorkingDirectory：交接页不重复打开。
+      expect(openPosts(h)).toHaveLength(1);
     } finally { view.unmount(); }
   });
 
-  it("归属命令在途期间也不提前宣称已归入项目，确认后跟着会话事实改口", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+  it("选中当前会话已绑定的同一目录：保留当前页面，不重复发打开命令", async () => {
     const h = harness();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    vi.stubGlobal("fetch", router({ bindingGate: gate }, h));
-    const view = await mountWorkbench("/agent");
+    h.directory.value = "res-1";
+    const view = await mountSession(h, {
+      workspaceSessions: () => response({ items: [session({ working_resource_id: "res-1" })] }) });
     try {
-      await startDiscussion(view, "先讨论一下这个目录");
-      await openFolder();
-      await flush();
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("PENDING");
-      expect(folderStripAssociation()).toBe("未归入项目");
-
-      release();
+      // 等作用域读回，确保比较的是服务端已确认的绑定，而不是占位种子。
+      for (let i = 0; i < 10; i++) {
+        const label = document.querySelector('[data-testid="collab-current-directory"]')?.getAttribute("aria-label") ?? "";
+        if (label.includes(root)) break;
+        await flush();
+      }
+      const before = { path: view.router.currentRoute.value.path,
+        query: { ...view.router.currentRoute.value.query } };
+      await openWorkingDirectory(root);
       await flush(); await flush();
-      expect(folderStripAssociation()).toBe("已归入项目：MyProject");
-    } finally { release(); view.unmount(); }
+      expect({ path: view.router.currentRoute.value.path,
+        query: { ...view.router.currentRoute.value.query } }).toEqual(before);
+      expect(toolbarSessionTitle()).toBe("关于这个目录");
+      expect(openPosts(h)).toHaveLength(0);
+    } finally { view.unmount(); }
   });
 
-  it("左栏目录「＋」带着既有未归属讨论进来时，细条也不替它宣称已归入项目", async () => {
-    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+  it("目录打不开：留在旧会话并显示可行动的原因", async () => {
     const h = harness();
-    const rejected = () => response({ code: "STATE_CONFLICT", status: 409,
-      detail: "这段讨论还有消息在途，等它结束再换目录。" }, 409);
-    vi.stubGlobal("fetch", router({ binding: rejected, directory: rejected,
-      workspaceSessions: () => response({ items: [session()] }) }, h));
-    const view = await mountWorkbench(`/agent?dir=${encodeURIComponent(root)}`);
+    const view = await mountSession(h, {
+      open: () => response({ code: "RESOURCE_NOT_FOUND", detail: "目录不存在或已移动。" }, 404) });
     try {
+      await openWorkingDirectory(root);
+      await flush(); await flush();
+      expect(view.router.currentRoute.value.query.session).toBe(sessionId);
+      expect(toolbarSessionTitle()).toBe("关于这个目录");
+      const error = document.querySelector('[data-testid="folder-error"]')?.textContent ?? "";
+      expect(error).toContain("无法打开这个工作目录");
+      expect(error).not.toBe("");
+      expect(openPosts(h)).toHaveLength(1);
+    } finally { view.unmount(); }
+  });
+
+  it("切到新对话后返回旧会话：原消息与原目录身份不变，草稿仍按旧会话恢复", async () => {
+    const h = harness();
+    const view = await mountSession(h);
+    try {
+      const draft = view.wrapper.get('[data-testid="assist-draft"]');
+      await draft.setValue("旧会话里还没发出去的文字");
+      await flush();
+      await openWorkingDirectory(root);
+      await flush(); await flush();
+
+      await view.router.push(`/agent?session=${sessionId}`);
       await flush(); await flush(); await flush();
-      // 目录确实打开着，显示名照旧取目录回执。
-      expect(folderStripName()).toBe("MyProject");
-      // 但这条讨论的归属是服务端事实：project_id 仍为 null，投影里那个项目只是换会话时暂借的导航作用域。
-      expect(folderStripAssociation()).toBe("未归入项目");
-      expect(document.querySelector('[data-testid="folder-scope-strip"]')!.textContent).not.toContain("已归入项目");
+      expect(toolbarSessionTitle()).toBe("关于这个目录");
+      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("先讨论一下这个目录");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value)
+        .toBe("旧会话里还没发出去的文字");
+      expect(h.directory.value).toBeNull();
     } finally { view.unmount(); }
   });
 });

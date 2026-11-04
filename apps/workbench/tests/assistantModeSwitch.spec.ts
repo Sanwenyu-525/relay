@@ -227,15 +227,19 @@ async function openAgent(options: Stub) {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
   vi.stubGlobal("fetch", stub(options));
   /**
-   * 从项目作用域进入，再打开那个目录。
-   *
-   * UI-FOLDER-01 起「欢迎页选目录」落在该目录的**空白新对话**上，不再自动续上项目里
-   * 最近一条会话；本文件全部用例讲的是「已有一条会话里的输入卡与档位」，因此入口必须
-   * 显式落到项目作用域，不能靠选目录时顺带续上的那一条。
+   * 入口分两档，按用例真正要观察的输入器决定：
+   *   * 没有预置会话（`sessions: []`）：从项目作用域打开目录，落在该目录的空白新对话，
+   *     观察「首条输入器」的档位与命令菜单；
+   *   * 已有会话：直接进入那条会话，观察「会话输入器」的档位切换。
+   * P0-D 后，已有会话里打开目录会进入新对话，不能再靠那次点击顺带到达被测会话。
    */
-  const view = await mountWorkbench(`/agent?project=${projectId}`);
-  await openWorkingDirectory("D:/tmp/probe");
-  return view;
+  const sessionId = (options.sessions[0] as { id?: string } | undefined)?.id;
+  if (sessionId === undefined) {
+    const view = await mountWorkbench(`/agent?project=${projectId}`);
+    await openWorkingDirectory("D:/tmp/probe");
+    return view;
+  }
+  return mountWorkbench(`/agent?session=${sessionId}`);
 }
 
 const configDialogSelector = '[role="dialog"][aria-label="人设助手"]';
@@ -410,19 +414,16 @@ describe("会话模式单选框", () => {
       expect(view.wrapper.find('[data-role="ASSISTANT"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
-  it("新会话响应丢失后按原回执接续，不重复创建", async () => {
+  it("新会话响应丢失：自动按原回执接续，不重复创建", async () => {
     const options: Stub = { sessions: [agentSession()], posts: [], loseChatResponse: true };
     const view = await openAgent(options);
     try {
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("/clear");
       await view.wrapper.get('[data-testid="assist-composer"] form').trigger("submit");
-      await flush(80);
-      expect(view.wrapper.find(".assist-pending").exists()).toBe(true);
-      expect((document.querySelector('[data-testid="assist-draft"]') as HTMLTextAreaElement).value).toBe("/clear");
-      await openUnresolvedDialog("assist-pending");
-      await clickPortal("assist-pending-receipt");
-      await flush(100);
-      // 回执接续之后停在按原 command_id 建出的那条讨论上（顶栏浮层的当前标记，取代旧下拉的 value）。
+      await flush(120);
+      // 自动核对成功：不弹未决提示、不出现核对弹窗，直接停在按原 command_id 建出的讨论上。
+      expect(view.wrapper.find(".assist-pending").exists()).toBe(false);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
       await openSessionSwitcher();
       expect(switcherCurrentSession()).toBe(createdSessionId);
       expect(options.posts.filter((p) => p.path.endsWith("/chat-commands"))).toHaveLength(1);

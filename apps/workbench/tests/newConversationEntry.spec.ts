@@ -86,6 +86,8 @@ async function mount(path = "/agent", withOldSession = false,
     if (path.endsWith("/model-selection")) return response({ selection: modelSelected ? {
       session_id: sessionId, connection: "openrouter", model: "v/a:free", free_only: true, revision: "7" } : null });
     if (path.endsWith("/model-port")) return response({ provider: "fake", configured: false, model: null, base_url: null, max_call_tokens: null });
+    if (path.endsWith("/model-connections/chat-default"))
+      return response({ connection_id: null, revision: null });
     if (path.endsWith("/model-connections")) return response({ items: withConnection ? [{
       id: connectionId, name: "团队网关", provider_kind: "openai-compatible",
       base_url: "https://fixture.invalid/v1", default_model: "vendor/registered",
@@ -133,8 +135,10 @@ describe("新对话直接起步", () => {
     await openUnresolvedDialog("assist-first-pending");
     await clickPortal(`assist-first-${recovery}`); await flush();
     const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
-    expect(selections).toHaveLength(2);
-    expect(selections[1]?.body).toEqual(selections[0]?.body);
+    // P0-B（2026-11-04）：回执核对证明模型选择已落库后，后续恢复不得再提交一次已确认的
+    // 前置命令；只有「按原命令重试」这条明确重放路径才重新提交同一份载荷。
+    expect(selections).toHaveLength(recovery === "retry" ? 2 : 1);
+    if (recovery === "retry") expect(selections[1]?.body).toEqual(selections[0]?.body);
     expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(1);
     expect(view.posts.filter((post) => post.path.endsWith("/messages"))).toHaveLength(1);
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body).toMatchObject({ expected_model_selection_revision: "7" });
@@ -146,22 +150,24 @@ describe("新对话直接起步", () => {
     expect(view.wrapper.text()).not.toContain("无项目任务的专属会话");
     expect(view.posts).toHaveLength(0);
   });
-  // 2026-10-20 用户指令「模型的话要持久化，要记住上一次选择的模型而不是每一个会话都先显示
-  // 模型这两个字」：新对话的芯片初始就是上次选的型号，首条发送时按原命令绑定给新会话。
-  it("新对话记住上一次选择的模型：芯片初始就是上次型号，首条发送按原命令绑定", async () => {
+  /**
+   * MODEL-SETTINGS-03（P0-4）取代 2026-10-20 的「记住上次模型」：
+   * 本机历史偏好不得悄悄覆盖工作区默认连接。新会话在没有显式选择时显示「跟随默认」，
+   * 并且**不提交** SelectSessionModel——优先级由服务端按
+   * 「会话显式选择 > 工作区聊天默认 > 进程默认」解析。
+   */
+  it("本机历史偏好不覆盖默认：新对话显示跟随默认，首条发送不提交模型选择", async () => {
     writeLastModel(workspaceId, "v/a:free");
     const view = await mount("/agent?new=entry");
     const triggerName = view.wrapper.get('[data-testid="model-selector-open"] .model-selector-trigger-name');
-    expect(triggerName.text()).toBe("v/a:free");
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("沿用上次选择的模型发送");
+    expect(triggerName.text()).toBe("跟随默认");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按工作区默认发送");
     await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
-    // 先建会话，再把上次选择按 SelectSessionModel 原命令落到这个会话，消息带期望修订。
     expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(1);
-    const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
-    expect(selections).toHaveLength(1);
-    expect(selections[0]?.body).toMatchObject({ text: "/model v/a:free" });
+    // 没有显式选择就不发选择命令；消息也不带 expected_model_selection_revision。
+    expect(view.posts.filter((post) => post.path.endsWith("/chat-commands"))).toHaveLength(0);
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
-      .toMatchObject({ expected_model_selection_revision: "7" });
+      .not.toHaveProperty("expected_model_selection_revision");
   });
   it("首条选择已登记连接：只提交 connection_id，消息携带该连接声明的型号修订", async () => {
     const view = await mount("/agent?new=conn", false, undefined, false, undefined, true);
@@ -184,39 +190,36 @@ describe("新对话直接起步", () => {
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
       .toMatchObject({ expected_model_selection_revision: "3" });
   });
-  it("首条选择模型即写本机偏好；下一条新对话（重新挂载）从它开始", async () => {
+  it("首条选择只作用于本会话，不写本机偏好；下一条新对话仍跟随默认", async () => {
     const first = await mount("/agent?new=entry");
     await first.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
     const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
       .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
     await act(async () => option.click()); await flush();
-    expect(readLastModel(workspaceId)).toBe("v/a:free");
+    // 显式选择仍是本会话的草稿选择，但不落本机存储。
+    expect(readLastModel(workspaceId)).toBeNull();
     first.unmount();
-    // 下一条新对话：路由按 ?new= 重新挂载，种子从本机偏好读回，不再是「模型」两个字。
-    // 断言只锁芯片可见文字（用户指令原话是「不要每个新会话都先显示模型两个字」）：
-    // 整页文字里本来就允许出现「模型」（如计量行的「尚无模型调用」），扫全页会假红。
     const second = await mount("/agent?new=second");
     const secondChip = () => second.wrapper
       .get('[data-testid="model-selector-open"] .model-selector-trigger-name').text();
-    expect(secondChip()).toBe("v/a:free");
-    expect(secondChip()).not.toBe("模型");
+    expect(secondChip()).toBe("跟随默认");
     second.unmount();
   });
   // 2026-10-21 接续：上一条用例覆盖「重新挂载那一拍的 useState 种子」，这一条覆盖挂在它
   // 后面的那次重置——协作页的新对话 effect 会把首条输入器清成空白，模型偏好不能跟着一起被抹。
   // 用户实机指认「每次点新建会话，模型芯片又变回『模型』两个字」。
-  it("同页再点「新对话」：清空草稿但不退回「模型」占位，芯片仍按本机偏好起步", async () => {
-    writeLastModel(workspaceId, "v/a:free");
+  it("同页再点「新对话」：清空草稿并把芯片重置为跟随默认，不继承上一条的显式选择", async () => {
     const view = await mount("/agent?new=entry");
     const chip = () => document
       .querySelector('[data-testid="model-selector-open"] .model-selector-trigger-name')?.textContent ?? "";
-    expect(chip()).toBe("v/a:free");
+    expect(chip()).toBe("跟随默认");
     // 先在首条输入器里写字，再开一次新对话：草稿要清空，型号要留下。
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("这段不该带进下一条"); await flush();
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush(120);
     expect((document.querySelector('[data-testid="assist-first-draft"]') as HTMLTextAreaElement | null)?.value)
       .toBe("");
-    expect(chip(), "新对话重置把模型偏好一起抹掉了，芯片退回「模型」占位").toBe("v/a:free");
+    expect(chip(), "新对话重置后应回到跟随默认，而不是保留上一条会话的显式选择")
+      .toBe("跟随默认");
   });
   it("回到同一个新对话地址恢复未发送草稿；换新键保持空白且不串写", async () => {
     const firstDraft = () => document
@@ -336,11 +339,13 @@ describe("新对话直接起步", () => {
     // 因此本用例改为「未决首条命令仍在时另开新对话」：迟到原响应同样不得清空新草稿。
     expect(view.wrapper.find('[data-testid="assist-first-receipt"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
-    // 未决命令未收口：不静默另开新对话，弹层只给「留在本页核对回执」这一个出口。
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
+    // 未决命令未收口：不静默另开新对话，弹层只给「留在本页」这一个出口。
+    // 在途（IN_FLIGHT）与结果未知（UNRESOLVED）用不同文案，但都不能离开。
+    const dialogText = document.querySelector('[role="dialog"]')?.textContent ?? "";
+    expect(dialogText).toMatch(/命令正在提交|命令结果待核对/);
     expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
     const keep = Array.from(document.querySelectorAll("button"))
-      .find(button => button.textContent === "留在本页核对回执");
+      .find(button => ["留在本页等待结果", "留在本页核对回执"].includes(button.textContent?.trim() ?? ""));
     expect(keep).toBeDefined();
     await new DomWrapper(keep!).trigger("click"); await flush();
     release(); await flush(); await flush();
@@ -361,29 +366,43 @@ describe("新对话直接起步", () => {
     expect(view.posts).toHaveLength(0);
   });
 
-  it.each(["CREATE_RESPONSE_LOST", "MESSAGE_RESPONSE_LOST"] as const)(
-    "%s：新对话不得丢弃未决命令，核对原回执后接续普通讨论", async (failure) => {
-      const view = await mount("/agent?new=entry", false, failure);
-      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("保留这条原始消息");
-      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
-      await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
-      expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
-      expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
-      // 无任务作用域的首条命令没进本页恢复区：离开即丢核对入口，弹层不提供离开出口。
-      expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
-      const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "留在本页核对回执");
-      keep!.click(); await flush();
-      // 未决命令在正文只留一行状态；核对弹窗从那一行点开（不再自动弹出，也不再把细节铺在正文）。
-      await openUnresolvedDialog(failure === "CREATE_RESPONSE_LOST" ? "assist-first-create-pending" : "assist-first-pending");
-      const check = Array.from(document.querySelectorAll("button")).find(b =>
-        b.textContent === (failure === "CREATE_RESPONSE_LOST" ? "查询创建回执" : "查询首条回执"));
-      expect(check).toBeDefined(); await new DomWrapper(check!).trigger("click"); await flush(); await flush();
-      expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
-      expect(view.posts.filter(p => p.path === `${root}/assist-sessions`)).toHaveLength(1);
-      expect(view.posts.filter(p => p.path.endsWith("/messages"))).toHaveLength(1);
-      expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("保留这条原始消息");
-      await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
-    });
+  it("MESSAGE_RESPONSE_LOST：不打开核对弹窗也会按原回执自动收口，不产生第二条消息", async () => {
+    const view = await mount("/agent?new=entry", false, "MESSAGE_RESPONSE_LOST");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("响应丢失但服务端已落库");
+    await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+    // P0-B：消息命令已落库、响应丢失时，按原 command_id 自动核对并收口；
+    // 不打开弹窗也不留下「首条消息还没有确认送达」。
+    await flush(600);
+    expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    expect(view.wrapper.find('[data-testid="assist-first-transition"]').exists()).toBe(false);
+    const transcript = view.wrapper.get('[data-testid="assist-transcript"]').text();
+    expect(transcript).toContain("响应丢失但服务端已落库");
+    expect(transcript.split("响应丢失但服务端已落库").length - 1).toBe(1);
+    expect(view.posts.filter(p => p.path.endsWith("/messages"))).toHaveLength(1);
+    expect(view.posts.filter(p => p.path === `${root}/assist-sessions`)).toHaveLength(1);
+  });
+
+  it("CREATE_RESPONSE_LOST：新对话不得丢弃未决命令，核对原回执后接续普通讨论", async () => {
+    const view = await mount("/agent?new=entry", false, "CREATE_RESPONSE_LOST");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("保留这条原始消息");
+    await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click"); await flush();
+    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("命令结果待核对");
+    expect(document.querySelector('[data-testid="discard-draft-leave"]')).toBeNull();
+    // 无任务作用域的首条命令没进本页恢复区：离开即丢核对入口，弹层不提供离开出口。
+    expect(document.querySelector('[data-testid="pending-keep-and-leave"]')).toBeNull();
+    const keep = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "留在本页核对回执");
+    keep!.click(); await flush();
+    // 未决命令在正文只留一行状态；核对弹窗从那一行点开（不再自动弹出，也不再把细节铺在正文）。
+    await openUnresolvedDialog("assist-first-create-pending");
+    const check = Array.from(document.querySelectorAll("button")).find(b => b.textContent === "查询创建回执");
+    expect(check).toBeDefined(); await new DomWrapper(check!).trigger("click"); await flush(); await flush();
+    expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+    expect(view.posts.filter(p => p.path === `${root}/assist-sessions`)).toHaveLength(1);
+    expect(view.posts.filter(p => p.path.endsWith("/messages"))).toHaveLength(1);
+    expect(view.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("保留这条原始消息");
+    await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(view.wrapper.find('[data-testid="assist-first-draft"]').exists()).toBe(true);
+  });
 });

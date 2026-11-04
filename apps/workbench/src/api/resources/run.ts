@@ -12,8 +12,9 @@ import type { RelayFileReadAction, RelayMockGatewayAction, RelayWebFetchAction }
 import type { RelayCommandEnvelope, RelayCommandReceipt } from "../dtos/projects";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "../dtos/run";
 
-export async function getCommandReceipt(http: RelayHttp, commandId: string): Promise<RelayCommandReceipt> {
-  const body = await http.request(http.workspacePath(`/commands/${encodeURIComponent(commandId)}`));
+export async function getCommandReceipt(http: RelayHttp, commandId: string, signal?: AbortSignal): Promise<RelayCommandReceipt> {
+  const body = await http.request(http.workspacePath(`/commands/${encodeURIComponent(commandId)}`),
+    signal === undefined ? {} : { signal });
   const envelope = commandEnvelopeFrom(body);
   const record = object(body, "command receipt");
   return { ...envelope, commandType: string(record, "command_type", "command receipt") };

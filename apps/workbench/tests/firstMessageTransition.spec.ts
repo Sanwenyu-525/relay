@@ -249,6 +249,35 @@ describe("首条消息的过渡状态（不空白、不重复、不伪造）", (
     } finally { view.unmount(); }
   });
 
+  it("未决状态只渲染一份正文；任意 404 不触发同 ID 重放", async () => {
+    const h = harness({ loseResponse: true });
+    const view = await start(h, "你好");
+    try {
+      h.createGate.release(); await flush(120);
+      h.messageGate.release(); await flush(160);
+      // P0-A：正文只允许一个可见实例——过渡行自己那一份，状态行不得再复制一条消息块。
+      expect(occurrences(view.wrapper.get('[data-testid="assist-transcript"]').text(), "你好")).toBe(1);
+      const unresolved = transitionRow();
+      expect(unresolved).not.toBeNull();
+      expect(unresolved!.querySelectorAll(".agent-message[data-role='USER']")).toHaveLength(1);
+      expect(document.querySelector('[data-testid="assist-first-pending-message"]')).toBeNull();
+
+      // 真实用户消息读回后：过渡行正文卸载，状态行仍可核对，但正文仍只有一份。
+      h.projection.items = [userMessage("你好")];
+      await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");
+      await flush(120);
+      expect(transitionRow()).toBeNull();
+      expect(document.querySelector('[data-testid="assist-first-transition-status"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="assist-first-pending"]')).not.toBeNull();
+      expect(occurrences(view.wrapper.get('[data-testid="assist-transcript"]').text(), "你好")).toBe(1);
+
+      // 回执查询返回的是 404 NOT_FOUND（不是协议定义的 COMMAND_NOT_FOUND）：
+      // 这不能证明命令没落库，自动核对不得据此重放消息命令、产生第二条用户消息。
+      await flush(1_100);
+      expect(h.messageBodies).toHaveLength(1);
+    } finally { view.unmount(); }
+  });
+
   it("明确失败：过渡行给出原因，原文可放回输入框改写重发", async () => {
     const h = harness({ reject: { status: 422, body: { code: "VALIDATION_FAILED",
       detail: "请求字段不满足端点契约。", retryable: false, retry_action: "NONE",

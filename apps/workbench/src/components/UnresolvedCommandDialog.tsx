@@ -15,18 +15,21 @@ export function UnresolvedCommandStrip({ testId, label, busy, onOpen, className 
   readonly className?: string;
 }) {
   return <div className={className} data-testid={testId} data-state="unresolved">
-    <span className="helper-text">{label}</span>
+    <span className="helper-text" role="status">{label}</span>
     <button type="button" className="text-button" disabled={busy} onClick={onOpen}>查看核对</button>
   </div>;
 }
 
-export function UnresolvedCommandDialog({ open, title, summary, commandId, detail, reason,
+export function UnresolvedCommandDialog({ open, title, summary, commandId, detail, details = [],
+  reason,
   busy, checkLabel, retryLabel, testId, onCheck, onRetry, onClose }: {
   readonly open: boolean;
   readonly title: string;
   readonly summary: string;
   readonly commandId: string;
   readonly detail: string;
+  /** 自动核对留下的技术信息（失败分类、HTTP 状态、重试次数）；默认折叠。 */
+  readonly details?: readonly string[];
   readonly reason: string | null;
   readonly busy: boolean;
   readonly checkLabel: string;
@@ -53,6 +56,7 @@ export function UnresolvedCommandDialog({ open, title, summary, commandId, detai
         <summary>技术详情</summary>
         <p>原 command_id：{commandId}</p>
         <p>{detail}</p>
+        {details.map((line) => <p key={line}>{line}</p>)}
       </details>
     </div>
   </AppDialog>;

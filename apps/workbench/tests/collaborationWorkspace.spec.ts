@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { act } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { configureCommandRecoveryForTest, resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 import { clickPortal, DomWrapper, dialogText, flush, folderStripName, mountWorkbench, openSessionSwitcher, openUnresolvedDialog, openWorkingDirectory, switchToolbarSession, toolbarSessionTitle } from "./mountApp";
 import { COLLABORATION_LAYOUT_STORAGE_KEY } from "../src/lib/collaborationLayoutPreferences";
 
@@ -207,9 +208,29 @@ function router(routes: Routes) {
   });
 }
 
+/** 旧会话回执对应的一对消息：恢复读回时用来证明这条发送命令真的落库。 */
+function oldSessionMessages(sessionId: string) {
+  const base = { session_id: sessionId, intent: "DISCUSS", sources: [], skill: null,
+    usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
+    cancel_requested: false, error_code: null, provider_error_kind: null };
+  return [
+    { ...base, id: "old-request", seq: "1", role: "USER", status: "COMPLETED", content: "旧讨论",
+      created_at: "2026-09-30T03:00:00Z", updated_at: "2026-09-30T03:00:00Z" },
+    { ...base, id: "old-reply", seq: "2", role: "ASSISTANT", status: "COMPLETED", content: "旧回复",
+      created_at: "2026-09-30T03:01:00Z", updated_at: "2026-09-30T03:01:00Z" },
+  ];
+}
+
 // 会话内恢复线索（未确认的 Run 控制命令按 Run 存在 sessionStorage）不属于协作页夹具状态：
 // 每条用例都以「没有上一条未确认命令」为前提，因此连同布局偏好一起清掉。
-afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); window.localStorage.removeItem(COLLABORATION_LAYOUT_STORAGE_KEY); window.sessionStorage.clear(); });
+beforeEach(() => {
+  resetCommandRecoveryForTest();
+  // 自动恢复只有一轮：这些既有用例断言「失败后仍保留未决」与手动核对路径，
+  // 不能让后台退避在断言前把记录清掉或长时间停在 RETRYING。退避本身由 commandRecovery.spec.ts 覆盖。
+  configureCommandRecoveryForTest({ delaysMs: [0], maxAttempts: 1, jitterRatio: 0 });
+});
+afterEach(() => { resetCommandRecoveryForTest(); resetRelayConnectionForTest(); vi.unstubAllGlobals();
+  window.localStorage.removeItem(COLLABORATION_LAYOUT_STORAGE_KEY); window.sessionStorage.clear(); });
 
 describe("协作工作区主路径", () => {
   it("双栏、对话、成果切换保留原Owner、会话草稿和判断说明，零业务提交", async () => {
@@ -379,6 +400,8 @@ describe("协作工作区主路径", () => {
         await view.wrapper.get(`[data-testid="collab-layout-${mode}"]`).trigger("click");
         expect(view.wrapper.get(selector).element).toBe(original);
       }
+      // 自动核对已经消费了进入未决后的第一次查询；手动点击只追加一次，断言仍按「原命令一次」。
+      receipts.length = 0;
       if (owner === "assist") {
         await openUnresolvedDialog("assist-pending");
         await clickPortal("assist-pending-receipt"); await flush();
@@ -525,6 +548,9 @@ describe("协作工作区主路径", () => {
       workspace_id: workspaceId, project_id: projectId, task_id: taskId, title: `讨论${index + 1}`,
       status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:40:00Z" })) }) });
     let currentCommandId = ""; const posts: Record<string, unknown>[] = []; const receiptPaths: string[] = [];
+    // 自动核对首轮先拿不到旧回执，保留恢复入口供本用例验证「切换前先恢复旧命令」；
+    // 测试显式打开后，再让服务端回执可用，模拟用户点击触发的确认。
+    let oldReceiptAvailable = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       if (path === `${prefix}/assist-sessions/${sessionId}/messages` && init?.method === "POST") {
@@ -533,19 +559,32 @@ describe("协作工作区主路径", () => {
       }
       if (path === `${prefix}/commands/${oldCommandId}`) {
         receiptPaths.push(path);
+        if (!oldReceiptAvailable) return response({ code: "COMMAND_NOT_FOUND", detail: "not found yet" }, 404);
         return response({ command_id: oldCommandId, command_type: "RequestAssistMessage", committed_at: "2026-09-30T04:00:00Z",
           result: { session_id: oldSessionId, assistant_message_id: "old-reply", user_message_id: "old-request" } });
       }
       if (currentCommandId && path === `${prefix}/commands/${currentCommandId}`) {
         receiptPaths.push(path); return response({ code: "COMMAND_NOT_FOUND", detail: "not found yet" }, 404);
       }
+      // 恢复成功后的服务端读回：旧会话必须能被单读确认，而不是只凭回执猜；
+      // 消息命令还要核对回执里的两条消息真的写进了这条会话。
+      if (path === `${prefix}/assist-sessions/${oldSessionId}/messages`)
+        return response({ items: oldSessionMessages(oldSessionId) });
+      if (path === `${prefix}/assist-sessions/${oldSessionId}`)
+        return response({ id: oldSessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+          title: "讨论2", status: "ACTIVE", revision: "1",
+          created_at: "2026-09-29T03:40:00Z", updated_at: "2026-09-29T03:41:00Z" });
       return read(input, init);
     }));
     const view = await mountWorkbench(`/agent?work=${taskId}`);
     try {
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("当前会话需要保留的讨论");
       if (pending) { await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush(); }
-      await view.wrapper.get(`[data-testid="collab-recovery-${oldCommandId}"]`).trigger("click"); await flush();
+      oldReceiptAvailable = true;
+      receiptPaths.length = 0;
+      // 恢复入口收进顶栏 chip，详情在对话框里按需展开后再逐条核对。
+      await view.wrapper.get('[data-testid="collab-recovery"]').trigger("click"); await flush();
+      await clickPortal(`collab-recovery-${oldCommandId}`); await flush();
       expect(view.router.currentRoute.value.query.work).toBe(taskId);
       if (pending) {
         // 未决命令仍在：留在原会话，草稿与输入器都不动。
@@ -586,6 +625,7 @@ describe("协作工作区主路径", () => {
       workspace_id: workspaceId, project_id: projectId, task_id: taskId, title: `讨论${index + 1}`,
       status: "ACTIVE", revision: "1", updated_at: "2026-09-29T03:40:00Z" })) }) });
     let currentCommandId = ""; const posts: Record<string, unknown>[] = []; const receiptPaths: string[] = [];
+    let oldReceiptAvailable = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       if (path === `${prefix}/assist-sessions/${sessionId}/messages` && init?.method === "POST") {
@@ -594,19 +634,29 @@ describe("协作工作区主路径", () => {
       }
       if (path === `${prefix}/commands/${oldCommandId}`) {
         receiptPaths.push(path);
+        if (!oldReceiptAvailable) return response({ code: "COMMAND_NOT_FOUND", detail: "not found yet" }, 404);
         return response({ command_id: oldCommandId, command_type: "RequestAssistMessage", committed_at: "2026-09-30T04:00:00Z",
           result: { session_id: oldSessionId, assistant_message_id: "old-reply", user_message_id: "old-request" } });
       }
       if (currentCommandId && path === `${prefix}/commands/${currentCommandId}`) {
         receiptPaths.push(path); return response({ code: "COMMAND_NOT_FOUND", detail: "not found yet" }, 404);
       }
+      if (path === `${prefix}/assist-sessions/${oldSessionId}/messages`)
+        return response({ items: oldSessionMessages(oldSessionId) });
+      if (path === `${prefix}/assist-sessions/${oldSessionId}`)
+        return response({ id: oldSessionId, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+          title: "讨论2", status: "ACTIVE", revision: "1",
+          created_at: "2026-09-29T03:40:00Z", updated_at: "2026-09-29T03:41:00Z" });
       return read(input, init);
     }));
     const view = await mountWorkbench(`/agent?work=${taskId}`);
     try {
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("结果不明的讨论");
       await view.wrapper.get('[data-testid="assist-send"]').trigger("click"); await flush();
-      await view.wrapper.get(`[data-testid="collab-recovery-${oldCommandId}"]`).trigger("click"); await flush();
+      oldReceiptAvailable = true;
+      receiptPaths.length = 0;
+      await view.wrapper.get('[data-testid="collab-recovery"]').trigger("click"); await flush();
+      await clickPortal(`collab-recovery-${oldCommandId}`); await flush();
       // 任务作用域的未决命令已进恢复区：弹层提供切换出口，切走不丢命令身份。
       const escape = document.querySelector('[data-testid="collab-pending-switch"]');
       expect(escape).not.toBeNull();
@@ -615,10 +665,15 @@ describe("协作工作区主路径", () => {
       expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(toolbarSessionTitle()).toBe("讨论2");
       // 原命令仍留在本页恢复区，可继续按原 ID 查回执；期间没有第二条消息命令。
-      const recovery = view.wrapper.get(`[data-testid="collab-recovery-${currentCommandId}"]`);
-      expect(recovery.exists()).toBe(true);
-      await recovery.trigger("click"); await flush();
-      expect(receiptPaths).toEqual([`${prefix}/commands/${oldCommandId}`, `${prefix}/commands/${currentCommandId}`]);
+      // 核对成功后详情已自动收起，按需重新打开紧凑入口。
+      await view.wrapper.get('[data-testid="collab-recovery"]').trigger("click"); await flush();
+      const recovery = document.querySelector(`[data-testid="collab-recovery-${currentCommandId}"]`);
+      expect(recovery).not.toBeNull();
+      // 自动核对与手动核对都可能查过同一条命令；这里只盯手动这一次仍使用原 command_id。
+      expect(receiptPaths.filter((item) => item.endsWith(`/${oldCommandId}`))).toHaveLength(1);
+      receiptPaths.length = 0;
+      await clickPortal(`collab-recovery-${currentCommandId}`); await flush();
+      expect(receiptPaths).toEqual([`${prefix}/commands/${currentCommandId}`]);
       expect(posts).toHaveLength(1);
     } finally {
       view.unmount();
@@ -1781,12 +1836,12 @@ describe("协作工作区主路径", () => {
     await flush(40);
     expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("该 Project 已登记的受管目录");
     expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("D:\\repo");
-    expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("受管产物是任务产物版本，工作目录文件是受管目录下的普通文件；两者来源不同，不混成同一版本。");
+    expect(view.wrapper.get('[data-testid="devtools-files"]').text()).toContain("受管产物是任务产物版本，工作目录文件是普通文件，两者不混成同一版本");
     await view.wrapper.get('[data-testid="devtools-tab-GIT"]').trigger("click");
     expect(view.wrapper.get('[data-testid="git-read-idle"]').text()).toContain("尚未读取所选目录");
     expect(view.wrapper.get('[data-testid="git-read-status"]').attributes("disabled")).toBeDefined();
     // 2026-10-24 用户指令：面板规范语言（「不得显示为干净」）撤出上屏，能力边界收成开发注记。
-    expect(view.wrapper.get('[data-testid="devtools-git"]').text()).toContain("开发注记：本轮只放行受管资源上的状态与差异读取");
+    expect(view.wrapper.get('[data-testid="devtools-git"]').text()).toContain("本轮只放行受管资源上的状态与差异读取");
     expect(view.wrapper.find('[data-testid="devtools-terminal-gap"]').exists()).toBe(false);
     await view.wrapper.get('[data-testid="devtools-tab-TERMINAL"]').trigger("click");
     expect(view.wrapper.get('[data-testid="devtools-terminal-gap"]').text()).toContain("不提供可执行提示符");
@@ -2470,7 +2525,7 @@ describe("不可恢复输入的离页保护", () => {
         write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } } }, 200);
   }
 
-  it("暂存附件在页内切目录（换工作区）时直接切换：不再弹确认，正文与暂存附件随会话保留", async () => {
+  it("暂存附件在页内切目录：先确认；保留留在原会话，丢弃后才进入新对话", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const mocked = router({});
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -2492,20 +2547,29 @@ describe("不可恢复输入的离页保护", () => {
         new File([new Uint8Array([1, 2, 3])], "截图.png", { type: "image/png" }));
       await flush();
       expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
-      // 用户原话的场景：输入框里已有正文（截图里就是「你好」）。
       await view.wrapper.get('[data-testid="assist-draft"]').setValue("你好");
       await flush();
 
-      // 2026-11-03 用户指令「输入框里面有内容的时候切换工作区就直接切换就可以了」：
-      // 换工作区不再因输入器里的不可恢复输入弹确认，直接切走。
+      // P0-D：目录切换会离开当前会话进入新对话，暂存附件无法跨导航恢复——先确认再走。
       await openWorkingDirectoryViaManual("D:/repo-other");
+      await flush(120);
+      expect(dialogText()).toContain("无法恢复");
+      await clickPortal("collab-unsaved-keep");
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
+      expect((view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement).value).toBe("你好");
+
+      // 明确丢弃后才离开旧会话：新对话欢迎页自己的输入器，旧附件不跟过去。
+      await openWorkingDirectoryViaManual("D:/repo-other");
+      await flush(120);
+      expect(dialogText()).toContain("无法恢复");
+      await clickPortal("collab-unsaved-discard");
       await flush(120);
       expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(folderStripName()).toBe("repo-other");
-      // 换工作区（CHANGE_DIRECTORY）不换会话：输入器状态跟着同一条会话保留，没被静默丢掉。
-      expect(view.wrapper.get('[data-testid="composer-attachments"]').attributes("data-count")).toBe("1");
-      const draftAfterSwitch = view.wrapper.get('[data-testid="assist-draft"]').element as HTMLTextAreaElement;
-      expect(draftAfterSwitch.value).toBe("你好");
+      expect(document.querySelector('[data-testid="assist-first-draft"]')).not.toBeNull();
+      expect(view.wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
     } finally { view.unmount(); }
   });
 
@@ -2730,11 +2794,11 @@ describe("普通会话工具面板的项目身份", () => {
     } finally { view.unmount(); }
   });
 
-  it("归属命令结果未知：工具面板留在未关联边界，不放行受管目录", async () => {
+  it("切换目录不改写旧会话归属：返回后工具面板仍在未关联边界", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const base = router({ session: () => response(sessionRow(null)) });
-    // 目录打开成功并带回项目关联，随后归属命令「结果未知」（网络层失败）：
-    // 目录已经打开不等于这条讨论已经归入项目，工具面板必须继续按未关联处理。
+    // P0-D：已有会话里选目录进入新对话，不再替旧会话发归属命令。
+    // 旧会话的 project_id 仍为 null，返回它时工具面板必须继续按未关联处理。
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       if (init?.method === "POST" && path.endsWith("/working-directories/open")) {
@@ -2747,9 +2811,6 @@ describe("普通会话工具面板的项目身份", () => {
             candidates: [], write_readiness: { status: "NEEDS_CONNECTION", detail: "本项目还没有绑定该目录的文件写入连接。" } },
           links: { resource: "" } });
       }
-      if (init?.method === "POST" && path.endsWith("/binding")) {
-        throw new TypeError("Failed to fetch");
-      }
       return base(input, init);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -2758,14 +2819,18 @@ describe("普通会话工具面板的项目身份", () => {
       await flush(80);
       await openWorkingDirectory("D:/Develop/MyProject");
       await flush(120);
-      // 归属在途/未知由细条如实说明；这里只钉住它对工具面板的后果。
-      expect(view.wrapper.get('[data-testid="collab-binding"]').attributes("data-status")).toBe("UNKNOWN");
+      expect(fetchMock.mock.calls.some(([input, init]) => init?.method === "POST" &&
+        new URL(String(input)).pathname.endsWith("/binding"))).toBe(false);
+      await view.router.push(`/agent?session=${sessionId}`);
+      await flush(); await flush();
+      const beforeTools = fetchMock.mock.calls.length;
       await view.wrapper.get('[data-testid="collab-conversation-tools-toggle"]').trigger("click");
       await flush(80);
       expect(view.wrapper.get('[data-testid="collab-conversation-tools"]').attributes("data-project")).toBe("unbound");
       await view.wrapper.get('[data-testid="devtools-tab-FILES"]').trigger("click");
       expect(view.wrapper.get('[data-testid="devtools-files-unavailable"]').text()).toContain("尚未关联项目");
-      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/managed-resources"))).toBe(false);
+      expect(fetchMock.mock.calls.slice(beforeTools)
+        .some(([input]) => String(input).includes("/managed-resources"))).toBe(false);
     } finally { view.unmount(); }
   });
 

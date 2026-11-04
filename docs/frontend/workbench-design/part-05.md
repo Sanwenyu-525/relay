@@ -123,6 +123,17 @@
 
 页面元素：`folder-scope-strip`（输入卡上方的常驻细条：目录名、归属与告警）、`folder-scope-change`（目录名本身即「更换目录」入口，2026-10-18 两行合并后原 `folder-scope-options` 目录名 testid 并入这一颗键）、`folder-scope-association`（已归入项目 / 未归入项目）、`folder-scope-change`（打开 `folder-scope-pop` 浮层：非模态 `role="dialog"`，aria-label「更换工作目录」，内容即 `folder-scope` 选择面）、`folder-write-readiness`（只读投影的受阻与受限说明；2026-10-24 起「已具备／已开放」的档位复述不再显示）、`folder-ambiguous` 与 `collab-folder-candidate-{project_id}`（多项目显式选择）、`folder-not-ready`（稳定原因说明）、`collab-recent-folder`（本机近期目录，展示偏好）、`assist-first-draft` / `assist-first-send`（首条输入）、`execution-summary` 及其 `data-decision` / `data-status` / `execution-summary-stage` / `execution-summary-title` / `execution-clarify` / `execution-start` / `execution-open-task`。
 
+**2026-11-04 用户指令：输入卡下方的目录选择器改为「切换工作上下文 → 进入新对话」（已实施；Breaking Change：Yes，仅交互语义，不涉及 API / 数据库 / 权限契约）。** 已有会话 A 里选中另一个目录 B 时：
+
+1. 先按同一条 `OpenWorkingDirectory` 验证 B；目录不存在、权限不足或命令失败时留在 A，细条显示「无法打开这个工作目录：…」与可重试入口，A 的会话身份、消息、项目归属与目录绑定都不改。
+2. B 为 `READY` 时进入以 B 为当前目录的新对话欢迎页，查询串为 `?new=<新键>&dir=<B 路径>&source_session=<A>`；欢迎页的目录细条与顶栏都读 B，首条输入器恢复该新草稿自己的内容。
+3. 本步骤**不创建数据库 Session**；用户在欢迎页发送第一条消息时才按既有 `CreateAssistSession → BindAssistSessionDirectory → RequestAssistMessage` 路径创建会话 C 并绑定 B。A 的目录、归属、消息与草稿保持原样，左侧最近工作栏同时保留 A 与 C。
+4. `AMBIGUOUS`（同一实际目录关联多个项目）仍进入欢迎页，由该页目录浮层里的候选作用域完成选择；`NOT_READY` 且无法用候选作用域解析时留在 A 并给出原因。
+5. 选中的就是 A 已确认绑定的同一目录时保留当前页面，不发送 `OpenWorkingDirectory`、不创建新对话身份。
+6. 换目录不再替 A 发 `BindAssistSessionProject` / `BindAssistSessionDirectory` 写命令；A 的未决命令仍按原 `command_id` 与原会话身份恢复。暂存附件等不可跨导航恢复的输入先经既有离开确认，单纯文字草稿不弹确认（按会话保存在本机）。
+7. 欢迎页再次选择目录仍作用于这份尚未建立的草稿，不新增会话身份；全局新对话、左栏目录「＋」的目录预选机制不变。
+8. 首条未决命令按**草稿作用域**隔离：换到另一条新对话时，旧命令身份与载荷仍留在共享 Owner / 恢复区，但不再占住新草稿的输入器、过渡行或导航上报；回到原作用域时同一份 pending 重新生效并继续自动核对。
+
 阶段显示必须区分「正在整理这次请求 / 需要你补充一点信息 / 候选已就绪 / 任务已建立 / 已进入执行」；**Task READY 或 Run CREATED 都不会被显示成正在写文件**。截至 2026-10-17，服务端将 READY 且由原用户明确请求的 PREPARE 候选标记 `auto_start=true`，Workbench 沿原 `request_id` 自动应用；讨论与缺信息仍不自动推进，写入仍由 Gateway/本次任务范围准入，DELETE 保留确切动作确认。是否自动应用还受本设备「计划执行方式」偏好约束（§18.4.2）。Apply 读回同时刷新挂在原用户消息下的 Run 轨迹投影，不要求切到任务页才能看到结果。行为规格见[§18.10](part-07.md#1810-普通-agent-的连续工具主流程)。
 
 当前实现建立真实任务后协作页切到那个 Task：执行摘要、Run 控制、成果阅读与判断入口仍是原来的 Owner。目标交互按 §18.10 保留原会话中的进度与结果，不再强制切任务才能看到唯一结果；原任务视图继续作为详情入口。实际 Windows 原生选择、取消、重启、中文 IME 与 DPI 取证尚未完成，范围只在[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)记录。

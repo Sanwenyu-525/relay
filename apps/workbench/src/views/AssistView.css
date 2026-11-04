@@ -471,6 +471,11 @@
   white-space: nowrap;
 }
 .agent-first-transition-reason { margin: 0; text-align: right; font-size: var(--relay-font-size-meta); }
+/* 会话面板未挂载时的未决首条兜底（P0-A，2026-11-04）：正文骨架复用正式消息行，
+   这里只补它与首条输入区之间的间距；消息块自身的宽度、对齐与排版仍由 .agent-message-* 决定。
+   原先那条自带消息气泡的 .agent-first-pending-message 已删除——它让同一条消息
+   在过渡行里嵌套出现两次，并在真实消息投影后于列表末尾再出现一次。 */
+.agent-first-pending-fallback { margin-top: var(--relay-space-4); }
 /* 状态行（在途/未决）挂在消息体内部、与正文同宽同侧：回执入口因此贴在所属消息上，
    而不是浮在会话标题下方另起一行。行高按一行算，出现/消失不推动消息列表。 */
 .agent-first-transition-note {

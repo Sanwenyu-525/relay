@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
+import { configureCommandRecoveryForTest, resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 import { clickPortal, flush, mountWorkbench, openUnresolvedDialog } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -42,7 +43,7 @@ function message(id: string, role: "USER" | "ASSISTANT", content: string | null,
     cancel_requested: false, ...extra };
 }
 
-afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
+afterEach(() => { resetRelayConnectionForTest(); resetCommandRecoveryForTest(); vi.unstubAllGlobals(); });
 
 describe("M04 第一方 Skill 与 Pack", () => {
   it("注册表不可读时普通 Assist 仍按原意图发送", async () => {
@@ -76,6 +77,9 @@ describe("M04 第一方 Skill 与 Pack", () => {
 
   it("任务显式选择 Skill，原命令重试保持 skill_ref/skill_input，输出只读且无 Apply", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
+    // 自动核对只在轻量状态里跑（CHECKING/RETRYING 期间不摆恢复面板，2026-11-04 恢复入口收紧）。
+    // 把退避压到「1 次 0ms」让用例在核对落到上限后断言紧凑入口，而不是真等 15 秒。
+    configureCommandRecoveryForTest({ delaysMs: [0], maxAttempts: 1 });
     const attempts: Record<string, unknown>[] = [];
     let messages: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -132,7 +136,8 @@ describe("M04 第一方 Skill 与 Pack", () => {
     expect(view.wrapper.get('[data-testid="assist-send"]').attributes("aria-label"))
       .toBe("运行 task-to-execution-contract");
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
-    await flush();
+    // 响应丢失后先进入自动核对；核对到上限才落成「命令结果待核对」紧凑入口——判据不变，只等它落定。
+    await flush(80);
     expect(view.wrapper.text()).toContain("命令结果待核对");
     // 发送键只留图标（UI-COMPOSER-compact-controls），文案由可访问名称承担——判据不变，载体换位。
     expect(view.wrapper.get('[data-testid="assist-send"]').attributes("aria-label"))

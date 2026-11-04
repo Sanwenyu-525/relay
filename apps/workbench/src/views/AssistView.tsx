@@ -26,6 +26,7 @@ import ModelSelector from "../components/ModelSelector";
 import ContextUsagePanel from "../components/ContextUsagePanel";
 import ContextRiskNotice from "../components/ContextRiskNotice";
 import { sessionModelSelectionFrom } from "../api/resources/modelSelection";
+import { revisionAtLeast } from "../api/parse/memory";
 import ChatTimelineNav from "../components/ChatTimelineNav";
 import ChatCommandInput, { chatCommandScope, chatCommandStatus } from "../components/ChatCommandInput";
 import PluginIcon from "../components/PluginIcon";
@@ -68,6 +69,8 @@ import { ConversationModeSwitch, ConversationModeHints, type AssistantDraft } fr
 import { Notice, Toast } from "../components/Feedback";
 import { UnresolvedCommandDialog, UnresolvedCommandStrip } from "../components/UnresolvedCommandDialog";
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
+import { checkRecoveryNow, recoveryFailureLabel, recoveryScope, registerRecoveryOwner, removeRecovery, subscribeRecoveries, upsertRecovery,
+  type ApplyOutcome, type RecoveryEntry, type RecoveryFailure, type RecoveryRecord, type RecoveryOwner } from "../lib/commandRecovery";
 import { bumpActiveConversationActivity } from "../lib/activeConversation";
 import { assistActivityLanded } from "../lib/sessionActivity";
 import { useDetailsMenu, useMenuDismiss, useMenuExclusive, usePopupFlip } from "../lib/popoverMenu";
@@ -82,7 +85,6 @@ import { waitForEventRetry } from "../lib/eventRetry";
 import type { PendingContext } from "../lib/usePendingWork";
 import { rememberSourceRefs, readRecentSourceRefs } from "../lib/recentSourceRefs";
 import { readComposerDraft, writeComposerDraft } from "../lib/composerDrafts";
-import { readLastModel, writeLastModel } from "../lib/modelPreferences";
 import { useDelayedVisible } from "../lib/useDelayedVisible";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { chatControlFromText } from "../lib/chatControls";
@@ -207,6 +209,9 @@ type PendingAction = { readonly kind: "send"; readonly commandId: string; readon
   /** `/compact`：与 restart 共用 chat-commands 通道，但只申请整理工作窗口，不新建会话。 */
   { readonly kind: "compact"; readonly commandId: string; readonly content: string } |
   { readonly kind: "model"; readonly commandId: string; readonly model: string } |
+  /** MODEL-SETTINGS-03-ANCHOR：跟随工作区默认（ClearSessionModelSelection）。
+   *  清除本会话的显式选择，恢复「工作区聊天默认 → 进程默认」；不在本机存任何偏好。 */
+  { readonly kind: "followDefault"; readonly commandId: string } |
   /** 选择一条已登记连接：身份是 connection_id，型号由服务端按连接当前声明解析。 */
   { readonly kind: "connection"; readonly commandId: string; readonly connectionId: string;
     readonly connectionName: string } |
@@ -230,6 +235,7 @@ function pendingCommandType(action: PendingAction): string {
     case "restart": return "ExecuteChatCommand";
     case "compact": return "RequestMemoryCompaction";
     case "model": return "SelectSessionModel";
+    case "followDefault": return "ClearSessionModelSelection";
     case "connection": return "SelectSessionConnection";
     case "chatMode": return "SetChatMode";
     case "cancel": return "CancelAssistMessage";
@@ -263,6 +269,18 @@ function firstModelChoice(process: Pick<FirstMessageProcess, "model" | "connecti
 type PendingFirstMessage = { readonly sessionId: string; readonly commandId: string;
   readonly modelSelection?: SessionModelChoice;
   readonly modelSelectionConfirmed?: boolean;
+  /**
+   * 已确认的模型选择修订（P0-B，2026-11-04）。恢复时即使不再提交选择命令，
+   * 消息命令仍要带上原来那份 `expected_model_selection_revision`——载荷冻结，
+   * 不因「这一阶段已经核对」而丢掉并发保护。
+   */
+  readonly modelSelectionRevision?: string;
+  /**
+   * 这条首条命令属于哪一份新对话草稿作用域（P0-B，2026-11-04）。
+   * 命令身份跨重挂载保留，但换到另一条新对话时不能继续锁住新草稿；
+   * 回到原作用域时同一份 pending 仍会恢复显示并继续自动核对。
+   */
+  readonly scopeKey?: string;
   readonly content: string; readonly conversationMode: RelayConversationMode;
   /** 0127：首条消息按哪种模式受理；缺省沿用会话的持久模式。 */
   readonly chatMode?: RelayChatMode | undefined;
@@ -279,7 +297,19 @@ type PendingFirstMessage = { readonly sessionId: string; readonly commandId: str
   readonly attachmentIds?: readonly string[];
   /** 传输失败时的真实原因；null 表示命令已确认发出。 */
   readonly reason: string | null; readonly resourceId: string | null;
-  readonly directoryCommandId?: string };
+  readonly directoryCommandId?: string;
+  /**
+   * FIRST-STAGE-ANCHOR（2026-11-04）：目录绑定是否已拿到回执。
+   * 绑定命令在消息命令**之前**发出；没有这个标记时，核对会把尚未发出的消息命令当成
+   * 「结果未知」去查回执，查不到就把整个首条链路锁死。
+   */
+  readonly directoryBindingConfirmed?: boolean;
+  /**
+   * FIRST-STAGE-ANCHOR（2026-11-04）：消息命令是否真正提交过。
+   * 只有置位后才允许按 command_id 查消息回执；模型/目录/上传阶段中断时按原身份重放，
+   * 不拿还没发出的消息命令去查回执。
+   */
+  readonly messageAttempted?: boolean };
 /**
  * 首条消息的冻结展示快照（DEV-0110 续）。
  *
@@ -315,6 +345,16 @@ function snapshotOfPendingFirst(pending: PendingFirstMessage): FirstMessageSnaps
     sourceCount: pending.sourceRefs?.length ?? 0,
     ...(pending.skillRef === undefined ? {} : { skillRef: pending.skillRef }) };
 }
+/** 未决/在途的 pending 只映射成一条过渡事实：正文只有这一份来源，状态行另行附着。 */
+function transitionOfPendingFirst(pending: PendingFirstMessage,
+  phase: "sending" | "unresolved"): FirstMessageTransition {
+  return { phase, content: pending.content,
+    attachments: (pending.attachmentFiles ?? []).map((file) => file.name),
+    ...(pending.chatMode === undefined ? {} : { chatMode: pending.chatMode }),
+    sourceCount: pending.sourceRefs?.length ?? 0,
+    ...(pending.skillRef === undefined ? {} : { skillRef: pending.skillRef }),
+    reason: null };
+}
 /**
  * 建会话命令连同首条原文：创建响应丢失后按原回执恢复时，交接的必须是这一份载荷。
  *
@@ -325,6 +365,8 @@ type PendingCreate = { readonly commandId: string; readonly projectId: string | 
   readonly modelSelection?: SessionModelChoice;
   readonly taskId: string | null; readonly title: string;
   readonly firstContent: string; readonly resourceId: string | null;
+  /** 与 PendingFirstMessage 同一份草稿作用域：创建回执恢复后续发首条时不能混到别的新对话。 */
+  readonly scopeKey?: string;
   /**
    * P0-1（2026-10-31）：风险预检那次认定的工作目录（`null` = 当时认定不会绑定目录）。
    *
@@ -420,6 +462,8 @@ export type AssistNavigationState = {
   readonly discard?: () => void;
   readonly pending: { readonly commandId: string; readonly commandType: string;
     readonly sessionId: string | null;
+    /** 提案/验收命令的业务对象 id；跨页恢复时用于核对回执身份。 */
+    readonly objectId?: string;
     /**
      * true = 结果未知，需要按原 command_id 查回执；false = 请求仍在途。
      * 缺省按未知保守处理：旧调用方没有声明时，宁可说「待核对」也不谎称仍在提交。
@@ -491,6 +535,10 @@ function receiptMatches(receipt: RelayCommandReceipt, action: PendingAction, ses
   if (action.kind === "connection") return receipt.commandId === action.commandId &&
     receipt.commandType === "SelectSessionConnection" && receipt.result.session_id === sessionId &&
     receipt.result.connection === "registered" && receipt.result.connection_id === action.connectionId;
+  // 清除选择：`cleared` 表示「原本是否有选择」，两种取值都代表命令已生效。
+  if (action.kind === "followDefault") return receipt.commandId === action.commandId &&
+    receipt.commandType === "ClearSessionModelSelection" &&
+    receipt.result.session_id === sessionId && typeof receipt.result.cleared === "boolean";
   if (action.kind === "restart") return receipt.commandId === action.commandId &&
     receipt.commandType === "ExecuteChatCommand" && receipt.result.source_session_id === sessionId &&
     receipt.result.system === action.system && receipt.result.kind === "NEW_SESSION";
@@ -544,6 +592,7 @@ export default function AssistView({ targetKind, targetId, preferredSessionId, o
   deferSessionCreation = standalone, executionScope = null, onExecutionPrepared,
   pendingDirectory = null, initialTarget, initialSession, creationPending = false,
   firstMessageOwner, firstMessageProcess, workspaceLevel = false,
+  firstConversationScope,
   conversationTarget, onConversationTargetChange, composerHeader, composerFooter,
   conversationToolbar = false, toolbarRight,
   sessionContextEpoch = 0, onRequestSkillTarget, onSessionScopeResolved }: {
@@ -623,6 +672,12 @@ onExecutionPrepared?: (taskId: string) => void;
   firstMessageOwner?: FirstMessageOwner;
   /** 父级持有的当前过程投影；只在提供了 firstMessageOwner 时使用。 */
   firstMessageProcess?: FirstMessageProcess;
+  /**
+   * 当前新对话草稿作用域（P0-B，2026-11-04）。首条命令属于产生它的那份草稿；
+   * 父级换到另一条新对话后，旧 pending 仍留在恢复区，但不能锁住新草稿的输入器。
+   * 不传时视为「当前作用域」，独立页与测试行为不变。
+   */
+  firstConversationScope?: string;
   /**
    * 工作空间级模式：没有项目也没有任务，只有 project_id 为空的会话。
    * 文件夹入口在未选目录时用它 —— 先能讨论，归属与执行准入另行决定。
@@ -786,13 +841,14 @@ onExecutionPrepared?: (taskId: string) => void;
   const [firstComposing, setFirstComposing] = useState(false);  /**
    * 首条消息过程的 Owner。文件夹入口下由协作页持有并跨重挂载存活；
    * 独立使用时退回本实例的局部记录，语义不变。
-   * 模型选择带本机偏好（2026-10-20 用户指令「记住上一次选择的模型」）：独立使用时
-   * 这里也要种子化，否则只有协作页路径能记住上次选择。协作页路径由它的 firstMessage
-   * 初始状态负责（见 CollaborationView），本条只覆盖没有 Owner 的用法。
+   *
+   * 首条消息前的模型选择**只由用户显式选择产生**（MODEL-SETTINGS-03，P0-4）。
+   *
+   * 这里不再从本机「上次使用的模型」种下初值：那会让新会话在没有显式选择时悄悄提交
+   * 一次 SelectSessionModel，把「跟随工作区聊天默认 → 进程默认」覆盖成本机历史偏好。
+   * 新会话默认显示「跟随默认」，由服务端按优先级解析。
    */
-  const [localFirst, setLocalFirst] = useState<FirstMessageProcess>(() => ({
-    ...emptyFirstProcess,
-    model: client === null ? undefined : readLastModel(client.workspaceId) ?? undefined }));
+  const [localFirst, setLocalFirst] = useState<FirstMessageProcess>(emptyFirstProcess);
   const localFirstRef = useRef(localFirst); localFirstRef.current = localFirst;
   const localOwner = useMemo<FirstMessageOwner>(() => ({
     read: () => localFirstRef.current,
@@ -801,6 +857,17 @@ onExecutionPrepared?: (taskId: string) => void;
   const firstOwner = firstMessageOwner ?? localOwner;
   const first = firstMessageOwner ? (firstMessageProcess ?? emptyFirstProcess) : localFirst;
   const pendingFirst = first.pending;
+  /**
+   * 只有属于当前新对话草稿作用域的 pending 才占住输入器、过渡行与恢复入口。
+   * 命令身份仍完整保留在共享 Owner 与恢复区里；切回原作用域时同一份 pending 会重新生效，
+   * 不会因为「换了一条新对话」被清掉，也不会把新对话的输入器永久置忙。
+   */
+  const scopedPendingFirst = pendingFirst !== null &&
+    (pendingFirst.scopeKey === undefined || firstConversationScope === undefined ||
+      pendingFirst.scopeKey === firstConversationScope ||
+      // 会话已经建立后按会话身份认领：从最近工作栏重新打开同一条会话时 URL 不再带 `?new`，
+      // 草稿键会变，但这条 pending 仍然属于屏上的这条会话。
+      (sessionId !== null && pendingFirst.sessionId === sessionId)) ? pendingFirst : null;
   // 在途阶段与命令身份同属一个 Owner：重挂载后的新实例据此知道原发送仍在途，
   // 不会再对同一条消息发起第二次解释。
   const updateFirst = useCallback((patch: Partial<FirstMessageProcess>) => {
@@ -1075,7 +1142,7 @@ onExecutionPrepared?: (taskId: string) => void;
     client, sourceKey: `${connection.epoch}:first`,
     value: first.draft, onChange: (next) => updateFirst({ draft: next }),
     disabled: firstBusy || creating,
-    inflight: firstBusy || creating || pendingFirst !== null,
+    inflight: firstBusy || creating || scopedPendingFirst !== null,
     composing: firstComposing, onRequestFocus: restoreFirstDraftFocus,
   });
 
@@ -1095,13 +1162,13 @@ onExecutionPrepared?: (taskId: string) => void;
         || selectedRefs.length > 0 || stagedFirst.items.length > 0,
       discard: () => { sessionNavigation.discard?.(); setSelectedRefs([]); setFirstSkillKey("");
         stagedFirst.clear(); updateFirst({ draft: "" }); },
-      pending: pendingFirst ? { commandId: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
-          ? pendingFirst.modelSelection.commandId : pendingFirst.commandId,
-          commandType: pendingFirst.modelSelection && !pendingFirst.modelSelectionConfirmed
-            ? pendingFirst.modelSelection.kind === "connection" ? "SelectSessionConnection" : "SelectSessionModel"
-            : "RequestAssistMessage", sessionId: pendingFirst.sessionId,
+      pending: scopedPendingFirst ? { commandId: scopedPendingFirst.modelSelection && !scopedPendingFirst.modelSelectionConfirmed
+          ? scopedPendingFirst.modelSelection.commandId : scopedPendingFirst.commandId,
+          commandType: scopedPendingFirst.modelSelection && !scopedPendingFirst.modelSelectionConfirmed
+            ? scopedPendingFirst.modelSelection.kind === "connection" ? "SelectSessionConnection" : "SelectSessionModel"
+            : "RequestAssistMessage", sessionId: scopedPendingFirst.sessionId,
           // reason 只在结果丢失/失败后写入；null 表示命令已确认发出或仍在途。
-          unresolved: pendingFirst.reason !== null }
+          unresolved: scopedPendingFirst.reason !== null }
         : pendingCreate ? { commandId: pendingCreate.commandId,
             commandType: "CreateAssistSession", sessionId: null,
             // 创建请求仍在跑时是在途；停下后仍有错误才是结果未知（4xx 已在原处解除 pending）。
@@ -1109,7 +1176,7 @@ onExecutionPrepared?: (taskId: string) => void;
           : sessionNavigation.pending,
       // 首条输入器挂载时它就是触发保护的编辑器；未挂载（已有会话/读被挡）时交给会话输入器的恢复回调。
       restoreFocus: firstDraftRef.current !== null ? restoreFirstDraftFocus : sessionNavigation.restoreFocus });
-  }, [standalone, embedded, sessionNavigation, selectedRefs, pendingCreate, pendingFirst, first.draft, firstSkillKey,
+  }, [standalone, embedded, sessionNavigation, selectedRefs, pendingCreate, scopedPendingFirst, first.draft, firstSkillKey,
     creating, createError, stagedFirst, updateFirst, onNavigationStateChange, restoreFirstDraftFocus]);
 
   /**
@@ -1264,12 +1331,34 @@ onExecutionPrepared?: (taskId: string) => void;
    * 同一原消息只解释一次：先在 Owner 上按 command_id 声明，重复或迟到的成功路径拿不到声明。
    */
   async function confirmFirstMessage(pending: PendingFirstMessage) {
+    settleFirstMessageCommand(pending.commandId, pending.sessionId);
+  }
+
+  /**
+   * 首条命令（含它前面的模型选择、目录绑定两段）被任何一条核对路径确认后，
+   * 都回到这里收口共享 Owner（P0-B，2026-11-04）。
+   *
+   * 此前各段各自更新自己的标记，却没有一个出口把「未决」摘掉：消息已经被助手面板的
+   * 自动回执核对证明落库、恢复区也已清空，首条过渡行仍停在结果待核对。身份核对仍是
+   * 唯一依据——只有当前 pending 正是这条命令、这个会话时才清；迟到响应不得清掉
+   * 新命令，也不得把别的会话的未决算到这一条上。
+   */
+  function settleFirstMessageCommand(commandId: string, sessionId: string) {
     const current = firstOwner.read();
-    if (current.interpreted === pending.commandId || current.pending?.commandId !== pending.commandId) return;
+    if (current.pending === null || current.pending.commandId !== commandId ||
+        current.pending.sessionId !== sessionId) return;
     // 主流程保存执行/维护候选；前端只确认原消息发送，不再抢先解释或建立执行。
-    firstOwner.write({ ...current, interpreted: pending.commandId,
-      interpretedSessionId: pending.sessionId, pending: null, draft: "" });
+    firstOwner.write({ ...current, interpreted: commandId,
+      interpretedSessionId: sessionId, pending: null, draft: "" });
     setFirstPendingDialogOpen(false);
+    setFirstPendingError(null);
+    // 这条命令已经有确切回执：恢复区里的同一身份不该继续挂着等核对。
+    if (client !== null) removeRecovery(recoveryScope(client), commandId);
+  }
+
+  /** 模型选择/目录绑定这段被确认后，清掉该段自己的恢复身份；消息命令继续按原阶段推进。 */
+  function settleFirstStageCommand(commandId: string) {
+    if (client !== null) removeRecovery(recoveryScope(client), commandId);
   }
 
   /**
@@ -1334,6 +1423,7 @@ onExecutionPrepared?: (taskId: string) => void;
       title: target === null ? (unassignedTitle === "" ? "新讨论" : unassignedTitle)
         : `关于${target.title}`.slice(0, 200),
       firstContent: content, resourceId: executionScope?.association?.resourceId ?? null,
+      ...(firstConversationScope === undefined ? {} : { scopeKey: firstConversationScope }),
       ...(verified === undefined ? {} : { expectedDirectoryId: verified.scope.resourceId }),
       ...(chatModeOf === null ? {} : { chatMode: chatModeOf }),
       ...(draftChoice === undefined ? {} : { modelSelection: draftChoice }),
@@ -1380,12 +1470,13 @@ onExecutionPrepared?: (taskId: string) => void;
         return;
       }
       onSessionCreated?.(created.id, adopted.session ?? undefined);
-      // 首条只发一次：命令 ID 与原始载荷在发送前就固定。响应丢失时保留 pendingFirst，
+      // 首条只发一次：命令 ID 与原始载荷在发送前就固定。响应丢失时保留 scopedPendingFirst，
       // 由「查询首条回执」按原 command_id 核对或「按原命令重试」，绝不重建会话，
       // 也不把后来修改的文本混入原载荷。
       // 只有图片、没有文字的首条同样要发（§33 / HTTP §10.85）：判据是「有正文或有附件」。
       if (action.firstContent !== "" || (action.attachmentFiles?.length ?? 0) > 0) {
         const first: PendingFirstMessage = { sessionId: created.id, commandId: createCommandId(),
+          ...(action.scopeKey === undefined ? {} : { scopeKey: action.scopeKey }),
           ...(action.modelSelection === undefined ? {} : { modelSelection: action.modelSelection }),
           content: action.firstContent, conversationMode: action.conversationMode,
           ...(action.chatMode === undefined ? {} : { chatMode: action.chatMode }),
@@ -1434,8 +1525,11 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       sent: snapshotOfPendingFirst(pending) });
     setCreating(true); setFirstError(null); setFirstPendingError(null);
     try {
-      let expectedModelSelectionRevision: string | undefined;
-      if (pending.modelSelection !== undefined) {
+      let expectedModelSelectionRevision: string | undefined = pending.modelSelectionRevision;
+      // P0-B（2026-11-04）：恢复重放只补没确认过的前置阶段。一次首条过程里模型选择与
+      // 目录绑定各有一个固定 command_id；已经拿到回执的段不得因为后面的消息失败被
+      // 无条件重发——那既多写一次会话，也会让「核对原命令」变成「重做前几步」。
+      if (pending.modelSelection !== undefined && pending.modelSelectionConfirmed !== true) {
         const choice = pending.modelSelection;
         const selection = choice.kind === "connection"
           ? await client.selectSessionConnection({ sessionId: pending.sessionId,
@@ -1444,13 +1538,20 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             commandId: choice.commandId, model: choice.model });
         expectedModelSelectionRevision = selection.revision;
         if (firstOwner.read().pending?.commandId !== pending.commandId || client !== liveClient()) return;
-        pending = { ...pending, modelSelectionConfirmed: true };
+        pending = { ...pending, modelSelectionConfirmed: true, modelSelectionRevision: selection.revision };
         firstOwner.write({ ...firstOwner.read(), pending });
+        settleFirstStageCommand(choice.commandId);
       }
-      if (pending.resourceId !== null && pending.directoryCommandId !== undefined) {
+      if (pending.resourceId !== null && pending.directoryCommandId !== undefined &&
+          pending.directoryBindingConfirmed !== true) {
+        const directoryCommandId = pending.directoryCommandId;
         await client.bindAssistSessionDirectory({ sessionId: pending.sessionId,
-          commandId: pending.directoryCommandId, resourceId: pending.resourceId });
+          commandId: directoryCommandId, resourceId: pending.resourceId });
         if (firstOwner.read().pending?.commandId !== pending.commandId || client !== liveClient()) return;
+        // 只记录「这一个绑定命令已确认」，不把目录当成消息链路的前置成功。
+        pending = { ...pending, directoryBindingConfirmed: true };
+        firstOwner.write({ ...firstOwner.read(), pending });
+        settleFirstStageCommand(directoryCommandId);
         await loadTarget(pending.sessionId);
         onActiveSessionChange?.(pending.sessionId);
       }
@@ -1476,6 +1577,10 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         { skillRef: { id: string; version: string }; skillInput: RelaySkillInput } =
         pending.skillRef !== undefined ? { skillRef: pending.skillRef, skillInput: {} }
           : pending.conversationMode === "AGENT" ? { intent: "DISCUSS" } : {};
+      // FIRST-STAGE-ANCHOR（2026-11-04）：先把「消息命令已提交」写进 pending，
+      // 之后网络失败时才有资格按原 command_id 核对；此前任何失败都只重放前置步骤。
+      pending = { ...pending, messageAttempted: true };
+      firstOwner.write({ ...firstOwner.read(), pending });
       await client.requestAssistMessage({ sessionId: pending.sessionId, commandId: pending.commandId,
         ...(expectedModelSelectionRevision === undefined ? {} : { expectedModelSelectionRevision }),
         ...(pending.chatMode === undefined ? {} : { chatMode: pending.chatMode }),
@@ -1521,18 +1626,41 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   /**
    * 首条消息回执核对：只按原 command_id 查询，不重建会话、不改载荷、不猜测结果。
    * 核对成功后与迟到响应走同一个 confirmFirstMessage，由共享 Owner 确认原发送过程。
+   *
+   * FIRST-STAGE-ANCHOR（2026-11-04）：核对必须按真实阶段选命令身份——
+   * 模型选择未决 → 查模型命令；目录绑定未决 → 查绑定命令；消息从未提交 → 直接按原身份重放。
+   * 之前只用「模型是否确认」二选一，目录绑定失败或上传失败时都会拿尚未发出的消息命令去查回执，
+   * 查不到又把原因写成「回执与原命令不匹配」，于是整条首条链路被永久锁在结果待核对。
+   * 404 是服务端明确「这个 command_id 没有落库」，按原 ID 同载荷重放是幂等安全的；
+   * 5xx/传输失败仍保留原身份等待用户核对，不自动宣称成功。
    */
   async function checkFirstReceipt() {
-    if (!client || !pendingFirst || creating) return;
-    const pending = pendingFirst; const version = requestVersion.current;
+    if (!client || !scopedPendingFirst || creating) return;
+    const pending = scopedPendingFirst; const version = requestVersion.current;
     firstOwner.write({ ...firstOwner.read(), busy: true });
     setCreating(true); setFirstPendingError(null);
+    // 只有协议定义的 COMMAND_NOT_FOUND 才是「这条命令确实没落库」。任意 404
+    // （路径不存在、反向代理配置错误、别的资源缺失）都不能推导成可以安全重放。
+    const notFound = (caught: unknown): boolean =>
+      caught instanceof RelayApiError && caught.problem.status === 404 &&
+      caught.problem.code === "COMMAND_NOT_FOUND";
+    const resume = async (next: PendingFirstMessage) => {
+      firstOwner.write({ ...firstOwner.read(), busy: false, pending: next });
+      setCreating(false);
+      await sendFirstMessage(next, true);
+    };
     try {
       const selectingModel = pending.modelSelection !== undefined && !pending.modelSelectionConfirmed;
-      const receipt = await client.getCommandReceipt(selectingModel ? pending.modelSelection!.commandId : pending.commandId);
-      if (version !== requestVersion.current) return;
       if (selectingModel) {
         const choice = pending.modelSelection!;
+        let receipt: RelayCommandReceipt;
+        try {
+          receipt = await client.getCommandReceipt(choice.commandId);
+        } catch (caught) {
+          if (notFound(caught)) { await resume(pending); return; }
+          throw caught;
+        }
+        if (version !== requestVersion.current) return;
         const selection = sessionModelSelectionFrom(receipt.result);
         // 连接分支只按 connection_id 核对：型号由服务端从连接声明解析，回执里的型号是结果不是载荷。
         const matches = choice.kind === "connection"
@@ -1543,12 +1671,43 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             selection.sessionId !== pending.sessionId || !matches) {
           throw new Error("首条模型选择回执与原命令不匹配。");
         }
-        const continued = { ...pending, modelSelectionConfirmed: true };
-        firstOwner.write({ ...firstOwner.read(), busy: false, pending: continued });
-        setCreating(false);
-        await sendFirstMessage(continued, true);
+        settleFirstStageCommand(choice.commandId);
+        await resume({ ...pending, modelSelectionConfirmed: true,
+          modelSelectionRevision: selection.revision });
         return;
       }
+      const bindingPending = pending.resourceId !== null && pending.directoryCommandId !== undefined &&
+        pending.directoryBindingConfirmed !== true;
+      if (bindingPending) {
+        let receipt: RelayCommandReceipt;
+        try {
+          receipt = await client.getCommandReceipt(pending.directoryCommandId!);
+        } catch (caught) {
+          if (notFound(caught)) { await resume(pending); return; }
+          throw caught;
+        }
+        if (version !== requestVersion.current) return;
+        const result = receipt.result as { session_id?: unknown; working_resource_id?: unknown };
+        if (receipt.commandId !== pending.directoryCommandId || receipt.commandType !== "BindAssistSessionDirectory" ||
+            result.session_id !== pending.sessionId || result.working_resource_id !== pending.resourceId) {
+          throw new Error("目录绑定回执与原命令不匹配。");
+        }
+        settleFirstStageCommand(pending.directoryCommandId);
+        await resume({ ...pending, directoryBindingConfirmed: true });
+        return;
+      }
+      // 消息命令还没提交过：这是发送前的模型/目录/上传阶段中断，不是「消息结果未知」。
+      // 只按原身份重放，不去查一条不存在的消息命令回执。
+      if (pending.messageAttempted !== true) { await resume(pending); return; }
+      let receipt: RelayCommandReceipt;
+      try {
+        receipt = await client.getCommandReceipt(pending.commandId);
+      } catch (caught) {
+        // 命令确实没有落库（404）：同 ID 同载荷重放是幂等的，不会产生第二条消息。
+        if (notFound(caught)) { await resume(pending); return; }
+        throw caught;
+      }
+      if (version !== requestVersion.current) return;
       const result = receipt.result as { session_id?: unknown; user_message_id?: unknown };
       if (receipt.commandId !== pending.commandId || receipt.commandType !== "RequestAssistMessage" ||
           result.session_id !== pending.sessionId || typeof result.user_message_id !== "string") {
@@ -1566,9 +1725,45 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     finally { if (version === requestVersion.current) setCreating(false); }
   }
   /**
-   * 创建回执恢复：按原 CreateAssistSession 回执取回确切会话，并把该命令携带的首条原文与
-   * 目录资源交接回同一条用户过程。原载荷不会随恢复丢失，也不会被后来输入替换。
+   * 结果未决的首条消息自动核对（2026-11-04，P0-B）。
+   *
+   * 传输失败只说明「没拿到响应」，不说明命令没落库：服务端可能已经写入用户消息并生成了
+   * 助手回复，而界面原先只能靠用户点开核对弹窗才收口，于是真实回复已经在屏上、底部还挂着
+   * 「首条消息还没有确认送达」。这里按原 command_id 自动查回执，身份不符或 5xx 一律保留
+   * 未决身份（核对本身不猜结果），有限次退避后停下，恢复入口仍在原处。
+   *
+   * 只在本视图正看着这条首条命令所属会话时跑；已经切到别的会话时交给跨页恢复 Owner，
+   * 不拿旧会话的未决状态去打扰新会话。成功/失败都会重新读 `firstOwner`，不靠闭包里的旧值。
    */
+  const checkFirstReceiptRef = useRef(checkFirstReceipt);
+  checkFirstReceiptRef.current = checkFirstReceipt;
+  useEffect(() => {
+    const pending = scopedPendingFirst;
+    if (pending === null || pending.reason === null) return;
+    if (sessionId !== null && sessionId !== pending.sessionId) return;
+    // 用户已经打开核对弹窗：此时由弹窗里的两个出口决定，不在背后抢着核对、
+    // 也不在用户阅读原因时把弹窗收掉。关掉后若仍未决，自动核对重新开始。
+    if (firstPendingDialogOpen) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    let attempts = 0;
+    const delays = [800, 2_000, 4_000, 8_000, 15_000, 20_000];
+    const tick = (): void => {
+      timer = null;
+      if (cancelled) return;
+      attempts += 1;
+      void checkFirstReceiptRef.current().finally(() => {
+        if (cancelled) return;
+        const current = firstOwner.read().pending;
+        // 已收口、换了命令或已明确失败：不再自动查。
+        if (current === null || current.commandId !== pending.commandId || current.reason === null) return;
+        if (attempts >= delays.length) return;
+        timer = window.setTimeout(tick, delays[attempts] ?? 20_000);
+      });
+    };
+    timer = window.setTimeout(tick, delays[0] ?? 800);
+    return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
+  }, [scopedPendingFirst?.commandId, scopedPendingFirst?.reason, sessionId, firstPendingDialogOpen, firstOwner]);
   async function checkCreateReceipt() {
     if (!client || !pendingCreate || creating) return;
     const commandId = pendingCreate.commandId; const version = requestVersion.current;
@@ -1590,6 +1785,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       // 否则用户只看到空白会话，原文与载荷就此丢失。
       if (action.firstContent !== "") {
         const first: PendingFirstMessage = { sessionId: createdSessionId, commandId: createCommandId(),
+          ...(action.scopeKey === undefined ? {} : { scopeKey: action.scopeKey }),
           ...(action.modelSelection === undefined ? {} : { modelSelection: action.modelSelection }),
           content: action.firstContent, conversationMode: action.conversationMode,
           reason: null, resourceId: action.resourceId,
@@ -1636,8 +1832,8 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
    * `reason` 只在传输失败等「结果不明」时写入，重试一开始就清掉；因此它同时是
    * 「要收起在途行、换成未决状态与核对弹窗」的判据，不需要第二份布尔状态。
    */
-  const firstPendingUnresolved = pendingFirst !== null && pendingFirst.reason !== null;
-  const firstPendingOpen = pendingFirst !== null && firstPendingDialogOpen;
+  const firstPendingUnresolved = scopedPendingFirst !== null && scopedPendingFirst.reason !== null;
+  const firstPendingOpen = scopedPendingFirst !== null && firstPendingDialogOpen;
   // 明确失败没有可核对的结果，走停留到关闭的 Notice；它的原因住在弹窗里，不混进这里。
   const firstNotice = firstError ?? sharedFailure;
   /**
@@ -1655,13 +1851,8 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   const firstSentSnapshot = first.sent !== undefined && first.sent !== null &&
     session !== null && first.sent.sessionId === session.id ? first.sent : null;
   const firstTransition: FirstMessageTransition | null = session === null ? null
-    : pendingFirst !== null && pendingFirst.sessionId === session.id
-      ? { phase: firstPendingUnresolved ? "unresolved" : "sending", content: pendingFirst.content,
-        attachments: (pendingFirst.attachmentFiles ?? []).map((file) => file.name),
-        ...(pendingFirst.chatMode === undefined ? {} : { chatMode: pendingFirst.chatMode }),
-        sourceCount: pendingFirst.sourceRefs?.length ?? 0,
-        ...(pendingFirst.skillRef === undefined ? {} : { skillRef: pendingFirst.skillRef }),
-        reason: null }
+    : scopedPendingFirst !== null && scopedPendingFirst.sessionId === session.id
+      ? transitionOfPendingFirst(scopedPendingFirst, firstPendingUnresolved ? "unresolved" : "sending")
       : firstSentSnapshot !== null && first.interpreted === firstSentSnapshot.commandId
         ? { phase: "awaiting", content: firstSentSnapshot.content,
           attachments: firstSentSnapshot.attachments,
@@ -1678,16 +1869,20 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             reason: sharedFailure }
           : null;
   /**
-   * 未决/在途状态行：原来挂在会话标题下方单独占一行，现在交给过渡行渲染（P0-C）。
-   * 会话面板没有挂载（读回的会话清单里还没有这条，或建会话未决）时仍回落到原位置，
-   * 否则未决命令会连同核对入口一起消失。
+   * 未决/在途状态行（P0-A，2026-11-04）。
+   *
+   * 这一份**只承载状态说明与核对入口**，不再带用户消息正文：正文的唯一样子由过渡行
+   * （或真实消息投影）渲染。此前这里自带一条完整用户消息，又被作为 `pending` 塞进
+   * `FirstMessageTransitionRow`，一条消息嵌套另一条，屏上出现两份「你好」和一枚狭窄气泡；
+   * 消息真正投影回来之后，这段正文还会以状态行的身份在列表末尾再出现一次。
    */
-  const firstPendingStrip = pendingFirst === null ? null : firstPendingUnresolved
+  const firstPendingStatus = scopedPendingFirst === null ? null : firstPendingUnresolved
     ? <UnresolvedCommandStrip testId="assist-first-pending" busy={creating}
-        label="会话已创建，首条消息结果待核对。"
+        label="首条消息还没有确认送达，先查询回执再继续。"
         onOpen={() => setFirstPendingDialogOpen(true)} />
     : <p className="helper-text agent-first-transition-note" role="status"
         data-testid="assist-first-pending" data-state="sending">
+        正在提交首条消息…
         </p>;
   /**
    * 模式是**会话属性**：已在会话上的身份以会话为准；没有会话时由协作页持有的工作对象身份
@@ -1740,7 +1935,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
 
   /** 还能不能发：已有在途、创建中、目录/助手阻塞都算「不能」，预检据此放弃。 */
   function firstCanSend(): SendSnapshot | null {
-    if (pendingFirst !== null || first.busy || creating || creationPending) return null;
+    if (scopedPendingFirst !== null || first.busy || creating || creationPending) return null;
     if (projectWriteBlockedReason !== null || firstAssistantBlockedReason !== null) return null;
     return firstSnapshotRef.current ?? firstSnapshot();
   }
@@ -1809,6 +2004,28 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   const preferredSessionLookup = session === null && preferredSessionId !== undefined &&
     preferredSessionId !== null && !targetSettled;
   const firstComposer = deferSessionCreation && session === null && externalReadBlockedReason === null;
+  /**
+   * 会话面板还没挂载、首条输入器也不在时的兜底展示（P0-A 第 4 条）。
+   *
+   * 首条输入器在场时，冻结原文就在它自己的输入区里（命令未确认前不会清空），这里再画一份
+   * 就是第二个正文实例；因此兜底只服务嵌入态等没有首条输入器的布局。骨架与正式消息完全
+   * 同一条（同阅读列、同右对齐、同正文样式），会话面板一挂载整块卸载。
+   */
+  const firstPendingFallback = scopedPendingFirst !== null && firstPendingUnresolved &&
+    firstTransition === null && !firstComposer &&
+    (session === null || scopedPendingFirst.sessionId === session.id)
+    ? <ol className="agent-message-list agent-first-pending-fallback"
+        data-testid="assist-first-pending-fallback">
+        <FirstMessageTransitionRow transition={transitionOfPendingFirst(scopedPendingFirst, "unresolved")}
+          pending={firstPendingStatus} />
+      </ol>
+    : null;
+  /**
+   * 会话面板尚未挂载、首条输入器仍在上屏的那一拍：正文已在输入器里，不能重复摆，
+   * 但未决状态与核对入口不能消失。这里只补状态行，不补消息正文。
+   */
+  const firstPendingComposerStatus = firstComposer && firstTransition === null &&
+    scopedPendingFirst !== null ? firstPendingStatus : null;
   function sendFirst(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = first.draft.trim();
@@ -1937,7 +2154,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             onPickPlugin={(label) => { updateFirst({ draft: insertPluginMention(first.draft, label, firstDraftRef.current) });
               firstDraftRef.current?.focus(); }}
             onUploadAttachments={(files) => { stagedFirst.add(files); firstDraftRef.current?.focus(); }}
-            uploadDisabled={firstBusy || creating || pendingFirst !== null || firstAttaching}
+            uploadDisabled={firstBusy || creating || scopedPendingFirst !== null || firstAttaching}
             workspace={executionScope?.association === null || executionScope?.association === undefined ? null
               : { projectId: executionScope.association.projectId,
                 resourceId: executionScope.association.resourceId, displayName: executionScope.displayName }}
@@ -1977,7 +2194,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             projectId={executionScope?.association?.projectId ?? null}
             resourceId={executionScope?.association?.resourceId ?? null}
             canonicalRoot={executionScope?.canonicalRoot ?? null}
-            disabled={firstBusy || creating || pendingFirst !== null || projectWriteBlockedReason !== null}
+            disabled={firstBusy || creating || scopedPendingFirst !== null || projectWriteBlockedReason !== null}
             onTier={setFirstWriteTier} />}
         </div>
         <div className="agent-chat-composer-message-group">
@@ -2016,7 +2233,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             <div className="agent-chat-send-modes" role="radiogroup" aria-label="发送方式">
               <SendModeRow testId="assist-first-send-mode-DISCUSS" name="assist-first-send-mode" value="DISCUSS"
                 label={sendModeLabels.DISCUSS} checked={firstSkill === null}
-                disabled={firstBusy || creating || pendingFirst !== null}
+                disabled={firstBusy || creating || scopedPendingFirst !== null}
                 title="自然语言协作，按需使用已授权工具；文档候选和任务提案请使用对应选项。"
                 onSelect={() => setFirstSkillKey("")} />
               {firstSkills.length === 0 ? null : <p className="agent-chat-send-section">Skill</p>}
@@ -2034,7 +2251,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
                 return <SendModeRow key={`${skill.id}@${skill.version}`} testId={`assist-first-send-skill-${index}`}
                   name="assist-first-send-mode" value={`${skill.id}@${skill.version}`} label={skill.title} hint={hint}
                   checked={firstSkillKey === `${skill.id}@${skill.version}`}
-                  disabled={firstBusy || creating || pendingFirst !== null || blocked || scopeFixed}
+                  disabled={firstBusy || creating || scopedPendingFirst !== null || blocked || scopeFixed}
                   title={`${skill.title} · ${skill.id} v${skill.version}${missingScope
                   ? ` · 需要${scopeLabel}上下文${scopeFixed ? "，从对应任务或项目进入对话后可用" : "，选完后在工具行指定"}` : ""}`}
                   onSelect={() => setFirstSkillKey(`${skill.id}@${skill.version}`)} />;
@@ -2059,7 +2276,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
             {/* 第二屏：资料选择器。始终挂载、只切换可见性（挂载会按 projectId/client 重置选中项）。 */}
             {firstSourcesSelectable ? <div className="agent-chat-send-sources-view" hidden={!firstSourcesView}>
               <AssistSourcePicker projectId={firstScope.projectId} selectedRefs={selectedRefs}
-                onChange={setSelectedRefs} disabled={firstBusy || creating || pendingFirst !== null}
+                onChange={setSelectedRefs} disabled={firstBusy || creating || scopedPendingFirst !== null}
                 hideHeading />
             </div> : null}
             </div>
@@ -2083,18 +2300,15 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         <ModelSelector client={client} open={firstModelPickerOpen} onOpenChange={setFirstModelPickerOpen}
           selectedModel={first.model ?? null}
           selectedConnectionId={first.connectionId ?? null}
-          onChoose={(model) => { updateFirst({ model, connectionId: null });
-            // 2026-10-20 用户指令「记住上一次选择的模型」：选中的那一刻就记住，
-            // 下一个新对话的芯片直接显示它，不再从「模型」两个字开始。
-            // 只记目录/默认型号；已登记连接不写进本机偏好（下个会话的 /model 解析不到它）。
-            if (client !== null) writeLastModel(client.workspaceId, model); }}
+          onChoose={(model) => { updateFirst({ model, connectionId: null }); }}
           onChooseConnection={(connection: RelayModelConnection) => {
             // 连接身份与服务端将解析出的型号一起写入草稿；首条发送时按 connection_id 提交。
             updateFirst({ model: connection.defaultModel, connectionId: connection.id }); }}
-          disabled={firstBusy || creating || pendingFirst !== null} />
+          onFollowDefault={() => { updateFirst({ model: undefined, connectionId: null }); }}
+          disabled={firstBusy || creating || scopedPendingFirst !== null} />
       </div>
       <button className="primary-button agent-chat-send" type="submit" data-testid="assist-first-send"
-        data-busy={firstBusy || creating || pendingFirst !== null ? "true" : undefined}
+        data-busy={firstBusy || creating || scopedPendingFirst !== null ? "true" : undefined}
         aria-label={firstBusy || creating ? "正在发送首条消息" : "发送消息"}
         title={firstBusy || creating ? "正在发送首条消息"
           : firstSkillScopeMissing ? `这个 Skill 需要${firstSkill?.target === "TASK" ? "任务" : "项目"}上下文；先在工具行指定任务或项目`
@@ -2120,7 +2334,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     {/* 这条状态只给辅助技术：可见反馈由主色发送键、在途光点与首条回执行承担。
         它曾以 helper-text 占一行流式高度，出现/消失时把输入卡抬高又放下 33px
         （DEV-0110 四相位实测），正是用户说的「发送时界面会闪一下」。 */}
-    {creating && pendingFirst === null && <p className="visually-hidden" role="status"
+    {creating && scopedPendingFirst === null && <p className="visually-hidden" role="status"
       data-testid="assist-first-sending-status">正在发送首条消息…</p>}
     {projectWriteBlockedReasonShown !== null && <p className="disabled-reason">{projectWriteBlockedReasonShown}</p>}
     {/* 首条消息前就能看到的必读文件风险（P0-A）：与已有会话用同一个组件、同一份风险定义与预算。
@@ -2157,10 +2371,9 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   function newSession() {
     if (!deferSessionCreation) { void createSession(); return; }
     setSessionId(null); setSelectedRefs([]); setFirstSkillKey("");
-    // 新对话只空白草稿与在途状态；模型选择是本设备偏好，重置时按上次选择重新种子化
-    // （2026-10-20 用户指令「记住上一次选择的模型」），否则同页第二条新对话又显示「模型」。
-    firstOwner.write({ ...emptyFirstProcess,
-      model: client === null ? undefined : readLastModel(client.workspaceId) ?? undefined });
+    // 新对话只空白草稿与在途状态；模型选择也一起清空（不继承上一条的显式选择），
+    // 芯片因此回到「跟随工作区默认」（MODEL-SETTINGS-03，P0-4）。
+    firstOwner.write({ ...emptyFirstProcess });
     onSessionSelected?.(null);
   }
   // 协作页（standalone）的会话行引用全局横向 field 与紧凑按钮变体；skill 子页保持
@@ -2290,8 +2503,13 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         <div className="collab-toolbar-info">
           {session === null ? null : <p className="collab-toolbar-session" data-testid="collab-session-title" title={session.title}>{session.title}</p>}
           <div className="collab-toolbar-crumb collab-toolbar-crumb--scope" data-testid="collab-conversation-scope"
-            title={`目标（项目关联）：${goalDescription}；会话目录：${directoryDescription}`}>
-            <span data-testid="collab-current-goal" title={goalDescription}><span className="collab-toolbar-scope-label">关联目标：</span><span className={scopeValueClass(goalIsPlaceholder)}>{goalDescription}</span></span>
+            title={goalIsPlaceholder
+              ? `会话目录：${directoryDescription}`
+              : `目标（项目关联）：${goalDescription}；会话目录：${directoryDescription}`}>
+            {/* TOOLBAR-GOAL-PLACEHOLDER-ANCHOR（2026-11-04）：普通讨论没有关联目标时不渲染
+                「尚未关联目标」占位。元素保留在 DOM（既有样式/计数契约不动），仅对视觉与
+                辅助技术隐藏；真实目标与「目标关联待核对」照常显示。 */}
+            <span data-testid="collab-current-goal" title={goalDescription} hidden={goalDescription === "尚未关联目标"}><span className="collab-toolbar-scope-label">关联目标：</span><span className={scopeValueClass(goalIsPlaceholder)}>{goalDescription}</span></span>
             <span className={`collab-toolbar-directory${directoryIsPlaceholder ? " collab-toolbar-directory--placeholder" : ""}`}
               data-testid="collab-current-directory" role="img"
               data-source={session?.context?.workingDirectory?.source ?? "UNKNOWN"}
@@ -2322,6 +2540,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
     {conversationToolbarNode}
     {!externalReadBlockedReason && !(embedded && session) && !firstComposer && !preferredSessionLookup && !conversationToolbar && <section className={standalone ? `agent-assist-session-bar${!session ? " agent-assist-session-bar--empty" : ""}` : "surface-panel"}>{!standalone && <h2>会话</h2>}{standalone && !session && <div className="agent-session-welcome"><MessageSquareText aria-hidden="true" /><h2>开始讨论</h2></div>}{!session && preferredSessionId === null && <p className="helper-text" data-testid="assist-new-session-prompt">工作对象已选。可以新建会话，或在“当前会话”中返回已有讨论。</p>}{!sessions.length && preferredSessionId !== null && <p className="helper-text">当前工作对象还没有会话，先新建会话再发送消息。</p>}{sessionSwitcher}</section>}
     {firstComposer && firstMessage}
+    {firstPendingComposerStatus}
     {/* 首条消息的提示渲染在首条输入区之外：建会话成功后协作页会切到该 Task，
         明确失败与未决命令都必须继续留在对话区可发现、可核对。
         2026-10-24 用户指令：提示按类型走通道——明确失败是停留到关闭的 Notice；
@@ -2330,16 +2549,16 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         这里只保留「面板还没挂载」的回落——否则读回的会话清单暂时没有这条时，
         未决命令会连同核对入口一起从界面上消失。 */}
     {firstNotice !== null && firstTransition === null && <Notice testId="assist-first-error">{firstNotice}</Notice>}
-    {firstPendingStrip !== null && firstTransition === null && firstPendingStrip}
+    {firstPendingFallback}
     <UnresolvedCommandDialog open={firstPendingOpen} testId="assist-first"
       title="首条消息结果待核对"
       summary="会话已创建，但还没有拿到这条消息的送达回执。先查询回执；查不到时按原命令重试。"
-      commandId={pendingFirst?.commandId ?? ""}
+      commandId={scopedPendingFirst?.commandId ?? ""}
       detail="两个出口都按原 command_id 与原载荷走，不换新 ID；核对前这条消息不算已送达。"
-      reason={firstPendingError ?? pendingFirst?.reason ?? null}
+      reason={firstPendingError ?? scopedPendingFirst?.reason ?? null}
       busy={creating} checkLabel="查询首条回执" retryLabel="按原命令重试"
       onCheck={() => void checkFirstReceipt()}
-      onRetry={() => { if (pendingFirst !== null) void sendFirstMessage(pendingFirst, true); }}
+      onRetry={() => { if (scopedPendingFirst !== null) void sendFirstMessage(scopedPendingFirst, true); }}
       onClose={() => setFirstPendingDialogOpen(false)} />
     {createError !== null && pendingCreate === null && <Notice testId="assist-create-error">{createError}</Notice>}
     {pendingCreate !== null && !creating && <UnresolvedCommandStrip testId="assist-first-create-pending"
@@ -2360,13 +2579,14 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       <AssistSessionPanel key={`${connection.epoch}:${session.id}`} client={client} session={session} target={target} sources={selectedRefs}
         standalone={standalone} embedded={embedded} onNavigationStateChange={reportSessionNavigation}
         sourcePickerInline={sourcePickerInline}
-        firstMessageInflight={firstBusy || creating || pendingFirst !== null}
+        firstMessageInflight={firstBusy || creating || scopedPendingFirst !== null}
         firstMessageTransition={firstTransition}
-        firstMessagePending={firstPendingStrip}
+        firstMessagePending={firstPendingStatus}
         preferredSkillId={preferredSkillId}
         initialExecution={first.execution?.sessionId === session.id ? first.execution : null}
         initialMaintenance={first.maintenance?.sessionId === session.id ? first.maintenance : null}
         confirmedFirstMessageCommandId={first.interpretedSessionId === session.id ? first.interpreted : null}
+        onFirstMessageReceiptConfirmed={settleFirstMessageCommand}
         proposalActionHost={proposalActionHost}
         externalReadBlockedReason={externalReadBlockedReason}
         onOpenSession={onOpenRelatedSession === undefined && onSessionSelected === undefined
@@ -4803,7 +5023,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   onExecutionPrepared, initialExecution, confirmedFirstMessageCommandId,
   initialMaintenance, modeSwitch, modeHints, onInflightChange, composerHeader, composerFooter, onLearningTransfer, recordLearning = true,
   firstMessageInflight = false, firstMessageTransition = null, firstMessagePending = null, onToggleSourceRef,
-  onChatSessionCreated, onOpenSession }: { client: RelayApiClient;
+  onFirstMessageReceiptConfirmed, onChatSessionCreated, onOpenSession }: { client: RelayApiClient;
   session: RelayAssistSession; target: AssistTarget | null; sources: readonly RelayAssistSourceRef[];
   writeBlockedReason: string | null;
   refreshTarget: () => Promise<void>;
@@ -4841,6 +5061,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   firstMessageTransition?: FirstMessageTransition | null;
   /** 在途/未决状态行（含查询回执与核对入口），由外层持有命令身份，面板只负责挂在过渡行里。 */
   firstMessagePending?: ReactNode;
+  /**
+   * 首条消息命令被本面板的回执核对证明已落库后，把这件事交回外层共享 Owner 收口。
+   * 面板只证明「命令有确切回执、会话里确有这条消息」，不自己清外层的 pending——
+   * 那会形成第二份首条状态。外层按 command_id + session_id 核对后才摘除过渡行。
+   */
+  onFirstMessageReceiptConfirmed?: (commandId: string, sessionId: string) => void;
   /**
    * 在途状态上报。切档不是停止，禁用判定必须在真正看得见在途的那一层做，
    * 所以由面板把事实送上去，而不是外层另猜一份。
@@ -4944,8 +5170,25 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
    * 因此单独记一个「已确认结果不明」的标记，只在传输失败保留 pending 时置真。
    */
   const [pendingUnresolved, setPendingUnresolved] = useState(false);
+  /** 恢复协调者只读一份状态：自动核对的阶段、失败分类与重试次数都从这里取。 */
+  const [pendingRecovery, setPendingRecovery] = useState<RecoveryEntry | null>(null);
+  const pendingRef = useRef<PendingAction | null>(null);
+  pendingRef.current = pending;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   /** 未决命令的核对弹窗由用户从正文状态行点开；重试期间保持打开，失败原因更新在同一层。 */
   const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  /* 自动核对期间只给非阻断局部状态；耗时长才出现，短则完全不显示。 */
+  const recoveryAutoChecking = pending !== null && pendingUnresolved &&
+    (pendingRecovery?.phase === "CHECKING" || pendingRecovery?.phase === "RETRYING");
+  const showRecoveryChecking = useDelayedVisible(recoveryAutoChecking, 600);
+  /* 到上限/离线/没有可认领 Owner 时才落成「暂未确认」的紧凑入口。 */
+  const showUnresolvedStrip = pending !== null && pendingUnresolved && pendingRecovery !== null &&
+    pendingRecovery.phase !== "CHECKING" && pendingRecovery.phase !== "RETRYING";
+  /* 说明只在真实原因上措辞：离线暂停不能说成「已到上限」，没有可信回执才需要人工入口。 */
+  const recoveryDialogSummary = pendingRecovery?.phase === "PAUSED"
+    ? "这次命令没有拿到回执。网络暂不可用，恢复网络后会自动继续核对；也可以现在查询原命令回执。"
+    : "这次命令没有拿到回执。自动核对已到上限；可再次查询原命令回执，查不到时按原命令重试。";
   const [busy, setBusy] = useState(false);
   /**
    * 会话输入器的图片附件暂存（工作台 §33）。切换会话时整份重挂载，因此这里不需要
@@ -5244,6 +5487,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       discard: () => { discardDraft(); learningNavigation.discard?.(); },
       pending: pending ? { commandId: pending.commandId,
         commandType: pendingCommandType(pending), sessionId: session.id,
+        ...(pending.kind === "cancel" || pending.kind === "accept" || pending.kind === "acceptTask"
+          ? { objectId: pending.id } : {}),
         unresolved: pendingUnresolved } : learningNavigation.pending,
       restoreFocus: restoreDraftFocus });
   }, [standalone, embedded, draft, skillInputText, selectedSkillKey, intent, pending, pendingUnresolved, session.id,
@@ -5284,6 +5529,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       const lastMessage = nextMessages.length > 0 ? nextMessages[nextMessages.length - 1] : null;
       if (assistActivityLanded(activityLast.current, lastMessage)) bumpActiveConversationActivity(session.id);
       activityLast.current = lastMessage;
+      return true;
     } catch (caught) { if (!disposed.current && version === requestVersion.current) {
       const described = describeLiveError(caught);
       // 失权与「读不到」不是一件事（2026-10-25）：403/404 表示这些内容不该再展示，
@@ -5309,6 +5555,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       }
       setError(described.message);
     } }
+    return false;
   }
   /**
    * ENG-OBS-02：向前补读历史消息。
@@ -5580,6 +5827,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         setSelectedModel(selection.model); setSelectedConnectionId(null);
         setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
         setNotice(`后续新消息首选 ${selection.model}；活动 Run 保留原策略。`);
+      } else if (action.kind === "followDefault") {
+        await client.clearSessionModelSelection({ sessionId: session.id,
+          commandId: action.commandId });
+        if (disposed.current) return;
+        setSelectedModel(null); setSelectedConnectionId(null);
+        setNotice("已恢复跟随工作区默认：新消息按工作区聊天默认，未设置时按进程默认。");
       } else if (action.kind === "connection") {
         const selection = await client.selectSessionConnection({ sessionId: session.id,
           commandId: action.commandId, connectionId: action.connectionId });
@@ -5699,28 +5952,156 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       }
     } finally { if (!disposed.current) setBusy(false); }
   }
+  const recoveryScopeValue = client === null ? null : recoveryScope(client);
+  /** 用当前会话身份登记未决命令；跨页已有记录保留原 target，只补模型/连接校验字段。 */
+  function recoveryRecordFor(action: PendingAction, target: RelayAssistSession): RecoveryRecord {
+    return { commandId: action.commandId, commandType: pendingCommandType(action),
+      sessionId: target.id, targetKind: target.taskId === null ? "SESSION" : "TASK",
+      targetId: target.taskId ?? target.id,
+      ...(action.kind === "connection" ? { connectionId: action.connectionId } : {}),
+      ...(action.kind === "model" ? { model: action.model } : {}),
+      ...(action.kind === "cancel" || action.kind === "accept" || action.kind === "acceptTask"
+        ? { objectId: action.id } : {}) };
+  }
+  /**
+   * 身份校验：有原 pending 时用同一套 receiptMatches（载荷、会话、业务对象都核对）；
+   * 页面重挂载后 pending 已丢，只对可由回执自身确认的模型/连接/消息类型放行，
+   * 其余保守返回 UNVERIFIABLE，保留未决身份而不是猜成功。
+   */
+  function verifyAssistReceipt(record: RecoveryRecord, receipt: RelayCommandReceipt,
+    action: PendingAction | null, target: RelayAssistSession): RecoveryFailure | null {
+    if (receipt.commandId !== record.commandId || receipt.commandType !== record.commandType)
+      return "IDENTITY_MISMATCH";
+    if (action !== null && action.commandId === record.commandId)
+      return receiptMatches(receipt, action, target.id) ? null : "IDENTITY_MISMATCH";
+    if (record.commandType === "SelectSessionModel") {
+      if (typeof receipt.result.model !== "string" || receipt.result.session_id !== target.id) return "MALFORMED";
+      return record.model != null && receipt.result.model !== record.model ? "IDENTITY_MISMATCH" : null;
+    }
+    if (record.commandType === "SelectSessionConnection") {
+      if (receipt.result.session_id !== target.id) return "IDENTITY_MISMATCH";
+      if (receipt.result.connection !== "registered" || typeof receipt.result.connection_id !== "string")
+        return "MALFORMED";
+      return record.connectionId != null && receipt.result.connection_id !== record.connectionId
+        ? "IDENTITY_MISMATCH" : null;
+    }
+    if (record.commandType === "ClearSessionModelSelection") {
+      return receipt.result.session_id === target.id && typeof receipt.result.cleared === "boolean"
+        ? null : "IDENTITY_MISMATCH";
+    }
+    if (record.commandType === "RequestAssistMessage") {
+      if (receipt.result.session_id !== target.id) return "IDENTITY_MISMATCH";
+      return typeof receipt.result.assistant_message_id === "string" ? null : "MALFORMED";
+    }
+    if (record.commandType === "CancelAssistMessage")
+      return typeof receipt.result.message_id === "string" ? null : "MALFORMED";
+    if (record.commandType === "RequestMemoryCompaction")
+      return receipt.result.session_id === target.id && typeof receipt.result.request_id === "string"
+        ? null : "IDENTITY_MISMATCH";
+    if (record.commandType === "SetChatMode")
+      return receipt.result.session_id === target.id && typeof receipt.result.chat_mode === "string"
+        ? null : "IDENTITY_MISMATCH";
+    return "UNVERIFIABLE";
+  }
+  /**
+   * 回执已通过身份校验后，先读回服务端事实再更新 UI。删除恢复记录由协调者在 APPLIED
+   * 之后执行；这里返回 KEPT 或抛错都表示「还不能算成功」。
+   */
+  async function applyAssistReceipt(record: RecoveryRecord, receipt: RelayCommandReceipt,
+    trigger: "auto" | "manual"): Promise<ApplyOutcome> {
+    if (disposed.current) return "KEPT";
+    const target = sessionRef.current;
+    const action = pendingRef.current !== null && pendingRef.current.commandId === record.commandId
+      ? pendingRef.current : null;
+    if (record.commandType === "SelectSessionModel" || record.commandType === "SelectSessionConnection") {
+      const expected = sessionModelSelectionFrom(receipt.result);
+      const selection = await client.getSessionModelSelection(target.id);
+      if (disposed.current) return "KEPT";
+      // RECOVERY-ENTRY-ANCHOR（2026-11-04）：模型选择用回执 revision 与当前修订比较。
+      // 同一会话连续切换两次会合法地覆盖前一次选择；要求「当前选择仍等于本次选择」
+      // 会让前一条命令永远核对失败，留下重复的恢复记录。修订单调递增，被覆盖不影响
+      // 「这条命令确实生效」这一事实。
+      if (selection === null || !revisionAtLeast(selection.revision, expected.revision))
+        throw new RelayTransportError("服务端读回的选择修订与回执不一致。");
+      // 读回的是最新事实；如果已被后续切换覆盖，界面显示覆盖后的选择，而不是回执里那一档。
+      setSelectedModel(selection.model);
+      setSelectedConnectionId(selection.connectionId);
+    } else if (record.commandType === "ClearSessionModelSelection") {
+      const selection = await client.getSessionModelSelection(target.id);
+      if (disposed.current) return "KEPT";
+      // 已被后续选择覆盖时保留未决身份：清除是否生效不能靠「此刻恰好为空」证明。
+      if (selection !== null) return "KEPT";
+      setSelectedModel(null); setSelectedConnectionId(null);
+    } else if (record.commandType === "RequestAssistMessage") {
+      if (!await refresh()) throw new RelayTransportError("服务端消息读回失败。");
+      // 首条消息也走这条回执核对：消息确实读回之后，外层的过渡行必须收口，
+      // 不能因为命令不是本面板发起的就把未决状态留在共享 Owner 上。
+      onFirstMessageReceiptConfirmed?.(record.commandId, record.sessionId ?? target.id);
+      if (action?.kind === "send") {
+        setDraft(""); clearSentSources(action.sources); setRecentRefs(rememberSourceRefs(action.sources));
+      }
+    } else if (record.commandType === "CancelAssistMessage" || record.commandType === "RequestMemoryCompaction") {
+      if (!await refresh()) throw new RelayTransportError("服务端消息读回失败。");
+    } else if (record.commandType === "SetChatMode") {
+      if (!await refresh()) throw new RelayTransportError("服务端消息读回失败。");
+      void refreshTarget();
+    } else if (record.commandType === "ExecuteChatCommand") {
+      if (action === null || action.kind !== "restart") return "KEPT";
+      await finishChatSession(chatSessionResultFrom(receipt.result, target.id, action.system));
+      setPendingUnresolved(false); setPendingDialogOpen(false);
+      return "APPLIED";
+    } else if (record.commandType === "AcceptAssistProposal") {
+      if (action === null) return "KEPT";
+      if (!await refresh()) throw new RelayTransportError("服务端消息读回失败。");
+      if (action.kind === "acceptTask") void refreshTarget();
+    } else {
+      return "KEPT";
+    }
+    if (action !== null) {
+      setPending(null); setPendingUnresolved(false); setPendingDialogOpen(false); setActionError(null);
+      if (recoveryScopeValue !== null) removeRecovery(recoveryScopeValue, record.commandId);
+    }
+    if (trigger === "manual") setNotice("原命令回执已核对；已按服务端状态更新。");
+    return "APPLIED";
+  }
+  useEffect(() => {
+    if (recoveryScopeValue === null) return;
+    const owner: RecoveryOwner = {
+      scope: recoveryScopeValue,
+      claims(record) {
+        if (record.sessionId !== sessionRef.current.id) return false;
+        const action = pendingRef.current;
+        if (action !== null && action.commandId === record.commandId) return true;
+        return ["SelectSessionModel", "SelectSessionConnection", "RequestAssistMessage",
+          "CancelAssistMessage", "RequestMemoryCompaction", "SetChatMode"].includes(record.commandType);
+      },
+      verify(record, receipt) {
+        return verifyAssistReceipt(record, receipt, pendingRef.current, sessionRef.current);
+      },
+      apply: (record, receipt, context) => applyAssistReceipt(record, receipt, context.trigger),
+      fetchReceipt: (commandId, signal) => client.getCommandReceipt(commandId, signal)
+    };
+    return registerRecoveryOwner(owner);
+  }, [recoveryScopeValue, client]);
+  useEffect(() => {
+    if (recoveryScopeValue === null || pending === null) { setPendingRecovery(null); return; }
+    return subscribeRecoveries(recoveryScopeValue, (entries) => {
+      setPendingRecovery(entries.find((entry) => entry.record.commandId === pending.commandId) ?? null);
+    });
+  }, [recoveryScopeValue, pending]);
+  useEffect(() => {
+    if (recoveryScopeValue === null || pending === null || !pendingUnresolved) return;
+    upsertRecovery(recoveryScopeValue, recoveryRecordFor(pending, sessionRef.current));
+  }, [recoveryScopeValue, pending, pendingUnresolved]);
   async function checkReceipt() {
-    if (!pending || busy) return;
+    if (!pending || busy || recoveryScopeValue === null) return;
     setBusy(true); setActionError(null);
     try {
-      const receipt = await client.getCommandReceipt(pending.commandId);
+      const outcome = await checkRecoveryNow(recoveryScopeValue, pending.commandId);
       if (disposed.current) return;
-      if (!receiptMatches(receipt, pending, session.id)) throw new Error("回执与本次 Assist 命令不匹配。");
-      if (pending.kind === "model" || pending.kind === "connection") {
-        const selection = sessionModelSelectionFrom(receipt.result);
-        setSelectedModel(selection.model); setSelectedConnectionId(selection.connectionId);
-      }
-      if (pending.kind === "restart") {
-        await finishChatSession(chatSessionResultFrom(receipt.result, session.id, pending.system));
-        return;
-      }
-      if (pending.kind === "send") { setDraft(""); clearSentSources(pending.sources);
-        setRecentRefs(rememberSourceRefs(pending.sources)); }
-      if (pending.kind === "acceptTask") void refreshTarget();
-      setPending(null); setPendingUnresolved(false); setPendingDialogOpen(false);
-      setNotice("原命令回执已核对；正在读取服务端状态。"); await refresh();
-    } catch (caught) { if (!disposed.current) setActionError(describeLiveError(caught).message); }
-    finally { if (!disposed.current) setBusy(false); }
+      if (outcome.kind === "FAILED") setActionError(outcome.message);
+      /* 成功时由 Owner.apply 关闭弹窗、更新模型并清未决；这里不重复写。 */
+    } finally { if (!disposed.current) setBusy(false); }
   }
   /** 0127：计划与目标投影重读；操作后的刷新与轮询共用。 */
   async function refreshGoalPlan() {
@@ -6595,6 +6976,19 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const sendLabel = pending?.kind === "send"
     ? pending.skillRef ? `运行 ${frozenSkill?.title ?? pending.skillRef.id}` : intentLabels[pending.intent ?? "DISCUSS"]
     : selectedSkill ? `运行 ${selectedSkill.title}` : intentLabels[intent];
+  /**
+   * SEND-REASON-ANCHOR（2026-11-04）：发送键禁用时必须有可读原因，不能出现
+   * 「能输入却无法继续且没有解释」的死锁。按优先级只给最主要的一条：
+   * 未决命令 → 提交中 → 附件上传 → 权限阻塞 → 空草稿 → Skill 不可用。
+   */
+  const sendBlockedReason = pending !== null ? "有命令结果待核对；先处理恢复入口，避免重复发送。"
+    : busy ? "正在提交这条消息。"
+      : uploadingAttachments ? "附件还在上传，完成后才能发送。"
+        : writeBlockedReason !== null ? writeBlockedReason
+          : !draft.trim() && stagedSession.items.length === 0 ? "输入内容或添加附件后可发送。"
+            : selectedSkillKey !== "" && selectedSkill === null ? "所选 Skill 不在当前清单中；重新选择后再发送。"
+              : selectedSkill !== null && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0)
+                ? "所选 Skill 缺少当前所需能力；换一个或补齐能力后再发送。" : null;
   const lastLearningReply = learningMode ? [...(messages ?? [])].reverse()
     .find((item) => item.role === "ASSISTANT" && item.status === "COMPLETED") : undefined;
   const learningTransferSources: RelayAssistSourceRef[] = [];
@@ -7095,6 +7489,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         >{stopPending ? "正在停止生成" : "停止生成"}</button>
         : <button key="send" className="primary-button" data-testid="assist-send" type="submit"
           data-busy={busy || pending !== null ? "true" : undefined}
+          title={sendBlockedReason ?? sendLabel}
           disabled={(!draft.trim() && stagedSession.items.length === 0) || pending !== null || busy ||
             uploadingAttachments || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
             Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? `正在提交 · ${sendLabel}` : sendLabel}</button>)}
@@ -7188,15 +7583,17 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             switching={busy && pending !== null && (pending.kind === "model" || pending.kind === "connection")}
             disabled={busy || pending !== null || writeBlockedReason !== null}
             onChoose={(model) => {
-              // 会话级选择仍走原命令落服务端（唯一事实）；同时记住到本机偏好，
-              // 下一个新对话的芯片初始就是它（2026-10-20 用户指令）。
-              writeLastModel(client.workspaceId, model);
+              // 会话级选择仍走原命令落服务端（唯一事实）；本机不再存「上次使用」，
+              // 新会话只跟随工作区默认（MODEL-SETTINGS-03）。
               void runAction({ kind: "model", commandId: createCommandId(), model });
             }}
             onChooseConnection={(connection) => {
-              // 已登记连接只按身份提交；型号由服务端按连接当前声明解析，不写进本机偏好。
+              // 已登记连接只按身份提交；型号由服务端按连接当前声明解析。
               void runAction({ kind: "connection", commandId: createCommandId(),
                 connectionId: connection.id, connectionName: connection.name });
+            }}
+            onFollowDefault={() => {
+              void runAction({ kind: "followDefault", commandId: createCommandId() });
             }} />
         </div>
         {/* 主按钮二态：位置与配色不动，只在有 RUNNING 回复时把字形换成停止方块。
@@ -7213,7 +7610,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" /></svg>
         </button> : <button key="send" className="primary-button agent-chat-send" data-testid="assist-send" type="submit" form={composerFormId}
           data-busy={busy || pending !== null ? "true" : undefined}
-          aria-label={busy ? `正在提交 · ${sendLabel}` : sendLabel} title={sendLabel}
+          aria-label={busy ? `正在提交 · ${sendLabel}` : sendLabel} title={sendBlockedReason ?? sendLabel}
           disabled={(!draft.trim() && stagedSession.items.length === 0) || pending !== null || busy ||
             uploadingAttachments || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
             Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><ArrowUp aria-hidden="true" /></button>}
@@ -7254,21 +7651,31 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       action={selectionRejected ? { label: "重新选择", onSelect: () => {
         setSelectionRejected(false); setActionError(null); setModelPickerOpen(true);
       } } : undefined}>{actionError}</Notice>}
-    {pending && pendingUnresolved && <UnresolvedCommandStrip testId="assist-pending"
+    {showRecoveryChecking && <p className="helper-text assist-pending-checking" role="status"
+      aria-live="polite" data-testid="assist-pending-checking">
+      {pending?.kind === "model" || pending?.kind === "connection" ? "正在确认模型切换…" : "正在核对原命令…"}
+    </p>}
+    {showUnresolvedStrip && pending !== null && <UnresolvedCommandStrip testId="assist-pending"
       className="assist-pending unresolved-command-strip" busy={busy}
       /* MODEL-SWITCH-RECEIPT-RECOVERY：模型/连接的未决只影响后续消息的选择，
-         不能把「连接选择成功」说成「模型推理成功」。 */
+         不能把「连接选择成功」说成「模型推理成功」。自动核对到上限后才提示人工处理。 */
       label={pending.kind === "model" || pending.kind === "connection"
-        ? "模型切换结果未确认。" : "命令结果待核对。"}
+        ? "模型切换暂未确认。" : "命令结果待核对。"}
       onOpen={() => setPendingDialogOpen(true)} />}
     <UnresolvedCommandDialog open={pending !== null && pendingDialogOpen} testId="assist-pending"
       title={pending !== null && (pending.kind === "model" || pending.kind === "connection")
-        ? "模型切换结果未确认" : "命令结果待核对"}
+        ? "模型切换暂未确认" : "命令结果待核对"}
       summary={pending !== null && (pending.kind === "model" || pending.kind === "connection")
-        ? "这次模型切换没有拿到回执。先查询原命令回执；查不到时按原命令重试。它只影响后续消息使用的模型，不代表已有回复失败。"
-        : "这次命令没有拿到回执。先查询原命令回执；查不到时按原命令重试。"}
+        ? `${recoveryDialogSummary}它只影响后续消息使用的模型，不代表已有回复失败。`
+        : recoveryDialogSummary}
       commandId={pending?.commandId ?? ""}
       detail="先查回执；未找到时只能用原命令 ID 和原载荷重试。核对前不重复提交，也不换命令 ID。"
+      details={pendingRecovery === null ? [] : [
+        `自动核对结果：${recoveryFailureLabel(pendingRecovery.failure ?? "UNKNOWN")}`,
+        `重试次数：${pendingRecovery.attempts}`,
+        ...(pendingRecovery.httpStatus === null ? [] : [`HTTP 状态：${pendingRecovery.httpStatus}`]),
+        ...(pendingRecovery.error === null ? [] : [pendingRecovery.error])
+      ]}
       reason={actionError}
       busy={busy} checkLabel="查询原命令回执" retryLabel="以原命令重试"
       onCheck={() => void checkReceipt()}

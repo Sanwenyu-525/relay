@@ -240,7 +240,7 @@ describe("欢迎页选择目录不恢复历史会话", () => {
 });
 
 describe("目录命令只改它自己那条会话", () => {
-  it("自动续上未归属会话后打开目录：目录绑定不落到项目里另一条历史会话上", async () => {
+  it("自动续上未归属会话后打开目录：进入新对话，不改写这条会话", async () => {
     const h = harness({ workspaceSessions: () => [session({ id: workspaceSessionId, project_id: null,
       title: "未归属讨论", working_resource_id: null })] });
     const view = await mount("/agent", h);
@@ -252,17 +252,17 @@ describe("目录命令只改它自己那条会话", () => {
       await openWorkingDirectory(rootA);
       await flush(); await flush(); await flush();
 
-      const bindings = bindingPosts(h);
-      expect(bindings).toHaveLength(1);
-      expect(bindings[0]!.path).toBe(`${prefix}/assist-sessions/${workspaceSessionId}/binding`);
-      // 目录绑定必须跟着同一个目标：项目里那条历史会话的工作目录不得被这次点击改写。
-      const directory = directoryBindingPosts(h);
-      expect(directory).toHaveLength(1);
-      expect(directory[0]!.path).toBe(`${prefix}/assist-sessions/${workspaceSessionId}/working-directory`);
+      // P0-D：已有会话里选目录 = 进入该目录的新对话；旧会话不收到任何归属/绑定命令。
+      expect(view.router.currentRoute.value.query.new).toBeTruthy();
+      expect(view.router.currentRoute.value.query.dir).toBe(rootA);
+      expect(bindingPosts(h)).toHaveLength(0);
+      expect(directoryBindingPosts(h)).toHaveLength(0);
+      expect(folderStripName()).toBe("ProjectA");
+      expect(document.querySelector('[data-testid="assist-first-draft"]')).not.toBeNull();
     } finally { view.unmount(); }
   });
 
-  it("已有会话里换目录仍按原行为绑定这条会话（场景 C 不被修复连带删掉）", async () => {
+  it("新对话里再换目录只改这次草稿的目录，不回头改写旧会话", async () => {
     const h = harness({ workspaceSessions: () => [session({ id: workspaceSessionId, project_id: null,
       title: "未归属讨论", working_resource_id: null })] });
     const view = await mount("/agent", h);
@@ -270,15 +270,17 @@ describe("目录命令只改它自己那条会话", () => {
       await flush(); await flush();
       await openWorkingDirectory(rootA);
       await flush(); await flush(); await flush();
-      const before = directoryBindingPosts(h).length;
+      const newKey = view.router.currentRoute.value.query.new;
+      expect(newKey).toBeTruthy();
 
-      // 再换到另一个目录：这条会话仍在屏上，绑定照旧只改它。
+      // 新对话欢迎页还没有会话：再选 B 仍作用在这份草稿上，不建会话、不产生绑定。
       await openWorkingDirectory(rootB);
       await flush(); await flush(); await flush();
-      const after = directoryBindingPosts(h);
-      expect(after).toHaveLength(before + 1);
-      expect(after.every((post) => post.path.includes(workspaceSessionId))).toBe(true);
+      expect(view.router.currentRoute.value.query.new).toBe(newKey);
       expect(folderStripName()).toBe("ProjectB");
+      expect(bindingPosts(h)).toHaveLength(0);
+      expect(directoryBindingPosts(h)).toHaveLength(0);
+      expect(h.posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(0);
     } finally { view.unmount(); }
   });
 
