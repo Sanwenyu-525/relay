@@ -131,7 +131,13 @@ test('readiness 不就绪：整轮直接返回，不进入任何阶段，也不�
     await scheduler.fake.runHook('onReady');
     // 两轮 tick 都不该碰 executor；guardedExecutor 会在被访问时抛错并被记成阶段失败。
     await waitUntil(() => probes >= 2, TWO_TICKS_MS, 'second readiness probe');
-    assert.deepEqual(scheduler.fake.logs, []);
+    // 构造期的一次性环境事实：测试进程没有模型配置，调度器按 B1 接缝记
+    // BACKGROUND_MODEL_UNAVAILABLE（无配置不再回退 Fake）；readiness 不就绪本身
+    // 仍然零阶段、零错误——除此之外不允许任何日志。
+    assert.deepEqual(scheduler.fake.logs, [
+      { level: 'warn', fields: { code: 'BACKGROUND_MODEL_UNAVAILABLE' },
+        message: 'background_member_wakeup_skipped_without_model_config' },
+    ]);
   } finally {
     await scheduler.stop();
   }
