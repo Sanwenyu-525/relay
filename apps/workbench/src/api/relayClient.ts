@@ -1,6 +1,8 @@
 import * as readinessApi from "./resources/readiness";
 import * as projectsApi from "./resources/projects";
 import * as tasksApi from "./resources/tasks";
+import { getTaskRunsPage, type RelayTaskRunPage } from "./resources/taskRuns";
+export type { RelayTaskRunPage, RelayTaskRunSummary } from "./resources/taskRuns";
 import * as artifactsApi from "./resources/artifacts";
 import * as impactGroupSelectionsApi from "./resources/impactGroupSelections";
 import * as informationApi from "./resources/information";
@@ -11,6 +13,7 @@ export type { RelayCompactAccepted, RelayMemoryCompactionRequest, RelayMemoryCom
   RelayMemorySourceRef, RelayMessageMemoryUse, RelaySessionMemory, RelaySessionMemoryCheckpoint,
   RelaySessionMemoryResetResult } from "./dtos/memory";
 import * as assistApi from "./resources/assist";
+import * as recallUndoApi from "./resources/recallUndo";
 import * as subagentSupplementsApi from "./resources/subagentSupplements";
 export type { RelaySubagentSupplement, RelaySubagentSupplementResult } from "./resources/subagentSupplements";
 import * as sessionTodosApi from "./resources/sessionTodos";
@@ -805,6 +808,14 @@ export class RelayApiClient {
     return assistApi.getAssistMessageRecall(this.#http, messageId);
   }
 
+  async getAssistRecallUndo(recallId: string) {
+    return recallUndoApi.getAssistRecallUndo(this.#http, recallId);
+  }
+
+  async undoAssistRecall(recallId: string, commandId: string) {
+    return recallUndoApi.undoAssistRecall(this.#http, recallId, commandId);
+  }
+
   /* ---------------------- 0127：聊天 /plan 与 /goal ---------------------- */
 
   /** 会话的计划版本（最新在前）。读接口无副作用；重开会话从这里恢复。 */
@@ -1104,6 +1115,10 @@ export class RelayApiClient {
 
   async getRun(runId: string): Promise<RelayRun> {
     return runApi.getRun(this.#http, runId);
+  }
+
+  async getTaskRunsPage(taskId: string, cursor: string | null = null): Promise<RelayTaskRunPage> {
+    return getTaskRunsPage(this.#http, taskId, cursor);
   }
 
   async getRunDraftPreview(runId: string): Promise<RelayRunDraftPreview> {

@@ -2,7 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "resources": {
-      "resources/desktop-build-manifest.json": "desktop-build-manifest.json"
+      "resources/desktop-build-manifest.json": "desktop-build-manifest.json",
+      "resources/licenses/": "licenses/"
     }
   }
 }

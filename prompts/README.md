@@ -12,8 +12,16 @@
 | 外部 Agent 共享任务 | [external-agent-shared-tasks](external-agent-shared-tasks.md) |
 | 长期项目差异化体验 | [differentiated-project-experience](differentiated-project-experience.md) |
 | 工具面板与网页预览 | [workbench-browser-preview](workbench-browser-preview.md) |
+| Agent 基础工具循环跑通（2026-11-09） | [agent-basic-tool-loop-2026-11-09](agent-basic-tool-loop-2026-11-09.md) |
+| 正式任务执行闭环（2026-11-09） | [task-run-execution-chain-2026-11-09](task-run-execution-chain-2026-11-09.md) |
+| 执行恢复与控制（2026-11-09） | [execution-recovery-control-2026-11-09](execution-recovery-control-2026-11-09.md) |
+| 真实模型连接与 Provider（2026-11-09） | [model-provider-reliability-2026-11-09](model-provider-reliability-2026-11-09.md) |
+| 长期记忆与上下文（2026-11-09） | [memory-context-continuity-2026-11-09](memory-context-continuity-2026-11-09.md) |
+| Windows 桌面与安装交付（2026-11-09） | [windows-desktop-delivery-2026-11-09](windows-desktop-delivery-2026-11-09.md) |
 | 缺陷整改与复验 | [remediation](remediation/README.md) |
 | 其他功能及代码/测试关联 | [功能地图](../docs/feature-map/README.md) |
+
+2026-11-09 的六份模块提示词涉及 `assist-runner.ts`、`assistant-readonly-round.ts`、`run-graph.ts`、`run-steps.ts`、`review-decisions.ts` 等共享热文件，默认串行执行；确需并行时先按 `AGENTS.md` 建独立 worktree、锚定当前 HEAD，并在合并前比对基线差异，不整文件覆盖。
 
 公共约束、产品补充映射与历史 P 阶段关系见下方原章节路由；产品运行时提示词另见[运行时设计](../docs/architecture/agent-prompt-design.md#21-当前运行时提示词路由)，不会自动执行本目录任务书。
 

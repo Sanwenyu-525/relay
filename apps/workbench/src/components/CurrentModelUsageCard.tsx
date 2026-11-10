@@ -61,36 +61,49 @@ export function CurrentModelUsageCard({ client, status, refreshToken = 0 }: {
       ? "Mock 端口（仅供开发，不调用外部服务）"
       : status.provider === "invalid"
         ? "配置残缺：真实模型不可用，也不会静默回退"
-        : `${status.model ?? "缺少模型名"}${status.baseUrl === null ? "" : ` · ${status.baseUrl}`}`;
+        : null;
 
   return <section className="settings-card" data-testid="current-model-usage">
-    <h2>当前使用的模型</h2>    <p className="helper-text">生效顺序：会话显式选择 → 工作区聊天默认 → 进程默认。</p>
+    <h2>当前使用的模型</h2>
+    <p className="helper-text">生效顺序：会话显式选择 → 工作区聊天默认 → 进程默认。</p>
     {loading && <p role="status">正在读取当前模型使用情况…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="current-model-usage-error">
       <p>读取失败：{error}</p>
       <button className="secondary-button" type="button" onClick={read}>
         <RotateCcw aria-hidden="true" />重新读取</button>
     </div>}
-    {snapshot !== null && <dl className="settings-definition-list">
-      <div data-testid="current-model-chat-default">
+    {snapshot !== null && <dl className="settings-usage-list">
+      <div className="settings-usage-row" data-testid="current-model-chat-default">
         <dt>聊天 · 新消息（无会话选择）</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.chatDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
         </dd>
       </div>
-      <div data-testid="current-model-session">
-        <dt>聊天 · 会话显式选择</dt>        <dd>在输入器里选择，只对该会话之后的新消息生效。</dd>
+      <div className="settings-usage-row" data-testid="current-model-session">
+        <dt>聊天 · 会话显式选择</dt>
+        <dd>在输入器里选择，只对该会话之后的新消息生效。</dd>
       </div>
-      <div data-testid="current-model-run-default">
+      <div className="settings-usage-row" data-testid="current-model-run-default">
         <dt>任务执行 · 新 Run</dt>
         <dd><DefaultConnectionLine connectionId={snapshot.runDefault.connectionId}
           connections={snapshot.connections} unsetText="跟随进程默认" />
           <span className="helper-text">连接停用、凭据缺失或配置变化会让它停止并明确报错。</span></dd>
       </div>
-      <div data-testid="current-model-process">
+      <div className="settings-usage-row" data-testid="current-model-process">
         <dt>进程默认（环境变量）</dt>
-        <dd>{processText}
-          <span className="helper-text">本机兜底，不是页面保存的设置。</span></dd>
+        <dd>
+          {processText === null && status !== null
+            ? <>
+              <span className="settings-usage-value">
+                <code className="hash-code">{status.model ?? "缺少模型名"}</code>
+              </span>
+              {status.baseUrl !== null && <span className="settings-usage-endpoint">
+                <code className="hash-code">{status.baseUrl}</code>
+              </span>}
+            </>
+            : processText}
+          <span className="helper-text">本机兜底，不是页面保存的设置。</span>
+        </dd>
       </div>
     </dl>}
   </section>;

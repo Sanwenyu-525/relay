@@ -21,6 +21,7 @@ const assistantMessageId = "55555555-5555-4555-8555-555555555555";
 const recallId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
 const recallPath = `${prefix}/assist-messages/${userMessageId}/recall`;
+const undoPath = `${prefix}/assist-message-recalls/${recallId}/undo`;
 const withdrawnAt = "2026-10-24T01:00:00.000Z";
 
 function response(body: unknown, status = 200): Response {
@@ -65,20 +66,32 @@ afterEach(() => {
   unmount?.(); unmount = null;
   resetRelayConnectionForTest();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  sessionStorage.removeItem(`relay.recall-undo:${recallId}`);
 });
 
 interface Harness {
   items: () => unknown[];
   recallPost: (body: Record<string, unknown>) => Response;
   recallGet?: () => Response;
+  undoGet?: () => Response | Promise<Response>;
+  undoPost?: (body: Record<string, unknown>) => Response | Promise<Response>;
 }
 
 async function mountConversation(harness: Harness) {
   const posted: Record<string, unknown>[] = [];
+  const undoPosted: Record<string, unknown>[] = [];
   let recallReads = 0;
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
+    if (path === undoPath && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      undoPosted.push(body);
+      return harness.undoPost?.(body) ?? response({});
+    }
+    if (path === undoPath) return harness.undoGet?.() ?? response({ type: "about:blank",
+      title: "not found", status: 404, detail: "不存在。", code: "RESOURCE_NOT_FOUND" }, 404);
     if (path === `${prefix}/projects/${projectId}`) return response({ id: projectId, title: "项目",
       project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
     if (path === `${prefix}/projects/${projectId}/state`) return response({ project_id: projectId,
@@ -124,7 +137,25 @@ async function mountConversation(harness: Harness) {
   }));
   const view = await mountWorkbench(`/projects/${projectId}?skill=assist`);
   unmount = view.unmount;
-  return { wrapper: view.wrapper, posted, recallReads: () => recallReads };
+  return { wrapper: view.wrapper, posted, undoPosted, recallReads: () => recallReads };
+}
+
+function undoReceipt(status = "COMPLETED", overrides: Record<string, unknown> = {}) {
+  return { id: "77777777-7777-4777-8777-777777777777", source_recall_id: recallId,
+    status, root_path: "D:\\work", requested_at: withdrawnAt,
+    completed_at: status === "RUNNING" ? null : withdrawnAt, detail: {},
+    files: [{ path: "notes/a.md", status: status === "COMPLETED" ? "RESTORED" : "FAILED", reason: null }],
+    ...overrides };
+}
+
+async function mountRecalled(extra: Partial<Harness> = {}) {
+  const view = await mountConversation({ items: () => [
+    message(userMessageId, "1", "USER", "COMPLETED", "请修改 notes/a.md", recallSummary(), true),
+    message(assistantMessageId, "2", "ASSISTANT", "COMPLETED", "已修改。", recallSummary(), true)],
+    recallPost: () => response({}), recallGet: () => response(recallReceipt()), ...extra });
+  await view.wrapper.get(`[data-testid="assist-recall-${recallId}"] button`).trigger("click");
+  await flush();
+  return view;
 }
 
 describe("消息撤回（文件回退）", () => {
@@ -152,7 +183,8 @@ describe("消息撤回（文件回退）", () => {
     expect(typeof posted[0]!.command_id).toBe("string");
     const note = wrapper.get(`[data-testid="assist-recall-${recallId}"]`);
     expect(note.attributes("data-status")).toBe("COMPLETED");
-    expect(note.text()).toContain("已回退 1 个文件到该轮发送前。");
+    expect(note.text()).toContain("已回退 1 个文件。");
+    expect(note.text()).not.toContain("发送前");
     expect(wrapper.find(`[data-testid="assist-recall-action-${userMessageId}"]`).exists()).toBe(false);
     const statuses = wrapper.findAll(".agent-message-status").map((node) => node.text());
     expect(statuses.filter((text) => text === "已撤回")).toHaveLength(2);
@@ -183,7 +215,8 @@ describe("消息撤回（文件回退）", () => {
     expect(text).toContain("逐文件结果（1）");
     expect(text).toContain("notes/a.md");
     expect(text).toContain("已恢复");
-    expect(text).toContain("发送前存在");
+    expect(text).toContain("恢复目标：文件存在");
+    expect(text).not.toContain("发送前");
   });
 
   it("崩溃遗留的 RUNNING 回执提供「继续回退」，结算后按同一回执标记撤回", async () => {
@@ -219,7 +252,7 @@ describe("消息撤回（文件回退）", () => {
     expect(wrapper.get(`[data-testid="assist-recall-${recallId}"]`).attributes("data-status"))
       .toBe("COMPLETED");
     expect(wrapper.get(`[data-testid="assist-recall-${recallId}"]`).text())
-      .toContain("已回退 2 个文件到该轮发送前。");
+      .toContain("已回退 2 个文件。");
     expect(wrapper.findAll(".agent-message-status").map((node) => node.text()))
       .toEqual(["已撤回", "已撤回"]);
   });
@@ -229,7 +262,7 @@ describe("消息撤回（文件回退）", () => {
       items: baseMessages,
       recallPost: () => response({ type: "/problems/recall-preflight-blocked",
         title: "撤回预检未通过", status: 409,
-        detail: "至少一个目标文件与发送前基线不一致或缺少可信前像；本次没有写入任何文件。",
+        detail: "至少一个目标文件存在后续改动，或缺少可信的恢复依据；本次没有写入任何文件。",
         code: "RECALL_PREFLIGHT_BLOCKED", retryable: true, retry_action: "REFRESH_AND_REDECIDE",
         conflict: { recall_paths: ["notes/a.md｜CONFLICT｜CURRENT_CHANGED_SINCE_LAST_WRITE"] } },
       409) });
@@ -252,5 +285,146 @@ describe("消息撤回（文件回退）", () => {
       status: "DONE" })));
     await expect(client.getAssistMessageRecall(userMessageId))
       .rejects.toThrow("Assist 消息撤回状态无法识别。");
+  });
+
+  it("撤销回退只恢复文件，原撤回消息保留历史；刷新读取既有撤销而不再提交", async () => {
+    const first = await mountRecalled({ undoPost: (body) => response({ command_id: body.command_id,
+      committed_at: withdrawnAt, result: undoReceipt() }) });
+    const undo = first.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    await undo.find("button").trigger("click");
+    await flush();
+    expect(first.undoPosted).toHaveLength(1);
+    expect(undo.text()).toContain("已撤销这次回退");
+    expect(undo.find("button").exists()).toBe(false);
+    expect(first.wrapper.findAll(".agent-message-status").map((node) => node.text()))
+      .toEqual(["已撤回", "已撤回"]);
+    unmount?.(); unmount = null;
+    const second = await mountRecalled({ undoGet: () => response(undoReceipt()) });
+    expect(second.undoPosted).toHaveLength(0);
+    expect(second.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`).text())
+      .toContain("已撤销这次回退");
+  });
+
+  it("响应丢失且暂未读到回执，重新挂载后重试沿用原命令身份", async () => {
+    const first = await mountRecalled({ undoPost: () => { throw new TypeError("lost response"); } });
+    await first.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"] button`).trigger("click");
+    await flush();
+    const originalId = first.undoPosted[0]!.command_id;
+    expect(sessionStorage.getItem(`relay.recall-undo:${recallId}`)).toBe(originalId);
+    unmount?.(); unmount = null;
+    const second = await mountRecalled({ undoPost: (body) => response({ command_id: body.command_id,
+      committed_at: withdrawnAt, result: undoReceipt() }) });
+    const retry = second.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"] button`);
+    expect(retry.text()).toBe("按原命令重试撤销");
+    await retry.trigger("click"); await flush();
+    expect(second.undoPosted[0]!.command_id).toBe(originalId);
+    expect(sessionStorage.getItem(`relay.recall-undo:${recallId}`)).toBeNull();
+  });
+
+  it("冲突逐路径显示，不把 409 当成撤销成功", async () => {
+    const { wrapper } = await mountRecalled({ undoPost: () => response({ status: 409,
+      code: "RECALL_UNDO_PREFLIGHT_BLOCKED", detail: "文件有后续改动，本次没有写入。",
+      conflict: { recall_paths: ["notes/a.md|CONFLICT|CURRENT_CHANGED"] } }, 409) });
+    const undo = wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    await undo.find("button").trigger("click"); await flush();
+    expect(undo.text()).toContain("notes/a.md|CONFLICT");
+    expect(undo.text()).not.toContain("已撤销这次回退");
+    expect(undo.find("button").text()).toBe("撤销这次回退");
+  });
+
+  it("无法核对读取结果时不提供写入入口，RUNNING 只核对进度", async () => {
+    const view = await mountRecalled({ undoGet: () => response({ status: 503, code: "UNAVAILABLE",
+      detail: "暂不可用" }, 503) });
+    expect(view.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"] button`).text())
+      .toBe("核对撤销进度");
+    expect(view.undoPosted).toHaveLength(0);
+    unmount?.(); unmount = null;
+    const running = await mountRecalled({ undoGet: () => response(undoReceipt("RUNNING", { files: [] })) });
+    expect(running.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`).text())
+      .toContain("正在撤销这次回退");
+    expect(running.wrapper.get(`[data-testid="assist-recall-undo-${recallId}"] button`).text())
+      .toBe("核对撤销进度");
+  });
+
+  it("已有更新成功回退时，旧回执不提供快捷撤销", async () => {
+    const { wrapper, undoPosted } = await mountRecalled({ items: () => [
+      message(userMessageId, "1", "USER", "COMPLETED", "旧消息", recallSummary(), true),
+      message(assistantMessageId, "2", "ASSISTANT", "COMPLETED", "旧回复", recallSummary(), true),
+      message("88888888-8888-4888-8888-888888888888", "3", "USER", "COMPLETED", "新消息",
+        recallSummary("COMPLETED", { id: "99999999-9999-4999-8999-999999999999",
+          completed_at: "2026-10-25T01:00:00.000Z" }), true)] });
+    expect(wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`).find("button").exists()).toBe(false);
+    expect(undoPosted).toHaveLength(0);
+  });
+
+  it.each(["PARTIAL", "FAILED"])("撤销 %s 不显示完整成功，也不重新创建动作", async (status) => {
+    const { wrapper, undoPosted } = await mountRecalled({ undoGet: () => response(undoReceipt(status)) });
+    const undo = wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    expect(undo.text()).not.toContain("已撤销这次回退");
+    expect(undo.text()).toContain("请核对逐文件结果");
+    expect(undo.find("button").exists()).toBe(false);
+    expect(undoPosted).toHaveLength(0);
+  });
+
+  it("响应丢失但读到已完成回执时收口，不要求再次提交", async () => {
+    let committed = false;
+    const { wrapper, undoPosted } = await mountRecalled({
+      undoGet: () => committed ? response(undoReceipt()) : response({ status: 404,
+        code: "RESOURCE_NOT_FOUND", detail: "不存在。" }, 404),
+      undoPost: () => { committed = true; throw new TypeError("response lost after commit"); } });
+    const undo = wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    await undo.find("button").trigger("click"); await flush();
+    expect(undoPosted).toHaveLength(1);
+    expect(undo.text()).toContain("已撤销这次回退");
+    expect(undo.find("button").exists()).toBe(false);
+    expect(sessionStorage.getItem(`relay.recall-undo:${recallId}`)).toBeNull();
+  });
+
+  it("无法持久化命令身份时不提交撤销", async () => {
+    const { wrapper, undoPosted } = await mountRecalled();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage disabled"); });
+    const undo = wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    await undo.find("button").trigger("click"); await flush();
+    expect(undoPosted).toHaveLength(0);
+    expect(undo.text()).toContain("尚未提交");
+  });
+
+  it("未知撤销状态拒绝解析，不提供写入入口", async () => {
+    const { wrapper, undoPosted } = await mountRecalled({ undoGet: () => response(undoReceipt("DONE")) });
+    expect(wrapper.get(`[data-testid="assist-recall-undo-${recallId}"] button`).text())
+      .toBe("核对撤销进度");
+    expect(undoPosted).toHaveLength(0);
+  });
+
+  it("较早的核对请求迟到时，不把已确认完成倒退成 RUNNING", async () => {
+    let reads = 0, posts = 0;
+    let release!: (value: Response) => void;
+    const delayed = new Promise<Response>((resolve) => { release = resolve; });
+    const { wrapper } = await mountRecalled({
+      undoGet: () => ++reads === 3 ? delayed : response({ status: 404,
+        code: "RESOURCE_NOT_FOUND", detail: "不存在。" }, 404),
+      undoPost: (body) => {
+        if (++posts === 1) throw new TypeError("lost response");
+        return response({ command_id: body.command_id, committed_at: withdrawnAt, result: undoReceipt() });
+      } });
+    const undo = wrapper.get(`[data-testid="assist-recall-undo-${recallId}"]`);
+    await undo.find("button").trigger("click"); await flush();
+    await undo.findAll("button").find((button) => button.text() === "核对撤销进度")!.trigger("click");
+    await undo.findAll("button").find((button) => button.text() === "按原命令重试撤销")!.trigger("click");
+    await flush();
+    expect(undo.text()).toContain("已撤销这次回退");
+    release(response(undoReceipt("RUNNING", { files: [] })));
+    await flush();
+    expect(undo.text()).toContain("已撤销这次回退");
+    expect(undo.text()).not.toContain("正在撤销这次回退");
+  });
+
+  it.each(["command", "source"])("撤销回执 %s 身份不匹配时不能当成成功", async (mismatch) => {
+    const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      command_id: mismatch === "command" ? "other-command" : "original-command",
+      committed_at: withdrawnAt,
+      result: undoReceipt("COMPLETED", mismatch === "source" ? { source_recall_id: "other-recall" } : {}) })));
+    await expect(client.undoAssistRecall(recallId, "original-command")).rejects.toThrow("无法核对");
   });
 });

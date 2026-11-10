@@ -202,13 +202,19 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
         gatewayNeedsReconciliation) {
       return controlDto(pending);
     }
-    // A Review wait has no external Invocation or resource claim. Control may
-    // withdraw that proposal at the safe point before changing Task/Run.
-    for (const operation of gatewayPending) {
-      const review = await repositories.reviews.readByOperationId(operation.id);
-      if (review?.status === 'OPEN') await repositories.reviews.expireRequest(review.id, review.revision);
-      await repositories.dispatch.settleInvalidatedApprovalResume(run.id, operation.id);
-      await repositories.gateway.setOperationStatus(operation.id, 'DENIED', { reason: 'RUN_CONTROL_APPLIED' });
+    // A Review wait has no external Invocation or resource claim. Terminal-bound
+    // controls (CANCEL/HANDOFF/CANCEL_TASK) withdraw the pending proposal at the
+    // safe point before changing Task/Run. PAUSE keeps the original approval
+    // waiting point (契约 02 §3：恢复时原阻塞 Review 仍未解决 → 返回原等待点，
+    // 不丢原审批身份), so the safe point only parks the Run.
+    const withdrawProposals = pending.type !== 'PAUSE';
+    if (withdrawProposals) {
+      for (const operation of gatewayPending) {
+        const review = await repositories.reviews.readByOperationId(operation.id);
+        if (review?.status === 'OPEN') await repositories.reviews.expireRequest(review.id, review.revision);
+        await repositories.dispatch.settleInvalidatedApprovalResume(run.id, operation.id);
+        await repositories.gateway.setOperationStatus(operation.id, 'DENIED', { reason: 'RUN_CONTROL_APPLIED' });
+      }
     }
     if (isTerminal(run.status) || task.executor_run_id !== run.id || task.ownership_epoch !== run.ownership_epoch) {
       await repositories.toolCalls.rejectUndispatchedForTerminalRun(run.id, run.status);
@@ -218,8 +224,10 @@ export async function applySafeControl(db: DbExecutor, runId: string): Promise<C
       return controlDto(rejected);
     }
     if (pending.type === 'PAUSE') {
+      // 审批等待点暂停：保留原等待点（Review 仍 OPEN），Resume 回到 WAITING_APPROVAL；
+      // 提案已被撤回（终态类控制）时回到 RUNNING 重新走动作。
       const resumePhase = run.status === 'CREATED' ? 'CONTEXT_BUILDING'
-        : run.status === 'WAITING_APPROVAL' && gatewayPending.length > 0 ? 'RUNNING' : run.status;
+        : run.status === 'WAITING_APPROVAL' && gatewayPending.length > 0 && withdrawProposals ? 'RUNNING' : run.status;
       const changed = await repositories.runs.advanceRun({ runId: run.id, expectedRevision: run.revision,
         status: 'PAUSED', currentStepId: run.current_step_id, resumePhase, waitReason: 'PAUSED_BY_USER' });
       if (changed === undefined) throw new Error('pause Run CAS failed');

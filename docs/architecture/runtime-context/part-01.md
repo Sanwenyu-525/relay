@@ -48,6 +48,8 @@ M04 读证据输入切片：冻结的 FILE_READ/WEB_FETCH 意图只在 Gateway �
 
 Run 默认修正预算 2 次，与模型连接重试分开统计；总调用/成本上限由执行配置提供。耗尽进入 Review，不自动增预算。所有默认值进入版本化配置和 UI，不隐含为不可更改业务事实。
 
+2026-11-05 修正纯生成格式重试的计数边界：每一轮 DRAFT 最多两次格式生成尝试，上一次成功的 DRAFT 作为下一轮的边界，不把旧轮成功或失败的尝试计入新轮。StepAttempt 编号仍单调递增，原 Attempt、模型账本、幂等身份与业务修正预算保留；本轮两次格式失败仍终止 Run，非法候选不会落为 Artifact。该修复不自动增加业务修正次数，也不改变 Provider/成本准入。
+
 Development 的 `change-and-verify-v1` 目标流程：确认本次任务范围 → 读取实际基线 → 生成变化集 → 基线复核并在受管原目录应用 → 运行已配置检查 → 验证证据 → 完成。删除、Git 提交/推送与扩大范围分别按[任务范围授权规则](../tool-adapters.md#12-本次任务范围内的工具授权2026-10-03)确认。2026-10-03 用户已确认默认原目录修改，替代此前隔离副本优先的建议；具体文件规则见[工具适配器 Files](../tool-adapters.md#2-files)。复用同一 Run/Gateway/Review 机制，工具循环仍待实现。
 
 执行器实现由 P00 复用验证决定，有界线程池只是一种候选。业务执行先按 DB 协议取得合法执行权；排队不等于持有资源写权。外部 harness 的 session/thread/turn 与产品 Run 显式关联，重复事件去重，不把 SDK 状态当第二套业务事实。每轮下一步前核查控制请求；进程退出时保存控制/核对信息，不能强行标记成功。框架 checkpoint 与业务完成事务不默认原子，恢复必须处理两边提交不一致。
@@ -81,6 +83,8 @@ Development 的 `change-and-verify-v1` 目标流程：确认本次任务范围 �
 **冻结信封 `tool_loop_action`。** Delegate 时可选冻结 `{ intent_key:'tool-loop-v1', resource_id, connections, allowed_tools, max_rounds, max_tool_calls }`。它是模型可自主调用的**上界**，不是授权：resource 必须在 Task 的 Project 下 ACTIVE，每个 connection 必须是该项目绑定该 resource 的 ACTIVE 连接，`allowed_tools` 只能是首批词表。信封不含 `operation_id`——每次工具调用的动作身份在落库时产生，见下。`max_rounds`/`max_tool_calls` 是循环自身预算，不替代 `model_calls` 的调用与 token 预算。
 
 **身份。** 新表 `run_tool_calls` 是一次「模型工具请求 ↔ 一个 Gateway 逻辑动作」的持久对应，行 id 直接作为该动作的 `logical_operations.id`。因此：Provider 的 `tool_call_id` 只是本轮内的关联标签，不承担跨 Run/轮次唯一性；同一已落库请求的重放沿用同一行与同一 operation_id，`prepareGatewayAction` 的既有幂等分支返回原记录；断流、半截 JSON、非法 schema、未知工具、超预算与取消在落库前即拒绝，不产生 Operation。
+
+2026-11-05 修正：新动作的 `intent_key` 使用 `tool-loop-v2#<请求行 id>`，避免新 DRAFT Attempt 的 round/ordinal 从零开始时撞上前一 Attempt；已存在的旧动作仍保留原意图及 Operation 身份，未绑定的同 ID 动作须核对归属后接回，UNKNOWN 与失效令牌不因此放行。冻结信封的 `intent_key:'tool-loop-v1'` 标识不变，二者分别是信封标识和逐动作去重键，不混用。
 
 **轮次与恢复。** 行上带 `round` 与 `step_attempt_id`，按 `(round, ordinal)` 重建模型消息：assistant 工具请求来自 `arguments`，tool 结果来自原 Operation 的 `result_ref` 投影。2026-10-13 增加 migration 0073，每轮首行不可变 `assistant_message` 保存本轮完整响应的前置正文与可选实际 `reasoning_content`，重建时与该轮工具请求配对；旧 NULL 行只能恢复空正文/无推理字段，不能补造历史。LangChain 当前出站转换省略该 Provider 字段，端口只对确实已有字段的 assistant 消息作局部回填，仍经原 guarded fetch、取消与调用计量，不改 SDK 隐式重试策略。数据不进入计量账本或工具轨迹 DTO，不保存凭据。只读助手/学习循环在当前进程的续轮中也传递这两个字段，未扩展其跨重启恢复。已结算结果复用原证据，不重新生成同一动作；mock 请求体往返不代表真实 DeepSeek 兼容或收益已经验收。
 

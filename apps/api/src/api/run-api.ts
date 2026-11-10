@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { delegateTask } from '../application/delegate-task.js';
 import { recoverRunByHumanAttestation } from '../application/recover-run.js';
-import { readRunById } from '../application/run-queries.js';
+import { listTaskRunHistory, readRunById } from '../application/run-queries.js';
 import { readRunDraftPreview } from '../application/run-draft-preview.js';
 import { readRunToolCalls } from '../application/run-tool-call-projection.js';
 import { readRunToolCallPreviews } from '../application/run-tool-call-preview-projection.js';
@@ -24,6 +24,7 @@ import {
   WorkspaceRunControlParamsSchema,
   WorkspaceRunParamsSchema,
   WorkspaceTaskParamsSchema,
+  UuidSchema,
   commandEnvelopeSchema,
 } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
@@ -47,6 +48,23 @@ const draftPreviewDto = Type.Object({
  * 成功返回 202（已接受，工作尚未完成）。Run 查询是只读投影，不含宿主路径、密钥或可写实体。
  */
 export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDependencies): void {
+  app.get('/tasks/:task_id/runs', { schema: {
+    params: WorkspaceTaskParamsSchema,
+    querystring: Type.Object({ cursor: Type.Optional(UuidSchema),
+      limit: Type.Optional(Type.String({ pattern: '^[1-9][0-9]{0,2}$' })) }, { additionalProperties: false }),
+    response: { 200: Type.Object({ items: Type.Array(Type.Object({ id: UuidSchema, task_id: UuidSchema,
+      status: Type.String(), revision: Type.String(), retry_of_run_id: Type.Union([UuidSchema, Type.Null()]),
+      created_at: Type.String(), terminal_at: Type.Union([Type.String(), Type.Null()]),
+    }, { additionalProperties: false })), next_cursor: Type.Union([UuidSchema, Type.Null()]) }, { additionalProperties: false }) },
+  } }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try {
+      const params = request.params as { workspace_id: string; task_id: string };
+      const query = request.query as { cursor?: string; limit?: string };
+      return await listTaskRunHistory(dependencies.database.executor, params.workspace_id, params.task_id,
+        query.limit === undefined ? 20 : Number(query.limit), query.cursor);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
   app.post(
     '/tasks/:task_id/delegations',
     {

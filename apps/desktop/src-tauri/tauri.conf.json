@@ -19,6 +19,7 @@
       "resources/node.exe": "node.exe",
       "resources/relay-file-io-helper.exe": "relay-file-io-helper.exe",
       "resources/relay-computer-runtime.exe": "relay-computer-runtime.exe",
+      "resources/relay-credential-helper.exe": "relay-credential-helper.exe",
       "resources/browser-extension/": "browser-extension/",
       "resources/api/": "api/"
     },

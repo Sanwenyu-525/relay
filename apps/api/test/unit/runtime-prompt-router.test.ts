@@ -107,12 +107,12 @@ test('every registered route resolves and its metadata matches the registry', ()
     // 每条路由的模板版本各自独立：AGENT_MAIN_LOOP 随直写后的检查接续升到 1.0.4，
     // 2026-10-21 随「工具准入由这一步需不需要本地事实决定」这条判定升到 1.0.5
     // （用户指认一个很简单的问题也要想很久；收口在提示词，不在按文本猜的路由谓词）；
-    // DRAFT 只读/含写工具集的 1.0.1 是它们自己的版本，不能顺手一起抬；
-    // METHOD 随明确 MODIFY 复用直写升到 1.0.2，DRAFT 写分支因放开删除升到 1.0.2。
+    // DRAFT 各分支随完整正文/真实换行规则分别递增，不改变 METHOD 等其他路由。
     const expectedVersion =
       descriptor.routeId === 'AGENT_MAIN_LOOP' ? '1.0.5' :
-      descriptor.routeId === 'DRAFT_WRITE_TOOLS' || descriptor.routeId === 'METHOD' ? '1.0.2' :
-      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS'
+      descriptor.routeId === 'DRAFT_WRITE_TOOLS' ? '1.0.3' :
+      descriptor.routeId === 'DRAFT_READ_ONLY_TOOLS' || descriptor.routeId === 'METHOD' ? '1.0.2' :
+      descriptor.routeId === 'DRAFT_NO_TOOLS' || descriptor.routeId === 'DRAFT_OPERATION_TOOLS'
         ? '1.0.1' : '1.0.0';
     assert.equal(descriptor.templateVersion, expectedVersion);
     // 元数据声称包含核心，模板里就必须恰好出现一次；声称不含就必须为零。

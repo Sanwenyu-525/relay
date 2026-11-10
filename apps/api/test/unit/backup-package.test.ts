@@ -74,6 +74,9 @@ async function fixture(t: { after(fn: () => Promise<void>): void }, source?: str
   const files: Record<string, Buffer | string> = {
     'relay-desktop.exe': 'maintenance fixture only', 'node.exe': 'node fixture only',
     'relay-file-io-helper.exe': 'helper fixture only', 'licenses/OFL.txt': 'fixture',
+    'relay-computer-runtime.exe': 'computer fixture only',
+    'relay-credential-helper.exe': 'credential fixture only',
+    'browser-extension/manifest.json': '{"name":"fixture"}',
     'api/package.json': '{"type":"module"}', 'api/dist/src/main.js': '',
     'api/dist/src/worker/main.js': '', 'api/dist/src/worker/supervisor-main.js': '',
     'api/dist/src/runtime/database-connect-fence.js': '',

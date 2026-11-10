@@ -9,21 +9,61 @@
   padding: var(--relay-layout-main-padding);
 }
 
-.settings-layout {
+/* 设置骨架：对齐上游设置页的「左栏导航 + 右栏内容」。
+   左栏承载页面标题与四个分组，宽屏吸顶；右栏每个分组先给标题和一句说明，再排卡片。
+   页面仍不挂 .pv-page，也不引入第二套 token。 */
+.settings-shell {
   display: grid;
   gap: var(--relay-space-6);
-  margin-top: var(--relay-space-6);
   align-items: start;
 }
 
 @media (min-width: 64rem) {
-  .settings-layout {
-    grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr);
+  .settings-shell {
+    grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr);
     gap: var(--relay-space-8);
   }
 }
 
-/* 页签：宽屏为左侧竖向导航；窄屏折成两列，不横向溢出。 */
+/* 外层负责满高的分隔线，内层负责吸顶：只给内层 sticky 时，
+   1px 分隔线只会画到导航自身高度，内容再长也像断了半截。 */
+.settings-aside {
+  min-width: 0;
+  align-self: stretch;
+}
+
+.settings-aside-inner {
+  display: grid;
+  gap: var(--relay-space-6);
+}
+
+@media (min-width: 64rem) {
+  .settings-aside {
+    padding-right: var(--relay-space-6);
+    border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+  }
+
+  .settings-aside-inner {
+    position: sticky;
+    top: var(--relay-space-4);
+    align-self: start;
+  }
+}
+
+/* 页头收进左栏：标题降一档到 section，说明用小字；窄栏里不再压过导航。 */
+.settings-aside .page-head { display: block; }
+
+.settings-aside .page-head-title > h1 {
+  font-size: var(--relay-font-size-section);
+}
+
+.settings-aside .page-head-lede {
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* 分组导航：宽屏是 32px 的竖向行（图标 + 名称），窄屏折成可换行的胶囊。
+   悬停比选中更轻：选中用 selection.bg，悬停只给一档底色，避免两个页签同时像被选中。 */
 .settings-navigation {
   display: flex;
   flex-wrap: wrap;
@@ -34,14 +74,18 @@
 @media (min-width: 64rem) {
   .settings-navigation {
     flex-direction: column;
-    position: sticky;
-    top: var(--relay-space-4);
+    flex-wrap: nowrap;
+    gap: 2px;
   }
 }
 
 .settings-navigation button {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
   min-height: var(--relay-control-height-compact);
-  padding: 0 var(--relay-space-3);
+  padding: 0 var(--relay-space-2);
   border: 0;
   border-radius: var(--relay-radius-control);
   background: transparent;
@@ -53,8 +97,12 @@
   cursor: pointer;
 }
 
-/* 悬停比选中更轻：选中用 selection.bg，悬停只给一档底色，切换时不做淡入淡出，
-   避免两个页签在半透明过渡里同时像被选中。 */
+.settings-navigation button > svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
 .settings-navigation button:hover {
   background: var(--relay-color-bg-subtle);
   color: var(--relay-color-text-primary);
@@ -66,21 +114,66 @@
   font-weight: var(--relay-font-weight-semibold);
 }
 
-.settings-navigation button:focus-visible {
-  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
-  outline-offset: 2px;
+/* 单列档页签横排：按内容宽度排成胶囊并换行，不占满整行、不做 2×2 色块。 */
+@media (width < 64rem) {
+  .settings-navigation button {
+    width: auto;
+    flex: 0 1 auto;
+  }
+}
+
+/* 右栏：分组标题 + 内容。标题只做定位，不包成卡片，避免与设置卡片的 h2 混淆。 */
+.settings-main {
+  min-width: 0;
 }
 
 .settings-content {
   display: grid;
-  gap: var(--relay-space-4);
+  gap: var(--relay-space-6);
   min-width: 0;
 }
 
 .settings-content > [role="tabpanel"] {
   display: grid;
-  gap: var(--relay-space-4);
+  gap: var(--relay-space-6);
   min-width: 0;
+}
+
+.settings-section-head {
+  padding-bottom: var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-section-head > h2 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-section);
+  font-weight: var(--relay-font-weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.settings-section-head > p {
+  margin: var(--relay-space-1) 0 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+/* AI 与模型：五张卡仍必须是 tabpanel 的直接子级（浏览器测试按此顺序取 h2）。
+   宽屏只用 grid 列跨度做层次，不包 wrapper、不重排 DOM：
+   摘要与状态、模型连接、高级诊断全宽；只有上下文与记忆并排——
+   它们内容短，两列不会把型号/端点挤成多行。 */
+@media (width >= 80rem) {
+  #settings-panel-model {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  #settings-panel-model >
+    :not([data-testid="context-budget"]):not([data-testid="memory-settings"]) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* display:grid 会压掉 UA 的 [hidden]，这里显式收回：隐藏页签仍挂载以保留草稿。 */
@@ -112,6 +205,15 @@
 .settings-page .settings-card > h2 + .helper-text,
 .settings-page .pack-catalog > h2 + .helper-text {
   margin-top: var(--relay-space-1);
+}
+
+/* 设置页内的动作统一到 control.height（40px）：全局按钮默认 48px，目录行此前还混用
+   32px compact，同一张卡里三种高度。主/次/危险只靠颜色区分，不靠尺寸。 */
+.settings-page .settings-card .primary-button,
+.settings-page .settings-card .secondary-button,
+.settings-page .settings-card .danger-button,
+.settings-page .settings-card .secondary-button--compact {
+  min-height: var(--relay-control-height);
 }
 
 /* 说明文字：正文可读档（meta 14px），不使用 11–12px 的小字铺满正文。 */
@@ -186,6 +288,7 @@
 }
 
 .settings-field select,
+.settings-row-control select,
 .settings-field input:not([type="checkbox"]):not([type="radio"]),
 .settings-default-directory-manual input,
 .settings-inline-form input {
@@ -211,13 +314,6 @@
 /* 时区、动效这类短选项不铺满整列（宽屏下曾拉到 784px，读起来像一块空白控件）：
    控件宽跟内容走，长文本输入仍可占满整列。 */
 .settings-field select { max-width: 22rem; }
-
-.settings-field select:focus-visible,
-.settings-field input:focus-visible,
-.settings-default-directory-manual input:focus-visible {
-  outline: var(--relay-border-width) solid var(--relay-color-focus-ring);
-  outline-offset: 1px;
-}
 
 .settings-field .helper-text {
   margin-top: 0;
@@ -281,6 +377,491 @@
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-ui);
   overflow-wrap: anywhere;
+}
+
+/* 当前使用的模型：四个作用域各占一行，标签与值分层；分隔线代替整行白卡。 */
+.settings-usage-list {
+  display: grid;
+  margin: var(--relay-space-4) 0 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-usage-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+  gap: var(--relay-space-4);
+  padding: var(--relay-space-3) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-usage-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.settings-usage-row dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-usage-row dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+/* 连接摘要本身是一串行内事实（chip + 名称 + 型号），不能放进 grid 被拆成每段一行；
+   说明文字单独占一行。 */
+.settings-usage-row dd .helper-text {
+  display: block;
+  margin-top: var(--relay-space-1);
+}
+
+.settings-usage-value {
+  display: block;
+  min-width: 0;
+}
+
+.settings-usage-value code,
+.settings-usage-endpoint code {
+  font-size: var(--relay-font-size-caption);
+}
+
+/* 端点单独占一行：长 URL 不再把型号与分隔点挤成一团。 */
+.settings-usage-endpoint {
+  display: block;
+  margin-top: var(--relay-space-0-5);
+  overflow-wrap: anywhere;
+}
+
+/* 连接与模型状态：三列状态条；窄窗回到单列，行间用 1px 分隔线而不是再套卡片。 */
+.settings-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--relay-space-4);
+  margin: var(--relay-space-4) 0 0;
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-status-item {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  align-content: start;
+}
+
+.settings-status-item + .settings-status-item {
+  padding-left: var(--relay-space-4);
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-status-item dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-status-item dd {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.settings-status-item .status-chip {
+  justify-self: start;
+}
+
+/* 权限与执行：三列只读事实，列间 1px 分隔，不再是一列定义列表拖出大片空白。 */
+.settings-fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--relay-space-4);
+  margin: var(--relay-space-4) 0 0;
+}
+
+.settings-fact {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+  align-content: start;
+}
+
+.settings-fact + .settings-fact {
+  padding-left: var(--relay-space-4);
+  border-left: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-fact dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-fact dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.settings-fact dd .status-chip {
+  margin-right: var(--relay-space-2);
+}
+
+.settings-fact dd .inline-link {
+  margin-left: var(--relay-space-1);
+}
+
+/* 单设置行：左侧标签与说明、右侧控件；宽窗一行说清，窄窗上下排。 */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  gap: var(--relay-space-6);
+  align-items: start;
+}
+
+.settings-row-text {
+  display: grid;
+  gap: var(--relay-space-1);
+  min-width: 0;
+}
+
+.settings-row-text .helper-text {
+  margin-top: 0;
+}
+
+.settings-row-control {
+  display: grid;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+@media (width < 64rem) {
+  .settings-usage-row,
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--relay-space-1);
+  }
+
+  .settings-status-strip,
+  .settings-fact-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--relay-space-3);
+  }
+
+  .settings-status-item + .settings-status-item,
+  .settings-fact + .settings-fact {
+    padding-top: var(--relay-space-3);
+    padding-left: 0;
+    border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+    border-left: 0;
+  }
+}
+
+/* 模型连接：主从布局。左侧连接列表只负责选择，右侧详情承载配置与动作；
+   分隔线来自 shell，不再把每条连接做成卡片。 */
+.settings-connections-shell {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  margin-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-connections-list {
+  display: grid;
+  align-content: start;
+  gap: var(--relay-space-3);
+  min-width: 0;
+  padding: var(--relay-space-4) var(--relay-space-4) var(--relay-space-4) 0;
+  border-right: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-connections-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+}
+
+.settings-connections-list-title {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.settings-connections-list ul {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-connection-nav {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height);
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-connection-nav:hover {
+  background: var(--relay-color-bg-subtle);
+}
+
+.settings-connection-nav[data-selected="true"] {
+  background: var(--relay-color-selection-bg);
+  color: var(--relay-color-action-text);
+}
+
+.settings-connection-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--relay-color-text-muted);
+}
+
+.settings-connection-dot--active {
+  background: var(--relay-color-status-success-text);
+}
+
+.settings-connection-dot--disabled {
+  background: var(--relay-color-status-neutral-text);
+}
+
+.settings-connection-nav-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-connection-nav-name {
+  overflow: hidden;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-connection-nav[data-selected="true"] .settings-connection-nav-name {
+  color: var(--relay-color-action-text);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.settings-connection-nav-meta {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.settings-connection-nav[data-selected="true"] .settings-connection-nav-meta {
+  color: var(--relay-color-action-text);
+}
+
+.settings-page .settings-connections-add {
+  width: 100%;
+  justify-content: flex-start;
+  margin-top: var(--relay-space-1);
+}
+
+.settings-connections-detail {
+  min-width: 0;
+  padding: var(--relay-space-4) 0 var(--relay-space-4) var(--relay-space-6);
+}
+
+.settings-connection {
+  display: grid;
+  gap: var(--relay-space-4);
+}
+
+.settings-connection-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--relay-space-3);
+}
+
+.settings-connection-detail-title {
+  display: grid;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.settings-connection-detail-title h3 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-snug);
+  overflow-wrap: anywhere;
+}
+
+.settings-connection-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.settings-connection-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.settings-connection-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--relay-space-3) var(--relay-space-4);
+  margin: 0;
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+/* 端点通常较长，单独占满一行；格式与凭据留在下一行。 */
+.settings-connection-fields > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.settings-connection-fields > div {
+  display: grid;
+  gap: var(--relay-space-0-5);
+  min-width: 0;
+}
+
+.settings-connection-fields dt {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.settings-connection-fields dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+}
+
+.settings-connection-fields code {
+  font-size: var(--relay-font-size-caption);
+}
+
+.settings-connection-defaults {
+  display: grid;
+  gap: var(--relay-space-2);
+}
+
+.settings-connection-defaults-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.settings-connection-models {
+  display: grid;
+  gap: var(--relay-space-2);
+  padding-top: var(--relay-space-3);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-connection-models-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2);
+}
+
+.settings-connection-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--relay-space-3);
+}
+
+.settings-connection-model-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.settings-connection-model-row > .helper-text {
+  margin: 0;
+}
+
+.settings-connection-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  margin: 0;
+  color: var(--relay-color-status-danger-text);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+@media (width < 64rem) {
+  .settings-connections-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-connections-list {
+    padding-right: 0;
+    padding-bottom: var(--relay-space-3);
+    border-right: 0;
+    border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  }
+
+  .settings-connections-detail {
+    padding-top: var(--relay-space-3);
+    padding-left: 0;
+  }
+
+  .settings-connection-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-connection-fields > div:first-child {
+    grid-column: auto;
+  }
+}
+
+@media (width < 48rem) {
+  .settings-connection-detail-head {
+    flex-direction: column;
+  }
 }
 
 .settings-page .status-chip {
@@ -507,21 +1088,25 @@
   margin-top: 0;
 }
 
-/* 模型连接行：动作在值下方换行，不把长端点挤成不可读的一行。 */
-.settings-connection-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--relay-space-2);
-  margin-top: var(--relay-space-2);
-}
-
+/* 行内表单：编辑/轮换/新增都用同一块面板；标题说明这里在做什么，动作固定在底部。 */
 .settings-inline-form {
   display: grid;
-  gap: var(--relay-space-2);
+  gap: var(--relay-space-3);
   margin-top: var(--relay-space-3);
   padding: var(--relay-space-4);
   background: var(--relay-color-bg-subtle);
   border-radius: var(--relay-radius-control);
+}
+
+.settings-inline-form > h3 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.settings-inline-form .settings-verify-actions {
+  margin-top: var(--relay-space-1);
 }
 
 .settings-inline-form label {
@@ -613,12 +1198,6 @@
     padding: var(--relay-layout-main-smallPadding);
   }
 
-  /* 窄窗页签保持自适应宽度的胶囊并换行，不做 2×2 全宽色块：
-     后者会让两个页签同时像被选中。 */
-  .settings-navigation button {
-    flex: 0 1 auto;
-  }
-
   .settings-page .settings-card,
   .settings-page .pack-catalog,
   .settings-page .settings-advanced {
@@ -664,7 +1243,7 @@
 
 .settings-inline-form .settings-advanced {
   padding: var(--relay-space-3);
-  border: var(--relay-border-width) solid var(--relay-color-border-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
   background: var(--relay-color-bg-surface);
 }
@@ -680,7 +1259,7 @@
   margin-bottom: var(--relay-space-2);
 }
 
-@media (max-width: 720px) {
+@media (width < 48rem) {
   .settings-inline-form .settings-form-row {
     grid-template-columns: minmax(0, 1fr);
   }

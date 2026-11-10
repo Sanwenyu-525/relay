@@ -17,9 +17,11 @@ const MAX_FILES = 100_000;
 const MAX_FILE_BYTES = 256n * 1024n * 1024n;
 const MANIFEST = 'desktop-build-manifest.json';
 const REGISTRY_MODULE = 'api/dist/src/skills/first-party-registry.js';
-const TOP_LEVEL = ['api', 'desktop-build-manifest.json', 'licenses', 'node.exe',
+const TOP_LEVEL = ['api', 'browser-extension', 'desktop-build-manifest.json', 'licenses',
+  'node.exe', 'relay-computer-runtime.exe', 'relay-credential-helper.exe',
   'relay-desktop.exe', 'relay-file-io-helper.exe'];
-const REQUIRED = ['node.exe', 'relay-file-io-helper.exe', 'api/package.json', REGISTRY_MODULE,
+const REQUIRED = ['node.exe', 'relay-file-io-helper.exe', 'relay-computer-runtime.exe',
+  'relay-credential-helper.exe', 'api/package.json', REGISTRY_MODULE,
   'api/dist/src/receipt/payload-hash.js', 'api/dist/src/main.js',
   'api/dist/src/worker/main.js', 'api/dist/src/worker/supervisor-main.js',
   'api/dist/src/runtime/database-connect-fence.js', 'api/migrations/0001_v001_human_core.sql',
@@ -255,7 +257,9 @@ export async function verifyBackupPackage(packageRoot: string): Promise<{
     const resources: Record<string, string> = Object.create(null) as Record<string, string>;
     const folded = new Set<string>();
     for (const [ref, hash] of Object.entries(manifest.resource_file_sha256)) {
-      if (!safeRef(ref) || !['api', 'licenses', 'node.exe', 'relay-file-io-helper.exe'].includes(ref.split('/')[0]!) ||
+      if (!safeRef(ref) || !['api', 'browser-extension', 'licenses', 'node.exe',
+        'relay-computer-runtime.exe', 'relay-credential-helper.exe', 'relay-file-io-helper.exe']
+        .includes(ref.split('/')[0]!) ||
           typeof hash !== 'string' || !HASH.test(hash) || folded.has(ref.toLowerCase())) throw new Error();
       resources[ref] = hash;
       folded.add(ref.toLowerCase());

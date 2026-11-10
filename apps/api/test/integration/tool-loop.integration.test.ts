@@ -15,6 +15,7 @@ import { advanceRunStep } from '../../src/application/run-steps.js';
 import { markTaskReady } from '../../src/application/task-commands.js';
 import { resolveReview } from '../../src/application/review-decisions.js';
 import { requestRunControl, applySafeControl, resumeRun } from '../../src/application/control-requests.js';
+import { recoverStoppedWorker } from '../../src/application/recover-run.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { claimRunForGateway, prepareGatewayAction } from '../../src/application/gateway-actions.js';
 import { readRunToolCalls } from '../../src/application/run-tool-call-projection.js';
@@ -258,6 +259,66 @@ async function latestDecisionId(reviewId: string): Promise<string> {
   assert.ok(decision !== undefined);
   return decision.id;
 }
+
+test('a corrected Draft can reuse tool round zero without colliding with the prior attempt', async () => {
+  const fx = await fixture('tool-loop-correction-identity');
+  const script = [[{ name: 'list_directory', arguments: {} }]];
+  await drive(fx, script);
+  const first = (await toolRows(fx.runId))[0]!;
+  assert.equal(first.status, 'SETTLED');
+  const review = await withTransaction(app.db, async (r) =>
+    (await r.reviews.listByWorkspace(fx.workspaceId, 'OPEN')).find((item) => item.run_id === fx.runId));
+  assert.ok(review);
+  await resolveReview(app.db, { workspaceId: fx.workspaceId, reviewId: review.id,
+    commandId: randomUUID(), expectedRevision: review.revision.toString(), targetHash: review.target_hash.toString('hex'),
+    decision: 'REQUEST_CHANGES', feedback: 'Revise the candidate and read the directory again.' });
+  const pendingId = await advanceToPendingToolAction(fx, script);
+  const pending = await new RunToolCallRepository(app.db).read(pendingId);
+  assert.ok(pending);
+  assert.notEqual(pending.step_attempt_id, first.step_attempt_id);
+  assert.equal(pending.round, first.round);
+  assert.equal(pending.ordinal, first.ordinal);
+  const claim = { commandId: randomUUID(), runId: fx.runId, workspaceId: fx.workspaceId,
+    kind: 'START' as const, reviewDecisionId: null, workerId: `loop-${randomUUID()}`, epoch: 0n };
+  const result = await executeToolLoopStep(app.db, { claim, toolCallId: pendingId });
+  assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(result.operationId, pendingId);
+  const replay = await executeToolLoopStep(app.db, { claim, toolCallId: pendingId });
+  assert.equal(replay.operationId, pendingId);
+  const operations = await sql<{ id: string }>`select id from logical_operations
+    where run_id = ${fx.runId} and id in (${first.id}, ${pendingId})`.execute(app.db);
+  assert.equal(operations.rows.length, 2, 'two requests own two stable operations, replay adds none');
+});
+
+test('an unbound legacy tool request keeps its operation and cannot bypass its fenced token', async () => {
+  const fx = await fixture('tool-loop-legacy-intent');
+  const toolCallId = await advanceToPendingToolAction(fx, [[{ name: 'list_directory', arguments: {} }]]);
+  const row = (await new RunToolCallRepository(app.db).read(toolCallId))!;
+  const plan = (await resolveToolLoopPlan(app.db, fx.runId, fx.workspaceId))!;
+  const workerId = `loop-${randomUUID()}`;
+  const claimed = await claimRunForGateway(app.db, { workspaceId: fx.workspaceId, runId: fx.runId, workerId });
+  const legacyKey = `tool-loop-v1#${row.round}#${row.ordinal}`;
+  await prepareGatewayAction(app.db, { workspaceId: fx.workspaceId, operationId: toolCallId,
+    intentKey: legacyKey, connectionId: fx.connectionId,
+    origin: { kind: 'RUN', runId: fx.runId, stepId: row.step_id,
+      resourceId: plan.resourceId, workerId, workerEpoch: BigInt(claimed.worker_epoch) },
+    actionType: 'LIST_DIRECTORY', target: plan.canonicalRoot, params: {} });
+  await recoverStoppedWorker(app.db, { runId: fx.runId, stoppedWorkerId: workerId,
+    stoppedEvidence: 'Fixture owns this non-process Worker; prepare stopped before any invocation.',
+    storage: new ManagedContentStore(dataRoot) });
+  // 停机已撤销旧资源令牌：这里只证明接回原身份，不能假设旧授权仍可执行。
+  await assert.rejects(() => executeToolLoopStep(app.db, { claim: { commandId: randomUUID(),
+    runId: fx.runId, workspaceId: fx.workspaceId, kind: 'START', reviewDecisionId: null,
+    workerId, epoch: 0n }, toolCallId }), (error: unknown) =>
+    (error as { code?: string }).code === 'GATEWAY_STALE_TOKEN');
+  assert.equal((await new RunToolCallRepository(app.db).read(toolCallId))?.operation_id, toolCallId);
+  const operation = await withTransaction(app.db, (r) => r.gateway.readOperation(toolCallId));
+  assert.equal(operation?.intent_key, legacyKey);
+  const calls = await sql<{ status: string }>`select status from invocation_attempts
+    where operation_id = ${toolCallId}`.execute(app.db);
+  assert.equal(calls.rows.length, 1, 'prepare already owns one invocation; replay must not add another');
+  assert.ok(calls.rows.every((call) => call.status !== 'DISPATCHING' && call.status !== 'SUCCEEDED'));
+});
 
 test('a scripted model walks search, read and git diff, then settles the draft', async () => {
   const fx = await fixture('tool-loop-read', { git: true });

@@ -85,6 +85,21 @@ export async function executeToolLoopStep(db: DbExecutor, input: ExecuteToolLoop
   let workerEpoch: bigint | undefined;
   let operationId = row.operation_id;
   if (operationId === null) {
+    // prepare 与请求行绑定之间可能停机：只能接回这条不可变请求已经创建的同一动作。
+    const existing = await createRepositories(db).gateway.readOperation(row.id);
+    if (existing !== undefined) {
+      if (existing.workspace_id !== claim.workspaceId || existing.run_id !== claim.runId ||
+          existing.step_id !== row.step_id || existing.action_type !== definition.actionType ||
+          existing.resource_id !== plan.resourceId) throw new Error('Tool loop Operation ownership mismatch');
+      if (existing.status === 'UNKNOWN' || existing.status === 'DISPATCHING') {
+        return { status: 'UNKNOWN', toolCallId: row.id, operationId: row.id };
+      }
+      await repository.bindOperation(row.id, row.id,
+        existing.status === 'WAITING_APPROVAL' ? 'WAITING_APPROVAL' : 'PREPARED');
+      operationId = row.id;
+    }
+  }
+  if (operationId === null) {
     // 行 id 即动作身份：Gateway 的既有幂等分支因此保证同一请求只准备一次。
     operationId = row.id;
     try {
@@ -300,9 +315,11 @@ async function prepareToolAction(db: DbExecutor, input: {
     // 准备阶段也要实测程序摘要，否则授权复核会因为「没有实测值」而一律判定配置已变，
     // 已配置检查就永远退不出一致性核对。
     const observed = check === undefined ? undefined : await sha256OfFile(check.executable);
+    // RUN-TOOL-INTENT-20261105：round/ordinal 在修正后的新 Attempt 会从零开始，不能跨 Attempt 共用。
+    // 请求行是持久动作身份；已准备的旧行在派发入口接回原 Operation，不重建动作。
     const prepared = await prepareGatewayAction(db, {
       workspaceId: input.workspaceId, operationId: input.operationId,
-      intentKey: `tool-loop-v1#${input.row.round}#${input.row.ordinal}`,
+      intentKey: `tool-loop-v2#${input.row.id}`,
       connectionId: requireConnection(input.plan, input.definition.capability),
       origin: input.origin, actionType: input.definition.actionType,
       target: toolTargetFor(input.plan, input.definition, input.row.arguments, input.origin),

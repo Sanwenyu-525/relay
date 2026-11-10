@@ -121,6 +121,13 @@ export default function ReviewsView() {
       : projectArchivedAt !== null ? "项目已归档，不能提交新的 Review 决定。" : null;
 
   const visibleReviews = kind === "ALL" ? reviews : reviews.filter((review) => review.kind === kind);
+  // REVIEW-NEXT-IN-RUN-20261106：只读事实确认当前判断已保存后，显式接续同次执行的有效请求。
+  const nextInRun = live && !loading && !refreshing && error === null && selected?.status === "DECIDED" && selected.runId &&
+    (selectedId === null || selectedId === selected.id)
+    ? visibleReviews.find((review) => review.id !== selected.id && review.runId === selected.runId &&
+      review.taskId === selected.taskId && review.projectId === selected.projectId &&
+      review.status === "OPEN" && !isReviewExpired(review))
+    : undefined;
   // 请求标题优先用服务端读到的产物标题；示例模式没有标题读取，退回示例产物名，
   // 避免列表标题、详情「请求事项」与「为何需要你」正文三处显示同一句理由。
   const title = (review: RelayReview) => labels?.reviewId === review.id && labels.targetTitle
@@ -197,8 +204,14 @@ export default function ReviewsView() {
       <details className="review-request-identity"><summary>请求身份 · v{selected.revision}</summary><p className="helper-text">请求 ID：<code className="hash-code">{selected.id}</code> · 请求 v{selected.revision}</p>{selected.projectId && <p className="helper-text">Project ID：{selected.projectId}</p>}{selected.taskId && <p className="helper-text">Task ID：{selected.taskId}</p>}</details>
       {selected.expiresAt && <p className="helper-text" data-testid="review-expires-at">有效期至：{requestTime(selected.expiresAt)}</p>}
       {selected.taskId && live && <div className="form-actions"><Link className="text-link" to={`/tasks/${selected.taskId}?tab=artifacts`}>查看关联任务与产物</Link>{typeof selected.target.artifact_version_id === "string" && <Link className="text-link" to={`/artifact-versions/${selected.target.artifact_version_id}/lineage`}>核对版本来源</Link>}</div>}
+      {/* TASK-ACCEPTANCE-RETURN-20261106：判断保存后沿原 Run 核对完成，不重复提交完成命令。 */}
+      {live && selected.runId && <div className="form-actions"><Link className="text-link" data-testid="review-return-run"
+        to={`/runs/${selected.runId}`}>查看执行与完成状态</Link></div>}
       <ReviewDecisionPanel live={live} review={selected} writeBlockedReason={projectWriteBlockedReason}
         busy={loading || refreshing} onRefresh={load} />
+      {nextInRun && <div className="form-actions"><Link className="text-link" data-testid="review-next-in-run"
+        to={`/reviews?${new URLSearchParams({ id: nextInRun.id, ...(kind !== "ALL" ? { kind } : {}) })}`}>
+        处理本次执行的下一条待办</Link></div>}
       <details className="page-explanation"><summary>逐项判断的边界</summary><p className="helper-text">每条请求绑定自己的对象与依据，不能绕过证据自动接受。判断保存后，任务完成与执行权仍须分别核对。</p></details>
     </article> : <div className="review-detail review-empty" role="status"><h2>为何需要你</h2>
       {loading || refreshing ? <p className="helper-text" data-testid="review-detail-empty-state"><Info aria-hidden="true" /> 正在读取待审请求…</p>

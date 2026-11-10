@@ -404,3 +404,53 @@ test('已知 Gateway 失败落 SETTLED 而不是 UNKNOWN，执行活动投影给
   assert.equal(activity.state.view, 'FAILED');
   assert.equal(activity.evidence.result_available, true);
 });
+/**
+ * AGENT-BASIC-TOOL-LOOP-20261109 S7：默认轮次预算被吃满后的强制收尾。
+ *
+ * 可控参数是脚本端口的行为——每一轮都请求一次读取工具，把默认 6 轮预算
+ * （`DEFAULT_MAX_ROUNDS`，产品默认值不改）吃满；第 7 次请求就是收尾轮。
+ * 期望：收尾轮**不声明任何读取/写入工具**（`tools: []`，与 OpenCode 的
+ * toolChoice:none 语义等价），并追加 `TOOL_BUDGET_WRAP_UP` 收尾指令；此前的
+ * 轮次不受影响，全部工具行照常结算。
+ */
+test('轮次预算吃满后：收尾轮不声明工具、追加预算收尾指令、工具行全部结算', async () => {
+  const fx = await fixture();
+  const scripted = new FakeModelPort();
+  const original = scripted.assist.bind(scripted);
+  const requests: { tools: readonly string[]; toolTurns: number;
+    lastTurnContent: string }[] = [];
+  scripted.assist = async (request) => {
+    const lastTurn = request.turns.at(-1);
+    requests.push({ tools: (request.tools ?? []).map((spec) => spec.name),
+      toolTurns: request.toolTurns?.length ?? 0,
+      lastTurnContent: lastTurn?.role === 'user' ? lastTurn.content : '' });
+    return original(request);
+  };
+  // 6 轮都请求同一文件：真实 Provider 的实测形态就是反复读取；脚本按此吃满预算。
+  const script = Array.from({ length: 6 }, () =>
+    [{ name: 'read_file', arguments: { relative_path: 'src/index.ts' } }]);
+  const outcome = await ask(fx, `FAKE_ASSIST_TOOLS ${JSON.stringify(script)}`, scripted);
+  assert.equal(outcome.status, 'COMPLETED', JSON.stringify(outcome));
+  // 脚本 6 轮工具 + 1 轮收尾正文 = 7 次请求。
+  assert.equal(requests.length, 7, JSON.stringify(requests.map((r) => r.tools.length)));
+  // 前 6 轮声明词表；收尾轮不再声明任何工具。
+  assert.ok(requests.slice(0, 6).every((r) => r.tools.length > 0),
+    JSON.stringify(requests.map((r) => r.tools)));
+  assert.deepEqual(requests[6]!.tools, [], '收尾轮不得声明读取/写入工具');
+  // 收尾指令只出现在收尾轮的最后一个用户回合。
+  assert.match(requests[6]!.lastTurnContent, /工具轮次或调用预算已用尽/u);
+  assert.ok(requests.slice(0, 6).every((r) => !r.lastTurnContent.includes('工具轮次或调用预算已用尽')),
+    '收尾指令不应出现在仍声明工具的轮次');
+  // 回灌递增：第 n 次请求携带 n-1 轮工具结果（工具结果回到同一上下文）。
+  assert.deepEqual(requests.map((r) => r.toolTurns), [0, 1, 2, 3, 4, 5, 6]);
+  // 每个请求恰好一条工具行，全部 SETTLED，无孤儿。
+  const rows = await new SessionToolCallRepository(app.db).listBySession(fx.sessionId);
+  assert.equal(rows.length, 6);
+  assert.ok(rows.every((row) => row.status === 'SETTLED'), JSON.stringify(rows.map((r) => r.status)));
+  // 每次请求都登记为 PRIMARY 调用（含收尾轮）。
+  const calls = await sql<{ count: string }>`
+    select count(*)::text as count from model_calls
+    where assist_message_id = ${rows[0]!.message_id} and purpose = 'PRIMARY'`
+    .execute(app.db);
+  assert.equal(calls.rows[0]!.count, '7');
+});

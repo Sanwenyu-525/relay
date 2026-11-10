@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { FolderOpen, Info, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Bot, FolderOpen, Info, LayoutGrid, RotateCcw, Settings2, ShieldCheck, X } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayModelPortStatus,
   type RelayModelVerificationState, type RelayViewKind,
   type RelayWorkingDirectory, type RelayWriteTier, type RelayWorkspaceDefaultDirectory } from "../api/relayClient";
@@ -29,6 +29,26 @@ export { resolveVerificationState };
 export type { ModelVerificationStateKind };
 
 type SettingsGroup = "basic" | "model" | "execution" | "workbench";
+
+/**
+ * 分组元数据只描述导航与分组标题，不承载业务状态。
+ * 图标与说明按上游设置页的「左栏导航 + 右栏分组标题」组织：
+ * 导航回答「去哪」，分组标题回答「这一页管什么」，卡片只负责具体配置。
+ */
+interface SettingsGroupMeta {
+  readonly value: SettingsGroup;
+  readonly label: string;
+  readonly icon: typeof Settings2;
+  readonly description: string;
+}
+
+/** 每个分组自己的标题与一句说明；不是卡片，避免被当成配置块或重复的 h2 层级。 */
+function SettingsSectionHead({ title, description }: { title: string; description: string }) {
+  return <header className="settings-section-head" data-testid="settings-section-head">
+    <h2>{title}</h2>
+    <p>{description}</p>
+  </header>;
+}
 
 const providerLabels: Record<RelayModelPortStatus["provider"], string> = {
   fake: "Mock 模型端口",
@@ -84,8 +104,9 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
   ];
   return <section className="settings-card" data-testid="service-state">    <h2>连接与模型状态</h2>
     <p className="helper-text">连接验证通过只表示固定短文本调用成功，不等于真实任务执行成功。</p>
-    <dl className="settings-definition-list">
-      {rows.map((row) => <div key={row.key} data-testid={`service-state-${row.key}`}>
+    <dl className="settings-status-strip">
+      {rows.map((row) => <div key={row.key} className="settings-status-item"
+        data-testid={`service-state-${row.key}`}>
         <dt>{row.label}</dt>
         <dd><span className={`status-chip status-chip--${row.tone}`}>{row.chip}</span> {row.detail}</dd>
       </div>)}
@@ -738,13 +759,17 @@ function WorkbenchPreferencesCard() {
         setError("默认工作台未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。");
       }
     }}>
-      <div className="settings-field">
-        <label htmlFor="settings-default-workbench">默认视图</label>
-        <select id="settings-default-workbench" data-testid="settings-default-workbench" value={defaultWorkbench}
-          onChange={(event) => { setDefaultWorkbench(event.target.value as RelayViewKind); setSaved(false); setError(null); }}>
-          <option value="general">通用</option><option value="thesis">论文</option><option value="development">开发</option>
-        </select>
-        <p className="helper-text">这是本设备偏好，不修改项目的模板配置，也不改变活动任务的执行契约。</p>
+      <div className="settings-row">
+        <div className="settings-row-text">
+          <label htmlFor="settings-default-workbench">默认视图</label>
+          <p className="helper-text">这是本设备偏好，不修改项目的模板配置，也不改变活动任务的执行契约。</p>
+        </div>
+        <div className="settings-row-control">
+          <select id="settings-default-workbench" data-testid="settings-default-workbench" value={defaultWorkbench}
+            onChange={(event) => { setDefaultWorkbench(event.target.value as RelayViewKind); setSaved(false); setError(null); }}>
+            <option value="general">通用</option><option value="thesis">论文</option><option value="development">开发</option>
+          </select>
+        </div>
       </div>
       <div className="settings-save-actions">
         <button type="submit" className="primary-button" data-testid="settings-default-workbench-save">
@@ -775,8 +800,8 @@ function ExecutionPermissionsCard({ client, projection, loading, readError }: {
   return <section className="settings-card" data-testid="execution-permissions">
     <h2>当前执行权限</h2>
     <p className="helper-text">以下状态来自服务端投影；本页不改 Project、Directory、Run 或审批策略。</p>
-    <dl className="settings-definition-list">
-      <div>
+    <dl className="settings-fact-grid">
+      <div className="settings-fact">
         <dt>默认目录写入档位</dt>
         <dd data-testid="execution-current-write-tier">
           {client === null
@@ -793,7 +818,7 @@ function ExecutionPermissionsCard({ client, projection, loading, readError }: {
                     : <><span className="status-chip status-chip--neutral">暂无目录</span>{" "}选择默认目录后才能读取它的写入档位。</>}
         </dd>
       </div>
-      <div>
+      <div className="settings-fact">
         <dt>新目录默认档位</dt>
         <dd data-testid="execution-default-write-tier">
           {defaultTier === null
@@ -802,7 +827,7 @@ function ExecutionPermissionsCard({ client, projection, loading, readError }: {
               {writeTierLabels[defaultTier]}</span>{" "}只作用于以后新打开的目录，不改已有目录。</>}
         </dd>
       </div>
-      <div>
+      <div className="settings-fact">
         <dt>连接、插件与策略</dt>
         <dd>按项目查看真实连接、受管目录与逐动作策略。<Link className="inline-link" to="/connections">
           打开连接与权限</Link></dd>
@@ -813,7 +838,6 @@ function ExecutionPermissionsCard({ client, projection, loading, readError }: {
       界面语言与通知偏好暂不可修改：语言偏好的读写接口尚未提供；通知规则已确认——
       仅提醒必须由用户介入的事项，同一事项只提醒一次。
     </p>
-    <p className="helper-text">推进与审批由服务端负责；本页不保存执行策略开关，也不改变任何 Run 的执行权。</p>
   </section>;
 }
 
@@ -880,67 +904,92 @@ export default function SettingsView() {
     });
   };
 
-  const groups: readonly (readonly [SettingsGroup, string])[] = [
-    ["basic", "通用设置"], ["model", "AI 与模型"], ["execution", "权限与执行"], ["workbench", "工作台"]];
+  const groups: readonly SettingsGroupMeta[] = [
+    { value: "basic", label: "通用设置", icon: Settings2,
+      description: "显示偏好、时区与动效只保存在本机；默认工作目录决定新会话的默认落点。" },
+    { value: "model", label: "AI 与模型", icon: Bot,
+      description: "连接、默认型号与上下文预算按工作空间生效；连接验证只证明一次固定短文本调用可用。" },
+    { value: "execution", label: "权限与执行", icon: ShieldCheck,
+      description: "执行权限按工作目录授予；这里只读展示当前档位、新目录默认档位和修改入口。" },
+    { value: "workbench", label: "工作台", icon: LayoutGrid,
+      description: "默认工作台进入哪一页，以及本机可见的只读 Pack 清单。" },
+  ];
 
-  return <section className="settings-page" data-testid="settings-page">    <PageHeader testId="settings-page-head" title="设置"
-      lede="显示偏好只保存在本机；模型、执行权限与工作目录各自独立保存，改哪一项只影响那一块。" />
-    <div className="settings-layout">
-      <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
-        {groups.map(([value, label]) => <button key={value} type="button" data-testid={`settings-group-${value}`}
-          role="tab" id={`settings-tab-${value}`} aria-controls={`settings-panel-${value}`}
-          aria-selected={group === value} tabIndex={group === value ? 0 : -1}
-          onClick={() => selectGroup(value)}>{label}</button>)}
-      </nav>
-      <div className="settings-content">
-        <div role="tabpanel" id="settings-panel-basic" aria-labelledby="settings-tab-basic" hidden={group !== "basic"}>
-          <GeneralPreferencesCard />
-          <DefaultWorkingDirectoryRow client={client} projection={directory.projection}
-            loading={directory.loading} readError={directory.readError} read={directory.read} />
+  return <section className="settings-page" data-testid="settings-page">
+    <div className="settings-shell">
+      <div className="settings-aside">
+        <div className="settings-aside-inner">
+          <PageHeader testId="settings-page-head" title="设置"
+            lede="显示偏好只保存在本机；模型、执行权限与工作目录各自独立保存，改哪一项只影响那一块。" />
+          <nav className="settings-navigation" role="tablist" aria-label="设置分组" onKeyDown={handleTabListKeyDown}>
+            {groups.map(({ value, label, icon: Icon }) => <button key={value} type="button"
+              data-testid={`settings-group-${value}`}
+              role="tab" id={`settings-tab-${value}`} aria-controls={`settings-panel-${value}`}
+              aria-selected={group === value} tabIndex={group === value ? 0 : -1}
+              onClick={() => selectGroup(value)}>
+              <Icon aria-hidden="true" /><span>{label}</span></button>)}
+          </nav>
         </div>
+      </div>
+      <div className="settings-main">
+        <div className="settings-content">
+          <div role="tabpanel" id="settings-panel-basic" aria-labelledby="settings-tab-basic" hidden={group !== "basic"}>
+            <SettingsSectionHead title="通用设置" description={groups[0]!.description} />
+            <GeneralPreferencesCard />
+            <DefaultWorkingDirectoryRow client={client} projection={directory.projection}
+              loading={directory.loading} readError={directory.readError} read={directory.read} />
+          </div>
 
-        <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>
-          {visited.model && (client === null ? <FixtureNote>
-            当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，
-            或通过顶栏「数据来源」连接本机 API。
-          </FixtureNote> : <>            <p className="settings-scope-note" data-testid="settings-ai-scope">
-              以下设置按工作空间生效：聊天默认只影响没有显式会话选择的新消息，Run 默认只决定新任务冻结哪条连接；
-              已排队、生成中或已冻结的执行保持原连接。
-            </p>
-            {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
-            {error && <div className="action-error" role="alert">
-              <p>读取失败：{error}</p>
-              <button className="secondary-button" type="button" data-testid="model-port-retry"
-                onClick={refresh}>
-                <RotateCcw aria-hidden="true" />重新读取</button>
-            </div>}
-            {verifyError && <div className="action-error" role="alert" data-testid="verify-error">
-              <p>验证未完成：{verifyError}</p></div>}
-            <CurrentModelUsageCard client={client} status={status}
-              refreshToken={defaultsRevision} />
-            <ServiceStateCard loading={loading} error={error} status={status}
-              verification={verification} verifying={verifying} onVerify={onVerify} />
-            <ModelConnectionsCard client={client}
-              onDefaultsChanged={() => { setDefaultsRevision((current) => current + 1); }} />
-            <ContextBudgetCard client={client} />
-            <MemorySettingsCard client={client} />
-            <ModelAdvancedDiagnostics client={client} status={status} verification={verification}
-              verifying={verifying} onSaved={refresh} />
-          </>)}
-        </div>
+          <div role="tabpanel" id="settings-panel-model" aria-labelledby="settings-tab-model" hidden={group !== "model"}>
+            {visited.model && <>
+              <SettingsSectionHead title="AI 与模型" description={groups[1]!.description} />
+              {client === null ? <FixtureNote>
+                当前是示例数据预览，没有真实服务实例状态。<Link to="/projects">打开项目</Link>，
+                或通过顶栏「数据来源」连接本机 API。
+              </FixtureNote> : <>            <p className="settings-scope-note" data-testid="settings-ai-scope">
+                以下设置按工作空间生效：聊天默认只影响没有显式会话选择的新消息，Run 默认只决定新任务冻结哪条连接；
+                已排队、生成中或已冻结的执行保持原连接。
+              </p>
+              {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
+              {error && <div className="action-error" role="alert">
+                <p>读取失败：{error}</p>
+                <button className="secondary-button" type="button" data-testid="model-port-retry"
+                  onClick={refresh}>
+                  <RotateCcw aria-hidden="true" />重新读取</button>
+              </div>}
+              {verifyError && <div className="action-error" role="alert" data-testid="verify-error">
+                <p>验证未完成：{verifyError}</p></div>}
+              <CurrentModelUsageCard client={client} status={status}
+                refreshToken={defaultsRevision} />
+              <ServiceStateCard loading={loading} error={error} status={status}
+                verification={verification} verifying={verifying} onVerify={onVerify} />
+              <ModelConnectionsCard client={client}
+                onDefaultsChanged={() => { setDefaultsRevision((current) => current + 1); }} />
+              <ContextBudgetCard client={client} />
+              <MemorySettingsCard client={client} />
+              <ModelAdvancedDiagnostics client={client} status={status} verification={verification}
+                verifying={verifying} onSaved={refresh} />
+              </>}
+            </>}
+          </div>
 
-        <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution"
-          hidden={group !== "execution"}>
-          {visited.execution && <ExecutionPermissionsCard client={client} projection={directory.projection}
-            loading={directory.loading} readError={directory.readError} />}
-        </div>
+          <div role="tabpanel" id="settings-panel-execution" aria-labelledby="settings-tab-execution"
+            hidden={group !== "execution"}>
+            {visited.execution && <>
+              <SettingsSectionHead title="权限与执行" description={groups[2]!.description} />
+              <ExecutionPermissionsCard client={client} projection={directory.projection}
+                loading={directory.loading} readError={directory.readError} />
+            </>}
+          </div>
 
-        <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench"
-          hidden={group !== "workbench"}>
-          {visited.workbench && <>
-            <WorkbenchPreferencesCard />
-            <div id="settings-packs"><PackCatalogPanel /></div>
-          </>}
+          <div role="tabpanel" id="settings-panel-workbench" aria-labelledby="settings-tab-workbench"
+            hidden={group !== "workbench"}>
+            {visited.workbench && <>
+              <SettingsSectionHead title="工作台" description={groups[3]!.description} />
+              <WorkbenchPreferencesCard />
+              <div id="settings-packs"><PackCatalogPanel /></div>
+            </>}
+          </div>
         </div>
       </div>
     </div>

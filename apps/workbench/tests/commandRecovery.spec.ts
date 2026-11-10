@@ -358,3 +358,29 @@ describe("命令回执自动恢复协调者", () => {
     expect(next.calls).toEqual([]);
   });
 });
+
+
+it("先登记记录再同轮挂载无关及正确 Owner，不被无人认领的查询占住在途标记", async () => {
+  upsertRecovery(scope, record());
+  const unrelated = fakeOwner({ claims: () => false, fetchReceipt: async (id) => receipt(id) });
+  registerRecoveryOwner(unrelated.owner);
+  const expected = fakeOwner({ fetchReceipt: async (id) => receipt(id) });
+  registerRecoveryOwner(expected.owner);
+  await tick();
+  expect(unrelated.calls).toEqual([]);
+  expect(expected.calls).toEqual([commandId]);
+  expect(stored()).toEqual([]);
+});
+
+
+it("无关 Owner 的反复注册不消耗已耗尽记录重新认领的预算", async () => {
+  configureCommandRecoveryForTest({ maxAttempts: 1 });
+  const failing = fakeOwner({ fetchReceipt: async () => { throw apiError(503, "DATABASE_UNAVAILABLE"); } });
+  const unregister = registerRecoveryOwner(failing.owner);upsertRecovery(scope, record());await tick();unregister();
+  for (let index = 0; index < 5; index++) {
+    const unrelated = fakeOwner({ claims: () => false, fetchReceipt: async (id) => receipt(id) });
+    registerRecoveryOwner(unrelated.owner)();
+  }
+  const correct = fakeOwner({ fetchReceipt: async (id) => receipt(id) });registerRecoveryOwner(correct.owner);await tick();
+  expect(correct.calls).toEqual([commandId]);expect(stored()).toEqual([]);
+});

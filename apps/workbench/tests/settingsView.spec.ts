@@ -77,6 +77,12 @@ describe("设置页模型端口状态", () => {
     expect(document.activeElement).toBe(model.element);
     await act(async () => { model.element!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); });
     expect(basic.attributes("aria-selected")).toBe("true");
+    // 宽屏设置导航是竖向的：Down/Up 与 Right/Left 都按上一项/下一项移动，焦点与选中一起走。
+    await act(async () => { basic.element!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); });
+    expect(model.attributes("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(model.element);
+    await act(async () => { model.element!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })); });
+    expect(basic.attributes("aria-selected")).toBe("true");
     expect(mounted.wrapper.get('[data-testid="settings-timezone"]').element).toBe(field.element);
     expect((field.element as HTMLSelectElement).value).toBe("UTC");
     expect(fetchMock).not.toHaveBeenCalled();

@@ -9,6 +9,7 @@
 | 当前验收简表 | [打开](overall-acceptance-2026-09-28.md#当前功能验收表) | 唯一当前功能结论入口 |
 | 验收详细记录路由 | [打开](overall-acceptance-details-20261025.md) | 按条目号进入正文，避免通读 |
 | 测试与发布规格 | [打开](verification-plan.md) | 场景、故障注入与分层出口 |
+| Spark 真实文件链冒烟 | [执行脚本](../../scripts/verify-agent-file-chain.mjs) | Node 24 下执行；需 `SPARK_API_KEY`、本地 Bearer、已有 PG/Node/helper 产物。新建隔离库与临时目录，真实读取→写入→读回，只校验测试文件，不连接现有业务数据库；停止自有进程，保留证据与停机数据 |
 | 原始证据保留 | [打开](../documentation-maintenance.md#6-验收结果与原始输出保留) | 过程输出、历史和发布身份边界 |
 
 查到相关章节后读取必要的公共规则与上下游约束；历史日期、Accepted 与测试通过均不能自动扩展到当前源码。

@@ -79,6 +79,13 @@ async function installRoutes(page: Page, directory: { current: DirectoryState },
       configured: true, model: "gpt-test", base_url: "https://api.example.com/v1",
       max_call_tokens: 1_048_576, image_input: "SUPPORTED", image_input_source: "CATALOG" });
     if (path === `${prefix}/model-port/verification`) return fulfillJson(route, verification());
+    // 「当前使用的模型」读三类作用域；缺这三个桩会把卡片渲染成「响应格式无效」，
+    // 截图就不再代表正常的未配置态。
+    if (path === `${prefix}/model-connections`) return fulfillJson(route, { items: [] });
+    if (path === `${prefix}/model-connections/default`
+      || path === `${prefix}/model-connections/chat-default`) {
+      return fulfillJson(route, { connection_id: null, revision: null });
+    }
     if (path === `${prefix}/memory-settings`) return fulfillJson(route, { workspace_id: workspaceId,
       revision: "2", recall_enabled: true, automatic_compaction: true, auto_capture: true });
     if (path === `${prefix}/packs`) return fulfillJson(route, { items: [
@@ -105,8 +112,13 @@ async function connect(page: Page): Promise<void> {
 }
 
 async function screenshot(page: Page, name: string): Promise<void> {
-  // 页壳自己滚动；展开诊断后滚动位置会改变，截图前先回到页头，保证每张图从同一阅读起点开始。
-  await page.getByTestId("settings-page-head").scrollIntoViewIfNeeded();
+  // 主滚动容器是 .app-main；左栏设置导航吸顶后，页头始终可见，
+  // scrollIntoViewIfNeeded 不再把页面带回顶部——直接复位滚动位置，
+  // 保证每张图从同一阅读起点开始。
+  await page.evaluate(() => {
+    const scroller = document.querySelector(".app-main");
+    if (scroller instanceof HTMLElement) scroller.scrollTop = 0;
+  });
   await page.screenshot({ path: `../../tmp/SETTINGS-UX-01/screenshots/${name}.png`, fullPage: true });
 }
 

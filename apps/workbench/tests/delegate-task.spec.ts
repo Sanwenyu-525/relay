@@ -1,9 +1,10 @@
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TaskDelegatePanel, { type DelegateTarget } from "../src/components/TaskDelegatePanel";
 import { RelayApiClient } from "../src/api/relayClient";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { flush, mountReact, mountWorkbench } from "./mountApp";
+import { resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -15,9 +16,11 @@ const taskUrl = `${prefix}/tasks/${taskId}`;
 const runUrl = `${prefix}/runs/${runId}`;
 let unmount: (() => void) | null = null;
 
+beforeEach(() => { sessionStorage.clear(); resetCommandRecoveryForTest(); });
+
 afterEach(() => {
   unmount?.(); unmount = null;
-  resetRelayConnectionForTest();
+  resetRelayConnectionForTest(); resetCommandRecoveryForTest(); sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -63,7 +66,7 @@ function downstream(url: string, delegated: boolean): Response | null {
 }
 
 describe("M03 首片 Task Delegate", () => {
-  it("真实 READY/HUMAN 任务提交原版本命令，202 后进入真实 Run", async () => {
+  it("真实 READY/HUMAN 任务在概览直接委托，202 后进入真实 Run", async () => {
     activate();
     let delegated = false;
     let posted: Record<string, unknown> | null = null;
@@ -77,7 +80,9 @@ describe("M03 首片 Task Delegate", () => {
       return downstream(url, delegated) ?? Promise.reject(new Error(`unexpected request: ${url}`));
     }));
     const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="task-detail-tab-overview"]').attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="delegate-optional-settings"]').attributes("open")).toBeUndefined();
+    expect(mounted.wrapper.get('[data-testid="task-delegate"]').element!.closest("details")).toBeNull();
     expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeUndefined();
     await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click");
     await flush(50);
@@ -188,6 +193,13 @@ describe("M03 首片 Task Delegate", () => {
     await flush();
     expect(mounted.wrapper.get('[data-testid="delegate-command-id"]').text()).toContain(commandId);
     expect(mounted.wrapper.find('[data-testid="task-delegate"]').exists()).toBe(false);
+    await mounted.wrapper.get('[data-testid="task-detail-tab-overview"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="delegate-command-id"]').text()).toContain(commandId);
+    await mounted.wrapper.get('[data-testid="task-detail-tab-artifacts"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
+    expect(mounted.wrapper.get('[data-testid="delegate-command-id"]').text()).toContain(commandId);
+    expect(mounted.wrapper.find('[data-testid="task-delegate"]').exists()).toBe(false);
+
     await mounted.wrapper.get('[data-testid="delegate-check-receipt"]').trigger("click");
     await flush();
     expect(mounted.wrapper.text()).toContain("结果仍未确定");
@@ -283,6 +295,7 @@ function readResources(project = projectId) {
 }
 
 function readConfig(url: string): Response | null {
+  if (url === runUrl) return response(200, run());
   if (url === `${prefix}/projects/${projectId}/connections`) return response(200, readConnections());
   if (url === `${prefix}/projects/${projectId}/managed-resources`) return response(200, readResources());
   return null;
@@ -337,6 +350,7 @@ describe("M04 Delegate 可选真实读取", () => {
     const mounted = await mountDelegate();
     await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("WEB_FETCH"); await flush();
     expect(mounted.wrapper.get('[data-testid="task-read-connection"]').text()).toContain("localhost");
+    expect(mounted.wrapper.get('[data-testid="delegate-optional-settings"] summary').text()).toContain("读取网页");
     expect(mounted.wrapper.find('[data-testid="task-read-resource"]').exists()).toBe(false);
     await mounted.wrapper.get('[data-testid="task-read-url"]').setValue(" http://localhost:8765/source?q=relay ");
     await mounted.wrapper.get('[data-testid="task-delegate"]').trigger("click"); await flush();
@@ -350,6 +364,9 @@ describe("M04 Delegate 可选真实读取", () => {
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountDelegate();
     await mounted.wrapper.get('[data-testid="task-read-kind"]').setValue("FILE_READ"); await flush();
+    expect(mounted.wrapper.get('[data-testid="delegate-optional-settings"] summary').text()).toContain("读取文件");
+    expect(mounted.wrapper.findAll(".disabled-reason").some((node) => !node.element!.closest("details") && node.text().includes("文件"))).toBe(true);
+
     for (const value of ["", "../secret.txt", "notes/../../secret.txt", "notes\\..\\secret.txt", "C:\\secret.txt", "C:secret.txt", "/secret.txt", "\\\\host\\share\\secret.txt", ".", "notes/"]) {
       await mounted.wrapper.get('[data-testid="task-read-relative-target"]').setValue(value);
       expect(mounted.wrapper.get('[data-testid="task-delegate"]').attributes("disabled")).toBeDefined();
@@ -553,4 +570,23 @@ describe("M04 Delegate 可选真实读取", () => {
     expect(original?.file_read_action).toEqual({ connection_id: fileConnectionId, resource_id: resourceId, relative_target: "source.md" });
     expect((mounted.wrapper.get('[data-testid="task-read-relative-target"]').element as HTMLInputElement).value).toBe("source.md");
   });
+});
+
+
+it("任务概览与执行页签共用委托草稿，切换不创建执行或重置来源查询", async () => {
+  activate();
+  const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
+    expect(init?.method).not.toBe("POST");
+    return downstream(String(input), false) ?? response(200, { items: [] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const mounted = await mountWorkbench(`/tasks/${taskId}`); unmount = mounted.unmount;
+  await mounted.wrapper.get("#assist-source-query").setValue("已填资料查询");
+  const panel = mounted.wrapper.get('[data-testid="task-delegate-panel"]').element;
+  await mounted.wrapper.get('[data-testid="task-detail-tab-runs"]').trigger("click");
+  expect(mounted.wrapper.get('[data-testid="task-delegate-panel"]').element).toBe(panel);
+  expect((mounted.wrapper.get("#assist-source-query").element as HTMLInputElement).value).toBe("已填资料查询");
+  await mounted.wrapper.get('[data-testid="task-detail-tab-overview"]').trigger("click");
+  expect(mounted.wrapper.get('[data-testid="task-delegate-panel"]').element).toBe(panel);
+  expect(mounted.wrapper.element!.querySelectorAll('[data-testid="task-delegate-panel"]').length).toBe(1);
 });

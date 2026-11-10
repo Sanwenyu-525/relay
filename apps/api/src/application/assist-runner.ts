@@ -1398,7 +1398,8 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     if (sourceMessageId !== null && session.project_id !== null) {
       const envelope = mainLoopEnvelope(finalContent);
       const maintenance = readMainLoopStateCandidate(
-        envelope === undefined ? null : mainLoopMaintenanceField(envelope));
+        envelope === undefined ? null : mainLoopMaintenanceField(envelope),
+        decided.kind === 'PREPARE' ? decided.candidate.title : undefined);
       if (maintenance.kind === 'OUTCOME') {
         await recordStateMaintenanceCandidate(db, { workspaceId: session.workspace_id,
           sessionId: session.id, sourceMessageId,

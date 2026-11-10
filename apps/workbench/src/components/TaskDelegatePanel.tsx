@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import AssistSourcePicker from "./AssistSourcePicker";
-import { createCommandId, delegateSubmissionFrom, RelayApiError, RelayTransportError,
+import { createCommandId, delegateSubmissionFrom, RelayTransportError,
   type RelayApiClient, type RelayAssistSourceRef, type RelayMockGatewayConnection,
   type RelayMockManagedResource, type RelayGatewayConnection, type RelayManagedResource } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
+import { checkRecoveryNow, recoveryScope, recoveryStorageKey, registerRecoveryOwner, removeRecovery,
+  subscribeRecoveries, upsertRecovery, type RecoveryRecord } from "../lib/commandRecovery";
+import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import type { DecimalRevision, ExecutorKind, TaskStatus } from "../types";
 
 export interface DelegateTarget {
@@ -56,14 +59,16 @@ function readTargetError(kind: ReadKind, target: string): string | null {
  * 任务委托是唯一写入口：任务详情页与协作工作区共用同一个组件和同一条命令路径，
  * 避免两处各自维护 Delegate 准入、回执核对或 Mock 动作配置。
  */
-export default function TaskDelegatePanel({ client, task, projectWriteBlockedReason, onDelegated, compact }: {
+export default function TaskDelegatePanel({ client, task, projectWriteBlockedReason, onDelegated, compact, recoveryOnly = false }: {
   client: RelayApiClient;
   task: DelegateTarget;
   projectWriteBlockedReason: string | null;
   onDelegated: (runId: string) => void;
   compact?: boolean;
+  recoveryOnly?: boolean;
 }) {
   const [delegating, setDelegating] = useState(false);
+  const [recoveryChecking, setRecoveryChecking] = useState(false);
   const [delegateError, setDelegateError] = useState<string | null>(null);
   const [pendingDelegate, setPendingDelegate] = useState<{ taskId: string; commandId: string } | null>(null);
   const [mockActionEnabled, setMockActionEnabled] = useState(false);
@@ -89,17 +94,67 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
   const [delegateSources, setDelegateSources] = useState<readonly RelayAssistSourceRef[]>([]);
   const [delegateExpanded, setDelegateExpanded] = useState(false);
   const actionVersion = useRef(0);
+  const scope = recoveryScope(client);
+  const posting = useRef(false);
+  const pendingRef = useRef<{ taskId: string; commandId: string } | null>(null);
+  const onDelegatedRef = useRef(onDelegated); onDelegatedRef.current = onDelegated;
+  const matches = (record: RecoveryRecord) => record.commandType === "DelegateTask" &&
+    record.targetKind === "TASK" && record.targetId === task.id && record.sessionId === null;
+
+  // DELEGATE-RECEIPT-RECOVERY-20261106：统一恢复 Owner 只读原回执，不重放委托。
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = subscribeRecoveries(scope, (entries) => {
+      const entry = entries.find((item) => matches(item.record));
+      const pending = entry ? { taskId: task.id, commandId: entry.record.commandId } : null;
+      pendingRef.current = pending; setPendingDelegate(pending);
+      setRecoveryChecking(entry?.phase === "CHECKING" || entry?.phase === "RETRYING");
+      if (entry?.error) setDelegateError(`原委托结果仍未确定。${entry.error}`);
+    });
+    const unregister = registerRecoveryOwner({ scope,
+      claims: (record) => !posting.current && matches(record),
+      verify(record, receipt) {
+        if (receipt.commandId !== record.commandId || receipt.commandType !== "DelegateTask") return "IDENTITY_MISMATCH";
+        try { return delegateSubmissionFrom(receipt.result).taskId === task.id ? null : "IDENTITY_MISMATCH"; }
+        catch { return "MALFORMED"; }
+      },
+      async apply(record, receipt) {
+        const accepted = delegateSubmissionFrom(receipt.result);
+        const run = await client.getRun(accepted.runId);
+        if (!active || run.id !== accepted.runId || run.taskId !== task.id) return "KEPT";
+        removeRecovery(scope, record.commandId);
+        setPendingDelegate(null); setDelegateError(null);
+        onDelegatedRef.current(accepted.runId);
+        return "APPLIED";
+      },
+      fetchReceipt: (commandId, signal) => client.getCommandReceipt(commandId, signal)
+    });
+    const guard: DraftGuard = {
+      hasUnsavedChanges: () => pendingRef.current !== null, discard: () => undefined,
+      pendingCommandId: () => pendingRef.current?.commandId ?? null,
+      pendingCommandState: () => posting.current ? "IN_FLIGHT" : pendingRef.current ? "UNRESOLVED" : null,
+      pendingRecoversAfterLeave: () => {
+        try {
+          const stored: unknown = JSON.parse(sessionStorage.getItem(recoveryStorageKey(scope)) ?? "[]");
+          return Array.isArray(stored) && stored.some((record) => record.commandId === pendingRef.current?.commandId);
+        } catch { return false; }
+      }
+    };
+    setDraftGuard(guard);
+    return () => { active = false; unsubscribe(); unregister(); clearDraftGuard(guard); };
+  }, [client, scope, task.id]);
   const targetKey = `${task.id}:${task.revision}:${task.executor}:${task.executorRunId}:${task.projectId}`;
 
   useEffect(() => {
     actionVersion.current++;
-    setPendingDelegate(null); setDelegateError(null); setDelegating(false);
+    setDelegateError(null); setDelegating(false); posting.current = false;
     setMockActionEnabled(false); setMockConnectionId(""); setMockResourceId("");
     setMockTarget(""); setMockContent(""); setDelegateSources([]);
     setMockConnections([]); setMockResources([]); setMockConfigError(null); setMockConfigLoading(false);
     setReadKind("NONE"); clearReadConfig();
     setDelegateExpanded(false);
-  }, [targetKey]);
+    return () => { actionVersion.current++; };
+  }, [targetKey, scope]);
 
   useEffect(() => {
     if (!mockActionEnabled || !task.projectId) return;
@@ -153,7 +208,16 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
   async function delegate() {
     if (delegateBlockedReason || mockActionBlockedReason || readActionBlockedReason || pendingDelegate || delegating) return;
     const commandId = createCommandId(); const version = actionVersion.current;
-    setPendingDelegate({ taskId: task.id, commandId }); setDelegateError(null); setDelegating(true);
+    posting.current = true;
+    const saved = upsertRecovery(scope, { commandId, commandType: "DelegateTask", sessionId: null,
+      targetKind: "TASK", targetId: task.id });
+    if (!saved) {
+      removeRecovery(scope, commandId); posting.current = false;
+      setDelegateError("无法安全保存原命令的恢复身份，未提交委托。请检查浏览器存储后重试。");
+      return;
+    }
+    setDelegateError(null); setDelegating(true);
+    let acceptedByServer = false;
     try {
       const accepted = await client.delegateTask({ taskId: task.id, commandId, expectedTaskRevision: task.revision,
         contextSources: delegateSources.map((source) => ({ ...source })),
@@ -162,13 +226,18 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
         ...(readKind === "FILE_READ" ? { fileReadAction: { connectionId: readConnectionId,
           resourceId: readResourceId, relativeTarget: readRelativeTarget.trim() } } : {}),
         ...(readKind === "WEB_FETCH" ? { webFetchAction: { connectionId: readConnectionId, url: readUrl.trim() } } : {}) });
+      acceptedByServer = true;
+      const run = await client.getRun(accepted.runId);
+      if (accepted.taskId !== task.id || run.id !== accepted.runId || run.taskId !== task.id)
+        throw new RelayTransportError("委托结果与原 Task/Run 不匹配，请查询原回执。");
       if (version !== actionVersion.current) return;
-      setPendingDelegate(null); onDelegated(accepted.runId);
+      removeRecovery(scope, commandId);
+      setPendingDelegate(null); onDelegatedRef.current(accepted.runId);
     } catch (caught) {
       if (version !== actionVersion.current) return;
-      if (caught instanceof RelayTransportError) setDelegateError("提交结果尚未确定。只能查询原 command_id 回执，不能生成新命令重试。");
-      else { setPendingDelegate(null); setDelegateError(describeLiveError(caught).message); }
-    } finally { if (version === actionVersion.current) setDelegating(false); }
+      if (acceptedByServer || needsReceiptCheck(caught)) setDelegateError("提交结果尚未确定。只能查询原 command_id 回执，不能生成新命令重试。");
+      else { removeRecovery(scope, commandId); setPendingDelegate(null); setDelegateError(describeLiveError(caught).message); }
+    } finally { if (version === actionVersion.current) { posting.current = false; setDelegating(false); } }
   }
 
   async function checkDelegateReceipt() {
@@ -176,27 +245,21 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
     if (!pending || delegating) return;
     const version = actionVersion.current; setDelegating(true);
     try {
-      const receipt = await client.getCommandReceipt(pending.commandId);
-      if (version !== actionVersion.current) return;
-      const accepted = delegateSubmissionFrom(receipt.result);
-      if (receipt.commandId !== pending.commandId || receipt.commandType !== "DelegateTask" ||
-          accepted.taskId !== pending.taskId) throw new Error("原命令回执与当前任务不匹配。");
-      setPendingDelegate(null); setDelegateError(null); onDelegated(accepted.runId);
-    } catch (caught) {
-      if (version !== actionVersion.current) return;
-      setDelegateError(caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND"
-        ? "尚未找到原命令回执，结果仍未确定；请稍后继续查询同一个 command_id。"
-        : caught instanceof RelayApiError ? describeLiveError(caught).message
-        : "原命令回执无法匹配 Delegate 与当前任务，结果仍未确定；请保留原 command_id 核对。");
+      const outcome = await checkRecoveryNow(scope, pending.commandId);
+      if (version === actionVersion.current && outcome.kind === "FAILED")
+        setDelegateError(outcome.failure === "IDENTITY_MISMATCH" || outcome.failure === "MALFORMED"
+          ? "原命令回执无法匹配 Delegate 与当前任务，结果仍未确定；请保留原 command_id 核对。"
+          : `原委托结果仍未确定。${outcome.message}`);
     } finally { if (version === actionVersion.current) setDelegating(false); }
   }
+
+  if (recoveryOnly && pendingDelegate === null) return null;
 
   const showMockOptions = task.executorRunId === null;
   const needsAttention = delegating || pendingDelegate !== null || delegateError !== null;
   const panelOpen = delegateExpanded || needsAttention;
-  const content = <>
-    <p className="helper-text">{compact ? "提交委托后请以运行状态核对进展；讨论消息不会自动启动执行。"
-      : "委托命令返回 202 只表示已创建 Run 并授予执行权；实际进度以 Run 查询为准。聊天中的“开始”不构成委托授权。"}</p>
+  // TASK-DELEGATE-OPTIONS-20261106：日常委托直接可用，可选配置按需展开且仍沿原 Owner。
+  const options = <>
     {task.projectId && (compact
       ? <details className="collaboration-disclosure"><summary>本次委托冻结的资料来源 · 已选 {delegateSources.length}</summary>
         <AssistSourcePicker projectId={task.projectId} selectedRefs={delegateSources}
@@ -209,16 +272,25 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
         {renderMockActionOptions()}
       </details>
       : renderMockActionOptions())}
+  </>;
+  const content = <>
+    <p className="helper-text">{pendingDelegate ? posting.current ? "正在提交委托，原命令身份已保存。" : "原委托结果尚待核对；仅查询原 command_id，不重新提交委托。" : compact ? "提交委托后请以运行状态核对进展；讨论消息不会自动启动执行。"
+      : "按当前任务目标和验收条件执行；提交后进入执行记录查看进度。"}</p>
+    <div hidden={recoveryOnly || pendingDelegate !== null}>{compact ? options : <details className="collaboration-disclosure" data-testid="delegate-optional-settings">
+      <summary>资料与附加动作（可选）{delegateSources.length > 0 ? ` · 资料 ${delegateSources.length} 项` : ""}{readKind !== "NONE" ? ` · ${readKind === "FILE_READ" ? "读取文件" : "读取网页"}` : ""}{mockActionEnabled ? " · Mock 写入" : ""}</summary>
+      {options}
+    </details>}</div>
     {delegateError && <p className="action-error" role="alert">{delegateError}</p>}
     {pendingDelegate ? <>
       <p className="helper-text" data-testid="delegate-command-id">原 command_id：{pendingDelegate.commandId}</p>
-      <button className="secondary-button" type="button" data-testid="delegate-check-receipt" disabled={delegating}
-        onClick={() => void checkDelegateReceipt()}>核对原命令回执</button>
+      <button className="secondary-button" type="button" data-testid="delegate-check-receipt" disabled={delegating || recoveryChecking}
+        onClick={() => void checkDelegateReceipt()}>{delegating || recoveryChecking ? "正在核对原命令回执" : "核对原命令回执"}</button>
     </> : <>
       <button className="primary-button" type="button" data-testid="task-delegate"
         disabled={delegateBlockedReason !== null || mockActionBlockedReason !== null || readActionBlockedReason !== null || delegating}
         onClick={() => void delegate()}>{delegating ? "正在提交" : "委托 AI 执行"}</button>
       {delegateBlockedReason && <p className="disabled-reason">{delegateBlockedReason}</p>}
+      {!compact && (mockActionBlockedReason || readActionBlockedReason) && <p className="disabled-reason">{mockActionBlockedReason ?? readActionBlockedReason}</p>}
     </>}
   </>;
   return <section className={compact ? "collaboration-delegate" : "surface-panel"} data-testid="task-delegate-panel">
@@ -227,11 +299,11 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
         aria-expanded={panelOpen} aria-controls={`delegate-config-${task.id}`} disabled={needsAttention}
         onClick={() => setDelegateExpanded((value) => !value)}>
         {panelOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-        委托 AI 执行设置<span className="helper-text">{delegateBlockedReason ? "当前不可用" : "配置与开始"}</span>
+        {recoveryOnly ? "核对原委托" : "委托 AI 执行设置"}<span className="helper-text">{recoveryOnly ? recoveryChecking ? "正在核对" : "结果待核对" : delegateBlockedReason ? "当前不可用" : "配置与开始"}</span>
       </button>
       {!panelOpen && delegateBlockedReason && <p className="disabled-reason">{delegateBlockedReason}</p>}
       <div id={`delegate-config-${task.id}`} data-testid="delegate-config-body" hidden={!panelOpen}>{content}</div>
-    </> : <><h2>委托执行</h2>{content}</>}
+    </> : <><h2>{recoveryOnly ? "核对原委托" : "委托执行"}</h2>{content}</>}
   </section>;
 
   function clearReadConfig() {

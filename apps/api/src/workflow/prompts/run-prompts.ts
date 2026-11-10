@@ -21,7 +21,7 @@ import { withRelayAgentCore } from '../agent-system-prompt.js';
 /** DRAFT 输出规格的四条编号规则（原 `DRAFT_OUTPUT_SPEC` 的行数组；正文唯一来源）。 */
 const DRAFT_OUTPUT_SPEC_LINES: readonly string[] = [
   '输出是一篇 Markdown 候选交付，必须满足：',
-  '1. 第一行是 `# <任务标题>` 形式的一级标题；',
+  '1. 第一行是 `# <任务标题>` 形式的一级标题；直接输出完整 Markdown 正文，使用真实换行，不要输出字面的 \\n，不要用引号、JSON、代码围栏或整篇加粗包裹正文；修正时同样提交完整正文，不只回答修改说明；',
   '2. 必须包含 `## 摘要` 与 `## 结论` 两个二级小节，每节非空；',
   '3. 如引用了资料，在正文后附 `参考资料：[标题](URL)` 形式的引用行；没有可引用来源则不要编造引用。',
 ];

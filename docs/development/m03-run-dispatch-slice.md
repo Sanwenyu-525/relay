@@ -123,6 +123,72 @@ M01 固定版本实测显示根图忽略传入非空 `checkpoint_ns` 并实际�
 
 当前分片供独立复验的[输入 SHA-256 清单](../testing/evidence/m03/graph-inputs.sha256)与[原始日志 SHA-256 清单](../testing/evidence/m03/graph-logs.sha256)分开冻结。清单只绑定本片与前一已验收片的相关输入，不代表尚未运行的 Windows 新图包或完整 M03 已通过。
 
+### 同条消息的任务创建归属与聊天结果读回（2026-11-05）
+
+正常自然语言请求「登记任务并执行」曾由模型同时返回执行候选与同名 CREATE_TASK 维护候选，两条已有 Owner 各自创建任务。主流程现在先按原规则验证维护候选：执行候选已为 PREPARE、维护候选 READY 且无需范围决定时，移除与执行标题完全一致的 CREATE_TASK；其他维护变更仍沿原入口生效。有范围决定或候选不合法时保留原澄清，避免改变决定所引用的变更序号。无新增表、迁移或 API，Breaking Change：No。
+
+目录优先会话原先因没有显式 Task target 跳过执行归属读取，原聊天因此没有业务结果。前端现在按原消息读取归属，再由只读组件核对 Task、Run 与当前完成凭据，提供原成果和凭据入口；不以回复完成或 Run 结束冒充任务完成。回归覆盖双候选仅建一项任务、混合维护保留，以及正确和错配的完成凭据。具体运行结果只归统一验收表。
+
+后续正常重开场景还暴露了结果卡的周期归属问题：只读 Task 当前完成指针，会在重开后丢失历史入口，并在新周期完成后拿另一 Run 的凭据校验而报错。现从既有 Run COMPLETE 步骤结果读取原 `completion_id`，校验凭据仍绑定原 Task/Run；当前凭据与历史凭据分别呈现，历史凭据不再被要求 `is_current=true`。没有改动后端 Owner、重开命令、完成事务或不可变产物规则；具体重开链路和真实 Spark 结果只归统一验收表。
+
+### 任务执行历史查询（2026-11-06）
+
+Task 的当前执行者指针不能表示历史：任务重开或交还人工后，`executor.run_id` 会变化或清空。此前任务详情只能展示该指针，开发者需从其他记录找回旧 Run。现由原 Run Repository 提供 Workspace/Task 内的有界摘要分页，Application 先核对任务可见性及游标归属，API 只输出身份、状态、修订和时间；历史不新增写入 Owner，也不授予执行权。
+
+分页以原 Run ID 作边界，在 PG 内按 `(created_at, id)` 排序比较，避免 JS Date 将微秒截成毫秒后出现重复或漏项。前端只在「执行记录」页签读取，按需加载下一页，保持当前 Task 绑定与历史分离；失败、撤权和切换作用域分别处理。无数据库迁移、新依赖或架构取代；接口归 HTTP 契约 §6，交互归 workbench-design，实际成绩只归统一验收表 TASK-RUN-HISTORY。
+
+### 执行控制与成果选用的恢复缺陷收口（2026-11-06）
+
+协作页按「没有 Run」决定是否挂载委托面板，导致服务端已创建 Run 时原回执没有认领者。现在已有 Run 也保留原面板的只读恢复 Owner；通用会话 Owner 仍不认领委托，不把 Task 读回冒充原 Run 绑定确认。
+
+RunControlPanel 原先只将传输异常视作结果未知，5xx 会释放原身份；已收到 202 但后续重读失败时，旧快照也可能继续提供新命令。桌面侧栏和抽屉另有两个组件实例，单实例内存不能保护另一个入口。现在提交前同步保存并复核同一作用域的原身份，本机事件只促使其他实例重读同一线索；已确认回执附带可选最低修订，读到该修订后再清除。该元数据不是暂停或停止的业务状态，也不授予执行权。渲染期的迟到结果校验同步加入连接和 Workspace，保留同 Run revision 更新不丢未知身份的既定行为。
+
+手动刷新另有同源异步缺陷：只使用 finally 释放忙碌状态，没有捕获读取失败，且作用域切换不复位刷新状态。现在捕获失败并显示独立刷新反馈，切换作用域立即复位，迟到回包按原作用域丢弃。刷新本身不结算原控制命令、不清除其错误，避免一次读取失败覆盖回执核对入口；对应验证归统一验收表 RUN-REFRESH-FEEDBACK。
+
+产物「当前选用」原先在 5xx 释放 ID，传输异常后又可能把另一候选塞入同一个 ID；回执核对只看类型，缺少原命令、项目与动作绑定。现复用 commandRecovery 保存原身份与版本引用，未决时不重发；同基线 State 必须包含原版本，后续 State 则只作为当前事实读取，不混同本轮接受或完成。
+
+上述接线先红暴露了统一协调器的注册时序缺陷：无关 Owner 的初始化会发起无人认领的自动尝试，占住同轮正确 Owner 的在途槽；重复无关注册还会消耗恢复预算。现在没有认领者就不发起自动查询，只有认领该记录的 Owner 才能重开自己的有界预算。错误记录与原命令仍保留，手动核对不变。所有修改均为既有 Owner/客户端恢复修复，无新增 HTTP、迁移或架构依赖；实际成绩仅归统一验收表 CONTROL-RECOVERY-FOLLOWUP。
+
+### 未决委托的原命令恢复（2026-11-06）
+
+页签实例保留不能覆盖整页刷新：原委托只将 command_id 留在组件内存，返回页面又可能因服务端已转移 AI 执行权而隐藏面板。现在由 TaskDelegatePanel 认领统一 commandRecovery 中的 DelegateTask，提交前确认原身份已写入 sessionStorage；存储不可用或损坏则不提交，避免无法追踪的第二次委托。协调器登记函数返回保存是否成功，既有调用方可继续忽略返回值；损坏的恢复记录不被覆盖。只恢复回执身份，不恢复或重放写载荷。正常响应和恢复回执都读回原 Run 核对 Task 绑定，原记录只在确认后移除；5xx 不再被当作明确未执行而释放原身份。
+
+TaskDetailView 在 AI 已持权时仍挂载只负责核对的同一组件；没有未决身份时不显示额外面板。协作页通用会话 Owner 排除 DelegateTask，防止抢领后只按会话规则处理。DraftGuard 保留原命令保护；保存能力只保证同标签页，不等于窗口关闭后的持久恢复。原页面切换切片的边界由本片扩展，没有新增后端、表或命令。测试结论只归统一验收表 DELEGATE-RECEIPT-RECOVERY。
+
+### 任务概览委托与页签状态保留（2026-11-06）
+
+原 TaskDetailView 只在执行记录页签挂载委托面板；切到概览或产物时组件卸载，资料配置与内存中的未决 Delegate 回执身份一起丢失，返回后无法继续核对原命令。现在 READY/HUMAN 的无 Run 任务在概览直接使用同一面板，切页签只隐藏，不另建委托 Owner；所有原准入、版本与回执校验保持原入口。为避免概览被可选配置占满，默认折叠资料与附加动作，摘要保留已选范围，错误原因仍在外层可见。该修复限同任务页签生命周期，整页刷新、跨 Task 恢复没有在本片扩展。实际成绩只归统一验收表 TASK-OVERVIEW-DELEGATE。
+
+### 执行控制与人工接手的编辑入口（2026-11-05）
+
+正常链路采用 API＋Supervisor＋一次性 Worker：控制请求先持久化，子进程中止后由 Supervisor 观察 close 并保存停机依据，原恢复/控制 Owner 再核对执行槽及未决动作并生效。直接用持续 Worker 测试时，模型中止后的 LOST 不会自行提供子进程退出证明，不能据此手工清空领取或宣称暂停完成。本次早期测试拓扑的原请求在停止自有进程、核实 OS 进程缺席后沿公开恢复入口结清；后续功能证据使用正式监督拓扑，二者不混作同一出口。
+
+接手成功后 Task 已为 HUMAN/IN_PROGRESS，但 `ArtifactPanel` 只把含 HUMAN 版本的 Artifact 当作编辑目标，唯一的 AI 成果因此没有载入原稿的入口，保存也会退化为新建另一份 Artifact。现复用原版本读取和 SubmitHumanArtifactVersion：优先固定草稿基线，其次采用用户在既有版本阅读入口选择的 Artifact，再保留原人工产物默认；没有人工产物时允许从 AI 成果继续。读取确切 latest 版本后仍复核 Artifact revision，未保存草稿不会因阅读其他产物而改写目标。保存追加 HUMAN 新版本，不覆盖 AI 原版、不继承旧验证/接受，写权限仍由任务 allowed_actions 与后端执行权核对。
+
+Run 终止或暂停时，步骤行可能仍保留原始 RUNNING 历史记录。RunView 按 Run 生命周期显示「停留步骤」及「已暂停 / 已中断（历史步骤）」，撤去执行中样式，并保留原始步骤状态供诊断；不改写步骤或尝试账本。
+
+停止后的模型账本可能仍有 STARTED：Worker 未获得 Provider 完整结算时，结果与计费按原契约保持未知，保留预算预留，不补零、不伪造 CANCELLED。Run Trace 在已停止/暂停状态明确标注「调用结果未知」，同时保留原始状态与未知用量。此修改只完善前端消费与呈现，不增加数据库、API 或执行权 Owner；Breaking Change：No。测试结果只归统一验收表 CORE-EXECUTION-CONTROL。
+
+### 人工退回修正的格式与重试修复（2026-11-05）
+
+真实 Spark 首版经人工 REQUEST_CHANGES 后，修正稿曾用整篇加粗包裹 Markdown，并把换行写成字面的转义字符；候选校验因此返回 SCHEMA_INVALID。格式校验保持严格，DRAFT 各提示词分支补充「完整裸正文、真实换行、修正也提交完整正文」规则，并分别递增模板版本。该提示改善不等于 Provider 质量保证。
+
+进一步复现发现确定性计数缺陷：`schemaInvalidOutcome` 直接使用同一 Step 的累计 Attempt 编号。即使首版第一次就成功，修正轮第一次格式错误的编号也已是 2，会被当作本轮第二次失败而直接终止。现保留连续 Attempt 身份，以最近成功的 DRAFT 为轮次边界计算格式重试；本轮首次失败可重试，第二次失败仍停止，旧候选不改写，非法修正不发布为新版本。真实 PG 回归同时核对该计数、原轮两次失败上限与幂等重放。没有新增 API、迁移或新 Owner，Breaking Change：No；具体结果只归统一验收表。
+
+### 多条人工条件的恢复身份修复（2026-11-05）
+
+真实 Spark 聊天任务的三条必需人工条件全部接受后，Run 曾停在 `VERIFYING`，Worker 报 `Run graph Review resume is no longer valid`。根因是图检查点由最早一条未决条件建立，而 Review Owner 只在最后一条必需条件通过后投递 RESUME；该命令绑定最后一条决定，原图却要求它必须对应检查点上的同一条 Review。单条件测试覆盖不到这个正常多条件场景。
+
+`apps/api/src/worker/run-graph.ts` 保留原精确匹配入口，补充已完成条件组的核对：恢复命令、两条已 ACCEPT 的 Review 必须属于同一 Run、同一原验证会话、同一产物版本/内容摘要/验收修订；决定的目标摘要须一致，最后决定的派生验证会话须为 PASS 并仍绑定确切产物。满足后沿原检查点继续，由原完成用例再检查并提交，不重新生成产物。ACTION_APPROVAL 仍精确绑定原操作，不使用条件组分支。无新增 API、迁移、命令类型或图布局版本。
+
+回归位于 `run-graph.integration.test.ts` 的多人工条件用例，验证三条接受只产生一个 RESUME 并完成 Task/Run；实际自检和真实 Provider 复验结果统一归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)，不把本次修复计作整个 M03 的独立验收。
+
+### 修正轮次的工具意图身份修复（2026-11-05）
+
+同日真实 Spark Run 在产物修正后再次调用工具时，Worker 报 `GATEWAY_INTENT_CONFLICT`。工具请求按 DRAFT Attempt 重新从 round/ordinal 零开始，Gateway 旧意图键却只包含 round/ordinal，并按 Run＋Step 去重；新 Attempt 的新请求因此撞上上一轮已成功动作。`tool-loop-action.ts` 改用不可变工具请求行 ID 构成新意图键；如果该请求已经准备过 Operation、只是尚未绑定请求行，则核对归属后接回原 Operation，保留旧 v1 意图，不替换已有动作，也不绕过 UNKNOWN 核对。回归覆盖修正后轮次复用、同请求重放不增动作，以及旧请求身份保留；停机撤销的旧资源令牌仍被拒绝且不派发，不将身份恢复声称为授权恢复。无 API、数据库或授权范围变化。
+
+同轮还收紧 `conversation-prompts.ts` 的执行候选说明：保留用户指定的 HUMAN 验收；`CITATION_EXISTS` 只用于引用标记，不能代替正文含字面串的判断；纯受管 Markdown 且明确不改工作目录时，不自行派生本地 `.md` 写入。这是模型输入约束的补全，不是新的自然语言权限解析器；持久候选、冻结契约及动作权限仍由原 Owner 校验。
+
 ## 固定 Mock Gateway 的 ACTION_APPROVAL 图动作（已分片独立验收）
 
 本轮仍只有一个官方 `StateGraph` 和原 Task/Run/Gateway Owner；不新增 migration、通用工具路由或真实 Provider。可选 Delegate `mock_gateway_action` 在原 HTTP `command_id` 事务中冻结 WRITE_MARKER 的连接、资源、目标、内容及唯一 `operation_id`，旧客户端不传该字段时固定 Markdown 路径不变。图在 DRAFT 后、PERSIST_CANDIDATE 前进入 `gatewayAction`：ASK 先持久化 Gateway operation/Review，再使旧 START 在 ACTION interrupt 处结清；APPROVE 只保存原决定与唯一 RESUME，批准 200 回执不代表效果完成。Gateway Prepare/Claim/Admit 和 Fake 写入前同时检查原外层 command/epoch 与内层 worker/epoch，并重核目标/hash、Connection、Permission、政策和批准有效期。DENY 与可证明尚无 Invocation/效果的准入前撤权使原 operation DENIED、Run FAILED、Task READY；已 DISPATCHING/UNKNOWN 不作无效果拒绝，也不换 ID 盲重试。

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { unlink, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +13,7 @@ import { applySafeControl, readControlRequest, requestRunControl, resumeRun } fr
 import { advanceRunStep, SimulatedWorkerCrash } from '../../src/application/run-steps.js';
 import { noteStrandedWorker, recoverStoppedWorker, scanRecoveryCandidates } from '../../src/application/recover-run.js';
 import { recoverStrandedFencedClaim } from '../../src/worker/supervisor.js';
+import { createFakeConnection, createGatewayPolicy, registerManagedResource } from '../../src/application/gateway-configuration.js';
 import { readRunById } from '../../src/application/run-queries.js';
 import { lockTaskAndRun } from '../../src/application/lock-task-run.js';
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
@@ -95,6 +96,7 @@ function barrier(): { entered: Promise<void>; release: () => void; wait: () => P
 }
 
 const CHILD_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), 'recovery-worker-child.js');
+const WORKER_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'worker', 'main.js');
 
 function runWorkerChild(mode: 'crash-after-dispatch' | 'recover', f: Awaited<ReturnType<typeof fixture>>): Promise<{
   readonly exitCode: number | null; readonly stdout: string; readonly stderr: string;
@@ -694,4 +696,94 @@ test('P08 a real API process restart preserves PENDING and the new process reads
     await Promise.allSettled([worker]);
     await api.stop();
   }
+});
+
+
+test('P08 pausing at an action approval wait keeps the review open; resume returns to the wait point', async () => {
+  // 契约 02 §3：PAUSED 恢复时原阻塞 Review 仍未解决 → 返回原等待点，不丢原审批身份。
+  const workspaceId = randomUUID();
+  const projectId = randomUUID();
+  const taskId = randomUUID();
+  const dir = join(dataRoot, `p08-ask-${randomUUID()}`);
+  await mkdir(dir, { recursive: true });
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.workspaces.insertWorkspace({ id: workspaceId, name: `p08-ask-${workspaceId.slice(0, 8)}` });
+    await repositories.workspaces.insertAuthorityRow(workspaceId);
+    await repositories.projects.insertProject({ id: projectId, workspaceId, title: 'P08 ask pause', projectType: 'GENERAL' });
+    await repositories.projects.insertProjectState(projectId, 'PLANNING');
+    await repositories.tasks.insertTask({ id: taskId, workspaceId, projectId, title: 'P08 approval pause',
+      status: 'READY', mode: 'ME', acceptanceRevision: 1n, executorKind: 'HUMAN', ownershipEpoch: 0n,
+      currentCompletionId: null });
+    await repositories.tasks.insertAcceptanceVersion({ taskId, acceptanceRevision: 1n,
+      objective: '核对审批等待暂停', requiredOutputSpec: {}, source: 'CREATE' });
+    await repositories.tasks.insertCriterion({ taskId, acceptanceRevision: 1n, criterionId: 'structure',
+      statement: 'Markdown 结构核对', required: true, method: 'HUMAN', targetSpec: {} });
+  });
+  const connection = await createFakeConnection(app.db, { workspaceId, projectId, capabilities: ['FAKE_WRITE'] });
+  const resource = await registerManagedResource(app.db, { workspaceId, projectId, rootPath: dir });
+  await createGatewayPolicy(app.db, { workspaceId, projectId, capability: 'FAKE_WRITE',
+    actionType: 'WRITE_MARKER', targetPrefix: resource.canonicalRoot, decision: 'ASK', maxPayloadBytes: 1024 });
+  const delegated = await delegateTask(app.db, { workspaceId, taskId, commandId: randomUUID(),
+    expectedTaskRevision: '0',
+    mockGatewayAction: { connection_id: connection.connectionId, resource_id: resource.resourceId,
+      target: join(resource.canonicalRoot, 'p08-ask.md'), content: 'P08 approval pause' } });
+  const runId = delegated.result.run_id;
+  // 真实一次性 Worker 推进到动作审批等待。
+  // 套件内先前用例可能遗留可领取命令：一次性 Worker 每次只领一条，循环直到本 Run 被推进。
+  const runWorkerOnce = async (): Promise<string> => {
+    let output = '';
+    const child = spawn(process.execPath, [WORKER_ENTRY, '--once'], {
+      env: { ...process.env, RELAY_DB_URL: APP_DATABASE_URL,
+        RELAY_DATA_ROOT: dataRoot, RELAY_WORKER_ID: `worker-${randomUUID()}` },
+      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+    });
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { output += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { output += chunk; });
+    const exit = await new Promise<number | null>((done, fail) => {
+      child.once('error', fail);
+      child.once('close', (code) => done(code));
+    });
+    assert.equal(exit, 0, output.slice(-600));
+    return output;
+  };
+  const workerDeadline = Date.now() + 30_000;
+  for (;;) {
+    await runWorkerOnce();
+    if ((await runState(runId)).status !== 'CREATED') break;
+    assert.ok(Date.now() < workerDeadline, 'worker never claimed the approval-wait run');
+  }
+  const waiting = await runState(runId);
+  assert.equal(waiting.status, 'WAITING_APPROVAL');
+  const operation = await sql<{ status: string }>`select status from logical_operations
+    where run_id = ${runId} order by created_at limit 1`.execute(app.db);
+  assert.equal(operation.rows[0]?.status, 'WAITING_APPROVAL');
+
+  const control = await requestRunControl(app.db, { workspaceId, runId, commandId: randomUUID(),
+    expectedTaskRevision: (await taskState(taskId)).revision.toString(),
+    expectedRunRevision: waiting.revision.toString(), type: 'PAUSE' });
+  assert.equal((await applySafeControl(app.db, runId))?.status, 'APPLIED');
+  const review = await sql<{ status: string }>`select status from review_requests
+    where run_id = ${runId} order by created_at desc limit 1`.execute(app.db);
+  const operationAfter = await sql<{ status: string }>`select status from logical_operations
+    where run_id = ${runId} order by created_at limit 1`.execute(app.db);
+  // 暂停不撤回审批提案：Review 保持 OPEN，操作保持 WAITING_APPROVAL。
+  assert.equal(review.rows[0]?.status, 'OPEN');
+  assert.equal(operationAfter.rows[0]?.status, 'WAITING_APPROVAL');
+  const paused = await runState(runId);
+  assert.equal(paused.status, 'PAUSED');
+  const resumePhase = await sql<{ resume_phase: string }>`select resume_phase from runs
+    where id = ${runId}`.execute(app.db);
+  assert.equal(resumePhase.rows[0]?.resume_phase, 'WAITING_APPROVAL');
+  assert.equal((await taskState(taskId)).status, 'WAITING');
+
+  const resumed = await resumeRun(app.db, { workspaceId, runId, commandId: randomUUID(),
+    expectedTaskRevision: (await taskState(taskId)).revision.toString(),
+    expectedRunRevision: paused.revision.toString() });
+  assert.equal(resumed.result.status, 'WAITING_APPROVAL');
+  const resumeCommands = await sql<{ count: bigint }>`select count(*)::bigint as count from run_commands
+    where run_id = ${runId} and kind = 'RESUME'`.execute(app.db);
+  assert.equal(resumeCommands.rows[0]?.count, 0n);
+  const reviewAfterResume = await sql<{ status: string }>`select status from review_requests
+    where run_id = ${runId} order by created_at desc limit 1`.execute(app.db);
+  assert.equal(reviewAfterResume.rows[0]?.status, 'OPEN');
 });

@@ -83,7 +83,7 @@ async function fixture(install: boolean, apiPoolMax = 4): Promise<Fixture> {
   }
 }
 
-async function delegatedRun(f: Fixture, method: 'HUMAN' | 'SEMANTIC' = 'HUMAN'): Promise<string> {
+async function delegatedRun(f: Fixture, method: 'HUMAN' | 'SEMANTIC' = 'HUMAN', criteriaCount = 1): Promise<string> {
   const projectCommand = randomUUID();
   const project = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/projects'), {
     command_id: projectCommand, title: `graph-${projectCommand.slice(0, 8)}`,
@@ -93,7 +93,9 @@ async function delegatedRun(f: Fixture, method: 'HUMAN' | 'SEMANTIC' = 'HUMAN'):
   const task = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId, '/tasks'), {
     command_id: taskCommand, project_id: project.project_id,
     title: 'Graph checkpoint replay', objective: 'Verify one managed Mock candidate',
-    criteria: [{ criterion_id: method.toLowerCase(), statement: 'Review the candidate', method }],
+    criteria: Array.from({ length: criteriaCount }, (_, index) => ({
+      criterion_id: criteriaCount === 1 ? method.toLowerCase() : `${method.toLowerCase()}-${index + 1}`,
+      statement: criteriaCount === 1 ? 'Review the candidate' : `Review the candidate ${index + 1}`, method })),
   }), 201, taskCommand);
   const readyCommand = randomUUID();
   const ready = expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
@@ -284,6 +286,40 @@ async function decideAction(f: Fixture, operationId: string,
   assert.equal(replay.decision_id, decided.decision_id);
   return { decisionId: decided.decision_id as string, commandId };
 }
+
+test('multiple human criteria resume the graph when the last acceptance differs from its interrupted Review', async () => {
+  const f = await fixture(true);
+  try {
+    const runId = await delegatedRun(f, 'HUMAN', 3);
+    const started = await workerOnce(f);
+    assert.equal(started.code, 0, started.output);
+    const reviews = (await sql<{ id: string; revision: bigint; target_hash: string }>`
+      select id, revision, encode(target_hash, 'hex') as target_hash from review_requests
+      where run_id = ${runId} and kind = 'CRITERION' and status = 'OPEN'
+      order by created_at, id
+    `.execute(f.app.db)).rows;
+    assert.equal(reviews.length, 3);
+    for (const review of reviews) {
+      const commandId = randomUUID();
+      expectCommandAccepted(await f.api.post(workspacePath(f.workspaceId,
+        `/reviews/${review.id}/decisions`), { command_id: commandId,
+        expected_revision: String(review.revision), target_hash: review.target_hash,
+        decision: 'ACCEPT' }), 200, commandId);
+    }
+    const resumes = (await sql<{ count: bigint }>`select count(*) as count from run_commands
+      where run_id = ${runId} and kind = 'RESUME'`.execute(f.app.db)).rows[0]?.count;
+    assert.equal(resumes, 1n, 'only the last required acceptance wakes the Run');
+    const resumed = await workerOnce(f);
+    assert.equal(resumed.code, 0, resumed.output);
+    const facts = (await sql<{ run_status: string; task_status: string; completion_id: string | null }>`
+      select r.status as run_status, t.status as task_status, t.current_completion_id as completion_id
+      from runs r join tasks t on t.id = r.task_id where r.id = ${runId}
+    `.execute(f.app.db)).rows[0];
+    assert.equal(facts?.run_status, 'COMPLETED');
+    assert.equal(facts?.task_status, 'DONE');
+    assert.ok(facts?.completion_id);
+  } finally { await f.close(); }
+});
 
 test('API pool size one keeps SEMANTIC criteria on human review without an evaluator', {
   skip: hasChecker('semantic-model-v1', '1'),

@@ -47,7 +47,8 @@ try {
   # 2) Payload present.
   foreach ($relative in @('relay-desktop.exe', 'node.exe', 'api\dist\src\main.js',
       'api\dist\src\worker\supervisor-main.js', 'relay-file-io-helper.exe',
-      'relay-computer-runtime.exe', 'uninstall.exe')) {
+      'relay-computer-runtime.exe', 'relay-credential-helper.exe', 'uninstall.exe',
+      'licenses\NOTO-FONTS-LICENSE.txt')) {
     $file = Join-Path $InstallDir $relative
     Add-Check "payload:$relative" (Test-Path -LiteralPath $file -PathType Leaf) $file
   }

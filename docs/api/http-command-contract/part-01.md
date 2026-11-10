@@ -163,6 +163,8 @@ POST W/projects/{id}/state-commands 输入 command_id、expected_revision 和一
 
 Task 查询至少返回 id、project_id?、status、mode、revision、acceptance_revision、executor（kind、run_id?、ownership_epoch）、current_completion_id?、waiting_reason?、allowed_actions。mode 及显式切换见[运行设计](../../architecture/runtime-context.md)。Run 查询返回 id、status、revision、current_step、wait_reason、pending_control_request、blocking_review_ids、unresolved_operation_ids、result_refs。
 
+2026-11-06 任务执行历史只读接口（TASK-RUN-HISTORY）：`GET /api/v1/workspaces/{workspace_id}/tasks/{task_id}/runs?limit=20&cursor={run_id}`，返回 `{items, next_cursor}`；每项仅含 `id`、`task_id`、`status`、十进制字符串 `revision`、`retry_of_run_id`、`created_at`、`terminal_at`。默认每页 20，允许 1–100；按 `(created_at DESC, id DESC)` 键集分页，游标是上一页末项 Run ID，原始时间戳比较在 PG 内完成，保留微秒精度。`next_cursor=null` 表示该次查询无更早页，不是任务完成或无后续执行的保证。先核对 Workspace 与 Task 可见性，跨 Workspace Task 返回 404 `RESOURCE_NOT_FOUND`；未知或不属于该 Task 的游标、非法/越界 limit 返回 422 `VALIDATION_FAILED`，无凭据沿既有边界拒绝。响应 `Cache-Control: no-store`，不含冻结配置、路径、正文或凭据；读取不更改 Task/Run/执行权。Breaking Change：No，新增只读接口，现有单 Run 查询、委托与历史写入不变；无 migration。
+
 allowed_actions 是当前事实下的 UI 提示，不是授权凭证；点击后仍需完整校验。所有查询均以安全的只读模型输出，不暴露 Connection/SDK 私有消息或可写 ORM 对象。
 
 第一版使用轮询：执行中默认约 2 秒一次，空闲逐步退避，终态停止；用户重新聚焦页面时刷新。轮询频率是客户端建议，不是正确性前提。响应携带 revision/依赖版本，客户端不得让较旧响应覆盖新状态。

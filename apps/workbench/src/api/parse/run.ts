@@ -104,12 +104,24 @@ export function controlRequestFrom(value: unknown): RelayControlRequest {
 
 export function runFrom(value: unknown): RelayRun {
   const record = object(value, "run");
+  const refs = record.result_refs === undefined ? []
+    : array(record, "result_refs", "run").map((item) => object(item, "run.result_refs item"));
+  const completed = refs.find((item) => item.step_kind === "COMPLETE");
+  const completedResult = completed === undefined ? undefined : object(completed.result_ref, "run.COMPLETE.result_ref");
+  const savedArtifactVersionIds = [...new Set(refs.filter((item) => item.step_kind === "PERSIST").flatMap((item) => {
+    const result = object(item.result_ref, "run.PERSIST.result_ref");
+    return result.artifact_version_id === undefined || result.artifact_version_id === null ? []
+      : [string(result, "artifact_version_id", "run.PERSIST.result_ref")];
+  }))];
   const pending = record.pending_control_request === null
     ? null
     : object(record.pending_control_request, "run.pending_control_request");
   return {
     id: string(record, "id", "run"),
     taskId: string(record, "task_id", "run"),
+    completionId: completedResult?.completion_id === undefined ? null
+      : string(completedResult, "completion_id", "run.COMPLETE.result_ref"),
+    savedArtifactVersionIds,
     status: string(record, "status", "run"),
     revision: decimal(record, "revision", "run"),
     waitReason: nullableString(record, "wait_reason", "run"),

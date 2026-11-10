@@ -28,6 +28,8 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
     return () => { requestVersion.current++; };
   }, [client, runId, taskId, runRevision, reload]);
 
+  const executionStopped = trace !== null && ["PAUSED", "COMPLETED", "FAILED", "CANCELLED"].includes(trace.status);
+
   return <section className="surface-panel run-trace" data-testid="run-trace"><div className="run-trace-heading"><div><h2>Run Trace</h2>
     <p className="helper-text">从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。</p></div>
     <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新证据</button></div>
@@ -42,7 +44,9 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
           {trace.attempts.filter((attempt) => attempt.stepId === step.id).map((attempt) => <p key={attempt.id}>Attempt {attempt.id} · 第 {attempt.number} 次 · {attempt.status} · claim epoch {attempt.claimEpoch} · {resultRef(attempt.resultAvailable)}</p>)}</li>)}</ol>
           : <p className="helper-text">尚无 Step 记录。</p>}</details>
       <details className="run-trace-group"><summary>模型调用元数据 · {trace.modelCalls.length}</summary>
-        {trace.modelCalls.length ? <ul>{trace.modelCalls.map((call) => <li key={call.id}><strong>{call.provider} / {call.model} · {call.status}</strong>
+        {trace.modelCalls.length ? <ul>{trace.modelCalls.map((call) => <li key={call.id} data-testid={`run-model-call-${call.id}`}><strong>{call.provider} / {call.model} · {executionStopped && call.status === "STARTED" ? "调用结果未知" : call.status}</strong>
+          {/* RUN-STOPPED-CALL-20261105：停机不能伪造 Provider 结算，也不能将未知用量记成零。 */}
+          {executionStopped && call.status === "STARTED" && <p className="helper-text">本次执行已结束或暂停，调用未取得完整结算；原始状态 STARTED，Provider 结果与实际用量未知。</p>}
           <small>Call {call.id} · Attempt {call.stepAttemptId ?? "未关联"} · Manifest {call.manifestId ?? "未关联"}</small>
           {call.kind !== null && <small>用途 {call.kind}{call.criterionId !== null && <> · 验收条件 {call.criterionId}</>}{call.checkAttempt !== null && <> · 检查尝试 {call.checkAttempt}</>}</small>}
           {call.providerRequestId !== null && <small>Provider 请求 {call.providerRequestId}</small>}

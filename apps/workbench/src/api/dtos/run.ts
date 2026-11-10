@@ -43,6 +43,10 @@ export interface RelayControlRequest {
 export interface RelayRun {
   readonly id: string;
   readonly taskId: string;
+  /** 原 Run 的 COMPLETE 步骤结果；任务重开后仍指向本次执行的历史凭据。 */
+  readonly completionId?: string | null;
+  /** 原 Run 的 PERSIST 步骤结果引用，不代表这些版本已被验收。 */
+  readonly savedArtifactVersionIds?: readonly string[];
   readonly status: string;
   readonly revision: DecimalRevision;
   readonly waitReason: string | null;

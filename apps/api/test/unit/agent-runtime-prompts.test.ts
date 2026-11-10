@@ -52,6 +52,8 @@ test('DRAFT sends the shared core and bounded mode while contract and source tex
   assert.ok(request.messages[0]!.content.includes(RELAY_AGENT_CORE_PROMPT));
   assert.match(request.messages[0]!.content, /本次只输出候选正文/u);
   assert.match(request.messages[0]!.content, /## 摘要/u);
+  assert.match(request.messages[0]!.content, /真实换行/u);
+  assert.match(request.messages[0]!.content, /不要.*整篇.*加粗/u);
   assert.ok(!request.messages[0]!.content.includes(sourceText));
   assert.ok(!request.messages[0]!.content.includes(objective));
   assert.ok(request.messages[1]!.content.includes(sourceText));

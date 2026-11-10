@@ -6,8 +6,9 @@ import TaskCompletionPanel from "./TaskCompletionPanel";
 import { artifactVersionResultFrom, createCommandId, RelayApiError, RelayTransportError, stateMutationFrom, type RelayAcceptanceCriterion, type RelayApiClient, type RelayArtifactVersionResult, type RelayProjectState, type RelayTaskArtifacts } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { taskStatusLabels } from "../lib/labels";
-import { describeLiveError, type LiveActionError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck, type LiveActionError } from "../lib/liveErrors";
 import { liveClient } from "../lib/relayConnection";
+import { checkRecoveryNow, recoveryScope, recoveryStorageKey, registerRecoveryOwner, removeRecovery, subscribeRecoveries, upsertRecovery, type RecoveryRecord } from "../lib/commandRecovery";
 import { sha256Hex } from "../lib/sha256";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import type { DecimalRevision, TaskStatus } from "../types";
@@ -152,6 +153,9 @@ export default function ArtifactPanel(props: Props) {
   const [stateFailure, setStateFailure] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selectReceipt, setSelectReceipt] = useState<string | null>(null);
+  const [selectionPending, setSelectionPending] = useState<RecoveryRecord | null>(null);
+  const [selectionChecking, setSelectionChecking] = useState(false);
+  const selectionFlight = useRef<string | null>(null);
   const disposed = useRef(false);
   const artifactsRequest = useRef(0);
   const draftRequest = useRef(0);
@@ -169,6 +173,9 @@ export default function ArtifactPanel(props: Props) {
   const live = allowedActions !== null;
   const saveRecoveryClient = liveClient();
   const saveRecoveryKey = saveRecoveryClient ? pendingSaveKey(saveRecoveryClient, taskId) : null;
+  const selectionScope = saveRecoveryClient && live && projectId ? recoveryScope(saveRecoveryClient) : null;
+  const selectionKey = selectionScope === null ? null : `${selectionScope}:${taskId}:${projectId}`;
+  const selectionKeyRef = useRef(selectionKey); selectionKeyRef.current = selectionKey;
   const saveRecoveryKeyRef = useRef(saveRecoveryKey);
   saveRecoveryKeyRef.current = saveRecoveryKey;
   const saveRecoveryReady = saveRecoveryKey !== null && saveRecoveryScope === saveRecoveryKey && saveRecoveryAvailable;
@@ -179,11 +186,15 @@ export default function ArtifactPanel(props: Props) {
   const taskUnavailableRef = useRef(taskUnavailable);
   taskUnavailableRef.current = taskUnavailable;
   const artifacts = !sourceUnavailable && artifactSnapshot?.taskId === taskId ? artifactSnapshot.data : null;
-  const humanArtifact = artifacts?.items.filter((item) => item.versions.some((version) => version.sourceKind === "HUMAN")).at(-1) ?? null;
-  const latestHumanVersion = humanArtifact?.versions.find((version) => version.artifactVersionId === humanArtifact.latestVersionId) ?? null;
-  const latest = humanArtifact && latestHumanVersion ? {
-    artifactId: humanArtifact.id, artifactRevision: humanArtifact.revision,
-    versionId: latestHumanVersion.artifactVersionId, versionNumber: latestHumanVersion.versionNumber
+  // ARTIFACT-HANDOFF-EDIT-20261105：草稿基线固定后不随阅读切换；AI 原版也可在接手后续写。
+  const editableArtifact = artifacts?.items.find((item) => item.id === draftBase?.artifactId)
+    ?? artifacts?.items.find((item) => item.versions.some((version) => version.artifactVersionId === readingVersionId))
+    ?? artifacts?.items.filter((item) => item.versions.some((version) => version.sourceKind === "HUMAN")).at(-1)
+    ?? artifacts?.items.at(-1) ?? null;
+  const latestEditableVersion = editableArtifact?.versions.find((version) => version.artifactVersionId === editableArtifact.latestVersionId) ?? null;
+  const latest = editableArtifact && latestEditableVersion ? {
+    artifactId: editableArtifact.id, artifactRevision: editableArtifact.revision,
+    versionId: latestEditableVersion.artifactVersionId, versionNumber: latestEditableVersion.versionNumber
   } : null;
   const versions = artifacts?.items.flatMap((artifact) => artifact.versions.map((version) => ({
     artifactId: artifact.id, versionId: version.artifactVersionId, versionNumber: version.versionNumber,
@@ -263,6 +274,52 @@ export default function ArtifactPanel(props: Props) {
     setSaveStorageWarning(!restored.available);
     setSaving(false); setSaveFailure(null); setSaveReceipt(null);
   }, [saveRecoveryKey, taskId]);
+  // ARTIFACT-SELECTION-RECOVERY-20261106：原选择只核对，不把新候选塞进旧 command_id。
+  useEffect(() => {
+    setSelecting(false);
+    if (selectionScope === null || selectionKey === null || saveRecoveryClient === null || projectId === null) {
+      command.current.select = null; setSelectionPending(null); return;
+    }
+    const client = saveRecoveryClient, scope = selectionScope, requestKey = selectionKey;
+    let active = true;
+    const matches = (record: RecoveryRecord) => record.commandType === "SetProjectState" &&
+      record.targetKind === "TASK" && record.targetId === taskId && record.sessionId === null && typeof record.objectId === "string";
+    const unsubscribe = subscribeRecoveries(scope, (entries) => {
+      const entry = entries.find((item) => matches(item.record));
+      command.current.select = entry?.record.commandId ?? null;
+      setSelectionPending(entry?.record ?? null);
+      setSelectionChecking(entry?.phase === "CHECKING" || entry?.phase === "RETRYING");
+      if (entry?.error) setSelectFailure({ kind: "unknown", message: `原选择结果尚待核对。${entry.error}`, fieldErrors: [] });
+    });
+    const unregister = registerRecoveryOwner({ scope,
+      claims: (record) => matches(record) && selectionFlight.current !== record.commandId,
+      verify(record, receipt) {
+        if (receipt.commandId !== record.commandId || receipt.commandType !== "SetProjectState") return "IDENTITY_MISMATCH";
+        try {
+          const mutation = stateMutationFrom(receipt.result);
+          return mutation.projectId === projectId && mutation.action === "SELECT_ARTIFACT_VERSION" ? null : "IDENTITY_MISMATCH";
+        } catch { return "MALFORMED"; }
+      },
+      async apply(record, receipt) {
+        if (!active) return "KEPT";
+        return await confirmSelection(client, scope, requestKey, record, stateMutationFrom(receipt.result)) ? "APPLIED" : "KEPT";
+      },
+      fetchReceipt: (commandId, signal) => client.getCommandReceipt(commandId, signal)
+    });
+    const selectionGuard: DraftGuard = {
+      hasUnsavedChanges: () => command.current.select !== null, discard: () => undefined,
+      pendingCommandId: () => command.current.select,
+      pendingCommandState: () => selectionFlight.current === command.current.select && command.current.select !== null ? "IN_FLIGHT" : command.current.select ? "UNRESOLVED" : null,
+      pendingRecoversAfterLeave: () => {
+        try {
+          const stored: unknown = JSON.parse(sessionStorage.getItem(recoveryStorageKey(scope)) ?? "[]");
+          return Array.isArray(stored) && stored.some((item) => item.commandId === command.current.select);
+        } catch { return false; }
+      }
+    };
+    setDraftGuard(selectionGuard);
+    return () => { active = false; unsubscribe(); unregister(); clearDraftGuard(selectionGuard); };
+  }, [saveRecoveryClient, selectionScope, selectionKey, taskId, projectId]);
   useEffect(() => { void loadArtifacts(); }, [taskId, projectId, taskRevision, taskUnavailable]);
   useEffect(() => { void loadState(); }, [taskId, projectId, taskRevision, sourceUnavailable]);
   useEffect(() => {
@@ -355,21 +412,21 @@ export default function ArtifactPanel(props: Props) {
     });
     contentRef.current = value; setContent(value); setDocumentMode("edit");
   }
-  async function loadLatestHumanDraft() {
+  async function loadLatestDraft() {
     const client = liveClient();
-    if (!client || unavailableRef.current || !latest || !humanArtifact || draftLoading || saving || activeSavePending || done ||
+    if (!client || unavailableRef.current || !latest || !editableArtifact || draftLoading || saving || activeSavePending || done ||
       contentRef.current !== savedContentSnapshot.current) return;
     const expectedContent = contentRef.current;
     const token = ++draftRequest.current;
     setDraftLoading(true); setDraftFailure(null);
     try {
       const [body, current] = await Promise.all([
-        client.getArtifactVersionContent(latest.versionId), client.getArtifact(humanArtifact.id)
+        client.getArtifactVersionContent(latest.versionId), client.getArtifact(editableArtifact.id)
       ]);
       if (disposed.current || token !== draftRequest.current) return;
-      if (current.id !== humanArtifact.id || current.latestVersionId !== latest.versionId ||
+      if (current.id !== editableArtifact.id || current.latestVersionId !== latest.versionId ||
         current.revision !== latest.artifactRevision)
-        throw new Error("最新人工版本已变化；请刷新任务事实后再起草。");
+        throw new Error("最新版本已变化；请刷新任务事实后再起草。");
       if (contentRef.current !== expectedContent) throw new Error("读取期间草稿发生变化，已保留你的输入。");
       savedContentSnapshot.current = body;
       setDraftBase({ taskId, taskRevision, artifactId: current.id,
@@ -380,7 +437,7 @@ export default function ArtifactPanel(props: Props) {
   }
   async function confirmCurrentBase() {
     const client = liveClient();
-    if (!client || !draftBase || !humanArtifact || !latest || !versionsReady || rebasing || saving || activeSavePending || done) return;
+    if (!client || !draftBase || !editableArtifact || !latest || !versionsReady || rebasing || saving || activeSavePending || done) return;
     setRebasing(true); setRebaseFailure(null);
     try {
       const [task, artifact] = await Promise.all([client.getTask(taskId), client.getArtifact(draftBase.artifactId)]);
@@ -467,21 +524,52 @@ export default function ArtifactPanel(props: Props) {
       if (!disposed.current && saveRecoveryKeyRef.current === requestScope) setSaving(false);
     }
   }
+  async function confirmSelection(client: RelayApiClient, scope: string, requestKey: string, record: RecoveryRecord, mutation: ReturnType<typeof stateMutationFrom>): Promise<boolean> {
+    if (projectId === null || mutation.projectId !== projectId || mutation.action !== "SELECT_ARTIFACT_VERSION") return false;
+    const request = ++stateRequest.current;
+    const current = await client.getProjectState(projectId);
+    if (disposed.current || selectionKeyRef.current !== requestKey || unavailableRef.current || request !== stateRequest.current ||
+        current.projectId !== projectId || BigInt(current.revision) < BigInt(mutation.revision)) return false;
+    if (BigInt(current.revision) === BigInt(mutation.revision) && !current.selectedArtifactVersionRefs.some((version) => version.artifactVersionId === record.objectId)) return false;
+    setState(current); setStateFailure(null);
+    removeRecovery(scope, record.commandId); setSelectFailure(null);
+    setSelectReceipt(`原选择命令已确认，当前选用已重新读取（State revision v${current.revision}）；本轮接受仍需单独核对。`);
+    return true;
+  }
   async function selectVersion() {
-    const client = liveClient();
-    if (!client || writeBlockedReason !== null || !versionsReady || !selectedVersion || !projectId || !state || selecting) return;
+    const client = liveClient(); const scope = selectionScope, requestKey = selectionKey;
+    if (!client || !scope || !requestKey || writeBlockedReason !== null || !versionsReady || !selectedVersion || !projectId || !state || selecting || command.current.select !== null) return;
+    const commandId = createCommandId();
+    const record: RecoveryRecord = { commandId, commandType: "SetProjectState", sessionId: null, targetKind: "TASK", targetId: taskId, objectId: selectedVersion.versionId };
+    selectionFlight.current = commandId;
+    if (!upsertRecovery(scope, record)) {
+      removeRecovery(scope, commandId); selectionFlight.current = null;
+      setSelectFailure({ kind: "unknown", message: "无法安全保存原选择身份，未提交选择。请检查浏览器存储。", fieldErrors: [] }); return;
+    }
     setSelecting(true); setSelectFailure(null); setSelectReceipt(null);
-    try { command.current.select ??= createCommandId(); const result = await client.selectArtifactVersion({ projectId, commandId: command.current.select, expectedRevision: state.revision, artifactVersionId: selectedVersion.versionId, sourceRef: `human:workbench:task/${taskId}` }); if (disposed.current) return; command.current.select = null; setSelectReceipt(`项目 State 已选用 v${selectedVersion.versionNumber}（State revision v${result.revision}）。这是“当前选用”，与“本轮接受”不同。`); await loadState(); }
-    catch (caught) { if (disposed.current) return; const described = describeLiveError(caught); setSelectFailure(described); if (described.kind !== "transport") command.current.select = null; }
-    finally { if (!disposed.current) setSelecting(false); }
+    let acceptedByServer = false;
+    try {
+      const result = await client.selectArtifactVersion({ projectId, commandId, expectedRevision: state.revision, artifactVersionId: record.objectId!, sourceRef: `human:workbench:task/${taskId}` });
+      acceptedByServer = true;
+      if (!await confirmSelection(client, scope, requestKey, record, result)) throw new RelayTransportError("原选择回执与当前项目状态尚未核对，请查询原命令。");
+    } catch (caught) {
+      if (disposed.current || selectionKeyRef.current !== requestKey) return;
+      setSelectFailure(describeLiveError(caught));
+      if (!acceptedByServer && !needsReceiptCheck(caught)) removeRecovery(scope, commandId);
+    } finally {
+      if (selectionFlight.current === commandId) selectionFlight.current = null;
+      if (!disposed.current && selectionKeyRef.current === requestKey) setSelecting(false);
+    }
   }
   async function lookupSelectReceipt() {
-    const client = liveClient(); const pending = command.current.select;
-    if (!client || !pending || selecting) return;
+    const scope = selectionScope, requestKey = selectionKey, pending = command.current.select;
+    if (!scope || !requestKey || !pending || selecting) return;
     setSelecting(true); setSelectFailure(null);
-    try { const body = await client.getCommandReceipt(pending); if (disposed.current) return; if (body.commandType !== "SetProjectState") { setSelectFailure(wrongReceipt(body.commandType, "选择")); return; } const result = stateMutationFrom(body.result); command.current.select = null; setSelectReceipt(`回执确认已提交：项目 State 已选用该版本（State revision v${result.revision}）。`); await loadState(); }
-    catch (caught) { if (!disposed.current) setSelectFailure(describeLiveError(caught)); }
-    finally { if (!disposed.current) setSelecting(false); }
+    try {
+      const result = await checkRecoveryNow(scope, pending);
+      if (!disposed.current && selectionKeyRef.current === requestKey && result.kind === "FAILED")
+        setSelectFailure({ kind: "unknown", message: `原选择结果尚待核对。${result.message}`, fieldErrors: [] });
+    } finally { if (!disposed.current && selectionKeyRef.current === requestKey) setSelecting(false); }
   }
   if (!live) return <>{documentHeader}<section className="surface-panel" data-testid="artifact-fixture-gap"><h2>产物与完成</h2><p className="helper-text">示例数据没有产物事实，不展示产物、版本或完成凭据。连接本机 API 后会写入真实 PostgreSQL。</p></section></>;
   const editor = <>
@@ -510,7 +598,7 @@ export default function ArtifactPanel(props: Props) {
       {documentHeader}
       <header className="artifact-document-heading">
         <p className="eyebrow">{conflicting ? "版本冲突与草稿保留" : "任务产物"}</p>
-        <ArtifactHeading>{conflicting ? "有更新的版本，先核对差异" : displayedMode === "saved" ? readingTarget?.title ?? title : humanArtifact?.title ?? title}</ArtifactHeading>
+        <ArtifactHeading>{conflicting ? "有更新的版本，先核对差异" : displayedMode === "saved" ? readingTarget?.title ?? title : editableArtifact?.title ?? title}</ArtifactHeading>
         <p className="helper-text">{conflicting ? "对比当前版本与我的草稿，确认需要保留或调整的内容。" : displayedMode === "saved" && readingTarget ? `v${readingTarget.versionNumber} · 已保存版本` : "本轮草稿 · 尚未保存"}</p>
       </header>
       {sourceUnavailable && <p className="warning-callout" role="status" data-testid="artifact-source-unavailable">产物来源暂不可读。旧正文、名称与版本事实已隐藏；仅保留你的未保存输入与原命令。</p>}
@@ -570,16 +658,16 @@ export default function ArtifactPanel(props: Props) {
     <aside className="artifact-action-rail" aria-label="产物保存与验收" data-testid="artifact-action-rail">
       <section className="artifact-save-section">
         <h2>{conflicting ? "选择如何继续" : "保存为新版本"}</h2>
-        <p>{draftVersion ? `基于 v${draftVersion.versionNumber} 编辑` : latest ? `保存至 ${humanArtifact?.title} 的新版本` : "创建首个产物版本"}</p>
+        <p>{draftVersion ? `基于 v${draftVersion.versionNumber} 编辑` : latest ? `保存至 ${editableArtifact?.title} 的新版本` : "创建首个产物版本"}</p>
         <p className="helper-text">保存后创建不可变版本；新版本不继承原来的验收凭据。草稿只保留在当前页面。</p>
         {saveRecoveryScope === saveRecoveryKey && saveStorageWarning && <p className="disabled-reason" role="status" data-testid="artifact-save-storage-warning">本机持久恢复记录不可用。未核实的保存会保留原 command_id 和正文；无法安全记录时不会发送新命令。</p>}
         {writeBlockedReason && <p className="disabled-reason" data-testid="artifact-project-write-blocked">{writeBlockedReason}</p>}
         {done ? <p className="warning-callout" role="status" data-testid="artifact-editor-locked"><Info aria-hidden="true" />该任务本轮已完成：编辑入口已关闭，请先在下方重开任务再保存新版本。</p> : !allowedActions.includes("SAVE_ARTIFACT_VERSION") && <p className="disabled-reason" data-testid="artifact-editor-reason"><Info aria-hidden="true" />服务端未投影 SAVE_ARTIFACT_VERSION：当前状态是{taskStatusLabels[taskStatus]}，只有进行中的人工任务可以保存产物。</p>}
-        {!humanArtifact && <label className="field"><span className="field-label">产物名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} name="artifact-title" disabled={done || activeSavePending !== null || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} /></label>}
+        {!editableArtifact && <label className="field"><span className="field-label">产物名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} name="artifact-title" disabled={done || activeSavePending !== null || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} /></label>}
         <div className="form-actions"><button className="primary-button" type="button" data-testid="artifact-save" disabled={saving || !(canSave || (saveRecoveryReady && activeSavePending !== null && !sourceUnavailable))} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : activeSavePending ? "按原命令重试保存" : "保存新版本"}</button></div>
         {draftBase && conflicting && <div className="form-actions"><button className="secondary-button" type="button" data-testid="artifact-confirm-new-base" disabled={rebasing || saving || activeSavePending !== null || !versionsReady || !latest || writeBlockedReason !== null || done} onClick={() => void confirmCurrentBase()}>{rebasing ? "正在核对" : `确认以当前 v${latest?.versionNumber ?? "?"} 为基线（保留草稿）`}</button>{latest && <Link className="inline-link" to={`/artifact-versions/${latest.versionId}/lineage`}>查看版本历史与差异</Link>}</div>}
         {rebaseFailure && <p className="action-error" role="alert">{rebaseFailure}</p>}
-        {latest && <button className="secondary-button" type="button" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || activeSavePending !== null || !versionsReady || content !== savedContentSnapshot.current || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} onClick={() => void loadLatestHumanDraft()}>{draftLoading ? "正在读取" : `从最新人工版本 v${latest.versionNumber} 起草修订`}</button>}
+        {latest && <button className="secondary-button" type="button" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || activeSavePending !== null || !versionsReady || content !== savedContentSnapshot.current || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} onClick={() => void loadLatestDraft()}>{draftLoading ? "正在读取" : `从最新版本 v${latest.versionNumber} 起草修订`}</button>}
         {draftFailure && <p className="action-error" role="alert">{draftFailure}</p>}
         {draftBase && !sourceUnavailable && <details className="artifact-binding-details"><summary>草稿基线{draftVersion ? ` · v${draftVersion.versionNumber}` : ""} · 任务修订 v{draftBase.taskRevision}</summary><p className="helper-text" data-testid="artifact-draft-base">草稿修订基线：版本 {draftBase.versionId} · Artifact revision v{draftBase.artifactRevision} · Task revision v{draftBase.taskRevision}。</p></details>}
         {activeSavePending && <p className="helper-text" data-testid="artifact-save-pending">原 command_id：{activeSavePending.commandId}。原请求{activeSavePending.kind === "create" ? "创建产物" : `续写产物 ${activeSavePending.artifactId}`}，正文 {new TextEncoder().encode(activeSavePending.content).length} 字节；结果未核对前不能提交新草稿。</p>}
@@ -592,9 +680,9 @@ export default function ArtifactPanel(props: Props) {
         {stateFailure ? <p className="action-error" role="alert">{stateFailure}</p> : projectId === null ? <p className="helper-text">该任务未归属项目：选择版本为当前选用是 Project State 命令，因此不可用。</p> : selectedByProject.length === 0 ? <p className="helper-text">项目 State 还没有选用任何产物版本。</p> : <ul className="version-list">{selectedByProject.map((ref) => <li key={ref.artifactVersionId} className="version-row"><span className="version-copy"><strong>v{ref.versionNumber}</strong><small>来源：{ref.sourceRef}</small></span></li>)}</ul>}
         <p className="helper-text">当前选用候选：{selectedVersion ? `v${selectedVersion.versionNumber} · ${selectedVersion.title}` : "尚未选择版本"}</p>
         {selectedVersion && <details className="artifact-binding-details"><summary>核对当前选用候选身份</summary><p className="helper-text" data-testid="artifact-selected-version">当前选用候选：v{selectedVersion.versionNumber} · {selectedVersion.title} · {selectedVersion.versionId}</p></details>}
-        <button className="secondary-button" type="button" data-testid="artifact-select-version" disabled={writeBlockedReason !== null || !versionsReady || selecting || !selectedVersion || !projectId || !state} onClick={() => void selectVersion()}>{selecting ? "正在提交" : "选择这个版本为当前选用"}</button>
+        <button className="secondary-button" type="button" data-testid="artifact-select-version" disabled={writeBlockedReason !== null || !versionsReady || selecting || selectionPending !== null || !selectedVersion || !projectId || !state} onClick={() => void selectVersion()}>{selecting ? "正在提交" : "选择这个版本为当前选用"}</button>
         <p className="helper-text">“当前选用”是项目级事实，与“本轮接受”不同；下方完成命令接受的是明确选择的确切版本。</p>
-        {selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectFailure?.kind === "transport" && <button className="secondary-button" type="button" disabled={selecting} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</button>}
+        {selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectionPending && <p className="helper-text" data-testid="artifact-select-pending">{selectionFlight.current === selectionPending.commandId ? "正在提交选择，原命令身份已保存。" : selectionChecking ? "正在核对原选择结果，不重新提交。" : "原选择结果尚待核对；仅查询原命令，不重新提交。"}原 command_id：{selectionPending.commandId}</p>}{selectionPending && <button className="secondary-button" type="button" data-testid="artifact-select-receipt-query" disabled={selecting || selectionChecking} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</button>}
       </section>
       <TaskCompletionPanel live={live} target={{ taskId, taskStatus, taskRevision, acceptanceRevision,
         allowedActions: sourceUnavailable ? [] : allowedActions, criteria: sourceUnavailable ? [] : criteria,

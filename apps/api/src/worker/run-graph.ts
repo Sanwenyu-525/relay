@@ -262,8 +262,14 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
           snapshot.values.reviewId === '') {
         throw new Error('Run graph Review interrupt has no bound Review');
       }
-      if (!(await validReviewResume(db, input.claim, snapshot.values.reviewId,
-        snapshot.values.reviewKind, snapshot.values.operationId))) {
+      const exactReview = await validReviewResume(db, input.claim, snapshot.values.reviewId,
+        snapshot.values.reviewKind, snapshot.values.operationId);
+      // RUN-CRITERIA-GROUP-RESUME-20261105：检查点绑定首项，最后一项 ACCEPT 才投递 RESUME。
+      // 只允许同批、同产物且已形成 PASS 的条件组唤醒；操作审批仍须精确匹配原动作。
+      const completedCriteria = !exactReview && snapshot.values.reviewKind === 'CRITERION'
+        && snapshot.values.operationId === '' && await validCompletedCriteriaResume(db,
+          input.claim, snapshot.values.reviewId);
+      if (!exactReview && !completedCriteria) {
         if (await isPriorReviewDecision(db, input.claim, snapshot.values.reviewId)) {
           return { settlement: 'DONE', holdForRecovery: false };
         }
@@ -354,6 +360,36 @@ async function isToolLoopOperation(db: DbExecutor, runId: string, operationId: s
   const rows = await sql<{ exists: boolean }>`
     select exists(select 1 from run_tool_calls
       where run_id = ${runId} and operation_id = ${operationId}) as exists
+  `.execute(db);
+  return rows.rows[0]?.exists === true;
+}
+
+async function validCompletedCriteriaResume(db: DbExecutor, claim: ClaimedRunCommand,
+  interruptedReviewId: string): Promise<boolean> {
+  const rows = await sql<{ exists: boolean }>`
+    select exists(select 1 from run_commands c
+      join review_decisions d on d.id = c.review_decision_id
+      join review_requests r on r.id = d.review_id
+      join review_requests waiting on waiting.id = ${interruptedReviewId}
+      join review_decisions accepted on accepted.review_id = waiting.id
+      join verification_sessions v on v.id::text = d.effect->>'verification_session_id'
+      join verification_targets target on target.session_id = v.id
+      where c.id = ${claim.commandId} and c.run_id = ${claim.runId}
+        and c.review_decision_id = ${claim.reviewDecisionId}
+        and r.run_id = c.run_id and waiting.run_id = c.run_id
+        and r.kind = 'CRITERION' and waiting.kind = 'CRITERION'
+        and r.status = 'DECIDED' and waiting.status = 'DECIDED'
+        and d.decision = 'ACCEPT' and accepted.decision = 'ACCEPT'
+        and d.target_hash = r.target_hash and accepted.target_hash = waiting.target_hash
+        and r.target->>'session_id' = waiting.target->>'session_id'
+        and r.target->>'artifact_version_id' = waiting.target->>'artifact_version_id'
+        and r.target->>'content_hash' = waiting.target->>'content_hash'
+        and r.target->>'acceptance_revision' = waiting.target->>'acceptance_revision'
+        and v.run_id = c.run_id and v.task_id = r.task_id and v.status = 'PASS'
+        and d.effect->>'verdict' = 'PASS'
+        and v.acceptance_revision::text = r.target->>'acceptance_revision'
+        and target.artifact_version_id::text = r.target->>'artifact_version_id'
+        and encode(target.content_hash, 'hex') = r.target->>'content_hash') as exists
   `.execute(db);
   return rows.rows[0]?.exists === true;
 }

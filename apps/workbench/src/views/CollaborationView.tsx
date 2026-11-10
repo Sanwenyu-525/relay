@@ -132,8 +132,8 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   /**
    * `?session=` 是**一次性深链接种子**，不是持续 Owner（与 `?new=` 同一类）：
    * 左栏把工作区级会话列成可点入口，点了就要能回到那条讨论；而会话身份本身
-   * 仍住在协作页状态里——写回 URL 会因 App 按 pathname+search 重挂载整条路由，
-   * 连目录作用域与首条草稿一起丢掉。种子只在挂载时读一次。
+   * 仍住在协作页状态里。App 按 pathname+search 重挂载整条路由，因此首条提交与核对
+   * 完成前不改种子；确认落库后才用会话地址替换新对话入口，使刷新能恢复同一会话。
    */
   const sessionSeed = search.get("session");
   /** `?skill=` 与 `?session=` 同属一次性种子：指定进入后预选的 Skill（工作台 §32.11）。 */
@@ -240,6 +240,18 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     read: () => firstMessageRef.current,
     write: (next) => { firstMessageRef.current = next; setFirstMessage(next); },
   }), []);
+  // UI-FIRST-SESSION-URL-20261105：仅在原首条命令确认后替换入口，不卸载在途/未决 Owner。
+  useEffect(() => {
+    if (newConversationKey === null || sessionId == null || firstMessage.busy ||
+        firstMessage.pending !== null || firstMessage.interpretedSessionId !== sessionId) return;
+    const next = new URLSearchParams(search);
+    next.delete("new");
+    next.delete("dir");
+    next.delete("source_session");
+    next.set("session", sessionId);
+    setSearch(next, { replace: true });
+  }, [newConversationKey, sessionId, firstMessage.busy, firstMessage.pending,
+    firstMessage.interpretedSessionId, search, setSearch]);
   // undefined = 未指定会话（沿用该任务最近会话）；null = 用户显式要求新建会话。
   const [task, setTask] = useState<RelayTaskDetail | null>(null);
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
@@ -744,9 +756,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     : null;
 
   // 委托面板按选定稿收进「更多操作」；准入判定仍只有一份，禁用原因留在页头常驻。
-  const delegateTarget: DelegateTarget | null = task !== null && task.executorRunId === null && task.projectId !== null
+  const delegateTarget: DelegateTarget | null = task !== null && task.projectId !== null
     ? { id: task.id, projectId: task.projectId, status: task.status, executor: task.executor,
-        revision: task.revision, executorRunId: null, allowedActions: task.allowedActions }
+        revision: task.revision, executorRunId: task.executorRunId, allowedActions: task.allowedActions }
     : null;
   const folderProjectId = folder?.status === "READY" ? folder.association?.projectId ?? null : null;
   const entryPending = sessionSeed !== null && newConversationKey === null && sessionEntry?.id !== sessionSeed;
@@ -1339,7 +1351,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     const owner: RecoveryOwner = {
       scope: recoveryScopeValue,
       // 同一会话的输入区仍挂载时由 AssistView 做主入口；这里只在离开原会话后接管。
-      claims: (record) => record.sessionId !== activeSessionRef.current,
+      // DELEGATE-RECOVERY-OWNER-20261106：委托回执由原面板核对 Run，通用会话 Owner 不抢领。
+      claims: (record) => record.commandType !== "DelegateTask" && record.sessionId !== activeSessionRef.current,
       verify: verifyCollabReceipt,
       apply: (record, receipt) => applyCollabReceipt(record, receipt),
       fetchReceipt: (commandId, signal) => client.getCommandReceipt(commandId, signal)
@@ -1569,7 +1582,8 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
             </button>}
           </>}
           more={<>
-            {delegateTarget !== null && <TaskDelegatePanel compact client={client} task={delegateTarget}
+            {/* COLLAB-DELEGATE-RECOVERY-20261106：已有 Run 仍挂载原恢复 Owner，不提供第二次委托。 */}
+            {delegateTarget !== null && <TaskDelegatePanel compact recoveryOnly={delegateTarget.executorRunId !== null} client={client} task={delegateTarget}
               projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
             <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
               {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>

@@ -209,6 +209,25 @@ async function ask(fx: Fixture, content: string, port: AssistModelPort) {
 
 // ------------------------------------------------- AM-05 状态维护（阶段 C 其余）
 
+test('one message declaring execution and same-title task maintenance creates only the execution Task', async () => {
+  const fx = await fixture();
+  const title = 'Single execution owner';
+  const outcome = await ask(fx, '登记这项任务并交给 AI 执行', oneShotPort(JSON.stringify({
+    reply: '已提交执行候选。', execution: { title, objective: 'Produce a managed document',
+      criteria: [{ statement: 'Review the document', required: true, method: 'HUMAN' }],
+      expected_outputs: { kind: 'MARKDOWN_DOCUMENT' }, writes_files: false, file_changes: [], check: null },
+    maintenance: { decision: 'MAINTAIN', changes: [{ kind: 'CREATE_TASK', title,
+      objective: 'Produce a managed document' }] },
+  })));
+  assert.equal(outcome.requests.length, 1);
+  const maintenance = await createRepositories(app.db).conversationState.listSessionRequests(fx.workspaceId, fx.sessionId);
+  assert.equal(maintenance.length, 0);
+  await applyConversationExecution(app.db, { workspaceId: fx.workspaceId, requestId: outcome.requests[0]!.id });
+  const tasks = await sql<{ count: number }>`select count(*)::integer as count from tasks
+    where project_id = ${fx.projectId}`.execute(app.db);
+  assert.equal(tasks.rows[0]?.count, 1);
+});
+
 test('AM-05 明确状态维护经主流程提交，落进原请求行并沿原 Owner 生效', async () => {
   const fx = await fixture();
   const port = oneShotPort(JSON.stringify({

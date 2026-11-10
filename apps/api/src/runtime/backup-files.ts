@@ -111,7 +111,9 @@ async function inventory(root: string): Promise<Inventory> {
       artifacts: 'CONTENT', staging: 'STAGING', 'runtime-launches': 'ARMED',
     };
     const kind = Object.hasOwn(kinds, child.name) ? kinds[child.name] : undefined;
-    if (kind === undefined && !['logs', '.relay-content-admission.lock', 'knowledge', 'runtime-workspaces'].includes(child.name)) {
+    // `logs` 与 `browser`（扩展桥桥接令牌，运行时轮换的本机凭据）允许存在但不进入备份：
+    // 备份不得明文复制本机凭据，还原目标首次启动会重新生成桥接事实。
+    if (kind === undefined && !['logs', 'browser', '.relay-content-admission.lock', 'knowledge', 'runtime-workspaces'].includes(child.name)) {
       fail('BACKUP_UNMANAGED_DATA');
     }
     const entry = await inspect(join(root, child.name), child.name);
@@ -121,7 +123,7 @@ async function inventory(root: string): Promise<Inventory> {
     } else {
       if (!entry.stat.isDirectory()) fail('BACKUP_UNSAFE_ENTRY');
       if (kind !== undefined) pending.push({ entry, kind, depth: 1 });
-      else if (child.name !== 'logs') pending.push({ entry, kind: 'EMPTY', depth: 1 });
+      else if (child.name !== 'logs' && child.name !== 'browser') pending.push({ entry, kind: 'EMPTY', depth: 1 });
     }
   }
   await assertBackupWindowsPaths([...entries.values()].map((entry) => entry.path));

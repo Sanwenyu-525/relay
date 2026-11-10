@@ -21,7 +21,7 @@
 
 .context-budget-option strong {
   color: var(--relay-color-text-primary);
-  font-weight: 600;
+  font-weight: var(--relay-font-weight-semibold);
 }
 
 .context-budget-actions {

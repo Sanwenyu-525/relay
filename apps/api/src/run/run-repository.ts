@@ -167,6 +167,17 @@ export class RunRepository {
     return result.rows;
   }
 
+  /** 任务执行历史只读分页；边界在 PG 内比较，保留时间戳微秒精度。 */
+  async listTaskRunPage(workspaceId: string, taskId: string, limit: number, cursor?: string): Promise<readonly RunRow[]> {
+    const boundary = cursor === undefined ? sql`` : sql`and (created_at, id) < (
+      select created_at, id from runs where id = ${cursor}
+        and workspace_id = ${workspaceId} and task_id = ${taskId})`;
+    const result = await sql<RunRow>`select ${RUN_COLUMNS} from runs
+      where workspace_id = ${workspaceId} and task_id = ${taskId} ${boundary}
+      order by created_at desc, id desc limit ${limit}`.execute(this.db);
+    return result.rows;
+  }
+
   /** 当前未释放的 Run；不存在表示该 Task 没有 AI 执行权占有者。 */
   async findLiveRunForTask(taskId: string): Promise<RunRow | undefined> {
     const result = await sql<RunRow>`

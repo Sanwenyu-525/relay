@@ -6,6 +6,7 @@ import SafeMarkdown from "../src/components/SafeMarkdown";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { resetSessionArtifactsForTest } from "../src/lib/sessionArtifacts";
 import { sha256Hex } from "../src/lib/sha256";
+import { configureCommandRecoveryForTest, recoveryScope, recoveryStorageKey, resetCommandRecoveryForTest } from "../src/lib/commandRecovery";
 import { flush, mountReact, mountWorkbench } from "./mountApp";
 
 const BASE_URL = "http://127.0.0.1:8787";
@@ -23,15 +24,17 @@ const TOKEN = "test-bearer-token-0123456789abcdef";
 let unmount: (() => void) | null = null;
 
 beforeEach(() => {
+  resetCommandRecoveryForTest(); configureCommandRecoveryForTest({ maxAttempts: 1 });
   localStorage.clear();
   sessionStorage.clear();
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   unmount?.();
   unmount = null;
   resetRelayConnectionForTest();
-  resetSessionArtifactsForTest();
+  resetSessionArtifactsForTest(); resetCommandRecoveryForTest();
   localStorage.clear();
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -283,6 +286,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
   it("保存版本用任务 revision 与 text/markdown，选择版本走 Project State，完成带上必需条件与版本", async () => {
     activate();
     let taskRevision = "2";
+    let stateRevision = "1"; let stateSelected = false;
     let versions: { id: string; number: string; hash: string; size: string }[] = [];
     const { calls } = stubFetch(async (url, method, body) => {
       if (method === "GET" && url === taskUrl) {
@@ -292,7 +296,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
         return jsonResponse(200, taskArtifactsBody(versions, versions.length ? String(versions.length - 1) : "0"));
       }
       if (method === "GET" && url === stateUrl) {
-        return jsonResponse(200, projectStateBody());
+        return jsonResponse(200, { ...projectStateBody(stateSelected ? [{ artifact_version_id: VERSION_TWO_ID, artifact_id: ARTIFACT_ID, version_number: "2", source_ref: "human:test" }] : []), revision: stateRevision });
       }
       if (method === "POST" && url === `${taskUrl}/artifacts`) {
         versions = [{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "12" }];
@@ -331,12 +335,14 @@ describe("产物与完成闭环（UI-11，live）", () => {
         );
       }
       if (method === "POST" && url === stateCommandsUrl) {
+        stateSelected = true; stateRevision = "2";
         return jsonResponse(
           200,
           envelope(String(body.command_id), { project_id: PROJECT_ID, action: "SELECT_ARTIFACT_VERSION", revision: "2" })
         );
       }
       if (method === "POST" && url === `${taskUrl}/complete`) {
+        stateRevision = "3";
         return jsonResponse(
           200,
           envelope(String(body.command_id), {
@@ -1142,7 +1148,7 @@ describe("人工产物版本修订", () => {
     });
   });
 
-  it("只从最新人工版本载入草稿，未保存改动不被覆盖，保存后不继承旧接受", async () => {
+  it("从最新版本载入人工修订，未保存改动不被覆盖，保存后不继承旧接受", async () => {
     activateRelayConnection({ baseUrl: BASE_URL, workspaceId: WORKSPACE_ID, bearerToken: TOKEN });
     let appended = false;
     const { calls } = stubFetch(async (url, method, body) => {
@@ -1202,4 +1208,67 @@ describe("安全 Markdown 预览", () => {
     expect(wrapper.find("code").text()).toBe("code");
     unmount();
   });
+});
+
+
+it.each(["network", "503", "storage"])("当前选用失败保持原选择身份，换候选不重发；存储失败不提交：%s", async (kind) => {
+  activate();
+  let originalCommandId = "";
+  const { calls } = stubFetch(async (url, method, body) => {
+    if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({}));
+    if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody([
+      { id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "10" }, { id: VERSION_TWO_ID, number: "2", hash: "b".repeat(64), size: "12" }], "1"));
+    if (method === "GET" && url === stateUrl) return jsonResponse(200, projectStateBody());
+    if (method === "POST" && url === stateCommandsUrl) {
+      originalCommandId = String(body.command_id);
+      if (kind === "network") throw new TypeError("response lost");
+      return jsonResponse(503, { code: "DATABASE_UNAVAILABLE", detail: "unavailable" });
+    }
+    if (method === "GET") return jsonResponse(200, { items: [] });
+    throw new Error(`unexpected ${method} ${url}`);
+  });
+  const mounted = await mountWorkbench(`/tasks/${TASK_ID}?tab=artifacts`);unmount = mounted.unmount;await flush();
+  await mounted.wrapper.get(`[data-testid="artifact-version-${VERSION_ID}"]`).setValue(true);
+  if (kind === "storage") vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable"); });
+  await mounted.wrapper.get('[data-testid="artifact-select-version"]').trigger("click");await flush();
+  const posts = () => calls.filter((call) => call.method === "POST" && call.url === stateCommandsUrl);
+  if (kind === "storage") {
+    expect(posts()).toHaveLength(0);expect(mounted.wrapper.text()).toContain("未提交选择");return;
+  }
+  expect(mounted.wrapper.get('[data-testid="artifact-select-version"]').attributes("disabled")).toBeDefined();
+  expect(mounted.wrapper.get('[data-testid="artifact-select-pending"]').text()).toContain(originalCommandId);
+  await mounted.wrapper.get(`[data-testid="artifact-version-${VERSION_TWO_ID}"]`).setValue(true);
+  await mounted.wrapper.get('[data-testid="artifact-select-version"]').trigger("click");await flush();
+  expect(posts()).toHaveLength(1);expect(posts()[0]!.body.artifact_version_id).toBe(VERSION_ID);
+  expect(mounted.wrapper.get('[data-testid="artifact-select-receipt-query"]').exists()).toBe(true);
+});
+
+it.each(["wrong-command", "wrong-project", "wrong-action", "stale-state", "wrong-version", "leading-zero-wrong-version", "later-state", "valid"])("当前选用恢复核对原命令、项目、动作及状态基线：%s", async (kind) => {
+  activate(); const originalCommandId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab";
+  const key = recoveryStorageKey(recoveryScope({ baseUrl: BASE_URL, workspaceId: WORKSPACE_ID }));
+  sessionStorage.setItem(key, JSON.stringify([{ commandId: originalCommandId, commandType: "SetProjectState", sessionId: null,
+    targetKind: "TASK", targetId: TASK_ID, objectId: VERSION_ID }]));
+  const { calls } = stubFetch(async (url, method) => {
+    if (method === "GET" && url === taskUrl) return jsonResponse(200, taskDetailBody({}));
+    if (method === "GET" && url === `${taskUrl}/artifacts`) return jsonResponse(200, taskArtifactsBody([{ id: VERSION_ID, number: "1", hash: "a".repeat(64), size: "10" }], "0"));
+    if (method === "GET" && url === stateUrl) return jsonResponse(200, { ...projectStateBody([
+      { artifact_version_id: ["wrong-version", "leading-zero-wrong-version", "later-state"].includes(kind) ? VERSION_TWO_ID : VERSION_ID,
+        artifact_id: ARTIFACT_ID, version_number: "1", source_ref: "human:test" }]),
+      revision: kind === "stale-state" ? "1" : kind === "leading-zero-wrong-version" ? "02" : kind === "later-state" ? "3" : "2" });
+    if (url.endsWith(`/commands/${originalCommandId}`)) return jsonResponse(200, { command_id: kind === "wrong-command" ? "other" : originalCommandId,
+      command_type: "SetProjectState", committed_at: "2026-11-06T00:00:00Z", result: {
+        project_id: kind === "wrong-project" ? "other" : PROJECT_ID, action: kind === "wrong-action" ? "SET_PHASE" : "SELECT_ARTIFACT_VERSION", revision: "2" } });
+    if (method === "GET") return jsonResponse(200, { items: [] });
+    throw new Error(`unexpected ${method} ${url}`);
+  });
+  const mounted = await mountWorkbench(`/tasks/${TASK_ID}?tab=artifacts`);unmount = mounted.unmount;await flush(60);
+  expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  expect(calls.some((call) => call.url.endsWith(`/commands/${originalCommandId}`))).toBe(true);
+  if (kind === "valid" || kind === "later-state") {
+    expect(mounted.wrapper.text()).toContain("原选择命令已确认");
+    expect(sessionStorage.getItem(key)).not.toContain(originalCommandId);
+  } else {
+    expect(mounted.wrapper.get('[data-testid="artifact-select-pending"]').text()).toContain(originalCommandId);
+    expect(sessionStorage.getItem(key)).toContain(originalCommandId);
+  }
 });

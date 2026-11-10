@@ -1,13 +1,48 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { RelayApiError, type RelayCompletionEvidence } from "../api/relayClient";
+import { RelayApiError, type RelayApiClient, type RelayCompletionEvidence } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import ResponsiveRail from "../components/ResponsiveRail";
 import PageHeader from "../components/PageHeader";
 import FixtureNote from "../components/FixtureNote";
+import SafeMarkdown from "../components/SafeMarkdown";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import "./CompletionRecordView.css";
+
+// COMPLETION-ACCEPTED-READER-20261106：按需只读凭据绑定的版本，不查询或替换为最新版。
+function AcceptedArtifactContent({ client, versionId }: { client: RelayApiClient; versionId: string }) {
+  const regionId = useId();
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setContent(null); setError(null);
+    void client.getArtifactVersionContent(versionId).then((value) => {
+      if (active) setContent(value);
+    }).catch((caught: unknown) => {
+      if (active) setError(caught instanceof RelayApiError && [403, 404].includes(caught.problem.status)
+        ? "该版本正文当前不可读取或无权查看；不会以其他版本替代。"
+        : `正文读取失败：${describeLiveError(caught).message}`);
+    });
+    return () => { active = false; };
+  }, [client, versionId, open, retry]);
+  return <div data-testid={`completion-content-${versionId}`}>
+    <button className="text-link" type="button" aria-expanded={open} aria-controls={regionId}
+      onClick={() => { setContent(null); setError(null); setOpen((value) => !value); }}>{open ? "收起正文" : "阅读本次接受的正文"}</button>
+    {open && <div id={regionId} aria-label="本次接受版本的正文" aria-busy={content === null && error === null}>
+      <p className="helper-text">仅展示本凭据绑定版本的正文，当前任务可能已有新版本。</p>
+      {error !== null ? <><p className="action-error" role="alert">{error}</p>
+        <button className="text-link" type="button" onClick={() => setRetry((value) => value + 1)}>重新读取正文</button></>
+        : content === null ? <p role="status">正在读取确切版本正文…</p>
+          : content.length === 0 ? <p className="helper-text">该版本正文为空。</p>
+            : <SafeMarkdown source={content} />}
+    </div>}
+  </div>;
+}
 
 export default function CompletionRecordView() {
   const { id = "" } = useParams();
@@ -102,6 +137,8 @@ export default function CompletionRecordView() {
               <strong>版本 v{version.versionNumber ?? "?"}</strong>
               <small>Artifact ID：{version.artifactId ?? "未记录"} · sha256：{version.sha256 ?? "未记录"}</small>
               {version.artifactVersionId && <Link className="inline-link" to={`/artifact-versions/${version.artifactVersionId}/lineage`}>查看确切版本 {version.artifactVersionId} 的来源</Link>}
+              {version.artifactVersionId && <AcceptedArtifactContent key={`${key}:${version.artifactVersionId}`}
+                client={client} versionId={version.artifactVersionId} />}
             </>}
           </li>)}</ul> : <p className="helper-text">本次完成未关联产物版本。</p>}
         </section>

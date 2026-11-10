@@ -75,6 +75,7 @@ describe("P07 Review Inbox", () => {
     expect(filtered.wrapper.get(".review-list").text()).toContain("当前类型没有待处理请求");
     expect(filtered.wrapper.get('[aria-label="所选待审请求详情"]').text()).toContain("请核对产物中的结论");
     expect(filtered.wrapper.find('[data-testid="review-detail-empty-state"]').exists()).toBe(false);
+    expect(filtered.wrapper.get('[data-testid="review-return-run"]').attributes("href")).toBe(`/runs/${item.run_id}`);
   });
 
   it("待处理右栏区分加载、读取失败与空列表，不把失败显示成成功空态", async () => {
@@ -839,5 +840,49 @@ describe("P07 Review Inbox", () => {
     await mounted.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
     await flush();
     expect(posts).toBe(1);
+  });
+});
+
+
+describe("同次执行待办接续", () => {
+  const nextId = "66666666-6666-4666-8666-666666666666";
+  function installQueue(status = "DECIDED", extra: Record<string, unknown> = {}) {
+    activate();
+    const current = review(status);
+    const next = { ...review(), id: nextId, ...extra };
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") { posts.push(url); throw new Error("navigation must not submit"); }
+      if (url === `${reviewUrl}?status=OPEN`) return response(200, { items: [
+        { ...review(), id: "77777777-7777-4777-8777-777777777777", run_id: "88888888-8888-4888-8888-888888888888" },
+        { ...review(), id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expires_at: "2020-01-01T00:00:00.000Z" }, next] });
+      if (url === `${reviewUrl}/${reviewId}`) return response(200, current);
+      if (url === `${reviewUrl}/${nextId}`) return response(200, next);
+      if (url.endsWith("/artifacts")) return response(200, { items: [], current_accepted_version_ids: [] });
+      if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
+      if (url.endsWith("/tasks?scope=all") || url.endsWith("/projects?status=active")) return response(200, { items: [], next_cursor: null });
+      throw new Error(`unexpected ${url}`);
+    }));
+    return posts;
+  }
+  it("读回已处理后直达同 Run 有效请求，保持筛选且不提交决定", async () => {
+    const posts = installQueue();
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}&kind=CRITERION`); unmount = mounted.unmount; await flush();
+    const next = mounted.wrapper.get('[data-testid="review-next-in-run"]');
+    expect(next.attributes("href")).toBe(`/reviews?id=${nextId}&kind=CRITERION`);
+    await next.trigger("click"); await flush();
+    expect(mounted.wrapper.find('[data-testid="review-next-in-run"]').exists()).toBe(false);
+    expect(mounted.wrapper.get('[aria-label="所选待审请求详情"]').text()).toContain(nextId);
+    expect(posts).toEqual([]);
+  });
+  it.each([
+    ["OPEN", {}], ["DECIDED", { run_id: null }],
+    ["DECIDED", { kind: "ACTION_APPROVAL" }],
+    ["DECIDED", { task_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
+  ])("不为当前状态 %s 或无匹配候选提供接续", async (status, extra) => {
+    installQueue(status, extra);
+    const mounted = await mountWorkbench(`/reviews?id=${reviewId}&kind=CRITERION`); unmount = mounted.unmount; await flush();
+    expect(mounted.wrapper.find('[data-testid="review-next-in-run"]').exists()).toBe(false);
   });
 });

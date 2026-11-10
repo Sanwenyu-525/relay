@@ -6,7 +6,7 @@ import type {
 } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { toDecimalString } from '../shared/decimal.js';
-import { resourceNotFound } from './domain-error.js';
+import { resourceNotFound, validationFailed } from './domain-error.js';
 import { requireWorkspaceVisible } from './guards.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 import { listRunReviews } from './review-queries.js';
@@ -26,6 +26,28 @@ export interface RunContractDto {
   readonly execution_config_version: string;
   readonly acceptance_revision: string;
   readonly contract_hash: string;
+}
+
+/** TASK-RUN-HISTORY-20261106：历史列表不授予执行权，不暴露执行配置或结果正文。 */
+export async function listTaskRunHistory(db: DbExecutor, workspaceId: string, taskId: string,
+  limit = 20, cursor?: string) {
+  await requireWorkspaceVisible(db, workspaceId);
+  const repositories = createRepositories(db);
+  const task = await repositories.tasks.readTask(taskId);
+  if (task === undefined || task.workspace_id !== workspaceId) throw resourceNotFound('Task');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw validationFailed([{ field: 'limit', message: 'must be 1..100' }]);
+  if (cursor !== undefined) {
+    const previous = await repositories.runs.readRun(cursor);
+    if (previous === undefined || previous.workspace_id !== workspaceId || previous.task_id !== taskId)
+      throw validationFailed([{ field: 'cursor', message: 'cursor does not belong to this task' }]);
+  }
+  const rows = await repositories.runs.listTaskRunPage(workspaceId, taskId, limit + 1, cursor);
+  const page = rows.slice(0, limit);
+  return { items: page.map((run) => ({ id: run.id, task_id: run.task_id, status: run.status,
+    revision: toDecimalString(run.revision), retry_of_run_id: run.retry_of_run_id,
+    created_at: run.created_at.toISOString(), terminal_at: run.terminal_at?.toISOString() ?? null })),
+    next_cursor: rows.length > limit ? page.at(-1)!.id : null };
 }
 
 export interface RunStepDto {

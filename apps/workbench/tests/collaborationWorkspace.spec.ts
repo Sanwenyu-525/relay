@@ -2852,3 +2852,37 @@ describe("普通会话工具面板的项目身份", () => {
     } finally { view.unmount(); }
   });
 });
+
+
+it.each([false, true])("AI 已持权的协作页由原委托 Owner 核对确切 Run，不抢领或猜成功（绑定正确=%s）", async (matching) => {
+  activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+  const commandId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const originalRunId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const key = `relay-agent-chat-pending:http://127.0.0.1:8787:${workspaceId}`;
+  sessionStorage.setItem(key, JSON.stringify([{ commandId, commandType: "DelegateTask", sessionId: null, targetKind: "TASK", targetId: taskId }]));
+  const read = router({}); const queriedRuns: string[] = []; const writes: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const path = String(input);
+    if (init?.method === "POST") writes.push(path);
+    if (path.endsWith(`/commands/${commandId}`)) return response({ command_id: commandId, command_type: "DelegateTask",
+      committed_at: "2026-11-06T00:00:00Z", result: { task_id: taskId, run_id: originalRunId, task_revision: "2", run_revision: "0", status: "CREATED", retry_of_run_id: null } });
+    if (path.endsWith(`/runs/${originalRunId}`)) {
+      queriedRuns.push(originalRunId);
+      return response(run("CANCELLED", { id: originalRunId, task_id: matching ? taskId : "other-task" }));
+    }
+    return read(input, init);
+  }));
+  const view = await mountWorkbench(`/agent?work=${taskId}`);
+  try {
+    await flush();
+    expect(queriedRuns.length).toBeGreaterThan(0);
+    expect(queriedRuns.every((id) => id === originalRunId)).toBe(true);
+    expect(queriedRuns.length).toBeLessThanOrEqual(4);
+    expect(sessionStorage.getItem(key)?.includes(commandId)).toBe(!matching);
+    expect(writes).toEqual([]);
+    if (!matching) {
+      expect(view.wrapper.get('[data-testid="delegate-command-id"]').text()).toContain(commandId);
+      expect(view.wrapper.find('[data-testid="task-delegate"]').exists()).toBe(false);
+    }
+  } finally { view.unmount(); }
+});

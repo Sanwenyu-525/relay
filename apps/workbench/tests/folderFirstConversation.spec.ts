@@ -341,6 +341,44 @@ describe("文件夹入口与对话直接执行", () => {
     } finally { view.unmount(); }
   });
 
+  it("首条消息提交后地址恢复同一会话，提交在途时保留新对话种子", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    const posts: { path: string; body: unknown }[] = [];
+    const projected = sessionProjection({ working_resource_id: "res-1",
+      context: { project_goals: [], working_directory: {
+        resource_id: "res-1", canonical_root: root, source: "USER_PICKED" } } });
+    const base = router({ sessions: () => response({ items: [projected] }),
+      sessionRead: () => response(projected) }, posts);
+    let releaseMessage!: () => void;
+    const messageGate = new Promise<void>((resolve) => { releaseMessage = resolve; });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST" && String(input).endsWith(`/assist-sessions/${sessionId}/messages`)) await messageGate;
+      return base(String(input), init);
+    });
+    const view = await mountWorkbench(`/agent?new=refresh-folder&dir=${encodeURIComponent(root)}`);
+    let restored: Awaited<ReturnType<typeof mountWorkbench>> | undefined;
+    try {
+      await flush(); await flush();
+      await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("帮我把这个文件的内容改成 after");
+      await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
+      await flush(80); await flush();
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+      expect(view.router.currentRoute.value.query.new).toBe("refresh-folder");
+      releaseMessage();
+      await flush(80); await flush(); await flush(80); await flush();
+      const query = view.router.currentRoute.value.query;
+      expect(query.session).toBe(sessionId);
+      expect(query.new).toBeUndefined();
+      expect(query.dir).toBeUndefined();
+      view.unmount();
+      restored = await mountWorkbench(`/agent?session=${sessionId}`);
+      await flush(); await flush();
+      expect(restored.wrapper.find('[data-testid="assist-first-welcome"]').exists()).toBe(false);
+      expect(restored.wrapper.get('[data-testid="assist-transcript"]').text()).toContain("帮我把这个文件的内容改成 after");
+      expect(posts.filter((post) => post.path === `${prefix}/assist-sessions`)).toHaveLength(1);
+    } finally { releaseMessage(); restored?.unmount(); view.unmount(); }
+  });
+
   it("目录没打开成功时顶栏跟着读「未就绪」，不与细条的告警互相否定", async () => {
     activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
     const posts: { path: string; body: unknown }[] = [];
@@ -1036,7 +1074,7 @@ describe("文件夹入口与对话直接执行", () => {
     // 回执与原命令不匹配时必须停在未决状态，不猜结果、不宣称已完成。
     const posts2: { path: string; body: unknown }[] = [];
     vi.stubGlobal("fetch", router({ loseMessageResponse: true }, posts2));
-    const other = await mountWorkbench("/agent");
+    const other = await mountWorkbench("/agent?new=unresolved-first");
     try {
       await openFolderAndType(other, "帮我把这个文件的内容改成 after");
       await other.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
@@ -1053,6 +1091,8 @@ describe("文件夹入口与对话直接执行", () => {
       await flush();
 
       expect(other.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(true);
+      expect(other.router.currentRoute.value.query.new).toBe("unresolved-first");
+      expect(other.router.currentRoute.value.query.session).toBeUndefined();
       expect(other.wrapper.text()).not.toContain("已完成");
     } finally { other.unmount(); }
   }, 20_000);
@@ -1065,7 +1105,7 @@ describe("文件夹入口与对话直接执行", () => {
         retryable: false, retry_action: "NONE",
         field_errors: [{ field: "attachment_ids", message: "当前聊天模型不支持图片输入，不能发送图片附件。" }] }, 422)
     }, posts));
-    const view = await mountWorkbench("/agent");
+    const view = await mountWorkbench("/agent?new=rejected-first");
     try {
       await openFolderAndType(view, "你好");
       await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
@@ -1074,6 +1114,8 @@ describe("文件夹入口与对话直接执行", () => {
 
       // 明确拒绝说明命令没有落库：不得保留 command_id、核对入口或「结果待核对」结论。
       expect(view.wrapper.find('[data-testid="assist-first-pending"]').exists()).toBe(false);
+      expect(view.router.currentRoute.value.query.new).toBe("rejected-first");
+      expect(view.router.currentRoute.value.query.session).toBeUndefined();
       expect(document.querySelector('[data-testid="assist-first-receipt"]')).toBeNull();
       expect(view.wrapper.text()).not.toContain("消息结果待核对");
       // 明确失败没有可核对的结果：原因贴在失败消息上（会话面板未挂载时才回落到 Notice）。

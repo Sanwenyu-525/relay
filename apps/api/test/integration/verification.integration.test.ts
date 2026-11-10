@@ -1483,6 +1483,24 @@ test('P07: REQUEST_CHANGES consumes one correction round and does not alter the 
   assert.equal(await countArtifactVersions(fixture.taskId), 2n);
 });
 
+test('P07: correction generation has its own bounded schema retry allowance', async () => {
+  const fixture = await setupDelegatedRun([{ criterionId: 'human', statement: '人工确认', required: true, method: 'HUMAN' }]);
+  await advanceToVerifying(fixture);
+  await expectStepSucceeded(await advance(fixture), 'VERIFY');
+  const review = (await listInboxReviews(app.db, fixture.workspaceId)).items[0]!;
+  await resolveReview(app.db, { workspaceId: fixture.workspaceId, reviewId: review.id,
+    commandId: randomUUID(), expectedRevision: review.revision, targetHash: review.target_hash,
+    decision: 'REQUEST_CHANGES', feedback: '补充说明后重新提交完整 Markdown。' });
+  await expectStepSucceeded(await advance(fixture, 'SCHEMA_INVALID'), 'BUILD_CONTEXT');
+  const first = await advance(fixture);
+  assert.equal(first.status, 'RETRYABLE', 'prior successful generation must not consume the correction round retry');
+  assert.equal((await readRun(fixture.runId)).status, 'RUNNING');
+  const second = await advance(fixture);
+  assert.equal(second.status, 'RUN_FAILED', 'two schema failures in this round still stop execution');
+  assert.equal((await readRun(fixture.runId)).status, 'FAILED');
+  assert.equal(await countArtifactVersions(fixture.taskId), 1n, 'invalid correction never becomes an artifact');
+});
+
 test('P07: a bounded budget decision persists and VERIFY reads the new cap', async () => {
   const fixture = await setupDelegatedRun([{ criterionId: 'semantic', statement: '来源支持论断', required: true, method: 'SEMANTIC' }],
     {}, { testOnlyAllowFakeSemanticChecker: true });

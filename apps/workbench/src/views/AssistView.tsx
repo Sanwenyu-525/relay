@@ -22,6 +22,7 @@ import { formatTokenUsageDetail, formatTokenUsageLine, legacyTokenUsage,
 import { generationStageDiagnostics, generationStageView } from "../lib/generationStage";
 import { RELAY_REQUIRED_CONTEXT_AGENT } from "../api/resources/requiredContext";
 import AssistSkillOutput from "../components/AssistSkillOutput";
+import AssistRecallUndo from "../components/AssistRecallUndo";
 import ModelSelector from "../components/ModelSelector";
 import ContextUsagePanel from "../components/ContextUsagePanel";
 import ContextRiskNotice from "../components/ContextRiskNotice";
@@ -49,6 +50,7 @@ import { firstSendPayload, riskScopeSignature, type RiskSendScope,
   type SendSnapshot } from "../lib/sendRiskGate";
 import { useSendRiskGate } from "../lib/useSendRiskGate";
 import ExecutionTrajectorySummary from "../components/ExecutionTrajectorySummary";
+import ConversationExecutionResult from "../components/ConversationExecutionResult";
 import ConversationDiffSummary from "../components/ConversationDiffSummary";
 import { RecentActivitySummary } from "../components/RecentActivitySummary";
 import { PendingWorkStrip } from "../components/PendingWorkStrip";
@@ -3684,17 +3686,18 @@ const messageStatusLabels: Record<RelayAssistMessage["status"], string> = {
 
 /** 0132：撤回回执里的逐文件状态；未知枚举原样回显，不猜语义。 */
 const recallFileStatusLabels: Record<string, string> = {
-  PLANNED: "计划中", RESTORED: "已恢复", ALREADY_RESTORED: "本来已是发送前状态",
+  PLANNED: "计划中", RESTORED: "已恢复", ALREADY_RESTORED: "已是恢复目标状态",
   CONFLICT: "冲突", UNAVAILABLE: "不可恢复", FAILED: "恢复失败",
   SKIPPED: "未执行", UNCERTAIN: "结果未决"
 };
 
+// UI-RECALL-RESTORE-TARGET-20261105：0159 新消息使用首写前像，摘要不再承诺发送前快照。
 function recallSummaryText(recall: RelayAssistMessageRecallSummary): string {
   switch (recall.status) {
     case "RUNNING": return `正在回退文件（${recall.restoredFiles}/${recall.plannedFiles}）。`;
     case "COMPLETED": return recall.plannedFiles === 0
       ? "已撤回；这条消息之后没有需要回退的文件修改。"
-      : `已回退 ${recall.restoredFiles} 个文件到该轮发送前。`;
+      : `已回退 ${recall.restoredFiles} 个文件。`;
     case "PARTIAL": return `撤回已生效：${recall.restoredFiles}/${recall.plannedFiles} 个文件已回退，`
       + `${recall.skippedFiles} 个未恢复；逐项原因见回执。`;
     case "FAILED": return `撤回未生效：${recall.skippedFiles} 个文件未恢复，消息未标记撤回；逐项原因见回执。`;
@@ -3705,7 +3708,9 @@ function recallSummaryText(recall: RelayAssistMessageRecallSummary): string {
  * 0132：撤回回执。摘要随消息列表读回；逐文件结果按需读取，不把每条历史消息都变成
  * 一次额外查询。错误显示在同一层，不弹窗。
  */
-function AssistRecallNote({ recall, receipt, reading, busy, error, onRead, onResume }: {
+function AssistRecallNote({ client, recall, receipt, reading, busy, error, onRead, onResume,
+  undoEligible, disabledReason }: {
+  client: RelayApiClient; undoEligible: boolean; disabledReason: string | null;
   recall: RelayAssistMessageRecallSummary; receipt: RelayAssistMessageRecall | null;
   reading: boolean; busy: boolean; error: string | null;
   onRead: () => void; onResume: () => void;
@@ -3722,7 +3727,7 @@ function AssistRecallNote({ recall, receipt, reading, busy, error, onRead, onRes
           {receipt.files.map((file) => <li key={file.path} data-status={file.status}>
             <code>{file.path}</code>
             <span>{recallFileStatusLabels[file.status] ?? file.status}</span>
-            <span className="helper-text">发送前{file.baseline === "PRESENT" ? "存在" : "不存在"}
+            <span className="helper-text">恢复目标：文件{file.baseline === "PRESENT" ? "存在" : "不存在"}
               {file.reason ? ` · ${file.reason}` : ""}</span>
           </li>)}
         </ul>
@@ -3736,6 +3741,10 @@ function AssistRecallNote({ recall, receipt, reading, busy, error, onRead, onRes
         : <button className="text-link" type="button" disabled={reading} onClick={onRead}>
           {reading ? "正在读取回执…" : "查看逐文件回执"}</button>}
     {error !== null && <p className="action-error" role="alert">{error}</p>}
+    {/* UI-RECALL-UNDO-20261105：只对取得原回执的成功回退读取单层撤销状态。 */}
+    {receipt !== null && recall.status === "COMPLETED" && recall.restoredFiles > 0 &&
+      <AssistRecallUndo key={recall.id} client={client} recallId={recall.id}
+        eligible={undoEligible} disabledReason={busy ? "正在回退文件，等它结算后再撤销。" : disabledReason} />}
   </div>;
 }
 
@@ -4198,7 +4207,7 @@ function TokenUsageLine({ usage, phase, live = false, testId }: {
 // SCENARIO-LAB-EXPORT-ANCHOR：AI 回复场景实验室直接挂载这一行，产品与演示共用同一个消息行 Owner。
 export function AssistMessageRow({ client, target, message, activity, preview, previewError, onRetryPreview, settling,
   handover, onVerifyFinal, writeBlocked, candidates, personaLabel,
-  recallReceipt, recallBusy, recallReading, recallError, recallDisabledReason, onRecall, onReadRecall }: { client: RelayApiClient;
+  recallReceipt, recallBusy, recallReading, recallError, recallDisabledReason, recallUndoEligible, onRecall, onReadRecall }: { client: RelayApiClient;
   /** 助手档显示冻结人设（名字 · 修订），普通档为 null，仍显示「AI」。 */
   personaLabel: string | null;
   target: AssistTarget | null; message: RelayAssistMessage; writeBlocked: boolean;
@@ -4217,6 +4226,7 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
   recallReceipt: RelayAssistMessageRecall | null;
   recallBusy: boolean; recallReading: boolean; recallError: string | null;
   recallDisabledReason: string | null;
+  recallUndoEligible?: boolean;
   onRecall: () => void; onReadRecall: () => void;
 }) {
   const user = message.role === "USER";
@@ -4234,7 +4244,7 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
   /* 0132 悬停提示：动作说明与禁用原因共用这一处出口（2026-10-24 用户指令：说明句改成 tooltip）。
      提示挂在外层 span 上而不是按钮上——disabled 的 <button> 不派发鼠标事件，挂在按钮身上时
      「为什么现在点不了」恰好会在最需要的时候看不到。 */
-  const recallHint = recallDisabledReason ?? "这会将改动回滚到这条消息之前";
+  const recallHint = recallDisabledReason ?? "按已保存的恢复点回退相关文件";
   const { tooltipHandlers: recallTooltipHandlers, tooltipNode: recallTooltipNode } =
     usePathTooltip(() => (canRecall ? recallHint : null), "assist-recall-tooltip", { arrow: true });
   /* 取消意图要在行内一直可读：PENDING 已不标状态词，三点又在取消中隐藏，
@@ -4320,7 +4330,8 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
     {!user && !withdrawn && activity !== null &&
       <MessageExecutionStatus activity={activity} animate={!toolActivityOwnsProgress} />}
     {/* 0132：回执只挂在被撤回的那条用户消息上；直接回复行只标「已撤回」，不重复同一份回执。 */}
-    {message.recall !== null && user && <AssistRecallNote recall={message.recall}
+    {message.recall !== null && user && <AssistRecallNote client={client} recall={message.recall}
+      undoEligible={recallUndoEligible === true} disabledReason={recallDisabledReason}
       receipt={recallReceipt} reading={recallReading} busy={recallBusy}
       error={recallError} onRead={onReadRecall} onResume={onRecall} />}
     {withdrawn && message.recall === null &&
@@ -6599,7 +6610,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     ReadonlyMap<string, RelayConversationExecution>>(() => new Map());
   useEffect(() => {
     let active = true;
-    if (target === null || readonlyMode) return () => { active = false; };
+    // CHAT-EXECUTION-RESULT-20261105：目录优先会话没有显式 Task target，也要按原消息读取执行归属。
+    if (readonlyMode) return () => { active = false; };
     void client.getConversationExecutionRequests(session.id).then((requests) => {
       if (!active) return;
       // 同一原消息只保留最新一次执行：服务端按「新 → 旧」返回，后写覆盖先写会留下
@@ -6631,7 +6643,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       if (active) setExecutionSummaries(new Map());
     });
     return () => { active = false; };
-  }, [client, session.id, target?.id, settledMessageKey, projectionReload, confirmedFirstMessageCommandId]);
+  }, [client, session.id, target?.id, readonlyMode, settledMessageKey, projectionReload, confirmedFirstMessageCommandId]);
 
   // 空会话首屏按会话归属取「待你处理」：项目会话看项目，目录会话看未读，其余看全局。
   const pendingEmptyContext: PendingContext = session.projectId !== null
@@ -6845,10 +6857,16 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         recallReading={recallReadingId === (message.recall?.messageId ?? message.id)}
         recallError={recallErrors[message.id] ?? null}
         recallDisabledReason={recallDisabledReason}
+        recallUndoEligible={message.recall?.status === "COMPLETED" && !messages?.some((item) =>
+          item.recall?.status === "COMPLETED" && item.recall.id !== message.recall?.id
+          && (item.recall.completedAt ?? "") > (message.recall?.completedAt ?? ""))}
         onRecall={() => void recallMessage(message)}
         onReadRecall={() => void readRecallReceipt(message)} />
         {learningMode && message.role === "ASSISTANT" && learningState?.rounds.find((round) => round.messageId === message.id) &&
           <p className="receipt-message" data-testid="learning-round-receipt">{learningRoundText(learningState.rounds.find((round) => round.messageId === message.id)!)}</p>}
+        {message.role === "USER" && executionSummaries.get(message.id)?.taskId &&
+          executionSummaries.get(message.id)?.runId && <ConversationExecutionResult client={client}
+            taskId={executionSummaries.get(message.id)!.taskId!} runId={executionSummaries.get(message.id)!.runId!} />}
         {message.role === "USER" && (executionSummaries.get(message.id)?.runId ?? null) !== null && client &&
           <ExecutionTrajectorySummary client={client}
             runId={(executionSummaries.get(message.id)?.runId ?? "") as string}

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { flush, mountWorkbench } from "./mountApp";
 import { RelayApiClient } from "../src/api/relayClient";
+import { createElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+import RunTracePanel from "../src/components/RunTracePanel";
+import { mountReact } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -19,6 +23,22 @@ afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi
 function response(body: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
+
+it.each(["CANCELLED", "PAUSED", "RUNNING"])("%s 下的未结算模型调用保留真实状态与未知用量", async (status) => {
+  const data = trace();
+  vi.stubGlobal("fetch", vi.fn(async () => response({ ...data, status, model_calls: [
+    { ...data.model_calls[0], status: "STARTED", usage_input_tokens: null, usage_output_tokens: null, settled_at: null }
+  ] })));
+  const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-token" });
+  const mounted = await mountReact(createElement(MemoryRouter, {},
+    createElement(RunTracePanel, { client, runId, taskId, runRevision: "1" })));
+  unmount = mounted.unmount; await flush();
+  const panel = mounted.wrapper;
+  expect(panel.text()).toContain("Token 输入 未知 / 输出 未知");
+  expect(panel.text()).toContain("STARTED");
+  if (status === "RUNNING") expect(panel.text()).not.toContain("调用结果未知");
+  else expect(panel.text()).toContain("调用结果未知");
+});
 function task() { return { id: taskId, project_id: null, title: "可追溯任务", status: "IN_PROGRESS", mode: "DELEGATE_AI",
   revision: "4", executor: { kind: "AI", run_id: runId, ownership_epoch: "1" }, current_completion_id: null,
   waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],

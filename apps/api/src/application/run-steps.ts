@@ -1472,6 +1472,12 @@ async function executeDraft(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
+  // DRAFT-CORRECTION-RETRY-20261105：Attempt 编号保留连续身份，格式重试只计本轮。
+  // 上次成功的 DRAFT 是新一轮的边界，不能把它算成修正轮已用的失败重试。
+  const priorSuccess = (await repositories.runs.listAttempts(input.step.id))
+    .findLast((attempt) => attempt.status === 'SUCCEEDED' && attempt.attempt_number < input.attemptNumber);
+  const generationAttemptNumber = input.attemptNumber - (priorSuccess?.attempt_number ?? 0n);
+
   switch (result.kind) {
     case 'CANCELLED':
       return { outcome: 'FAILED', reason: 'CANCELLED', evidence: { kind: 'CANCELLED' } };
@@ -1485,7 +1491,7 @@ async function executeDraft(
       };
 
     case 'SCHEMA_INVALID':
-      return schemaInvalidOutcome(input.attemptNumber, result.reason, result.raw);
+      return schemaInvalidOutcome(generationAttemptNumber, result.reason, result.raw);
 
     case 'CONTENT': {
       // 模型输出只变成受约束结果：CONTENT 仍要过结构校验，非法结构按可重试的 schema 失败处理。
@@ -1493,7 +1499,7 @@ async function executeDraft(
 
       if (!validation.ok) {
         const reason = validation.issues.map((issue) => issue.detail).join(' ');
-        return schemaInvalidOutcome(input.attemptNumber, reason, result.content);
+        return schemaInvalidOutcome(generationAttemptNumber, reason, result.content);
       }
 
       return {

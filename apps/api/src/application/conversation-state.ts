@@ -1153,13 +1153,24 @@ export type MainLoopStateCandidate =
  * 也照样落成带澄清问题的请求行（`NEEDS_DECISION`），用户因此还能看到该决定什么。多加
  * 这道闸只会让需要人工决定的情况静默消失——那是信息损失，不是保护。
  */
-export function readMainLoopStateCandidate(raw: unknown): MainLoopStateCandidate {
+export function readMainLoopStateCandidate(raw: unknown, executionTaskTitle?: string): MainLoopStateCandidate {
   if (raw === undefined || raw === null) return { kind: 'NONE' };
   // 复用既有读法：把这段字段当成一次解释输出读一遍，连不合法输入也走同一条收口路径。
   const outcome = readStateMaintenanceInterpretation({ kind: 'CONTENT',
     content: JSON.stringify(raw), providerRequestId: '',
     usage: { inputTokens: null, outputTokens: null, cacheReadTokens: null,
       cacheCreationTokens: null } });
+  // MAIN-LOOP-SINGLE-TASK-20261105：同一信封的执行 Owner 已负责创建该任务，维护通道不再建同名副本。
+  // 先过原验证；有人工范围决定时保留完整候选，避免改变 blocked_changes 的序号含义。
+  if (executionTaskTitle !== undefined && outcome.decision === 'MAINTAIN' &&
+      outcome.status === 'READY' && outcome.decisionRequired === null) {
+    const changes = outcome.changes.filter((change) => change.changeKind !== 'CREATE_TASK'
+      || change.payload.title !== executionTaskTitle.trim());
+    if (changes.length !== outcome.changes.length) {
+      if (changes.length === 0) return { kind: 'NONE' };
+      return readMainLoopStateCandidate({ decision: 'MAINTAIN', changes: changes.map((change) => change.payload) });
+    }
+  }
   return { kind: 'OUTCOME', outcome };
 }
 

@@ -23,6 +23,8 @@ $helperRoot = Join-Path $appsRoot 'file-io-helper'
 $helperExe = Join-Path $helperRoot 'target\release\relay-file-io-helper.exe'
 $computerRoot = Join-Path $appsRoot 'computer-runtime'
 $computerExe = Join-Path $computerRoot 'target\release\relay-computer-runtime.exe'
+$credentialRoot = Join-Path $appsRoot 'credential-helper'
+$credentialExe = Join-Path $credentialRoot 'target\release\relay-credential-helper.exe'
 $extensionRoot = Join-Path $appsRoot 'browser-extension'
 $extensionFiles = @('manifest.json', 'background.js', 'options.html', 'options.js')
 $cargoReleaseRoot = Join-Path $tauriRoot 'target\release'
@@ -52,7 +54,7 @@ function Invoke-Pnpm {
 
 function Get-BuildInputFingerprint {
   $inputs = @()
-  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\api\skills\builtin\gh', 'apps\workbench\src', 'apps\workbench\public\licenses', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src', 'apps\computer-runtime\src')) {
+  foreach ($directory in @('apps\api\src', 'apps\api\migrations', 'apps\api\skills\builtin\gh', 'apps\workbench\src', 'apps\workbench\public\licenses', 'apps\desktop\src-tauri\src', 'apps\desktop\scripts', 'apps\file-io-helper\src', 'apps\computer-runtime\src', 'apps\credential-helper\src')) {
     $inputs += @(Get-ChildItem -LiteralPath (Join-Path $workspaceRoot $directory) -Recurse -File)
   }
   foreach ($file in $extensionFiles) { $inputs += Get-Item -LiteralPath (Join-Path $extensionRoot $file) }
@@ -66,7 +68,8 @@ function Get-BuildInputFingerprint {
     'apps\desktop\src-tauri\capabilities\default.json', 'apps\desktop\src-tauri\icons\icon.ico',
     'scripts\verify-desktop-maintenance-capability.mjs',
     'apps\file-io-helper\Cargo.toml', 'apps\file-io-helper\Cargo.lock',
-    'apps\computer-runtime\Cargo.toml', 'apps\computer-runtime\Cargo.lock'
+    'apps\computer-runtime\Cargo.toml', 'apps\computer-runtime\Cargo.lock',
+    'apps\credential-helper\Cargo.toml', 'apps\credential-helper\Cargo.lock'
   )) { $inputs += Get-Item -LiteralPath (Join-Path $workspaceRoot $relative) }
   $lines = foreach ($file in @($inputs | Sort-Object FullName)) {
     "$($file.FullName)|$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)"
@@ -236,6 +239,11 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $computerExe -PathType 
   throw 'The Windows computer runtime build failed'
 }
 Copy-Item -LiteralPath $computerExe -Destination (Join-Path $resourceRoot 'relay-computer-runtime.exe') -Force
+& cargo build --release --locked --manifest-path (Join-Path $credentialRoot 'Cargo.toml')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $credentialExe -PathType Leaf)) {
+  throw 'The Windows credential helper build failed'
+}
+Copy-Item -LiteralPath $credentialExe -Destination (Join-Path $resourceRoot 'relay-credential-helper.exe') -Force
 $extensionStage = Join-Path $resourceRoot 'browser-extension'
 New-Item -ItemType Directory -Path $extensionStage -Force | Out-Null
 foreach ($file in $extensionFiles) {
@@ -250,7 +258,7 @@ if ((Get-BuildInputFingerprint) -ne $buildInputFingerprint) {
 }
 
 $compiledExe = Join-Path $cargoReleaseRoot 'relay-desktop.exe'
-foreach ($required in @($compiledExe, (Join-Path $cargoReleaseRoot 'node.exe'), (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe'), (Join-Path $cargoReleaseRoot 'api\dist\src\main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\main.js'))) {
+foreach ($required in @($compiledExe, (Join-Path $cargoReleaseRoot 'node.exe'), (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe'), (Join-Path $cargoReleaseRoot 'relay-credential-helper.exe'), (Join-Path $cargoReleaseRoot 'api\dist\src\main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $cargoReleaseRoot 'api\dist\src\worker\main.js'))) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Tauri build output is incomplete: $required" }
 }
 if (Test-Path -LiteralPath $releaseRoot) {
@@ -269,16 +277,17 @@ Copy-Item -LiteralPath $compiledExe -Destination $exe
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'node.exe') -Destination (Join-Path $releaseRoot 'node.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-file-io-helper.exe') -Destination (Join-Path $releaseRoot 'relay-file-io-helper.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-computer-runtime.exe') -Destination (Join-Path $releaseRoot 'relay-computer-runtime.exe')
+Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'relay-credential-helper.exe') -Destination (Join-Path $releaseRoot 'relay-credential-helper.exe')
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'browser-extension') -Destination $releaseRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $cargoReleaseRoot 'api') -Destination $releaseRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $workbenchRoot 'dist\licenses') -Destination $releaseRoot -Recurse
 
 $releaseEntries = @(Get-ChildItem -LiteralPath $releaseRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
-if (($releaseEntries -join '|') -ne (@('api', 'browser-extension', 'licenses', 'node.exe', 'relay-computer-runtime.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
+if (($releaseEntries -join '|') -ne (@('api', 'browser-extension', 'licenses', 'node.exe', 'relay-computer-runtime.exe', 'relay-credential-helper.exe', 'relay-desktop.exe', 'relay-file-io-helper.exe') -join '|')) {
   throw "Final release contains unexpected top-level entries: $($releaseEntries -join ', ')"
 }
 
-foreach ($required in @($exe, (Join-Path $releaseRoot 'node.exe'), (Join-Path $releaseRoot 'relay-file-io-helper.exe'), (Join-Path $releaseRoot 'api\dist\src\main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\main.js'), (Join-Path $releaseRoot 'api\migrations\0001_v001_human_core.sql'))) {
+foreach ($required in @($exe, (Join-Path $releaseRoot 'node.exe'), (Join-Path $releaseRoot 'relay-file-io-helper.exe'), (Join-Path $releaseRoot 'relay-credential-helper.exe'), (Join-Path $releaseRoot 'api\dist\src\main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\supervisor-main.js'), (Join-Path $releaseRoot 'api\dist\src\worker\main.js'), (Join-Path $releaseRoot 'api\migrations\0001_v001_human_core.sql'))) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release package is incomplete: $required" }
 }
 if (Test-Path -LiteralPath (Join-Path $releaseRoot 'api\.env')) { throw 'Release package includes a dotenv file' }
@@ -321,13 +330,14 @@ $sourceHashes['desktop'] = Get-FileHashes $desktopRoot @('src-tauri\src', 'scrip
 $sourceHashes['api'] = Get-FileHashes (Join-Path $appsRoot 'api') @('src', 'migrations') @('package.json', 'tsconfig.json')
 $sourceHashes['file_io_helper'] = Get-FileHashes $helperRoot @('src') @('Cargo.toml', 'Cargo.lock')
 $sourceHashes['computer_runtime'] = Get-FileHashes $computerRoot @('src') @('Cargo.toml', 'Cargo.lock')
+$sourceHashes['credential_helper'] = Get-FileHashes $credentialRoot @('src') @('Cargo.toml', 'Cargo.lock')
 $sourceHashes['browser_extension'] = Get-FileHashes $extensionRoot @() $extensionFiles
 $sourceHashes['workbench'] = Get-FileHashes $workbenchRoot @('src', 'public\licenses') @('package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'index.html')
 $sourceHashes['workspace_lock'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['workspace_manifest'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'pnpm-workspace.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['design_tokens'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'docs\frontend\design-tokens.json') -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceHashes['maintenance_capability_verifier'] = (Get-FileHash -LiteralPath (Join-Path $workspaceRoot 'scripts\verify-desktop-maintenance-capability.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
-$resourceHashes = Get-FileHashes $releaseRoot @('api', 'browser-extension', 'licenses') @('node.exe', 'relay-file-io-helper.exe', 'relay-computer-runtime.exe')
+$resourceHashes = Get-FileHashes $releaseRoot @('api', 'browser-extension', 'licenses') @('node.exe', 'relay-file-io-helper.exe', 'relay-computer-runtime.exe', 'relay-credential-helper.exe')
 
 # A legacy EXE can ignore --maintenance-session and open the normal desktop.
 # Check stable output markers and the invalid-argument CLI path, never a valid start/hold session.
@@ -380,6 +390,12 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -En
 # actually installed EXE (maintenance.js seal-install). This step only renders and packs.
 $installerManifest = Join-Path $resourceRoot 'desktop-build-manifest.json'
 Copy-Item -LiteralPath $manifestPath -Destination $installerManifest -Force
+# The manifest binds the licenses/ directory (font OFL texts shipped in the directory
+# package); the NSIS payload must carry the same files or installed-package verification
+# fails on a missing licenses directory.
+$installerLicenses = Join-Path $resourceRoot 'licenses'
+if (Test-Path -LiteralPath $installerLicenses) { Remove-Item -LiteralPath $installerLicenses -Recurse -Force }
+Copy-Item -LiteralPath (Join-Path $workbenchRoot 'dist\licenses') -Destination $installerLicenses -Recurse
 $installerConfig = Join-Path $tauriRoot 'tauri.installer.conf.json'
 Invoke-Pnpm $desktopRoot @('exec', 'tauri', 'bundle', '--bundles', 'nsis', '--config', $installerConfig)
 if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.artifact_sha256) {
@@ -388,7 +404,7 @@ if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -
 $renderedInstaller = Join-Path $cargoReleaseRoot 'nsis\x64\installer.nsi'
 if (-not (Test-Path -LiteralPath $renderedInstaller -PathType Leaf)) { throw 'NSIS installer script was not rendered' }
 $renderedText = Get-Content -LiteralPath $renderedInstaller -Raw
-foreach ($expected in @('/oname=desktop-build-manifest.json', '/oname=node.exe', 'api\dist\src\main.js')) {
+foreach ($expected in @('/oname=desktop-build-manifest.json', '/oname=node.exe', 'api\dist\src\main.js', 'licenses\NOTO-FONTS-LICENSE.txt')) {
   if (-not $renderedText.Contains($expected)) { throw "Installer payload is missing: $expected" }
 }
 $installer = Join-Path $cargoReleaseRoot 'bundle\nsis\Relay Agent_0.1.0_x64-setup.exe'

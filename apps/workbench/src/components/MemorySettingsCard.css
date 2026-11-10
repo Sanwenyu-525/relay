@@ -21,7 +21,7 @@
 
 .memory-settings-switch strong {
   color: var(--relay-color-text-primary);
-  font-weight: 600;
+  font-weight: var(--relay-font-weight-semibold);
 }
 
 .memory-settings-actions {

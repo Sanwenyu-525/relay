@@ -192,7 +192,7 @@ export async function recallAssistMessage(db: DbExecutor,
   if (blocked.length > 0) {
     throw new DomainError({ code: 'RECALL_PREFLIGHT_BLOCKED', status: 409,
       type: '/problems/recall-preflight-blocked', title: '撤回预检未通过',
-      detail: '至少一个目标文件与发送前基线不一致或缺少可信前像；本次没有写入任何文件。',
+      detail: '至少一个目标文件存在后续改动，或缺少可信的恢复依据；本次没有写入任何文件。',
       retryable: true, retryAction: 'REFRESH_AND_REDECIDE',
       conflict: { sessionId: session.id, messageId: message.id,
         recallPaths: blocked.map((file) => `${file.relativePath}｜${file.status}｜${file.reason ?? ''}`) } });

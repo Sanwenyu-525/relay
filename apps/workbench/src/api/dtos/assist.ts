@@ -870,7 +870,7 @@ export interface RelayAssistMessageRecallSummary {
   readonly completedAt: string | null;
 }
 
-/** 一次撤回的逐文件结果；`baseline` 说明目标文件在发送前是否存在。 */
+/** 一次撤回的逐文件结果；`baseline` 说明恢复目标中的文件是否存在。 */
 export interface RelayAssistMessageRecallFile {
   readonly path: string;
   readonly status: string;
@@ -884,6 +884,15 @@ export interface RelayAssistMessageRecall extends RelayAssistMessageRecallSummar
   readonly detail: Readonly<Record<string, unknown>>;
   readonly requestedAt: string;
   readonly files: readonly RelayAssistMessageRecallFile[];
+}
+
+/** 单层撤销只恢复文件；原消息撤回标记及业务验收状态不自动恢复。 */
+export interface RelayAssistRecallUndo {
+  readonly id: string;
+  readonly sourceRecallId: string;
+  readonly status: RelayAssistMessageRecallStatus;
+  readonly rootPath: string;
+  readonly files: readonly { readonly path: string; readonly status: string; readonly reason: string | null }[];
 }
 
 /**

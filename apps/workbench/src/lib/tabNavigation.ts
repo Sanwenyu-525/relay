@@ -5,15 +5,21 @@ import type { KeyboardEvent } from "react";
  * IME 过滤与两端循环的判据只写一遍；路由导航继续使用链接，不挂这里的处理器。
  */
 
-/** 同页横向页签：焦点和选中项一起移动，路由链接不使用此处理器。 */
+/**
+ * 同页页签：焦点和选中项一起移动，路由链接不使用此处理器。
+ * 设置页在宽屏把页签排成竖向导航，因此四向方向键都解释为「上一项 / 下一项」：
+ * 横向列表收到 Up/Down 时不再落到页面滚动，竖向列表也仍接受左右键。
+ * 两端循环、Home/End 与 IME 过滤规则不变。
+ */
 export function handleTabListKeyDown(event: KeyboardEvent<HTMLElement>): void {
   if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
   const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="tab"]:not(:disabled)')];
   const current = tabs.findIndex((tab) => tab === document.activeElement);
   if (current < 0 || tabs.length === 0) return;
+  const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
   const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
-    : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    : (current + (forward ? 1 : -1) + tabs.length) % tabs.length;
   event.preventDefault();
   tabs[next]!.focus();
   tabs[next]!.click();

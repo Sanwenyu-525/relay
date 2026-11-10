@@ -47,6 +47,50 @@ async function mount() {
 
 function listResponse() { return response({ items: [], current_accepted_version_ids: [] }); }
 
+it.each([false, true])("人工接手后可沿 AI 产物载入原稿并追加人工版本（另有产物：%s）", async (withOtherArtifact) => {
+  const original = "# AI 成果\n\n保留原版本正文。\n";
+  const artifact = { id: artifactId, task_id: taskId, title: "AI 成果", revision: "0",
+    latest_version_id: versionId, version_count: 1, versions: [{ artifact_version_id: versionId,
+      version_number: "1", media_type: "text/markdown", sha256: sha256Hex(original),
+      size: String(new TextEncoder().encode(original).byteLength), source_kind: "AI",
+      created_at: "2026-11-05T00:00:00.000Z" }] };
+  const otherVersionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const other = { ...artifact, id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", title: "另一成果",
+    latest_version_id: otherVersionId,
+    versions: [{ ...artifact.versions[0]!, artifact_version_id: otherVersionId }] };
+  const posted: { url: string; body: Record<string, unknown> }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      posted.push({ url, body });
+      return response({ command_id: body.command_id, committed_at: "2026-11-05T00:00:01Z",
+        result: { ...result(String(body.content)), artifact_revision: "1", version_number: "2",
+          version_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" } }, 201);
+    }
+    if (url === `${root}/tasks/${taskId}/artifacts`) return response({ items: withOtherArtifact ? [artifact, other] : [artifact], current_accepted_version_ids: [] });
+    if (url === `${root}/artifacts/${artifactId}`) return response(artifact);
+    if (url === `${root}/artifact-versions/${versionId}/content`) return new Response(original);
+    if (url === `${root}/artifact-versions/${otherVersionId}/content`) return new Response("# 另一份成果");
+    throw new Error(`unexpected ${url}`);
+  }));
+  const view = await mount();
+  if (withOtherArtifact) {
+    await view.wrapper.get(`[data-testid="artifact-read-${versionId}"]`).trigger("click"); await flush();
+  }
+  await view.wrapper.get('[data-testid="artifact-load-latest-draft"]').trigger("click"); await flush();
+  expect(view.wrapper.get("#artifact-content").element).toHaveProperty("value", original);
+  await view.wrapper.get("#artifact-content").setValue(original + "\n人工补充。");
+  if (withOtherArtifact) {
+    await view.wrapper.get(`[data-testid="artifact-read-${otherVersionId}"]`).trigger("click"); await flush();
+  }
+  await view.wrapper.get('[data-testid="artifact-save"]').trigger("click"); await flush();
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.url).toBe(`${root}/artifacts/${artifactId}/versions`);
+  expect(posted[0]!.body).toMatchObject({ expected_artifact_revision: "0", expected_task_revision: "2",
+    content: original + "\n人工补充。" });
+});
+
 it("保存响应丢失后编辑草稿，重试仍发送本机持久化的原 ID 和正文", async () => {
   const posted: Record<string, unknown>[] = [];
   let sends = 0;

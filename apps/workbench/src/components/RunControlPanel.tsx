@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayControlRequest, type RelayControlType, type RelayRun, type RelayTaskDetail } from "../api/relayClient";
-import { describeLiveError } from "../lib/liveErrors";
+import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { liveClient } from "../lib/relayConnection";
 
@@ -53,6 +53,7 @@ interface PendingRunControl {
   readonly id: string;
   readonly kind: "control" | "resume";
   readonly type?: RelayControlType;
+  readonly confirmedRevision?: string;
 }
 
 function pendingCommandKey(client: RelayApiClient | null, runId: string): string {
@@ -65,25 +66,35 @@ function readPendingCommand(key: string, runId: string): PendingRunControl | nul
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const row = value as Record<string, unknown>;
     if (row["runId"] !== runId || typeof row["commandId"] !== "string" || row["commandId"] === "") return null;
-    if (row["kind"] === "resume") return { runId, id: row["commandId"], kind: "resume" };
+    const confirmed = row["confirmedRevision"];
+    if (confirmed !== undefined && (typeof confirmed !== "string" || !/^\d+$/.test(confirmed))) return null;
+    const confirmation = confirmed === undefined ? {} : { confirmedRevision: confirmed as string };
+    if (row["kind"] === "resume") return { runId, id: row["commandId"], kind: "resume", ...confirmation };
     if (row["kind"] !== "control" || typeof row["type"] !== "string") return null;
     if (!Object.prototype.hasOwnProperty.call(controlLabels, row["type"])) return null;
-    return { runId, id: row["commandId"], kind: "control", type: row["type"] as RelayControlType };
+    return { runId, id: row["commandId"], kind: "control", type: row["type"] as RelayControlType, ...confirmation };
   } catch { return null; }
 }
 
-function writePendingCommand(key: string, pending: PendingRunControl | null): void {
+const pendingCommandChanged = "relay:run-control-pending-changed";
+
+function writePendingCommand(key: string, pending: PendingRunControl | null): boolean {
   try {
-    if (pending === null) sessionStorage.removeItem(key);
-    else sessionStorage.setItem(key, JSON.stringify({ runId: pending.runId, commandId: pending.id,
-      kind: pending.kind, type: pending.type ?? null }));
-  } catch { /* 本机存储写不进去也不影响本次页面会话内的核对入口。 */ }
+    const current = sessionStorage.getItem(key);
+    if (pending !== null && current !== null && readPendingCommand(key, pending.runId) === null) return false;
+    const serialized = pending === null ? null : JSON.stringify({ runId: pending.runId, commandId: pending.id,
+      kind: pending.kind, type: pending.type ?? null, confirmedRevision: pending.confirmedRevision });
+    if (current === serialized) return true;
+    if (serialized === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, serialized);
+    window.dispatchEvent(new CustomEvent(pendingCommandChanged, { detail: key }));
+    return true;
+  } catch { return false; }
 }
 
 function samePendingCommand(left: PendingRunControl | null, right: PendingRunControl | null): boolean {
   if (left === null || right === null) return left === right;
   return left.runId === right.runId && left.id === right.id && left.kind === right.kind &&
-    left.type === right.type;
+    left.type === right.type && left.confirmedRevision === right.confirmedRevision;
 }
 
 /**
@@ -104,9 +115,10 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // Run 身份键只含 Run ID，不含 revision：同 Run 的事实修订（revision 变化）只触发数据刷新，
+  const [refreshFailure, setRefreshFailure] = useState<string | null>(null);
+  // Run 身份键包含连接、工作区与 Run ID，不含 revision：同 Run 的事实修订（revision 变化）只触发数据刷新，
   // 不代表原命令已结算，不得清掉结果未知的 command_id、冻结载荷与「核对原命令回执」入口。
-  const runKey = run.id;
+  const runKey = pendingCommandKey(liveClient(), run.id);
   // 渲染期就同步的版本标记。只在 effect 里自增会让「换 Run 的那一帧」与「迟到回包」之间留一个
   // 微任务级窗口：迟到回包会写进已经属于另一个 Run 的界面。渲染期赋值不留这个窗口。
   // 该标记也保证同 Run 的迟到 202 回执仍能落账：revision 更新不改变它。
@@ -114,7 +126,7 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
   facts.current = runKey;
   // 未确认命令按 (连接, 工作空间, Run) 分键持久化，因此换连接或换 Run 各读各的，
   // 同 Run 的刷新、事件补读与整页重读都取回同一条命令身份。
-  const pendingKey = pendingCommandKey(liveClient(), run.id);
+  const pendingKey = runKey;
   const [pendingCommand, setPendingCommand] = useState<PendingRunControl | null>(
     () => readPendingCommand(pendingCommandKey(liveClient(), run.id), run.id));
   const pendingRef = useRef(pendingCommand); pendingRef.current = pendingCommand;
@@ -123,52 +135,98 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
     // 换 Run（或换连接）时读回**这个** Run 自己的未确认命令：既不丢同一条命令的恢复入口，
     // 也不把上一 Run 的 command_id 带过来；受理记录仍按次重读清空。
     const restored = readPendingCommand(pendingKey, run.id);
+    pendingRef.current = restored;
     setPendingCommand((current) => samePendingCommand(current, restored) ? current : restored);
     setActionError(null); setActionMessage(null); setSubmitting(false); setAccepted(null);
+    setRefreshing(false); setRefreshFailure(null);
+    // CONTROL-SHARED-PENDING-20261106：桌面侧栏与窄窗抽屉消费同一原命令线索。
+    const changed = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== pendingKey) return;
+      const stored = readPendingCommand(pendingKey, run.id);
+      pendingRef.current = stored;
+      setPendingCommand((current) => samePendingCommand(current, stored) ? current : stored);
+    };
+    window.addEventListener(pendingCommandChanged, changed);
+    return () => window.removeEventListener(pendingCommandChanged, changed);
   }, [runKey, pendingKey]);
 
-  useEffect(() => {
-    if (pendingCommand !== null) writePendingCommand(pendingCommandKey(liveClient(), pendingCommand.runId),
-      pendingCommand);
-  }, [pendingCommand]);
 
   /** 命令已结算或被服务端明确拒绝：本地身份与持久化线索一起收口，之后才允许再提交。 */
   function settlePendingCommand() {
     const current = pendingRef.current;
-    if (current !== null) writePendingCommand(pendingCommandKey(liveClient(), current.runId), null);
-    setPendingCommand(null);
+    if (current !== null) writePendingCommand(pendingKey, null);
+    pendingRef.current = null; setPendingCommand(null);
   }
 
-  const canControl = activeRun && !terminal && projectWriteBlockedReason === null &&
+  function beginPendingCommand(kind: PendingRunControl["kind"], type?: RelayControlType): PendingRunControl | null {
+    const existing = readPendingCommand(pendingKey, run.id);
+    if (existing !== null) { pendingRef.current = existing; setPendingCommand(existing); return null; }
+    const pending: PendingRunControl = { runId: run.id, id: createCommandId(), kind, ...(type ? { type } : {}) };
+    if (!writePendingCommand(pendingKey, pending)) {
+      setActionError("无法安全保存原命令身份，未提交控制命令。请检查浏览器存储后重试。");
+      return null;
+    }
+    pendingRef.current = pending; setPendingCommand(pending);
+    return pending;
+  }
+
+  function acknowledgePending(revision: string) {
+    const current = pendingRef.current;
+    if (current === null) return;
+    const confirmed = { ...current, confirmedRevision: revision };
+    pendingRef.current = confirmed; setPendingCommand(confirmed);
+    writePendingCommand(pendingKey, confirmed);
+  }
+
+  useEffect(() => {
+    const current = pendingRef.current;
+    const stored = readPendingCommand(pendingKey, run.id);
+    if (current?.confirmedRevision !== undefined && stored?.id === current.id && current.runId === run.id &&
+        stored.kind === current.kind && stored.type === current.type &&
+        BigInt(run.revision) >= BigInt(current.confirmedRevision)) settlePendingCommand();
+  }, [pendingKey, run.revision, pendingCommand?.confirmedRevision]);
+
+  const awaitingReadback = pendingCommand?.confirmedRevision !== undefined && BigInt(run.revision) < BigInt(pendingCommand.confirmedRevision);
+  const canControl = activeRun && !terminal && !awaitingReadback && projectWriteBlockedReason === null &&
     run.pendingControlRequest === null && pendingCommand === null && !submitting;
   const handoffApplied = controlRecord !== null && controlRecord.type === "HANDOFF" && controlRecord.status === "APPLIED";
   // 服务端记录还没覆盖这次提交时才显示本地受理记录；覆盖之后立刻交回服务端事实。
   const awaitingServer = accepted !== null && accepted.runId === run.id &&
     (controlRecord === null || controlRecord.id !== accepted.controlRequestId);
 
+  // RUN-REFRESH-FEEDBACK-20261106：刷新结果不结算命令，旧作用域回包不更新新页面。
   async function reload() {
-    setRefreshing(true);
-    try { await onReload(); } finally { setRefreshing(false); }
+    if (refreshing || submitting) return;
+    const context = facts.current;
+    setRefreshing(true); setRefreshFailure(null);
+    try { await onReload(); }
+    catch (caught) {
+      if (context === facts.current) setRefreshFailure(`刷新执行状态失败：${describeLiveError(caught).message}`);
+    } finally { if (context === facts.current) setRefreshing(false); }
   }
 
   async function submitControl(type: RelayControlType) {
     const client = liveClient();
     if (!client || !canControl || (type === "PAUSE" && run.status === "PAUSED")) return;
-    const commandId = createCommandId(); const context = facts.current;
-    setPendingCommand({ runId: run.id, id: commandId, kind: "control", type }); setSubmitting(true); setActionError(null); setActionMessage(null);
+    const pending = beginPendingCommand("control", type); if (pending === null) return;
+    const commandId = pending.id; const context = facts.current;
+    setSubmitting(true); setActionError(null); setActionMessage(null);
+    let responseConfirmed = false;
     try {
       const result = await client.requestRunControl({ runId: run.id, commandId, expectedTaskRevision: task.revision,
         expectedRunRevision: run.revision, type });
       if (context !== facts.current) return;
       if (result.taskId !== task.id) throw new RelayTransportError("控制回执的任务与当前 Run 不匹配。");
-      settlePendingCommand();
+      responseConfirmed = true;
+      acknowledgePending(result.runRevision);
       const record = { runId: run.id, commandId, controlRequestId: result.controlRequestId, type };
       setAccepted(record); report.current?.(result.controlRequestId);
       setActionMessage(`${controlLabels[type]}提交回执为 202 / PENDING；下方 Run 与控制请求状态是随后查询的当前事实。`);
       await onReload();
     } catch (caught) {
       if (context !== facts.current) return;
-      if (caught instanceof RelayTransportError) setActionError("响应丢失或无法核对，控制请求是否入库尚未确定。请查询原 command_id 回执，不能换 ID 再提交。");
+      if (responseConfirmed) setActionError(`原命令回执已确认，但最新执行状态读取失败。${describeLiveError(caught).message}`);
+      else if (needsReceiptCheck(caught)) setActionError("响应丢失或无法核对，控制请求是否入库尚未确定。请查询原 command_id 回执，不能换 ID 再提交。");
       else { settlePendingCommand(); setActionError(describeLiveError(caught).message);
         if (caught instanceof RelayApiError && ["REVISION_CONFLICT", "CONTROL_CONFLICT", "INVALID_TRANSITION", "RUN_TERMINAL", "UNKNOWN_ACTION_BLOCKED"].includes(caught.problem.code)) await onReload(); }
     } finally { if (context === facts.current) setSubmitting(false); }
@@ -177,18 +235,22 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
   async function resume() {
     const client = liveClient();
     if (!client || !canControl || run.status !== "PAUSED") return;
-    const commandId = createCommandId(); const context = facts.current;
-    setPendingCommand({ runId: run.id, id: commandId, kind: "resume" }); setSubmitting(true); setActionError(null); setActionMessage(null);
+    const pending = beginPendingCommand("resume"); if (pending === null) return;
+    const commandId = pending.id; const context = facts.current;
+    setSubmitting(true); setActionError(null); setActionMessage(null);
+    let responseConfirmed = false;
     try {
-      await client.resumeRun({ runId: run.id, commandId, expectedTaskRevision: task.revision, expectedRunRevision: run.revision });
+      const result = await client.resumeRun({ runId: run.id, commandId, expectedTaskRevision: task.revision, expectedRunRevision: run.revision });
       if (context !== facts.current) return;
-      settlePendingCommand();
+      responseConfirmed = true;
+      acknowledgePending(result.runRevision);
       setAccepted((current) => current === null || current.runId !== run.id ? current : null);
       setActionMessage("恢复命令已受理（202）。已重新读取 Run；实际状态以服务端查询为准。");
       await onReload();
     } catch (caught) {
       if (context !== facts.current) return;
-      if (caught instanceof RelayTransportError) setActionError("响应丢失或无法核对，恢复是否受理尚未确定。请查询原 command_id 回执，不能换 ID 再提交。");
+      if (responseConfirmed) setActionError(`原命令回执已确认，但最新执行状态读取失败。${describeLiveError(caught).message}`);
+      else if (needsReceiptCheck(caught)) setActionError("响应丢失或无法核对，恢复是否受理尚未确定。请查询原 command_id 回执，不能换 ID 再提交。");
       else { settlePendingCommand(); setActionError(describeLiveError(caught).message);
         if (caught instanceof RelayApiError && ["REVISION_CONFLICT", "CONTROL_CONFLICT", "INVALID_TRANSITION", "UNKNOWN_ACTION_BLOCKED"].includes(caught.problem.code)) await onReload(); }
     } finally { if (context === facts.current) setSubmitting(false); }
@@ -216,7 +278,8 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
         setAccepted({ runId: run.id, commandId: pending.id, controlRequestId, type: pending.type as RelayControlType });
         report.current?.(controlRequestId);
       }
-      settlePendingCommand(); setActionError(null);
+      acknowledgePending(result.run_revision);
+      setActionError(null);
       setActionMessage("已找到原命令回执；正在核对 Run 与控制请求的最新状态。");
       await onReload();
     } catch (caught) {
@@ -246,16 +309,18 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
     {terminal && controlRecord?.status === "PENDING" && <p className="helper-text" data-testid="run-terminal-race" role="status">Run 已按服务端结果进入「{runLabels[run.status] ?? run.status}」终态；停止与完成发生竞争时以服务端查询结果为准，提交意图不改写事实。控制请求 {controlRecord.id} 的实际处理结果同样以服务端为准。</p>}
     {terminal && <p className="warning-callout" data-testid="run-stop-limitation">{processStopLimitation}</p>}
     {(handoffApplied || (task.executor === "HUMAN" && terminal)) && <p className="receipt-message" data-testid="run-handoff-edit" role="status">{handoffApplied ? "已交接，可编辑。" : "任务当前执行者为人工（服务端事实）；本 Run 已结束且只读。"}人工编辑与保存版本在 {taskHref ? <Link className="text-link" to={taskHref}>任务详情</Link> : "本工作区的产物区"}进行；接手完成前的历史产物与原 Run 保持可追溯。任务状态：{taskStatusLabels[task.status] ?? task.status}。</p>}
+    {awaitingReadback && <p className="helper-text" role="status" data-testid="run-control-readback">原命令回执已确认；请重新读取执行状态。核对到回执修订前，不能提交新的控制命令。</p>}
+    {refreshFailure && <p className="action-error" role="alert" data-testid="run-refresh-error">{refreshFailure}</p>}
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
     {actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}
     {/* 整页重读后取回的命令身份：说明它仍未核对，并继续锁住新的控制提交。 */}
-    {pendingCommand && !submitting && <p className="helper-text" role="status" data-testid="run-control-recheck">
+    {pendingCommand && pendingCommand.confirmedRevision === undefined && !submitting && <p className="helper-text" role="status" data-testid="run-control-recheck">
       仍在等原命令回执：{pendingCommand.kind === "resume" ? "恢复命令" : controlLabels[pendingCommand.type ?? "PAUSE"]}已提交，
       但结果尚未核对（页面重读后仍保留这条命令身份）。真实状态以下方服务端查询为准；核对完成前不提交新的控制命令。
     </p>}
     {pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.id}</p>}
     <div className="run-actions">
-      {pendingCommand ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button> : <>
+      {pendingCommand && pendingCommand.confirmedRevision === undefined ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button> : <>
         {run.status === "PAUSED"
           ? <button className="primary-button" type="button" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</button>
           : <button className="secondary-button" type="button" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</button>}

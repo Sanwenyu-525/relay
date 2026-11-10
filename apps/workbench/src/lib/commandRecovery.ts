@@ -148,6 +148,8 @@ export function recoveryStorageKey(scope: string): string {
 /** 恢复区的用户可读命令名；未知命令保留原枚举，供展开区核对，不猜测语义。 */
 export function recoveryCommandLabel(commandType: string): string {
   switch (commandType) {
+    case "DelegateTask": return "委托任务";
+    case "SetProjectState": return "更新项目状态";
     case "SelectSessionModel": return "模型切换";
     case "SelectSessionConnection": return "模型连接切换";
     case "ClearSessionModelSelection": return "恢复跟随默认";
@@ -205,11 +207,17 @@ function readStored(scope: string): readonly RecoveryRecord[] {
   } catch { return []; }
 }
 
-function writeStored(scope: string): void {
+function writeStored(scope: string): boolean {
   try {
+    const stored = window.sessionStorage.getItem(recoveryStorageKey(scope));
+    if (stored !== null) {
+      const parsed: unknown = JSON.parse(stored);
+      if (!Array.isArray(parsed) || parsed.some((item) => recordFrom(item) === null)) return false;
+    }
     window.sessionStorage.setItem(recoveryStorageKey(scope),
       JSON.stringify(entriesFor(scope).map((entry) => entry.record)));
-  } catch { /* 写不进去时命令身份仍在内存里；不阻断核对。 */ }
+    return true;
+  } catch { return false; } // 身份仍留内存；要求提交前落盘的 Owner 可据此禁止新命令。
 }
 
 function snapshotFor(scope: string): readonly RecoveryEntry[] {
@@ -262,7 +270,7 @@ export function subscribeRecoveries(scope: string, listener: (entries: readonly 
  * 登记未决命令。已有同 command_id 的记录保留原 target 身份（跨页既有记录），
  * 只补全模型/连接校验字段；不会因为重复上报而重启已完成的核对。
  */
-export function upsertRecovery(scope: string, record: RecoveryRecord): void {
+export function upsertRecovery(scope: string, record: RecoveryRecord): boolean {
   ensureLoaded(scope);
   attachWindowHooks();
   const key = keyOf(scope, record.commandId);
@@ -275,14 +283,15 @@ export function upsertRecovery(scope: string, record: RecoveryRecord): void {
       ...(record.objectId == null ? {} : { objectId: record.objectId })
     };
     existing.record = merged;
-    writeStored(scope);
+    const saved = writeStored(scope);
     notify(scope);
-    return;
+    return saved;
   }
   entries.set(key, entryFromRecord(scope, record));
-  writeStored(scope);
+  const saved = writeStored(scope);
   notify(scope);
   scheduleAttempt(scope, record.commandId, 0);
+  return saved;
 }
 
 /** 只清这一条；调用方必须已经完成身份校验与服务端读回。 */
@@ -305,6 +314,7 @@ export function registerRecoveryOwner(owner: RecoveryOwner): () => void {
   attachWindowHooks();
   owners.add(owner);
   for (const entry of entriesFor(owner.scope)) {
+    if (!owner.claims(entry.record)) continue;
     // 页面重新进入（新 Owner 挂载）时，即使上一轮已到上限也再给一轮查询预算：
     // 未解决命令要在进入页面后自动继续核对，而不是等焦点/网络事件。
     // 但每个记录的重开次数有上限：反复切换会话或重挂载不能让同一命令无界自动查询。
@@ -379,7 +389,8 @@ function jittered(delayMs: number): number {
 
 function scheduleAttempt(scope: string, commandId: string, delayMs: number): void {
   const entry = entries.get(keyOf(scope, commandId));
-  if (entry === undefined) return;
+  // RECOVERY-OWNER-REGISTRATION-20261106：无认领者时保持等待，不占用同轮后续 Owner 的在途槽。
+  if (entry === undefined || ownerFor(scope, entry.record) === null) return;
   const key = keyOf(scope, commandId);
   if (inflight.has(key) || timers.has(key)) return;
   if (typeof navigator !== "undefined" && navigator.onLine === false) {

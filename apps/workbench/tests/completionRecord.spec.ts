@@ -116,3 +116,79 @@ describe("P15 完成凭据详情", () => {
     expect(mounted.wrapper.text()).not.toContain("新凭据目标");
   });
 });
+
+
+describe("完成凭据原版本正文阅读", () => {
+  const contentUrl = `${root}/artifact-versions/${versionId}/content`;
+  it("按需只读历史接受的确切版本，渲染正文并可收起", async () => {
+    connect();
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      if (String(input).includes("/completion-records/") || String(input).includes("/artifact-versions/")) calls.push(String(input));
+      if (String(input) === `${root}/completion-records/${completionId}`) return response(humanEvidence());
+      if (String(input) === contentUrl) return { ok: true, status: 200, text: async () => "# 当时接受的正文\n\n**不可变历史**" } as Response;
+      throw new Error(`unexpected ${input}`);
+    }));
+    const mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount; await flush();
+    expect(calls).toEqual([`${root}/completion-records/${completionId}`]);
+    const reader = mounted.wrapper.get(`[data-testid="completion-content-${versionId}"]`);
+    await reader.get("button").trigger("click"); await flush();
+    expect(reader.get('[data-heading-level="1"]').text()).toBe("当时接受的正文");
+    expect(reader.get("strong").text()).toBe("不可变历史");
+    expect(reader.get("button").attributes("aria-expanded")).toBe("true");
+    expect(calls).toEqual([`${root}/completion-records/${completionId}`, contentUrl]);
+    await reader.get("button").trigger("click");
+    expect(reader.text()).not.toContain("不可变历史");
+  });
+
+  it.each([403, 404, 503])("正文 %s 不影响历史依据，重试仍读取原版本", async (status) => {
+    connect(); let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === `${root}/completion-records/${completionId}`) return response(humanEvidence());
+      expect(String(input)).toBe(contentUrl);
+      if (++reads === 1) return response({ code: "EVIDENCE_UNAVAILABLE", detail: "测试失败" }, status);
+      return { ok: true, status: 200, text: async () => "重试读到原正文" } as Response;
+    }));
+    const mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount;
+    const reader = mounted.wrapper.get(`[data-testid="completion-content-${versionId}"]`);
+    await reader.get("button").trigger("click"); await flush();
+    expect(reader.find('[role="alert"]').exists()).toBe(true);
+    expect(mounted.wrapper.text()).toContain("当时核对通过");
+    await reader.findAll("button")[1].trigger("click"); await flush();
+    expect(reader.text()).toContain("重试读到原正文");
+    expect(reader.find('[role="alert"]').exists()).toBe(false);
+    expect(reads).toBe(2);
+  });
+
+  it("重读凭据清除在途正文，不可用版本无入口且旧回包不泄漏", async () => {
+    connect(); let unavailable = false; let release: ((value: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === contentUrl) return new Promise<Response>((resolve) => { release = resolve; });
+      expect(String(input)).toBe(`${root}/completion-records/${completionId}`);
+      const item = humanEvidence();
+      return response(unavailable ? { ...item, artifact_versions: [{ availability: "UNAVAILABLE" }] } : item);
+    }));
+    const mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount;
+    await mounted.wrapper.get(`[data-testid="completion-content-${versionId}"] button`).trigger("click");
+    expect(mounted.wrapper.text()).toContain("正在读取确切版本正文");
+    unavailable = true;
+    const reload = mounted.wrapper.findAll("button").find((button) => button.text() === "重读凭据")!;
+    await reload.trigger("click"); await flush();
+    expect(mounted.wrapper.find(`[data-testid="completion-content-${versionId}"]`).exists()).toBe(false);
+    release!({ ok: true, status: 200, text: async () => "不应显示的旧正文" } as Response); await flush();
+    expect(mounted.wrapper.text()).not.toContain("不应显示的旧正文");
+    expect(mounted.wrapper.text()).toContain("产物版本不可用");
+  });
+
+  it("空正文明确显示为空，不当作加载未结束", async () => {
+    connect();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === contentUrl
+      ? { ok: true, status: 200, text: async () => "" } as Response : response(humanEvidence())));
+    const mounted = await mountWorkbench(`/completion-records/${completionId}`); unmount = mounted.unmount;
+    const reader = mounted.wrapper.get(`[data-testid="completion-content-${versionId}"]`);
+    await reader.get("button").trigger("click"); await flush();
+    expect(reader.text()).toContain("该版本正文为空");
+    expect(reader.get('[aria-label="本次接受版本的正文"]').attributes("aria-busy")).toBe("false");
+  });
+});

@@ -5,7 +5,7 @@ import type { ConversationStateChangeRow, StateChangeKind, StateChangeStatus } f
   '../../src/infrastructure/database-schema.js';
 import type { JsonObject } from '../../src/infrastructure/json.js';
 import {
-  buildCompensationPlan, deriveCompensationCommandId, matchTitle,
+  buildCompensationPlan, deriveCompensationCommandId, matchTitle, readMainLoopStateCandidate,
   validateStateMaintenanceCandidate,
 } from '../../src/application/conversation-state.js';
 
@@ -13,6 +13,18 @@ import {
  * 自然语言状态维护的确定性校验纯函数（无数据库）：
  * 候选形状、标题解析与撤回补偿计划。所有判定在模型输出与数据库之间充当栅栏。
  */
+
+test('execution owns its task while unrelated maintenance remains intact', () => {
+  const task = { kind: 'CREATE_TASK', title: 'One task', objective: 'Deliver a document' };
+  assert.equal(readMainLoopStateCandidate({ decision: 'MAINTAIN', changes: [task] }, 'One task').kind, 'NONE');
+  const mixed = readMainLoopStateCandidate({ decision: 'MAINTAIN', changes: [task,
+    { kind: 'SET_PHASE', phase: '执行' }] }, 'One task');
+  assert.equal(mixed.kind, 'OUTCOME');
+  if (mixed.kind !== 'OUTCOME') return;
+  assert.equal(mixed.outcome.changes.length, 1);
+  assert.equal(mixed.outcome.changes[0]?.changeKind, 'SET_PHASE');
+  assert.equal(readMainLoopStateCandidate({ decision: 'MAINTAIN', changes: [task] }).kind, 'OUTCOME');
+});
 
 function changeRow(input: {
   readonly id: string; readonly ordinal: number; readonly changeKind: StateChangeKind;
