@@ -11,6 +11,8 @@ import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
+import type { RuntimeLogLevel } from '../infrastructure/runtime-log.js';
+import { configureRuntimeLog, getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { runAssistGoalTick } from '../application/goal-advance.js';
@@ -171,6 +173,16 @@ async function main(): Promise<void> {
     throw new Error('supervisor configuration invalid');
   }
   await assertRestoreNotIsolated(dataRoot);
+  // Supervisor is its own process: keep a dedicated log file so startup failures and
+  // dispatch errors survive after the console is gone.
+  configureRuntimeLog({
+    directory: resolve(dataRoot, 'logs'),
+    fileName: 'relay-supervisor.log',
+    level: (process.env.RELAY_LOG_LEVEL?.trim() ?? 'info') as RuntimeLogLevel,
+    echoToStderr: true,
+  });
+  const supervisorLog = getRuntimeLogger('supervisor');
+  supervisorLog.info('supervisor_started', { desktop_mode: desktopMode });
   const testHoldAfterGatewayEffectMs = await readAcceptanceFileWriteHoldMs(dataRoot, desktopFrame);
   const workerLeaseMs = Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000');
   if (!Number.isInteger(workerLeaseMs) || workerLeaseMs < 100 || workerLeaseMs > 600_000) {
@@ -361,6 +373,10 @@ try {
   const configFailure = error instanceof RestoreIsolationError || error instanceof Error &&
     (error.message.includes('configuration') || error.message.includes('schema unavailable'));
   process.stderr.write(`${configFailure ? 'supervisor_configuration_failed' : 'supervisor_failed'}\n`);
+  getRuntimeLogger('supervisor').error(configFailure ? 'supervisor_configuration_failed' : 'supervisor_failed', {
+    error_name: error instanceof Error ? error.name : 'NON_ERROR',
+    error_message: error instanceof Error ? error.message : String(error),
+  });
   if (error instanceof RestoreIsolationError) process.stderr.write(`${error.code}\n`);
   process.exitCode = configFailure ? 2 : 1;
 }

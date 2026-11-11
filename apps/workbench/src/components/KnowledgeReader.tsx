@@ -16,6 +16,18 @@ interface Props {
   readonly newVersionDisabled?: boolean;
 }
 
+/**
+ * 正文常以「# 标题」开头，而阅读页头已经显示同一个标题。两处相邻重复会把首屏读成
+ * 两次「这是什么」，因此只在**逐字相同**时去掉正文里的那一行：标题不同的历史版本、
+ * 或作者刻意写上小标题的正文都原样保留。
+ */
+function withoutDuplicateLeadHeading(markdown: string, title: string): string {
+  const match = /^\uFEFF?\s{0,3}#{1,2}[ \t]+(.+?)[ \t]*\r?\n/u.exec(markdown);
+  if (match === null) return markdown;
+  const heading = (match[1] ?? "").replace(/[*_`]/gu, "").trim();
+  return heading !== "" && heading === title.trim() ? markdown.slice(match[0].length) : markdown;
+}
+
 const sourceLabels: Readonly<Record<string, string>> = {
   NOTE: "本地笔记", MANAGED_TEXT: "已保存文本", ARTIFACT_VERSION: "产物版本引用",
   WEB_PAGE: "已保存网页快照",
@@ -76,18 +88,11 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
   const artifactVersionId = content?.sourceRefs.artifact_version_id;
   const sourceUri = content?.sourceUri;
   return <section className={`knowledge-reader${headings.length === 0 ? " knowledge-reader--no-toc" : ""}`} aria-label="资料正文与来源" data-testid="knowledge-reader">
-    {headings.length > 0 && <aside className="knowledge-reader__outline">
-      <nav className="knowledge-reader__toc" aria-label="本文目录"><h2>本文目录</h2>
-        <ol>{headings.map((heading, index) => <li key={`${index}-${heading}`}><button type="button"
-          className={index === activeHeading ? "knowledge-reader__toc-current" : undefined}
-          aria-current={index === activeHeading ? "location" : undefined}
-          onClick={() => jumpToHeading(index)}>{heading}</button></li>)}</ol>
-      </nav>
-    </aside>}
-    <div className="knowledge-reader__main">
-      {/* 阅读页头：名称、确切版本与状态同行，来源与保存时间一行；原件与编辑入口是本页首屏动作。
-          正文状态不可折叠——PARTIAL / 读取失败必须常驻，不能只留在来源栏。 */}
+    {/* 页头横跨三栏：名称、确切版本与状态同行，原件与编辑入口是本页首屏动作；
+        正文状态不可折叠——PARTIAL / 读取失败必须常驻，不能只留在来源栏。 */}
+    <div className="knowledge-reader__head">
       <PageHeader title={content?.title ?? knowledge.title} testId="knowledge-reader-head"
+        overline="Knowledge"
         status={content ? <span className={`status-chip${content.contentStatus === "FULL" ? "" : " status-chip--warning"}`}>
           {contentStatusLabels[content.contentStatus] ?? content.contentStatus}</span> : null}
         meta={<>{content ? (sourceLabels[content.sourceKind] ?? content.sourceKind) : sourceLabels[selected?.sourceKind ?? ""] ?? "资料"}
@@ -111,6 +116,17 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         {selected && <span className="helper-text">保存于 <time dateTime={selected.createdAt}
           title={timeZone}>{formatReadableDateTime(selected.createdAt, timeZone)}</time></span>}
       </div>
+    </div>
+    <div className="knowledge-reader__grid">
+    {headings.length > 0 && <aside className="knowledge-reader__outline">
+      <nav className="knowledge-reader__toc" aria-label="本文目录"><h2>本文目录</h2>
+        <ol>{headings.map((heading, index) => <li key={`${index}-${heading}`}><button type="button"
+          className={index === activeHeading ? "knowledge-reader__toc-current" : undefined}
+          aria-current={index === activeHeading ? "location" : undefined}
+          onClick={() => jumpToHeading(index)}>{heading}</button></li>)}</ol>
+      </nav>
+    </aside>}
+    <div className="knowledge-reader__main">
       {loading && <p role="status">正在读取 v{version} 的确切正文…</p>}
       {error && <p className="action-error" role="alert">v{version} 正文读取失败：{error} <button type="button"
         className="text-button" onClick={() => setRetry((value) => value + 1)}>重试读取</button></p>}
@@ -118,12 +134,15 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         {content.contentStatus === "FULL" && <>
           {/* 2026-10-24 用户指令：正文芯片已显示「全文」，状态行不再复述；网页快照的
               「当前网页可能已经变化」是无从预知的事实，保留。 */}
-          <p className="knowledge-reader__status">{content.sourceKind === "WEB_PAGE"
-            ? <>已保存网页快照全文；当前网页可能已经变化。 · </> : null}v{content.version}</p>
-          <div ref={bodyRef} className="knowledge-reader__body" data-testid="knowledge-reader-body">
-            {content.mediaType === "text/markdown" ? <SafeMarkdown source={content.content ?? ""} />
-              : <pre className="knowledge-reader__plain">{content.content}</pre>}
-          </div>
+          {content.sourceKind === "WEB_PAGE" && <p className="knowledge-reader__status">已保存网页快照全文；当前网页可能已经变化。</p>}
+          <article className="knowledge-reader__paper">
+            <div className="knowledge-reader__paper-head"><strong>资料内容</strong><span>只读预览</span></div>
+            <div ref={bodyRef} className="knowledge-reader__body" data-testid="knowledge-reader-body">
+              {content.mediaType === "text/markdown"
+                ? <SafeMarkdown source={withoutDuplicateLeadHeading(content.content ?? "", content.title)} />
+                : <pre className="knowledge-reader__plain">{content.content}</pre>}
+            </div>
+          </article>
         </>}
         {content.contentStatus === "PARTIAL" && <p className="knowledge-reader__partial" role="status">仅保存了部分内容，不能视为全文。<span className="knowledge-body">{content.content}</span></p>}
         {content.contentStatus === "UNAVAILABLE" && <p role="status">该版本的已保存正文不可用，无法用其他版本替代。</p>}
@@ -149,5 +168,6 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
           <p>{item.excerpt ?? "该版本引用受管产物，无内联摘录。"}</p></li>)}</ol></details>
       <p className="helper-text">阅读不会将正文发送给 AI；使用范围由现有选源与权限决定。</p>
     </aside>
+    </div>
   </section>;
 }

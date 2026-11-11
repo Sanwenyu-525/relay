@@ -402,3 +402,38 @@ P1（同类歧义，同批改）：
 - 真实 API + 真实 Chromium：`tests/browser/computerPluginE2E.spec.ts` 2/2（一次性 PG + API + Vite；等待批准显示 Run 状态与审批入口；缺少连接显示失败原因且首屏可见），截图在 `tmp/COMPUTER-PLUGIN-E2E/screenshots/`。
 - 未验：真实 Windows/WebView2 窗口；多 DPI；产品无暗色主题。
 
+## 60. 资料页视觉收口：常驻工具行、阅读三栏与去重标题（2026-11-10，已实施，浏览器已验）
+
+**背景。** 用户要求「用 skill 优化一下资料页面」。按 `impeccable` 的 polish 口径先量测再改：1440×900、真实 Workbench + 伪造 GET（`page.route`），阅读形态首屏只剩两枚裸 ▶（`搜索资料`、`资料列表 · 8`）——页头、四个类型页签、「新建」全在 `<details>` 之后，页面上没有任何一处写着「资料」；正文标题在 100px 内出现两次（页头 h1 + Markdown H1），中间夹一行孤立的 `v3`；正文列 500px 配 18px 字号 ≈ 每行 27 字；576px 宽的表格塞进 500px 后横向滚动，最后一列贴边被裁；列表是 200px 窄列里 16px 内边距的纯文字行，行内没有类型标识。
+
+### 60.1 工具行常驻
+
+- 类型页签从列表卡片里提出，与「搜索资料 / 资料列表 · N / 导入网页 / 项目导读」同处一条工具行：页签靠左，其余按 `pv-filter` 胶囊靠右；展开的那一枚 `order: 10` + `flex: 1 1 100%` 独占下一整行，面板不再被挤在右半边。
+- 阅读形态也保留页签与项目段导航（`ProjectNav`）：此前它们折进「资料列表」，进了正文就既看不出在哪个类型里，也切不出去。
+- 折叠面板仍是原生 `<details>`（`.knowledge-search` / `.knowledge-library` 的语义与键盘行为不变），只是摘要行由裸文本改成带图标的 34px 胶囊。
+
+### 60.2 阅读三栏与卡片
+
+- 页头（标题、状态芯片、来源与版本 meta、编辑入口）横跨整行；下面是 `150px 目录 / 1fr 正文 / 252px 来源` 三栏，20px 间距。正文列 618px、内容 574px，18px 字号约 32 字一行（原 500px ≈ 27 字）。
+- 正文与来源各是一张 `pv` 卡：13px 圆角、1px `#dfe9df` 边框、轻投影、卡头 hairline（「资料内容 / 只读预览」「来源与版本」）。来源栏的 `dl` 改 11.5px 两列网格，版本说明与不可变版本折叠压到 11px。
+- `< 80rem` 时目录折成正文上方一行横向 chip；`< 48rem` 单列，卡片内边距降到 16px。
+
+### 60.3 去重与阅读排版
+
+- 正文首个 `#`/`##` 标题与版本标题**逐字相同**时才删除：历史版本标题不同、作者刻意写的小标题都原样保留。目录因此不再把文档标题当成第一条，当前项仍是 `aria-current="location"`。
+- 删除阅读页头下那行只剩 `vN` 的状态段（版本在页头 meta 和版本下拉里已各出现一次）；网页快照的「当前网页可能已经变化」保留。
+- 正文里的 Markdown 表格降到 13px、单元格下限 5.5rem：三列表格不再被 18px 字号顶成横向滚动（单元格下限按 body 字号算，18px 时一列要 216px）。
+
+### 60.4 列表、空态与状态
+
+- 列表是一张卡：卡头（类型名 + 新建 + 计数）吸顶，行内 `30px` 类型图标 + 标题 + 元信息；容器 ≥34rem 时元信息靠右单行（46px 行高），窄列仍按上下两行。选中行 `inset 2px` 绿条 + 浅底，不再用整行深色块。
+- 记忆有效状态筛选与类型页签同形（30px 胶囊，按容器宽度 2 列或 4 列），窄列不拆行。
+- 列表为空时收成一张全宽卡（`knowledge-columns--empty`）：原来左列 200px 塞四行说明、右列再用整张卡复述一句「可使用左侧列表中的新建入口」。详情空态节点仍在 DOM 内（`knowledge-detail-empty-state`），只是这档不显示。
+- 工具行摘要、页签、列表行都补 `focus-visible`：3px `#9dd3ad` ring，偏移 1px。
+
+### 60.5 验证与未验
+
+- 定向 Vitest 两批 **87 条 / 41 条**：`knowledge`、`knowledgeReading`、`knowledgeMemoryFilter`、`knowledgeCaptureLayout`、`knowledgeSimplify`、`knowledgeContentClient`、`knowledgeTypedErrorPending`、`knowledgeViewPaginationRecovery`、`informationRestore`、`memoryStatus`、`memoryOrigin`、`projectKnowledgeGuide`、`readingPresentation`。其中 `knowledgeSimplify` 1 条与 `knowledgeCaptureLayout` 1 条失败，**在 HEAD 上同样失败**（用例未伪造 `/tasks?project_id=…&limit=12`，产物候选读不到），不是本次引入。
+- 真实 Chromium：`tests/browser/knowledgeMemoryFilter.spec.ts` 1/1（1162×782 四枚筛选胶囊不拆行、不越出列表、键盘仍可切换）；`tsc --noEmit` 通过。
+- 截图：`tmp/knowledge-polish-20261110/`（1440 阅读/列表展开/记忆/空态、1162、390）。
+- 未验：真实 PostgreSQL + API 的业务读写、Windows/WebView2 窗口、多 DPI；产品无暗色主题，未做暗色对照。

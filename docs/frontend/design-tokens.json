@@ -323,6 +323,31 @@
       "$value": "{color.palette.control}",
       "$description": "2026-11-01 新增：上下文构成「其他上下文」图标色（中性灰）。收在六色之末：它是兜底分类，不该比具名分类更显眼。"
     },
+    "color.fileType.code": {
+      "$type": "color",
+      "$value": "{color.palette.azure}",
+      "$description": "2026-11-10 新增：工具活动行里源代码文件（ts/tsx/js/py/go/rs/css/html/sql 等）的类型图标色。只上色 12px 图标，文件名仍是次级文字色——一行一个彩色文件名会让过程列表变成调色盘，类型识别交给形状 + 颜色两件事一起做。"
+    },
+    "color.fileType.doc": {
+      "$type": "color",
+      "$value": "{color.palette.teal}",
+      "$description": "2026-11-10 新增：文档与纯文本文件（md/txt/rst/pdf 等）的类型图标色。与上下文构成「文件读取」同值不同用途：这里按扩展名分类，不按读取行为分组。"
+    },
+    "color.fileType.config": {
+      "$type": "color",
+      "$value": "{color.palette.amber}",
+      "$description": "2026-11-10 新增：配置文件（json/yaml/toml/ini/env 等）的类型图标色。与警示琥珀同值但不同用途：图标不表达风险，风险仍由状态色与文字表达。"
+    },
+    "color.fileType.data": {
+      "$type": "color",
+      "$value": "{color.palette.violet}",
+      "$description": "2026-11-10 新增：数据文件（csv/tsv/xlsx/parquet/db 等）的类型图标色。"
+    },
+    "color.fileType.image": {
+      "$type": "color",
+      "$value": "{color.palette.leaf}",
+      "$description": "2026-11-10 新增：图片与图形资源（png/jpg/svg/webp 等）的类型图标色。"
+    },
     "color.disabled.bg": {
       "$type": "color",
       "$value": "{color.palette.disabled}"
@@ -672,12 +697,13 @@
     },
     "control.meter.size": {
       "$type": "dimension",
-      "$value": "1.5rem",
-      "$description": "输入区上下文占用圆环的**视觉**直径。2026-10-25 曾由 1.125rem 提到 2rem 以与模型 chip 同高；2026-11-01 按用户指令收回 24px——圆环是辅助读数，32px 会压过同排的文字读数。点击区不跟着缩：按钮盒仍是 control.height.compact（32px），环在其中居中，因此命中区不小于 32×32。数值必须旁标可读文字（Tooltip / aria-label / 详情浮层），圆环本身不单独承载信息。"
+      "$value": "1.125rem",
+      "$description": "输入区上下文占用圆环的**视觉**直径。2026-10-25 曾由 1.125rem 提到 2rem 以与模型 chip 同高；2026-11-01 按用户指令收回 24px——圆环是辅助读数，32px 会压过同排的文字读数。2026-11-10 按用户指令把半径减半（24px → 12px）后实测过小，改取 18px（字号的 1.125rem 档）：比原值小一档、仍能在工具行里读出弧线，悬停 Tooltip 与详情浮层补足读数。环内 stroke 随 SVG 视框等比缩放。点击区不跟着缩：按钮盒仍是 control.height.compact（32px），环在其中居中，因此命中区不小于 32×32。数值必须旁标可读文字（Tooltip / aria-label / 详情浮层），圆环本身不单独承载信息。"
     },
     "control.meter.stroke": {
       "$type": "dimension",
-      "$value": "0.125rem"
+      "$value": "0.3125rem",
+      "$description": "上下文占用圆环的描边宽度，写在 0 0 36 36 的 SVG 视框里，实际显示线宽 = 本值 × control.meter.size / 36（18px 环下约 2.5px，与 ZCode 参考环的粗细比例一致）。2026-11-10 按用户指令由 0.125rem（显示约 1px）加粗。"
     },
     "border.width": {
       "$type": "dimension",
@@ -999,6 +1025,31 @@
     },
     {
       "foreground": "color.category.other",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.fileType.code",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.fileType.doc",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.fileType.config",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.fileType.data",
+      "background": "color.bg.surface",
+      "minimum": 3
+    },
+    {
+      "foreground": "color.fileType.image",
       "background": "color.bg.surface",
       "minimum": 3
     }

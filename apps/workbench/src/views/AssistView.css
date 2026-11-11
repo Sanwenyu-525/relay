@@ -368,6 +368,19 @@
 .agent-message-avatar svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
 .agent-message-body { display: grid; gap: var(--relay-space-1); min-width: 0; flex: 1; }
 .agent-message-body > * { min-width: 0; max-width: 100%; }
+/* 消息过程只有一个槽位（2026-11-10）：阶段行、工具账本、例外状态块互斥占用。
+   间距由这一层统一给，子块自己不再带外边距——阶段行与工具标题行互换时因此
+   不会多出一档 margin，正文也不会因为换了个组件而上下跳。空槽位不占位。 */
+.agent-message-process {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  margin-block: var(--relay-space-1) var(--relay-space-2);
+}
+.agent-message-process:empty { display: none; }
+.agent-message-process > .assist-stage,
+.agent-message-process > .activity-panel,
+.agent-message-process > .message-execution-status { margin: 0; }
 .agent-message-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--relay-space-2); margin: 0; color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); line-height: var(--relay-font-lineHeight-heading); }
 /* 用户消息：整行靠右排列，与 AI 消息在左右两侧形成明确区分 */
 .agent-message[data-role="USER"] {
@@ -838,17 +851,11 @@ html[data-motion="off"] .chat-disclosure-chevron { transition: none; }
   font-weight: var(--relay-font-weight-medium);
 }
 
-/* 交接是一次性的淡入（motion.duration.panel + 标准缓动）：只动 opacity，不位移、不缩放。
-   起点 0.6 而不是 0——文字全程可读，读起来是「换上了」而不是「闪没了」。 */
-.assist-reply[data-state="final"][data-handover="true"] {
-  animation: assist-reply-handover var(--relay-motion-duration-panel) var(--relay-motion-easing-standard);
-}
-@keyframes assist-reply-handover {
-  from { opacity: 0.6; }
-  to { opacity: 1; }
-}
-/* 关掉动效就立即呈现静态终态：文字、操作与焦点全在，只是没有那一下过渡。 */
-html[data-motion="off"] .assist-reply[data-state="final"][data-handover="true"] { animation: none; }
+/* 交接不再做淡入（2026-11-10 用户反馈「回答完成的瞬间会闪一下」）。
+   草稿与终稿本来就在同一个阅读区、同一档字号行高，真正的交接差异只有 Markdown
+   块距；再叠一次 opacity 0.6 → 1 只会把「换上了」读成「闪了一下」。
+   `data-handover` 仍保留为一次性标记（用例与后续观测用），但不再驱动任何动画。 */
+.assist-reply[data-state="final"][data-handover="true"] { animation: none; }
 
 /* 输入区：常驻底部，不随消息滚动；按钮不被末段遮挡。
    对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。
@@ -1137,8 +1144,11 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
    以卡片为锚又会被中栏的 overflow 裁掉。fixed + 实测是唯一同时满足
    「不遮挡输入区」「不被裁剪」「窄窗可读」的形态，因此这里不再改包含块。 */
 /* 圆环按钮＝环本体（2026-10-28 建，2026-11-01 按用户指令收掉右侧百分比读数）。
-   按钮盒取 control.height.compact（32px），环本体取 control.meter.size（24px）：
-   视觉直径缩到 24px，命中区仍是 32×32，不低于 control.target.minimum——
+   按钮盒取 control.height.compact（32px），环本体取 control.meter.size（18px）：
+   2026-11-10 先按用户指令把直径从 24px 减半到 12px，实测过小，最终取 18px——
+   比原值小一档、弧线仍可读；环内 stroke 随 SVG 视框等比缩放，同日按用户指令
+   加粗到 ZCode 参考环的比例（显示线宽约 2.5px）。
+   命中区仍是 32×32，不低于 control.target.minimum——
    缩的是画出来的环，不是能点到的地方。内边距给悬停底色留出边，不必为点击再加外壳。 */
 .agent-chat-context-meter {
   display: inline-flex;
@@ -2643,7 +2653,7 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
 /* 2026-11-01 AGENT_STREAM_VISIBILITY：在途回复的阶段行。
    一个阅读列里的单行文字 + 既有三点动效；不套卡片、不加底色/阴影，
    与 meta 行和正文同一阅读起点。正文一出现这一行就卸下（由渲染条件决定，不是遮盖）。
-   延迟诊断只在用户展开时出现，两列读法在窄容器里自动换行。 */
+   2026-11-10：聊天流只保留这一行；逐段耗时不再就地展开，随会话导出提供。 */
 .assist-stage { display: grid; gap: var(--relay-space-1); margin: 0; min-width: 0; }
 .assist-stage-line {
   display: flex;
@@ -2663,27 +2673,6 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
   font-size: var(--relay-font-size-meta);
   color: var(--relay-color-text-secondary);
 }
-.assist-stage-details { margin: 0; }
-.assist-stage-diagnostics {
-  display: flex;
-  flex-direction: column;
-  gap: var(--relay-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-ui);
-  color: var(--relay-color-text-secondary);
-}
-.assist-stage-diagnostics > li {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--relay-space-1) var(--relay-space-3);
-  min-width: 0;
-}
-.assist-stage-diagnostic-label { flex: 1 1 auto; min-width: 0; color: var(--relay-color-text-muted); }
-.assist-stage-diagnostic-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 /* 「部分不可统计」的逐条解释（CD-17）：成因、范围、条数都摆在面板里，不用单一颜色表达状态。 */
 .conversation-diff-incomplete {

@@ -8,6 +8,7 @@ import type { JsonObject } from '../infrastructure/json.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
 import { ProblemError, internalError, problemBody, type ProblemDetails } from './problem.js';
+import { logRequestFailure } from './request-failure-log.js';
 
 /**
  * 命令成功回执与领域错误到 Problem Details 的映射。
@@ -374,15 +375,15 @@ export function createCommandHandler<TBodySchema extends TSchema, TResult extend
         }),
       );
     } catch (error) {
-      if (error instanceof ProblemError) {
-        return sendProblem(reply, error.problem, request.id);
-      }
-
-      if (!(error instanceof DomainError) && !(error instanceof CommandIdReusedError)) {
+      const problem = error instanceof ProblemError ? error.problem
+        : problemFromError(error, body.command_id);
+      if (!(error instanceof ProblemError) && !(error instanceof DomainError)
+        && !(error instanceof CommandIdReusedError)) {
         request.log.error({ err: error }, 'command_failed');
       }
-
-      return sendProblem(reply, problemFromError(error, body.command_id), request.id);
+      // 4xx 是业务拒绝，helper 内部按状态码过滤；只有 5xx 落盘。
+      logRequestFailure(request, error, problem, { command_id: body.command_id });
+      return sendProblem(reply, problem, request.id);
     }
   };
 }
@@ -393,9 +394,7 @@ export function sendReadError(
   error: unknown,
   requestId: string,
 ): FastifyReply {
-  if (error instanceof ProblemError) {
-    return sendProblem(reply, error.problem, requestId);
-  }
-
-  return sendProblem(reply, problemFromError(error), requestId);
+  const problem = error instanceof ProblemError ? error.problem : problemFromError(error);
+  logRequestFailure(reply.request, error, problem);
+  return sendProblem(reply, problem, requestId);
 }

@@ -34,6 +34,8 @@ interface Row {
   readonly id: string;
   project_id: string | null;
   task_id: string | null;
+  /** 0128：子代理会话的父会话；左栏只列根会话，删除主会话时子会话随主会话级联。 */
+  parent_session_id?: string | null;
   title: string;
   status: string;
   revision: string;
@@ -51,6 +53,12 @@ interface Row {
   /** 0157：标题来源与最近一次生成请求；缺省按 LEGACY / null 读（旧服务端行为）。 */
   title_source?: string;
   title_generation?: Record<string, unknown> | null;
+  /** 左栏「会话（按目录）」分组依据；缺省表示这次读取没有上下文（归「目录待核对」）。 */
+  context?: {
+    readonly project_goals: readonly unknown[];
+    readonly working_directory: { readonly resource_id: string;
+      readonly canonical_root: string; readonly source: string } | null;
+  };
 }
 
 const row = (n: number, title: string, at: string): Row => ({
@@ -63,6 +71,14 @@ const row = (n: number, title: string, at: string): Row => ({
 /** 还没有落过一条消息的会话：除活动键与派生事实外与普通行同形（这正是它难分辨的地方）。 */
 const emptyRow = (n: number, title: string, at: string): Row =>
   ({ ...row(n, title, at), last_message_at: null, has_messages: false });
+
+const DIR_A = "66666666-6666-4666-8666-666666666666";
+const DIR_B = "77777777-7777-4777-8777-777777777777";
+/** 带目录上下文的会话：左栏按它分组，「清空该工作区」也按同一个键限定范围。 */
+const directoryRow = (n: number, title: string, at: string,
+  resourceId: string, root: string): Row => ({ ...row(n, title, at),
+  context: { project_goals: [], working_directory: { resource_id: resourceId,
+    canonical_root: root, source: "USER_PICKED" } } });
 
 const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
@@ -392,7 +408,7 @@ const rowOf = (container: HTMLElement, sessionId: string) =>
  * 「归档即隐藏」要看的是它还在不在活跃那一段里：jsdom 折叠 `<details>` 不会把子节点从
  * DOM 里摘掉，所以按全局 testid 断言存在性会同时命中归档区，把断言写成假通过。
  * 2026-10-16 第七轮起归档段与三个活跃根区同处 recent-work-list 包装层（让根区相邻选择器
- * 覆盖「任务入口 ↔ 已归档」的间距），因此命中后还要再排除落在归档段里的那一份；
+ * 覆盖「任务 ↔ 已归档」的间距），因此命中后还要再排除落在归档段里的那一份；
  * 归档段在文档序上位于三个活跃根区之后，活跃副本永远先被 querySelector 取到。
  */
 const rowInActiveList = (container: HTMLElement, sessionId: string) => {
@@ -1190,6 +1206,15 @@ const barOf = (container: HTMLElement) =>
 const barText = (container: HTMLElement) => (barOf(container)?.textContent ?? "").replace(/\s+/gu, " ").trim();
 const barButton = (container: HTMLElement, testId: string) =>
   container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);
+/** 批量删除的失败/待核实结果现在挂在页壳反馈栈里（portal 到 body），不在左栏容器内。 */
+const noticeOf = () => document.querySelector<HTMLElement>('[data-testid="recent-work-batch-notice"]');
+const noticeText = () => (noticeOf()?.textContent ?? "").replace(/\s+/gu, " ").trim();
+async function clickNoticeAction(): Promise<void> {
+  const action = noticeOf()?.querySelector<HTMLButtonElement>(".feedback-action");
+  if (action === null || action === undefined) throw new Error("反馈提示里没有动作按钮");
+  await act(async () => { action.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+}
 
 async function toggleRow(container: HTMLElement, sessionId: string): Promise<void> {
   const box = selectOf(container, sessionId);
@@ -1252,7 +1277,7 @@ it("批量删除逐段发命令、各带读回来的修订；成功后行消失�
   expect(fake.rows).toEqual([]);
 });
 
-it("被引用阻止的那段留在列表与选择集里，其余照删：结论一行、原因一次、可执行动作一次", async () => {
+it("被引用阻止的那段留在列表里，其余照删：非阻塞提示写结论、原因与动作，选择清空", async () => {
   const fake = fakeServer([row(1, "被引用的", "01"), row(2, "可以删的", "02")],
     { deleteBlockedIds: [id(1)] });
   const { container } = await mount(fake);
@@ -1264,28 +1289,23 @@ it("被引用阻止的那段留在列表与选择集里，其余照删：结论�
   expect(fake.posts).toHaveLength(2);
   expect(rowInActiveList(container, id(1))).not.toBeNull();
   expect(rowInActiveList(container, id(2))).toBeNull();
-  const report = container.querySelector('[data-testid="recent-work-batch-error"]');
-  // 顶层只有一行结论：删了几段、没删掉几段、待核实几段。
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toContain("已删除 1 段");
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toContain("1 段未删除");
-  expect(report?.textContent).toContain("被任务验收观察引用");
-  // 原因只写一次，并且给出真正能做的动作。
-  expect((report?.textContent ?? "").split("被任务验收观察引用").length - 1).toBe(1);
-  expect(report?.textContent).toContain("先在任务里解除对这条消息的验收引用");
-  // 失败的那段仍勾着（用户可以回去处理引用后再删）；结果态不再提供第二次删除确认。
-  expect(selectOf(container, id(1))?.checked).toBe(true);
-  expect(barText(container)).toContain("删除结果");
-  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
-  expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
-  // 关闭即结束这一轮：勾选清空，卡片收起，不会再出现第三次确认。
-  await clickBar(container, "recent-work-batch-result-close");
+  // 结果不再占左栏里的第三张卡片：勾选清空、操作栏收起，提示进页壳反馈栈。
   expect(barOf(container)).toBeNull();
   expect(selectOf(container, id(1))?.checked).toBe(false);
+  expect(container.querySelector('[data-testid="recent-work-batch-error"]')).toBeNull();
+  expect(container.textContent).not.toContain("删除结果");
+  expect(noticeText()).toContain("已删除 1 段");
+  expect(noticeText()).toContain("1 段未删除");
+  expect(noticeText()).toContain("被任务验收观察引用");
+  // 原因只写一次，并且给出真正能做的动作。
+  expect(noticeText().split("被任务验收观察引用").length - 1).toBe(1);
+  expect(noticeText()).toContain("先在任务里解除对这条消息的验收引用");
+  // 不再出现第二次删除确认。
+  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
+  expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
 });
 
-it("同因被阻止的多段合并成一句：原因只出现一次，同名标题按段数报", async () => {
+it("同因被阻止的多段合并成一句：原因只写一次，提示里不再点名长标题", async () => {
   const fake = fakeServer([row(1, "关于Relay-Agent", "01"), row(2, "关于Relay-Agent", "02"),
     row(3, "关于Relay-Agent", "03")], { deleteBlockedIds: [id(1), id(2), id(3)] });
   const { container } = await mount(fake);
@@ -1294,20 +1314,15 @@ it("同因被阻止的多段合并成一句：原因只出现一次，同名标�
   await clickBar(container, "recent-work-batch-delete-confirm");
 
   expect(fake.posts).toHaveLength(3);
-  const text = (container.querySelector('[data-testid="recent-work-batch-error"]')?.textContent ?? "")
-    .replace(/\s+/gu, " ");
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toContain("已删除 0 段");
-  // 三条同名、同一阻断原因：标题去重后按段数报，原因写一次。
-  expect(text).toContain("「关于Relay-Agent」等 3 段还不能删除：被任务验收观察引用、有学习记录");
+  expect(noticeText()).toContain("已删除 0 段");
+  expect(noticeText()).toContain("3 段未删除");
+  expect(noticeText()).toContain("被任务验收观察引用");
+  expect(noticeText()).toContain("有学习记录");
   // 整句与建议都不按条数重复（2026-10-20 用户截图指认的正是这三遍红字）。
-  expect(text.split("还不能删除").length - 1).toBe(1);
-  expect(text.split("被任务验收观察引用").length - 1).toBe(1);
-  expect(selectOf(container, id(1))?.checked).toBe(true);
-  // 结果态是本轮唯一终态：不会退回「已选 3 段讨论 + 删除」的第三次确认。
-  expect(barText(container)).toContain("删除结果");
-  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
-  await clickBar(container, "recent-work-batch-result-close");
+  expect(noticeText().split("被任务验收观察引用").length - 1).toBe(1);
+  // 标题就是用户那一段长提示词：结果提示不再逐条点名，避免把反馈卡再次撑长。
+  expect(noticeText()).not.toContain("关于Relay-Agent");
+  expect(selectOf(container, id(1))?.checked).toBe(false);
   expect(barOf(container)).toBeNull();
 });
 
@@ -1334,20 +1349,18 @@ it("批量删除里结果未知的那条停在待核实：不宣称成功也不�
   await clickBar(container, "recent-work-batch-delete-confirm");
 
   expect(fake.posts).toHaveLength(1);
-  const report = container.querySelector('[data-testid="recent-work-batch-error"]');
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toContain("1 段待核实");
-  expect(report?.textContent).toContain("还没有确定");
-  // 行与勾选都留着：本次是否删掉未定，界面不替用户猜。
+  expect(noticeText()).toContain("1 段待核实");
+  expect(noticeText()).toContain("不要重复删除");
+  // 行留着，勾选清空：本次是否删掉未定，界面不替用户猜，也不把这一条再当成「已选」。
   expect(rowInActiveList(container, id(1))).not.toBeNull();
-  expect(selectOf(container, id(1))?.checked).toBe(true);
-  // 结果态没有再次删除的入口；只有核对回执与关闭。
-  expect(barButton(container, "recent-work-batch-delete")).toBeNull();
-  expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
-  expect(barButton(container, "recent-work-batch-recheck")).not.toBeNull();
-  await clickBar(container, "recent-work-batch-result-close");
+  expect(selectOf(container, id(1))?.checked).toBe(false);
   expect(barOf(container)).toBeNull();
+  // 提示里没有再次删除的入口；只有核对回执。
+  expect(noticeOf()?.querySelector(".feedback-action")?.textContent).toContain("核对回执");
+  await clickNoticeAction();
   expect(fake.posts).toHaveLength(1);
+  expect(rowInActiveList(container, id(1))).not.toBeNull();
+  expect(noticeOf()?.querySelector(".feedback-action")?.textContent).toContain("核对回执");
 });
 
 it("核对回执确认已删之后那一行真的收掉：部分成功、部分未知、被阻断的互不误伤", async () => {
@@ -1365,32 +1378,29 @@ it("核对回执确认已删之后那一行真的收掉：部分成功、部分�
   // 四条各走各的结局：一条当场删成，一条被跨对象引用挡住，两条结果未知——
   // 其中「响应丢了」那条在删除时已自动按原命令核对过一次，撞上回执还没对外可见。
   expect(fake.posts).toHaveLength(4);
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toBe("已删除 1 段，1 段未删除，2 段待核实");
+  expect(noticeText()).toContain("已删除 1 段，1 段未删除，2 段待核实");
   expect(rowInActiveList(container, id(4))).toBeNull();
   for (const n of [1, 2, 3]) {
     expect(rowInActiveList(container, id(n))).not.toBeNull();
-    expect(selectOf(container, id(n))?.checked).toBe(true);
+    expect(selectOf(container, id(n))?.checked).toBe(false);
   }
+  expect(barOf(container)).toBeNull();
 
-  await clickBar(container, "recent-work-batch-recheck");
+  await clickNoticeAction();
   // 核对只读取回执，一条删除命令都没有重发。
   expect(fake.posts).toHaveLength(4);
-  // 已确认删掉的那条：行与勾选一起消失（分组副本派生自这两份列表，跟着没了）。
+  // 已确认删掉的那条：行一起消失（分组副本派生自这两份列表，跟着没了）。
   expect(rowInActiveList(container, id(2))).toBeNull();
   expect(selectOf(container, id(2))).toBeNull();
   // 仍查不到回执的那条一行不动：既不改成成功，也不改成失败，继续留在待核实。
   expect(rowInActiveList(container, id(3))).not.toBeNull();
-  expect(selectOf(container, id(3))?.checked).toBe(true);
   // 业务阻断的那条也原样留着：等用户回去解除引用，界面不替它猜结局。
   expect(rowInActiveList(container, id(1))).not.toBeNull();
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toBe("已删除 2 段，1 段未删除，1 段待核实");
-  // 终态没变：还是这一张卡片，只有「核对回执」与「关闭」，没有第二次删除确认。
-  expect(barText(container)).toContain("删除结果");
+  expect(noticeText()).toContain("已删除 2 段，1 段未删除，1 段待核实");
+  // 仍有待核实：提示里保留核对入口；没有第二次删除确认。
+  expect(noticeOf()?.querySelector(".feedback-action")?.textContent).toContain("核对回执");
   expect(barButton(container, "recent-work-batch-delete")).toBeNull();
   expect(barButton(container, "recent-work-batch-delete-confirm")).toBeNull();
-  expect(barButton(container, "recent-work-batch-recheck")).not.toBeNull();
 });
 
 it("批量里连归档段那条也一起核对掉：活跃与归档两份投影同时收行，核对完不再留待核实", async () => {
@@ -1409,11 +1419,11 @@ it("批量里连归档段那条也一起核对掉：活跃与归档两份投影�
 
   // 两条都删到了服务端、两条都还查不到回执：结果未知时列表一行都不收。
   expect(fake.posts).toHaveLength(2);
-  expect(container.querySelector('[data-testid="recent-work-batch-summary"]')?.textContent)
-    .toBe("已删除 0 段，2 段待核实");
+  expect(noticeText()).toContain("已删除 0 段，2 段待核实");
   expect(archivedSection.querySelector(`[data-testid="recent-work-${id(2)}"]`)).not.toBeNull();
+  expect(barOf(container)).toBeNull();
 
-  await clickBar(container, "recent-work-batch-recheck");
+  await clickNoticeAction();
   expect(fake.posts).toHaveLength(2);
   // 移除按确切 sessionId 同时打在两份投影上：归档段里那一份不能留在原地当幽灵行。
   expect(rowInActiveList(container, id(1))).toBeNull();
@@ -1421,10 +1431,58 @@ it("批量里连归档段那条也一起核对掉：活跃与归档两份投影�
   expect(archivedSection.querySelector(`[data-testid="recent-work-${id(2)}"]`)).toBeNull();
   expect(archivedSection.querySelector(".recent-work-group-count")?.textContent).toBe("0");
   expect(selectOf(container, id(2))).toBeNull();
-  // 全部核对到位 = 这一轮没有残项：与「批量删除全部成功」同一终态，提示卡片自己收起，
+  // 全部核对到位 = 这一轮没有残项：与「批量删除全部成功」同一终态，提示自己收起，
   // 不再留「核对回执」，也不留一句已经过期的大白话结论。
-  expect(barButton(container, "recent-work-batch-recheck")).toBeNull();
+  expect(noticeOf()).toBeNull();
   expect(barOf(container)).toBeNull();
+});
+
+it("清空按钮在「会话（按目录）」段标题右侧：清的是整段会话集合，子代理会话不出现在左栏", async () => {
+  const fake = fakeServer([
+    directoryRow(1, "目录 A 讨论甲", "01", DIR_A, "D:/work/a"),
+    directoryRow(2, "目录 B 讨论", "02", DIR_B, "D:/work/b"),
+    directoryRow(4, "目录 A 讨论乙", "04", DIR_A, "D:/work/a"),
+    // 子代理会话：task_id 为空、parent_session_id 非空。它属于主会话的委派执行史，
+    // 不能作为一条独立讨论出现在左栏，更不能被「清空工作区」当成单条删除。
+    { ...row(3, "子 Agent · 只读调查", "03"), parent_session_id: id(1) }
+  ]);
+  const { container } = await mount(fake);
+
+  // 只显示两个目录组；子代理会话不在左栏。
+  expect(rowInActiveList(container, id(1))).not.toBeNull();
+  expect(rowInActiveList(container, id(2))).not.toBeNull();
+  expect(rowInActiveList(container, id(4))).not.toBeNull();
+  expect(rowInActiveList(container, id(3))).toBeNull();
+
+  // 按钮只有一枚，挂在「会话（按目录）」段标题上、就在标题文字右边：
+  // 不再下放到各个目录组行（用户口径：这一段指会话的集合区域，不是单个目录）。
+  const section = container.querySelector<HTMLElement>('[data-testid="recent-work-directories"]')!;
+  const summary = section.querySelector<HTMLElement>(":scope > summary")!;
+  const clear = summary.querySelector<HTMLButtonElement>('[data-testid="workspace-clear-sessions"]');
+  expect(clear).not.toBeNull();
+  expect(container.querySelectorAll('[data-testid="workspace-clear-sessions"]')).toHaveLength(1);
+  expect(container.querySelector(`[data-testid="workspace-clear-sessions-${DIR_A}"]`)).toBeNull();
+  expect(container.querySelector(`[data-testid="workspace-clear-sessions-${DIR_B}"]`)).toBeNull();
+  const title = summary.querySelector<HTMLElement>(".recent-work-section-title")!;
+  expect(title.textContent).toBe("会话（按目录）");
+  expect(title.nextElementSibling).toBe(clear);
+
+  await act(async () => { clear?.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(document.querySelector('[data-testid="workspace-clear-count"]')?.textContent).toBe("3");
+
+  const confirm = document.querySelector<HTMLButtonElement>('[data-testid="workspace-clear-confirm"]');
+  await act(async () => { confirm?.click(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  // 两个目录的三条讨论都删；子代理会话一个都不动，也不单独发命令。
+  expect(fake.posts.filter((post) => post.action === "delete")).toHaveLength(3);
+  expect(rowInActiveList(container, id(1))).toBeNull();
+  expect(rowInActiveList(container, id(4))).toBeNull();
+  expect(rowInActiveList(container, id(2))).toBeNull();
+  expect(fake.rows.map((item) => item.id)).toEqual([id(3)]);
+  expect(document.querySelector('[data-testid="workspace-clear-success"]')?.textContent)
+    .toContain("已清空 3 条会话");
 });
 
 /**

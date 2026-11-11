@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronRight, Inbox, Info, Plus, RotateCcw, Search, SearchX } from "lucide-react";
+import { ChevronRight, Inbox, Info, Plus, RotateCcw, Search, SearchX, X } from "lucide-react";
 import type { RelayApiClient, RelayTaskSummary } from "../api/relayClient";
 import EmptyState from "../components/EmptyState";
 import { taskStatusIcons } from "../components/StatusChip";
@@ -74,12 +74,12 @@ function InboxScopeNav() {
   </nav>;
 }
 
-function InboxStats({ rows }: { rows: readonly InboxTaskRow[] }) {
+function InboxStats({ rows, basis }: { rows: readonly InboxTaskRow[]; basis: string }) {
   const counts = statusCounts(rows);
-  return <ul className="inbox-stats" aria-label="收件箱状态统计">
+  return <ul className="inbox-stats" aria-label={`收件箱状态统计（${basis}）`}>
     {statCards.map((card) => <li key={card.status} className="inbox-stat">
-      <span className="inbox-stat-label">{taskStatusLabels[card.status]}</span>
-      <span className="inbox-stat-value">{counts[card.status]}</span>
+      {/* 数字与状态名基线对齐成一行，提示独占下一行：三张卡更紧凑，口径写在 aria-label 里。 */}
+      <span className="inbox-stat-figure"><span className="inbox-stat-value">{counts[card.status]}</span><span className="inbox-stat-label">{taskStatusLabels[card.status]}</span></span>
       <span className="inbox-stat-hint">{card.hint}</span>
     </li>)}
   </ul>;
@@ -98,7 +98,8 @@ function InboxTaskRow({ task }: { task: InboxTaskRow }) {
   return <Link className={`inbox-row${untriaged}`} to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`}>
     <InboxRowIcon status={task.status} />
     <span className="inbox-row-main">
-      <span className="inbox-row-title">{task.title}</span>
+      {/* 单行省略的标题挂完整名称：键盘与读屏拿不到悬停文本，需要真实属性承载。 */}
+      <span className="inbox-row-title" title={task.title}>{task.title}</span>
       <span className="inbox-row-facts">未归属项目 · {taskStatusLabels[task.status]} · {interactionModeLabels[task.mode]} · {executorLabels[task.executor]} · 任务修订 v{task.revision}</span>
       {reason !== null && <span className="inbox-row-reason">{reason}</span>}
     </span>
@@ -129,12 +130,33 @@ function InboxEmptyState({ hasFilters, onClearFilters, onCreate }: {
     actions={<button className="primary-button" type="button" onClick={onCreate}>新建任务</button>} />;
 }
 
-/** 范围说明：折叠块收拢「这个范围是什么、统计覆盖到哪」，不占首屏高度。 */
-function InboxScopeNote() {
+/** 当前生效筛选摘要：与任务页同一套 chips 语言，写在页面私有 CSS 里（不抽全局组件）。 */
+function InboxFilterSummary({ filters, onClear }: {
+  filters: readonly { key: string; label: string; onRemove: () => void }[];
+  onClear: () => void;
+}) {
+  if (filters.length === 0) return null;
+  return <div className="active-filters" data-testid="inbox-active-filters">
+    <span className="active-filters-label">筛选生效中</span>
+    <ul className="active-filters-list" role="list">
+      {filters.map((filter) => <li key={filter.key} className="active-filter-chip">
+        <span>{filter.label}</span>
+        <button className="active-filter-remove" type="button" aria-label={`移除筛选：${filter.label}`} onClick={filter.onRemove}><X aria-hidden="true" /></button>
+      </li>)}
+    </ul>
+    <button className="text-button" type="button" onClick={onClear}>清除筛选</button>
+  </div>;
+}
+
+/** 范围说明：折叠块收拢「这个范围是什么、统计覆盖到哪」，不占首屏高度。
+    统计口径按数据链分句：live 保持原句（每页 50 项 + 加载更多），fixture 说示例行口径。 */
+function InboxScopeNote({ mode }: { mode: "fixture" | "live" }) {
   return <details className="page-explanation" data-testid="inbox-scope-note">
     <summary>收件箱范围说明</summary>
     <p>收件箱只包含未归属项目的人工任务：服务端只返回未归属 Project 且由人工执行的事项；把任务挂到项目下，它就不再出现在这里。</p>
-    <p>统计与列表都只覆盖已加载范围，不代表工作空间全量；本机服务每页最多 50 项，后续页用「加载更多」继续。需要人工判断的事项（开放 Review、未决操作与控制请求）在「人工待处理」。</p>
+    {mode === "live"
+      ? <p>统计与列表都只覆盖已加载范围，不代表工作空间全量；本机服务每页最多 50 项，后续页用「加载更多」继续。需要人工判断的事项（开放 Review、未决操作与控制请求）在「人工待处理」。</p>
+      : <p>当前是示例数据：统计基于全部示例行，不代表真实工作空间；需要人工判断的事项（开放 Review、未决操作与控制请求）在「人工待处理」，连接本机 API 后查看。</p>}
   </details>;
 }
 
@@ -182,25 +204,36 @@ function FixtureInboxBoard() {
   if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Task Inbox</p><h1>正在读取收件箱任务</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
   if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Task Inbox</p><h1>暂时无法显示收件箱</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
   const rows = tasks.map(fixtureRow);
+  // 生效筛选摘要（fixture）：项目筛选停用且不产生生效条件，chips 只列状态、模式与搜索。
+  const activeFilters = [
+    ...(statusFilter !== "all" ? [{ key: "status", label: `状态：${taskStatusLabels[statusFilter]}`, onRemove: () => setStatusFilter("all") }] : []),
+    ...(modeFilter !== "all" ? [{ key: "mode", label: `执行模式：${interactionModeLabels[modeFilter]}`, onRemove: () => setModeFilter("all") }] : []),
+    ...(search !== "" ? [{ key: "search", label: `搜索“${search}”`, onRemove: () => setSearch("") }] : [])
+  ];
   return <section className="skill-page inbox-page pv-page"><div className="inbox-inner">
     <InboxHead onCreate={openCreate} onCreateLightweight={openLightweight} />
     <InboxScopeNav />
-    <InboxStats rows={rows} />
-    <div className="list-toolbar list-toolbar--compact">
-      {/* 收件箱范围没有项目维度，筛选框保留但停用：明说「这里不按项目筛」，不留一个能点却无效的控件。 */}
-      <label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project" disabled><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label>
+    <InboxStats rows={rows} basis="基于全部示例行" />
+    <div className="list-toolbar list-toolbar--compact" data-testid="inbox-toolbar">
+      {/* 工具条降噪（UI-PAGE-INBOX-01）：搜索在前、筛选次之；项目筛选保留但停用并在控件旁说明原因。 */}
+      <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label>
       <label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label>
       <label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label>
-      <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label>
+      {/* 收件箱范围没有项目维度，筛选框保留但停用：明说「这里不按项目筛」，不留一个能点却无效的控件。 */}
+      <label className="filter-field inbox-filter-project">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project" disabled title="收件箱不按项目筛选：这里只收未归属项目的人工任务"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select><small className="inbox-filter-project-note">收件箱不按项目筛选：这里只收未归属项目的人工任务。</small></label>
     </div>
+    <InboxFilterSummary filters={activeFilters} onClear={clearFilters} />
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
     <InboxTaskCard count={rows.length}>
       {rows.length === 0
         ? <InboxEmptyState hasFilters={hasFilters} onClearFilters={clearFilters} onCreate={openCreate} />
         : rows.map((task) => <InboxTaskRow key={task.id} task={task} />)}
     </InboxTaskCard>
-    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
-    <InboxScopeNote />
+    <div className="task-list-foot">
+      <p className="list-count-note" data-testid="inbox-fixture-count">{hasFilters ? `当前筛选显示 ${rows.length} 项任务。` : `共 ${rows.length} 项任务。`}</p>
+      <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
+    </div>
+    <InboxScopeNote mode="fixture" />
   </div></section>;
 }
 
@@ -252,18 +285,26 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
     (!needle || task.title.toLocaleLowerCase().includes(needle)));
   const hasFilters = statusFilter !== "all" || modeFilter !== "all" || needle !== "";
   const clearFilters = () => { setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
+  // 生效筛选摘要（live）：搜索按已去空白的关键词展示，与实际过滤口径一致。
+  const activeFilters = [
+    ...(statusFilter !== "all" ? [{ key: "status", label: `状态：${taskStatusLabels[statusFilter]}`, onRemove: () => setStatusFilter("all") }] : []),
+    ...(modeFilter !== "all" ? [{ key: "mode", label: `执行模式：${interactionModeLabels[modeFilter]}`, onRemove: () => setModeFilter("all") }] : []),
+    ...(needle !== "" ? [{ key: "search", label: `搜索“${needle}”`, onRemove: () => setSearch("") }] : [])
+  ];
   const openCreate = () => navigate("/tasks?view=create&tab=inbox");
   const openLightweight = () => navigate("/tasks?view=create&light=1&tab=inbox");
   return <section className="skill-page inbox-page pv-page" data-testid="tasks-live-inbox"><div className="inbox-inner">
     <InboxHead onCreate={openCreate} onCreateLightweight={openLightweight} />
     <InboxScopeNav />
-    <InboxStats rows={visible} />
-    <div className="list-toolbar list-toolbar--compact">
-      <button className="secondary-button" type="button" data-testid="inbox-refresh" disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新收件箱</button>
+    <InboxStats rows={visible} basis="基于当前筛选可见行" />
+    <div className="list-toolbar list-toolbar--compact" data-testid="inbox-toolbar">
+      {/* 工具条降噪（UI-PAGE-INBOX-01）：搜索在前、筛选次之、刷新独立在末尾。 */}
+      <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索已加载任务" /></label>
       <label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label>
       <label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label>
-      <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索已加载任务" /></label>
+      <button className="secondary-button" type="button" data-testid="inbox-refresh" disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新收件箱</button>
     </div>
+    <InboxFilterSummary filters={activeFilters} onClear={clearFilters} />
     {loading ? <div className="page-state" aria-live="polite"><p>正在从本机服务读取收件箱任务…</p></div> :
       error ? <div className="page-state page-state--error" role="alert"><p>{error}</p><button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
         <InboxTaskCard count={visible.length}>
@@ -283,7 +324,7 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
         </div>
       </>}
     <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
-    <InboxScopeNote />
+    <InboxScopeNote mode="live" />
   </div></section>;
 }
 
@@ -291,8 +332,10 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
  * 收件箱页（/tasks?tab=inbox，/inbox 别名）。
  *
  * 页面语义未变：只收未归属项目的人工任务，live 模式按服务端 `GET /tasks?inbox=true`
- * 分页读取，fixture 模式读同一范围的示例数据。本次按 Relay V5.11 原型改版式与信息层级
- * （页头 kicker、三张状态统计卡、卡片式任务行），不改数据来源、筛选口径与测试锚点。
+ * 分页读取，fixture 模式读同一范围的示例数据。UI-PAGE-INBOX-01（2026-11-11）在既有
+ * board 结构上收紧呈现层：工具条「搜索 → 筛选 → 刷新」、fixture 停用的项目筛选旁说明
+ * 原因、统计卡数字与状态名同行并标注口径（fixture 全部示例行 / live 当前筛选可见行）、
+ * 生效筛选 chips 摘要、行标题挂完整名称；数据来源、筛选口径、守卫与测试锚点不变。
  */
 export default function InboxView({ client }: { client: RelayApiClient | null }) {
   return client ? <LiveInboxBoard client={client} /> : <FixtureInboxBoard />;

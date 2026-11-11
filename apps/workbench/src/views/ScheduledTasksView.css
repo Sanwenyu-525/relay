@@ -1,5 +1,6 @@
-/* 定时任务列表（/scheduled-tasks）：重点是「下次触发」与「已执行次数」两列的扫描。
-   时间按任务自身时区显示，因此单元格内附一行本地时刻与时区，避免与浏览器时区混淆。 */
+/* 定时任务列表（/scheduled-tasks）：「下次触发」与「已执行次数」是扫描重点，状态 chip 分语气。
+   时间按任务自身时区显示，因此单元格内附一行本地时刻与时区，避免与浏览器时区混淆。
+   注意：本文件也被 CreateScheduledTaskView 引入（排期四件套与高级折叠规则供创建页共用）。 */
 .scheduled-tasks-page .data-table small {
   display: block;
   color: var(--relay-color-text-muted);
@@ -89,4 +90,53 @@
 
 @media (max-width: 760px) {
   .pv-page .data-table { min-width: 640px; display: block; overflow-x: auto; }
+}
+
+/* ── UI-PAGE-SCHEDULED-01：列表层级与窄窗卡片（scope 在本页 pv 根，创建页不受影响） ── */
+
+/* 状态与调度事实分层：标题是行锚点，下次触发用更强语气；「—」是缺省值不是零。 */
+.pv-page.scheduled-tasks-page .scheduled-task-link { font-weight: 650; }
+.pv-page.scheduled-tasks-page .scheduled-next { font-weight: 650; color: #33533d; font-variant-numeric: tabular-nums; }
+.pv-page.scheduled-tasks-page .scheduled-cell-muted { color: var(--pv-muted); }
+.pv-page.scheduled-tasks-page .scheduled-cell-num { font-variant-numeric: tabular-nums; }
+
+/* 数字列与操作列右对齐：表头与其值共享同一条右缘（表格对齐规范）。 */
+.pv-page.scheduled-tasks-page .data-table th.scheduled-col-num,
+.pv-page.scheduled-tasks-page .data-table td.scheduled-col-num { text-align: right; }
+.pv-page.scheduled-tasks-page .data-table th.scheduled-col-actions { text-align: right; }
+.pv-page.scheduled-tasks-page .data-table td.scheduled-col-actions { text-align: right; }
+.pv-page.scheduled-tasks-page .scheduled-task-actions { justify-content: flex-end; }
+.pv-page.scheduled-tasks-page .data-table tbody tr:hover { background: #f7fbf8; }
+
+/* 待核对区块：标题 + 说明 + 动作分三层，固定在列表上方，不遮挡、不浮层。 */
+.pv-page.scheduled-tasks-page .scheduled-pending-title { margin: 0 0 4px; font-weight: 700; }
+.pv-page.scheduled-tasks-page .scheduled-pending > div > p { margin: 0 0 6px; }
+.pv-page.scheduled-tasks-page .scheduled-pending .form-actions { margin-block-end: 0; }
+
+/* 统计概览轻量收紧：数字与状态名对齐不变，只减首屏占用。 */
+.pv-page.scheduled-tasks-page .pv-stats { margin: 13px 0 11px; gap: 10px; }
+.pv-page.scheduled-tasks-page .pv-stat { padding: 13px 14px; }
+
+/* 窄窗（<48rem）把表格降级为行卡片：表头视觉隐藏但保留在文档中，
+   列语义由 td[data-label] 承载，不丢列信息、不横向滚动。 */
+@media (width < 48rem) {
+  .pv-page.scheduled-tasks-page .scheduled-table { display: block; min-width: 0; overflow: visible; }
+  .pv-page.scheduled-tasks-page .scheduled-table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody { display: grid; gap: 9px; padding: 12px; }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody tr {
+    display: grid; gap: 7px; border: 1px solid #e3ebe4; border-radius: 12px;
+    background: #fff; padding: 12px 13px;
+  }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody tr:last-child td { border-bottom: 0; }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody td {
+    display: flex; gap: 10px; align-items: baseline; padding: 0; border-bottom: 0; text-align: left;
+  }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody td::before {
+    content: attr(data-label); flex: 0 0 6.5em; color: var(--pv-muted); font-size: 11px; white-space: nowrap;
+  }
+  .pv-page.scheduled-tasks-page .scheduled-table tbody td.scheduled-col-num,
+  .pv-page.scheduled-tasks-page .scheduled-table tbody td.scheduled-col-actions { text-align: left; justify-content: flex-start; }
 }

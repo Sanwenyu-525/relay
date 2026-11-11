@@ -235,7 +235,8 @@ const AssistUsageDto = Type.Object({
  * 执行阶段只读投影（AGENT_STREAM_VISIBILITY，2026-11-01）。
  *
  * 它不是新的业务状态：阶段由 `model_calls` 的 STARTED/首流/首正文/结算时间与消息
- * 自身的 PENDING/RUNNING 一起派生。时间字段只用于就地展开的延迟诊断，不常驻正文。
+ * 自身的 PENDING/RUNNING 一起派生。界面只读它的一句阶段文案；逐段耗时随会话导出提供，
+ * 不在聊天流就地展开。
  */
 const AssistGenerationProgressDto = Type.Object({
   phase: Type.Union(ASSIST_GENERATION_PHASES.map((phase) => Type.Literal(phase))),
@@ -929,8 +930,8 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       return { outcome, result: outcome.result };
     } }));
 
-  // ADR-027：物理删除。不可撤销、没有回收站；被其它对象引用的会话整条拒绝（409
-  // SESSION_DELETE_BLOCKED），不提供强制删除开关。归档与删除是两条通道。
+  // ADR-027：物理删除。不可撤销、没有回收站；外部对象保留、来源引用解除，不再整条拒绝。
+  // 归档与删除是两条通道。
   app.post('/assist-sessions/:id/delete', { schema: { params: sessionItem,
     body: sessionStateBody, response: { 200: commandEnvelopeSchema(SessionDeleteResult) } } },
   createCommandHandler(dependencies, { commandType: 'DeleteAssistSession',

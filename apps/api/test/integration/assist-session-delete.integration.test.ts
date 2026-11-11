@@ -28,7 +28,7 @@ import {
  *
  * 这里取证的是单测覆盖不到的三件事：
  *   * 删除顺序真的能穿过全部 NO ACTION 外键，并把**会话自有**的账本删干净；
- *   * 被别的对象引用时整条拒绝、零删除——保留边界不是文案，是一组真实的 exists 判定；
+ *   * 被别的对象引用时不再整条拒绝：外部对象保留、来源引用解除（ADR-027 2026-11-10 修订）；
  *   * 行消失之后幂等仍然有效：同 command_id 重放读的是回执账本，不是那条已经不存在的会话。
  *
  * 不取证：真实模型产生的调用、Windows 窗口、界面观感。删除「不可撤销」是产品口径，
@@ -183,20 +183,27 @@ test('陈旧基线不删除任何行：409 REVISION_CONFLICT 带出服务端实�
   assert.equal(await countOf(sql`select count(*)::text as c from assist_messages where session_id = ${sessionId}`), 1);
 });
 
-test('在途消息挡住删除：整条拒绝、零删除，与归档共用同一道栅栏', async () => {
+test('在途消息不再挡住删除：消息随会话删除，Worker 之后按原身份结算不到任何行', async () => {
   const workspaceId = await newWorkspace('inflight');
   const sessionId = await newSession(workspaceId);
+  const inFlightMessageId = randomUUID();
   await sql`insert into assist_messages (id, session_id, seq, role, status, intent)
-    values (${randomUUID()}, ${sessionId}, 1, 'ASSISTANT', 'RUNNING', 'DISCUSS')`.execute(app.db);
+    values (${inFlightMessageId}, ${sessionId}, 1, 'ASSISTANT', 'RUNNING', 'DISCUSS')`.execute(app.db);
 
-  const response = await post(workspaceId, sessionId, {
-    command_id: randomUUID(), expected_revision: '0' });
-  expectProblem(response, 409, 'INVALID_TRANSITION');
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 1);
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_messages where session_id = ${sessionId}`), 1);
+  const commandId = randomUUID();
+  const result = expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: '0' }), 200, commandId) as
+    { deleted_messages: number };
+  assert.equal(result.deleted_messages, 1);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 0);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_messages where session_id = ${sessionId}`), 0);
+  // 迟到的 Worker 结算按原消息身份找不到行，不会复活已删消息。
+  await sql`update assist_messages set status = 'COMPLETED', content = 'late'
+    where id = ${inFlightMessageId}`.execute(app.db);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_messages where id = ${inFlightMessageId}`), 0);
 });
 
-test('被分叉引用时拒绝删除：blocking_reasons 带 FORK_CHILDREN，父子两行都还在', async () => {
+test('被分叉引用时删除父会话：子会话保留，来源指针置空并推进修订', async () => {
   const workspaceId = await newWorkspace('fork');
   const sessionId = await newSession(workspaceId);
   // 分叉要求可搬历史（2026-10-24）：先落一轮已完成的消息，子会话才建得出来。
@@ -206,28 +213,157 @@ test('被分叉引用时拒绝删除：blocking_reasons 带 FORK_CHILDREN，父�
   const fork = await forkAssistSession(app.db, { workspaceId, sessionId,
     commandId: randomUUID(), expectedRevision: '0' });
 
-  const response = await post(workspaceId, sessionId, {
-    command_id: randomUUID(), expected_revision: '0' });
-  const problem = expectProblem(response, 409, 'SESSION_DELETE_BLOCKED');
-  assert.deepEqual((problem.conflict as { blocking_reasons: string[] }).blocking_reasons,
-    ['FORK_CHILDREN']);
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 1);
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
-    where id = ${fork.result.session_id}`), 1);
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: '0' }), 200, commandId);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 0);
+  const child = (await sql<{ source: string | null; revision: string; messages: string }>`
+    select s.forked_from_session_id::text as source, s.revision::text as revision,
+      (select count(*)::text from assist_messages m where m.session_id = s.id) as messages
+    from assist_sessions s where s.id = ${fork.result.session_id}`.execute(app.db)).rows[0];
+  assert.equal(child?.source, null, '分叉来源解除引用，子会话本身保留');
+  assert.equal(child?.revision, '1', '来源变化推进子会话修订，旧读数的后续命令会先冲突再重读');
+  assert.equal(child?.messages, '1', '子会话的独立历史不受影响');
 });
 
-test('有学习记录时拒绝删除：学习记录有自己的删除入口，不能借删会话绕过', async () => {
+test('有学习记录时删除会话：证据、轮次与会话开关随会话删除，知识点身份保留', async () => {
   const workspaceId = await newWorkspace('learning');
   const sessionId = await newSession(workspaceId);
+  const messageId = randomUUID();
+  await sql`insert into assist_messages (id, session_id, seq, role, status, intent, content)
+    values (${messageId}, ${sessionId}, 1, 'ASSISTANT', 'COMPLETED', 'DISCUSS', '解释一下')`
+    .execute(app.db);
+  const conceptId = randomUUID();
+  await sql`insert into learning_concepts (id, workspace_id, topic, slug, display_name)
+    values (${conceptId}, ${workspaceId}, '测试', ${`concept-${conceptId}`}, '测试知识点')`
+    .execute(app.db);
+  const evidenceId = randomUUID();
+  await sql`insert into learning_evidence (id, workspace_id, concept_id, kind, scenario,
+      detail, source_kind, source_message_id, session_id, observed_at, epoch)
+    values (${evidenceId}, ${workspaceId}, ${conceptId}, 'EXPOSURE', '删除策略',
+      '用户见过这条记录', 'LEARNING_MESSAGE', ${messageId}, ${sessionId}, now(), 0)`
+    .execute(app.db);
   await sql`insert into learning_session_controls (session_id, workspace_id)
     values (${sessionId}, ${workspaceId})`.execute(app.db);
+  await sql`insert into learning_rounds (id, workspace_id, session_id, message_id, epoch,
+      record_enabled)
+    values (${randomUUID()}, ${workspaceId}, ${sessionId}, ${messageId}, 0, true)`.execute(app.db);
 
-  const response = await post(workspaceId, sessionId, {
-    command_id: randomUUID(), expected_revision: '0' });
-  const problem = expectProblem(response, 409, 'SESSION_DELETE_BLOCKED');
-  assert.deepEqual((problem.conflict as { blocking_reasons: string[] }).blocking_reasons,
-    ['LEARNING_RECORDS']);
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 1);
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: '0' }), 200, commandId);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions where id = ${sessionId}`), 0);
+  assert.equal(await countOf(sql`select count(*)::text as c from learning_session_controls
+    where session_id = ${sessionId}`), 0);
+  assert.equal(await countOf(sql`select count(*)::text as c from learning_rounds
+    where session_id = ${sessionId}`), 0);
+  const evidence = (await sql<{ session_id: string | null; source_message_id: string | null }>`
+    select session_id::text as session_id, source_message_id::text as source_message_id
+    from learning_evidence where id = ${evidenceId}`.execute(app.db)).rows[0];
+  assert.equal(evidence, undefined, '学习证据由会话派生，随会话删除');
+  assert.equal(await countOf(sql`select count(*)::text as c from learning_concepts
+    where id = ${conceptId}`), 1, '知识点身份不随会话消失');
+});
+
+test('被验收/假设/工作片段/蓝图/影响检查引用时仍可删除：外部对象保留、来源解除', async () => {
+  const workspaceId = await newWorkspace('citations');
+  const projectId = await newProject(workspaceId, '引用项目');
+  const sessionId = await newSession(workspaceId, '被引用的讨论');
+  const messageId = await seedCompletedMessage(sessionId, 1, '既要能删也要留痕');
+  const task = await createTask(app.db, { workspaceId, commandId: randomUUID(), projectId,
+    title: '引用任务', objective: '核对引用解除', criteria: [], expectedOutputs: {},
+    mode: 'ME' });
+  const trialId = randomUUID();
+  await sql`insert into task_acceptance_trials (id, workspace_id, task_id, acceptance_revision,
+      mode, sample_label, material_ids, status, started_at, revision)
+    values (${trialId}, ${workspaceId}, ${task.result.task_id},
+      ${task.result.acceptance_revision}, 'ORIGINAL', '删除样本', '[]'::jsonb, 'PAUSED',
+      now(), 1)`.execute(app.db);
+  const observationId = randomUUID();
+  await sql`insert into task_acceptance_trial_observations (id, trial_id, trial_revision,
+      source_note, source_message_id)
+    values (${observationId}, ${trialId}, 2, '验收观察引用这条消息', ${messageId})`
+    .execute(app.db);
+  const hypothesisId = randomUUID();
+  await sql`insert into hypotheses (id, workspace_id, project_id, title)
+    values (${hypothesisId}, ${workspaceId}, ${projectId}, '被引用的假设')`.execute(app.db);
+  await sql`insert into hypothesis_versions (id, hypothesis_id, version, claim, method,
+      criterion, source_message_id)
+    values (${randomUUID()}, ${hypothesisId}, 1, 'claim', 'method', 'criterion', ${messageId})`
+    .execute(app.db);
+  const segmentId = randomUUID();
+  await sql`insert into work_segments (id, workspace_id, project_id, title, expectation,
+      baseline, source_message_id, status, revision, started_at)
+    values (${segmentId}, ${workspaceId}, ${projectId}, '工作片段', '说明', '{}'::jsonb,
+      ${messageId}, 'OPEN', 1, now())`.execute(app.db);
+  const proposalId = randomUUID();
+  await sql`insert into project_blueprint_proposals (id, workspace_id, project_id, status,
+      origin, skill_message_id, candidate, baseline, source, candidate_sha256)
+    values (${proposalId}, ${workspaceId}, ${projectId}, 'PENDING', 'SKILL', ${messageId},
+      '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, ${'a'.repeat(64)})`.execute(app.db);
+  const artifactId = randomUUID();
+  const beforeVersionId = randomUUID();
+  const afterVersionId = randomUUID();
+  await sql`insert into artifacts (id, workspace_id, project_id, task_id, artifact_kind,
+      title, revision)
+    values (${artifactId}, ${workspaceId}, ${projectId}, ${task.result.task_id},
+      'MARKDOWN_DOCUMENT', '影响文档', 1)`.execute(app.db);
+  for (const [versionId, versionNumber, storageRef] of [
+    [beforeVersionId, 1, 'before.md'], [afterVersionId, 2, 'after.md']] as const) {
+    await sql`insert into artifact_versions (id, artifact_id, version_number, storage_ref,
+        content_hash, size, media_type, source_kind)
+      values (${versionId}, ${artifactId}, ${versionNumber}, ${storageRef},
+        ${Buffer.from('11'.repeat(32), 'hex')}, 3, 'text/markdown', 'HUMAN')`.execute(app.db);
+  }
+  const impactCheckId = randomUUID();
+  const impactCandidateId = randomUUID();
+  await sql`insert into artifact_impact_checks (id, workspace_id, artifact_id,
+      source_before_version_id, source_after_version_id, artifact_revision,
+      assist_session_id, assist_message_id, direct_targets, has_more, input_truncated)
+    values (${impactCheckId}, ${workspaceId}, ${artifactId}, ${beforeVersionId},
+      ${afterVersionId}, 1, ${sessionId}, ${messageId}, '[]'::jsonb, false, false)`
+    .execute(app.db);
+  await sql`insert into artifact_impact_candidates (id, workspace_id, impact_check_id,
+      source_artifact_revision, target_artifact_id, target_artifact_revision, target_version_id,
+      assist_session_id, assist_message_id, confirmed_possible)
+    values (${impactCandidateId}, ${workspaceId}, ${impactCheckId}, 1, ${artifactId}, 1,
+      ${afterVersionId}, ${sessionId}, ${messageId}, false)`.execute(app.db);
+
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: '0' }), 200, commandId);
+
+  const citations = (await sql<{
+    observation: string | null; hypothesis: string | null; segment: string | null;
+    proposal: string | null; proposalOrigin: string; proposalDetached: boolean;
+  }>`select
+      (select source_message_id::text from task_acceptance_trial_observations
+        where id = ${observationId}) as observation,
+      (select source_message_id::text from hypothesis_versions
+        where hypothesis_id = ${hypothesisId}) as hypothesis,
+      (select source_message_id::text from work_segments where id = ${segmentId}) as segment,
+      (select skill_message_id::text from project_blueprint_proposals
+        where id = ${proposalId}) as proposal,
+      (select origin from project_blueprint_proposals where id = ${proposalId}) as "proposalOrigin",
+      (select source_detached_at is not null from project_blueprint_proposals
+        where id = ${proposalId}) as "proposalDetached"`.execute(app.db)).rows[0];
+  assert.equal(citations?.observation, null, '验收观察保留、来源解除');
+  assert.equal(citations?.hypothesis, null, '假设版本保留、来源解除');
+  assert.equal(citations?.segment, null, '工作片段保留、来源解除');
+  assert.equal(citations?.proposal, null, '蓝图提案保留、来源解除');
+  assert.equal(citations?.proposalOrigin, 'SKILL', '蓝图提案不伪造来源类别');
+  assert.equal(citations?.proposalDetached, true, '蓝图来源解除有显式时刻');
+  const impact = (await sql<{ check_source: string | null; candidate_source: string | null }>`
+    select (select assist_message_id::text from artifact_impact_checks
+        where id = ${impactCheckId}) as check_source,
+      (select assist_message_id::text from artifact_impact_candidates
+        where id = ${impactCandidateId}) as candidate_source`.execute(app.db)).rows[0];
+  assert.equal(impact?.check_source, null, '影响检查保留、来源解除');
+  assert.equal(impact?.candidate_source, null, '影响候选保留、来源解除');
+  assert.equal(await countOf(sql`select count(*)::text as c from artifact_impact_checks
+    where id = ${impactCheckId}`), 1);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
+    where id = ${sessionId}`), 0);
 });
 
 test('跨 Workspace 的会话按不可见处理：404 且一行不动', async () => {
@@ -269,11 +405,11 @@ test('删除后无法恢复：不存在能读回消息或会话的只读入口',
 
 // ---------------------------------------------------------------------------
 // 0127 / 0128 后加账本（禅道 #119）：计划、目标、轮次、额度授予与委派账本都是会话
-// 自有记录，删除时由删除 Owner 在同一短事务内按外键顺序清理；委派账本的跨会话
-// 引用（子会话、子会话结论消息）则整条阻断。以下用例取证三件事：
+// 自有记录，删除时由删除 Owner 在同一短事务内按外键顺序清理。以下用例取证四件事：
 //   * 正常业务路径落定的计划/目标会话删除不再撞外键 500，也不留残行；
 //   * 0127 的「计划 ← 目标 ← 消息」NO ACTION 互指在删除顺序里被显式打破；
-//   * 0128 的主子代理关系按跨对象事实阻断，委派账本不随子会话消失。
+//   * 0128 的主会话删除按「账本 → 子会话 → 主会话」整棵子树清理（2026-11-10 修订）；
+//   * 子代理会话自己的学习轮次随子会话删除，不再拿外部引用把父会话整条挡住。
 // ---------------------------------------------------------------------------
 
 /** 播种一版 0127 计划（指定版本号、状态与来源消息，用于多版本与目标启动来源）。 */
@@ -467,22 +603,23 @@ test('纯目标会话（无计划）删除：CANCELLED 与 COMPLETED 两个终�
   }
 });
 
-test('在途消息挡住计划会话删除：409 INVALID_TRANSITION，计划版本零删除', async () => {
+test('在途消息不再挡住计划会话删除：计划、目标与消息一起清理', async () => {
   const workspaceId = await newWorkspace('plan-inflight');
-  const sessionId = await generatePlanSession(workspaceId, '在途挡删除的计划讨论');
-  // 在途只发生在 ASSISTANT 侧（USER 轮落库即终态）：与既有在途栅栏用例同一形状。
+  const sessionId = await generatePlanSession(workspaceId, '在途也要能删的计划讨论');
+  // 在途只发生在 ASSISTANT 侧（USER 轮落库即终态）。
   await sql`insert into assist_messages (id, session_id, seq, role, status, intent)
     values (${randomUUID()}, ${sessionId}, 3, 'ASSISTANT', 'PENDING', 'DISCUSS')`.execute(app.db);
 
-  const response = await post(workspaceId, sessionId, {
-    command_id: randomUUID(), expected_revision: await currentRevision(sessionId) });
-  expectProblem(response, 409, 'INVALID_TRANSITION');
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: await currentRevision(sessionId) }),
+    200, commandId);
   assert.equal(await countOf(sql`select count(*)::text as c from assist_plans
-    where session_id = ${sessionId}`), 1, '整条拒绝时计划版本一行不删');
+    where session_id = ${sessionId}`), 0, '计划版本随会话清理');
   assert.equal(await countOf(sql`select count(*)::text as c from assist_messages
-    where session_id = ${sessionId}`), 3);
+    where session_id = ${sessionId}`), 0);
   assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
-    where id = ${sessionId}`), 1);
+    where id = ${sessionId}`), 0);
 });
 
 test('过期修订挡住计划会话删除：409 REVISION_CONFLICT，计划版本零删除', async () => {
@@ -522,28 +659,78 @@ test('删除带委派账本的主会话：委派尝试与账本随会话清理',
     where id = ${sessionId}`), 0);
 });
 
-test('主会话下还有子代理会话时拒绝删除：SUBAGENT_CHILDREN，父子两行都在', async () => {
+test('删除主会话时子代理会话与委派账本随主会话整棵清理', async () => {
   const workspaceId = await newWorkspace('subagent-children');
   const sessionId = await newSession(workspaceId, '委派主会话');
+  const parentMessageId = await seedCompletedMessage(sessionId, 1, '发起委派');
   const childId = randomUUID();
   await withTransaction(app.db, async (repositories) => {
     await repositories.assist.insertSession({ id: childId, workspaceId, projectId: null,
       taskId: null, title: '子代理调查', parentSessionId: sessionId,
       budgetScopeSessionId: sessionId });
   });
+  const childMessageId = await seedCompletedMessage(childId, 1, '子代理结论');
+  const delegationId = await seedDelegation(workspaceId, sessionId, parentMessageId, childId);
+  await seedDelegationAttempt(delegationId, childMessageId);
 
-  const response = await post(workspaceId, sessionId, {
-    command_id: randomUUID(), expected_revision: await currentRevision(sessionId) });
-  const problem = expectProblem(response, 409, 'SESSION_DELETE_BLOCKED');
-  assert.deepEqual((problem.conflict as { blocking_reasons: string[] }).blocking_reasons,
-    ['SUBAGENT_CHILDREN']);
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: await currentRevision(sessionId) }),
+    200, commandId);
+
   assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
-    where id = ${sessionId}`), 1);
+    where id = ${sessionId}`), 0, '主会话行消失');
   assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
-    where id = ${childId}`), 1);
+    where id = ${childId}`), 0, '子代理会话随主会话消失');
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_messages
+    where session_id = ${childId}`), 0, '子会话消息一并清掉');
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_delegations
+    where id = ${delegationId}`), 0, '委派账本是主会话执行史，一起清掉');
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_delegation_attempts
+    where delegation_id = ${delegationId}`), 0);
+
+  // 审计只留身份与行数；级联删掉的子会话身份也留一份，事后仍能核对这一刀删了谁。
+  const audit = (await sql<{ fact_refs: Record<string, unknown> }>`
+    select fact_refs from activity_records where command_id = ${commandId}`.execute(app.db)).rows;
+  assert.deepEqual(audit[0]?.fact_refs.deleted_subagent_sessions, [childId]);
+  assert.equal(JSON.stringify(audit[0]?.fact_refs).includes('子代理调查'), false,
+    '审计不复制子会话标题或正文');
 });
 
-test('子会话被父会话委派账本引用时拒绝删除：DELEGATION_LEDGER_REFERENCED，账本保留', async () => {
+test('子代理会话带学习记录时父会话仍可删除：轮次随子会话清理，父会话不留残行', async () => {
+  const workspaceId = await newWorkspace('subagent-learning');
+  const sessionId = await newSession(workspaceId, '委派主会话');
+  const parentMessageId = await seedCompletedMessage(sessionId, 1, '发起委派');
+  const childId = randomUUID();
+  await withTransaction(app.db, async (repositories) => {
+    await repositories.assist.insertSession({ id: childId, workspaceId, projectId: null,
+      taskId: null, title: '子代理调查', parentSessionId: sessionId,
+      budgetScopeSessionId: sessionId });
+  });
+  const childMessageId = await seedCompletedMessage(childId, 1, '子代理结论');
+  const delegationId = await seedDelegation(workspaceId, sessionId, parentMessageId, childId);
+  await seedDelegationAttempt(delegationId, childMessageId);
+  await sql`insert into learning_rounds (id, workspace_id, session_id, message_id, epoch,
+    record_enabled) values (${randomUUID()}, ${workspaceId}, ${childId}, ${childMessageId}, 0, true)`
+    .execute(app.db);
+
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, sessionId, {
+    command_id: commandId, expected_revision: await currentRevision(sessionId) }),
+    200, commandId);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
+    where id = ${sessionId}`), 0, '主会话删除');
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
+    where id = ${childId}`), 0, '子代理会话随主会话删除');
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_messages
+    where session_id = ${childId}`), 0);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_delegations
+    where id = ${delegationId}`), 0, '委派账本随主会话清理');
+  assert.equal(await countOf(sql`select count(*)::text as c from learning_rounds
+    where session_id = ${childId}`), 0, '学习轮次是会话自有控制元数据，随子会话删除');
+});
+
+test('单独删除子代理会话：子会话消失，父会话委派账本保留并解除子引用', async () => {
   const workspaceId = await newWorkspace('delegation-child');
   const parentSessionId = await newSession(workspaceId, '委派主会话');
   const parentMessageId = await seedCompletedMessage(parentSessionId, 1, '发起委派');
@@ -558,19 +745,26 @@ test('子会话被父会话委派账本引用时拒绝删除：DELEGATION_LEDGER
     childSessionId);
   await seedDelegationAttempt(delegationId, childMessageId);
 
-  const response = await post(workspaceId, childSessionId, {
-    command_id: randomUUID(), expected_revision: await currentRevision(childSessionId) });
-  const problem = expectProblem(response, 409, 'SESSION_DELETE_BLOCKED');
-  assert.deepEqual((problem.conflict as { blocking_reasons: string[] }).blocking_reasons,
-    ['DELEGATION_LEDGER_REFERENCED']);
-  assert.equal(await countOf(sql`select count(*)::text as c from assist_delegations
-    where id = ${delegationId}`), 1, '委派账本是父会话的执行史，不随子会话消失');
+  const commandId = randomUUID();
+  expectCommandAccepted(await post(workspaceId, childSessionId, {
+    command_id: commandId, expected_revision: await currentRevision(childSessionId) }),
+    200, commandId);
+  const delegation = (await sql<{ child_session_id: string | null; attempts: string }>`
+    select d.child_session_id::text as child_session_id,
+      (select count(*)::text from assist_delegation_attempts a where a.delegation_id = d.id) as attempts
+    from assist_delegations d where d.id = ${delegationId}`.execute(app.db)).rows[0];
+  assert.ok(delegation, '委派账本是父会话执行史，保留');
+  assert.equal(delegation?.child_session_id, null, '子会话引用解除');
+  assert.equal(delegation?.attempts, '1', '尝试行保留');
   assert.equal(await countOf(sql`select count(*)::text as c from assist_delegation_attempts
-    where delegation_id = ${delegationId}`), 1);
+    where delegation_id = ${delegationId} and result_message_id is null`), 1,
+    '结论消息引用解除');
   assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
-    where id = ${childSessionId}`), 1);
+    where id = ${childSessionId}`), 0);
   assert.equal(await countOf(sql`select count(*)::text as c from assist_messages
-    where session_id = ${childSessionId}`), 1);
+    where session_id = ${childSessionId}`), 0);
+  assert.equal(await countOf(sql`select count(*)::text as c from assist_sessions
+    where id = ${parentSessionId}`), 1, '父会话不动');
 });
 
 test('0133 只补删除账本所需的 DELETE 授权：0127/0128 六表可删，任务表不可删', async () => {
@@ -707,9 +901,6 @@ test('有自动记忆来源的会话可删除：来源凭据随会话清理，�
     values (${randomUUID()}, ${workspaceId}, ${sessionId}, ${messageId}, ${'c'.repeat(64)},
       ${'d'.repeat(64)}, ${memoryId})`.execute(app.db);
 
-  // 策略与实现一致：来源凭据是会话自有账本，不再阻断删除（2026-10-31 撤销 MEMORY_SOURCES）。
-  assert.deepEqual(await createRepositories(app.db).assist.listDeleteBlockers(sessionId), []);
-
   const commandId = randomUUID();
   expectCommandAccepted(await post(workspaceId, sessionId, { command_id: commandId,
     expected_revision: await currentRevision(sessionId) }), 200, commandId);
@@ -762,8 +953,6 @@ test('真实完成撤回的会话可删除：消息侧反向引用在删除事�
   assert.equal(withdrawn?.marked, true);
   assert.equal(withdrawn?.recallRef, ledger.recallId,
     '撤回行被本会话的消息反向指着：这条外键是 NO ACTION，不是延迟约束');
-  assert.deepEqual(await createRepositories(app.db).assist.listDeleteBlockers(sessionId), [],
-    '已结算的撤回不是跨对象引用，不该挡住删除');
 
   const commandId = randomUUID();
   const result = expectCommandAccepted(await post(workspaceId, sessionId, { command_id: commandId,
@@ -896,8 +1085,6 @@ test('发起过执行请求的会话可删除：请求行留成脱钩凭据，�
       ${randomUUID()}, ${randomUUID()}, 'FILE_SCOPE')`.execute(app.db);
 
   // 候选已定的请求不再阻断删除：它是一条可脱钩的来源凭据。
-  assert.deepEqual(await createRepositories(app.db).assist.listDeleteBlockers(sessionId), []);
-
   const commandId = randomUUID();
   expectCommandAccepted(await post(workspaceId, sessionId, { command_id: commandId,
     expected_revision: await currentRevision(sessionId) }), 200, commandId);

@@ -215,7 +215,7 @@ test('CB-02: 真实聊天入口按**会话档位**外呼；改档不影响其它
       select model_selection_snapshot as snapshot from assist_messages
       where id = ${first.sent.result.assistant_message_id}`.execute(app.db)).rows[0];
   assert.deepEqual(firstMessage?.snapshot.budget, { call_reservation_tokens: 262_144,
-    scope_call_limit: 32, scope_token_limit: 524_288, context_budget_tokens: 262_144 });
+    scope_call_limit: 32, scope_token_limit: 786_432, context_budget_tokens: 262_144 });
 
   // 把这条会话改成 512K：下一次调用的预留、作用域上限与冻结档位一起换成新档。
   await setSessionContextBudget(app.db, { workspaceId: f.workspaceId, sessionId: f.sessionId,
@@ -228,7 +228,7 @@ test('CB-02: 真实聊天入口按**会话档位**外呼；改档不影响其它
       select model_selection_snapshot as snapshot from assist_messages
       where id = ${second.sent.result.assistant_message_id}`.execute(app.db)).rows[0];
   assert.deepEqual(secondMessage?.snapshot.budget, { call_reservation_tokens: 524_288,
-    scope_call_limit: 32, scope_token_limit: 1_048_576, context_budget_tokens: 524_288 });
+    scope_call_limit: 32, scope_token_limit: 1_572_864, context_budget_tokens: 524_288 });
   const calls = (await sql<{ status: string; budget_reserved_tokens: number | null;
     usage_input_tokens: number | null; context_usage: { categories: { key: string }[] } | null }>`
       select status, budget_reserved_tokens, usage_input_tokens, context_usage from model_calls
@@ -266,7 +266,7 @@ test('CB-03: Run 准入按「当前配置 + 冻结档位」重算预算，不把
   const budget = (plan.snapshot.budget as { call_reservation_tokens: number;
     scope_token_limit: number; context_budget_tokens: number | null });
   assert.deepEqual(budget, { call_reservation_tokens: 262_144, scope_call_limit: 32,
-    scope_token_limit: 524_288, context_budget_tokens: 262_144 });
+    scope_token_limit: 786_432, context_budget_tokens: 262_144 });
 
   const admission = await resolveRunModelPort(app.db, {
     run: { id: randomUUID() } as unknown as RunRow,
@@ -278,6 +278,6 @@ test('CB-03: Run 准入按「当前配置 + 冻结档位」重算预算，不把
   if (admission.kind !== 'READY') return;
   assert.equal(admission.basis, 'FROZEN');
   assert.deepEqual(admission.port.identity.budget, { callReservationTokens: 262_144,
-    scopeCallLimit: 32, scopeTokenLimit: 524_288 },
+    scopeCallLimit: 32, scopeTokenLimit: 786_432 },
   'Run 端口拿到的也是冻结档位，而不是进程默认 4,096');
 });

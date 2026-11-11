@@ -40,38 +40,30 @@
 
 **不可撤销。** 这是全项目唯一删除会话的命令：没有回收站，没有「取消删除」反向命令，误删与重启都无法找回。界面必须先弹确认框、逐字写明不可恢复，**不给撤销条**；归档仍是可撤销通道，两者不合并成一个「移除」动作。
 
-**删什么。** 只删会话自有账本，按子 → 父顺序在同一短事务内显式执行（不依赖 `ON DELETE CASCADE`）：消息、提案、附件（`bytea` 内容随行消失）、生成中预览、会话工具调用、模型选择、自然语言状态维护请求与其变更、未进入组合检查的影响检查与候选分组、辅助模型调用计量与已到期供应商冷却、会话 diff 基线，0132 的撤回基线／逐文件条目／撤回请求／保护副本／撤销行，0146 与 0151 的会话待办快照／事件／轮次归属，0148 的子代理补充消息，最后是会话行本身。`conversation_diff_baselines.session_id` 是普通列（0097 无外键），必须显式删，否则留下悬空账本。撤回子表清完、删撤回行之前，先按 `session_id` 解除本会话消息的 `withdrawn_by_recall_id`（0132 的 NO ACTION 非延迟外键）——这一步只属于「整条会话确定物理删除」的这一版事务，换行／编辑／撤回路径都不做（2026-11-01 补充，见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-11-01-补充撤回反向引用的解除时机)）。
+**删什么。** 只删会话自有账本，按「解除外部引用 → 子 → 父」顺序在同一短事务内显式执行（不依赖 `ON DELETE CASCADE`）：消息、提案、附件（`bytea` 内容随行消失）、生成中预览、会话工具调用、模型选择、自然语言状态维护请求与其变更、辅助模型调用计量与已到期供应商冷却、会话 diff 基线，0132 的撤回基线／逐文件条目／撤回请求／保护副本／撤销行，0146 与 0151 的会话待办快照／事件／轮次归属，0148 的子代理补充消息，学习轮次、会话级记录开关与由本会话派生的学习证据，最后是会话行本身。删除主会话时，它的子代理会话与委派账本属于同一份执行史：同一事务内按「委派账本 → 更深层子会话 → 直接子会话 → 主会话」整棵清理（2026-11-10 修订，见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-11-10-修订子代理会话随主会话级联)），审计的 `fact_refs.deleted_subagent_sessions` 留下被级联的身份。`conversation_diff_baselines.session_id` 是普通列（0097 无外键），必须显式删，否则留下悬空账本。撤回子表清完、删撤回行之前，先按 `session_id` 解除本会话消息的 `withdrawn_by_recall_id`（0132 的 NO ACTION 非延迟外键）——这一步只属于「整条会话确定物理删除」的这一版事务，换行／编辑／撤回路径都不做（2026-11-01 补充，见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-11-01-补充撤回反向引用的解除时机)）。
 
 **执行请求不被删，但会被脱钩（0154）。** `conversation_execution_requests` 引用会话与原用户消息（默认 NO ACTION），承载「这个 Task 从哪条消息来」的授权来源。0154 去掉那两条外键（两列仍是普通 uuid 列，身份留着），删除会话时把来源消息的**序号与正文摘要**、**脱钩时刻**写进请求行（`source_message_seq` / `source_message_sha256` / `source_detached_at`）：任务侧仍能核对来源，摘要只能核对、不能还原正文，不复制正文与标题。`source_detached_at` 非空后该请求**不能再被推进成新的 Task/Run**（应用层 409 `INVALID_TRANSITION` 失败关闭），已产生的 Task/Run 不受影响。
 
-**不删什么（阻断）。** 命令先查阻断项，命中任意一项即整条拒绝、零删除，返回 `409 SESSION_DELETE_BLOCKED`，`conflict.blocking_reasons` 逐项列出：
+**外部引用不再阻断（2026-11-10 修订，迁移 0161）。** 服务端不再返回 `409 SESSION_DELETE_BLOCKED`，也不再有 `listDeleteBlockers` 判定。删除会话时，外部对象保留，只解除指向被删会话／消息的来源：
 
-| 代码 | 含义 |
+| 外部对象 | 删除会话后的状态 |
 |---|---|
-| `FORK_CHILDREN` | 存在以本会话为来源的分叉会话 |
-| `SUBAGENT_CHILDREN` | 存在以本会话为父的子代理会话 |
-| `DELEGATION_LEDGER_REFERENCED` | 本会话是父会话委派账本里的子会话，或其消息是委派尝试的结论消息 |
-| `TASK_ACCEPTANCE_CITED` | Task 验收观察把本会话的消息作为来源 |
-| `HYPOTHESIS_CITED` | 项目假设版本把本会话的消息作为来源 |
-| `WORK_SEGMENT_CITED` | 工作片段把本会话的消息作为来源 |
-| `BLUEPRINT_CITED` | 项目蓝图提案把本会话的消息作为来源 |
-| `EXECUTION_REQUESTS_IN_FLIGHT` | 本会话有一条执行请求仍在解析（候选已定的请求是脱钩凭据，不再阻断） |
-| `LEARNING_RECORDS` | 本会话有学习记录（学习记录有自己的删除入口） |
-| `ARTIFACT_IMPACT_COMMITTED` | 本会话的影响检查已进入组合检查 |
-| `PROVIDER_COOLDOWN_ACTIVE` | 本会话的模型调用仍在未到期的供应商冷却里 |
-| `MEMORY_COMPACTION_ACTIVE` | 本会话的工作记忆正在整理中 |
+| 分叉子会话 | 保留；`forked_from_session_id` 置空并推进修订 |
+| Task 验收观察 / 项目假设 / 工作片段 | 保留；`source_message_id` 置空 |
+| 项目蓝图提案 | 保留；`skill_message_id` 置空并写 `source_detached_at`（0161 放宽 SKILL 来源约束与冻结触发器，`origin` 仍为 `SKILL`） |
+| artifact 影响检查 / 修改候选 | 保留；`assist_session_id` / `assist_message_id` 置空（0161 允许 NULL 并补列级 UPDATE）；候选组、已提交的组合检查全部保留 |
+| 学习知识点 / 其它会话留下的证据 | 保留；本会话派生的证据、轮次与会话开关随会话删除 |
+| 父会话委派账本（单独删子代理会话时） | 保留；`child_session_id`、结论消息引用、补充消息已读指针置空 |
 
-2026-10-31 撤销了初版的 `MEMORY_SOURCES`（自动记忆的来源绑定是会话自有凭据，随会话清理；长期记忆正文与版本保留、另有停用入口），并把 `EXECUTION_REQUESTS` 收窄为上表的 `EXECUTION_REQUESTS_IN_FLIGHT`；理由与代价见 [ADR-027](../../decisions/ADR-027-session-physical-delete.md#2026-10-31-修订按数据所有权重审阻断面)。
+在途消息不再挡住删除：`PENDING`/`RUNNING` 消息行随会话删除，Worker 之后按原身份结算不到行，不会复活会话；仍在进行的外部模型调用可能自然结束，但其结果无处落库。跨 Workspace 的会话仍按 `404 RESOURCE_NOT_FOUND`，陈旧修订仍按 `409 REVISION_CONFLICT`。
 
-另有与归档共用的在途栅栏：存在 `PENDING`/`RUNNING` 消息时返回 `409 INVALID_TRANSITION`。跨 Workspace 的会话按 `404 RESOURCE_NOT_FOUND`。
-
-**结果未知怎么读（2026-10-31）。** 删除是不可撤销操作，服务端 5xx 与响应丢失都**不能证明这次删除没发生**（命令与回执在同一事务里提交）。客户端因此按四档处理：已删、被引用阻断、明确失败、**结果未知**。最后一档先按**原 `command_id`** 查 `GET /commands/{command_id}`：回执存在且 `command_type='DeleteAssistSession'` 即视为已删；查不到（404 `COMMAND_NOT_FOUND`）只能记为待核实——服务端明确说过回执不存在不能证明一个仍在事务中的请求永远未提交。任何一档都不换 `command_id` 重发。
+**结果未知怎么读（2026-10-31）。** 删除是不可撤销操作，服务端 5xx 与响应丢失都**不能证明这次删除没发生**（命令与回执在同一事务里提交）。客户端按四档处理：已删、明确失败、**结果未知**（旧实例仍可能返回「被引用阻断」，客户端保留该解析以兼容）。最后一档先按**原 `command_id`** 查 `GET /commands/{command_id}`：回执存在且 `command_type='DeleteAssistSession'` 即视为已删；查不到（404 `COMMAND_NOT_FOUND`）只能记为待核实——服务端明确说过回执不存在不能证明一个仍在事务中的请求永远未提交。任何一档都不换 `command_id` 重发。
 
 **并发与幂等。** 行锁 + `expected_revision` CAS 先于判定：陈旧基线返回 `409 REVISION_CONFLICT` 并带出 `actual_revision`，一行不动。删除成功后会话行已不存在，重放**不能**靠再读会话判定，而是读 `command_receipts`：同 `command_id` 同载荷返回原结果并附 `command-replayed: true`，换载荷返回 `409 COMMAND_ID_REUSED`。
 
 **审计。** 命令回执之外，在同一事务写一条 append-only 的 `activity_records`（`event_type='ASSIST_SESSION_DELETED'`）。`fact_refs` 只记会话 ID、删除前修订与删除行数，不复制标题或正文——用户要求删除之后，审计不成为第二份保存。
 
-**证据（如实分层）。** 真实 PostgreSQL：`assist-session-delete.integration.test.ts` **25/25**（账本删净且无悬空基线、行消失后回执重放、换载荷复用 ID 被拒、陈旧基线零删除、在途消息栅栏、分叉与学习记录两类阻断、跨 Workspace 不可见、0116 授权不外溢、删除后无只读恢复入口，2026-10-31 新增五例：自动记忆来源随会话清理而长期记忆正文保留、撤回账本（基线／逐文件条目／撤回请求／保护副本／撤销行）清干净、会话待办三表无残行、执行请求脱钩后 Task 仍在且该请求不再能推进、0154 授权不外溢到 `tasks` 与 `memory_items`；2026-11-01 新增两例：真实完成撤回的会话可删除（消息侧反向引用在删除事务内解除、撤回账本整组消失、全库不留悬空撤回引用）、撤回会话的删除事务中途失败整条回滚（消息、反向引用与账本一行不少，回滚后重删仍成立））；工作台 `sessionRowMenu.spec.ts` **30/30**（删除相关八例：确认与取消、确认后行从活跃区消失、阻断终态给可执行动作、409 按原 ID 核对回执后判已删、500 停在待核实、批量四档与同因聚合、核对回执确认已删后按确切 sessionId 收掉活跃与归档两份投影与勾选、批量混合结局下只收已确认的那条）；真实 Chromium `tests/browser/sessionDeleteFlow.spec.ts` **4/4**（一次确认、无第三张删除卡、结论分层与限高、追溯号只在详情里、核对回执后行当场消失且刷新后与服务端一致）；`tsc --noEmit` 两侧 exit 0。真实 WebView2 窗口与多 DPI 下确认框的焦点与观感未复核。
+**证据（如实分层）。** 真实 PostgreSQL：`assist-session-delete.integration.test.ts` **27/27**（账本删净且无悬空基线、行消失后回执重放、换载荷复用 ID 被拒、陈旧基线零删除、跨 Workspace 不可见、0116/0154 授权不外溢、删除后无只读恢复入口、自动记忆来源随会话清理而长期记忆正文保留、撤回账本与反向引用、会话待办三表、执行请求脱钩、事务中途失败整条回滚；2026-11-10 改写并新增：在途消息可删且 Worker 结算不到行、分叉父会话删除后子会话保留且来源置空、学习证据/轮次/会话开关随会话删除而知识点保留、验收观察/假设版本/工作片段/蓝图提案/artifact 影响检查来源解除、单独删子代理会话解除父账本引用、主会话级联子代理子树）。相关联调：`migration` 14/14（0161 入清单）、`artifact-impact-groups`、`project-blueprint`、`work-segments`、`assist-memory`、`memory-module` 均通过。前端删除交互本轮未改：既有 `sessionRowMenu.spec.ts` **30/30** 与 Chromium `sessionDeleteFlow.spec.ts` **4/4** 证据未复跑，旧 409 阻断解析仅作为旧实例兼容保留。真实 WebView2 窗口与多 DPI 下确认框的焦点与观感未复核。
 
 ### 10.94 周期定时启动任务（2026-10-18 源码实现，迁移 0115）
 

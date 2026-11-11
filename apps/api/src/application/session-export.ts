@@ -264,6 +264,11 @@ function modelCallDto(row: ModelCallRow, tally: Tally): Draft {
     // 0145 的上下文分项只有分类与数值，本来就不含提示词与正文。
     context_breakdown: row.context_usage === null ? null : sanitizeObject(row.context_usage, tally),
     started_at: row.started_at,
+    // 2026-11-10：逐段耗时从聊天流的「延迟诊断」移到导出。三枚时间戳都是既有观测：
+    // 首流事件、首个正文增量、首个预览落库；没有观测到时为 null，不补造。
+    first_stream_event_at: row.first_stream_event_at,
+    first_text_delta_at: row.first_text_delta_at,
+    first_preview_persisted_at: row.first_preview_persisted_at,
     settled_at: row.settled_at,
   };
 }

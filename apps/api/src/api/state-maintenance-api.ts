@@ -11,6 +11,7 @@ import { toDecimalString } from '../shared/decimal.js';
 import { commandEnvelopeSchema, OpenObjectSchema } from './domain-schemas.js';
 import { createCommandHandler, problemFromError, sendProblem, sendReadError,
   type RouteDependencies } from './envelope.js';
+import { logRequestFailure } from './request-failure-log.js';
 
 const strict = { additionalProperties: false } as const;
 const uuid = Type.String({ format: 'uuid' });
@@ -179,7 +180,9 @@ export function registerStateMaintenanceRoutes(app: FastifyInstance,
           `/conversation-state-requests/${outcome.result.request.id}` } });
     } catch (error) {
       const commandId = (request.body as { command_id?: string } | undefined)?.command_id;
-      return sendProblem(reply, problemFromError(error, commandId), request.id);
+      const problem = problemFromError(error, commandId);
+      logRequestFailure(request, error, problem, { command_id: commandId });
+      return sendProblem(reply, problem, request.id);
     }
   });
 

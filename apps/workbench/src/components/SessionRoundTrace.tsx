@@ -103,6 +103,8 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
   const [loaded, setLoaded] = useState(false);
   const touched = useRef(false);
   const wasActive = useRef(active);
+  /** 这条消息在本页里真实经历过「在途」。历史消息没有这一段，完成态因此不自动展开。 */
+  const everActive = useRef(active);
   const request = useRef(0);
   /** 我们最后一次告诉 DOM 的开合状态；原生 toggle 与它一致时就是程序化回声。 */
   const openState = useRef(active);
@@ -140,6 +142,7 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
     if (message.role !== "ASSISTANT") return;
     if (active) {
       wasActive.current = true;
+      everActive.current = true;
       void read();
       const timer = window.setInterval(() => void read(), pollIntervalMs);
       return () => { request.current++; window.clearInterval(timer); };
@@ -149,7 +152,17 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
     if (wasActive.current) { wasActive.current = false; void read(); }
   }, [active, message.role, pollIntervalMs, read]);
 
-  useEffect(() => { if (!touched.current) setOpen(active); }, [active]);
+  /* 默认开合（2026-11-10 用户指令「调用工具、读取文件的过程看不了」）。
+   *
+   * 旧口径是「在途展开、完成时自动收起」，于是回复一结束整段过程就只剩标题行，
+   * 用户看不到刚才读了哪些文件、跑了哪些检查。现在：**这条消息在本页里真实跑过工具**
+   * 时，完成态保持展开，让人能顺着回复把过程读完；用户自己收起后就不再弹开。
+   * 历史消息不因此自动展开：它们没有在本页经历过在途阶段，`everActive` 为 false。
+   * 零工具轮次仍保持收起（也没有可展开的内容）。 */
+  useEffect(() => {
+    if (touched.current) return;
+    setOpen(active || (everActive.current && items.length > 0));
+  }, [active, items.length]);
 
   useLayoutEffect(() => { openState.current = open; }, [open]);
 
@@ -257,7 +270,7 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
     {items.length > 0 && <>
       {/* 阅读密度只改视图：三个档位共享同一份事实，任何档位都不隐藏审批、被拒与未知。 */}
       <div className="activity-panel-toolbar">
-        <span className="helper-text">阅读密度</span>
+        <span className="helper-text">详细程度</span>
         <div className="activity-panel-density" role="group" aria-label="活动阅读密度">
           {DENSITIES.map((value) => <button key={value} type="button" className="activity-panel-density-option"
             data-testid={`session-round-trace-density-${value}`}

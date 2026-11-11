@@ -725,7 +725,10 @@ export class RelayApiClient {
     return assistApi.reopenAssistSession(this.#http, input);
   }
 
-  /** 物理删除（ADR-027）：不可撤销，被引用时 409 `SESSION_DELETE_BLOCKED`。 */
+  /**
+   * 物理删除（ADR-027）：不可撤销。2026-11-10 起服务端不再因外部引用拒绝；客户端仍保留
+   * 旧 409 `SESSION_DELETE_BLOCKED` 的解析，兼容尚未升级的实例。
+   */
   async deleteAssistSession(input: { readonly sessionId: string; readonly commandId: string;
     readonly expectedRevision: DecimalRevision }): ReturnType<typeof assistApi.deleteAssistSession> {
     return assistApi.deleteAssistSession(this.#http, input);

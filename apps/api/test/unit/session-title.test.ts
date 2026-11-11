@@ -9,6 +9,7 @@ import {
   parseModelTitleOutput,
   parseSessionTitle,
   provisionalSessionTitle,
+  readableRuleSubject,
   ruleTitleSubject,
   subjectProblem,
   validatedModelTitle,
@@ -48,6 +49,22 @@ test('临时标题：无关联目标时必须结构化，且保留可读的任�
   // 空内容给确定性的结构化兜底，不再是裸「新讨论」或空串。
   const empty = provisionalSessionTitle({ submittedTitle: '新讨论', scoped: false });
   assert.equal(isStructuredSessionTitle(empty.title), true);
+});
+
+test('临时标题：纯寒暄的首条消息保留原文，不退化成「新会话」', () => {
+  // 规则任务名会先清掉行首寒暄，但清空后用「新会话」会丢掉唯一可辨认的信息。
+  assert.equal(ruleTitleSubject('你好'), '');
+  assert.equal(readableRuleSubject('你好'), '你好');
+  assert.equal(readableRuleSubject('嗨'), '嗨');
+  // 标题主题仍要求至少一个汉字：纯英文问候按既有规则兜底，不破坏格式约定。
+  assert.equal(readableRuleSubject('Hi'), '新会话');
+  const title = provisionalSessionTitle({ submittedTitle: '你好', scoped: false });
+  assert.equal(isStructuredSessionTitle(title.title), true);
+  assert.match(title.title, /你好/u);
+  // 有具体内容的句子仍走原清洗；模糊表达仍按既有规则兜底。
+  assert.equal(readableRuleSubject('请帮我看看登录接口'), '看看登录接口');
+  assert.equal(readableRuleSubject('新讨论'), '新会话');
+  assert.equal(readableRuleSubject(''), '新会话');
 });
 
 test('临时标题：关联目标的讨论保留 `关于<目标>`，不被规则改写', () => {

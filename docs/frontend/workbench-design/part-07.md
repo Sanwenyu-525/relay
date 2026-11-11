@@ -158,6 +158,11 @@
 
 回归钉在 `tests/sessionRoundTrace.spec.tsx`（等待阶段不占位、首件工具活动入场、结算后标题接手、读数失败保入口、Owner 移交五组）与 `tests/scenarioLabMatrix.spec.tsx`（A01/A02/A03 等场景断言）。
 
+**完成态可读与文件类型识别（2026-11-10 用户指令「调用工具、读取文件之类的过程看不了」）。** 两处补强：
+
+- **完成时不再自动收起。** 这条消息在本页里真实经历在途、并读到工具记录时，终态保持展开；用户手动收起后不再被程序化打开；历史消息（挂载时已是终态）保持收起，避免整段历史各摊一份过程。零工具轮次仍没有可展开的内容（入口与空态规则不变）。此前的口径是「完成即收起」，回复一结束整段过程只剩标题行，用户看不到刚才读了哪些文件、跑了哪些检查。
+- **文件行带类型图标与颜色。** `ActivityRow` 在对象前加 14px 类型图标：代码（azure）/ 文档（teal）/ 配置（amber）/ 数据（violet）/ 图片（leaf）；目录用文件夹图标，未知扩展名用普通文件，取既有色板并登记 `color.fileType.*` 与 3:1 对比度检查。**只给图标上色**，文件名仍是次级文字色——行内颜色只表达「动的是哪类文件」，状态仍由左列状态图标与右侧状态词表达，不按动作词再加第二套彩色语义。分类只读扩展名，不读文件内容；不是路径的对象（搜索词、检查名、`operation_id`）不画图标。回归见 `tests/activityRow.spec.tsx` 的「文件类型图标」一组与 `tests/sessionRoundTrace.spec.tsx` 的完成态开合两例。
+
 **连续性。** 首条发送、已有会话后续发送、刷新/重启后读回使用同一套语义。执行转入 Run 后原会话继续展示该 Run 的真实结果，不因强制导航丢失上下文；切换目录/会话不重解释旧消息、不把迟到结果投递到新目标，也不自动停止旧 Run。停止入口将意图交给当前会话或 Run 的实际执行责任方，安全收敛前保持处理中。旧请求的接续、批准与撤回保留原身份，新主流程不重复推进。
 
 **目录绑定的呈现（阶段 D 已做的那部分）。** 打开目录后会向当前会话发一条独立的绑定命令，按钮区出现 `collab-directory-binding` 区域给出 PENDING / CONFIRMED / UNKNOWN / FAILED 四态与原 `command_id`。三条口径不可让步：目录是**作用域不是权限**，文案不得暗示已获读取或写入；结果未知时保留原命令等核对，不换 ID 重试，且**不显示成已绑定**（读取按未绑定目录处理）；服务端拒绝时如实呈现并说明对话仍可继续。已绑到同一资源时不再发第二条命令。
@@ -288,3 +293,41 @@
 
 2026-10-05 用户要求在协作页聊天框加一个切换模式的单选框。交互取舍见 [ADR-018](../../decisions/ADR-018-assistant-conversations.md)，后端契约归[命令契约 §10.60](../../api/http-command-contract.md)。**本节是已确认的设计；界面已实现（2026-10-06 首版，2026-10-16 助手配置改弹窗；2026-10-18 三档收成一个下拉框；2026-10-19 该下拉的浮层与选中态收进设计系统；2026-10-22 该浮层改由应用自绘，见 §25.1 末条），真实业务路径仍未验收**，成绩以[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)的「会话模式与人设助手」行为准。下面的呈现要求是验收依据。
 
+
+## §18.11 工具活动的披露列、单层底色与文案（UI-CHAT-PROCESS-POLISH-01，2026-11-10）
+
+四处点名的 UI 问题，按实测改完的形态：
+
+- 折叠箭头：从行尾（left=1209.2，贴耗时右缘）移到行首披露列，`order: -1`、字箱 1rem、收进 20px 引导槽；实测箭头左缘 513.2、文字起点 537.2 → 561.2、箭头与状态词中心差 0px（改前 -0.5px）。耗时独占右端列，不再与箭头相挤。
+- 参数卡片：两层底（容器 #F8FAF7 704×199.8 + 内层 `pre` #FFFFFF）压成一底（容器透明、`pre` #F8FAF7），卡片高度 199.8 → 177.8，`pre` 上限 16rem → 12rem；原来单独一行的“工具 find_paths”收进“参数 · find_paths”标签行。
+- 消息内状态区：`.message-execution-status` 与 `__phase`/`__details` 实测均为透明；唯一灰面就是展开后的参数卡片，已按上一条去掉。摘要行改为左侧 chevron + 原生 marker 两道压掉，与 `.chat-disclosure` / `.activity-header-chevron` 同一套语言。
+- 文案：
+  - `SessionRoundTrace.tsx` 的“阅读密度”改为“详细程度”（档位仍为简洁/标准/详细）。
+  - `AssistView.tsx` 在途消息头的“已用 38 秒”改为“38 秒”（紧跟“正在生成”，不再一个词说两遍）；已结束的仍写“耗时 X”。`tests/assistElapsed.spec.tsx` 两条旧断言同步改成“5 秒”/“7 秒”。
+  - 工具活动标题行的“已结算 2 项 · 正在执行”已拆语义；本轮只改了消息内状态区的重复 `<code>`：标签已含工具名时不再尾随一个同名字码。
+  - `ActivityDetail.tsx` 结果缺正文的说明从“会话账本只记录请求与结算，不保存工具结果正文；实际结果在该 Run 的工具轨迹里核对。”压到“会话账本不保存结果正文，结果在该 Run 的工具轨迹里核对。”
+- 可核对信息全部保留：请求时间、结算时间、错误码、退出码、计数、动作身份仍在展开层各自成行。
+
+取证：`tmp/UI-CHAT-PROCESS-POLISH-01/`（Chromium 1440/1024 截图 + metrics-before/after-1440.json，DOM 布局实测）。真机 Tauri 窗口未取证，见本轮汇报的 NOT_RUN 项。
+
+## §18.12 单一过程槽位与 clean 成功零残留（UI-CHAT-PROCESS-LITE-02，2026-11-10）
+
+用户反馈三件事：发一句「你好」花了 9.5k token；页面跳转/生成消息时闪一下；AI 回复过程希望像 ZCode 那样克制。前两件各有独立根因（修复轮门控见 [computer-plugin-v1 §11](../../architecture/computer-plugin-v1.md#11-会话到执行链修复2026-11-01-computer-plugin-e2e)；会话切换缓存见下），本节只定过程区的呈现口径。
+
+**一个槽位。** 每条 ASSISTANT 消息在 meta 行与正文之间只有 `.agent-message-process` 一个过程槽位，三种内容互斥：
+
+- 生成中且工具尚未接手 → `AssistStageLine` 一行（三点 + 服务端阶段文案）；活动快照到达后不再换成第二块。
+- 工具有真实记录（`activity_counts.toolCalls + todoWrites > 0`）或在途需要轮询 → `SessionRoundTrace` 一条账本入口；在途自动展开，终态自动收起。历史终态消息只有在活动投影确认过工具/待办时才挂载，避免每条纯文本回复都带一行「工具活动 · 展开查看」。
+- 需要人看一眼的例外 → `MessageExecutionStatus`：`gaps`（审批/UNKNOWN/待核对）非空、`run_summary` 非空，或 FAILED 但没有 `error_code`。委派由 `SessionDelegations` 承担，工具轮次由 trace 承担，不在状态块里重复列模型调用。
+
+**clean 成功零残留。** COMPLETED、无工具、无 gaps、无 Run 摘要时，槽位为空并 `display:none`；页面只留正文、来源条与 token 读数。不保留「● 回复已完成」或「查看执行过程（N 项）」。
+
+**辅助外呼不冒充主步骤。** 过程区的 `MODEL_CALL` 活动与 `activity_counts.model_calls` 只统计 `purpose='PRIMARY'`；`TITLE`/`MEMORY_CAPTURE`/`MEMORY_COMPACT` 仍记账、仍可导出，但不出现在回复步骤里。
+
+**不再用入场动画补偿。** 交接终稿的 opacity 0.6 → 1 已删除（`data-handover` 仅保留为一枚标记）；工具账本首次挂载的 `@starting-style` 淡入 + 2px 上浮也删除。过程槽位用统一 margin 与最小行高保证阶段行 ↔ trace 标题行互换时不改变正文上方高度；出现与消失只表达事实，不再演一次过渡。
+
+**会话切换。** 会话消息与提案按 `workspaceId + sessionId` 保留最近 12 份展示缓存（`lib/sessionTranscriptCache.ts`），面板重挂载时同步初始化；挂载后立即 `refresh()`，服务端结果覆盖缓存。连接代次变化（`relayConnection.publish`）清空缓存。这样切回已有会话时首帧就有内容并按既有布局滚到底部，不再出现「空档 → 列表 → 跳底」。缓存不参与业务判断；读取失败仍显示既有的「下面显示的是上次成功读取的内容，可能已过期」。
+
+**token 读数不变。** 「本轮 N tokens」仍是 PRIMARY 的输入 + 输出，`≈`/`≥`/未上报口径不变；本次只是让过程区的模型调用次数与它对齐。剩余成本是主循环 system（约 15.4KB）与工具声明（约 6.9KB），不属本节范围。
+
+**证据。** 组件 `assistProcessSlot` **4/4**、`sessionTranscriptCache` **3/3**、`assistStage` **3/3**、`assistReplyHandover` **5/5**、`sessionRoundTrace` **24/24**；浏览器 `assistExecutionTransparency` 与 `assistReplyHandover` 已按新口径改写，取证在 `tmp/ENG-OBS-02-execution-transparency/browser` 与 `tmp/UI-CHAT-PROCESS-POLISH-01/`。真实 Tauri 窗口未重新取证。

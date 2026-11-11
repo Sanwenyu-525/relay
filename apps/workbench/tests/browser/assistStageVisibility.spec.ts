@@ -114,6 +114,11 @@ async function installRoutes(page: Page, state: {
       message_id: assistantMessageId, message_status: state.status(), rounds: [] });
     if (path === `${prefix}/assist-sessions/${sessionId}/todos`)
       return fulfillJson(route, { snapshot: null });
+    // 过程槽位会读执行活动投影；返回合法空快照，避免截图里出现「执行过程读取失败」。
+    if (path === `${prefix}/assist-sessions/${sessionId}/activity`) return fulfillJson(route, {
+      schema_version: 1, session, generated_at: "2026-11-01T08:00:07Z",
+      snapshot_at: "2026-11-01T08:00:07Z", messages: [], next_before_seq: null,
+      has_more: false });
     if (path.includes("conversation-diff")) return fulfillJson(route, { session_id: sessionId,
       files: [], unavailable_files: 0, unverifiable_files: 0, baseline: null,
       incomplete: false });
@@ -140,7 +145,7 @@ async function connect(page: Page): Promise<void> {
 
 function save(name: string): { path: string } { return { path: `${evidenceDir}/${name}.png` }; }
 
-test.describe("执行阶段行与延迟诊断", () => {
+test.describe("执行阶段行", () => {
   test("等待处理 → 等待模型响应 → 模型已响应等待正文 → 草稿接管", async ({ page }) => {
     fs.mkdirSync(evidenceDir, { recursive: true });
     await page.setViewportSize({ width: 1270, height: 900 });
@@ -158,27 +163,24 @@ test.describe("执行阶段行与延迟诊断", () => {
 
     status = "RUNNING"; phase = "WAITING_MODEL";
     await expect(stage).toHaveText("等待模型响应", { timeout: 10_000 });
+    // 2026-11-10：聊天流只有一行阶段，逐段耗时不再就地展开。
+    await expect(page.getByText("延迟诊断")).toHaveCount(0);
     await page.screenshot(save("02-waiting-model"));
-
-    await page.locator(`[data-testid="assist-inflight-${assistantMessageId}"] summary`).click();
-    await expect(page.getByText("模型请求 → 首个流事件")).toBeVisible();
-    await expect(page.getByText("尚未收到", { exact: true })).toBeVisible();
-    await page.screenshot(save("03-latency-diagnostics"));
 
     phase = "MODEL_STREAMING";
     await expect(stage).toHaveText("模型已响应，等待正文", { timeout: 10_000 });
-    await page.screenshot(save("04-model-streaming"));
+    await page.screenshot(save("03-model-streaming"));
 
     phase = "MODEL_OUTPUT";
     await expect(stage).toHaveText("已收到模型输出，正在整理为回复", { timeout: 10_000 });
-    await page.screenshot(save("05-model-output"));
+    await page.screenshot(save("04-model-output"));
 
     previewText = DRAFT;
     await expect(stage).toBeHidden({ timeout: 10_000 });
     await expect(page.locator(`[data-testid="assist-live-preview-${assistantMessageId}"]`))
       .toContainText(DRAFT);
     await expect(page.locator(".assist-inflight-dots")).toHaveCount(1);
-    await page.screenshot(save("06-draft-takes-over"));
+    await page.screenshot(save("05-draft-takes-over"));
   });
 
   test("窄窗口无横向溢出；减少动效时三点静止", async ({ page }) => {
@@ -202,6 +204,6 @@ test.describe("执行阶段行与延迟诊断", () => {
     const animation = await page.locator(".assist-stage .assist-inflight-dots > i").first()
       .evaluate((node) => getComputedStyle(node).animationName);
     expect(animation).toBe("none");
-    await page.screenshot(save("07-narrow-reduced-motion"));
+    await page.screenshot(save("06-narrow-reduced-motion"));
   });
 });

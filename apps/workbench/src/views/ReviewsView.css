@@ -87,6 +87,11 @@
   .review-page .review-columns:has(> .review-reading) > .review-detail { position: static; max-height: none; overflow: visible; }
 }
 
+/* 2026-11-11 UI-PAGE-REVIEWS-01：详情区链接并入同一行距节奏；时间/修订用等宽数字便于扫读。
+   决定区位置与 jump 几何不变（reviewDecisionJump.spec 锁定 1162×782 单列时决定区在首屏外）。 */
+.review-detail-links { gap: var(--relay-space-4); }
+.review-page .review-list-meta time { font-variant-numeric: tabular-nums; }
+
 /* ── V5.28 原型皮肤（scope 在 .pv-page；数值取自原型 relay-v528-styles） ───────── */
 
 .pv-page .review-filters { gap: 7px; }
@@ -174,3 +179,15 @@
   .pv-page.review-page { padding: 14px 14px 40px; }
   .pv-page .review-request-facts { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ── 2026-11-11 UI-PAGE-REVIEWS-01 视觉收口（scope 在 .pv-page；不改结构与 testid） ── */
+/* 列表 meta 行：类型/项目/时间/修订统一为 muted 事实行，时间用等宽数字；选中项的边界与底色已由既有规则承担。 */
+.pv-page .review-list-meta time { font-variant-numeric: tabular-nums; }
+/* 详情事实区：三项（请求事项/请求时间/有效期）同网格；dt 保持 11px muted，dd 12px。 */
+.pv-page .review-request-facts { margin-bottom: 4px; }
+/* 详情链接行：三个只读入口（关联任务/版本来源/执行与完成状态）同行节奏，窄窗换行。 */
+.pv-page .review-detail-links { gap: 14px; flex-wrap: wrap; margin: 6px 0; }
+.pv-page .review-detail-links .text-link { font-size: 12px; }
+/* 空态/加载/读取失败共用卡内空态：图标与文案已由 Info + helper-text 承担，补一行内边距节奏。 */
+.pv-page .review-empty { padding-bottom: 20px; }
+.pv-page .review-empty .helper-text { display: inline-flex; align-items: center; gap: 8px; margin: 0; }

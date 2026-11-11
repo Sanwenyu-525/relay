@@ -6,7 +6,7 @@ import { checkRequiredText, normalizeText, TEXT_LIMITS } from '../shared/text.js
 import { toDecimalString } from '../shared/decimal.js';
 import { LOCAL_ACTOR_REF, httpCommandScopeKey } from './actor.js';
 import { runIdempotentCommand, type CommandOutcome } from './command.js';
-import { assistSessionDeleteBlocked, invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
+import { invalidTransition, resourceNotFound, revisionConflict, validationFailed } from './domain-error.js';
 import { requireRevision } from './revisions.js';
 import type { Repositories } from './unit-of-work.js';
 
@@ -335,18 +335,24 @@ export async function reopenAssistSession(db: DbExecutor,
 /**
  * 物理删除一条会话（ADR-027，迁移 0116）。这是本模块唯一**不可撤销**的命令。
  *
- * 与归档相反：归档保留全部历史并可用「重开」撤销；删除按子 → 父顺序删掉会话自有的账本，
- * 会话行本身也消失，没有回收站、不提供恢复命令。删除前先过两道栅栏——在途消息（与归档
- * 同一条）和跨对象引用（`listDeleteBlockers`），任何一道命中都整条拒绝、零删除。
+ * 与归档相反：归档保留全部历史并可用「重开」撤销；删除按「解除外部引用 → 子 → 父」顺序
+ * 删掉会话自有的账本，会话行本身也消失，没有回收站、不提供恢复命令。
  *
- * 2026-10-31（用户要求「删正常会话应该简单可靠」）按数据所有权重审了阻断面：自动记忆的
- * 来源凭据本来就是会话自有（0137 的删除路径已清），不再单独阻断；执行请求行改成脱钩凭据
- * （0153），只有仍在解释中的请求继续挡。被别的对象引用的来源、学习记录、分叉与子代理
- * 关系照旧整条拒绝——那些行各有自己的保留 Owner。
+ * 2026-11-10（用户决定「删除优先，需要保留的不会轻易删除」）撤掉全部业务阻断：
+ *   * 在途消息不再挡删除。消息行消失后，Worker 的结算与预览写入按原身份找不到行，只会
+ *     静默失败，不会复活已删会话或写出第二份事实。
+ *   * 被 Task 验收观察、项目假设、工作片段、蓝图提案、学习证据、artifact 影响检查引用的
+ *     来源消息不再拒绝删除；取消引用、保留外部对象（见 `detachExternalReferences`）。
+ *   * 分叉子会话保留、来源置空；单独删除子代理会话时父会话委派账本保留、子引用置空。
+ *   * 学习轮次、会话级记录开关与由会话派生的学习证据随会话删除；知识点身份保留。
+ *
+ * 子代理会话与委派账本仍随主会话整棵删除：子代理没有独立的用户对话生命周期，删除主会话
+ * 时按「账本 → 子会话（含更深层）→ 主会话」在同一事务里清理。单独删子会话现在也能成功，
+ * 不再被 `DELEGATION_LEDGER_REFERENCED` 挡住。
  *
  * 审计：会话行与消息都不再存在，命令回执仍留在 `command_receipts`；另写一条 append-only 的
- * `activity_records`，这是该会话存在过的唯一痕迹。`fact_refs` 只记身份、修订与删除行数，
- * 不复制标题或正文——用户要求删除之后，审计不应该变成第二份保存。
+ * `activity_records`，这是该会话存在过的唯一痕迹。`fact_refs` 只记身份、修订、删除行数与
+ * 被级联的子代理会话身份，不复制标题或正文——用户要求删除之后，审计不应该变成第二份保存。
  */
 export async function deleteAssistSession(db: DbExecutor,
   input: DeleteAssistSessionInput): Promise<CommandOutcome<AssistSessionDeleteResult>> {
@@ -360,11 +366,27 @@ export async function deleteAssistSession(db: DbExecutor,
     execute: async (repositories) => {
       const session = await requireSessionInWorkspace(repositories, input.workspaceId, input.sessionId);
       requireExpectedRevision(session, expectedRevision);
-      if (await repositories.assist.hasInflightMessages(session.id)) {
-        throw invalidTransition('这段讨论还有消息在途，等它结束再删除。', { sessionId: session.id });
+      /*
+       * 子代理会话与委派账本随主会话整棵删除（2026-11-10）。顺序不能反：
+       * 账本的 `child_session_id` / 尝试结论消息 / 补充消息都是 NO ACTION，账本不先走，
+       * 子会话行就撞外键；子会话不先删，主会话的 `parent_session_id` 又会被子行引用。
+       * 删除本身不再按保留事实整条拒绝；外部引用由 `deleteSession` 在每条会话上解除。
+       */
+      const descendants = await repositories.assist.listSubagentDescendants(session.id);
+      if (descendants.length > 0) {
+        await repositories.assist.deleteDelegationLedgerForSessions(
+          [session.id, ...descendants.map((child) => child.id)]);
+        for (const child of descendants) {
+          const deletedChild = await repositories.assist.deleteSession(child.id, child.revision);
+          if (deletedChild === undefined) {
+            const latest = await repositories.assist.readSession(child.id);
+            if (latest === undefined) throw resourceNotFound('Assist session');
+            throw revisionConflict({ entityType: 'Assist session',
+              expectedRevision: child.revision.toString(),
+              actualRevision: latest.revision.toString() });
+          }
+        }
       }
-      const blockers = await repositories.assist.listDeleteBlockers(session.id);
-      if (blockers.length > 0) throw assistSessionDeleteBlocked(blockers);
       const deleted = await repositories.assist.deleteSession(session.id, expectedRevision);
       if (deleted === undefined) {
         throw revisionConflict({ entityType: 'Assist session',
@@ -379,7 +401,9 @@ export async function deleteAssistSession(db: DbExecutor,
         factRefs: { session_id: session.id,
           previous_revision: expectedRevision.toString(),
           deleted_messages: deleted.messages,
-          deleted_attachments: deleted.attachments },
+          deleted_attachments: deleted.attachments,
+          ...(descendants.length === 0 ? {} : {
+            deleted_subagent_sessions: descendants.map((child) => child.id) }) },
       });
       return { session_id: session.id, revision: expectedRevision.toString(),
         deleted_messages: deleted.messages, deleted_attachments: deleted.attachments,

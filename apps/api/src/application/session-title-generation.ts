@@ -13,6 +13,7 @@ import {
   classifySessionTitleCategory,
   hasExplicitNewTaskMarker,
   parseModelTitleOutput,
+  readableRuleSubject,
   ruleTitleSubject,
   safeRuleSubject,
   validatedModelTitle,
@@ -39,6 +40,15 @@ export const TITLE_AUTO_COOLDOWN_MS = 10 * 60 * 1000;
 const TITLE_LEASE_MS = 60_000;
 const TITLE_TIMEOUT_MS = 25_000;
 const TITLE_RETRY_DELAY_MS = 5_000;
+
+/**
+ * 短首发输入本身就是可读标题：不足 10 个字符不发起模型命名（与上游 ZCode 同口径）。
+ *
+ * 实测「你好」的一次 TITLE 调用是 408 输入 / 269 输出 / 14.4 秒；而它唯一能得到的
+ * 标题是泛化的分类名，比创建会话时由首条消息派生的临时标题更差。继续生成还会在
+ * 10 分钟防抖窗口后对这一类轮次反复重试。
+ */
+const MIN_GENERATED_TITLE_INPUT_CHARS = 10;
 
 /** 规则降级用的输入都不长：辅助外呼只回答「用户在做什么」。 */
 const FIRST_MESSAGE_MAX_CHARS = 600;
@@ -97,6 +107,10 @@ export async function enqueueSessionTitleAfterTurn(db: DbExecutor,
   // 已经有过正式标题时，只有用户明确换任务的标记才允许再次命名；
   // 普通追问、排查、测试与完成状态都不构成重命名理由。
   if (session.title_source === 'AI_GENERATED' && !hasExplicitNewTaskMarker(user.content!)) return false;
+
+  // 短输入不命名：创建会话时已经按首条消息派生过 PROVISIONAL 标题，
+  // 再让模型把它覆盖成泛化分类只会多一次真实外呼，没有信息增量。
+  if (Array.from(user.content!.trim()).length < MIN_GENERATED_TITLE_INPUT_CHARS) return false;
 
   const now = new Date();
   const digest = createHash('sha256')
@@ -334,7 +348,7 @@ function ruleTitleFor(evidence: TitleEvidence): string {
     || ruleTitleSubject(evidence.latestUserText)
     || (evidence.taskTitle === null ? '' : `关于${evidence.taskTitle}`);
   return buildSessionTitle(category, subject === ''
-    ? safeRuleSubject(evidence.firstUserText) : safeRuleSubject(subject));
+    ? readableRuleSubject(evidence.firstUserText) : safeRuleSubject(subject));
 }
 
 /**

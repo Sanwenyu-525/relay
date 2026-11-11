@@ -3,7 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // B 组受控 Chromium UI 验收；API 响应由本文件拦截，不连接真实服务或 Provider。
-const origin = "http://127.0.0.1:4188";
+// origin 跟随 RELAY_E2E_PORT（默认 4173）：playwright.config 的 webServer 也起在同一端口，
+// 此前硬编码 4188 与 webServer 脱节，换端口跑时页面打不开（UI-PAGE-TASKS-01 修正）。
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 const out = resolve(import.meta.dirname, "../../output/ui-acceptance-20261028/tasks");
 const phase = process.env.RELAY_TASKS_CAPTURE_PHASE ?? "after";
 const api = "http://127.0.0.1:8787";

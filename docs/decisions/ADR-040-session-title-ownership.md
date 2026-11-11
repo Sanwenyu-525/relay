@@ -25,6 +25,7 @@
 7. **模型失败有确定性降级。** 没有真实模型配置、超时或输出不合规时，AUTO 用规则标题（`generator='RULES'`，来源仍 `PROVISIONAL`）；显式重新生成如实 `FAILED` 并保留原标题。模型错误不变成主 Agent 错误，也不改消息终态。
 8. **频率保守。** 同一会话 10 分钟内最多一次 AUTO 请求；已有正式标题后，只有用户消息出现明确换任务标记才再次入队。无法可靠判断目标变化时保持原标题，不为了「看起来智能」而频繁跳动。
 9. **辅助外呼单独记账。** `model_calls.purpose` 增 `TITLE`：进账本与预算闸门，但不抢「最近一次调用」读数，也不计入本轮 PRIMARY 用量。输入只含首条有效用户消息、最近用户消息、关联任务/项目标题与刚结算的回复摘要，整体包在 `<untrusted_data>`；不读工具日志、文件正文、附件或凭据。
+10. **短首发输入不自动命名（2026-11-10 补充）。** 首轮用户消息去空白后不足 10 个字符时不写 `assist_title_generations` 请求：这类输入本身就是可读的临时标题（例如「其他-你好」），继续命名只会多一次真实外呼，并把它稳定覆盖成泛化分类。口径与上游 ZCode 相同（`MIN_GENERATED_TITLE_INPUT_CHARS = 10`）；显式重新生成不受这条限制。为此，纯寒暄的 `PROVISIONAL` 标题保留首条消息原文，不再退化成 `其他-新会话`。
 
 ## 候选与取舍
 
@@ -53,4 +54,4 @@
 
 ## 验证
 
-单元 `session-title` **9/9**；真实 PG/HTTP `assist-session-title.integration.test` **8/8**（临时 PG18.6，跑完停止并删除）；组件 `sessionRowMenu` **39/39**；真实 Chromium `sessionTitleRegeneration` **3/3**；`apps/api` `tsc --noEmit` exit 0。详细证据归[验收详情条目 350](../testing/acceptance-details/part-19.md#条目-350)。
+单元 `session-title` **9/9**；真实 PG/HTTP `assist-session-title.integration.test` **9/9**（临时 PG18.6，跑完停止并删除；2026-11-10 新增「短首发输入不入队」一例）；组件 `sessionRowMenu` **39/39**；真实 Chromium `sessionTitleRegeneration` **3/3**；`apps/api` `tsc --noEmit` exit 0。详细证据归[验收详情条目 350](../testing/acceptance-details/part-19.md#条目-350)。

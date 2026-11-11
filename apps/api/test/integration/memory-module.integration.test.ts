@@ -130,10 +130,8 @@ test('message save requires confirmation, exact source hash and scope; provenanc
   const provenance = await api.get(f.path(`/memories/${id}/provenance`));
   assert.equal(provenance.status, 200, provenance.text);
   assert.equal((provenance.body as { sources: { message_id: string }[] }).sources[0]?.message_id, sent.user_message_id);
-  // 2026-10-31：记忆来源凭据是会话自有账本，随会话删除一起清理（0137 起删除路径就是如此），
-  // 不再单独阻断删除；长期记忆正文与版本保留，另有停用入口。
-  const blockers = await createRepositories(app.db).assist.listDeleteBlockers(f.sessionId);
-  assert.equal(blockers.some((reason) => String(reason) === 'MEMORY_SOURCES'), false);
+  // 2026-11-10：来源凭据是会话自有账本，随会话删除一起清理；长期记忆正文与版本保留，
+  // 删除会话不再被任何记忆来源阻断（删除路径的解除引用见 assist-session-delete 集成）。
   const other = await fixture();
   assert.equal((await api.post(path, { ...body, command_id: randomUUID(), project_id: other.projectId })).status, 404);
   assert.equal((await api.get(other.path(`/memories/${id}/provenance`))).status, 404);

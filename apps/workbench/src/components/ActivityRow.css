@@ -17,7 +17,7 @@
   gap: var(--relay-space-1) var(--relay-space-2);
   margin: 0;
   min-width: 0;
-  padding: 1px var(--relay-space-1);
+  padding: 1px var(--relay-space-1) 1px calc(var(--relay-space-1) + 1rem);
   border-radius: var(--relay-radius-badge);
   font-size: var(--relay-font-size-meta);
   line-height: var(--relay-font-lineHeight-ui);
@@ -78,6 +78,28 @@
 }
 .activity-item-dir { color: var(--relay-color-text-muted); }
 .activity-item-name { color: var(--relay-color-text-secondary); }
+
+/* 文件类型图标（2026-11-10 用户指令「不同文件要有颜色、图标的区别」）。
+   图标挂在文件名前面、14px：形状说类别，颜色说同一件事的第二层；比状态列（16px）小一档，
+   不跟「这一项怎么样了」抢第一眼。文件名本身保持次级文字色，五十行调用不会变成一排彩色正文。
+   用 inline-block + vertical-align 而不是把对象盒改成 flex——路径仍要在任意字符处折行，
+   改成 flex 容器会让长路径的换行与目录/文件名分段一起变紧。 */
+.activity-item-filetype {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-inline-end: 3px;
+  vertical-align: -3px;
+  flex: none;
+  color: var(--relay-color-text-muted);
+  stroke-width: var(--relay-control-icon-stroke);
+}
+.activity-item[data-filetype="code"] .activity-item-filetype { color: var(--relay-color-fileType-code); }
+.activity-item[data-filetype="doc"] .activity-item-filetype { color: var(--relay-color-fileType-doc); }
+.activity-item[data-filetype="config"] .activity-item-filetype { color: var(--relay-color-fileType-config); }
+.activity-item[data-filetype="data"] .activity-item-filetype { color: var(--relay-color-fileType-data); }
+.activity-item[data-filetype="image"] .activity-item-filetype { color: var(--relay-color-fileType-image); }
+/* 文件夹与无扩展名文件保持中性灰：它们是兜底类别，不该比具名类型更显眼。 */
 
 /* 工具名：核对用，但不与动作词抢注意力。
    全局 `.tech-details code` 会把 code 变成 block（并加 overflow-wrap），这里显式拉回行内。 */
@@ -140,12 +162,15 @@
 /* 展开控件：只有真的能展开时才出现。旋转 90° 表示展开，动效可关。 */
 .activity-item-toggle {
   flex: none;
+  order: -1;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--relay-control-target-minimum);
-  height: var(--relay-control-target-minimum);
-  margin: calc(var(--relay-space-1) * -1) 0;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  margin-inline-start: -1rem;
   padding: 0;
   border: 0;
   border-radius: var(--relay-radius-badge);
@@ -183,7 +208,6 @@
   margin: var(--relay-space-1) 0 var(--relay-space-2) calc(1rem + var(--relay-space-2));
   padding: var(--relay-space-2) var(--relay-space-3);
   border-radius: var(--relay-radius-control);
-  background: var(--relay-color-bg-subtle);
   color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-ui);
@@ -205,12 +229,12 @@
 .activity-item-detail > :last-child { margin-bottom: 0; }
 /* 参数与原始回执是代码，不是正文：等宽、限高、框内滚动，不让一段 JSON 把整轮顶出视野。 */
 .activity-item-detail pre {
-  max-height: 16rem;
+  max-height: 12rem;
   overflow: auto;
   margin: 0;
   padding: var(--relay-space-2);
   border-radius: var(--relay-radius-badge);
-  background: var(--relay-color-bg-surface);
+  background: var(--relay-color-bg-subtle);
   font-family: var(--relay-font-family-code);
   font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-code);

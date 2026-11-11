@@ -8,6 +8,7 @@ import { clearSessionModelSelection, readSessionModel, selectSessionConnection }
   from '../application/select-session-model.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 import { problemFromError, sendProblem, sendReadError, type RouteDependencies } from './envelope.js';
+import { logRequestFailure } from './request-failure-log.js';
 
 /**
  * 聊天 `/命令` 的登记查询、只读解析与有限执行端点。
@@ -138,7 +139,9 @@ export function registerChatCommandRoutes(app: FastifyInstance,
         committed_at: outcome.committedAt.toISOString(), result: outcome.result,
         links: { resource: `/api/v1/workspaces/${params.workspace_id}/${resource}` } });
     } catch (error) {
-      return sendProblem(reply, problemFromError(error, body.command_id), request.id);
+      const problem = problemFromError(error, body.command_id);
+      logRequestFailure(request, error, problem, { command_id: body.command_id });
+      return sendProblem(reply, problem, request.id);
     }
   });
 
@@ -190,7 +193,10 @@ export function registerChatCommandRoutes(app: FastifyInstance,
       return { command_id: commandId, committed_at: outcome.committedAt.toISOString(),
         result: { kind: 'MODEL_SELECTION' as const, ...outcome.result }, links };
     } catch (error) {
-      return sendProblem(reply, problemFromError(error, body.command_id), request.id);
+      const commandId = body.command_id;
+      const problem = problemFromError(error, commandId);
+      logRequestFailure(request, error, problem, { command_id: commandId });
+      return sendProblem(reply, problem, request.id);
     }
   });
 

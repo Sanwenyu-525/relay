@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import {
-  ChevronRight, Circle, CircleCheck, CircleX, Hourglass, LoaderCircle, TriangleAlert,
+  ChevronRight, Circle, CircleCheck, CircleX, File, FileCode2, FileCog, FileImage,
+  FileSpreadsheet, FileText, FolderOpen, Hourglass, LoaderCircle, TriangleAlert,
 } from "lucide-react";
 import type { ActivityItem } from "../lib/activityPresentation";
 import { formatActivityDuration } from "../lib/activityPresentation";
@@ -57,6 +58,54 @@ function targetParts(target: string): { readonly dir: string; readonly name: str
   return { dir: target.slice(0, cut + 1), name: target.slice(cut + 1) };
 }
 
+/**
+ * 文件类型（2026-11-10）。
+ *
+ * 只按**扩展名**分类：这是用户自己就认识的规则，不需要读取文件、也不猜内容。
+ * 分类只影响对象前的 12px 图标与其颜色，文件名保持次级文字色——颜色是第二层，
+ * 一行一行标成彩色正文会让 50 行过程变成调色盘，还会压过真正回答状态的左列图标。
+ * 目录与 `list_directory` 的对象用文件夹图标；取不到扩展名时不画图标，不硬猜。
+ */
+type FileKind = "code" | "doc" | "config" | "data" | "image" | "folder" | "file";
+
+const FILE_KINDS: readonly { readonly kind: FileKind; readonly extensions: readonly string[] }[] = [
+  // 顺序有意义：同名扩展名只归第一类（例如 .sql 归代码，不归数据）。
+  { kind: "code", extensions: ["ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "rs",
+    "java", "kt", "c", "h", "cpp", "cc", "cs", "rb", "php", "sh", "ps1", "sql", "css",
+    "scss", "less", "html", "vue", "svelte", "swift", "dart", "lua", "toml"] },
+  { kind: "doc", extensions: ["md", "mdx", "txt", "rst", "adoc", "pdf", "doc", "docx", "rtf"] },
+  { kind: "config", extensions: ["json", "jsonc", "json5", "yaml", "yml", "ini", "env",
+    "conf", "config", "properties", "lock"] },
+  { kind: "data", extensions: ["csv", "tsv", "xlsx", "xls", "parquet", "db", "sqlite", "ndjson"] },
+  { kind: "image", extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "avif", "bmp"] },
+];
+
+function fileKindOf(target: string, isDirectory: boolean): FileKind | null {
+  if (target === "" || target.includes("://")) return null;
+  if (isDirectory || /[\\/]$/u.test(target)) return "folder";
+  const name = targetParts(target).name;
+  const dot = name.lastIndexOf(".");
+  // 点开头的是隐藏文件（.gitignore 这类），它没有可读的扩展名身份：按普通文件处理。
+  if (dot <= 0 || dot === name.length - 1) return name.startsWith(".") ? "file" : null;
+  const extension = name.slice(dot + 1).toLowerCase();
+  if (!/^[a-z0-9]{1,8}$/u.test(extension)) return null;
+  for (const group of FILE_KINDS) {
+    if (group.extensions.includes(extension)) return group.kind;
+  }
+  return "file";
+}
+
+/** 类型 → 图标。与状态图标分列：状态回答「怎么样了」，这里回答「动的是哪类文件」。 */
+function FileKindIcon({ kind }: { readonly kind: FileKind }) {
+  if (kind === "folder") return <FolderOpen className="activity-item-filetype" aria-hidden="true" />;
+  if (kind === "code") return <FileCode2 className="activity-item-filetype" aria-hidden="true" />;
+  if (kind === "doc") return <FileText className="activity-item-filetype" aria-hidden="true" />;
+  if (kind === "config") return <FileCog className="activity-item-filetype" aria-hidden="true" />;
+  if (kind === "data") return <FileSpreadsheet className="activity-item-filetype" aria-hidden="true" />;
+  if (kind === "image") return <FileImage className="activity-item-filetype" aria-hidden="true" />;
+  return <File className="activity-item-filetype" aria-hidden="true" />;
+}
+
 export interface ActivityRowProps {
   readonly item: ActivityItem;
   /** 第三层技术详情；不传就不渲染展开控件（没有内容可展开时不摆一个点开是空的按钮）。 */
@@ -80,12 +129,14 @@ export interface ActivityRowProps {
 export default function ActivityRow({ item, detail, expanded = false, onToggle,
   detailLabel, testId, current = false, note }: ActivityRowProps) {
   const { dir, name } = targetParts(item.target);
+  const fileKind = fileKindOf(item.target, item.category === "LIST");
   const elapsed = formatActivityDuration(item.elapsedMs);
   const label = detailLabel ?? `${item.verb}${item.target === "" ? "" : ` ${item.target}`}`;
   const expandable = detail !== undefined && onToggle !== undefined;
   // 工具名不进可见行（参考图的行 anatomy 只有「动作 · 对象 · 状态 · 耗时」）：
   // 它留在 title 与第三层详情里，核对「模型到底调了什么」时展开一次就能看到。
   return <li className="activity-item" data-category={item.category} data-tone={item.tone}
+    data-filetype={fileKind ?? undefined}
     title={item.verb === item.toolName ? undefined : `工具 ${item.toolName}`}
     data-state={item.state} data-source={item.source}
     data-failed={item.detail.failed ? "true" : undefined}
@@ -98,6 +149,7 @@ export default function ActivityRow({ item, detail, expanded = false, onToggle,
       </span>
       <span className="activity-item-verb">{item.verb}</span>
       {item.target !== "" && <span className="activity-item-target">
+        {fileKind !== null && <FileKindIcon kind={fileKind} />}
         {dir !== "" && <span className="activity-item-dir">{dir}</span>}
         <span className="activity-item-name">{name}</span>
       </span>}

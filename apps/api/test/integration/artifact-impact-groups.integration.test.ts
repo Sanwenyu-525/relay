@@ -364,6 +364,7 @@ test('N02 正文正好到上限不标记截断，超过一字符才标记', asyn
       return withTransaction(app.db, async (r) => {
         const check = await r.impacts.read(checkId);
         assert.ok(check);
+        assert.ok(check.assist_session_id);
         const messages = await r.assist.listMessages(check.assist_session_id);
         const userMessage = messages.find((message) => message.role === 'USER');
         assert.ok(userMessage?.content);

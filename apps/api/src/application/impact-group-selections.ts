@@ -79,7 +79,8 @@ export async function createImpactGroupSelection(db: DbExecutor, input: {
       for (const targetId of order) {
         const candidate = candidates.get(targetId);
         if (candidate === undefined || !selected.has(candidate.id)) continue;
-        const message = await r.assist.readMessage(candidate.assist_message_id);
+        const message = candidate.assist_message_id === null ? undefined
+          : await r.assist.readMessage(candidate.assist_message_id);
         const target = await r.artifacts.readArtifact(candidate.target_artifact_id);
         if (message?.status !== 'COMPLETED' || parseImpactCandidateMarkdown(message.content) === null || candidate.applied_version_id !== null ||
             candidate.source_artifact_revision !== source.revision || target?.revision !== candidate.target_artifact_revision ||

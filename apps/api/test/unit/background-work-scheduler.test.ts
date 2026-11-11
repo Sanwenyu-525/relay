@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import type { FastifyInstance } from 'fastify';
 
 import type { RelayDatabase } from '../../src/infrastructure/database.js';
+import { configureRuntimeLog, resetRuntimeLog } from '../../src/infrastructure/runtime-log.js';
 import type { SchemaReadinessChecker } from '../../src/infrastructure/schema-readiness.js';
 import { registerBackgroundWorkScheduler } from '../../src/runtime/background-work-scheduler.js';
 
@@ -144,6 +148,8 @@ test('readiness 不就绪：整轮直接返回，不进入任何阶段，也不�
 });
 
 test('探针抛错：记为 BACKGROUND_WORK_TICK_CRASHED，不产生 unhandledRejection，下一轮继续', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'relay-bg-scheduler-log-'));
+  configureRuntimeLog({ directory, fileName: 'scheduler.log', level: 'debug' });
   const rejections: unknown[] = [];
   const onRejection = (reason: unknown): void => { rejections.push(reason); };
   process.on('unhandledRejection', onRejection);
@@ -174,9 +180,18 @@ test('探针抛错：记为 BACKGROUND_WORK_TICK_CRASHED，不产生 unhandledRe
     // 关键回归：抛错之后仍安排下一轮，探针次数继续增长（3 次以上）。
     assert.ok(probes >= 3, `scheduler must keep ticking after a crash (probes=${String(probes)})`);
     assert.deepEqual(rejections, [], 'crashed tick must not surface as unhandledRejection');
+
+    // 桌面模式 pino 关闭：同一崩溃事实必须进入 runtime log，否则窗口重启后无迹可查。
+    const records = readFileSync(join(directory, 'scheduler.log'), 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const crashRecords = records.filter((record) => record.event === 'background_work_tick_crashed');
+    assert.ok(crashRecords.length >= 1);
+    assert.equal((crashRecords[0]?.error as Record<string, unknown>).message, 'readiness probe exploded');
   } finally {
     await scheduler.stop();
     process.off('unhandledRejection', onRejection);
+    resetRuntimeLog();
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

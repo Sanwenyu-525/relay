@@ -111,7 +111,8 @@ export function MessageExecutionStatus({ activity, animate = true }: {
         {items.map((item) => <li key={item.activityId} data-tone={activityTone(item)}
           data-kind={item.kind}>
           <span>{activityLabel(item)}</span>
-          {item.toolName !== undefined && <code>{item.toolName}</code>}
+          {item.toolName !== undefined &&
+            !activityLabel(item).includes(item.toolName) && <code>{item.toolName}</code>}
         </li>)}
       </ol>
     </details>}

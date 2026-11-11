@@ -27,6 +27,7 @@ import {
   UuidSchema,
   commandEnvelopeSchema,
 } from './domain-schemas.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { sendRunEventStream } from './run-events-api.js';
 import { sendRunDraftPreviewStream } from './preview-events-api.js';
@@ -196,7 +197,12 @@ export function registerRunRoutes(app: FastifyInstance, dependencies: RouteDepen
       });
       // 回执始终描述已提交的 PENDING 意图；安全点在另一个短事务推进。
       try { await applySafeControl(executor, params.run_id ?? ''); }
-      catch (error) { request.log.error({ err: error }, 'run_control_safe_point_failed'); }
+      catch (error) {
+        request.log.error({ err: error }, 'run_control_safe_point_failed');
+        getRuntimeLogger('run-control').error('run_control_safe_point_failed', {
+          request_id: request.id, run_id: params.run_id ?? '', error,
+        });
+      }
       return { outcome, result: outcome.result };
     },
   }));

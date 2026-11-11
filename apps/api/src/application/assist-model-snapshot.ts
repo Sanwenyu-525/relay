@@ -15,6 +15,20 @@ const MAX_FREE_MODEL_ATTEMPTS = 3;
 const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
 
 /**
+ * 作用域预算要盖住几笔同时在途预留（2026-11-10）。
+ *
+ * 作用域闸门（model-call-repository.ts）对已结算调用按真实用量、对在途调用按整笔
+ * `budget_reserved_tokens` 计费。实测最小重叠是「上一轮回复结束后仍在途的 TITLE／
+ * MEMORY_CAPTURE 辅助调用」与「用户紧接着发的下一条消息」：两笔预留相加就等于旧公式的
+ * 两倍下限，再叠上任何已结算用量就被判 MODEL_BUDGET_EXHAUSTED（2026-11-10 14:42:49
+ * 会话 f7caca02：已结算 10397 + 在途 262144 + 新预留 262144 = 534685 > 524288）。
+ *
+ * 所以按「同时两笔在途 + 一笔已结算余量」给作用域下限，256K 档从 512K 提到 768K；
+ * 上限仍是硬限制，仍随 max_scope_tokens 只有更高时取更高。
+ */
+const SCOPE_CONCURRENT_RESERVATIONS = 2;
+
+/**
  * 单次调用预算的三个数（P1-A）。
  *
  * 0145：档位是**会话级**的（`assist_sessions.context_budget_tokens`），由调用方读出来
@@ -37,9 +51,10 @@ export function planAssistModelBudget(config: { readonly maxCallTokens: number;
   contextTokens: number | null, providerWindow: number | null) {
   const requested = contextTokens ?? config.maxCallTokens;
   const reservation = providerWindow === null ? requested : Math.min(requested, providerWindow);
-  // 选中档位时作用域至少留两倍单次预留：作用域闸门对已结算调用按真实用量、对在途调用按
-  // 预留数计算，只留一份预留会让第一次调用之后的任何一次续轮或自动提取都被拒绝。
-  const scopeFloor = contextTokens === null ? reservation : reservation * 2;
+  // 选中档位时作用域要留出「两笔同时在途的预留 + 一笔已结算余量」：闸门对已结算调用按
+  // 真实用量计费、对在途调用按整笔预留计费；旧公式只留两倍预留，任何已结算用量都会把余量吃干（见 SCOPE_CONCURRENT_RESERVATIONS）。
+  const scopeFloor = contextTokens === null ? reservation
+    : reservation * (1 + SCOPE_CONCURRENT_RESERVATIONS);
   return { callReservationTokens: reservation, scopeCallLimit: config.maxScopeCalls,
     scopeTokenLimit: Math.max(config.maxScopeTokens, scopeFloor),
     contextBudgetTokens: contextTokens };

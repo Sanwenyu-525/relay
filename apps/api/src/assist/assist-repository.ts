@@ -8,24 +8,6 @@ import type { AssistMessageAttachmentMetaRow, AssistMessageAttachmentRow,
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
-/**
- * 会话物理删除的阻断项（ADR-027）。任何一项存在，删除命令整条拒绝、零删除。
- * 「在途消息」不在这张表里：它由 `hasInflightMessages` 单独判定，与归档共用同一道栅栏。
- */
-export type SessionDeleteBlockerReason =
-  | 'MEMORY_COMPACTION_ACTIVE'
-  | 'FORK_CHILDREN'
-  | 'SUBAGENT_CHILDREN'
-  | 'DELEGATION_LEDGER_REFERENCED'
-  | 'TASK_ACCEPTANCE_CITED'
-  | 'HYPOTHESIS_CITED'
-  | 'WORK_SEGMENT_CITED'
-  | 'BLUEPRINT_CITED'
-  | 'EXECUTION_REQUESTS_IN_FLIGHT'
-  | 'LEARNING_RECORDS'
-  | 'ARTIFACT_IMPACT_COMMITTED'
-  | 'PROVIDER_COOLDOWN_ACTIVE';
-
 export interface AssistSessionContext {
   readonly session_id: string;
   readonly session_revision: bigint;
@@ -587,124 +569,131 @@ export class AssistRepository {
   }
 
   /**
-   * 物理删除的阻断面（ADR-027）：这条会话的账本里有没有被别的对象引用的来源消息。
+   * 删除会话前解除外部对象对它的引用（ADR-027 2026-11-10 修订）。
    *
-   * 只读，先于任何 DELETE 执行；命中任意一项，删除命令整条拒绝。理由不是保守，而是
-   * 这些行各自有保留 Owner：Task 验收观察属于任务、假设与工作片段属于项目、组合检查
-   * 绑定 Task、学习记录有自己的删除入口、未到期的供应商冷却属于平台调用安全。
-   * 删会话不能让它们一并消失。
+   * 用户决定「删除优先」：会话必须删得掉，外部对象保留，只把来源指针置空，不再用
+   * `SESSION_DELETE_BLOCKED` 把会话锁死。每一类都对应一条真实外键：
    *
-   * 2026-10-31 按数据所有权重审了两项（用户要求「删除正常会话应该简单可靠」）：
-   *   * `MEMORY_SOURCES` 撤销。`memory_message_sources` / `memory_auto_captures` 记的是
-   *     「这条记忆从哪条消息的哪一段提出」，消息随会话消失后它已无法核对；0137 起删除路径
-   *     就把它们当会话自有凭据清掉，长期记忆正文与版本（`memory_items` / `memory_versions`）
-   *     保留、另有停用入口。继续按它阻断等于让策略与实现互相矛盾——删除里明明删得掉，
-   *     判定层却先拒绝。
-   *   * `EXECUTION_REQUESTS` 收窄成 `EXECUTION_REQUESTS_IN_FLIGHT`。执行请求行随 0154
-   *     变成可脱钩的持久凭据（保留来源消息身份、序号与正文摘要），Task/Run 事实一个不动；
-   *     只有仍在解释中的请求（`INTERPRETING`）是真正的在途执行，才继续阻断。
+   *   * 分叉子会话：子会话是独立讨论，保留并把 `forked_from_session_id` 置空、推进修订；
+   *     不连带删除子会话，也不留下悬空来源。
+   *   * Task 验收观察 / 项目假设 / 工作片段 / 蓝图提案：保留行，只置空来源消息。
+   *     这些是别的对象的历史依据，删聊天不能连它们一起抹掉。
+   *   * 学习证据：`LEARNING_MESSAGE` 证据的 CHECK 要求来源消息与会话同时存在，不能只置空；
+   *     它们由这条会话派生，随会话删除。知识点身份（`learning_concepts`）与其它会话留下的
+   *     证据不动；轮次结算依据与会话级记录开关是会话自有控制元数据，一并删除。
+   *   * artifact 影响检查与候选：检查、候选组与已提交的组合检查全部保留，只把来源会话 /
+   *     消息置空（0161 起这两列允许 NULL）。
+   *   * 单独删除子代理会话：父会话的委派账本保留，`child_session_id`、结论消息与补充消息
+   *     的已读指针置空；拿子会话消息当来源的补充消息无法保留来源，整行删除（它只是父会话
+   *     的一次补充记录，不是外部事实）。
    *
-   * 分叉子会话单独算一类：外键是 NO ACTION，父行删掉后子会话的 `forked_from_session_id`
-   * 会永久悬空；不把来源说明改成 NULL，因为那等于替子会话改历史。
-   *
-   * 0128 的主子代理关系同样按跨对象事实阻断：主会话下还有子代理会话时不能删主会话
-   * （子会话是独立会话，各有自己的生命周期，不随父级联消失）；反过来，子会话被父会话的
-   * 委派账本引用（`child_session_id` 或尝试的结论消息）时也不能删——委派账本是父会话
-   * 的执行史，清掉它等于替父会话抹掉一次委派发生过的事实。
+   * 只解除引用，不删除外部对象；调用方随后照旧显式清理会话自有账本与消息。所有语句都在
+   * 删除事务里，任何一条失败整条回滚。
    */
-  async listDeleteBlockers(sessionId: string): Promise<readonly SessionDeleteBlockerReason[]> {
-    const result = await sql<{ reason: SessionDeleteBlockerReason }>`
-      select reason from (
-      select 1 as ordinal, 'FORK_CHILDREN' as reason where exists (
-        select 1 from assist_sessions where forked_from_session_id = ${sessionId})
-      union all
-      select 2, 'TASK_ACCEPTANCE_CITED' where exists (
-        select 1 from task_acceptance_trial_observations o
-        join assist_messages m on m.id = o.source_message_id
-        where m.session_id = ${sessionId})
-      union all
-      select 3, 'HYPOTHESIS_CITED' where exists (
-        select 1 from hypothesis_versions h
-        join assist_messages m on m.id = h.source_message_id
-        where m.session_id = ${sessionId})
-      union all
-      select 4, 'WORK_SEGMENT_CITED' where exists (
-        select 1 from work_segments w
-        join assist_messages m on m.id = w.source_message_id
-        where m.session_id = ${sessionId})
-      union all
-      select 5, 'BLUEPRINT_CITED' where exists (
-        select 1 from project_blueprint_proposals b
-        join assist_messages m on m.id = b.skill_message_id
-        where m.session_id = ${sessionId})
-      union all
-      select 6, 'EXECUTION_REQUESTS_IN_FLIGHT' where exists (
-        select 1 from conversation_execution_requests
-        where session_id = ${sessionId} and status = 'INTERPRETING')
-      union all
-      select 7, 'LEARNING_RECORDS' where exists (
-        select 1 from learning_evidence where session_id = ${sessionId})
-      union all
-      select 8, 'ARTIFACT_IMPACT_COMMITTED' where exists (
-        select 1 from artifact_combination_checks c
-        join artifact_impact_candidate_groups g on g.id = c.group_id
-        join artifact_impact_checks k on k.id = g.impact_check_id
-        where k.assist_session_id = ${sessionId})
-      union all
-      select 9, 'PROVIDER_COOLDOWN_ACTIVE' where exists (
-        select 1 from model_provider_cooldowns c
-        join model_calls mc on mc.id = c.model_call_id
-        join assist_messages m on m.id = mc.assist_message_id
-        where m.session_id = ${sessionId} and c.retry_after_at > now())
-      union all
-      select 10, 'LEARNING_RECORDS' where exists (
-        select 1 from learning_rounds where session_id = ${sessionId})
-      union all
-      select 11, 'LEARNING_RECORDS' where exists (
-        select 1 from learning_session_controls where session_id = ${sessionId})
-      union all
-      select 12, 'MEMORY_COMPACTION_ACTIVE' where exists (
-        select 1 from assist_memory_requests where session_id = ${sessionId} and status in ('PENDING', 'RUNNING'))
-      union all
-      select 13, 'SUBAGENT_CHILDREN' where exists (
-        select 1 from assist_sessions where parent_session_id = ${sessionId})
-      union all
-      select 14, 'DELEGATION_LEDGER_REFERENCED' where exists (
-        select 1 from assist_delegations where child_session_id = ${sessionId})
-      union all
-      select 15, 'DELEGATION_LEDGER_REFERENCED' where exists (
-        select 1 from assist_delegation_attempts a
-        join assist_delegations d on d.id = a.delegation_id
-        join assist_messages m on m.id = a.result_message_id
-        where m.session_id = ${sessionId})
-      ) blockers order by ordinal`.execute(this.db);
-    return [...new Set(result.rows.map((row) => row.reason))];
+  async detachExternalReferences(sessionId: string): Promise<void> {
+    const messages = sql`select id from assist_messages where session_id = ${sessionId}`;
+    await sql`update assist_sessions set forked_from_session_id = null,
+      revision = revision + 1 where forked_from_session_id = ${sessionId}`.execute(this.db);
+    await sql`update task_acceptance_trial_observations set source_message_id = null
+      where source_message_id in (${messages})`.execute(this.db);
+    await sql`update hypothesis_versions set source_message_id = null
+      where source_message_id in (${messages})`.execute(this.db);
+    await sql`update work_segments set source_message_id = null
+      where source_message_id in (${messages})`.execute(this.db);
+    await sql`update project_blueprint_proposals set skill_message_id = null,
+      source_detached_at = now() where skill_message_id in (${messages})`.execute(this.db);
+    await sql`delete from learning_evidence where session_id = ${sessionId}
+      or source_message_id in (${messages})`.execute(this.db);
+    await sql`delete from learning_rounds where session_id = ${sessionId}`.execute(this.db);
+    await sql`delete from learning_session_controls where session_id = ${sessionId}`
+      .execute(this.db);
+    await sql`update artifact_impact_candidates set assist_session_id = null,
+      assist_message_id = null where assist_session_id = ${sessionId}
+      or assist_message_id in (${messages})`.execute(this.db);
+    await sql`update artifact_impact_checks set assist_session_id = null,
+      assist_message_id = null where assist_session_id = ${sessionId}
+      or assist_message_id in (${messages})`.execute(this.db);
+    await sql`update assist_delegations set child_session_id = null,
+      revision = revision + 1, updated_at = now()
+      where child_session_id = ${sessionId}`.execute(this.db);
+    await sql`update assist_delegation_attempts set result_message_id = null
+      where result_message_id in (${messages})`.execute(this.db);
+    await sql`delete from assist_delegation_supplements
+      where source_message_id in (${messages})`.execute(this.db);
+    await sql`update assist_delegation_supplements
+      set child_seen_message_id = null, child_seen_at = null
+      where child_seen_message_id in (${messages})`.execute(this.db);
+    await sql`update assist_delegation_supplements
+      set parent_seen_message_id = null, parent_seen_at = null
+      where parent_seen_message_id in (${messages})`.execute(this.db);
   }
 
   /**
-   * 物理删除一条会话的自有账本（ADR-027）。调用方已持行锁、核对过修订、确认无阻断项，
-   * 且在同一短事务里跑完——这里不再重复判定，只按「子 → 父」顺序删。
+   * 删除主会话前先取它的整棵子代理子树（0128，2026-11-10 修订）。
+   *
+   * 只返回删除所需的身份与修订，不把子会话 DTO 带进删除用例。顺序按深度倒序：
+   * 孙会话先删，子会话再删，最后才由调用方删主会话，避免 `parent_session_id` 的外键
+   * 在父行还在时被撞。产品只允许一层委派，递归只为兜住历史上可能出现的更深数据。
+   */
+  async listSubagentDescendants(sessionId: string):
+  Promise<readonly { readonly id: string; readonly revision: bigint }[]> {
+    const result = await sql<{ id: string; revision: bigint }>`
+      with recursive tree as (
+        select s.id, s.revision, 1 as depth from assist_sessions s
+        where s.parent_session_id = ${sessionId}
+        union all
+        select s.id, s.revision, tree.depth + 1 from assist_sessions s
+        join tree on s.parent_session_id = tree.id
+      ) select id, revision from tree order by depth desc`.execute(this.db);
+    return result.rows;
+  }
+
+  /**
+   * 删除一组会话的委派账本（主会话 + 子代理子树），供父子级联删除在删子会话之前调用。
+   *
+   * `assist_delegations.child_session_id`、`assist_delegation_attempts.result_message_id`
+   * 与 `assist_delegation_supplements` 都是 NO ACTION 引用；账本不先走，子会话行就删不掉。
+   * 账本本身是父会话的执行史，因此只在父会话整条删除时一起清，不随子会话单独消失。
+   * 补充消息同时可能指向来源、主会话已读与子会话已读三条消息，所以两组合并成一次删除。
+   */
+  async deleteDelegationLedgerForSessions(sessionIds: readonly string[]): Promise<void> {
+    if (sessionIds.length === 0) return;
+    const ids = sql.join(sessionIds);
+    await sql`delete from assist_delegation_supplements where delegation_id in (
+      select id from assist_delegations where parent_session_id in (${ids}))
+      or source_message_id in (select id from assist_messages where session_id in (${ids}))
+      or parent_seen_message_id in (select id from assist_messages where session_id in (${ids}))`
+      .execute(this.db);
+    await sql`delete from assist_delegation_attempts where delegation_id in (
+      select id from assist_delegations where parent_session_id in (${ids}))`.execute(this.db);
+    await sql`delete from assist_delegations where parent_session_id in (${ids})`.execute(this.db);
+  }
+
+  /**
+   * 物理删除一条会话的自有账本（ADR-027）。调用方已持行锁、核对过修订，
+   * 且在同一短事务里跑完——这里不再重复判定，只按「解除外部引用 → 子 → 父」顺序删。
    *
    * 顺序是显式的而不是 `ON DELETE CASCADE`：删错一层会当场撞外键失败并整条回滚，
    * 不会让数据库按自己的级联规则决定哪些行该消失。`conversation_diff_baselines.session_id`
    * 是普通列（0097 没有外键），必须单独删，否则留下悬空账本。
    *
    * 删的是**会话自有**的账本：消息、提案、附件、预览、工具调用、模型选择、状态维护请求、
-   * 未进入组合检查的影响检查、辅助模型调用计量、已到期冷却、diff 基线、0127 的计划与目标
-   * 账本、0128 的委派账本与补充消息、0132 的撤回基线 / 撤回请求 / 保护副本 / 撤销、
-   * 0146 与 0151 的会话待办清单。学习记录与跨对象来源在阻断层就已拒绝，不会走到这里；
-   * 执行请求行保留成脱钩凭据（0154），长期记忆正文与其版本保留。
+   * 辅助模型调用计量、已到期冷却、diff 基线、0127 的计划与目标账本、0128 的委派账本与
+   * 补充消息、0132 的撤回基线 / 撤回请求 / 保护副本 / 撤销、0146 与 0151 的会话待办清单。
+   * 外部对象与跨对象来源先由 `detachExternalReferences` 解除引用、本身保留；学习证据保留、
+   * 轮次与控制随会话删除；执行请求行保留成脱钩凭据（0154），长期记忆正文与版本保留。
    *
    * 0127 的清理顺序由一组 NO ACTION 互指决定：计划引用来源消息、消息引用目标快照、
    * 目标引用计划版本——三方成环，必须先删额度授予与轮次这两张纯子表，再解除消息侧的
    * 目标快照引用（消息随后整批删除，快照列不承载独立事实），然后按目标 → 计划删除，
    * 每一层父行删除时子表都已无引用。目标无论是否从计划启动、无论终结在哪一态，都随
    * 会话消失：目标与计划是这条会话的执行账本，不是被别的对象引用的外部事实。
-   * 0128 的委派账本与尝试是主会话自己的执行史，随主会话清理；存在子会话或账本被
-   * 反向引用时，删除在阻断层已整条拒绝，走不到这里。
+   * 0128 的委派账本与尝试是主会话自己的执行史，随主会话清理；单独删除子代理会话时，
+   * 父会话账本由 `detachExternalReferences` 解除子会话与结论消息引用。
    */
   async deleteSession(sessionId: string, expectedRevision: bigint):
   Promise<{ readonly messages: number; readonly attachments: number } | undefined> {
+    await this.detachExternalReferences(sessionId);
     await sql`delete from assist_memory_uses where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_memory_state where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_memory_requests where session_id = ${sessionId}`.execute(this.db);
@@ -745,14 +734,8 @@ export class AssistRepository {
       select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
     await sql`delete from session_tool_calls where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_proposals where session_id = ${sessionId}`.execute(this.db);
-    await sql`delete from artifact_impact_candidate_group_items where group_id in (
-      select g.id from artifact_impact_candidate_groups g
-      join artifact_impact_checks k on k.id = g.impact_check_id
-      where k.assist_session_id = ${sessionId})`.execute(this.db);
-    await sql`delete from artifact_impact_candidate_groups where impact_check_id in (
-      select id from artifact_impact_checks where assist_session_id = ${sessionId})`.execute(this.db);
-    await sql`delete from artifact_impact_candidates where assist_session_id = ${sessionId}`.execute(this.db);
-    await sql`delete from artifact_impact_checks where assist_session_id = ${sessionId}`.execute(this.db);
+    // 0161：artifact 影响检查与候选不再随会话删除。它们只失去来源会话/消息指针，
+    // 检查、候选组与已提交的组合检查都保留；解除引用已在 deleteSession 开头完成。
     await sql`delete from conversation_state_changes where request_id in (
       select id from conversation_state_requests where session_id = ${sessionId})`.execute(this.db);
     await sql`delete from conversation_state_requests where session_id = ${sessionId}`.execute(this.db);

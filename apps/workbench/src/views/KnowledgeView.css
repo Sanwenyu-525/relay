@@ -1,18 +1,28 @@
 .knowledge-page { max-width: var(--relay-layout-content-maxWidth); margin: 0 auto; padding: var(--relay-layout-main-padding); }
 /* 2026-10-25 视觉对齐：主标题与全局页头同档（compactPage）。 */
 .knowledge-page h1 { margin: var(--relay-space-2) 0 var(--relay-space-3); font-size: var(--relay-font-size-compactPage); }
-.knowledge-tabs { display: flex; gap: var(--relay-space-1); margin: 0 0 var(--relay-space-4); }
-.knowledge-tabs .subnav-item { min-width: var(--relay-control-height); padding-inline: var(--relay-space-1); white-space: nowrap; }
+/* 类型页签＝「切换资料种类」，与原型筛选条同一形态：34px 胶囊常驻工具行，
+   不再是一排带下划线的二级导航，也不再折进「资料列表」里。 */
+.knowledge-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; }
+.knowledge-tabs .subnav-item { min-width: 0; min-height: 34px; padding: 7px 12px; border: 1px solid #d6e5d8; border-radius: 9px; background: #fff; color: #53705b; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.knowledge-tabs .subnav-item:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; color: #206846; }
+.knowledge-tabs .subnav-item--active { color: #206846; background: #eaf5eb; border-color: #9ccbab; font-weight: 650; }
 .knowledge-tabs button { cursor: pointer; }
-.knowledge-columns { display: grid; grid-template-columns: minmax(13rem, 0.3fr) minmax(0, 1fr); gap: var(--relay-space-4); }
+.knowledge-columns { display: grid; grid-template-columns: minmax(16rem, 0.34fr) minmax(0, 1fr); gap: 18px; }
+/* 列表为空时，左列 200px 塞一段四行说明、右列再用一整张卡复述同一句话——把空态
+   放回一张全宽卡里，右侧那句「可使用左侧列表中的新建入口」在这时也不再说得通。 */
+.knowledge-page .knowledge-columns--empty { grid-template-columns: minmax(0, 1fr); }
+.knowledge-columns--empty > .knowledge-detail { display: none; }
+.knowledge-columns--empty .knowledge-list [role="tabpanel"] > .empty-state,
+.knowledge-columns--empty .knowledge-list [data-testid="knowledge-list-empty"] { padding: 18px 16px 22px; }
 .knowledge-list { align-self: start; }
-/* 记忆有效状态筛选：沿用共享 .segmented 的选中态与尺寸，只在列表层级改成按宽度
-   2 列或 4 列的网格；窄列里三字标签不拆行、不越出按钮，宽列仍排成一行。 */
-.knowledge-memory-filter { display: grid; gap: var(--relay-space-2); margin: 0 0 var(--relay-space-4); container-type: inline-size; }
+/* 记忆有效状态筛选：与类型页签同一套胶囊形态，只在列表层级改成按宽度 2 列或 4 列；
+   窄列里三字标签不拆行、不越出按钮，宽列仍排成一行。 */
+.knowledge-memory-filter { display: grid; gap: 8px; margin: 0; padding: 12px 16px 0; container-type: inline-size; }
 .knowledge-memory-filter .segmented {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--relay-space-1);
+  gap: 6px;
 }
 @container (min-width: 18rem) {
   .knowledge-memory-filter .segmented { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -20,19 +30,48 @@
 .knowledge-memory-filter .segmented .segmented-option {
   flex: none;
   margin-left: 0;
-  padding-inline: var(--relay-space-1);
-  border-radius: var(--relay-radius-control);
+  height: 30px;
+  padding-inline: 6px;
+  border: 1px solid #d6e5d8;
+  border-radius: 8px;
+  background: #fff;
+  color: #53705b;
+  font-size: 11.5px;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
-.knowledge-memory-filter .helper-text { margin: 0; }
+.knowledge-memory-filter .segmented .segmented-option:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; color: #206846; }
+.knowledge-memory-filter .segmented .segmented-option--selected { background: #eaf5eb; border-color: #9ccbab; color: #206846; font-weight: 650; }
+.knowledge-memory-filter .helper-text { margin: 0; padding-bottom: 12px; color: #5a7263; font-size: 11px; line-height: 1.6; }
 /* 过期提示：沿用警示色左边线，不新增色值；续期入口复用既有按钮。 */
 .knowledge-expired { margin-top: var(--relay-space-4); padding-left: var(--relay-space-3); border-left: var(--relay-focus-width) solid var(--relay-color-status-warning-text); }
 .knowledge-expired .knowledge-actions { margin-top: var(--relay-space-3); }
-.knowledge-row, .knowledge-result { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-2); padding: var(--relay-space-4); border: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.knowledge-row:hover, .knowledge-result:hover { background: var(--relay-color-selection-hover); }
-.knowledge-row--active { background: var(--relay-color-selection-bg); border-left: var(--relay-focus-width) solid var(--relay-color-action-primary); }
-.knowledge-row small, .knowledge-result small { color: var(--relay-color-text-muted); }
+/* 列表＝一张卡：白底、13px 圆角、1px 边框，行内是「类型图标 + 标题 + 元信息」。
+   选中行用浅底 + 内嵌左侧条，不用整行深色块——它同时要在窄列里和悬停态区分得开。 */
+.knowledge-page .knowledge-list { padding: 0; overflow: hidden; border: 1px solid #dfe9df; border-radius: 13px; background: #fff; box-shadow: 0 3px 15px #22553506; }
+.knowledge-page .knowledge-list .section-heading-row { align-items: center; gap: 10px; margin: 0; padding: 12px 16px; border-bottom: 1px solid #edf1ec; }
+.knowledge-page .knowledge-list .section-heading-row h2 { margin: 0; font-size: 13px; color: #294635; }
+.knowledge-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: start; width: 100%; gap: 11px; padding: 12px 16px; border: 0; border-bottom: 1px solid #edf1ec; background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.knowledge-row:last-child { border-bottom: 0; }
+.knowledge-row:hover:not(:disabled) { background: #f6faf7; }
+.knowledge-row--active { background: #f2f8f3; box-shadow: inset 2px 0 0 #23704d; }
+.knowledge-row-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: #eaf5ec; color: #36724e; }
+.knowledge-row-icon svg { width: 15px; height: 15px; }
+.knowledge-row-main { display: grid; gap: 4px; min-width: 0; }
+.knowledge-row strong { color: #33533d; font-size: 12.5px; font-weight: 650; line-height: 1.55; }
+.knowledge-row small { color: #5a7263; font-size: 11px; line-height: 1.5; }
+/* 宽列表（阅读形态展开的那一份）一行放得下「标题 + 元信息」：标题在左、元信息靠右，
+   行高收到 46px；窄列（列表形态）仍按上下两行排。按容器宽度切换，不按视口猜。 */
+.knowledge-list { container-type: inline-size; }
+@container (min-width: 34rem) {
+  .knowledge-row { align-items: center; padding: 9px 16px; }
+  .knowledge-row-main { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
+  .knowledge-row small { text-align: right; white-space: nowrap; }
+}
+.knowledge-result { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-2); padding: var(--relay-space-4) 0; border: 0; border-bottom: 1px solid #edf1ec; background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.knowledge-result:hover { background: #f6faf7; }
+.knowledge-result small { color: #5a7263; font-size: 11px; line-height: 1.5; }
 .knowledge-detail { min-width: 0; }
 .knowledge-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .knowledge-actions { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); margin-top: var(--relay-space-4); }
@@ -68,12 +107,27 @@
 .knowledge-guide__add label { display: grid; gap: var(--relay-space-2); min-width: 0; }
 .knowledge-capture-preview { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--relay-space-4); border: var(--relay-border-width) solid var(--relay-color-border-separator); font: inherit; }
 .knowledge-capture-review { margin-top: var(--relay-space-4); padding: var(--relay-space-4); border-left: var(--relay-focus-width) solid var(--relay-color-action-primary); background: var(--relay-color-selection-bg); }
-.knowledge-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--relay-space-4); margin-bottom: var(--relay-space-6); }
+/* 工具行：类型页签靠左，搜索 / 资料列表 / 导入网页 / 项目导读靠右，同一形状的 34px 胶囊。
+   展开的那一枚独占下一整行——它此前是页面顶部两枚裸 ▶ 文本，面板还被挤在右半边。 */
+.knowledge-tools { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px; margin: 0 0 16px; }
+.knowledge-tools .knowledge-tabs { margin-right: auto; }
 .knowledge-tools > details { min-width: 0; }
-.knowledge-tools > details[open] { flex-basis: 100%; }
-.knowledge-tools .surface-panel { margin-top: var(--relay-space-3); }
-.knowledge-tools summary, .knowledge-management > summary, .knowledge-history > summary { padding: var(--relay-space-2) 0; color: var(--relay-color-text-secondary); cursor: pointer; }
-.knowledge-tools summary::marker, .knowledge-management > summary::marker, .knowledge-history > summary::marker { color: var(--relay-color-action-primary); }
+.knowledge-tools > details[open] { flex: 1 1 100%; order: 10; }
+.knowledge-tools summary { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 7px 11px; border: 1px solid #d6e5d8; border-radius: 9px; background: #fff; color: #53705b; font-size: 12px; font-weight: 600; list-style: none; cursor: pointer; }
+.knowledge-tools summary::-webkit-details-marker { display: none; }
+.knowledge-tools summary::marker { content: ""; }
+.knowledge-tools summary:hover { background: #f0f7f1; border-color: #a3c8ae; color: #206846; }
+.knowledge-tools summary svg { width: 13px; height: 13px; }
+.knowledge-tools summary:focus-visible, .knowledge-tabs .subnav-item:focus-visible { outline: 3px solid #9dd3ad; outline-offset: 1px; }
+.knowledge-tools > details[open] > summary { display: flex; width: fit-content; margin-left: auto; background: #eaf5eb; border-color: #9ccbab; color: #206846; }
+.knowledge-tools > .text-button { min-height: 34px; padding: 7px 11px; border: 1px solid #d6e5d8; border-radius: 9px; background: #fff; color: #53705b; font-size: 12px; font-weight: 600; }
+.knowledge-tools > .text-button:hover { background: #f0f7f1; border-color: #a3c8ae; color: #206846; text-decoration: none; }
+.knowledge-tools .surface-panel { margin-top: 10px; }
+/* 阅读形态下展开的资料列表：卡片内部滚动，卡头吸顶。否则八条资料会把正文整个推下首屏。 */
+.knowledge-library .knowledge-list { max-height: min(60vh, 520px); overflow: auto; }
+.knowledge-library .knowledge-list .section-heading-row { position: sticky; top: 0; z-index: 1; background: #fff; }
+.knowledge-management > summary, .knowledge-history > summary { padding: var(--relay-space-2) 0; color: var(--relay-color-text-secondary); cursor: pointer; }
+.knowledge-management > summary::marker, .knowledge-history > summary::marker { color: var(--relay-color-action-primary); }
 .knowledge-page--reading .knowledge-columns { display: block; }
 .knowledge-reading-detail.surface-panel { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .knowledge-management { margin-top: var(--relay-space-8); padding-top: var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
@@ -86,41 +140,58 @@
 .knowledge-fact-paper h3 { margin: var(--relay-space-4) 0 var(--relay-space-2); font-size: var(--relay-font-size-section); }
 .knowledge-fact-paper h3:first-child { margin-top: 0; }
 .knowledge-fact-paper .knowledge-body { margin: 0 0 var(--relay-space-4); white-space: pre-wrap; }
-.knowledge-reader { display: grid; grid-template-columns: minmax(0, var(--relay-layout-sidebar-width)) minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); gap: var(--relay-space-6); }
-.knowledge-reader--no-toc { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
+/* 阅读形态：页头横跨三栏，下面是「本文目录 / 正文卡 / 来源卡」。
+   栏宽按可读行宽取值：正文落在约 34 字，不再被 18px 字号挤成 27 字一行。 */
+.knowledge-reader { display: grid; gap: 14px; }
+.knowledge-reader__head { min-width: 0; }
+.knowledge-reader__head .page-head { margin: 0 0 12px; }
+.knowledge-reader__head .page-head-title > h1 { font-size: 22px; }
+.knowledge-reader__head .page-head-meta { font-size: 12px; }
+.knowledge-reader__grid { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) minmax(0, 252px); gap: 20px; align-items: start; }
+.knowledge-reader--no-toc .knowledge-reader__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 252px); }
 .knowledge-reader__outline, .knowledge-reader__main, .knowledge-reader__source { min-width: 0; }
-.knowledge-reader__outline { border-right: var(--relay-border-width) solid var(--relay-color-border-separator); padding-right: var(--relay-space-4); }
-/* 阅读页头复用共享 .page-head；这里只把它压回阅读纸面的密度，不另立一套标题层级。 */
-.knowledge-reader__main > .page-head { margin-bottom: var(--relay-space-2); }
-.knowledge-reader__main > .page-head .page-head-title > h1 { font-size: var(--relay-font-size-rowTitle); }
-.knowledge-reader__main > .page-head .page-head-meta { font-size: var(--relay-font-size-meta); }
-.knowledge-reader__toolbar { display: flex; flex-wrap: wrap; gap: var(--relay-space-3); align-items: center; justify-content: space-between; margin: var(--relay-space-4) 0; padding-bottom: var(--relay-space-4); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); }
+.knowledge-reader__outline { position: sticky; top: 12px; }
+.knowledge-reader__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 16px; padding-bottom: 12px; border-bottom: 1px solid #dfe9df; }
 .knowledge-reader__toolbar .field { margin: 0; min-width: 0; }
-.knowledge-reader__toolbar select { color: var(--relay-color-action-text); border-color: var(--relay-color-action-primary); }
-.knowledge-reader__status { margin: var(--relay-space-3) 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-meta); }
+/* 版本选择是元信息，不是警示：不再用主操作色描边，收成一枚 32px 的下拉。 */
+.knowledge-reader__toolbar select { min-height: 32px; padding: 4px 8px; border: 1px solid #d6e5d8; border-radius: 8px; background: #fff; color: #33533d; font-size: 12px; }
+.knowledge-reader__toolbar .helper-text { margin: 0; color: #5a7263; font-size: 11px; }
+.knowledge-reader__status { margin: 0 0 10px; color: #5a7263; font-size: 11px; }
+.knowledge-reader__paper { overflow: hidden; border: 1px solid #dfe9df; border-radius: 13px; background: #fff; box-shadow: 0 3px 15px #22553506; }
+.knowledge-reader__paper-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #edf1ec; }
+.knowledge-reader__paper-head strong { color: #294635; font-size: 13px; font-weight: 650; }
+.knowledge-reader__paper-head span { color: #5a7263; font-size: 11px; }
+.knowledge-reader__paper .knowledge-reader__body { max-width: none; padding: 20px 22px 26px; }
 .knowledge-reader__body { max-width: var(--relay-layout-reading-maxWidth); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); overflow-wrap: anywhere; }
 .knowledge-reader__body .markdown-preview { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; }
-.knowledge-reader__body .markdown-preview__heading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-compactPage); }
-.knowledge-reader__body .markdown-preview__heading[data-heading-level="2"] { font-size: var(--relay-font-size-rowTitle); }
-.knowledge-reader__body .markdown-preview__subheading { margin: var(--relay-space-6) 0 var(--relay-space-2); font-size: var(--relay-font-size-reading); }
+.knowledge-reader__body .markdown-preview__heading { margin: 26px 0 10px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.knowledge-reader__body .markdown-preview__heading[data-heading-level="1"] { font-size: 20px; }
+.knowledge-reader__body .markdown-preview__subheading { margin: 22px 0 8px; font-size: 15px; font-weight: 650; }
 .knowledge-reader__body .markdown-preview__heading:first-child, .knowledge-reader__body .markdown-preview__subheading:first-child { margin-top: 0; }
 .knowledge-reader__body .markdown-preview__paragraph, .knowledge-reader__body .markdown-preview__list { margin-bottom: var(--relay-space-4); }
+/* 正文里的表格是数据，不是正文：压到 13px 并按内容分列，避免 18px 字号把三列表格
+   顶成横向滚动（单元格下限按 body 字号算，18px 时一列就要 216px）。 */
+.knowledge-reader__body .markdown-preview__table { font-size: 13px; }
+.knowledge-reader__body .markdown-preview__table th,
+.knowledge-reader__body .markdown-preview__table td { min-width: 5.5rem; padding: 8px 10px; }
+.knowledge-reader__body .markdown-preview__table th { color: #566f5f; font-weight: 650; }
 .knowledge-reader__plain { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
-.knowledge-reader__toc h2 { margin: 0 0 var(--relay-space-4); font-size: var(--relay-font-size-rowTitle); }
-.knowledge-reader__toc ol { list-style: none; margin: 0; padding: 0; }
-.knowledge-reader__toc button { width: 100%; border: 0; padding: var(--relay-space-3) var(--relay-space-2); background: transparent; color: var(--relay-color-text-primary); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
-.knowledge-reader__toc button:hover, .knowledge-reader__toc button:focus-visible { background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); }
-.knowledge-reader__toc .knowledge-reader__toc-current { border-left: var(--relay-focus-width) solid var(--relay-color-action-primary); background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); }
-.knowledge-reader__source { border-left: var(--relay-border-width) solid var(--relay-color-border-separator); padding-left: var(--relay-space-6); }
-.knowledge-reader__source h2 { margin: 0 0 var(--relay-space-6); font-size: var(--relay-font-size-section); }
-.knowledge-reader__source dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--relay-space-4); margin: 0; overflow-wrap: anywhere; }
-.knowledge-reader__source dt { color: var(--relay-color-text-muted); }
-.knowledge-reader__source dd { margin: 0; }
-.knowledge-reader__source small { display: block; color: var(--relay-color-text-muted); }
-.knowledge-reader__source > p { margin: var(--relay-space-6) 0; overflow-wrap: anywhere; }
-.knowledge-reader__version-note { margin-top: var(--relay-space-8); padding-top: var(--relay-space-6); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
-.knowledge-reader__version-note h3 { margin: 0 0 var(--relay-space-3); }
-.knowledge-reader__version-note p { margin: 0; color: var(--relay-color-text-secondary); }
+.knowledge-reader__toc h2 { margin: 0 0 10px; padding-left: 10px; color: #6a8074; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.knowledge-reader__toc ol { display: grid; gap: 2px; list-style: none; margin: 0; padding: 0; }
+.knowledge-reader__toc button { width: 100%; border: 0; border-left: 2px solid transparent; padding: 7px 10px; background: transparent; color: #566f5f; font-size: 12px; line-height: 1.55; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.knowledge-reader__toc button:hover, .knowledge-reader__toc button:focus-visible { background: #f3f9f4; color: #206846; }
+.knowledge-reader__toc .knowledge-reader__toc-current { border-left-color: #23704d; background: #eaf5eb; color: #1f6545; font-weight: 650; }
+.knowledge-reader__source { padding: 14px 16px 18px; border: 1px solid #dfe9df; border-radius: 13px; background: #fff; box-shadow: 0 3px 15px #22553506; }
+.knowledge-reader__source h2 { margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid #edf1ec; color: #294635; font-size: 13px; }
+.knowledge-reader__source dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 12px; margin: 0; font-size: 11.5px; overflow-wrap: anywhere; }
+.knowledge-reader__source dt { color: #6a8074; }
+.knowledge-reader__source dd { margin: 0; color: #33533d; }
+.knowledge-reader__source small { display: block; color: #6a8074; font-size: 11px; }
+.knowledge-reader__source > p { margin: 12px 0 0; color: #5a7263; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.knowledge-reader__source > p a { color: #246c49; }
+.knowledge-reader__version-note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #edf1ec; }
+.knowledge-reader__version-note h3 { margin: 0 0 6px; color: #294635; font-size: 12px; }
+.knowledge-reader__version-note p { margin: 0; color: #5a7263; font-size: 11px; line-height: 1.7; }
 .knowledge-reader__edit { width: 100%; margin-top: var(--relay-space-6); }
 .knowledge-reader__partial .knowledge-body { display: block; }
 .knowledge-tools[hidden],
@@ -184,35 +255,26 @@
 }
 /* width < 80rem：与 min-width: 80rem 档（rail 出现）在恰 80rem 不再双触发；原 max-width: 80rem。 */
 @media (width < 80rem) {
-  .knowledge-reader { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
-  .knowledge-reader__outline { grid-column: 1 / -1; border-right: 0; border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); padding: 0 0 var(--relay-space-3); }
-  .knowledge-reader__toc h2 { margin-bottom: var(--relay-space-2); }
-  .knowledge-reader__toc ol { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); }
+  .knowledge-reader__grid { grid-template-columns: minmax(0, 1fr) minmax(0, var(--relay-layout-rail-narrowWidth)); }
+  .knowledge-reader--no-toc .knowledge-reader__grid { grid-template-columns: minmax(0, 1fr); }
+  .knowledge-reader__outline { position: static; grid-column: 1 / -1; margin-bottom: 2px; }
+  .knowledge-reader__toc h2 { margin-bottom: 6px; }
+  .knowledge-reader__toc ol { display: flex; flex-wrap: wrap; gap: 4px; }
+  .knowledge-reader__toc button { width: auto; border-left: 0; border: 1px solid #d6e5d8; border-radius: 8px; padding: 5px 9px; background: #fff; }
+  .knowledge-reader__toc .knowledge-reader__toc-current { border-color: #9ccbab; }
 }
 /* 并入 48rem 折行档，原 60rem：留白降级、列表/阅读双列折叠为单列，来源栏移到正文之下。 */
 @media (width < 48rem) {
   .knowledge-page { padding: var(--relay-layout-main-compactPadding); }
-  .knowledge-columns, .knowledge-reader, .knowledge-reader--no-toc { grid-template-columns: minmax(0, 1fr); }
-  .knowledge-reader__source { border-left: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding: var(--relay-space-6) 0 0; }
+  .knowledge-reader__paper .knowledge-reader__body { padding: 16px 16px 20px; }
+  .knowledge-reader__paper-head { padding: 11px 16px; }
+  .knowledge-columns, .knowledge-reader__grid, .knowledge-reader--no-toc .knowledge-reader__grid { grid-template-columns: minmax(0, 1fr); }
+  .knowledge-reader__source { padding: 14px 16px 18px; }
   .knowledge-page h1 { font-size: var(--relay-font-size-compactPage); }
 }
 
-/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+/* ── 原型皮肤里仍需收口的几处（其余已在上面按 V5.28 取值直接写死） ───────── */
 
-.pv-page .knowledge-tabs .subnav-item,
-.pv-page .knowledge-tabs button {
-  font-size: 12px;
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid #d6e5d8;
-  border-radius: 9px;
-  background: #fff;
-  color: #53705b;
-}
-.pv-page .knowledge-tabs .subnav-item[aria-selected="true"],
-.pv-page .knowledge-tabs button[aria-selected="true"],
-.pv-page .knowledge-tabs .subnav-item.is-active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
-.pv-page .knowledge-columns { gap: 14px; }
 .pv-page .knowledge-item-heading h2 { font-size: 15px; color: #244431; }
 .pv-page .knowledge-fact-paper {
   border: 1px solid #e9f0e9;

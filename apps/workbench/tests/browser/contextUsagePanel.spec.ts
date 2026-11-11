@@ -306,6 +306,9 @@ test("用量浮层：历史 65,536 与当前 1024K 各说各的——不互相�
   // 历史读数仍按那次调用冻结的 65,536 解释，不拿 1024K 去除。
   await expect(panel.getByTestId("assist-context-meter-input")).toHaveText("10,607");
   await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("16%");
+  // 2026-11-10：两个数字不同时补一句口径说明，避免把 65,536 当成当前档位。
+  await expect(panel.getByTestId("context-usage-frozen-note")).toContainText("65,536");
+  await expect(panel.getByTestId("context-usage-frozen-note")).toContainText("1024K 从下一次调用生效");
   await expect(panel.getByTestId("context-usage-history")).toContainText("最近一次模型调用");
   await expect(panel.getByTestId("context-usage-breakdown")).toBeVisible();
   await page.screenshot({ path: `${shots}/panel-history-vs-current.png`,

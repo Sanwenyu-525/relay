@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import type { AssistMessageAttachmentRow } from '../infrastructure/database-schema.js';
 import type { AssistContentPart, AssistIntent, AssistModelPort, AssistTurn,
@@ -36,7 +37,8 @@ import { mainLoopEnvelope, mainLoopMaintenanceField, readMainLoopOutcome,
   recordConversationExecutionCandidate, resolveMachineAttribution,
   mainLoopEnvelopeRepairInstruction, mainLoopMachineIntentFailureText }
   from './conversation-execution.js';
-import { findKnownPluginMentions, isMachineCapabilityQuestion } from './plugin-mentions.js';
+import { detectMachineActionIntent, findKnownPluginMentions,
+  isMachineCapabilityQuestion } from './plugin-mentions.js';
 import { freezeStateInterpretationBaseline, readMainLoopStateCandidate,
   recordStateMaintenanceCandidate } from './conversation-state.js';
 import { runLearningRounds } from './learning-round.js';
@@ -119,6 +121,49 @@ const PROPOSAL_SUMMARY_MAX_CHARS = 2_000;
 const CANCEL_POLL_MS = 200;
 const TASK_CRITERIA_METHODS: readonly string[] = ['HUMAN', 'MARKDOWN_STRUCTURE', 'CITATION_EXISTS', 'SEMANTIC'];
 const MAX_CRITERIA = 20;
+/**
+ * 结算后的自动记忆提取上界（2026-11-10）。
+ *
+ * 提取是**附带收益**：回复已经 COMPLETED 并提交，提取再慢也不能让 Worker 停在
+ * 「回复已完成、进程不退出」的状态。2026-11-10 实机出现过这种状态——桌面 Supervisor
+ * 按子进程退出推进派发，卡住的 Worker 会让后续消息一直停在 PENDING（界面只显示
+ * 「等待处理」，过程区与流式草稿都无从出现）。这里给一次真实外呼 30 秒上界：
+ * 到点中止信号并放弃这一轮提取，消息终态保持不变。
+ */
+const AUXILIARY_CAPTURE_TIMEOUT_MS = 30_000;
+
+/** 给辅助外呼一个有界信号；超时只放弃这一次附带调用，不改写任何已结算事实。 */
+export async function withAuxiliaryCaptureBound<T>(messageId: string, outer: AbortSignal | undefined,
+  run: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> {
+  const controller = new AbortController();
+  const onOuterAbort = (): void => controller.abort(outer?.reason);
+  if (outer?.aborted === true) onOuterAbort();
+  else outer?.addEventListener('abort', onOuterAbort, { once: true });
+  let timedOut = false;
+  let deadline: NodeJS.Timeout | undefined;
+  // 中止信号与竞速各做一层：端口会响应 abort；但凭据解析这类前置步骤可能不响应，
+  // 竞速保证调用方一定能在上界内继续，Worker 不会停在已结算的回复上。
+  const expired = new Promise<undefined>((resolve) => {
+    deadline = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error('AUXILIARY_CAPTURE_TIMEOUT'));
+      resolve(undefined);
+    }, AUXILIARY_CAPTURE_TIMEOUT_MS);
+    // 计时器不能反过来成为进程退出的最后一个句柄；到点之外的清理由 clearTimeout 负责。
+    deadline.unref();
+  });
+  try {
+    return await Promise.race([run(controller.signal), expired]);
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline);
+    outer?.removeEventListener('abort', onOuterAbort);
+    if (timedOut) {
+      getRuntimeLogger('assist').error('assist_memory_capture_timeout', {
+        message_id: messageId, timeout_ms: AUXILIARY_CAPTURE_TIMEOUT_MS,
+      });
+    }
+  }
+}
 
 export async function runAssistGenerationTick(db: DbExecutor,
   options: AssistGenerationOptions): Promise<AssistGenerationOutcome | undefined> {
@@ -603,13 +648,14 @@ export async function runAssistGenerationTick(db: DbExecutor,
       // 只有 DISCUSS（真正的对话）才提取；提案/影响检查轮的正文是协议信封，不是用户原话。
       if (settled && !cancelled && message.intent === 'DISCUSS') {
         try {
-          await captureMemoriesForTurn(db, { sessionId: session.id,
-            assistantMessageId: message.id, modelPort: modelRoute.modelPort,
-            ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
-            ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
-            ...(options.modelFetchDependencies === undefined ? {}
-              : { modelFetchDependencies: options.modelFetchDependencies }),
-            ...(options.signal === undefined ? {} : { signal: options.signal }) });
+          await withAuxiliaryCaptureBound(message.id, options.signal, (signal) =>
+            captureMemoriesForTurn(db, { sessionId: session.id,
+              assistantMessageId: message.id, modelPort: modelRoute.modelPort,
+              ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+              ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
+              ...(options.modelFetchDependencies === undefined ? {}
+                : { modelFetchDependencies: options.modelFetchDependencies }),
+              signal }));
         } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
         // 0157：只写一条持久请求，不在这里调用模型；真正的生成由常驻后台 tick 推进。
         try {
@@ -692,6 +738,12 @@ export async function runAssistGenerationTick(db: DbExecutor,
           modelInvocationFailed && Object.is(error, modelInvocationError) &&
           !(error instanceof DomainError)
         ? classifyProviderError(error) ?? routingStop?.providerErrorKind ?? null : null;
+      getRuntimeLogger('assist').error('assist_generation_failed', {
+        message_id: message.id, session_id: message.session_id,
+        worker_id: options.workerId, status, error_code: errorCode,
+        provider_error_kind: providerErrorKind,
+        error_name: error instanceof Error ? error.name : 'NON_ERROR',
+      });
       const settled = await settle(tx, message, options.workerId, { status,
         errorCode: status === 'FAILED' ? errorCode : null, providerErrorKind,
         content: null, ...modelErrorEvidence(error) });
@@ -720,6 +772,13 @@ interface AssistModelRoute {
 async function resolveAssistModelRoute(db: DbExecutor, message: AssistMessageRow,
   session: AssistSessionRow, options: AssistGenerationOptions, workerId: string):
 Promise<AssistModelRoute> {
+  // Correlation ids are logged before any model config resolution, so a later budget or
+  // credential failure can be tied back to the message that triggered it.
+  getRuntimeLogger('assist').debug('assist_model_route_resolve', {
+    message_id: message.id, session_id: message.session_id, worker_id: workerId,
+    model_connection_id: message.model_connection_id,
+    has_snapshot: message.model_selection_snapshot !== null,
+  });
   if (message.model_selection_snapshot === null) return { modelPort: options.modelPort };
   const snapshot = parseAssistModelSnapshot(message.model_selection_snapshot);
   const selected = snapshot.candidates[0];
@@ -1242,17 +1301,22 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     const explicitPluginIntent = selectedPlugins.length > 0;
     let machineIntentFailure: string | null = null;
     /*
-     * 信封修复（2026-11-01 COMPUTER-PLUGIN-E2E）。
+     * 信封修复（2026-11-01 COMPUTER-PLUGIN-E2E；2026-11-10 收紧触发条件）。
      *
      * 真实账本里 `@电脑操控 打开记事本` 的整段回复是模型的分析过程：没有 JSON 信封，
-     * 于是没有执行请求，界面却把它当成一次普通讨论。修复轮只在这三种条件同时成立时
-     * 发生：主流程 CHAT、这位模型这一轮**没有有副作用的工具调用**、且本工作区确实登记了
-     * 机器插件或用户明确选了插件。它不声明工具，不会重复任何副作用；修复结果仍走
+     * 于是没有执行请求，界面却把它当成一次普通讨论。修复轮只在以下条件同时成立时
+     * 发生：主流程 CHAT、这位模型这一轮**没有有副作用的工具调用**、且用户确实选了插件
+     * 或这句话明确要求机器操作。它不声明工具，不会重复任何副作用；修复结果仍走
      * `readMainLoopOutcome()` 与既有候选校验，不因为修复过就放宽。
+     *
+     * 旧条件只看「工作区登记了机器插件」：插件工作区里的任何纯文本回复（包括「你好」）
+     * 都要重发一遍整份 system，实测一条问候多花 3,708 输入 token 和 6 秒。环境能力
+     * 不是用户意图，因此这里必须再问一次「这句话是不是在要求动作」。
      */
+    const machineActionIntent = explicitPluginIntent ||
+      (context.machinePluginConfigured && detectMachineActionIntent(originalUserContent));
     if (context.chatMode === 'CHAT' && decided.kind === 'REPLY' && outcome.effectfulToolCalls === 0 &&
-        (context.machinePluginConfigured || explicitPluginIntent) &&
-        !controller.signal.aborted) {
+        machineActionIntent && !controller.signal.aborted) {
       try {
         const repaired = await invokeAssist({
           intent: 'DISCUSS',
@@ -1420,13 +1484,14 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
       // 完成」永远为假（2026-10-25 的真实入口缺陷）。提取入口按 id 重读已结算的行，
       // 判定依据只来自数据库。
       try {
-        await captureMemoriesForTurn(db, { sessionId: session.id,
-          assistantMessageId: message.id, modelPort: context.modelRoute.modelPort,
-          ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
-          ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
-          ...(options.modelFetchDependencies === undefined ? {}
-            : { modelFetchDependencies: options.modelFetchDependencies }),
-          ...(options.signal === undefined ? {} : { signal: options.signal }) });
+        await withAuxiliaryCaptureBound(message.id, options.signal, (signal) =>
+          captureMemoriesForTurn(db, { sessionId: session.id,
+            assistantMessageId: message.id, modelPort: context.modelRoute.modelPort,
+            ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+            ...(options.modelEnv === undefined ? {} : { modelEnv: options.modelEnv }),
+            ...(options.modelFetchDependencies === undefined ? {}
+              : { modelFetchDependencies: options.modelFetchDependencies }),
+            signal }));
       } catch { /* 自动记忆是附带收益，不是本轮结果的一部分。 */ }
       // 0157：标题请求只入队，不在主生成路径上外呼模型。
       try {

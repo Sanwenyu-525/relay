@@ -306,11 +306,11 @@ UNKNOWN、PARTIAL、控制请求待安全点、执行失败、权限/归档写�
 | 没有阶段读数（旧服务端 / 未知枚举） | 正在生成 | 猜一个更细的阶段 |
 
 - **出现条件走渲染，不走遮盖**：在途、无可见草稿、无工具主进度、无取消意图、无核对中时才渲染；正文或工具活动接手后整行卸下。它不新增第二组动效，也不给普通聊天加空过程面板。
-- **诊断是二级信息**：阶段行下可展开「延迟诊断」，显示调用次数与状态、提交→请求登记、请求→首流、首流→首正文、首正文→预览可见、请求→调用结算；Worker 领取时刻显示「未记录（排队与上下文准备合并计算）」，前端首次绘制显示「本机未观测」，不把消息总耗时当成模型推理耗时。
+- **过程区只有一行**（2026-11-10 修订）：阶段行只显示「三点 + 一句阶段文案」，不再就地展开「延迟诊断」。逐段耗时（提交→请求登记、请求→首流、首流→首正文、首正文→预览可见、请求→结算）只在服务端 `generation_progress` 与「导出会话」的 `model_calls[]` 中读，不进聊天流；Worker 领取时刻没有观测点，排队与上下文准备合并计算。不把消息总耗时当成模型推理耗时。
 - **无业务写入**：阶段只读 `assist_messages.status` 与 `model_calls`；不改消息、调用、权限或恢复状态，刷新后按同一投影恢复。终态整行消失，由最终正文、失败行与 meta 行接管。
-- **共享视觉件**：三点、字号、次级色与右向箭头展开语言沿用既有消息行；窄容器里诊断标签与数值换行，不撑破阅读列；`prefers-reduced-motion` 下三点静止，文案仍完整。
+- **共享视觉件**：三点、字号、次级色沿用既有消息行；`prefers-reduced-motion` 下三点静止，文案仍完整。
 
-实现落点：`apps/workbench/src/lib/generationStage.ts`（纯投影与诊断）、`AssistView.tsx` 的 `AssistStageLine`、`AssistView.css` 的 `.assist-stage*`；回归 `tests/generationStage.spec.ts`、`tests/assistStage.spec.ts`、`tests/browser/assistStageVisibility.spec.ts`。
+实现落点：`apps/workbench/src/lib/generationStage.ts`（纯阶段投影）、`AssistView.tsx` 的 `AssistStageLine`、`AssistView.css` 的 `.assist-stage*`；回归 `tests/generationStage.spec.ts`、`tests/assistStage.spec.ts`、`tests/browser/assistStageVisibility.spec.ts`。
 
 成绩、阻塞与未覆盖出口只见[功能验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)。
 

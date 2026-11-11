@@ -13,6 +13,8 @@ export const DESKTOP_DEFAULT_API_PORT = 43117;
 
 export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
+import { DEFAULT_LOG_MAX_BYTES, DEFAULT_LOG_RETAIN_FILES } from '../infrastructure/runtime-log.js';
+
 export interface ApiConfig {
   readonly bindHost: string;
   readonly port: number;
@@ -23,6 +25,12 @@ export interface ApiConfig {
   readonly databaseConnectTimeoutMs: number;
   readonly dataRoot: string;
   readonly logLevel: LogLevel;
+  /** Absolute directory for the structured log files (RELAY_DATA_ROOT/logs). */
+  readonly logDirectory?: string | undefined;
+  /** Size cap per log file before rotation. */
+  readonly logMaxBytes?: number | undefined;
+  /** Rotated log files kept per logger. */
+  readonly logRetainFiles?: number | undefined;
   readonly stopOnStdinEof: boolean;
   /** 系统级执行并发上界（runtime-context §2.12「并发上限」缺口的最小准入）。 */
   readonly maxConcurrentExecutions: number;
@@ -392,10 +400,19 @@ export function loadConfig(
     readOptionalInteger(env, 'RELAY_MAX_CONCURRENT_EXECUTIONS', 1, 64, issues) ??
     DEFAULT_MAX_CONCURRENT_EXECUTIONS;
 
+
+  // Logging knobs are optional: an unset value keeps the documented default so existing
+  // desktop.env files keep working unchanged.
+  const logDirectory = config.dataRoot === undefined ? undefined
+    : resolve(config.dataRoot, 'logs');
+  const logMaxBytes = readOptionalInteger(env, 'RELAY_LOG_MAX_BYTES',
+    64 * 1024, 1024 * 1024 * 1024, issues) ?? DEFAULT_LOG_MAX_BYTES;
+  const logRetainFiles = readOptionalInteger(env, 'RELAY_LOG_RETAIN_FILES',
+    0, 100, issues) ?? DEFAULT_LOG_RETAIN_FILES;
   if (issues.length > 0) {
     throw new ConfigError(issues);
   }
 
   // Every field is assigned once validation passes; issues are collected before this point.
-  return config as ValidatedConfig;
+  return { ...(config as ValidatedConfig), logDirectory, logMaxBytes, logRetainFiles };
 }

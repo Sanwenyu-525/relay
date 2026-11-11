@@ -170,36 +170,28 @@ test.describe("会话删除流程", () => {
     await page.screenshot({ path: `${evidenceDir}/02-batch-confirm.png` });
     await page.getByTestId("recent-work-batch-delete-confirm").click();
 
-    // 结果：顶层一行结论，原因只写一次，并给出真正能做的动作。
-    await expect(page.getByTestId("recent-work-batch-summary")).toContainText("已删除 1 段");
-    await expect(page.getByTestId("recent-work-batch-summary")).toContainText("1 段未删除");
-    const report = page.getByTestId("recent-work-batch-error");
-    await expect(report).toContainText("有学习记录");
-    await expect(report).toContainText("先在学习页清空这段讨论的评估记录");
-    expect(await report.textContent()).toContain("有学习记录");
+    // 结果：非阻塞提示里一行结论，原因只写一次，并给出真正能做的动作。
+    const notice = page.getByTestId("recent-work-batch-notice");
+    await expect(notice).toContainText("已删除 1 段");
+    await expect(notice).toContainText("1 段未删除");
+    await expect(notice).toContainText("有学习记录");
+    await expect(notice).toContainText("先在学习页清空这段讨论的评估记录");
     // 原因只出现一次（动作句里不再重复同一组词，避免读成两遍红字）。
-    expect((await report.textContent())!.split("有学习记录").length - 1).toBe(1);
+    expect((await notice.textContent())!.split("有学习记录").length - 1).toBe(1);
 
-    // 确认之后没有第二张带「删除」的卡片：只有「关闭」。
+    // 勾选清空、批量条收起；没有第二张带「删除」的卡片。
+    await expect(page.getByTestId("recent-work-selection")).toHaveCount(0);
     await expect(page.getByTestId("recent-work-batch-delete")).toHaveCount(0);
     await expect(page.getByTestId("recent-work-batch-delete-confirm")).toHaveCount(0);
-    await expect(page.getByTestId("recent-work-batch-result-close")).toBeVisible();
     await page.screenshot({ path: `${evidenceDir}/03-batch-result.png` });
 
-    // 侧栏不被这段结果撑开：结果区限高并内部滚动。
-    const geometry = await page.evaluate(() => {
-      const element = document.querySelector<HTMLElement>(".recent-work-batch-report");
-      if (element === null) throw new Error("结果区没渲染");
-      const style = getComputedStyle(element);
-      const rail = document.querySelector<HTMLElement>(".app-context-rail");
-      return { maxHeight: Number.parseFloat(style.maxHeight),
-        height: element.getBoundingClientRect().height,
-        railHeight: rail?.getBoundingClientRect().height ?? 0,
-        viewport: window.innerHeight };
-    });
-    expect(geometry.maxHeight).toBeGreaterThan(0);
-    expect(geometry.height).toBeLessThanOrEqual(geometry.maxHeight + 1);
-    expect(geometry.railHeight).toBeLessThanOrEqual(geometry.viewport);
+    // 结果不再进左栏文档流：提示是 portal 到 body 的反馈卡，侧栏不被这段文字撑开。
+    expect(await page.locator(".app-context-rail").getByTestId("recent-work-batch-notice").count())
+      .toBe(0);
+    expect(await page.locator(".recent-work-batch-report").count()).toBe(0);
+    const railHeight = await page.evaluate(() =>
+      document.querySelector<HTMLElement>(".app-context-rail")?.getBoundingClientRect().height ?? 0);
+    expect(railHeight).toBeLessThanOrEqual(page.viewportSize()!.height);
   });
 
   test("单条删除被引用阻断：给出可执行动作，且不再摆第二颗删除键", async ({ page }) => {
@@ -264,22 +256,25 @@ test.describe("会话删除流程", () => {
     await page.getByTestId("recent-work-batch-delete-confirm").click();
 
     // 两条都停在待核实（其中一条在服务端其实已经删成功）：结果未定时界面一行都不收。
-    await expect(page.getByTestId("recent-work-batch-summary")).toContainText("2 段待核实");
+    const notice = page.getByTestId("recent-work-batch-notice");
+    await expect(notice).toContainText("2 段待核实");
     await expect(page.getByTestId(`recent-work-${lateConfirmed}`)).toBeVisible();
     await expect(page.getByTestId(`recent-work-${unknown}`)).toBeVisible();
     expect(server.deleted.has(lateConfirmed)).toBe(true);
+    // 选择已清空：待核实的行仍在，但不再以「已选」的身份留在批量条里。
+    await expect(page.getByTestId("recent-work-selection")).toHaveCount(0);
     await page.screenshot({ path: `${evidenceDir}/06-recheck-before.png` });
 
     const readsBefore = server.receiptReads;
-    await page.getByTestId("recent-work-batch-recheck").click();
-    // 按原 command_id 核对到已提交：行与勾选一起消失，不是只改统计。
+    await notice.getByRole("button", { name: "核对回执" }).click();
+    // 按原 command_id 核对到已提交：行一起收掉，不是只改统计。
     await expect(page.getByTestId(`recent-work-${lateConfirmed}`)).toHaveCount(0);
     await expect(page.getByTestId(`recent-work-select-${lateConfirmed}`)).toHaveCount(0);
     // 仍查不到回执的那条原样留着：不改成成功，也不改成失败。
     await expect(page.getByTestId(`recent-work-${unknown}`)).toBeVisible();
-    await expect(page.getByTestId(`recent-work-select-${unknown}`)).toBeChecked();
-    await expect(page.getByTestId("recent-work-batch-summary")).toContainText("已删除 1 段");
-    await expect(page.getByTestId("recent-work-batch-summary")).toContainText("1 段待核实");
+    await expect(page.getByTestId(`recent-work-select-${unknown}`)).not.toBeChecked();
+    await expect(notice).toContainText("已删除 1 段");
+    await expect(notice).toContainText("1 段待核实");
     // 核对只读回执：两条各一发删除命令，没有第三发；核对按钮也只在原命令上查了一次。
     expect(server.deleteCalls).toEqual([lateConfirmed, unknown]);
     expect(server.receiptReads).toBe(readsBefore + 2);

@@ -127,10 +127,12 @@ describe("在途轮次", () => {
 
   /**
    * 原生 `<details>` 在 React 改 `open` 属性时同样派发 toggle。此前那段回声被写进 touched，
-   * 于是「完成时自动收起」只生效一次、之后永久失效——用户看到的是过程区在终态仍然大敞着，
-   * 把正文顶到屏幕之外。这里钉住两条：程序化收起不算人工操作；人手展开过就尊重。
+   * 于是程序化开合只生效一次、之后永久失效。
+   *
+   * 2026-11-10 用户指令「调用工具、读取文件的过程看不了」：这条消息在本页里真实跑过工具时，
+   * 完成态保持展开（过程跟着回复一起可读）；用户自己收起后不再被程序化弹开。
    */
-  it("程序化收起不写成人工开合；人手展开过则完成时保持展开", async () => {
+  it("完成态保留过程展开；用户收起后不再被程序化打开", async () => {
     stub(() => json(trace([round(0, [call()])])));
     const mounted = await mountReact(<SessionRoundTrace client={client} message={message()}
       pollIntervalMs={2_000} />);
@@ -141,18 +143,30 @@ describe("在途轮次", () => {
     await mounted.rerender(<SessionRoundTrace client={client}
       message={message({ status: "COMPLETED" })} pollIntervalMs={2_000} />);
     await flush(20);
-    expect(details().attributes("open")).toBeUndefined();
+    expect(details().attributes("open")).toBeDefined();
 
+    // 用户主动收起：之后同一段消息即使再次经过在途→终态，也不再自动展开。
     await mounted.wrapper.get("summary").trigger("click");
     await flush(20);
-    expect(details().attributes("open")).toBeDefined();
+    expect(details().attributes("open")).toBeUndefined();
 
     await mounted.rerender(<SessionRoundTrace client={client} message={message()} pollIntervalMs={2_000} />);
     await flush(20);
     await mounted.rerender(<SessionRoundTrace client={client}
       message={message({ status: "COMPLETED" })} pollIntervalMs={2_000} />);
     await flush(20);
-    expect(details().attributes("open")).toBeDefined();
+    expect(details().attributes("open")).toBeUndefined();
+  });
+
+  it("历史消息（挂载时已是终态）不因有工具记录自动展开", async () => {
+    stub(() => json(trace([round(0, [call()])])));
+    const { wrapper } = await mount(message({ status: "COMPLETED" }), 2_000);
+    // 终态入口先收起，点开才读取；读到工具有记录也不自动弹开。
+    expect(entry(wrapper).attributes("open")).toBeUndefined();
+    await wrapper.get("summary").trigger("click");
+    await flush(20);
+    expect(entry(wrapper).attributes("open")).toBeDefined();
+    expect(entry(wrapper).text()).toContain("README.md");
   });
 
   it("被拒与未知分档：标题报整条的例外，多轮时每一轮只报自己那一轮的", async () => {

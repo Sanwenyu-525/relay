@@ -10,13 +10,14 @@
   display: block;
   margin: var(--relay-space-2) 0;
   min-width: 0;
-  /* 首次出现：第一件真实工具活动到达时这一块才挂载。120ms 淡入 + 2px 上浮，
-     只动 opacity / transform（GPU 属性），目的只是「这里刚多出一条记录」，不是装饰。 */
-  transition: opacity var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
-}
-@starting-style {
-  .activity-panel { opacity: 0; transform: translateY(2px); }
+  /*
+   * 首次出现不再做淡入 + 2px 上浮（2026-11-10）。
+   *
+   * 这一块在第一件真实工具活动到达时挂载，而它正好在正在生成的正文上方：
+   * `@starting-style` 的 opacity/transform 与「新内容插入」叠在一起，读起来是
+   * 整段回复闪了一下。过程槽位已由 `.agent-message-process` 统一间距，标题行
+   * 出现本身就是事实，不需要再演一次入场。
+   */
 }
 
 /* ── 标题行 ─────────────────────────────────────────────────────────────

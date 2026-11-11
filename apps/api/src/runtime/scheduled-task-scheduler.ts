@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { RelayDatabase } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { runScheduledTaskTick } from '../application/scheduled-tasks.js';
@@ -42,6 +43,10 @@ export function registerScheduledTaskScheduler(
           error_name: name, error_message: message,
           ...(code === null ? {} : { error_code: code }) },
         'scheduled_task_scan_failed');
+        getRuntimeLogger('scheduler').warn('scheduled_task_scan_failed', {
+          code: 'SCHEDULED_TASK_SCAN_FAILED', error_name: name, error_message: message,
+          ...(code === null ? {} : { error_code: code }), error,
+        });
       }
       lastFailure = signature;
     } finally {

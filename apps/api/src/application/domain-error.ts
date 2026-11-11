@@ -1,6 +1,5 @@
 import type { FieldError } from '../shared/field-error.js';
 import type { ProjectArchiveBlockerReason } from '../project/project-repository.js';
-import type { SessionDeleteBlockerReason } from '../assist/assist-repository.js';
 
 /**
  * 应用层领域错误。
@@ -40,7 +39,7 @@ export interface DomainConflict {
   readonly proposalId?: string;
   /** 消息撤回预检的逐路径结果（0132）；只用于说明为何尚未写入。 */
   readonly recallPaths?: readonly string[];
-  readonly blockingReasons?: readonly ProjectArchiveBlockerReason[] | readonly SessionDeleteBlockerReason[];
+  readonly blockingReasons?: readonly ProjectArchiveBlockerReason[];
 }
 
 export interface DomainErrorOptions {
@@ -118,25 +117,6 @@ export function projectArchiveBlocked(
     type: '/problems/project-archive-blocked',
     title: '项目仍有未安全结束的工作',
     detail: '先处理在途执行、审批或未知外部效果，再重新检查归档条件。',
-    retryable: false,
-    retryAction: 'REFRESH_AND_REDECIDE',
-    conflict: { blockingReasons },
-  });
-}
-
-/**
- * 会话物理删除被拒（ADR-027）。它不是「暂时失败」，所以不 retryable：
- * 被引用的来源不会因为重试而消失；用户要么改归档，要么先处理原对象。
- */
-export function assistSessionDeleteBlocked(
-  blockingReasons: readonly SessionDeleteBlockerReason[],
-): DomainError {
-  return new DomainError({
-    code: 'SESSION_DELETE_BLOCKED',
-    status: 409,
-    type: '/problems/session-delete-blocked',
-    title: '这条讨论还不能删除',
-    detail: '它仍被其它对象引用；先改为归档，或在原对象解除引用后再删除。',
     retryable: false,
     retryAction: 'REFRESH_AND_REDECIDE',
     conflict: { blockingReasons },

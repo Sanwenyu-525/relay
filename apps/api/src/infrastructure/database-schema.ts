@@ -166,6 +166,8 @@ export interface ProjectBlueprintProposalRow {
   readonly status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED';
   readonly origin: 'USER_DRAFT' | 'SKILL';
   readonly skill_message_id: string | null;
+  /** 来源会话被删除、来源消息已置空的时刻（0161）；非空表示提案保留但原消息不可再读。 */
+  readonly source_detached_at: Date | null;
   readonly supersedes_proposal_id: string | null;
   readonly candidate: JsonObject;
   readonly baseline: JsonObject;

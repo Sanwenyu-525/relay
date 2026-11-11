@@ -10,8 +10,10 @@ export interface ArtifactImpactCheckRow {
   readonly source_before_version_id: string;
   readonly source_after_version_id: string;
   readonly artifact_revision: bigint;
-  readonly assist_session_id: string;
-  readonly assist_message_id: string;
+  /** 发起检查的会话；会话被删除后为 NULL（0161），检查本身保留。 */
+  readonly assist_session_id: string | null;
+  /** 承载分析的助手消息；会话被删除后为 NULL（0161）。 */
+  readonly assist_message_id: string | null;
   readonly direct_targets: readonly JsonObject[];
   readonly has_more: boolean;
   readonly input_truncated: boolean;
@@ -26,8 +28,10 @@ export interface ArtifactImpactCandidateRow {
   readonly target_artifact_id: string;
   readonly target_artifact_revision: bigint;
   readonly target_version_id: string;
-  readonly assist_session_id: string;
-  readonly assist_message_id: string;
+  /** 发起候选的会话；会话被删除后为 NULL（0161），候选保留。 */
+  readonly assist_session_id: string | null;
+  /** 承载候选正文的助手消息；会话被删除后为 NULL（0161）。 */
+  readonly assist_message_id: string | null;
   readonly confirmed_possible: boolean;
   readonly applied_version_id: string | null;
   readonly created_at: Date;

@@ -129,7 +129,7 @@ const directoryList = `directory:${projectA}`;
  */
 interface SlideRecord {
   readonly key: string;
-  /** 同一条会话在「目标」与「工作区（目录）」各有一份副本：只有起手那一列的那份带着走。 */
+  /** 同一条会话在「目标」与「会话（按目录）」各有一份副本：只有起手那一列的那份带着走。 */
   readonly listKey: string;
   readonly from: string;
   readonly duration: number | string;
@@ -400,7 +400,7 @@ test.describe("会话行拖拽改序", () => {
   });
 
   test("任务行与归档区不带拖拽把手", async ({ page }) => {
-    // 只有未归档会话所在的列声明 data-reorder-list；任务入口与已归档区起手应落空。
+    // 只有未归档会话所在的列声明 data-reorder-list；任务与已归档区起手应落空。
     const lists = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("ul[data-recent-list]")]
       .map((node) => ({ key: node.dataset.recentList!, reorder: node.dataset.reorderList ?? null,
         rows: node.querySelectorAll("[data-recent-row]").length })));

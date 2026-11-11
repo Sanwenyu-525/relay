@@ -6,9 +6,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
  *
  * API 全部由 page.route 伪造（不连数据库、不调 Provider）；服务端事实由后端
  * PostgreSQL/HTTP 集成测试证明。本用例只证明界面消费同一份活动快照：
- *   * 默认是一条由服务端 phase 决定的状态句，不按时间自动切换；
- *   * 展开后能看到真实工具/模型/待办/子 Agent 记录；
- *   * 在途有界轮询，终态停止；长会话可补读更早消息；
+ *   * 过程区只有一个槽位：等待时一行阶段、工具轮次一条账本入口；
+ *   * 只有审批/待核对/Run 摘要例外才出现消息级状态块，clean 完成两块都不留；
+ *   * 展开后能看到真实工具记录；在途有界轮询，终态停止；长会话可补读更早消息；
  *   * 结果未知不使用成功色；窄窗口下过程区不撑破阅读列。
  */
 
@@ -106,6 +106,8 @@ function activityMessage(input: { status: "PENDING" | "RUNNING" | "COMPLETED";
 async function installRoutes(page: Page, state: {
   status: () => "PENDING" | "RUNNING" | "COMPLETED";
   activity: (detail: "summary" | "full") => Record<string, unknown>;
+  /** 工具账本明细：过程区现在以 SessionRoundTrace 为工具事实的唯一常驻载体。 */
+  toolRounds: () => readonly { round: number; calls: readonly unknown[] }[];
   historyHasMore: () => boolean;
   activityCalls: { count: number };
 }) {
@@ -159,7 +161,8 @@ async function installRoutes(page: Page, state: {
         preview_truncated: false, preview_available: false, usage: null });
     }
     if (path.endsWith("/tool-calls")) return fulfillJson(route, { session_id: sessionId,
-      message_id: assistantMessageId, message_status: state.status(), rounds: [] });
+      message_id: assistantMessageId, message_status: state.status(),
+      rounds: state.toolRounds() });
     if (path === `${prefix}/assist-sessions/${sessionId}/todos`)
       return fulfillJson(route, { snapshot: null });
     if (path.includes("conversation-diff")) return fulfillJson(route, { session_id: sessionId,
@@ -201,6 +204,12 @@ test.describe("执行透明性", () => {
       status: () => status,
       activityCalls,
       historyHasMore: () => false,
+      toolRounds: () => stage === "QUEUE" ? [] : [{ round: 0, calls: [{
+        id: "t1", round: 0, ordinal: 0, tool_name: "read_file",
+        status: stage === "TOOL" ? "REQUESTED" : "UNKNOWN",
+        arguments: { path: "AGENTS.md" },
+        rejection_reason: null, rejection_detail: null,
+        requested_at: "2026-11-01T08:00:02Z", settled_at: null }] }],
       activity: (detail) => {
         if (stage === "QUEUE") return activityMessage({ status: "PENDING",
           view: "WAITING_WORKER", tone: "wait", detail: "已排队，等待执行",
@@ -239,38 +248,36 @@ test.describe("执行透明性", () => {
     await page.goto(`/projects/${projectId}?skill=assist`);
     await connect(page);
 
-    const statusLine = page.getByTestId("message-execution-status");
-    await expect(statusLine).toHaveCount(1, { timeout: 30_000 });
-    await expect(statusLine).toHaveAttribute("data-view", "WAITING_WORKER");
-    await expect(statusLine).toContainText("已排队，等待执行");
+    // 排队阶段只有一行阶段文案；简单的等待不再另起一块状态区。
+    const stageLine = page.getByTestId(`assist-stage-${assistantMessageId}`);
+    await expect(stageLine).toContainText("等待处理", { timeout: 30_000 });
+    await expect(page.getByTestId("message-execution-status")).toHaveCount(0);
     await page.screenshot(save("01-queued"));
 
     status = "RUNNING"; stage = "TOOL";
-    await expect(statusLine).toHaveAttribute("data-view", "RUNNING_TOOL", { timeout: 10_000 });
-    await expect(statusLine).toContainText("正在执行工具");
+    const trace = page.getByTestId(`session-round-trace-${assistantMessageId}`);
+    await expect(trace).toHaveCount(1, { timeout: 10_000 });
+    await expect(trace).toContainText("工具活动");
+    await expect(page.getByTestId("session-round-call-t1")).toContainText("读取文件");
+    await expect(page.getByTestId("message-execution-status")).toHaveCount(0);
     await page.screenshot(save("02-tool-running"));
-    await statusLine.locator("summary").click();
-    const list = page.locator(".message-execution-status__list");
-    await expect(list).toContainText("模型调用 · 正在接收回复");
-    await expect(list).toContainText("read_file · 正在执行");
-    await expect(list).toContainText("子 Agent · 调查 · 运行中");
-    expect(await page.locator('[data-testid="message-execution-status"] .message-execution-status__elapsed').count())
-      .toBe(1);
     await page.screenshot(save("03-expanded-process"));
 
     stage = "UNKNOWN";
-    await expect(statusLine).toHaveAttribute("data-view", "WAITING_CONFIRMATION",
-      { timeout: 10_000 });
+    const statusLine = page.getByTestId("message-execution-status");
+    await expect(statusLine).toHaveCount(1, { timeout: 10_000 });
+    await expect(statusLine).toHaveAttribute("data-view", "WAITING_CONFIRMATION");
     await expect(statusLine).toContainText("工具有结果待核对");
     await expect(statusLine).toContainText("1 项待核对");
+    await statusLine.locator("summary").click();
     const toolRow = page.locator('.message-execution-status__list li[data-kind="TOOL_CALL"]');
     await expect(toolRow).toContainText("read_file · 结果待核对");
     await expect(toolRow).toHaveAttribute("data-tone", "wait");
     await page.screenshot(save("04-result-unknown"));
 
     status = "COMPLETED"; stage = "DONE";
-    await expect(statusLine).toHaveAttribute("data-view", "COMPLETED", { timeout: 10_000 });
-    await expect(statusLine).toContainText("回复已完成");
+    await expect(page.getByTestId("message-execution-status")).toHaveCount(0, { timeout: 10_000 });
+    await expect(trace).toHaveAttribute("data-state", "settled");
     const settledCount = activityCalls.count;
     await page.waitForTimeout(1_500);
     expect(activityCalls.count, "终态消息不应继续轮询活动").toBe(settledCount);
@@ -279,7 +286,7 @@ test.describe("执行透明性", () => {
     // 窄窗口下过程区不撑破阅读列；长文本按 anywhere 折行。
     await page.setViewportSize({ width: 720, height: 900 });
     await page.waitForTimeout(200);
-    const width = await page.locator(".message-execution-status").evaluate(
+    const width = await trace.evaluate(
       (element) => ({ client: element.clientWidth, scroll: element.scrollWidth }));
     expect(width.scroll).toBeLessThanOrEqual(width.client + 1);
     await page.screenshot(save("06-narrow"));
@@ -292,6 +299,7 @@ test.describe("执行透明性", () => {
     await installRoutes(page, {
       status: () => "COMPLETED",
       activityCalls,
+      toolRounds: () => [],
       historyHasMore: () => true,
       activity: () => activityMessage({ status: "COMPLETED", view: "COMPLETED",
         tone: "success", detail: "回复已完成", fingerprint: "f4",

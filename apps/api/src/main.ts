@@ -14,6 +14,8 @@ import { applyCredentialEnvFromStore, CredentialEnvError } from './credentials/c
 import { shutdownComputerRuntimeClient } from './computer/client-holder.js';
 import { RelayDatabase } from './infrastructure/database.js';
 import { SchemaReadinessChecker } from './infrastructure/schema-readiness.js';
+import { configureRuntimeLog, getRuntimeLogger, logRuntimeEvent, runtimeLogFile }
+  from './infrastructure/runtime-log.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from './runtime/restore-isolation.js';
 import {
   desktopChildEnvironment,
@@ -122,6 +124,14 @@ async function main(): Promise<void> {
       desktopMode: desktopChild,
     };
     await assertRestoreNotIsolated(config.dataRoot);
+    configureRuntimeLog({
+      directory: config.logDirectory ?? resolve(config.dataRoot, 'logs'),
+      fileName: 'relay-api.log',
+      level: config.logLevel,
+      echoToStderr: !config.desktopMode,
+      maxBytes: config.logMaxBytes,
+      retainFiles: config.logRetainFiles,
+    });
   } catch (error) {
     if (error instanceof RestoreIsolationError) {
       if (desktopChild) {
@@ -154,6 +164,8 @@ async function main(): Promise<void> {
   const app = createServer(config);
   const database = new RelayDatabase(config, (error) => {
     app.log.error({ err: error }, 'database_pool_error');
+    // 桌面模式 pino 关闭，连接池的意外错误只走这里才能留下证据。
+    getRuntimeLogger('api-db').error('database_pool_error', { error });
   });
 
   registerRoutes(app, {
@@ -176,6 +188,9 @@ async function main(): Promise<void> {
       writeDesktopEvent({ type: 'desktop_error', nonce: desktopFrame.nonce, code: 'LISTEN_FAILED' });
     }
     app.log.error({ err: error }, 'api_listen_failed');
+    getRuntimeLogger('api').error('api_listen_failed', {
+      bind_host: config.bindHost, port: config.port, error,
+    });
     await settle(database.close(), CLEANUP_TIMEOUT_MS);
     process.exitCode = FAILURE_EXIT_CODE;
   };
@@ -215,6 +230,13 @@ async function main(): Promise<void> {
     },
     'api_listening',
   );
+  logRuntimeEvent('info', 'api_listening', {
+    bind_host: config.bindHost,
+    port: boundPort,
+    log_level: config.logLevel,
+    desktop_mode: config.desktopMode === true,
+    log_file: runtimeLogFile() ?? null,
+  });
 
   installShutdownHandlers(app, database, config);
 
@@ -252,6 +274,9 @@ async function main(): Promise<void> {
 
   if (!startupProbe.ok) {
     app.log.error({ database: 'down' }, 'database_unavailable_at_startup');
+    getRuntimeLogger('api-db').error('database_unavailable_at_startup', {
+      database: 'down',
+    });
   }
 
 }

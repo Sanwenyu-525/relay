@@ -799,7 +799,12 @@ export async function readExecutionActivity(db: DbExecutor, input: {
   }
   const messages = assistantMessages.map((message): MessageActivity => {
     const messageTools = toolByMessage.get(message.id) ?? [];
-    const messageModels = modelByMessage.get(message.id) ?? [];
+    // 过程区只列**这一次回复的主调用**（2026-11-10）。TITLE / MEMORY_CAPTURE /
+    // MEMORY_COMPACT 是挂在同一条消息上的辅助外呼：它们会出现在账本与导出里，
+    // 但不是用户可见回复的步骤。不过滤会把一句问候读成「模型 3 次」，
+    // 也与 token 读数（本来就只含 PRIMARY）对不上。
+    const messageModels = (modelByMessage.get(message.id) ?? [])
+      .filter((call) => call.purpose === 'PRIMARY');
     const sourceUserMessageId = sourceUserByAssistant.get(message.id) ?? null;
     const request = sourceUserMessageId === null ? undefined
       : requestByUserMessage.get(sourceUserMessageId);

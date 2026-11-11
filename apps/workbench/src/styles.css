@@ -842,8 +842,9 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   overflow-wrap: anywhere;
 }
 
-/* 清空会话：栏头按钮的进行态与确认框里的结果分组。图标只在读列表/逐条删除时转，
-   与既有加载指示同一动效 token；结果分组沿用文字层级，不新造配色。 */
+/* 清空会话：工作区（目录）行右侧按钮的进行态与确认框里的结果分组。图标只在读列表/
+   逐条删除时转，与既有加载指示同一动效 token；结果分组沿用文字层级，不新造配色。
+   长标题（用户提示词）会把结果列表撑高，整块限高并内部滚动，确认框不越出视口。 */
 .workspace-clear-spin { animation: workspace-clear-rotate var(--relay-motion-loop-spin) linear infinite; }
 @keyframes workspace-clear-rotate { to { transform: rotate(1turn); } }
 .workspace-clear-list {
@@ -854,6 +855,8 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   color: var(--relay-color-text-secondary);
   font-size: var(--relay-font-size-meta);
   overflow-wrap: anywhere;
+  max-height: 9rem;
+  overflow-y: auto;
 }
 .workspace-clear-list span { color: var(--relay-color-text-primary); font-weight: var(--relay-font-weight-semibold); }
 .workspace-clear-diagnostics { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
@@ -890,8 +893,7 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   align-items: center;
   gap: var(--relay-space-2);
 }
-/* 收起后只剩再展开的把手：清空入口在这条窄轨里没有空间，也不该在折叠态误触。 */
-.app-frame[data-context-collapsed="true"] .context-rail-clear-sessions { display: none; }
+/* 收起后只剩再展开的把手。 */
 .app-frame[data-context-collapsed="true"] .context-rail-collapse {
   width: var(--relay-control-height-comfort);
   min-width: var(--relay-control-height-comfort);
@@ -1067,6 +1069,27 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   text-align: center;
   line-height: var(--relay-font-lineHeight-ui);
 }
+/* 「任务」分组的运行指示（2026-11-10，用户要求「有任务执行的时候加一个带缺口的
+   点状圆圈，不停转动」）：读任务投影的 executor.run_id，有 Run 持有执行权才出现。
+   环用 SVG dasharray 画成一圈圆点，路径本身留 90° 缺口；12px 与状态图标同一格，
+   匀速旋转取 motion.loop.spin（1s，与清空按钮的加载环同一档），不加发光、不占布局。
+   减少动态效果时只停旋转，环与缺口仍可辨认——状态不靠动效单独表达。 */
+.recent-work-group-running {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  animation: recent-work-group-running-spin var(--relay-motion-loop-spin) linear infinite;
+}
+.recent-work-group-running > svg { width: 100%; height: 100%; }
+@keyframes recent-work-group-running-spin { to { transform: rotate(1turn); } }
+html[data-motion="off"] .recent-work-group-running { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .recent-work-group-running { animation: none !important; }
+}
 /* 目录行悬停的「＋」（在这个目录新建会话）：与 ⋯ 同一套显形规则——静止 display:none，
    悬停或键盘聚焦才出现，静止时行盒逐像素不变。它压在数字徽标那一格上，显形时徽标
    用 visibility 让位（仍占宽，标题可用宽度不动），两者不会同时出现。
@@ -1099,6 +1122,32 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
 .recent-work-group:has(> .recent-work-group-new:hover, > .recent-work-group-new:focus-visible) > summary > .recent-work-group-count {
   visibility: hidden;
 }
+/* 「工作区（目录）」段标题右侧的「清空会话」（2026-11-10 用户第二次指认）：工作区指
+   这一整段会话的集合区域，不是单个目录，所以键从目录组行收回到段标题上，就贴在名字右边。
+   标题不再 flex:1 撑满，键紧随其后；折叠箭头用 auto 外边距留在行尾，三段根区仍同一读法。
+   常显不悬停：清空是这一段的主动作，藏着会被读成功能被删掉了。 */
+.recent-work-section-title { flex: 0 1 auto; }
+.recent-work-section--directories > summary > svg,
+.recent-work-section--tasks > summary > svg { margin-inline-start: auto; }
+/* 双类选择器压过靠后的全局 `.icon-button`（同特异度、后者会赢），尺寸与颜色才真正生效；
+   不新增 opacity 档，静止用 muted、悬停用 primary，禁用态仍交给全局 `.icon-button:disabled`。
+   2026-11-10 起「会话（按目录）」的清空键与「任务」的新建任务键同一形态，共用这一组规则。 */
+.icon-button.recent-work-section-clear,
+.icon-button.recent-work-section-new {
+  flex: none;
+  width: var(--relay-control-target-minimum);
+  height: var(--relay-control-target-minimum);
+  color: var(--relay-color-text-muted);
+}
+.icon-button.recent-work-section-clear > svg,
+.icon-button.recent-work-section-new > svg {
+  width: var(--relay-font-size-caption);
+  height: var(--relay-font-size-caption);
+}
+.icon-button.recent-work-section-clear:hover:not(:disabled),
+.icon-button.recent-work-section-clear:focus-visible,
+.icon-button.recent-work-section-new:hover:not(:disabled),
+.icon-button.recent-work-section-new:focus-visible { color: var(--relay-color-text-primary); }
 .recent-work-group .recent-work-list {
   margin-left: var(--relay-space-2);
   /* 竖线是分组依据，条目和激活标记都要与它留出缝：贴着画会读成「这根线属于这一行」。 */
@@ -1389,50 +1438,6 @@ html[data-motion="off"] .recent-work-selection { animation: none; }
   min-width: 3.5rem;
 }
 .text-button.recent-work-selection-danger { color: var(--relay-color-status-danger-text); }
-
-/* 批量删除的结果区（2026-10-31）：顶层一行结论，每类原因只写一次，
-   逐条会话与技术细节收进详情区。整块限高并内部滚动——一段重复的诊断文字
-   会把这一窄列撑成长页面（2026-10-31 用户指认「侧栏被错误文字撑开」）。 */
-.recent-work-batch-report {
-  display: grid;
-  gap: var(--relay-space-1);
-  max-height: 11rem;
-  overflow-y: auto;
-}
-.recent-work-batch-summary {
-  margin: 0;
-  font-size: var(--relay-font-size-meta);
-  font-weight: var(--relay-font-weight-medium);
-  color: var(--relay-color-text-primary);
-}
-.recent-work-batch-line {
-  margin: 0;
-  font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-ui);
-  color: var(--relay-color-status-danger-text);
-}
-.recent-work-batch-detail {
-  font-size: var(--relay-font-size-caption);
-  color: var(--relay-color-text-muted);
-}
-.recent-work-batch-detail > summary { cursor: pointer; }
-.recent-work-batch-detail > ul {
-  display: grid;
-  gap: var(--relay-space-1);
-  margin: var(--relay-space-1) 0 0;
-  padding-inline-start: var(--relay-space-3);
-  max-height: 6rem;
-  overflow-y: auto;
-}
-.recent-work-batch-detail > ul > li {
-  display: flex;
-  gap: var(--relay-space-1);
-  align-items: baseline;
-  justify-content: space-between;
-}
-.recent-work-batch-detail-line {
-  word-break: break-all;
-}
 
 /* 会话行拖拽改序（2026-10-17，工作台 §28.1）：只有「目标」「工作区（目录）」里未归档的会话行可拖。
    落位横线绝对定位在这一列的 padding box 上（.recent-work-list 因此是它的定位上下文），

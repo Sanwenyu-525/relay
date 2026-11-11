@@ -46,6 +46,11 @@ function formatTierLabel(tokens: RelayContextBudgetTokens | null): string {
   return tier === undefined ? "未确认" : tier.label;
 }
 
+/** 预算值的说法：三档沿用单选上的 256K/512K/1024K；非三档的值如实给出原数。 */
+function tierLabelOf(tokens: number): string {
+  return TIERS.find((tier) => tier.value === tokens)?.label ?? tokens.toLocaleString();
+}
+
 /** 分类的显示顺序与名字。图标只做区分，不承担语义——名字才是事实。 */
 const CATEGORY_META: Readonly<Record<RelayContextUsageCategory,
   { readonly label: string; readonly icon: LucideIcon }>> = {
@@ -456,6 +461,15 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
                 {ratio !== null && <span className="agent-chat-context-meter-bar" aria-hidden="true"
                   data-over={ratio > 1 ? "true" : undefined}>
                   <span style={{ width: `${Math.min(1, ratio) * 100}%` }} /></span>}
+                {/* 冻结预算与当前档位不一致时明说一句（2026-11-10 用户指认「前后端不匹配」）：
+                    分母是**那次调用**冻结的预算，改档不会回头改写历史读数；三档单选只表示
+                    下一拍按哪一档申请。不重写「当前档位 N」那一行（2026-11-01 已删），
+                    只在两个数字真的不同时解释差异。 */}
+                {reserved !== null && usage.budget.tokens !== reserved &&
+                  <p className="context-usage-note" data-testid="context-usage-frozen-note">
+                    占比按这次调用冻结的 {tierLabelOf(reserved)} 计算；{tierLabelOf(usage.budget.tokens)}
+                    {" "}从下一次调用生效。
+                  </p>}
                 {/* 二级信息两列：预算余量（估算）与本次输出。余量是「预算 − 上报用量」，
                     不等于模型物理窗口的剩余容量。 */}
                 {(remaining !== null || lastCall.outputTokens !== null)
@@ -526,6 +540,15 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
                 </li>;
               })}
             </ul>}
+          {/* 分项合计与 Provider 实报不是同一个口径（2026-11-10 用户指认差异）：
+              估算按请求文本 UTF-8 字节 ÷ 3，英文占比高时会比 Provider 的分词结果偏大。
+              两个数不同时把两边的口径写在同一条 caption 里，避免读者把差额当成丢项。 */}
+          {breakdown !== null && inputTokens !== null &&
+            breakdown.estimatedTotalTokens !== inputTokens &&
+            <p className="context-usage-note" data-testid="context-usage-estimate-note">
+              分项合计约 {breakdown.estimatedTotalTokens.toLocaleString()} tokens（按请求文本字节估算）；
+              Provider 本次实报输入 {inputTokens.toLocaleString()} tokens。
+            </p>}
           {breakdown !== null && breakdown.imageParts > 0 &&
             <p className="context-usage-note" data-testid="context-usage-image-note">
               另有 {breakdown.imageParts} 段图片未计入估算：图片 token 由模型侧编码决定。</p>}

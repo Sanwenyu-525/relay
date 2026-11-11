@@ -87,10 +87,15 @@ async function settledRound(workspaceId: string, sessionId: string, content: str
     commandId: randomUUID(), content, intent: 'DISCUSS' });
   const port: AssistModelPort = {
     identity: new FakeModelPort().identity,
-    assist: async () => ({ kind: 'CONTENT', content: reply,
-      providerRequestId: `export-${randomUUID().slice(0, 8)}`,
-      usage: { inputTokens: 1234, outputTokens: 567, cacheReadTokens: null,
-        cacheCreationTokens: null } }),
+    assist: async (request) => {
+      // 逐段耗时要随导出离线可核对：先让观测真的发生，再断言字段带事实。
+      await request.onStreamEvent?.();
+      await request.onTextDelta?.(reply);
+      return { kind: 'CONTENT', content: reply,
+        providerRequestId: `export-${randomUUID().slice(0, 8)}`,
+        usage: { inputTokens: 1234, outputTokens: 567, cacheReadTokens: null,
+          cacheCreationTokens: null } };
+    },
   };
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const outcome = await runAssistGenerationTick(app.db, { workerId: `export-${randomUUID()}`,
@@ -210,6 +215,15 @@ test('EX-01 正常会话：一次落定轮导出后消息原文、模型用量�
     '模型调用只挂在本会话被导出的消息上');
   assert.ok(doc.model_calls.some((call: any) => call.usage.input_tokens === 1234
     && call.usage.output_tokens === 567), '计量列取 model_calls 原列，不从界面反推');
+  // 2026-11-10：聊天流不再展开「延迟诊断」，逐段耗时必须以既有观测列出现在导出里。
+  const primaryCall = doc.model_calls.find((call: any) => call.purpose === 'PRIMARY');
+  assert.ok(primaryCall !== undefined, '导出的这一轮应有 PRIMARY 调用');
+  for (const field of ['first_stream_event_at', 'first_text_delta_at',
+    'first_preview_persisted_at']) {
+    assert.ok(field in primaryCall!, `导出 model_calls 缺 ${field}`);
+  }
+  assert.notEqual(primaryCall!.first_stream_event_at, null, '首流事件应已观测');
+  assert.notEqual(primaryCall!.first_text_delta_at, null, '首个正文增量应已观测');
 
   assert.equal(doc.tool_calls.length, 1);
   const group = doc.tool_calls[0];

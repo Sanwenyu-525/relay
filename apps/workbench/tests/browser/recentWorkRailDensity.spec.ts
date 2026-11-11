@@ -24,9 +24,11 @@ async function fulfillJson(route: Route, body: unknown): Promise<void> {
   await route.fulfill({ status: 200, contentType: "application/json", headers: cors(), body: JSON.stringify(body) });
 }
 
-function task(id: string, projectId: string, title: string, updatedAt: string): unknown {
+function task(id: string, projectId: string, title: string, updatedAt: string,
+  runId: string | null = null): unknown {
   return { id, project_id: projectId, title, status: "READY", mode: "ME", revision: "1",
-    executor: { kind: "HUMAN", run_id: null }, current_completion_id: null, waiting_reason: null,
+    executor: { kind: runId === null ? "HUMAN" : "AI", run_id: runId },
+    current_completion_id: null, waiting_reason: null,
     blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
     dependencies: [], updated_at: updatedAt };
 }
@@ -57,7 +59,7 @@ const titles = [
   "把工作台的外壳折叠点从 64rem 下移到 48rem"
 ];
 
-async function installRoutes(page: Page): Promise<void> {
+async function installRoutes(page: Page, options: { runningFirstTask?: boolean } = {}): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -65,7 +67,8 @@ async function installRoutes(page: Page): Promise<void> {
     if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
     if (path === `${prefix}/tasks`) {
       return fulfillJson(route, { items: [
-        task("33333333-3333-4333-8333-333333333331", projectA, titles[0], "2026-10-11T06:59:00Z"),
+        task("33333333-3333-4333-8333-333333333331", projectA, titles[0], "2026-10-11T06:59:00Z",
+          options.runningFirstTask ? "99999999-9999-4999-8999-999999999991" : null),
         task("33333333-3333-4333-8333-333333333332", projectA, titles[1], "2026-10-11T04:59:00Z"),
         task("33333333-3333-4333-8333-333333333333", projectB, titles[2], "2026-10-07T04:07:00Z")
       ], next_cursor: null });
@@ -530,7 +533,7 @@ test.describe("近期工作栏窄列几何", () => {
     expect(rest.sectionBorderTops.length, detail).toBeGreaterThanOrEqual(3);
     expect(Math.max(...rest.sectionBorderTops), detail).toBeLessThan(0.5);
     expect(Math.min(...rest.sectionGaps), detail).toBeGreaterThanOrEqual(rest.gap - 0.5);
-    // 2026-10-16 第五轮起四个根区的视觉间距对齐同一档；第七轮修掉任务入口收起时塌成 0px 的
+    // 2026-10-16 第五轮起四个根区的视觉间距对齐同一档；第七轮修掉任务收起时塌成 0px 的
     // 相邻断裂；第八轮按用户「间距还是太大」由 space.3(12px) 收到 space.2(8px)；2026-10-20
     // 第九轮按「这四个的间距再减小一点」收到 space.1(4px)，同日第十轮按「减小到2px」收到
     // space.0.5(2px)——分组下外边距随同换档，塌穿才不会把间隙顶回去。四处间隙必须仍是同一档。
@@ -541,8 +544,8 @@ test.describe("近期工作栏窄列几何", () => {
 
   // 2026-10-16 第七轮：用户截图指认「四个根区间距没有统一，统一成任务入口和已归档的间距」。
   // 根因是已归档段曾放在 recent-work-list 包装层之外，`.recent-work-section + .recent-work-section`
-  // 覆盖不到「任务入口 ↔ 已归档」：任务入口展开时靠末组 margin 塌穿包装层凑数，一旦收起
-  // 就塌成 0px（已归档贴着任务入口）。归档段移进包装层后，这里盯住任意折叠组合下四个根区都是
+  // 覆盖不到「任务 ↔ 已归档」：任务展开时靠末组 margin 塌穿包装层凑数，一旦收起
+  // 就塌成 0px（已归档贴着任务）。归档段移进包装层后，这里盯住任意折叠组合下四个根区都是
   // 同一档（第八轮收到 space.2、2026-10-20 第九轮随用户「再减小一点」收到 space.1、同日第十轮
   // 按「减小到2px」收到 space.0.5）；同时盯住行距只有一档——分组内与已归档区共用 space.0.5
   // （第五轮把行距收到 34px 后，分组覆盖曾留在 space.1，同一列两档行距，用户指认「而且要统一」）。
@@ -586,14 +589,14 @@ test.describe("近期工作栏窄列几何", () => {
         `${detail} ${JSON.stringify(list)}`).toBe(true);
     }
 
-    // 收起任务入口：此前这里塌成 0px（已归档贴着任务入口）。
+    // 收起任务：此前这里塌成 0px（已归档贴着任务）。
     await page.locator('[data-testid="recent-work-tasks"] > summary').click();
     await page.waitForTimeout(150);
     const tasksCollapsed = await read();
     expect(tasksCollapsed.gaps, JSON.stringify(tasksCollapsed))
       .toEqual([tasksCollapsed.space05, tasksCollapsed.space05, tasksCollapsed.space05]);
 
-    // 其余三段也收起：四处间距仍不变（任务入口保持收起，不再点它）。
+    // 其余三段也收起：四处间距仍不变（任务保持收起，不再点它）。
     for (const id of ["recent-work-goals", "recent-work-directories", "recent-work-archived"]) {
       await page.locator(`[data-testid="${id}"] > summary`).click();
     }
@@ -676,6 +679,123 @@ test.describe("近期工作栏窄列几何", () => {
   // 这正是用户说的「点击三个点位置会改变」。这里盯住四件事：静止态触发器完全不占几何
   // （绝对定位 + display:none，行盒逐像素不变）；展开后触发器逐像素不动；
   // 滚动容器高度不变（面板不推挤列表）；面板是 fixed 浮层、开在触发器下方并与其右缘对齐。
+  test("清空按钮常显在「会话（按目录）」标题右侧，点它只开确认、不折叠这一段", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    await page.goto("/agent");
+    await connect(page);
+    await page.getByTestId("recent-work-directories").waitFor();
+
+    const clearButton = page.getByTestId("workspace-clear-sessions");
+    // 常显：没有悬停也看得见；且只有一枚——挂在段标题上，不再下放到各个目录组。
+    await expect(clearButton).toBeVisible();
+    expect(await page.getByTestId("workspace-clear-sessions").count()).toBe(1);
+    await expect(page.locator('[data-testid^="workspace-clear-sessions-"]')).toHaveCount(0);
+
+    const rest = await page.evaluate(() => {
+      const section = document.querySelector<HTMLDetailsElement>('[data-testid="recent-work-directories"]')!;
+      const summary = section.querySelector<HTMLElement>(":scope > summary")!;
+      const title = summary.querySelector<HTMLElement>(".recent-work-section-title")!;
+      const clear = summary.querySelector<HTMLElement>('[data-testid="workspace-clear-sessions"]')!;
+      const chevron = summary.querySelector<SVGElement>("svg")!;
+      const style = getComputedStyle(summary);
+      const rootPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return {
+        clear: clear.getBoundingClientRect(), title: title.getBoundingClientRect(),
+        chevron: chevron.getBoundingClientRect(), summary: summary.getBoundingClientRect(),
+        clearDisplay: getComputedStyle(clear).display,
+        gap: Number.parseFloat(style.columnGap) || 0,
+        paddingRight: Number.parseFloat(style.paddingRight),
+        rootPx
+      };
+    });
+    // 就在名字右边：紧跟标题文字，间距不超过 summary 自己的一档 gap；折叠箭头仍留在行尾。
+    expect(rest.clearDisplay, JSON.stringify(rest)).not.toBe("none");
+    expect(rest.clear.left, JSON.stringify(rest)).toBeGreaterThanOrEqual(rest.title.right - 0.5);
+    expect(rest.clear.left - rest.title.right, JSON.stringify(rest)).toBeLessThanOrEqual(rest.gap + 1.5);
+    // 尺寸与「＋」「⋯」同一档（control.target.minimum=24px），不把段标题撑高。
+    expect(rest.clear.height, JSON.stringify(rest)).toBeCloseTo(24, 1);
+    expect(rest.clear.width, JSON.stringify(rest)).toBeCloseTo(24, 1);
+    expect(rest.chevron.left, JSON.stringify(rest)).toBeGreaterThan(rest.clear.right);
+    expect(rest.summary.right - rest.chevron.right, JSON.stringify(rest))
+      .toBeCloseTo(rest.paddingRight, 0);
+
+    // 点击不折叠这一段：确认框开出来，段仍是展开的；作用域是整段而不是单个目录。
+    await clearButton.click();
+    await expect(page.getByTestId("workspace-clear-count")).toBeVisible();
+    await expect(page.getByRole("dialog")).toContainText("清空「会话（按目录）」里的讨论");
+    await expect(page.getByRole("dialog")).toContainText("左栏「会话（按目录）」收集的讨论");
+    expect(await page.getByTestId("recent-work-directories").evaluate(
+      (element) => (element as HTMLDetailsElement).open)).toBe(true);
+    await page.getByTestId("workspace-clear-cancel").click();
+    expect(await page.getByTestId("recent-work-directories").evaluate(
+      (element) => (element as HTMLDetailsElement).open)).toBe(true);
+  });
+
+  test("「任务」段标题右侧常有「＋新建任务」：键贴标题、箭头留行尾，点击进创建页", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    await page.goto("/agent");
+    await connect(page);
+    await page.getByTestId("recent-work-tasks").waitFor();
+
+    const button = page.getByTestId("recent-work-new-task");
+    await expect(button).toBeVisible();
+    expect(await page.getByTestId("recent-work-new-task").count()).toBe(1);
+    const geometry = await page.evaluate(() => {
+      const section = document.querySelector<HTMLDetailsElement>('[data-testid="recent-work-tasks"]')!;
+      const summary = section.querySelector<HTMLElement>(":scope > summary")!;
+      const title = summary.querySelector<HTMLElement>(".recent-work-group-title")!;
+      const action = summary.querySelector<HTMLElement>('[data-testid="recent-work-new-task"]')!;
+      const chevron = summary.querySelector<SVGElement>("svg")!;
+      return { title: title.getBoundingClientRect(), button: action.getBoundingClientRect(),
+        chevron: chevron.getBoundingClientRect(), open: section.open };
+    });
+    expect(geometry.open).toBe(true);
+    // 就在「任务」名字右边，折叠箭头留在行尾；尺寸与清空键同一档（24px）。
+    expect(geometry.button.left).toBeGreaterThanOrEqual(geometry.title.right - 0.5);
+    expect(geometry.chevron.left).toBeGreaterThan(geometry.button.right);
+    expect(geometry.button.height).toBeCloseTo(24, 1);
+    expect(geometry.button.width).toBeCloseTo(24, 1);
+
+    await button.click();
+    await expect(page).toHaveURL(/\/tasks\?view=create/);
+  });
+
+  test("「任务」分组有执行中的 Run 时显示旋转的点状缺口圆环", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page, { runningFirstTask: true });
+    await page.goto("/agent");
+    await connect(page);
+
+    const ring = page.getByTestId(`recent-work-task-running-${projectA}`);
+    await expect(ring).toBeVisible();
+    const facts = await ring.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const path = element.querySelector("path")!;
+      // 量布局尺寸而不是外接矩形：旋转中的 12px 方盒，外接矩形会随角度变大。
+      return { width: (element as HTMLElement).offsetWidth, height: (element as HTMLElement).offsetHeight,
+        animationName: style.animationName, duration: style.animationDuration,
+        iteration: style.animationIterationCount,
+        dash: getComputedStyle(path).strokeDasharray };
+    });
+    // 与状态图标同一格：12px；匀速旋转取 motion.loop.spin（1s、infinite）。
+    expect(facts.width).toBeCloseTo(12, 1);
+    expect(facts.height).toBeCloseTo(12, 1);
+    expect(facts.animationName).toBe("recent-work-group-running-spin");
+    expect(facts.duration).toBe("1s");
+    expect(facts.iteration).toBe("infinite");
+    // 带缺口的点状：短划 + 间隔组成圆点，路径本身只画 270°。
+    expect(facts.dash).toContain("4.2");
+    // 指示挂在分组行上：收起分组后仍可见。
+    await page.locator('[data-testid="recent-work-tasks"] .recent-work-group > summary').first().click();
+    await expect(ring).toBeVisible();
+    // 减少动态效果只停旋转，环的形状与位置保留。
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(async () => ring.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+    expect(await ring.evaluate((element) => getComputedStyle(element).display)).not.toBe("none");
+  });
+
   test("会话行内触发器静止不占几何，展开面板是浮层且不推挤列表", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page);
@@ -812,7 +932,7 @@ test.describe("近期工作栏窄列几何", () => {
     expect(hovered.rowTop, JSON.stringify({ rest, hovered })).toBe(rest.rowTop);
     expect(hovered.rowBottom, JSON.stringify({ rest, hovered })).toBe(rest.rowBottom);
 
-    // 同一会话会同时落在「目标」与「工作区（目录）」两段（目标区条目 testid 带 goal 前缀，
+    // 同一会话会同时落在「目标」与「会话（按目录）」两段（目标区条目 testid 带 goal 前缀，
     // 行内操作按钮的 testid 不带、两份相同），.first() 命中的是从未悬停的目标区副本，
     // 它的触发器永远 display:none；点击必须按行落到刚悬停的那一份。
     await page.locator(`.recent-work-row:has([data-testid="recent-work-${sessionId}"])`)
@@ -1044,11 +1164,11 @@ test.describe("近期工作栏窄列几何", () => {
   });
 
   // 2026-10-20 第五轮（用户截图）：批量操作栏从主内容区上方居中的浮层挪回**左栏内部**，
-  // 落在「工作区（目录）」标题正下方。守六件事：① 无勾选时整块不存在；② 勾第一项后它出现在
-  // 左栏里、紧跟「工作区（目录）」段标题；③ 不越出左栏滚动容器的左右缘（不遮挡目录条目）；
+  // 落在「会话（按目录）」标题正下方。守六件事：① 无勾选时整块不存在；② 勾第一项后它出现在
+  // 左栏里、紧跟「会话（按目录）」段标题；③ 不越出左栏滚动容器的左右缘（不遮挡目录条目）；
   // ④ 在这一段里滚动时停在列顶（sticky），不跟着滚走；⑤ 计数与两键仍是轻量扁平那一档；
   // ⑥ 它只占用这一段的内部空间，不把左栏整体顶高、也不占主工作区。
-  test("批量操作栏落在左栏「工作区（目录）」标题下方、sticky 停在列顶且不越出侧栏", async ({ page }) => {
+  test("批量操作栏落在左栏「会话（按目录）」标题下方、sticky 停在列顶且不越出侧栏", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page);
     // 默认 fixture 只有 3 段会话，900px 高下左栏装得下、根本不滚动，sticky 无从体现。
@@ -1094,7 +1214,7 @@ test.describe("近期工作栏窄列几何", () => {
       return {
         // 落在左栏内部：操作栏是滚动容器的后代，不是 body 直属节点。
         inRail: scroll.contains(bar),
-        // 紧跟「工作区（目录）」段标题下方，且是它的兄弟（不是别处的浮层）。
+        // 紧跟「会话（按目录）」段标题下方，且是它的兄弟（不是别处的浮层）。
         afterSummary: summary.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING,
         // 不越出侧栏滚动容器的左右缘：不遮挡目录条目，也不横向溢出。
         insetLeft: barBox.left - scrollBox.left,
@@ -1156,7 +1276,7 @@ test.describe("近期工作栏窄列几何", () => {
         delta: Math.abs(barBox.top - scrollBox.top),
         // 滚动时仍在视口内可见。
         visible: barBox.top < scrollBox.bottom && barBox.bottom > scrollBox.top,
-        // 不盖住「工作区（目录）」段标题。
+        // 不盖住「会话（按目录）」段标题。
         coversSummary: barBox.top < summaryBox.bottom && barBox.bottom > summaryBox.top
       };
     });

@@ -42,7 +42,9 @@ export function desktopChildEnvironment(input: {
       : `http://tauri.localhost,${input.extraOrigin}`,
     RELAY_API_BEARER_TOKEN: input.frame.bearerToken,
     RELAY_API_STOP_ON_STDIN_EOF: 'true',
-    RELAY_LOG_LEVEL: 'fatal',
+    // 2026-11-10：桌面模式现在有自己的文件日志，'fatal' 会把 API 的启动与结算记录全部滤掉。
+    // 默认改为 info；需要更安静时在宿主环境里设 RELAY_LOG_LEVEL 覆盖。
+    RELAY_LOG_LEVEL: input.base.RELAY_LOG_LEVEL ?? 'info',
   };
 }
 

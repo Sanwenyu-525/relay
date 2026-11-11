@@ -19,14 +19,15 @@ export interface LiveActionError {
   readonly kind: LiveErrorKind;
   readonly message: string;
   /**
-   * 409 `SESSION_DELETE_BLOCKED` 的中文阻断原因（ADR-027）。单条删除只读 `message`；
+   * 409 `SESSION_DELETE_BLOCKED` 的中文阻断原因（ADR-027 旧口径）。服务端 2026-11-10 起
+   * 不再发出这项拒绝；保留解析只为兼容尚未升级的实例。单条删除只读 `message`；
    * 批量删除按它聚合——同一原因写一次、标题并列，不把「这条讨论还不能删除…」重复成 N 段。
    */
   readonly blockedReasons?: readonly string[];
   /**
    * 409 `SESSION_DELETE_BLOCKED` 的**原始阻断代码**（与 `blockedReasons` 一一对应）。
    * 展示用中文名（`blockedReasons`），可执行动作按这份代码取（`deleteBlockerAdvice`）：
-   * 「有学习记录」该提示去学习页清理，「下面还有子代理讨论」该提示先删子会话——
+   * 「有学习记录」该提示去学习页清理，「是父会话的一次委派」该提示回父会话处理——
    * 这两种处置完全不同，不能共用一句话。
    */
   readonly blockedReasonCodes?: readonly string[];
@@ -39,7 +40,6 @@ export interface LiveActionError {
 /** 删除阻断项的中文说明（ADR-027）；未知代码原样保留，避免新阻断被静默吞掉。 */
 const sessionDeleteBlockerLabels: Record<string, string> = {
   FORK_CHILDREN: "有分叉出去的讨论",
-  SUBAGENT_CHILDREN: "下面还有子代理会话",
   DELEGATION_LEDGER_REFERENCED: "是父会话的一次委派",
   TASK_ACCEPTANCE_CITED: "被任务验收观察引用",
   HYPOTHESIS_CITED: "被项目假设引用",
@@ -56,12 +56,11 @@ const sessionDeleteBlockerLabels: Record<string, string> = {
  * 每一类阻断项**确实能做的事**（2026-10-31）。
  *
  * 此前所有阻断都收在同一句「先改为归档，或在原对象解除引用后再删除」上：对「有学习记录」
- * 这种自己能清理的项，这句话等于让人放弃；对「下面还有子代理讨论」又没说要先处理子会话。
+ * 这种自己能清理的项，这句话等于让人放弃；对「是父会话的一次委派」又没说回父会话处理。
  * 阻断理由与可执行动作在这里一一对应，界面按原因各写一次——不重复、也不制造第二种说法。
  */
 const sessionDeleteBlockerAdvice: Record<string, string> = {
   FORK_CHILDREN: "先删除从它分叉出去的那些讨论",
-  SUBAGENT_CHILDREN: "先处理它派出去的那些子会话",
   DELEGATION_LEDGER_REFERENCED: "先在父会话里处理那次委派",
   TASK_ACCEPTANCE_CITED: "先在任务里解除对这条消息的验收引用",
   HYPOTHESIS_CITED: "先在项目里删除引用它那条消息的假设",

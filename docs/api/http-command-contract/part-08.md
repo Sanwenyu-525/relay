@@ -494,12 +494,13 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
 - **一致性**：事务外先确认会话可见，整份读取放进 `READ ONLY` + `REPEATABLE READ` 事务——消息、工具账本、清单快照与执行请求描述的是同一时刻，而不是各自读一次再拼。只读事务不加行锁，不挡正在生成的那一轮。
 - **不声明 response schema**（有意）：字段随各投影走；这里声明 TypeBox 会把没列出的列静默裁掉，正与「不静默残缺」冲突。
 - **顶层键固定**（EX-10 逐字核对）：`format`／`schema_version`／`exported_at`／`relay`／`snapshot`／`workspace`／`session`／`scope`／`model`／`context_usage`／`messages`／`tool_calls`／`model_calls`／`todos`／`executions`／`operations`／`file_changes`／`completeness`／`privacy`。bigint 一律转十进制字符串（`revision`、`seq` 等整型列都按这个收口走），JSON 里出现 number 就意味着精度可能已丢。
+- **逐段耗时可核对（2026-11-10）**：`model_calls[]` 除 `started_at`／`settled_at` 外追加 `first_stream_event_at`、`first_text_delta_at`、`first_preview_persisted_at`；三列都是既有观测，未观测为 `null`。聊天流不再就地展开「延迟诊断」，这些读数只在这里与 `generation_progress` 读。
 - **上限与部分导出**：消息上限 2000 条（沿用读消息的 200 条分页口径会丢历史，导出不沿用）；工具调用、模型调用、执行请求、动作各上限 500 条。超过即部分导出，`completeness.<集合>.{total,exported,limit,truncated,reason}` 自述；账本里挂着但本文件未导出消息的轮次以 `completeness.tool_calls_without_message` 点出。
 - **没有的事实不补**：工具结果正文（`session_tool_calls` 只存 `result_digest`）、Todo 变更历史（`assist_session_todo_events` 无面向界面的合法读口）、模型私有推理与应用版本分别写 `null` 或 `completeness.missing_evidence`；`relay.version_source='NOT_EXPOSED_BY_API'`，不从别处猜一个版本号。
 - **脱敏口径**：结构化字段按凭据键名与凭据值形态替换为 `[REDACTED:*]`，单字符串上限 32,768 字符（先脱敏再截断）；用户与 AI 的消息正文逐字保留，`privacy.message_content` 当面声明文件里可能含用户自己的资料；附件只导元数据，不内嵌二进制；接入配置与动作参数不进文件，动作只交 `params_sha256`。
 - **不推进任何事实**：不写回执、不结算、不推进 `revision`；`snapshot` 说明导出时刻会话是否在生成中，在途回复只带已落盘的即时草稿（`messages[].live_preview`），不把 PG 里不存在的「完整中间稿」补出来。
 
-**验证。** 真实 PG/HTTP `test/integration/session-export.integration.test.ts` **12/12**（EX-01–EX-12：正常会话证据齐全、归档可导、空会话不造占位、四态与拒绝原文、260 条长会话不被分页上限截断、520 条工具调用部分导出自述、生成中快照、跨 Workspace 404、凭据脱敏、顶层结构与十进制字符串、只读前后一致、代表性会话的动作身份与清单快照）。浏览器落盘与界面口径归[工作台 §28.1](../../frontend/workbench-design/part-09.md#281-左栏recentworkrail)。
+**验证。** 真实 PG/HTTP `test/integration/session-export.integration.test.ts` 原有 **12/12**（EX-01–EX-12：正常会话证据齐全、归档可导、空会话不造占位、四态与拒绝原文、260 条长会话不被分页上限截断、520 条工具调用部分导出自述、生成中快照、跨 Workspace 404、凭据脱敏、顶层结构与十进制字符串、只读前后一致、代表性会话的动作身份与清单快照）；2026-11-10 复跑 **11/12**：EX-01 的新增时间戳断言通过，EX-12 失败为 `d61a1a2f` 起既有（`markUnknown()` 写 `settled_at`，旧断言仍要求 `null`），非本轮改动。浏览器落盘与界面口径归[工作台 §28.1](../../frontend/workbench-design/part-09.md#281-左栏recentworkrail)。
 
 ### 10.130 会话回复的实时 Token 读数（2026-11-01 源码实现，迁移 0155）
 
@@ -562,13 +563,15 @@ Breaking Change: **No**。新增一个只读端点，旧客户端不调用它就
 
 **首流事件接线。** 默认兼容端口的 A 档、普通主循环、工具续轮、人设助手只读轮次（B 档）、子 Agent 与学习轮次现在每次真实调用都传 `onStreamEvent`，写 `first_stream_event_at`；B 档同时补 `model_calls` 行（此前默认端口直接调用 `modelPort.assist`，没有调用计量）。免费路由已有自己的包装，重复观测因 `first_stream_event_at is null` 的条件 UPDATE 成为空操作。证据写入失败只丢这一枚时间，不把成功调用改判为失败，也不吞掉业务异常。该观测位于 Provider 流回调内：2026-11-04 起**有界化**（500 ms 上限，超时后原写入在后台继续完成），数据库瞬时变慢时不再把观测写入变成正文增量的阻塞点；超时/失败都不改判业务调用，审计仍以最终落库结果为准。
 
-**诊断口径。** 客户端在阶段行下就地展开只读读数：提交→模型请求登记（含排队与上下文准备）、请求→首流、首流→首正文、首正文→预览可见、请求→调用结算；Worker 领取时刻为「未记录（排队与上下文准备合并计算）」，前端首次绘制为「本机未观测」。**不得把消息总耗时当作模型推理耗时**，也不混算服务端与本机时钟。
+**诊断口径（2026-11-10 修订）。** 服务端仍返回 `generation_progress` 供阶段文案使用；聊天流只显示一行阶段文案，**不再就地展开「延迟诊断」**。逐段耗时改为随 `GET /assist-sessions/{id}/export` 的 `model_calls[]` 提供：`started_at`、`first_stream_event_at`、`first_text_delta_at`、`first_preview_persisted_at`、`settled_at`（未观测为 `null`，不补造）。**不得把消息总耗时当作模型推理耗时**，也不混算服务端与本机时钟；Worker 领取时刻没有观测点，排队与上下文准备合并计算。
 
 **不泄露。** 响应不含提示词、上下文正文、reasoning、工具参数或凭据；`call_count` 与时间戳只用于诊断。
 
+**执行活动的同一口径（2026-11-10）。** `GET /assist-sessions/{id}/activity` 的 `activities` 与 `activity_counts.model_calls` 只投影 `kind='ASSIST' and purpose='PRIMARY'` 的模型调用；`TITLE`、`MEMORY_CAPTURE`、`MEMORY_COMPACT` 仍保留在 `model_calls` 账本与会话导出里，但不冒充一次回复的步骤。这与 `usage_summary`、`generation_progress` 的 PRIMARY 口径一致：过程区列出的调用次数与本轮 token 读数据此可以对账。`process_evidence` 仍只由这些主调用或工具记录决定；辅助外呼单独存在不把过程证据升级为 `RECORDED`。
+
 Breaking Change: **No**——纯追加可选只读字段；旧客户端忽略即可，命令、表、权限、结算与恢复语义均不变。
 
-**证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间；2026-11-04 追加 `call_count=0` 与 FAILED/CANCELLED 结算投影）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` **53/53**（含「`generation_progress` 接受 `call_count=0` 及全部边界」与流式观测：首流、首文本、首预览、结算四枚时间落库，辅助外呼不混入；临时集群 PASSED 并清理，日志 `tmp/AGENT-CORE-RELIABILITY-V2/integration-assist.log`）；组件 `generationStage` **8/8**、`assistStage` **3/3**（阶段文案、诊断、PENDING、草稿接管、取消）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、诊断展开、窄窗无溢出、减少动效三点静止）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。
+**证据。** 单元 `assist-generation-progress` **7/7**（阶段派生、工具续轮取最新、DTO 时间；2026-11-04 追加 `call_count=0` 与 FAILED/CANCELLED 结算投影）与 `openai-compatible-model-port` 的 reasoning-only 观测（首流触发、正文增量保持为空）；真实 PG/HTTP `assist.integration.test.ts` **53/53**（含「`generation_progress` 接受 `call_count=0` 及全部边界」与流式观测：首流、首文本、首预览、结算四枚时间落库，辅助外呼不混入；临时集群 PASSED 并清理，日志 `tmp/AGENT-CORE-RELIABILITY-V2/integration-assist.log`）；组件 `generationStage` **4/4**（阶段文案；诊断投影 2026-11-10 随聊天流入口一并删除）、`assistStage` **3/3**（阶段文案、PENDING、草稿接管、取消，并断言阶段行不再渲染 `details`）；真实 Chromium `assistStageVisibility` **2/2**（阶段推进与截图、无诊断入口、窄窗无溢出、减少动效三点静止）；真实 PG `session-export` EX-01 通过（2026-11-10 新增断言：`model_calls[]` 带首流/首正文/首预览三枚时间戳）；整套 **11/12**，EX-12 是 `d61a1a2f` 起既有失败（`markUnknown()` 已写 `settled_at`，旧断言仍要求 `null`，与本轮无关）。规则归[生成生命周期](../../development/agent-generation-lifecycle.md#等待阶段的流式观测2026-11-01-agent_stream_visibility)与[工作台 §18.6.4](../../frontend/workbench-design/part-06.md#1864-等待阶段行三点旁的一句真实进度2026-11-01)。
 
 ### 10.132 会话标题的来源与系统命名（2026-11-01 源码实现，迁移 0157）
 
@@ -585,6 +588,7 @@ Breaking Change: **No**——纯追加可选只读字段；旧客户端忽略即
 - 不传 `title_source` 按 `USER_DEFINED`：既有客户端/测试显式给的名字默认受保护，这不是行为破坏。
 - 传 `PROVISIONAL` 表示「这是系统占位」：未关联项目/任务的讨论由服务端把提交文本规范化为 `分类-任务名`（分类枚举固定为 UI／功能／修复／架构／测试／调研／文档／其他）；关联了项目/任务的讨论保留既有 `关于<目标>`，等首次语义生成换成正式结构化标题。
 - `title_source` 进命令体参与载荷摘要：同一 `command_id` 换来源重放按异载荷拒绝。
+- **2026-11-10 补充：短首发输入不发起自动命名。** 首轮用户消息去空白后不足 10 个字符时不写 `assist_title_generations` 请求，标题保持建会话时的 `PROVISIONAL` 占位名；纯寒暄的占位名保留首条消息原文（如「其他-你好」），不再退化成 `其他-新会话`。口径与上游 ZCode 相同（`MIN_GENERATED_TITLE_INPUT_CHARS = 10`）。显式重新生成（`POST …/title/generate`）不受这条限制。
 
 **会话 DTO 追加只读字段。**
 ```json

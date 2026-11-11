@@ -224,8 +224,8 @@ export function reopenAssistSession(http: RelayHttp, input: { sessionId: string;
 
 /**
  * 物理删除（ADR-027）。与归档不同，它不可撤销：回执只核对身份，界面不得据此提供恢复入口。
- * 被其它对象引用的会话按 409 `SESSION_DELETE_BLOCKED` 拒绝，阻止项在 problem 的
- * `blocking_reasons` 里；那是可读的业务拒绝，不是回执不明。
+ * 2026-11-10 起服务端不再按外部引用拒绝（外部对象保留、来源解除）；仍保留对旧实例
+ * 409 `SESSION_DELETE_BLOCKED` / `blocking_reasons` 的解析，作为可读的业务拒绝处理。
  */
 export function deleteAssistSession(http: RelayHttp, input: { sessionId: string; commandId: string;
   expectedRevision: DecimalRevision }): Promise<RelayAssistSessionDelete> {

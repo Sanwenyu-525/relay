@@ -415,6 +415,82 @@ fn append_worker_log_capped(path: &std::path::Path, line: &str, rotate_bytes: u6
 fn append_worker_log(path: &std::path::Path, line: &str) {
     append_worker_log_capped(path, line, WORKER_LOG_ROTATE_BYTES);
 }
+/// Host-side log file: `<data-root>/logs/desktop.log`.
+///
+/// The Tauri host must survive a bad `desktop.env` or a panicking WebView2 setup, so it cannot
+/// depend on the API logger. Resolution mirrors the trial data directory: `RELAY_DATA_ROOT`,
+/// then `%APPDATA%\dev.relay.agent\trial-data`, then a temp directory.
+fn desktop_log_path() -> PathBuf {
+    if let Some(root) = std::env::var_os("RELAY_DATA_ROOT").map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        return root.join("logs").join("desktop.log");
+    }
+    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        return app_data
+            .join("dev.relay.agent")
+            .join("trial-data")
+            .join("logs")
+            .join("desktop.log");
+    }
+    std::env::temp_dir().join("relay-desktop-logs").join("desktop.log")
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other if (other as u32) < 0x20 => {
+                escaped.push_str(&format!("\\u{:04x}", other as u32))
+            }
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
+/// Append one JSON line to the host log. Write failures stay silent: logging must never be the
+/// reason the desktop refuses to start.
+fn append_desktop_log(event: &str, fields: &[(&str, &str)]) {
+    let mut payload = String::from("{\"event\":\"");
+    payload.push_str(&json_escape(event));
+    payload.push('"');
+    for (key, value) in fields {
+        payload.push_str(",\"");
+        payload.push_str(&json_escape(key));
+        payload.push_str("\":\"");
+        payload.push_str(&json_escape(value));
+        payload.push('"');
+    }
+    payload.push('}');
+    append_worker_log_capped(&desktop_log_path(), &payload, WORKER_LOG_ROTATE_BYTES);
+}
+
+/// Panic records used to disappear with the console. Persist them before unwinding.
+fn install_panic_log_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_owned());
+        let location = info
+            .location()
+            .map(|place| format!("{}:{}", place.file(), place.line()))
+            .unwrap_or_else(|| "unknown location".to_owned());
+        append_desktop_log(
+            "desktop_panic",
+            &[("message", &message), ("location", &location)],
+        );
+        eprintln!("Relay Agent panic: {message} ({location})");
+    }));
+}
 
 /// UTC ISO-8601（毫秒）时间戳；civil-from-days（Howard Hinnant 算法）免依赖。
 fn iso_utc_timestamp() -> String {
@@ -1189,6 +1265,9 @@ fn show_error(message: &str) {
 }
 
 pub fn run() {
+    // Host-side logging must be live before anything else can panic.
+    install_panic_log_hook();
+    append_desktop_log("desktop_process_start", &[]);
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.iter().any(|argument| argument == "--maintenance-session") {
         #[cfg(windows)]
@@ -1244,6 +1323,7 @@ pub fn run() {
     if let Err(error) = result {
         let message = error.to_string();
         eprintln!("Relay Agent startup failed: {message}");
+        append_desktop_log("desktop_startup_failed", &[("message", &message)]);
         #[cfg(windows)]
         show_error(&message);
         std::process::exit(1);

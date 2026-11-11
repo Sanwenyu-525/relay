@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ActivityRecordRepository } from '../audit/activity-record-repository.js';
 import type { DbExecutor } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import { ModelCallRepository, type ModelCallOrigin,
   type ModelCallSettlement } from '../model/model-call-repository.js';
@@ -33,6 +34,10 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
   const calls = new ModelCallRepository(db);
   await calls.begin(callId, input.contextUsage === undefined ? input.origin
     : { ...input.origin, contextUsage: input.contextUsage }, input.identity);
+  getRuntimeLogger('model-call').info('model_call_started', {
+    model_call_id: callId, model: input.identity.model,
+    provider: input.identity.provider, origin: input.origin,
+  });
   let result: T;
   try {
     result = await input.invoke(callId);
@@ -62,9 +67,18 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
       ...(typeof evidence.providerRequestId === 'string'
         ? { providerRequestId: evidence.providerRequestId } : {}),
       ...(knownUsage === undefined ? {} : { usage: knownUsage }) });
+    getRuntimeLogger('model-call').error('model_call_failed', {
+      model_call_id: callId, status: aborted ? 'CANCELLED' : 'FAILED',
+      error_kind: aborted ? null
+        : providerCategory ?? (error instanceof Error ? error.name : 'UNKNOWN'),
+      provider_request_id: typeof evidence.providerRequestId === 'string'
+        ? evidence.providerRequestId : null,
+      usage: knownUsage ?? null,
+    });
     throw error;
   }
   await calls.settle(callId, input.settle(result));
+  getRuntimeLogger('model-call').info('model_call_settled', { model_call_id: callId });
   return { callId, result };
 }
 

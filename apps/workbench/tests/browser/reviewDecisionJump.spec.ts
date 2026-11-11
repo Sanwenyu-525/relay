@@ -6,6 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
 // 全程不点任何决定按钮：页内定位只是移动视图，不提交、不批准。
 
 const apiBase = "http://127.0.0.1:8787";
+// 桩的 CORS 放行头必须与页面 origin 一致；页面端口由 RELAY_E2E_PORT 决定（默认 4173）。
+// 此前写死 4173，在 RELAY_E2E_PORT=4312 端口纪律下连接探测会被 CORS 拦截而永远回到 fixture。
+const pageOrigin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
@@ -41,7 +44,7 @@ const draftBody = ["# 第 3 章 方法与材料",
 async function connect(page: Page): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const headers = { "access-control-allow-origin": "http://127.0.0.1:4173",
+    const headers = { "access-control-allow-origin": pageOrigin,
       "access-control-allow-headers": "Authorization, Content-Type" };
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     // 其余路径统一按空集合回答：连接校验会探测多个只读入口，404 会让整次连接判定失败。

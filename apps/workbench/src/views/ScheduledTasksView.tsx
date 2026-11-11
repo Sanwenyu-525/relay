@@ -13,6 +13,11 @@ const statusLabels: Record<RelayScheduledTaskStatus, string> = {
   ENABLED: "启用中", PAUSED: "已暂停", DISABLED: "已停用", EXPIRED: "已到期",
 };
 
+/** 状态 chip 的展示语气：启用中积极、到期需要行动（先编辑再显式启用）、暂停与停用是中性静默态。 */
+const statusTones: Record<RelayScheduledTaskStatus, "success" | "neutral" | "warning"> = {
+  ENABLED: "success", PAUSED: "neutral", DISABLED: "neutral", EXPIRED: "warning",
+};
+
 /** 结果未知时冻结的状态变更：命令 ID、载荷与发起时的 API/Workspace 必须一起保留。 */
 interface PendingStatusChange {
   readonly input: RelayScheduledTaskStatusInput;
@@ -192,10 +197,11 @@ export default function ScheduledTasksView() {
         </div>
       </section>}
       {notice && <p className="receipt-message" role="status">{notice}</p>}
-      {pending && <div className="warning-callout" role="alert" data-testid="scheduled-status-pending">
+      {pending && <div className="warning-callout scheduled-pending" role="alert" data-testid="scheduled-status-pending">
         <Info aria-hidden="true" />
         <div>
-          <p>状态修改结果未确认，本次提交是否生效尚未确定。原 command_id：<code>{pending.input.commandId}</code>。
+          <p className="scheduled-pending-title">状态修改结果未确认</p>
+          <p>本次提交是否生效尚未确定。原 command_id：<code>{pending.input.commandId}</code>。
             先查询回执；在确认之前不要重复提交，其它操作也已禁用。</p>
           {pendingNote && <p>{pendingNote}</p>}
           <div className="form-actions">
@@ -211,18 +217,22 @@ export default function ScheduledTasksView() {
         <p>新建一条：选定项目、写下这次要完成什么、设置重复规则与执行次数上限。</p>
       </section>}
       {items.length > 0 && <section className="surface-panel" aria-label="定时任务列表">
-        <table className="data-table" data-testid="scheduled-tasks-table">
+        {/* 窄窗降级为行卡片时，列语义由每个 td 的 data-label 保留（表头隐藏但仍在文档中）。 */}
+        <table className="data-table scheduled-table" data-testid="scheduled-tasks-table">
           <thead><tr><th scope="col">定时任务</th><th scope="col">项目</th><th scope="col">重复</th>
-            <th scope="col">下次触发</th><th scope="col">已执行</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-          <tbody>{items.map((task) => <tr key={task.scheduledTaskId} data-testid={`scheduled-task-row-${task.scheduledTaskId}`}>
-            <td><Link className="text-link" to={`/scheduled-tasks/${task.scheduledTaskId}`}>{task.title}</Link>
+            <th scope="col">下次触发</th><th scope="col" className="scheduled-col-num">已执行 / 上限</th>
+            <th scope="col">状态</th><th scope="col" className="scheduled-col-actions">操作</th></tr></thead>
+          <tbody>{items.map((task) => <tr key={task.scheduledTaskId} data-testid={`scheduled-task-row-${task.scheduledTaskId}`}
+            aria-busy={busyId === task.scheduledTaskId || undefined}>
+            <td data-label="定时任务"><Link className="text-link scheduled-task-link" to={`/scheduled-tasks/${task.scheduledTaskId}`}>{task.title}</Link>
               <small>{task.localTime} · {task.timezone}</small></td>
-            <td>{task.project?.title ?? task.projectId}</td>
-            <td>{describeRepeat(task)}</td>
-            <td>{task.nextDueAt === null ? "—" : formatInZone(task.nextDueAt, task.timezone)}</td>
-            <td>{task.runsStarted} / {task.maxRuns}</td>
-            <td><span className={`status-chip status-chip--${task.status.toLowerCase()}`}>{statusLabels[task.status]}</span></td>
-            <td className="scheduled-task-actions">
+            <td data-label="项目">{task.project?.title ?? task.projectId}</td>
+            <td data-label="重复">{describeRepeat(task)}</td>
+            <td data-label="下次触发">{task.nextDueAt === null ? <span className="scheduled-cell-muted">—</span>
+              : <strong className="scheduled-next">{formatInZone(task.nextDueAt, task.timezone)}</strong>}</td>
+            <td data-label="已执行 / 上限" className="scheduled-col-num scheduled-cell-num">{task.runsStarted} / {task.maxRuns}</td>
+            <td data-label="状态"><span className={`status-chip status-chip--${statusTones[task.status]}`}>{statusLabels[task.status]}</span></td>
+            <td data-label="操作" className="scheduled-task-actions scheduled-col-actions">
               {task.status === "ENABLED" && <button className="text-button" type="button" disabled={frozen}
                 onClick={() => void changeStatus(task, "PAUSED")}>暂停</button>}
               {task.status === "PAUSED" && <button className="text-button" type="button" disabled={frozen}

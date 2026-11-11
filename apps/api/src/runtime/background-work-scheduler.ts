@@ -7,6 +7,7 @@ import { runMemberWakeupTick } from '../application/member-wakeup.js';
 import { runSessionTitleGenerationTick } from '../application/session-title-generation.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import type { RelayDatabase } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { FakeModelPort, isFakeModelPort, type AssistModelPort } from '../workflow/fake-model-port.js';
 import { readModelPortConfig } from '../workflow/model-port-config.js';
@@ -52,6 +53,9 @@ function readCapLeniently(app: FastifyInstance): number {
   if (!Number.isInteger(value) || value < 1 || value > 64) {
     app.log.warn({ code: 'BACKGROUND_CONCURRENCY_CAP_INVALID', value: raw },
       'background_concurrency_cap_invalid_using_default');
+    getRuntimeLogger('scheduler').warn('background_concurrency_cap_invalid', {
+      code: 'BACKGROUND_CONCURRENCY_CAP_INVALID', value: raw,
+    });
     return DEFAULT_MAX_CONCURRENT_EXECUTIONS;
   }
   return value;
@@ -64,6 +68,7 @@ export function registerBackgroundWorkScheduler(
 ): void {
   // 认领身份按进程唯一：宿主重启后的新进程不能顶着旧身份去接续一条可能还活着的租约。
   const workerId = `api:${process.pid}`;
+  const schedulerLog = getRuntimeLogger('scheduler');
   const controller = new AbortController();
   // 并发上界：路由层传入配置校验后的值；直接调用（单测）时宽松读环境变量（非法值
   // 告警后用默认上界，不经 loadConfig 的调用方仍留下可定位的事实，不静默）。
@@ -89,6 +94,9 @@ export function registerBackgroundWorkScheduler(
         // 这里避免「无配置」静默停摆。
         app.log.warn({ code: 'BACKGROUND_MODEL_UNAVAILABLE' },
           'background_member_wakeup_skipped_without_model_config');
+        schedulerLog.warn('background_model_unavailable', {
+          code: 'BACKGROUND_MODEL_UNAVAILABLE',
+        });
       }
     } else {
       memberWakeupModelPort = createModelPort(config);
@@ -96,6 +104,9 @@ export function registerBackgroundWorkScheduler(
   } catch {
     app.log.warn({ code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED', reason: 'MODEL_CONFIG_INVALID' },
       'background_member_wakeup_disabled_by_invalid_model_config');
+    schedulerLog.warn('background_member_wakeup_disabled', {
+      code: 'BACKGROUND_MEMBER_WAKEUP_DISABLED', reason: 'MODEL_CONFIG_INVALID',
+    });
   }
 
   let active = false;
@@ -118,6 +129,9 @@ export function registerBackgroundWorkScheduler(
         lastFailures.set(stage, signature);
         app.log.warn({ code: 'BACKGROUND_WORK_TICK_FAILED', stage,
           error_name: name, error_message: message }, 'background_work_tick_failed');
+        schedulerLog.warn('background_work_tick_failed', {
+          code: 'BACKGROUND_WORK_TICK_FAILED', stage, error_name: name, error_message: message,
+        });
       }
       return undefined;
     }
@@ -139,6 +153,10 @@ export function registerBackgroundWorkScheduler(
             lastThrottleKey = key;
             app.log.warn({ code: 'BACKGROUND_WORK_THROTTLED', active_executions: admission.active,
               concurrency_cap: admission.cap }, 'background_work_throttled_by_concurrency_cap');
+            schedulerLog.warn('background_work_throttled', {
+              code: 'BACKGROUND_WORK_THROTTLED', active_executions: admission.active,
+              concurrency_cap: admission.cap,
+            });
           }
           return;
         }
@@ -178,6 +196,12 @@ export function registerBackgroundWorkScheduler(
       error instanceof Error ? error.name : typeof error,
       error_message: error instanceof Error ? error.message : String(error) },
       'background_work_tick_unexpected_failure');
+    schedulerLog.error('background_work_tick_crashed', {
+      code: 'BACKGROUND_WORK_TICK_CRASHED',
+      error_name: error instanceof Error ? error.name : typeof error,
+      error_message: error instanceof Error ? error.message : String(error),
+      error,
+    });
   };
 
   app.addHook('onReady', async () => {

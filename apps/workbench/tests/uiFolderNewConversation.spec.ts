@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { activateRelayConnection } from "../src/lib/relayConnection";
-import { rememberWorkingDirectory } from "../src/lib/recentWorkingDirectories";
+import { rememberWorkingDirectory, readRecentWorkingDirectories } from "../src/lib/recentWorkingDirectories";
 import { flush, folderStripAssociation, folderStripName, mountWorkbench, openFolderDialog, openWorkingDirectory } from "./mountApp";
 
 /**
@@ -391,6 +391,32 @@ describe("从已有会话新建时继承目录", () => {
       expect((view.wrapper.get('[data-testid="assist-first-draft"]').element as HTMLTextAreaElement).value).toBe("");
       expect(bindingPosts(h)).toHaveLength(0);
       expect(directoryBindingPosts(h)).toHaveLength(0);
+    } finally { view.unmount(); }
+  });
+});
+
+describe("查看会话会更新最近目录", () => {
+  /**
+   * 2026-11-10 用户指令「目录没有持久化」：最近目录不能只在手动打开目录那一下更新。
+   * 打开一条服务端已绑定目录的会话，本机最近目录也要跟着它走；不带来源的新对话
+   * （如应用重启后从空页开新对话）才会沿用这个实际工作的目录。
+   */
+  it("打开已绑定目录的会话后，不带来源的新对话沿用这个目录", async () => {
+    const h = harness({ workspaceSessions: () => [session({ id: workspaceSessionId, project_id: null,
+      title: "未归属讨论", working_resource_id: "res-1" })],
+      sessionRead: (id) => id === workspaceSessionId
+        ? session({ id, project_id: null, title: "未归属讨论", working_resource_id: "res-1",
+          context: sessionContext(rootA) })
+        : session({ id, project_id: projectId, context: sessionContext(rootA) }) });
+    const view = await mount("/agent", h);
+    try {
+      await flush(); await flush(); await flush();
+      // 自动续上的会话已带目录 A：一次目录命令都没发过，最近目录也应指向 A。
+      expect(readRecentWorkingDirectories()[0]?.canonicalRoot).toBe(rootA);
+      await view.router.push("/agent?new=next");
+      await flush(); await flush(); await flush();
+      expect(openPosts(h).at(-1)?.body.root_path).toBe(rootA);
+      expect(folderStripName()).toBe("ProjectA");
     } finally { view.unmount(); }
   });
 });

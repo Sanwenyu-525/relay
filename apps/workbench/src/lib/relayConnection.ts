@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { RelayApiClient, type RelayApiConnection } from "../api/relayClient";
 import { clearSessionArtifacts } from "./sessionArtifacts";
+import { clearSessionTranscriptCache } from "./sessionTranscriptCache";
 
 export type RelayDataMode = "fixture" | "live";
 
@@ -18,6 +19,8 @@ export let relayConnection: RelayConnectionState = { mode: "fixture", client: nu
 
 function publish(next: Omit<RelayConnectionState, "epoch">): void {
   clearSessionArtifacts();
+  // 会话转录缓存按连接代次失效：换工作区/重连后不能把上一个连接的列表先画出来。
+  clearSessionTranscriptCache();
   relayConnection = { ...next, epoch: relayConnection.epoch + 1 };
   listeners.forEach((listener) => listener());
 }

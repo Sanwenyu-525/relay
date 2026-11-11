@@ -200,12 +200,15 @@ export default function ReviewsView() {
     {selected && (selectedId === null || selected.id === selectedId) ? <article className="review-detail" aria-label="所选待审请求详情">
       <div className="review-detail-heading"><h2>为何需要你</h2><span className={`status-chip status-chip--${selected.status === "OPEN" || selected.status === "EXPIRED" ? "warning" : "neutral"}`}>{status(selected)}</span></div>
       <p className="review-reason">{reviewReasonText(selected.reason)}</p>
-      <dl className="review-request-facts"><div><dt>请求事项 · {kindLabels[selected.kind]}</dt><dd>{title(selected)}</dd></div><div><dt>请求时间</dt><dd><time dateTime={selected.createdAt}>{requestTime(selected.createdAt)}</time></dd></div></dl>
+      <dl className="review-request-facts">
+        <div><dt>请求事项 · {kindLabels[selected.kind]}</dt><dd>{title(selected)}</dd></div>
+        <div><dt>请求时间</dt><dd><time dateTime={selected.createdAt}>{requestTime(selected.createdAt)}</time></dd></div>
+        {selected.expiresAt && <div><dt>有效期</dt><dd><span data-testid="review-expires-at">有效期至：{requestTime(selected.expiresAt)}</span></dd></div>}
+      </dl>
       <details className="review-request-identity"><summary>请求身份 · v{selected.revision}</summary><p className="helper-text">请求 ID：<code className="hash-code">{selected.id}</code> · 请求 v{selected.revision}</p>{selected.projectId && <p className="helper-text">Project ID：{selected.projectId}</p>}{selected.taskId && <p className="helper-text">Task ID：{selected.taskId}</p>}</details>
-      {selected.expiresAt && <p className="helper-text" data-testid="review-expires-at">有效期至：{requestTime(selected.expiresAt)}</p>}
-      {selected.taskId && live && <div className="form-actions"><Link className="text-link" to={`/tasks/${selected.taskId}?tab=artifacts`}>查看关联任务与产物</Link>{typeof selected.target.artifact_version_id === "string" && <Link className="text-link" to={`/artifact-versions/${selected.target.artifact_version_id}/lineage`}>核对版本来源</Link>}</div>}
+      {selected.taskId && live && <div className="form-actions review-detail-links"><Link className="text-link" to={`/tasks/${selected.taskId}?tab=artifacts`}>查看关联任务与产物</Link>{typeof selected.target.artifact_version_id === "string" && <Link className="text-link" to={`/artifact-versions/${selected.target.artifact_version_id}/lineage`}>核对版本来源</Link>}</div>}
       {/* TASK-ACCEPTANCE-RETURN-20261106：判断保存后沿原 Run 核对完成，不重复提交完成命令。 */}
-      {live && selected.runId && <div className="form-actions"><Link className="text-link" data-testid="review-return-run"
+      {live && selected.runId && <div className="form-actions review-detail-links"><Link className="text-link" data-testid="review-return-run"
         to={`/runs/${selected.runId}`}>查看执行与完成状态</Link></div>}
       <ReviewDecisionPanel live={live} review={selected} writeBlockedReason={projectWriteBlockedReason}
         busy={loading || refreshing} onRefresh={load} />

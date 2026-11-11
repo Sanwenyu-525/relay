@@ -28,8 +28,7 @@ export default function ActivityDetail({ item }: { readonly item: ActivityItem }
   const reasonLabel = reason === null ? "" : activityReasonLabel(reason);
 
   return <div className="activity-detail">
-    <p className="activity-detail-meta">工具 <code className="hash-code">{item.toolName}</code></p>
-    <p className="activity-detail-label">参数</p>
+    <p className="activity-detail-label">参数 · <code className="hash-code">{item.toolName}</code></p>
     <pre data-testid={`activity-detail-args-${item.id}`}>
       {JSON.stringify(detail.args ?? {}, null, 2)}</pre>
     {detail.resultText !== null && <>
@@ -52,7 +51,7 @@ export default function ActivityDetail({ item }: { readonly item: ActivityItem }
       {reasonLabel === reason ? "" : `（码 ${reason}）`}</p>}
     {/* 会话账本没有结果正文时，明确说清缺的是什么——不是「没有输出」，而是「这个账本不存」。 */}
     {detail.resultText === null && item.source === "SESSION_TOOL_CALL" && <p className="activity-detail-meta">
-      会话账本只记录请求与结算，不保存工具结果正文；实际结果在该 Run 的工具轨迹里核对。
+      会话账本不保存结果正文，结果在该 Run 的工具轨迹里核对。
     </p>}
   </div>;
 }

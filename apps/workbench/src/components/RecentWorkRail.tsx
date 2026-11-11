@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Folder, Search, SquarePen, Target } from "lucide-react";
+import { ChevronDown, Folder, Plus, Search, SquarePen, Target } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayAssistSession, type RelayProjectListItem, type RelayTaskSummary } from "../api/relayClient";
 import { readActiveConversation, useActiveConversation } from "../lib/activeConversation";
 import { deleteBlockerAdvice, describeLiveError } from "../lib/liveErrors";
-import { copyText, deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelete";
+import { deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelete";
 import { resolveMotionPreference } from "../lib/motionPreference";
 import { railGroupKey, readCollapsedRailGroups, writeCollapsedRailGroups } from "../lib/railGroupPreferences";
 import { readRailSessionOrder, writeRailSessionOrder } from "../lib/railSessionOrder";
+import { sessionDirectoryKey } from "../lib/sessionDirectory";
 import { sessionStateNote } from "../lib/sessionState";
 import { handleRosterKeyDown } from "../lib/tabNavigation";
 import { resolvedTokenValue } from "../lib/tokens";
 import EmptyState from "./EmptyState";
+import { Notice, Toast } from "./Feedback";
 import RecentWorkRow from "./RecentWorkRow";
+import WorkspaceClearSessions from "./WorkspaceClearSessions";
 import type { SessionRowPatch } from "./SessionRowMenu";
 
 /**
@@ -56,22 +59,34 @@ function batchSummary(report: BatchDeleteReport): string {
   return parts.join("，");
 }
 
-/**
- * 被阻止的那几段怎么点名：同名会话不重复念标题，三条「关于Relay-Agent」写成
- * 「「关于Relay-Agent」等 3 段」（2026-10-20 用户截图指认的那三遍红字就是从这儿来的）。
- */
-function blockedWho(titles: readonly string[]): string {
-  const unique = [...new Set(titles)];
-  if (unique.length === 1) {
-    return `「${unique[0]}」${titles.length > 1 ? `等 ${titles.length} 段` : "这条讨论"}`;
-  }
-  return `${unique.map((title) => `「${title}」`).join("")}这 ${titles.length} 段`;
-}
-
 /** 每一类阻断对应的可执行动作；同一组原因只写一次。 */
 function blockedAdvice(codes: readonly string[]): string {
   const advices = [...new Set(codes.map((code) => deleteBlockerAdvice(code)))];
   return advices.length === 0 ? "改为归档，或在原对象解除引用后再删除" : `${advices.join("；")}。`;
+}
+
+/**
+ * 批量删除失败/待核实的那一条非阻塞提示（2026-11-10）。
+ *
+ * 只写结论与去重后的原因，不点名会话标题：标题可能就是用户那一长段提示词，点名会把
+ * 这张反馈卡重新撑成截图里那种滚不完的红字。逐条身份仍留在 `batchResult` 里，
+ * 「核对回执」按原 command_id 核对时用得到。
+ */
+function batchNoticeText(report: BatchDeleteReport): string {
+  const parts = [batchSummary(report)];
+  const reasons = [...new Set(report.blocked.flatMap((group) => group.reasons))];
+  if (reasons.length > 0) {
+    const codes = [...new Set(report.blocked.flatMap((group) => group.reasonCodes))];
+    parts.push(`未删除原因：${reasons.join("、")}。${blockedAdvice(codes)}`);
+  }
+  if (report.failed.length > 0) {
+    const messages = [...new Set(report.failed.map((item) => item.message))];
+    parts.push(`删除失败：${messages.join("；")}。`);
+  }
+  if (report.unresolved.length > 0) {
+    parts.push("待核实的条目只按原命令核对回执，不要重复删除。");
+  }
+  return parts.join(" ");
 }
 
 interface Loaded {
@@ -94,6 +109,12 @@ interface Row {
   readonly pinned: boolean;
   /** 未读只是导航标记（0104），不参与分组与排序。 */
   readonly unread: boolean;
+  /**
+   * 任务当前有 Run 持有执行权（服务端投影的 `executor.run_id` 非空）。
+   * 只用于分组标题的运行指示，不参与分组、排序或行内容；会话行的运行态仍由
+   * 状态图标承担（`listState`），这里恒为 false。
+   */
+  readonly running: boolean;
 }
 
 /**
@@ -108,6 +129,15 @@ const RUN_POLL_SLOW_MS = 10_000;
 const RUN_POLL_SLOW_AFTER = 40;
 /** 读失败时的退避上限：不无限翻倍，也不因为一次失败就把在跑的那条显示成静止。 */
 const RUN_POLL_MAX_BACKOFF_MS = 30_000;
+/**
+ * 没有已知执行中的任务时的任务事实复查节拍（2026-11-10）。
+ *
+ * 运行指示只认服务端投影的 `executor.run_id`；执行可能由后台自动推进启动，
+ * 不经过本页的任何命令回执，因此需要一条低频复查把它发现出来。30s 是
+ * 「不用秒级、又不会让指示长期缺席」的一档：一次读取覆盖整页，可见时才打，
+ * 页面在后台只保留计时、切回可见那一拍立刻补一次。
+ */
+const TASK_IDLE_POLL_MS = 30_000;
 
 /** 拖拽期间的落位预览：横线画在 `listKey` 这一列的 `lineTop` 处，松手即落到 `targetKey` 的这侧。 */
 interface Drag {
@@ -162,6 +192,16 @@ function withoutConfirmedDeletes<T extends { readonly id: string }>(
 }
 
 /**
+ * 左栏只列**用户讨论**：任务执行会话不在这里（归任务行），子代理会话也不在这里
+ * （它是主会话的委派执行史，入口在主会话的委派面板）。2026-11-10 用户删不掉那几条
+ * 「子 Agent · 只读调查」就是因为子代理会话混进了左栏：服务端按委派账本拒绝单条删除，
+ * 而整棵委派树只有从主会话才能安全清理。把它挡在读侧，左栏的删除语义才和 Owner 对齐。
+ */
+function onRail(session: RelayAssistSession): boolean {
+  return session.taskId === null && (session.parentSessionId ?? null) === null;
+}
+
+/**
  * 左栏的「近期工作」分组（协作页 §3.1 重塑）。
  *
  * 范围仍是「当前工作空间已加载的任务与会话」，排序仍是服务端时间倒序：
@@ -172,15 +212,10 @@ function withoutConfirmedDeletes<T extends { readonly id: string }>(
  * 那个面板读的是与本列相同的两个端点（任务仅第一页、无搜索翻页），能显示的这里都能显示，
  * 翻页后这里更多，是更弱的重复入口；这一列（搜索＋「更早的任务」）是任务与会话的唯一导航入口。
  */
-export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshToken = 0 }: {
+export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
   client: RelayApiClient;
   currentTaskId: string | null;
   onOpen?: () => void;
-  /**
-   * 外壳「清空工作区会话」成功后的重读信号（2026-11-04）。
-   * 只增不减；0 表示还没触发过，首次挂载沿用原有读取，不重复打请求。
-   */
-  refreshToken?: number;
 }) {
   const navigate = useNavigate();
   const active = useActiveConversation();
@@ -203,32 +238,30 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
   /**
    * 批量删除的选择集（2026-10-20 用户指令「给会话 item 加一个复选框，方便删除记录」）。
    *
-   * 存的是**会话 id** 而不是行 key：同一段讨论可能同时出现在「目标」与「工作区（目录）」
+   * 存的是**会话 id** 而不是行 key：同一段讨论可能同时出现在「目标」与「会话（按目录）」
    * 两段里，勾一处两处一起勾上，删除也只发一条命令。任务行没有删除命令，不参与选择。
    */
   const [selected, setSelected] = useState<readonly string[]>([]);
   /**
-   * `confirm` 是就地确认（与 ⋯ 面板里的删除确认同一读法），`busy` 是命令在途，
-   * `result` 是**终态**：确认之后在同一张卡片里给出结果，只留「关闭」。
-   *
-   * 失败后不再退回 `idle` —— 退回会让同一张卡片第三次变成「已选 N 段讨论 + 删除」，
-   * 像在要求用户再确认一遍一件刚被拒绝的事（DEV-0098，2026-10-21 用户截图指认）。
+   * `confirm` 是就地确认（与 ⋯ 面板里的删除确认同一读法），`busy` 是命令在途。
+   * 结果不再占用左栏里的第三张卡片：失败/待核实写进页壳反馈栈的非阻塞 Notice，
+   * 勾选同时清空，用户不必先关一张卡才能继续操作（2026-11-10 用户指认）。
    */
-  const [batch, setBatch] = useState<"idle" | "confirm" | "busy" | "result">("idle");
+  const [batch, setBatch] = useState<"idle" | "confirm" | "busy">("idle");
   /**
-   * 批量删除的结果（2026-10-31）。
+   * 批量删除的失败/待核实结果（2026-10-31，2026-11-10 改由 Notice 呈现）。
    *
-   * 不再是一整段红字：顶层只留一行结论（「已删除 X 段，Y 段未删除，Z 段待核实」），
-   * 每类原因只写一次，逐条会话与技术细节收进可展开的详情区。这样左栏不会被一段
-   * 重复的诊断文字撑成长页面（2026-10-31 用户指认）。
+   * 只留一行结论与去重后的原因，不列会话标题：标题本身就是长提示词，会把左栏
+   * 再次撑成一长段红字。逐条身份与原始 command_id 留在状态里，供「核对回执」使用。
    */
   const [batchResult, setBatchResult] = useState<BatchDeleteReport | null>(null);
-  /** 结果未知的那几条：只能按原 command_id 核对回执，确认键不重发。 */
-  const [batchUncertain, setBatchUncertain] = useState(false);
+  /** 核对回执在途：防止重复点同一枚 Notice 动作；核对只读，不重发删除。 */
+  const [batchRechecking, setBatchRechecking] = useState(false);
+  /** 「清空该工作区」整组成功后的全局回执：回执挂在左栏上，不会随空分组卸载。 */
+  const [clearToast, setClearToast] = useState<{ readonly text: string; readonly seq: number } | null>(null);
+  const clearToastSeq = useRef(0);
   const request = useRef(0);
   const archivedRequest = useRef(0);
-  /** 外壳清空成功后已经消费过的重读信号：同一信号不因归档区状态变化再打第二趟请求。 */
-  const lastRailRefresh = useRef(refreshToken);
   /** 本次挂载里已由服务端确认删除的会话身份，只用于挡住删除之前发出的旧读数（见 withoutConfirmedDeletes）。 */
   const confirmedDeleted = useRef(new Set<string>());
   /** 拖拽松手那一拍：浏览器补发的 click 不当作「打开会话」。 */
@@ -258,15 +291,9 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
       ]);
       if (version !== request.current) return;
       const titles = new Map(projects.items.map((project: RelayProjectListItem) => [project.id, project.title]));
-      const sorted = [...page.items].sort((a, b) => {
-        // 服务端没给 updated_at 的排在有时间的之后，不用客户端时间补齐。
-        if (a.updatedAt === null && b.updatedAt === null) return 0;
-        if (a.updatedAt === null) return 1;
-        if (b.updatedAt === null) return -1;
-        return b.updatedAt.localeCompare(a.updatedAt);
-      });
+      const sorted = [...page.items].sort(compareTasks);
       const workspaceSessions = withoutConfirmedDeletes(
-        sessionResult.items.filter((session) => session.taskId === null),
+        sessionResult.items.filter(onRail),
         confirmedDeleted.current).sort(compareSessions);
       setLoaded((current) => ({
         tasks: cursor === null ? sorted : [...new Map([...(current?.tasks ?? []), ...sorted].map((task) => [task.id, task])).values()],
@@ -301,6 +328,35 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
   }, [load]);
 
   /**
+   * 任务事实的第一页复查（2026-11-10，运行指示的收敛路径）。
+   *
+   * 分组标题的运行指示读 `executor.run_id`：只有服务端知道 Run 是否还持有执行权，
+   * 界面不按状态文字推断。这里只合并**第一页读回的行**，不重置分页、不清已加载的更早任务：
+   * 运行状态变化、行内完成后释放执行权都由它收敛；旧读数不覆盖整列重读的结果
+   * （发起时记下整列读取的版本，回包被后来的整列读取接管就整份丢弃）。
+   * 失败返回 false：保留上一拍读数，不把在跑的显示成静止，也不把已完成的当成还在跑。
+   */
+  const refreshTaskFacts = useCallback(async (): Promise<boolean> => {
+    const version = request.current;
+    try {
+      const page = await client.getWorkspaceTasksPage(null);
+      if (version !== request.current) return true;
+      setLoaded((previous) => {
+        if (previous === null) return previous;
+        const incoming = new Map(page.items.map((task) => [task.id, task]));
+        const merged = previous.tasks.map((task) => incoming.get(task.id) ?? task);
+        for (const task of page.items) {
+          if (!merged.some((item) => item.id === task.id)) merged.push(task);
+        }
+        return { ...previous, tasks: [...merged].sort(compareTasks) };
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [client]);
+
+  /**
    * 读取已归档那一段（0090）。归档的会话不在默认列表里，只有展开这一段时才读。
    * 失败只影响这一段自己的提示，不把上面已经读到的任务与会话一起清掉；
    * 失败也不把列表写成 []——空结果与读取失败是两个事实（禅道 #134）。
@@ -312,7 +368,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     try {
       const items = await client.getAssistSessions({ status: "ARCHIVED" });
       if (version !== archivedRequest.current) return;
-      setArchived(withoutConfirmedDeletes(items.filter((session) => session.taskId === null),
+      setArchived(withoutConfirmedDeletes(items.filter(onRail),
         confirmedDeleted.current).sort(compareSessions));
     } catch (caught) {
       if (version !== archivedRequest.current) return;
@@ -322,17 +378,6 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
       if (version === archivedRequest.current) setArchivedLoading(false);
     }
   }, [client]);
-
-  /**
-   * 外壳「清空工作区会话」只传一个递增信号：这里按服务端事实整列重读，不靠本地删行制造
-   * 「已经清空」的假象。归档区若已经打开过，也一并重读，避免清空后仍留着旧的归档行。
-   */
-  useEffect(() => {
-    if (refreshToken === lastRailRefresh.current) return;
-    lastRailRefresh.current = refreshToken;
-    void load(null);
-    if (archived !== null) void loadArchived();
-  }, [refreshToken, archived, load, loadArchived]);
 
   /**
    * 行内命令之后按身份重读那一条：改名、置顶、归档、重开都重读这一条，分叉重读那次新建的
@@ -347,7 +392,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     // 重读在途时这一条可能刚被确认删除（改名撞删除是同一拍）：落地前再认一次身份，
     // 不能让删除之前发出的那一发读数把已确认删除的行重新插回列表。
     if (confirmedDeleted.current.has(sessionId)) return;
-    const movable = session.taskId === null;
+    const movable = onRail(session);
     setLoaded((previous) => previous === null ? previous : { ...previous,
       sessions: movable && session.status === "ACTIVE"
         ? sortSessions([session, ...previous.sessions.filter((item) => item.id !== sessionId)])
@@ -403,13 +448,15 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
   /** 勾选/取消一条会话。同一会话的两处副本共用这一个状态，因此两处永远同步。 */
   function toggleSelected(sessionId: string, next: boolean) {
     setBatch((current) => current === "busy" ? current : "idle");
+    // 开始一轮新的勾选就收走上一轮的失败提示：那条提示说的是上一批条目，不是这一批。
+    setBatchResult(null);
     setSelected((current) => next
       ? (current.includes(sessionId) ? current : [...current, sessionId])
       : current.filter((item) => item !== sessionId));
   }
 
   function clearSelection() {
-    setSelected([]); setBatch("idle"); setBatchResult(null); setBatchUncertain(false);
+    setSelected([]); setBatch("idle"); setBatchResult(null); setBatchRechecking(false);
   }
 
   /**
@@ -423,15 +470,15 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
    * 3. **结果未知不重发。** 5xx 或响应丢失意味着这一条是否已删尚未确定：先按**原 command_id**
    *    核对一次回执，核对到就算已删；核对不到就留在「待核实」，换 `command_id` 重试违反契约。
    * 4. **被引用阻止不是失败。** `SESSION_DELETE_BLOCKED` 是业务拒绝（行还在），说明里给出
-   *    阻止项与**真正能做的动作**；结果停在终态，读完原因点「关闭」即结束这一轮。
-   * 5. **同一原因只说一次。** 被阻止的讨论按阻断原因聚合：原因写一次、标题并列（同名去重后
-   *    仍读得出几条）。逐条会话与技术细节收进详情区，主区只留一行结论——一段重复的诊断
-   *    文字会把这一窄列撑成长页面（2026-10-31 用户指认）。
+   *    阻止项与**真正能做的动作**；结果写进非阻塞 Notice，勾选清空，用户可继续操作。
+   * 5. **同一原因只说一次，且不点名长标题。** 被阻止的讨论按阻断原因聚合：原因写一次。
+   *    标题本身就是用户的提示词，点名会把反馈卡撑成滚不完的红字（2026-11-10 用户指认）；
+   *    逐条身份仍留在状态里供「核对回执」使用。
    */
   async function deleteSelected() {
     const targets = selectedSessions;
     if (targets.length === 0) { clearSelection(); return; }
-    setBatch("busy"); setBatchResult(null); setBatchUncertain(false);
+    setBatch("busy"); setBatchResult(null); setBatchRechecking(false);
     const removed: string[] = [];
     /** 阻断原因 → 被它挡住的标题（按发送顺序累积）。 */
     const blockedByReason = new Map<string, { titles: string[]; reasons: readonly string[];
@@ -465,7 +512,6 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     }
     // 确认删掉的那几条走同一个收尾：行、分组副本、勾选，以及「删的正是当前会话」时的路由意图。
     settleConfirmedDeletes(removed);
-    setBatchUncertain(unresolved.length > 0);
     const report: BatchDeleteReport = {
       deleted: removed.map((sessionId) => targets.find((session) => session.id === sessionId)?.title ?? ""),
       blocked: [...blockedByReason.values()],
@@ -480,9 +526,10 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
       setBatchResult(null);
       return;
     }
-    // 有失败就停在终态（DEV-0098）：同一张卡片里读完原因后「关闭」，
-    // 不退回带「删除」按钮的第三次确认。
-    setBatch("result");
+    // 失败不留在左栏里做终态卡片：勾选清空、操作栏收起，结果写成页壳反馈栈里的
+    // 非阻塞 Notice。用户不必先关掉一张卡才能继续勾选或打开别的讨论。
+    setBatch("idle");
+    setSelected([]);
     setBatchResult(report);
   }
 
@@ -497,27 +544,35 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
    * 发现的 P1）。仍未知的那几条一行都不动——本次是否删掉还没确定，界面不替用户猜。
    */
   async function recheckUnresolved() {
-    if (batchResult === null || batchResult.unresolved.length === 0) return;
-    setBatch("busy");
+    if (batchResult === null || batchResult.unresolved.length === 0 || batchRechecking) return;
+    setBatchRechecking(true);
     const gone = new Set<string>();
     const stillUnknown: { sessionId: string; title: string; message: string;
       requestId: string | null; commandId: string }[] = [];
     const goneTitles: string[] = [];
-    for (const item of batchResult.unresolved) {
-      const verdict = await verifyDeleteReceipt(client, item.commandId);
-      if (verdict === "deleted") { gone.add(item.sessionId); goneTitles.push(item.title); }
-      else stillUnknown.push(item);
+    try {
+      for (const item of batchResult.unresolved) {
+        const verdict = await verifyDeleteReceipt(client, item.commandId);
+        if (verdict === "deleted") { gone.add(item.sessionId); goneTitles.push(item.title); }
+        else stillUnknown.push(item);
+      }
+      if (gone.size > 0) {
+        setBatchResult((previous) => {
+          if (previous === null) return previous;
+          const next = { ...previous, deleted: [...previous.deleted, ...goneTitles],
+            unresolved: stillUnknown };
+          // 只剩「待核实」的这一轮若已全部核对到，整条提示自己收起：没有别的失败要留，
+          // 再摆一句已经过期的结论只会占着反馈栈。仍有阻断/失败时保留并更新计数。
+          return stillUnknown.length === 0 && next.blocked.length === 0 && next.failed.length === 0
+            ? null : next;
+        });
+        // 已被服务端确认删除的那几条：走与单条/批量完全相同的收尾（行、勾选、旧读数闸门、
+        // 以及删的正是当前会话时的路由意图），三条确认删除路径不留两套写法。
+        settleConfirmedDeletes([...gone]);
+      }
+    } finally {
+      setBatchRechecking(false);
     }
-    if (gone.size > 0) {
-      setBatchResult((previous) => previous === null ? previous : { ...previous,
-        deleted: [...previous.deleted, ...goneTitles],
-        unresolved: stillUnknown });
-      setBatchUncertain(stillUnknown.length > 0);
-      // 已被服务端确认删除的那几条：走与单条/批量完全相同的收尾（行、勾选、旧读数闸门、
-      // 以及删的正是当前会话时的路由意图），三条确认删除路径不留两套写法。
-      settleConfirmedDeletes([...gone]);
-    }
-    setBatch("result");
   }
 
   /**
@@ -537,7 +592,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     const sessionId = active.sessionId;
     let current = true;
     void client.getAssistSession(sessionId, true).then((session) => {
-      if (!current || session.id !== sessionId || session.taskId !== null) return;
+      if (!current || session.id !== sessionId || !onRail(session)) return;
       // 这一发是在删除确认之前发出的：本地已认定这条不存在，旧读数不能再把它插回列里。
       if (confirmedDeleted.current.has(sessionId)) return;
       setLoaded((previous) => {
@@ -605,7 +660,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
         if (stopped) return;
         failures = 0;
         if (version !== request.current) { schedule(RUN_POLL_BASE_MS); return; }
-        const next = withoutConfirmedDeletes(items.filter((session) => session.taskId === null),
+        const next = withoutConfirmedDeletes(items.filter(onRail),
           confirmedDeleted.current).sort(compareSessions);
         setLoaded((previous) => previous === null ? previous : { ...previous, sessions: next });
       } catch {
@@ -630,6 +685,67 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     };
   }, [client, watchingWork]);
 
+  /**
+   * 任务运行态的复查节拍（2026-11-10，用户要求「有任务执行时分组处不停转动」）。
+   *
+   * 指示读的是任务投影的 `executor.run_id`，只有服务端说 Run 还持有执行权才算在跑。
+   * 有已知在跑的任务时按会话轮询同一档节拍（3s，长跑降 10s）让指示在完成那一刻收敛；
+   * 没有已知在跑的任务时降到 30s 一次——执行可能由后台自动推进启动，不经过本页的任何
+   * 命令回执，没有这条低频复查指示就会长期缺席。两条都只在页面可见时打请求，
+   * 读失败按 3→6→12→24→30s 退避，回包被整列读取接管时由 refreshTaskFacts 丢弃。
+   */
+  const watchingTaskRuns = (loaded?.tasks ?? []).some((task) => task.executorRunId !== null);
+  const hasLoadedTasks = loaded !== null;
+  useEffect(() => {
+    if (!hasLoadedTasks) return;
+    let stopped = false;
+    let timer: number | null = null;
+    let ticks = 0;
+    let failures = 0;
+    const baseDelay = () => watchingTaskRuns
+      ? (ticks >= RUN_POLL_SLOW_AFTER ? RUN_POLL_SLOW_MS : RUN_POLL_BASE_MS)
+      : TASK_IDLE_POLL_MS;
+    const schedule = (delay: number) => { timer = window.setTimeout(() => { void poll(); }, delay); };
+    const poll = async (): Promise<void> => {
+      timer = null;
+      if (stopped) return;
+      if (document.visibilityState === "hidden") { schedule(baseDelay()); return; }
+      ticks += 1;
+      const ok = await refreshTaskFacts();
+      if (stopped) return;
+      failures = ok ? 0 : failures + 1;
+      schedule(failures > 0
+        ? Math.min(RUN_POLL_MAX_BACKOFF_MS, baseDelay() * 2 ** Math.min(failures, 4))
+        : baseDelay());
+    };
+    const onVisibility = () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      if (timer !== null) { window.clearTimeout(timer); timer = null; }
+      void poll();
+    };
+    schedule(baseDelay());
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [hasLoadedTasks, refreshTaskFacts, watchingTaskRuns]);
+
+  /**
+   * 切进或离开某项任务的会话时复查一次任务事实：左栏在导航之间不重挂载，
+   * 而运行指示要能反映刚在任务页启动/结束的执行。只按身份变化补一次，不重置分页；
+   * 失败保留上一拍读数，由上面的节拍继续收敛。
+   */
+  const activeTaskIdentity = active.taskId ?? "";
+  const lastActiveTask = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastActiveTask.current === null) { lastActiveTask.current = activeTaskIdentity; return; }
+    if (lastActiveTask.current === activeTaskIdentity) return;
+    lastActiveTask.current = activeTaskIdentity;
+    if (hasLoadedTasks) void refreshTaskFacts();
+  }, [activeTaskIdentity, hasLoadedTasks, refreshTaskFacts]);
+
   const tasks = loaded?.tasks ?? [];
   const loadedSessions = loaded?.sessions ?? [];
   // 服务端读回来的次序保持原样（那是它的排序键），这一列显示成什么次序由本机偏好覆盖。
@@ -646,11 +762,11 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
 
   const toRow = (session: RelayAssistSession): Row => ({ key: `session:${session.id}`, kind: "session",
     id: session.id, title: session.title, projectId: session.projectId, updatedAt: session.updatedAt,
-    pinned: session.pinnedAt !== null, unread: session.unreadAt !== null });
+    pinned: session.pinnedAt !== null, unread: session.unreadAt !== null, running: false });
   const rows: readonly Row[] = [
     ...visibleTasks.map((task): Row => ({ key: `task:${task.id}`, kind: "task", id: task.id,
       title: task.title, projectId: task.projectId, updatedAt: task.updatedAt, pinned: false,
-      unread: false })),
+      unread: false, running: task.executorRunId !== null })),
     ...visibleSessions.map(toRow)
   ];
   // 行只带展示字段，命令要的是会话本身（状态、修订、置顶时刻）；按 id 回查这一条，
@@ -661,68 +777,25 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
   // （例如别处删掉了）直接不计入，不用一份可能过期的本地副本去发删除命令。
   const selectedSessions = selected.map((sessionId) => sessionById.get(sessionId))
     .filter((session): session is RelayAssistSession => session !== undefined);
-  /** 是否存在有效勾选：批量操作栏与「不许收起工作区（目录）」都由它驱动。 */
+  /** 是否存在有效勾选：批量操作栏与「不许收起会话（按目录）」都由它驱动。 */
   const selecting = selectedSessions.length > 0;
   /**
-   * 批量操作栏（2026-10-20 第五轮重构）：从左栏外、主内容区上方居中的浮层挪回**这一列内部**，
-   * 紧跟「工作区（目录）」标题下方。勾选框就在条目行里，操作入口与它同一列，视线不再横跨
-   * 整个主工作区；靠 sticky 在这一段里滚动时停在列顶，不跟着滚走。无勾选时整块不渲染，
-   * 这一列逐像素回到原样——不无条件占高度，也不遮挡目录条目。
+   * 批量操作栏（2026-10-20 第五轮重构，2026-11-10 结果移出操作栏）：从左栏外、主内容区
+   * 上方居中的浮层挪回**这一列内部**，紧跟「会话（按目录）」标题下方。勾选框就在条目行里，
+   * 操作入口与它同一列，视线不再横跨整个主工作区；靠 sticky 在这一列里滚动时停在列顶。
+   * 无勾选时整块不渲染，这一列逐像素回到原样。
    *
-   * 内容与状态机和旧浮层一致（就地确认、逐段发命令、部分成功如实报），结果停在终态：
-   * 失败后只留「关闭」，不再退回带「删除」按钮的第三次确认（DEV-0098）。
-   * 落点仍是原处。只有「已归档」里还有会话可勾、而上面三段都没渲染时（loadedCount === 0），
-   * 才落到列表上方那个兜底位置——否则勾了东西却看不到操作栏。
+   * 这里只保留「已选 / 确认」两档；删除后的失败与待核实写进页壳反馈栈的 Notice 并清空勾选。
+   * 结果不再占第三张卡片——那张卡里的会话标题就是长提示词，会把左栏撑成滚不完的红字，
+   * 且要人先关掉它才能继续操作（2026-11-10 用户指认）。
    */
   const batchBar = selecting ? <div className="recent-work-selection" role="group"
     aria-label="批量删除会话" data-testid="recent-work-selection">
     <p className="recent-work-selection-count" data-testid="recent-work-selection-count">
       {batch === "idle" ? `已选 ${selectedSessions.length} 段讨论`
-        : batch === "result" ? "删除结果" : `删除这 ${selectedSessions.length} 段讨论？`}</p>
+        : `删除这 ${selectedSessions.length} 段讨论？`}</p>
     {(batch === "confirm" || batch === "busy") && <p className="recent-work-selection-note">
       消息、附件与工具调用记录将永久移除，无法恢复。</p>}
-    {batch === "result" && batchResult !== null && (
-      <div className="recent-work-batch-report" data-testid="recent-work-batch-error" role="alert">
-        {/* 顶层只有一行结论：成功几段、没删掉几段、待核实几段。 */}
-        <p className="recent-work-batch-summary" data-testid="recent-work-batch-summary">
-          {batchSummary(batchResult)}
-        </p>
-        {/* 每类原因只写一次；同一组原因合并成一条，标题并列。 */}
-        {batchResult.blocked.map((group) => (
-          <p key={group.reasons.join("、")} className="recent-work-batch-line">
-            {blockedWho(group.titles)}还不能删除：{group.reasons.join("、")}。{blockedAdvice(group.reasonCodes)}
-          </p>
-        ))}
-        {batchResult.failed.map((item) => (
-          <p key={item.title} className="recent-work-batch-line">
-            「{item.title}」{item.message}
-          </p>
-        ))}
-        {batchResult.unresolved.map((item) => (
-          <p key={item.sessionId} className="recent-work-batch-line">
-            「{item.title}」{item.message}
-          </p>
-        ))}
-        {/* 技术细节只在需要时展开：原始 command_id 与 request_id 可复制，不进主提示句。 */}
-        {batchResult.unresolved.length > 0 && (
-          <details className="recent-work-batch-detail">
-            <summary>技术详情</summary>
-            <ul>
-              {batchResult.unresolved.map((item) => (
-                <li key={item.sessionId}>
-                  <span className="recent-work-batch-detail-line">
-                    {item.title} · 命令 {item.commandId}
-                    {item.requestId === null ? "" : ` · 请求 ${item.requestId}`}
-                  </span>
-                  <button type="button" className="text-button" data-testid="recent-work-batch-copy"
-                    onClick={() => void copyText(item.requestId ?? item.commandId)}>复制</button>
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </div>
-    )}
     <div className="recent-work-confirm-actions">
       {batch === "idle" ? <>
         <button type="button" className="text-button recent-work-selection-danger"
@@ -730,16 +803,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
           onClick={() => { setBatchResult(null); setBatch("confirm"); }}>删除</button>
         <button type="button" className="text-button" data-testid="recent-work-selection-clear"
           onClick={clearSelection}>取消</button>
-      </> : batch === "result" ? <>
-        {/* 结果态只留关闭：业务拒绝（被引用/有学习记录）不让删除，再摆一颗「删除」只会重演同一次拒绝。 */}
-        {batchResult !== null && batchResult.unresolved.length > 0 && (
-          <button type="button" className="secondary-button" data-testid="recent-work-batch-recheck"
-            onClick={() => void recheckUnresolved()}>核对回执</button>
-        )}
-        <button type="button" className="secondary-button" data-testid="recent-work-batch-result-close"
-          onClick={clearSelection}>关闭</button>
       </> : <>
-        <button type="button" className="danger-button" disabled={batch === "busy" || batchUncertain}
+        <button type="button" className="danger-button" disabled={batch === "busy"}
           data-testid="recent-work-batch-delete-confirm"
           onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</button>
         <button type="button" className="secondary-button" disabled={batch === "busy"}
@@ -769,7 +834,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
       group.rows.push(row); goalGroups.set(goal.goalId, group);
     }
     const directory = session.context?.workingDirectory;
-    const key = directory?.resourceId ?? (session.context === undefined ? "unknown" : "unbound");
+    const key = sessionDirectoryKey(session);
     const group = directoryGroups.get(key) ?? { title: directoryLabel(session), path: directory?.canonicalRoot ?? null, rows: [] };
     group.rows.push(row); directoryGroups.set(key, group);
   }
@@ -965,7 +1030,7 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
   }
 
   // 定位到当前会话/任务时展开它所在的区与组，但只在身份变化那一刻做一次。
-  // 常驻的强制展开会让用户永远收不起这一列：活动会话必然落在「工作区（目录）」里，
+  // 常驻的强制展开会让用户永远收不起这一列：活动会话必然落在「会话（按目录）」里，
   // 于是那一段的 summary 点了没反应。折叠偏好重新成为唯一依据，定位改由下面这条补偿。
   const activeIdentity = `${active.taskId ?? ""}|${active.sessionId ?? ""}`;
   const revealedFor = useRef("");
@@ -1063,12 +1128,27 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
             {renderRows(group.rows, `goal:${goalId}`, { goalId, reorderable: true })}
           </details>)}
         </details>
-        <details className="recent-work-section" data-testid="recent-work-directories"
+        <details className="recent-work-section recent-work-section--directories" data-testid="recent-work-directories"
           // 有勾选时这一段不许收起：勾选项与批量操作栏都在它内部，收起之后「选了什么、
           // 能对谁操作」一起消失，只剩一份看不见的选择状态（2026-10-20 用户指令）。
           open={!collapsed.includes("directories") || selecting}
           onToggle={(event) => { if (!selecting) groupToggle(event.currentTarget, "directories"); }}>
-          <summary><ChevronDown aria-hidden="true" /><span className="recent-work-group-title">工作区（目录）</span></summary>
+          {/* 清空键就贴在段标题「会话（按目录）」右侧（2026-11-10 用户第二次指认）：这一段指
+              这一整段会话的集合区域，不是某个目录；键放在 summary 内，点击只开清空确认、
+              不触发折叠（终止冒泡在按钮上）。折叠箭头用 auto 外边距留在行尾。
+              段标题 2026-11-10 由「工作区（目录）」改为「会话（按目录）」：列的是按目录归集的
+              自由会话，「工作区」与数据库 Workspace 隔离边界不是一回事，旧名易被读成同一对象。 */}
+          <summary><ChevronDown aria-hidden="true" />
+            <span className="recent-work-group-title recent-work-section-title">会话（按目录）</span>
+            <WorkspaceClearSessions client={client}
+              onCleared={(deletedSessionIds, allDeleted) => {
+                settleConfirmedDeletes(deletedSessionIds);
+                if (allDeleted && deletedSessionIds.length > 0) {
+                  setClearToast({ text: `已清空 ${deletedSessionIds.length} 条会话`,
+                    seq: ++clearToastSeq.current });
+                }
+              }} />
+          </summary>
           {batchBar}
           {directoryGroups.size === 0 && <p className="helper-text recent-work-scope-note">{needle ? "已加载范围内没有匹配会话" : sessionsError ? "会话暂不可读取" : "暂无会话"}</p>}
           {[...directoryGroups].map(([directoryId, group]) => <details className="recent-work-group" key={directoryId}
@@ -1087,16 +1167,44 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
             {renderRows(group.rows, `directory:${directoryId}`, { reorderable: true })}
           </details>)}
         </details>
-        {tasks.length > 0 && <details className="recent-work-section" data-testid="recent-work-tasks"
+        {tasks.length > 0 && <details className="recent-work-section recent-work-section--tasks"
+          data-testid="recent-work-tasks"
           open={!collapsed.includes("tasks")}
           onToggle={(event) => groupToggle(event.currentTarget, "tasks")}>
-          <summary><ChevronDown aria-hidden="true" /><span className="recent-work-group-title">任务入口</span></summary>
+          {/* 段标题 2026-11-10 由「任务入口」改为「任务」：这一段列的就是 Task 本身，
+              「入口」只是它在左栏的角色，留着会和「会话（按目录）」读成两类同质入口。
+              同日用户指认「没有新建任务的新建按钮」：段标题右侧补一颗常显的「＋」，
+              与「会话（按目录）」的清空键同一形态（同在 summary 内，click 必须同时
+              preventDefault + stopPropagation，否则这一击会先被读成折叠这一段）。
+              目标沿用左栏空态与标题栏既有的 `/tasks?view=create`，不新造创建流程。 */}
+          <summary><ChevronDown aria-hidden="true" /><span className="recent-work-group-title">任务</span>
+            <button type="button" className="icon-button recent-work-section-new"
+              title="新建任务" aria-label="新建任务" data-testid="recent-work-new-task"
+              onClick={(event) => {
+                event.preventDefault(); event.stopPropagation();
+                void navigate("/tasks?view=create");
+                onOpen?.();
+              }}><Plus aria-hidden="true" /></button>
+          </summary>
           {[...groups].map(([projectId, groupRows]) => {
             const key = railGroupKey(projectId);
+            const running = groupRows.some((row) => row.running);
             return <details className="recent-work-group" key={key} open={!collapsed.includes(key)}
               onToggle={(event) => groupToggle(event.currentTarget, key)}>
               <summary><ChevronDown aria-hidden="true" />{projectId !== null && <Folder aria-hidden="true" className="recent-work-group-folder" />}
-                <span className="recent-work-group-title">{projectName(projectId)}</span><span className="recent-work-group-count">{groupRows.length}</span></summary>
+                <span className="recent-work-group-title">{projectName(projectId)}</span>
+                {/* 运行指示（2026-11-10）：这一组里有任务被 Run 持有执行权时，标题右侧一枚
+                    带缺口的点状圆环匀速旋转；形状与文案同时存在，不靠动效单独表达状态。
+                    指示挂在分组行上，分组收起时仍看得见「这一组还在跑」。 */}
+                {running && <span className="recent-work-group-running"
+                  data-testid={`recent-work-task-running-${projectId ?? "unassigned"}`}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M6.34 17.66 A8 8 0 1 1 17.66 17.66" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeDasharray="0.1 4.2" />
+                  </svg>
+                  <span className="visually-hidden">有任务正在执行</span>
+                </span>}
+                <span className="recent-work-group-count">{groupRows.length}</span></summary>
               {renderRows(groupRows, `task:${key}`)}
             </details>;
           })}
@@ -1106,8 +1214,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
             这一段默认收起，并且仍挂在 loadedCount 之外——把唯一一条会话归档之后上面会整列空掉，
             若这一段也跟着消失，人就再也找不到重开的入口了。
             与三个根区同处一个父容器是结构要求：`.recent-work-section + .recent-work-section`
-            只覆盖相邻兄弟，2026-10-16 第七轮实测，包装层曾隔断「任务入口 ↔ 已归档」的相邻关系，
-            任务入口收起时间隙塌成 0px，四个根区读成三档。 */}
+            只覆盖相邻兄弟，2026-10-16 第七轮实测，包装层曾隔断「任务 ↔ 已归档」的相邻关系，
+            任务收起时间隙塌成 0px，四个根区读成三档。 */}
         {!loading && error === null && <details className="recent-work-section" data-testid="recent-work-archived"
           onToggle={(event) => {
             if (!event.currentTarget.open || archived !== null || archivedLoading) return;
@@ -1140,6 +1248,19 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen, refreshT
     </div>
     {sessionsError !== null && <p className="helper-text" role="status" data-testid="recent-work-sessions-error">
       会话列表暂时读不到：{sessionsError} 任务列表仍按已加载范围显示。</p>}
+    {/* 批量删除的失败/待核实结果与目录清空的成功回执都走页壳反馈栈：不进左栏文档流，
+        不会把这一列撑高，也不会因为某个目录组被清空而跟着卸载。 */}
+    {batchResult !== null && (
+      <Notice testId="recent-work-batch-notice"
+        tone={batchResult.blocked.length + batchResult.failed.length > 0 ? "danger" : "warning"}
+        action={batchResult.unresolved.length > 0 ? {
+          label: batchRechecking ? "核对中…" : "核对回执",
+          onSelect: () => { if (!batchRechecking) void recheckUnresolved(); }
+        } : undefined}>
+        {batchNoticeText(batchResult)}
+      </Notice>
+    )}
+    {clearToast !== null && <Toast key={clearToast.seq} testId="workspace-clear-success">{clearToast.text}</Toast>}
   </section>;
 }
 
@@ -1161,6 +1282,17 @@ function compareSessions(a: RelayAssistSession, b: RelayAssistSession): number {
 
 function sortSessions(sessions: readonly RelayAssistSession[]): RelayAssistSession[] {
   return [...sessions].sort(compareSessions);
+}
+
+/**
+ * 任务列的排序键：服务端没给 `updated_at` 的排在有时间的之后，不用客户端时间补齐。
+ * 整列读取、续页合并与第一页复查共用这一档，三处不能各排一套。
+ */
+function compareTasks(a: RelayTaskSummary, b: RelayTaskSummary): number {
+  if (a.updatedAt === null && b.updatedAt === null) return 0;
+  if (a.updatedAt === null) return 1;
+  if (b.updatedAt === null) return -1;
+  return b.updatedAt.localeCompare(a.updatedAt);
 }
 
 /**

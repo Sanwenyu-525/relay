@@ -64,12 +64,52 @@
 }
 
 .message-execution-status__details > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 var(--relay-space-2);
+  list-style: none;
   cursor: pointer;
   color: var(--relay-color-text-secondary);
 }
 
 .message-execution-status__details > summary:hover {
   color: var(--relay-color-text-primary);
+}
+
+/* 原生三角压掉；chevron 与 .activity-header-chevron / .chat-disclosure 同档（2026-11-10）。 */
+.message-execution-status__details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.message-execution-status__details > summary::marker {
+  content: "";
+}
+
+.message-execution-status__chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: var(--relay-space-1);
+  border-block-start: 1.5px solid currentColor;
+  border-inline-end: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.message-execution-status__details[open] > summary .message-execution-status__chevron {
+  transform: rotate(135deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-execution-status__chevron {
+    transition: none;
+  }
+}
+
+/* 与仓库既有的动效开关同一口径（SessionRoundTrace.css:252 的 html[data-motion="off"]）。 */
+html[data-motion="off"] .message-execution-status__chevron {
+  transition: none;
 }
 
 .message-execution-status__list {

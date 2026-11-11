@@ -415,7 +415,6 @@ test('clear and one-off mode preserve original history and long-term memory; in-
 test('cancelled/expired requests never publish; completed checkpoint children can be physically deleted', async () => {
   const f = await fixture();
   const requested = await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID(), expectedRevision: '0' }, storage);
-  assert.ok((await createRepositories(app.db).assist.listDeleteBlockers(f.sessionId)).includes('MEMORY_COMPACTION_ACTIVE'));
   await cancelMemoryCompaction(app.db, { ...f, requestId: String(requested.result.request_id), commandId: randomUUID() });
   assert.equal(await runAssistMemoryTick(app.db, port('unused').options), undefined);
   const second = await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID(), expectedRevision: '0' }, storage);

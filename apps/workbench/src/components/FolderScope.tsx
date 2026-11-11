@@ -157,8 +157,10 @@ function notReadyReason(directory: RelayWorkingDirectory): string {
   }
 }
 
-/** 目录关联成功后才进本机近期列表；它是展示偏好，不是资源身份或授权事实。 */
-export function rememberOpened(directory: RelayWorkingDirectory,
+/** 目录关联成功后才进本机近期列表；它是展示偏好，不是资源身份或授权事实。
+ *  会话服务端确认的目录也走这里（只有路径与显示名），因此只要求这三项。 */
+export function rememberOpened(directory: Pick<RelayWorkingDirectory,
+  "status" | "canonicalRoot" | "displayName">,
   current: readonly RecentWorkingDirectory[]): readonly RecentWorkingDirectory[] {
   if (directory.status !== "READY") return current;
   const next = [{ canonicalRoot: directory.canonicalRoot, displayName: directory.displayName,

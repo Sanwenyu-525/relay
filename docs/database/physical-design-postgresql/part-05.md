@@ -56,13 +56,13 @@ Migration：`0113_assist_session_fork.sql`。`assist_sessions` 追加一列可�
 
 **授予 DELETE 的十五张表**：`assist_sessions`、`assist_messages`、`assist_proposals`、`assist_message_attachments`、`session_tool_calls`、`session_model_selection`、`artifact_impact_checks`、`artifact_impact_candidates`、`artifact_impact_candidate_groups`、`artifact_impact_candidate_group_items`、`conversation_state_requests`、`conversation_state_changes`、`model_calls`、`model_provider_cooldowns`、`conversation_diff_baselines`。逐表对应删除路径上的一次显式 DELETE；`assist_message_previews`（0028）与 `learning_*`（0072）已有 DELETE，不重复授予。
 
-**刻意不授予的表就是阻断面**：`task_acceptance_trial_observations`、`hypothesis_versions`、`work_segments`、`project_blueprint_proposals`、`conversation_execution_requests`、`learning_evidence`、`learning_rounds`、`learning_session_controls`，以及 Task/Artifact/Project 主表。删除命令在发现这些引用时整条拒绝（`409 SESSION_DELETE_BLOCKED`），**不能**借 DELETE 授权把它们一并抹掉。`activity_records` 仍只有 `SELECT, INSERT`：删除命令写一条 `ASSIST_SESSION_DELETED`，但不允许改写或抹去审计。
+**外部对象仍不授予 DELETE（2026-11-10 修订）**：`task_acceptance_trial_observations`、`hypothesis_versions`、`work_segments`、`project_blueprint_proposals`、`conversation_execution_requests`，以及 Task/Artifact/Project 主表继续不可删；删除会话改为**解除来源引用**，不借 DELETE 抹掉别的对象。0161 只补了必要的列级 `UPDATE`：验收观察与假设版本的 `source_message_id`、artifact 影响检查/候选的 `assist_session_id` 与 `assist_message_id`（后两列同时允许 NULL）；蓝图提案新增 `source_detached_at` 并放宽冻结触发器与 SKILL 来源 CHECK，只放行「来源消息随会话删除」这一种变化。学习证据、轮次与会话开关是会话派生账本，已有 DELETE，随会话清理；知识点身份保留。`activity_records` 仍只有 `SELECT, INSERT`：删除命令写一条 `ASSIST_SESSION_DELETED`，但不允许改写或抹去审计。
 
 **为什么不用级联。** 指向 `assist_sessions` 的 12 条外键全部是默认 `NO ACTION`；保留这个形状，删除顺序由仓储层逐表写出。顺序写错会当场撞外键失败并整条回滚，而不是让数据库按自己的规则扩大删除范围。`conversation_diff_baselines.session_id` 没有外键（0097），不在数据库的保护范围内，必须显式删。
 
 **权限边界与回滚。** 授权只覆盖会话自有账本，不外溢到 `tasks` 等其它对象（`has_table_privilege` 在集成用例里逐项核对）。回滚只需撤销这批 GRANT，会话行与消息不会被带回；已删除的数据不在回滚范围内。
 
-**证据（如实分层）。** 真实临时 PostgreSQL 18.6：`assist-session-delete.integration.test.ts` **9/9**，含账本删净与无悬空基线、删除后回执重放、阻断项（分叉、学习记录）、在途与陈旧基线栅栏、跨 Workspace 不可见、0116 授权边界。未在用户库验证 0116 是否已应用，也未做真实 Windows 安装态复核。
+**证据（如实分层）。** 真实临时 PostgreSQL 18.6：`assist-session-delete.integration.test.ts` **27/27**（2026-11-10 版本），含账本删净与无悬空基线、删除后回执重放、陈旧基线零删除、跨 Workspace 不可见、0116/0154 授权边界、在途消息可删、分叉/学习/验收观察/假设/工作片段/蓝图/artifact 影响检查的来源解除、单独删子代理会话解除父账本引用、主会话级联子代理；`migration` **14/14** 覆盖 0161 入账本与全量应用。未在用户库验证迁移是否已应用，也未做真实 Windows 安装态复核。
 
 ## 103. 0115 周期定时启动任务（2026-10-18 源码实现）
 

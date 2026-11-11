@@ -327,3 +327,49 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 - `.agent-chat-composer-tools`：`gap: var(--relay-space-1) var(--relay-space-2)`——行 gap 沿用 space.1，列 gap 升为 space.2 作为组间唯一分隔手段。
 - **`@media (max-width: 64rem)` 里的 `gap: var(--relay-space-1)` 必须写成双值**：单值会把组间 8px 在窄栏压回 4px，分组当场失效。
 - 分组不使用任何颜色、背景、边框、阴影或分隔线 token；控件高度仍为 `control.height.compact`（32px），分组不改控件自身尺寸。
+## §9.28 过程区的披露列与底色（UI-CHAT-PROCESS-POLISH-01，2026-11-10）
+
+实测背景（Chromium 1440 宽，mock 一条在途消息：3 次模型调用 + 2 次工具调用）：
+
+- 折叠箭头原来吊在行尾：`.activity-item-toggle` 24×24 在 left=1209.2，紧贴耗时右缘（耗时右缘 1201.2，间隙 8px），与 `.activity-header-chevron` 左侧列不是一套语言。现改为同一条左侧披露列：箭头 `order: -1`、字箱 1rem、负 margin 收进 `padding-inline-start: calc(var(--relay-space-1) + 1rem)` 的引导槽，实测 toggle 左缘 513.2、行文字起点由 537.2 提到 561.2，箭头与状态词的垂直中心差由 -0.5px 收敛到 0px；耗时仍独占右端。
+- 参数卡片原来是两层底：容器 `--relay-color-bg-subtle`（rgb(248,250,247)）+ 内层 `<pre>` `--relay-color-bg-surface`（rgb(255,255,255)），实测容器 704×199.8。现容器底色去掉（实测 rgba(0,0,0,0)），只留 `<pre>` 一层 subtle（实测 rgb(248,250,247)），卡片高度 199.8 → 177.8，`pre` 最大高 16rem → 12rem。
+- 消息内状态区与过程容器实测本来就是透明（`.message-execution-status`、`__phase`、`__details`、`.activity-panel` 全是 rgba(0,0,0,0)），截图里的灰底只能来自展开后的参数卡片这唯一一层灰面；因此治理方向是“去掉多余底”，而不是加底。
+- 摘要行统一：`.message-execution-status__details > summary` 改成 flex + 左侧 chevron（CSS 画的 6px 方角，收起 45° 向右、展开 135° 向下，`prefers-reduced-motion` 下无过渡），原生 marker 用 `::-webkit-details-marker` 与 `::marker` 两道压掉。
+
+## §9.29 单一过程槽位的间距与“无入场动画”（UI-CHAT-PROCESS-LITE-02，2026-11-10）
+
+- `.agent-message-process` 是消息体里过程内容的唯一容器：`display:grid; gap:0; margin-block: var(--relay-space-1) var(--relay-space-2)`；空槽位 `:empty` 为 `display:none`，不占位。子块 `.assist-stage`、`.activity-panel`、`.message-execution-status` 在槽位内 `margin:0`，间距只由容器给——阶段行与工具标题行互换时正文上方高度不变。
+- 工具账本 `.activity-panel` 不再使用 `@starting-style` 的 opacity/transform 入场；首次出现就是静态事实，不做淡入 + 2px 上浮。
+- 草稿→终稿交接不再做 opacity 0.6 → 1 的淡入；`.assist-reply[data-state="final"][data-handover="true"]` 显式 `animation:none`。`data-handover` 仅保留为一枚一次性标记，不驱动视觉。
+- 不新增色值、阴影或第三套动效；上述规则只使用既有 `--relay-space-*` 与 `--relay-motion-*` token。减少动效偏好下这些规则本来就是静态终态。
+
+## §9.31 任务分组的运行指示（2026-11-10）
+
+- **位置**：`.recent-work-group-running` 只在「任务」段的分组标题里、标题文字与计数徽标之间出现；分组收起时仍可见（它在 `<summary>` 内）。
+- **形状**：12px（`font.size.caption`）内联 SVG，`viewBox="0 0 24 24"`；路径是 270° 圆弧，留 90° 缺口，`stroke-width: 2`（用户单位）、`stroke-linecap: round`、`stroke-dasharray: 0.1 4.2`——圆头短划排成一圈圆点，缺口处自然断开。颜色取 `color.text.muted`，不新增色值。
+- **动效**：整枚环 `rotate(1turn)`，时长取 `motion.loop.spin`（1s）、`linear`、`infinite`；只旋转自身，不发光、不闪烁、不改变盒子尺寸（SVG 内部图形，HTML 盒固定 12px）。
+- **减少动态效果**：`html[data-motion="off"]` 与 `@media (prefers-reduced-motion: reduce)` 都把 `animation` 置为 `none !important`；环与缺口保持静止可见，不把状态藏起来。
+- **语义**：只在任务投影的 `executor.run_id` 非空（有 Run 持有执行权）时出现；同一组多条在跑也只出现一枚，不按条数重复。环旁带视觉隐藏文案「有任务正在执行」，读屏与视觉用户读到同一件事。
+- **验证出口**：jsdom `tests/recentWorkPagination.spec.ts` 新增一例（无执行权不出现、有执行权出现一枚、`stroke-dasharray` 与隐藏文案、指示属于分组 summary），该文件 **15/15**；真实 Chromium `tests/browser/recentWorkRailDensity.spec.ts` 新增一例 **1/1**（`offsetWidth` 12px、`animation-name: recent-work-group-running-spin`、1s、infinite、虚线、分组收起后仍可见、`reducedMotion: reduce` 后 `animation: none` 且 `display` 不变）。
+
+## §9.32 活动行的文件类型图标与五色（CHAT-PROCESS-FILES-20261110，2026-11-10）
+
+用户指令「不同文件还要有颜色，图标的区别」。行内只增加一件事：对象前的 14px 类型图标。
+
+- **五色都是既有色板的语义别名**：`color.fileType.code`（azure）/ `doc`（teal）/ `config`（amber）/ `data`（violet）/ `image`（leaf）。token 只引用 `color.palette.*`，不新增色值；`contrastChecks` 登记亮面 `color.bg.surface` 3:1（实测 4.74–5.28，均高于门槛）。
+- **颜色只给图标**：`.activity-item-filetype` 是唯一着色点，文件名仍 `color.text.secondary`、目录仍 `color.text.muted`。五十行调用如果每行文件名都上色，过程列表会变成调色盘，还会与左列状态图标（状态色）抢同一个「颜色」通道。
+- **形状与颜色一起说类别**：FileCode2 / FileText / FileCog / FileSpreadsheet / FileImage / FolderOpen / File 七枚 lucide 图标形状各异，灰度与色盲下仍可分。
+- **兜底**：目录与 `list_directory` 的对象用文件夹图标；未知扩展名与点开头的隐藏文件用普通文件图标；无扩展名且不是目录（搜索词、检查名、`operation_id`、URL）不画图标，不硬猜类型。
+- **尺寸与对齐**：14px（caption 档），比左列 16px 状态图标小一档；`inline-block` + `vertical-align: -3px`，保持路径在任意字符处折行，不把对象盒改成 flex。
+
+## §9.33 项目列表页收口（PROJ-POLISH-20261110，2026-11-10）
+
+用户指令「用 skill 优化一下项目页面」，范围限定 `/projects` 列表页。只改呈现与状态语义，**不动业务规则、命令 Owner、API、路由语义、testid 与归档/撤销流程**；沿用 V5.28 pv 皮肤，不新建第二套色板或字号表。
+
+- **空范围不再输出空真结论**：推进摘要条在「范围读完了、0 个进行中、0 个待补下一步」时改说「还没有项目 / 还没有进行中的项目」；归档范围改说「N 个已归档项目」+「归档项目不再推进下一步」，0 个时不补右栏提示。原实现的「0 个项目正在推进 + 所有项目的下一步都已明确」在空列表与归档范围里读成一切正常，属状态误报（与禅道 #110 同一类）。部分加载与首读失败的既有口径不变：仍带「已加载范围内」「尚未确认」限定，测试锁定的句子保持原样。
+- **归档卡不再用警示色说下一步**：归档项目的指标行由「下一步：尚未明确」（`status.warning` 色）改为中性的「已归档 · 历史事实只读」；卡片动作由「进入项目」改为「查看项目」。归档项仍按真实 `archive_status` 渲染，不在前端推断。
+- **列表视图改为紧凑行**：`≥48rem` 时 `.projects-grid.is-list` 内同一份卡片标记排成三行网格（图标 | 名称/说明/下一步 | 状态/⋯/动作），卡片高度由约 200px 收到 113px；`display: contents` 展开 `__top` 重新落位，DOM、按钮顺序与 `data-testid` 不变；窄窗仍回竖排卡片。新建卡在列表视图同样收成一行（说明占中、新建按钮靠右）。
+- **错误态与续页入口**：首读失败统一为「图标 + 标题 + 原因 + 重试前不保留旧数据 + 重新读取」一块；fixture 分支单独渲染时用 `h1`（并保留 `.page-state.pv-page` 与「暂时无法显示项目」），live 嵌在页头下用 `h2`，不出现第二个 `h1`。计数说明「已加载 N 项…」从工具栏下方移到内容之后作脚注；「加载更多」居中成为网格后的续页入口，续页失败的就地提示与按原游标重试不变。
+- **响应式补口**：新增 48–70rem 两列断点（此前注释写了 1120px 降两列但缺少规则，800–1120px 三列会把卡片压到 240px 上下）；两列下项目数为奇数时新建卡延到行尾。窄窗工具栏改为搜索独占一行、刷新与视图切换在下一行两端对齐，不再让视图切换单独掉到第三行。网格卡标题预留两行（`min-height: 2.9em`），同一行内「下一步」落到同一基线。
+- **空态与图标**：项目页内 EmptyState 阅读宽度收到 46rem，避免说明句被拉成 1150px 长线；页头「记录目标」改用 `SquarePen`，与「目标列表」的 `Target` 区分。新增的少量数值沿用 pv 语言既有档位（`--pv-muted`、`--pv-danger-*`、`space.3/4`），未新增色值或 token。
+- **验证出口**：Workbench `tsc --noEmit` exit 0；项目相关 Vitest 5 文件 **28/28**；真实 Chromium 空态/抽屉/可读性 **10/10**、项目列表验收 fixture **3/3**；隔离 API 截图与宽度扫描 390 / 640 / 768 / 900 / 1120 / 1280 / 1440 七档无横向溢出（含空态、归档空、搜索无匹配、部分加载、错误态、键盘焦点、200% CSS 缩放）。证据留在本机 `tmp/POLISH-PROJECTS-20261110/shots2/`。**未验**：真实 Windows/WebView2 窗口与多 DPI、真实 PG/HTTP 下的视觉复核、独立 Agent 验收；本轮为当前 Agent 自检。

@@ -17,6 +17,7 @@ import {
   type FieldError,
   type ProblemDetails,
 } from './problem.js';
+import { logDomainErrorReachedGlobalHandler, logRequestFailure } from './request-failure-log.js';
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
 
@@ -107,12 +108,14 @@ export function createServer(config: ApiConfig): FastifyInstance {
 
   app.setErrorHandler<FastifyError>(async (error, request, reply) => {
     if (error instanceof ProblemError) {
+      logRequestFailure(request, error, error.problem);
       return sendProblem(reply, error.problem, request.id);
     }
 
     // 领域错误（含回执幂等冲突）在路由内已映射；这里是兜底，保证同样不泄漏内部信息。
     if (error instanceof DomainError || error instanceof CommandIdReusedError) {
       request.log.warn({ err: error }, 'domain_error_reached_global_handler');
+      logDomainErrorReachedGlobalHandler(request, error);
 
       return sendProblem(reply, problemFromError(error), request.id);
     }
@@ -145,7 +148,9 @@ export function createServer(config: ApiConfig): FastifyInstance {
 
     request.log.error({ err: error }, 'unhandled_request_error');
 
-    return sendProblem(reply, internalError(), request.id);
+    const problem = internalError();
+    logRequestFailure(request, error, problem);
+    return sendProblem(reply, problem, request.id);
   });
 
   return app;

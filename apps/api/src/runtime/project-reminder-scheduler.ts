@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { RelayDatabase } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { scanProjectReminders } from '../application/project-reminders.js';
@@ -18,8 +19,13 @@ export function registerProjectReminderScheduler(app: FastifyInstance, d: { data
       openedAt ??= await createRepositories(d.database.executor).projectReminders.now();
       await scanProjectReminders(d.database.executor, openedAt);
       failed = false;
-    } catch {
-      if (!failed) app.log.warn({ code: 'REMINDER_SCAN_FAILED' }, 'project_reminder_scan_failed');
+    } catch (error) {
+      if (!failed) {
+        app.log.warn({ code: 'REMINDER_SCAN_FAILED' }, 'project_reminder_scan_failed');
+        getRuntimeLogger('scheduler').warn('project_reminder_scan_failed', {
+          code: 'REMINDER_SCAN_FAILED', error,
+        });
+      }
       failed = true;
     } finally {
       if (active) { timer = setTimeout(() => { inFlight = tick(); }, 1000); timer.unref(); }

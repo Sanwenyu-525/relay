@@ -65,7 +65,9 @@
 
 /* ── 状态统计卡 ─────────────────────────────────────────────────────────── */
 
-/* 三张等宽卡对应收件箱里最需要人工过目的桶；格数不足时自动回落列数，不压缩文字。 */
+/* 三张等宽卡对应收件箱里最需要人工过目的桶；格数不足时自动回落列数，不压缩文字。
+   UI-PAGE-INBOX-01：数字与状态名基线对齐成一行、提示独占下一行，卡片更紧凑；
+   统计口径（全部示例行 / 当前筛选可见行）写在 aria-label，不占视觉空间。 */
 .inbox-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
@@ -83,6 +85,13 @@
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
+}
+
+.inbox-stat-figure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-1) var(--relay-space-2);
 }
 
 .inbox-stat-label {
@@ -256,6 +265,71 @@
 
 .inbox-card-foot .list-count-note { margin-top: 0; }
 
+/* ── 计数脚区、生效筛选摘要与停用筛选说明（UI-PAGE-INBOX-01）────────────── */
+/* 与任务页同一套呈现语言，样式落在本页 CSS：不抽全局组件，两页各自持有同款规则。 */
+
+.task-list-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--relay-space-2) var(--relay-space-4);
+  margin-top: var(--relay-space-3);
+}
+
+.task-list-foot .list-count-note,
+.task-list-foot .list-footer-note { margin-top: 0; }
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 10px;
+}
+
+.active-filters-label { color: var(--pv-muted); font-size: 11px; }
+.active-filters-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--pv-chip-border);
+  border-radius: 7px;
+  background: var(--pv-chip-bg);
+  color: var(--pv-chip-ink);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.active-filter-remove {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.active-filter-remove > svg { width: 11px; height: 11px; }
+.active-filter-remove:hover { background: var(--pv-btn-hover-bg); }
+.active-filter-remove:focus-visible { outline: 3px solid var(--pv-focus-ring); outline-offset: 1px; }
+
+/* fixture 停用的项目筛选：原因贴着控件，11px 常显，不做成只有悬停才可见的提示。 */
+.inbox-filter-project-note {
+  max-width: 17rem;
+  color: var(--pv-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
 /* ── V5.28 原型皮肤（scope 在 .pv-page；数值取自原型 relay-v528-styles） ───────── */
 
 .pv-page.inbox-page .inbox-inner {
@@ -270,15 +344,20 @@
 .pv-page .inbox-lede { margin-top: 6px; font-size: 12px; line-height: 1.75; color: var(--pv-muted); }
 
 .pv-page .inbox-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin-top: 15px; }
+/* 紧凑统计卡（UI-PAGE-INBOX-01）：数字与状态名基线同行，提示独占下一行；高度由 ~90px 收到 ~64px。 */
 .pv-page .inbox-stat {
-  padding: 15px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  padding: 12px 15px;
   border: 1px solid #dfe9df;
   border-radius: 12px;
   box-shadow: 0 3px 15px #22553506;
 }
 .pv-page .inbox-stat-label { font-size: 11px; color: var(--pv-muted); }
-.pv-page .inbox-stat-value { font-size: 22px; color: #286849; letter-spacing: -.02em; }
-.pv-page .inbox-stat-hint { font-size: 11px; color: var(--pv-muted); }
+.pv-page .inbox-stat-value { font-size: 20px; color: #286849; letter-spacing: -.02em; }
+.pv-page .inbox-stat-hint { flex-basis: 100%; font-size: 11px; color: var(--pv-muted); }
 
 .pv-page .inbox-card {
   margin-top: var(--relay-space-4);
@@ -303,7 +382,8 @@
 .pv-page .inbox-row-icon--warning { background: #fdf3e3; color: #96622a; }
 .pv-page .inbox-row-icon--danger { background: #fdeeea; color: #a34f43; }
 .pv-page .inbox-row-title { font-size: 12.5px; font-weight: 650; color: #33533d; }
-.pv-page .inbox-row-facts { font-size: 11px; color: var(--pv-muted); }
+/* 事实行含修订号：tabular 数字让长列表的同位数字对齐（与任务页同一处理）。 */
+.pv-page .inbox-row-facts { font-size: 11px; color: var(--pv-muted); font-variant-numeric: tabular-nums; }
 .pv-page .inbox-row-reason { font-size: 11px; color: #566f5f; }
 .pv-page .inbox-row-arrow { width: 14px; height: 14px; }
 

@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { resourceNotFound } from '../application/domain-error.js';
 import type { DbExecutor } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import { RunEventRepository } from '../run/run-event-repository.js';
 import { sendReadError } from './envelope.js';
 import { ProblemError, validationFailed } from './problem.js';
@@ -98,7 +99,12 @@ export async function sendRunEventStream(
       await waitForPoll(stopped.signal);
     }
   } catch (error) {
-    if (!stopped.signal.aborted) request.log.error({ err: error }, 'run_event_stream_failed');
+    if (!stopped.signal.aborted) {
+      request.log.error({ err: error }, 'run_event_stream_failed');
+      getRuntimeLogger('run-events').error('run_event_stream_failed', {
+        request_id: request.id, run_id: runId, error,
+      });
+    }
     response.destroy();
   } finally {
     response.off('close', onClose);

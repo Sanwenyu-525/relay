@@ -70,9 +70,10 @@ function isExtraction(request: AssistRequest): boolean {
 
 /** 一轮真实聊天：主流程回 REPLY_TEXT，提取调用回给定 JSON。 */
 async function runChatTurn(f: { workspaceId: string; sessionId: string },
-  extraction: string | Error): Promise<{ assistantMessageId: string; userMessageId: string }> {
+  extraction: string | Error, userText = USER_TEXT):
+  Promise<{ assistantMessageId: string; userMessageId: string }> {
   const sent = await requestAssistMessage(app.db, { workspaceId: f.workspaceId,
-    sessionId: f.sessionId, commandId: randomUUID(), content: USER_TEXT });
+    sessionId: f.sessionId, commandId: randomUUID(), content: userText });
   const port = new FakeModelPort();
   port.assist = async (request) => {
     if (!isExtraction(request)) {
@@ -170,6 +171,18 @@ test('真实聊天入口：结算后自动提取落库，来源与证据身份�
   assert.match(userSection.section, /用户原话/u);
   assert.match(observedSection.section, /模型观察/u);
   assert.ok(userSection.section.includes('UNTRUSTED_DATA'));
+});
+
+test('纯寒暄轮：不发起记忆提取，也不产生捕获账本', async () => {
+  const f = await fixture();
+  const turn = await runChatTurn(f, EXTRACTION, '你好');
+
+  const calls = await sql<{ purpose: string }>`select purpose from model_calls
+    where assist_message_id = ${turn.assistantMessageId}`.execute(app.db);
+  assert.deepEqual(calls.rows.map((row) => row.purpose), ['PRIMARY'],
+    `寒暄轮只应有主调用：${JSON.stringify(calls.rows)}`);
+  const items = await listInformation(app.db, 'memory', f.workspaceId, f.projectId);
+  assert.equal(items.length, 0, '寒暄轮不应写任何记忆');
 });
 
 test('来源类别按声明核验：声明与段落不符就丢弃，观察不得升级为用户陈述', async () => {

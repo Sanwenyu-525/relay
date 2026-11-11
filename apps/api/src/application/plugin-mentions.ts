@@ -67,3 +67,47 @@ export function isMachineCapabilityQuestion(text: string): boolean {
   if (!/[？?]$/u.test(trimmed)) return false;
   return /(能不能|能否|可不可以|是否|支持|会不会|怎么|如何|能不能帮)/u.test(trimmed);
 }
+
+/**
+ * 这条消息是否**明确要求操作电脑或浏览器**（2026-11-10）。
+ *
+ * 信封修复过去只看「工作区登记了机器插件」，于是插件工作区里的任何纯文本回复
+ * （包括「你好」）都会多跑一次整份 system 的修复调用：实测 2026-11-10 一条问候
+ * 因此多花 3,708 输入 token 和 6 秒。这个判定只回答「用户这句话是不是在要求动作」，
+ * 不产生任何授权，也不改变候选校验——准入仍由原执行链决定。
+ *
+ * 判定刻意保守，宁可漏掉一次修复也不把普通聊天当命令：
+ *   * 显式 `@电脑操控` / `@浏览器操控` 本身就是插件选择；
+ *   * 能力询问与讨论措辞（怎么/如何/能不能/原理/介绍…）一律不算；
+ *   * 其余要求「动作词 + 桌面/浏览器对象」同时出现，或动作词本身只可能发生在机器上
+ *     （截图/点击/拖拽…）。「打开项目」「复制代码」这类文件/文字动作不算。
+ */
+export function detectMachineActionIntent(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed === '') return false;
+  if (findKnownPluginMentions(trimmed).some((mention) =>
+    mention.key === 'computer' || mention.key === 'browser')) return true;
+  if (isMachineCapabilityQuestion(trimmed)) return false;
+  if (MACHINE_DISCUSSION_MARKERS.some((marker) => trimmed.includes(marker))) return false;
+  if (!MACHINE_ACTION_VERBS.some((verb) => trimmed.includes(verb))) return false;
+  return MACHINE_ACTION_OBJECTS.some((object) => trimmed.includes(object)) ||
+    MACHINE_ONLY_ACTIONS.some((verb) => trimmed.includes(verb));
+}
+
+const MACHINE_DISCUSSION_MARKERS: readonly string[] = ['怎么', '如何', '能不能', '能否',
+  '可不可以', '是否', '为什么', '什么是', '介绍', '讲解', '原理', '区别', '科普',
+  '会不会', '讨论', '聊聊', '谈谈', '是什么'];
+
+const MACHINE_ACTION_VERBS: readonly string[] = ['打开', '关闭', '关掉', '点击', '单击',
+  '双击', '右击', '右键', '输入', '键入', '按下', '按住', '松开', '滚动', '拖拽',
+  '拖动', '截图', '截屏', '录屏', '访问', '导航', '下载', '上传', '登录', '填写',
+  '勾选', '最小化', '最大化', '启动'];
+
+/** 只可能发生在桌面/浏览器上的动作词：命中即视为机器操作，不再要求对象词。 */
+const MACHINE_ONLY_ACTIONS: readonly string[] = ['截图', '截屏', '录屏', '点击', '双击',
+  '右击', '右键', '鼠标', '键盘', '滚动', '拖拽', '按住', '松开', '最小化', '最大化'];
+
+const MACHINE_ACTION_OBJECTS: readonly string[] = ['浏览器', '网页', '页面', '网址',
+  '链接', '标签页', '桌面', '窗口', '鼠标', '键盘', '应用', '程序', '记事本', '计算器',
+  '资源管理器', '文件管理器', '按钮', '输入框', '菜单', '图标', '任务栏', '开始菜单',
+  '系统设置', '软件', '播放器'];

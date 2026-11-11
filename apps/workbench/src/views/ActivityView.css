@@ -9,14 +9,21 @@
 .activity-filter label { display: grid; gap: var(--relay-space-2); color: var(--relay-color-text-secondary); }
 .activity-filter label input, .activity-filter label select { min-width: 11rem; }
 .activity-filter .action-error { flex-basis: 100%; }
-.activity-categories { display: flex; flex-wrap: wrap; gap: var(--relay-space-2) var(--relay-space-6); border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator); margin-bottom: var(--relay-space-4); }
-.activity-categories > button { min-height: var(--relay-control-height); border-bottom: var(--relay-border-width) solid transparent; border-radius: 0; }
-.activity-categories > button[aria-pressed="true"] { border-bottom-color: var(--relay-color-action-primary); color: var(--relay-color-action-primary); font-weight: var(--relay-font-weight-semibold); }
-.activity-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-4); margin-bottom: var(--relay-space-6); }
+.activity-categories { display: flex; flex-wrap: wrap; gap: var(--relay-space-2); margin-bottom: 0; }
+.activity-categories > button { min-height: var(--relay-control-height); }
+.activity-categories > button[aria-pressed="true"] { font-weight: var(--relay-font-weight-semibold); }
+.activity-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-3) var(--relay-space-4); margin-bottom: var(--relay-space-6); }
 .activity-toolbar .segmented { flex: none; white-space: nowrap; }
 .activity-toolbar .segmented-option { white-space: nowrap; }
 .activity-toolbar .activity-filter-scope { flex: 1 1 var(--relay-layout-rail-narrowWidth); min-width: 0; }
 .activity-filter-scope .helper-text { margin: var(--relay-space-2) 0 0; }
+/* 列表底部状态区：计数说明、续页失败与「继续加载」集中在一处（§4.4）。 */
+.activity-foot { margin-top: var(--relay-space-6); display: grid; gap: var(--relay-space-3); justify-items: start; }
+.activity-basis-head { display: grid; gap: var(--relay-space-2); }
+.activity-basis-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-3); }
+.activity-basis-section { margin-top: var(--relay-space-4); }
+.activity-basis-section h3 { margin: 0 0 var(--relay-space-2); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-secondary); }
+.activity-toolbar-label { color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-meta); }
 .activity-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--relay-space-8); align-items: start; }
 .activity-main { min-width: 0; }
 .activity-aside { min-width: 0; border-top: var(--relay-border-width) solid var(--relay-color-border-separator); padding-top: var(--relay-space-4); }
@@ -66,9 +73,11 @@
    标题降级不再在此重复——全局已在 <64rem 档把 .page-head-title > h1 降为 compactPage。 */
 @media (width < 48rem) { .activity-page { padding: var(--relay-layout-main-smallPadding); } .activity-filter label { width: 100%; } .activity-filter label input { min-width: 0; width: 100%; } }
 
-/* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
+/* ── V5.28 原型皮肤（scope 在 .pv-page；色值取自 protoPage.css 的 --pv-* 原型色板） ── */
 
-.pv-page .activity-categories { gap: 7px; }
+/* 工具行：类别 chips → 执行方 segmented → 范围说明，随宽度折行；执行方 group 不进 details（语义不变）。 */
+.pv-page .activity-toolbar { gap: 10px; margin-bottom: 4px; align-items: center; }
+.pv-page .activity-categories { gap: 7px; margin-bottom: 0; }
 .pv-page .activity-categories .text-button {
   min-height: 34px;
   padding: 7px 10px;
@@ -79,15 +88,98 @@
   color: #53705b;
 }
 .pv-page .activity-categories .text-button[aria-pressed="true"] { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
-.pv-page .activity-day { font-size: 12px; color: #759282; letter-spacing: .05em; }
+.pv-page .activity-toolbar .segmented { border: 1px solid #d6e5d8; border-radius: 9px; background: #fff; padding: 2px; gap: 2px; }
+.pv-page .activity-toolbar .segmented-option { border: 0; background: transparent; border-radius: 7px; min-height: 28px; padding: 4px 10px; font-size: 12px; color: #53705b; }
+.pv-page .activity-toolbar .segmented-option[aria-pressed="true"] { color: #206846; background: #eaf5eb; }
+.pv-page .activity-toolbar .activity-filter-scope { flex: 1 1 240px; }
+.pv-page .activity-filter-scope > summary { font-size: 11px; color: var(--pv-muted); }
+.pv-page .activity-filter-scope .helper-text { margin-top: 6px; }
+
+/* 高级筛选：折叠时 summary 行内给出已应用条件摘要；展开的表单进卡片，输入控件对齐原型 11px 标签 / 12px 控件档。 */
+.pv-page .activity-advanced-filter { margin: 0 0 13px; }
+.pv-page .activity-advanced-filter > summary { font-size: 12px; color: var(--pv-muted); padding: 6px 0; }
+.pv-page .activity-advanced-filter > summary::marker { color: #2c7a52; }
+.pv-page .activity-advanced-filter .activity-filter {
+  margin: 10px 0 0;
+  padding: 15px 17px;
+  background: #fff;
+  border: 1px solid var(--pv-line);
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+  gap: 13px;
+}
+.pv-page .activity-filter label { gap: 6px; font-size: 11px; font-weight: 650; color: #566f5f; }
+.pv-page .activity-filter label input,
+.pv-page .activity-filter label select {
+  min-width: 11rem;
+  border: 1px solid #d7e4d8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #34523b;
+  background: #fff;
+}
+.pv-page .activity-filter label input:focus,
+.pv-page .activity-filter label select:focus { border-color: #69a77b; box-shadow: 0 0 0 3px #eaf6ed; outline: none; }
+.pv-page .activity-filter .helper-text { flex-basis: 100%; margin: 0; }
+.pv-page .activity-filter .action-error { flex-basis: 100%; margin: 0; }
+
+/* 事件行卡片：meta 一行（时间/执行方/类别）→ 事件摘要升级为行标题 → 对象链接收尾。 */
+.pv-page .activity-day { font-size: 12px; color: #759282; letter-spacing: .05em; margin: 0 0 8px; }
 .pv-page .activity-list > li {
   border: 1px solid #e3ebe4;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 3px 15px #22553506;
   margin-bottom: 9px;
+  padding: 13px 15px;
 }
 .pv-page .activity-list > li:hover { border-color: #c6ddcc; }
+/* 选中态用原型色板表达（基础层的 selection 色被上面的 pv 边框覆写，这里按同一档补回）。 */
+.pv-page .activity-list > li.activity-row--selected { border-color: #9ccbab; background: #f2f8f3; }
+.pv-page .activity-toolbar-label { font-size: 11px; color: var(--pv-muted); flex: none; }
+.pv-page .activity-row-heading { gap: 8px; }
+.pv-page .activity-row-lead { gap: 8px; }
+.pv-page .activity-row-lead time { color: var(--pv-muted); font-size: 11px; }
+.pv-page .activity-actor { width: 8px; height: 8px; }
+.pv-page .activity-actor-label { font-size: 12px; color: #33533d; }
+.pv-page .activity-summary { margin-top: 5px; font-size: 12.5px; font-weight: 650; color: #33533d; line-height: 1.6; }
+.pv-page .activity-refs { margin-top: 7px; }
+.pv-page .activity-refs ul { gap: 6px 12px; margin-top: 0; }
+.pv-page .activity-refs .inline-link { font-size: 12px; }
+.pv-page .activity-refs p { margin-top: 0; font-size: 11px; }
+.pv-page .activity-row .text-button { font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+  .pv-page .activity-list > li { transition: border-color .15s ease, background-color .15s ease; }
+}
+
+/* 列表底部状态区：计数、续页失败与继续加载集中在同一页脚，续页失败紧邻继续加载按钮。 */
+.pv-page .activity-foot { margin-top: 13px; padding-top: 11px; border-top: 1px solid #edf1ec; gap: 9px; }
+.pv-page .activity-foot .helper-text { margin: 0; }
+.pv-page .activity-foot .action-error { margin: 0; }
+
+/* 依据检查器：卡片化分区（头部 / 关键事实 / 关联对象 / 判断说明 / 来源说明）。 */
+.pv-page .activity-basis {
+  background: #fff;
+  border: 1px solid var(--pv-line);
+  border-radius: 13px;
+  box-shadow: var(--pv-card-shadow);
+  padding: 15px 17px;
+  gap: 0;
+}
+.pv-page .activity-basis-head { gap: 6px; }
+.pv-page .activity-basis-title { gap: 8px; }
+.pv-page .activity-basis-title h2 { font-size: 13px; font-weight: 700; color: #294635; margin: 0; }
+.pv-page .activity-basis-summary { margin: 2px 0 0; font-size: 12px; color: #486452; }
+.pv-page .activity-basis-section { margin-top: 13px; padding-top: 11px; border-top: 1px solid #edf1ec; }
+.pv-page .activity-basis-section h3 { margin: 0 0 6px; font-size: 11px; font-weight: 650; color: #566f5f; }
+.pv-page .activity-basis-refs { gap: 8px; }
+.pv-page .activity-basis-note { border-left: 2px solid #dcebdd; background: #f6faf7; border-radius: 0 8px 8px 0; padding: 8px 10px; margin: 0; color: #52765e; }
+.pv-page .activity-basis-footer { margin-top: 13px; }
+/* 未选中事件的空态不是告警：虚线占位卡，说明选择后会出现什么。 */
+.pv-page .activity-basis-empty { border: 1px dashed #dce9de; border-radius: 13px; padding: 15px 17px; }
+.pv-page .activity-basis-empty .eyebrow { margin-bottom: 6px; }
 
 /* 示例模式空态：中性只读提示不是告警，改用 pv 卡片（白底/1px 边框/13px 圆角/780px 阅读宽），
    与 /goals、/knowledge 的空态卡同一条左对齐边与同一宽度；原 1160px 的整行琥珀条只占文字约 350px。 */
@@ -95,3 +187,10 @@
 .pv-page .activity-fixture-card p { margin: 0; font-size: 12px; line-height: 1.75; color: #486452; }
 /* 390px 下链接曾逐字竖排（打开/项目）：链接与其后文字不得在中间断开。 */
 .pv-page .activity-fixture-card a { white-space: nowrap; }
+
+/* 窄窗：行卡片收紧、工具行折行、筛选字段全宽（基础层已有全宽规则）。 */
+@media (width < 48rem) {
+  .pv-page .activity-list > li { padding: 12px 13px; }
+  .pv-page .activity-toolbar { gap: 8px; }
+  .pv-page .activity-foot { gap: 8px; }
+}

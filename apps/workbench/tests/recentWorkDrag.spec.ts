@@ -170,7 +170,7 @@ async function mount() {
   return { container, router };
 }
 
-/** 只有「目标」与「工作区（目录）」这两类会话列带可拖标记；本夹具没有目标关联，故唯一一列。 */
+/** 只有「目标」与「会话（按目录）」这两类会话列带可拖标记；本夹具没有目标关联，故唯一一列。 */
 const list = (container: HTMLElement) => container.querySelector<HTMLElement>("ul[data-reorder-list]")!;
 const orderOf = (container: HTMLElement) =>
   [...list(container).querySelectorAll<HTMLElement>("[data-recent-row]")].map((item) => item.dataset.recentRow);

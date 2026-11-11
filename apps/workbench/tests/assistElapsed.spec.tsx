@@ -57,9 +57,9 @@ describe("消息头部的任务耗时", () => {
       // 在途的 updated_at 是心跳，不是这次执行的终点。
       updatedAt: "2026-10-18T12:00:05Z" }) }));
     try {
-      expect(view.wrapper.get('[data-testid="assist-elapsed-m-1"]').text()).toBe("已用 5 秒");
+      expect(view.wrapper.get('[data-testid="assist-elapsed-m-1"]').text()).toBe("5 秒");
       await act(async () => { vi.advanceTimersByTime(2_000); });
-      expect(view.wrapper.get('[data-testid="assist-elapsed-m-1"]').text()).toBe("已用 7 秒");
+      expect(view.wrapper.get('[data-testid="assist-elapsed-m-1"]').text()).toBe("7 秒");
     } finally { view.unmount(); }
   });
 

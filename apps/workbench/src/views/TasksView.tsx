@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Info, ListTodo, Plus, RotateCcw, Search, SearchX } from "lucide-react";
+import { Info, ListTodo, Plus, RotateCcw, Search, SearchX, X } from "lucide-react";
 import { RelayApiError, type RelayApiClient, type RelayTaskSummary } from "../api/relayClient";
 import EmptyState from "../components/EmptyState";
 import ResponsiveRail from "../components/ResponsiveRail";
@@ -15,7 +15,7 @@ import { executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./TasksView.css";
-import type { InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
+import type { ExecutorKind, InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
 const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
@@ -35,6 +35,58 @@ function isAccessLost(caught: unknown): boolean {
   const { status, code } = caught.problem;
   return status === 401 || status === 403 || status === 404
     || code === "AUTH_REQUIRED" || code === "RESOURCE_NOT_FOUND";
+}
+
+/* ── 统一呈现层（2026-11-11 UI-PAGE-TASKS-01）────────────────────────────
+   fixture 与 live 各自把任务映射到同一行模型，共用一份表格标记；
+   宽窗保持列对齐的表格语义，窄窗由页面 CSS 转成行卡片，不再各写一份 JSX。 */
+
+/** 任务行呈现模型：项目名由调用方解析（live 单读缓存，fixture 读选项表），理由已合并。 */
+interface TaskRowModel {
+  readonly id: string;
+  readonly title: string;
+  readonly revision: string;
+  readonly projectLabel: string;
+  readonly status: TaskStatus;
+  readonly mode: InteractionMode;
+  readonly executor: ExecutorKind;
+  readonly reason: string | null;
+}
+
+/** 统一任务表：视觉表头仅供对照（aria-hidden），行语义由整行链接承担。 */
+function TaskTable({ rows }: { rows: readonly TaskRowModel[] }) {
+  return <div className="pv-card task-table-card"><div className="table-scroll"><div className="data-table">
+    <div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div>
+    <ul className="data-list">{rows.map((task) => <TaskTableRow key={task.id} task={task} />)}</ul>
+  </div></div></div>;
+}
+
+function TaskTableRow({ task }: { task: TaskRowModel }) {
+  return <li><Link className="data-row data-row--tasks data-row--interactive" to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`} style={rowLinkStyle}>
+    <span className="data-cell task-cell-main"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span>
+    <span className="data-cell data-cell--meta" data-label="项目">{task.projectLabel}</span>
+    <span className="data-cell" data-label="工作状态"><StatusChip status={task.status} />{task.reason !== null && <small className="data-cell-reason" title={task.reason}>{task.reason}</small>}</span>
+    <span className="data-cell data-cell--meta" data-label="执行模式">{interactionModeLabels[task.mode]}</span>
+    <span className="data-cell data-cell--meta" data-label="当前执行者">{executorLabels[task.executor]}</span>
+  </Link></li>;
+}
+
+/** 当前生效筛选摘要：每条可单独移除，附一键清除；无筛选时不渲染，不占首屏。 */
+function ActiveFilterBar({ filters, onClear }: {
+  filters: readonly { key: string; label: string; onRemove: () => void }[];
+  onClear: () => void;
+}) {
+  if (filters.length === 0) return null;
+  return <div className="active-filters" data-testid="tasks-active-filters">
+    <span className="active-filters-label">筛选生效中</span>
+    <ul className="active-filters-list" role="list">
+      {filters.map((filter) => <li key={filter.key} className="active-filter-chip">
+        <span>{filter.label}</span>
+        <button className="active-filter-remove" type="button" aria-label={`移除筛选：${filter.label}`} onClick={filter.onRemove}><X aria-hidden="true" /></button>
+      </li>)}
+    </ul>
+    <button className="text-button" type="button" onClick={onClear}>清除筛选</button>
+  </div>;
 }
 
 export default function TasksView() {
@@ -80,6 +132,17 @@ export default function TasksView() {
   const hasFilters = projectFilter !== "all" || statusFilter !== "all" || modeFilter !== "all" || search !== "";
   const clearFilters = () => { setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
   const projectTitle = (projectId: string | null) => projectId === null ? "未归属项目" : projects.find((project) => project.id === projectId)?.title ?? projectId;
+  // 当前生效筛选：chips 逐项可移除，无筛选时不渲染（不占首屏）。
+  const activeFilters = [
+    ...(projectFilter !== "all" ? [{ key: "project", label: `项目：${projectFilter === "inbox" ? "未归属项目" : projectTitle(projectFilter)}`, onRemove: () => setProjectFilter("all") }] : []),
+    ...(statusFilter !== "all" ? [{ key: "status", label: `状态：${taskStatusLabels[statusFilter]}`, onRemove: () => setStatusFilter("all") }] : []),
+    ...(modeFilter !== "all" ? [{ key: "mode", label: `执行模式：${interactionModeLabels[modeFilter]}`, onRemove: () => setModeFilter("all") }] : []),
+    ...(search !== "" ? [{ key: "search", label: `搜索“${search}”`, onRemove: () => setSearch("") }] : [])
+  ];
+  const taskRows: TaskRowModel[] = tasks.map((task) => ({
+    id: task.id, title: task.title, revision: task.revision, projectLabel: projectTitle(task.projectId),
+    status: task.status, mode: task.mode, executor: task.executor, reason: task.waitingReason ?? task.blockedReason
+  }));
   const openCreate = () => navigate(`/tasks?view=create${scope === "inbox" ? "&tab=inbox" : ""}`);
   /**
    * 「新建任务」默认走一句话登记（工作台 §18.7）：先记下要完成什么，验收标准、项目与委托
@@ -101,7 +164,8 @@ export default function TasksView() {
       actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
         <button className="secondary-button" type="button" data-testid="task-create-full" onClick={openCreate}>填写完整定义</button></>} />
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks" data-testid="tasks-tab-all" aria-current="page">全部</Link><Link className="subnav-item" to="/tasks?tab=inbox" data-testid="tasks-tab-inbox">收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
-    <div className="list-toolbar list-toolbar--compact"><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label></div>
+    <div className="list-toolbar list-toolbar--compact" data-testid="tasks-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label></div>
+    <ActiveFilterBar filters={activeFilters} onClear={clearFilters} />
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
     {tasks.length === 0
       ? hasFilters
@@ -115,8 +179,11 @@ export default function TasksView() {
           testId="tasks-empty"
           actions={<><button className="primary-button" type="button" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
             <Link className="secondary-button" to="/projects">打开项目</Link></>} />
-      : <div className="pv-card task-table-card"><div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div><ul className="data-list">{tasks.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive" to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`} style={rowLinkStyle}><span className="data-cell"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span><span className="data-cell data-cell--meta" data-label="项目">{projectTitle(task.projectId)}</span><span className="data-cell" data-label="工作状态"><StatusChip status={task.status} />{(task.waitingReason ?? task.blockedReason) && <small className="data-cell-reason" title={(task.waitingReason ?? task.blockedReason) ?? undefined}>{task.waitingReason ?? task.blockedReason}</small>}</span><span className="data-cell data-cell--meta" data-label="执行模式">{interactionModeLabels[task.mode]}</span><span className="data-cell data-cell--meta" data-label="当前执行者">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div></div>}
-    <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
+      : <TaskTable rows={taskRows} />}
+    <div className="task-list-foot">
+      <p className="list-count-note" data-testid="tasks-fixture-count">{hasFilters ? `当前筛选显示 ${tasks.length} 项任务。` : `共 ${tasks.length} 项任务。`}</p>
+      <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>
+    </div>
   </div><ResponsiveRail label="查看范围说明" title="当前范围"><div className="rail-content"><h2>当前范围</h2><p className="rail-intro">这里是整个工作空间的任务，不限定在某个项目内。</p><section className="rail-section"><h3>筛选保持作用域</h3><p>项目、状态与执行模式的筛选只作用于当前列表；切换“全部/收件箱”会重置项目筛选，避免把上一个范围的条件带到新范围。</p></section><section className="rail-section"><h3>未归属任务</h3><p>未归属项目的任务只允许人工事项；把它们关联到项目需要显式操作，不会自动创建 Project。<Link className="secondary-button secondary-button--wide" to="/tasks?tab=inbox">查看收件箱任务</Link></p></section><section className="rail-section"><h3>委托前确认</h3><p>AI 委托是执行意图，不是当前状态；只有满足执行条件后，单独的委托流程才能确认执行者。</p></section></div></ResponsiveRail></div></section>;
 }
 
@@ -201,6 +268,19 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
     (modeFilter === "all" || task.mode === modeFilter) &&
     (!needle || task.title.toLocaleLowerCase().includes(needle)));
   const hasFilters = projectFilter !== "all" || statusFilter !== "all" || modeFilter !== "all" || needle !== "";
+  const clearFilters = () => { setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch(""); };
+  // 当前生效筛选（live）：搜索按已去空白的关键词展示，与实际过滤口径一致。
+  const activeFilters = [
+    ...(projectFilter !== "all" ? [{ key: "project", label: `项目：${projectFilter === "inbox" ? "未归属项目" : projectTitles[projectFilter] ?? `项目 ${projectFilter}`}`, onRemove: () => setProjectFilter("all") }] : []),
+    ...(statusFilter !== "all" ? [{ key: "status", label: `状态：${taskStatusLabels[statusFilter]}`, onRemove: () => setStatusFilter("all") }] : []),
+    ...(modeFilter !== "all" ? [{ key: "mode", label: `执行模式：${interactionModeLabels[modeFilter]}`, onRemove: () => setModeFilter("all") }] : []),
+    ...(needle !== "" ? [{ key: "search", label: `搜索“${needle}”`, onRemove: () => setSearch("") }] : [])
+  ];
+  const taskRows: TaskRowModel[] = visible.map((task) => ({
+    id: task.id, title: task.title, revision: task.revision,
+    projectLabel: task.projectId === null ? "未归属项目" : projectTitles[task.projectId] ?? `项目 ${task.projectId}`,
+    status: task.status, mode: task.mode, executor: task.executor, reason: task.waitingReason
+  }));
   return <section className="skill-page task-list-page pv-page" data-testid="tasks-live-all"><div className="page-layout">
     <div className="page-primary">
       <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
@@ -212,9 +292,10 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
         <Link className="subnav-item" to="/tasks?tab=inbox"
           data-testid="tasks-tab-inbox">收件箱</Link>
         <Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
-      <div className="list-toolbar list-toolbar--compact">
-        <button className="secondary-button" type="button" data-testid="tasks-live-refresh"
-          disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新任务列表</button>
+      <div className="list-toolbar list-toolbar--compact" data-testid="tasks-toolbar">
+        <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search"
+            placeholder="搜索已加载任务" /></label>
         <label className="filter-field">项目<select value={projectFilter}
         onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project">
         <option value="all">全部</option><option value="inbox">未归属项目</option>{loadedProjectIds.map((id) =>
@@ -227,14 +308,12 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
           onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode">
           <option value="all">全部</option>{modeOptions.map((item) =>
             <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label>
-        <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search"
-            placeholder="搜索已加载任务" /></label></div>
+        <button className="secondary-button" type="button" data-testid="tasks-live-refresh"
+          disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新任务列表</button></div>
       {loading ? <div className="page-state" aria-live="polite"><p>正在从本机服务读取工作空间任务…</p></div> :
         error ? <div className="page-state page-state--error" role="alert"><p>{error}</p>
           <button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
-          <p className="list-count-note" data-testid="tasks-live-count">已加载 {items.length} 项 · 当前筛选显示 {visible.length} 项
-            {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。筛选只作用于已加载任务。</p>
+          <ActiveFilterBar filters={activeFilters} onClear={clearFilters} />
           {visible.length === 0
             ? items.length === 0
               ? <EmptyState icon={ListTodo} as="h2" title="还没有任务"
@@ -246,20 +325,15 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
               : <EmptyState size="compact" icon={SearchX} title="已加载任务里没有匹配项"
                 description={`已加载 ${items.length} 项，当前筛选显示 0 项。状态、模式与标题筛选只作用于已加载范围，后续页可能仍有匹配任务。`}
                 testId="tasks-live-no-match"
-                actions={hasFilters ? <button className="secondary-button" type="button" onClick={() => {
-                  setProjectFilter("all"); setStatusFilter("all"); setModeFilter("all"); setSearch("");
-                }}>清除筛选</button> : undefined} />
-            :
-            <div className="pv-card task-table-card"><div className="table-scroll"><div className="data-table"><div className="data-row data-row--head data-row--tasks" aria-hidden="true"><span className="data-cell">任务</span><span className="data-cell">项目</span><span className="data-cell">工作状态</span><span className="data-cell">执行模式</span><span className="data-cell">当前执行者</span></div>
-              <ul className="data-list">{visible.map((task) => <li key={task.id}><Link className="data-row data-row--tasks data-row--interactive"
-                to={`/tasks/${task.id}`} data-testid={`task-row-${task.id}`}><span className="data-cell"><strong title={task.title}>{task.title}</strong><small>任务修订 v{task.revision}</small></span>
-                <span className="data-cell data-cell--meta" data-label="项目">{task.projectId === null ? "未归属项目"
-                  : projectTitles[task.projectId] ?? `项目 ${task.projectId}`}</span><span className="data-cell" data-label="工作状态"><StatusChip status={task.status} />
-                  {task.waitingReason && <small className="data-cell-reason" title={task.waitingReason}>{task.waitingReason}</small>}</span><span className="data-cell data-cell--meta" data-label="执行模式">{interactionModeLabels[task.mode]}</span>
-                <span className="data-cell data-cell--meta" data-label="当前执行者">{executorLabels[task.executor]}</span></Link></li>)}</ul></div></div></div>}
-          {moreError && <p className="action-error" role="alert" data-testid="tasks-live-more-error">续页失败：{moreError}；已保留前面加载的结果，可按原游标重试。</p>}
-          {nextCursor && <button className="secondary-button" type="button" data-testid="tasks-live-load-more"
-            disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : moreError ? "重试加载后续页" : "加载更多"}</button>}
+                actions={hasFilters ? <button className="secondary-button" type="button" onClick={clearFilters}>清除筛选</button> : undefined} />
+            : <TaskTable rows={taskRows} />}
+          <div className="task-list-foot">
+            <p className="list-count-note" data-testid="tasks-live-count">已加载 {items.length} 项 · 当前筛选显示 {visible.length} 项
+              {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。筛选只作用于已加载任务。</p>
+            {moreError && <p className="action-error" role="alert" data-testid="tasks-live-more-error">续页失败：{moreError}；已保留前面加载的结果，可按原游标重试。</p>}
+            {nextCursor && <button className="secondary-button" type="button" data-testid="tasks-live-load-more"
+              disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : moreError ? "重试加载后续页" : "加载更多"}</button>}
+          </div>
         </>}
     </div><ResponsiveRail label="查看任务范围" title="已加载范围"><div className="rail-content"><h2>全工作空间范围</h2>
       <p className="rail-intro">服务端返回当前工作空间的项目内与未归属任务。每页最多 50 项；状态、模式和标题筛选只处理已加载的页，不代表全量任务总数。</p>

@@ -1,4 +1,5 @@
 import type { ModelUsage } from './fake-model-port.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 
 /**
  * 模型端口的协议无关失败类型（MODEL-SETTINGS-03）。
@@ -14,6 +15,10 @@ export class ModelCallBudgetError extends Error {
   constructor(readonly providerRequestId = '',
     readonly usage?: ModelUsage) {
     super('model call exceeds configured token budget');
+    // Single choke point: every provider protocol reports the exhausted budget here.
+    getRuntimeLogger('model-port').warn('model_call_budget_exhausted', {
+      provider_request_id: providerRequestId, usage: usage ?? null,
+    });
   }
 }
 
@@ -26,6 +31,9 @@ export class ModelOutputBudgetError extends Error {
   override readonly name = 'ModelOutputBudgetError';
   constructor(readonly providerRequestId: string, readonly usage: ModelUsage) {
     super('model output exceeds the configured bound');
+    getRuntimeLogger('model-port').warn('model_output_budget_exhausted', {
+      provider_request_id: providerRequestId, usage,
+    });
   }
 }
 

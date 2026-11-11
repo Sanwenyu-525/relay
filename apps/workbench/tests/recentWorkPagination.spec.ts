@@ -9,8 +9,9 @@ import { clearActiveConversation, bumpActiveConversationActivity, publishActiveC
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const id = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, "0")}`;
-const task = (n: number) => ({ id: id(n), title: `研究任务 ${n}`, project_id: projectId,
-  status: "READY", mode: "ME", revision: "1", executor: { kind: "HUMAN", run_id: null },
+const task = (n: number, runId: string | null = null) => ({ id: id(n), title: `研究任务 ${n}`, project_id: projectId,
+  status: "READY", mode: "ME", revision: "1",
+  executor: { kind: runId === null ? "HUMAN" : "AI", run_id: runId },
   current_completion_id: null, waiting_reason: null, blocking_task_ids: [], unresolved_blocker_ids: [], allowed_actions: [],
   updated_at: `2026-10-01T00:${String(20 - n).padStart(2, "0")}:00Z` });
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body }) as Response;
@@ -21,13 +22,14 @@ const directoryRow = (n: number, at: string, resource: number, root: string) => 
   assistant_profile_revision: null, assistant_role: null, remember: true,
   created_at: "2026-10-01T00:00:00Z", last_message_at: at, updated_at: at,
   context: { project_goals: [], working_directory: { resource_id: id(resource), canonical_root: root } } });
-/** 「工作区（目录）」段的组标题顺序：分组只是全局列序的子序列，组序即列序的投影。 */
+/** 「会话（按目录）」段的组标题顺序：分组只是全局列序的子序列，组序即列序的投影。 */
 const directoryGroupTitles = (container: HTMLElement) =>
   [...container.querySelectorAll('[data-testid="recent-work-directories"] .recent-work-group > summary .recent-work-group-title')].map((node) => node.textContent);
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); cleanup = undefined; clearActiveConversation(); vi.unstubAllGlobals(); vi.useRealTimers(); window.localStorage.clear(); });
 
-async function mount(secondStatus = 200, sessions: readonly unknown[] = [], sessionDetail?: Record<string, unknown>) {
+async function mount(secondStatus = 200, sessions: readonly unknown[] = [], sessionDetail?: Record<string, unknown>,
+  runningTaskNumbers: readonly number[] = []) {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     if (url.pathname.endsWith("/projects")) return json({ items: [{ id: projectId, title: "研究项目",
@@ -40,7 +42,8 @@ async function mount(secondStatus = 200, sessions: readonly unknown[] = [], sess
     if (url.searchParams.has("cursor")) return secondStatus === 200
       ? json({ items: [task(8), task(9), task(10)], next_cursor: null })
       : json({ code: "FORBIDDEN", message: "任务访问权已撤销" }, secondStatus);
-    return json({ items: Array.from({ length: 8 }, (_, n) => task(n + 1)), next_cursor: "older-page" });
+    return json({ items: Array.from({ length: 8 }, (_, n) => task(n + 1,
+      runningTaskNumbers.includes(n + 1) ? `run-${n + 1}` : null)), next_cursor: "older-page" });
   }));
   const client = new RelayApiClient({ baseUrl: "http://127.0.0.1:8794", workspaceId, bearerToken: "test-only" });
   const router = createMemoryRouter([{ path: "*", element: createElement(RecentWorkRail, { client, currentTaskId: null }) }],
@@ -144,7 +147,47 @@ it("目录行带「＋」：只在有真实路径的分组出现，点击以该�
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
 
-it("目录入口与任务入口分开：会话行仍打开原会话身份", async () => {
+it("「任务」段标题右侧常有「＋新建任务」：点击进创建页，不折叠这一段、不提前建对象", async () => {
+  // 2026-11-10 用户指认「没有新建任务的新建按钮」：段标题补一颗常显的「＋」，
+  // 与「会话（按目录）」的清空键同一形态——一枚、挂在段标题上、不下放到各项目组。
+  const { container, router } = await mount();
+  const section = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-tasks"]')!;
+  expect(section.open).toBe(true);
+  const summary = section.querySelector<HTMLElement>(":scope > summary")!;
+  const button = summary.querySelector<HTMLButtonElement>('[data-testid="recent-work-new-task"]')!;
+  expect(button).not.toBeNull();
+  expect(container.querySelectorAll('[data-testid="recent-work-new-task"]')).toHaveLength(1);
+  expect(button.getAttribute("aria-label")).toBe("新建任务");
+  // summary 的默认动作是折叠/展开：这颗键必须自己挡掉，不然点它会把这一段收起。
+  await act(async () => { button.click(); });
+  expect(section.open).toBe(true);
+  expect(router.state.location.pathname).toBe("/tasks");
+  expect(new URLSearchParams(router.state.location.search).get("view")).toBe("create");
+  // 新建是导航动作，不提前创建业务对象。
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it("任务分组有 Run 持有执行权时显示带缺口的点状圆环；没有执行权时不显示", async () => {
+  // 2026-11-10 用户要求「会话有任务执行的时候，那个地方加一个有缺口的点状圆圈，不停转动」。
+  // 口径是任务投影的 executor.run_id：服务端说 Run 还持有执行权才转动，不看状态文字推断。
+  const idle = await mount();
+  expect(idle.container.querySelector('[data-testid^="recent-work-task-running-"]')).toBeNull();
+  cleanup?.(); cleanup = undefined;
+
+  const { container } = await mount(200, [], undefined, [1]);
+  const group = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-tasks"] .recent-work-group')!;
+  const ring = group.querySelector<HTMLElement>(`:scope > summary [data-testid="recent-work-task-running-${projectId}"]`);
+  expect(ring).not.toBeNull();
+  // 12px 环与计数徽标同处分组行；形状之外还有文案，读屏听到的是同一件事。
+  expect(ring!.textContent).toContain("有任务正在执行");
+  expect(ring!.querySelector("path")?.getAttribute("stroke-dasharray")).toBe("0.1 4.2");
+  // 指示属于分组行本身：分组收起时仍看得见「这一组还在跑」。
+  expect(ring!.closest("summary")).toBe(group.querySelector(":scope > summary"));
+  // 同组里只有一条在跑也只出现一枚，不按任务条数重复。
+  expect(group.querySelectorAll(".recent-work-group-running")).toHaveLength(1);
+});
+
+it("会话（按目录）与任务分开：会话行仍打开原会话身份", async () => {
   // 协作页 §3.1：左栏不再只列任务。会话行与任务行共用一个列表，但走的是 ?session=。
   const sessionId = "77777777-7777-4777-8777-777777777777";
   const { container, router } = await mount(200, [{ id: sessionId, workspace_id: workspaceId,
@@ -276,7 +319,7 @@ it("当前会话所在的工作区段仍可手动收起，换会话时才由定�
 
   const section = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-directories"]')!;
   expect(section.open).toBe(true);
-  // 缺陷本身：活动会话一定落在「工作区（目录）」里，旧的常驻强制展开会在 summary 收起的同一拍
+  // 缺陷本身：活动会话一定落在「会话（按目录）」里，旧的常驻强制展开会在 summary 收起的同一拍
   // 把 open 改回 true，这一段因此永远收不起来。折叠偏好必须赢过定位展开。
   await act(async () => { section.open = false; section.dispatchEvent(new Event("toggle", { bubbles: true })); });
   expect(section.open).toBe(false);
@@ -323,7 +366,7 @@ it("近期工作栏支持方向键漫游：跨分组移动焦点，折叠段里�
   });
   expect(document.activeElement).toBe(rows()[0]);
 
-  // 收起「工作区（目录）」段：其中两行不可聚焦，不再参与漫游。
+  // 收起「会话（按目录）」段：其中两行不可聚焦，不再参与漫游。
   const section = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-directories"]')!;
   await act(async () => { section.open = false; section.dispatchEvent(new Event("toggle", { bubbles: true })); });
   expect(visibleRows()).toHaveLength(8);

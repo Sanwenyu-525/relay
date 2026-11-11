@@ -6,18 +6,22 @@ import { FeedbackHost } from "../src/components/Feedback";
 import { RelayApiClient } from "../src/api/relayClient";
 
 /**
- * 「清空该工作区会话」的口径（UI-WORKSPACE-CLEAR，2026-11-04）。
+ * 「清空该工作区会话」的口径（UI-WORKSPACE-CLEAR，2026-11-04，2026-11-10 按用户口径收窄）。
  *
  * 守护的是行为，不是外观：
- * 1. 悬停提示必须说出完整后果，不用原生 title。
- * 2. 清空是**逐条走既有 DeleteAssistSession 命令**，不能整表直写；任务执行会话与委派子会话
- *    不在范围，另一工作区（不同 workspaceId）不会收到任何请求。
- * 3. 先读当前事实再确认，确认框条数必须和实际目标一致；重复触发不产生第二次破坏。
- * 4. 阻断、明确失败、结果未确认各自可读；未确认只核对原 command_id 回执，绝不换新命令重删。
+ * 1. 悬停提示必须说出完整后果与作用范围，不用原生 title。
+ * 2. 清空是**逐条走既有 DeleteAssistSession 命令**，不能整表直写；任务是「任务」段的事，
+ *    任务执行会话与委派子会话不在范围，另一个工作区（不同 workspaceId）不会收到任何请求。
+ * 3. **范围是「会话（按目录）」这一段收集的会话**：各目录分组的讨论一起算，含已归档；
+ *    用户口径里的这一段是会话的集合区域，不是单个目录。
+ * 4. 先读当前事实再确认，确认框条数必须和实际目标一致；重复触发不产生第二次破坏。
+ * 5. 阻断、明确失败、结果未确认各自可读；未确认只核对原 command_id 回执，绝不换新命令重删。
  */
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const id = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, "0")}`;
+const DIR_A = "44444444-4444-4444-8444-444444444444";
+const DIR_B = "55555555-5555-4555-8555-555555555555";
 
 interface Row {
   readonly id: string;
@@ -33,13 +37,22 @@ interface Row {
   updated_at: string;
   last_message_at: string | null;
   has_messages: boolean;
+  context?: { readonly project_goals: readonly unknown[];
+    readonly working_directory: { readonly resource_id: string;
+      readonly canonical_root: string; readonly source: string } | null };
 }
+
+const directory = (resourceId: string, root: string) => ({
+  project_goals: [], working_directory: { resource_id: resourceId,
+    canonical_root: root, source: "USER_PICKED" }
+});
 
 const row = (n: number, title: string, extra: Partial<Row> = {}): Row => ({
   id: id(n), project_id: null, task_id: null, parent_session_id: null, title,
   status: "ACTIVE", revision: "1", pinned_at: null, unread_at: null,
   created_at: `2026-11-0${n}T08:00:00Z`, updated_at: `2026-11-0${n}T08:00:00Z`,
-  last_message_at: `2026-11-0${n}T08:00:00Z`, has_messages: true, ...extra
+  last_message_at: `2026-11-0${n}T08:00:00Z`, has_messages: true,
+  context: directory(DIR_A, "D:/work/a"), ...extra
 });
 
 const json = (body: unknown, status = 200) =>
@@ -111,7 +124,8 @@ function makeClient(): RelayApiClient {
 
 const mountedRoots: ReturnType<typeof createRoot>[] = [];
 
-async function mount(client: RelayApiClient, onCleared: (ids: readonly string[]) => void) {
+async function mount(client: RelayApiClient,
+  onCleared: (ids: readonly string[], allDeleted: boolean) => void) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -145,67 +159,74 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
-it("悬停提示说清后果，确认框按真实会话数计数，只删除讨论会话", async () => {
+it("悬停提示说清作用范围，确认框按整段会话集合计数，各目录讨论一起清、任务会话与子会话不动", async () => {
   const server = fakeServer([
     row(1, "讨论 A"),
     row(2, "讨论 B"),
     row(3, "任务执行会话", { task_id: id(90) }),
-    row(4, "委派子会话", { parent_session_id: id(1) })
+    row(4, "委派子会话", { parent_session_id: id(1) }),
+    row(5, "另一目录讨论", { context: directory(DIR_B, "D:/work/b") }),
+    { ...row(6, "已归档讨论"), status: "ARCHIVED" }
   ]);
-  const onCleared = vi.fn<(ids: readonly string[]) => void>();
+  const onCleared = vi.fn<(ids: readonly string[], allDeleted: boolean) => void>();
   const mounted = await mount(makeClient(), onCleared);
   const button = mounted.button();
   expect(button).not.toBeNull();
 
   await act(async () => { button?.focus(); });
   const tooltip = mounted.portal("workspace-clear-tooltip");
-  expect(tooltip?.textContent).toBe("该操作会清空该工作区所有会话");
+  expect(tooltip?.textContent)
+    .toBe("清空「会话（按目录）」里的讨论（含已归档）；「任务」段的执行会话不在范围内");
 
   await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
   await flush();
-  expect(mounted.portal("workspace-clear-count")?.textContent).toBe("2");
-  expect(mounted.portal("workspace-clear-confirm")?.textContent).toContain("清空 2 条会话");
+  // 目录 A 两条 + 目录 B 一条 + 已归档一条 = 4；任务执行会话与委派子会话不在范围。
+  expect(mounted.portal("workspace-clear-count")?.textContent).toBe("4");
+  expect(mounted.portal("workspace-clear-confirm")?.textContent).toContain("清空 4 条会话");
 
   await mounted.click("workspace-clear-confirm");
-  expect(server.deletedTargets).toEqual([id(1), id(2)]);
+  expect(server.deletedTargets).toEqual([id(1), id(2), id(5), id(6)]);
   expect(server.rows.map((item) => item.title)).toEqual(["任务执行会话", "委派子会话"]);
-  expect(onCleared).toHaveBeenCalledWith([id(1), id(2)]);
-  expect(mounted.portal("workspace-clear-success")?.textContent).toContain("已清空 2 条会话");
+  expect(onCleared).toHaveBeenCalledWith([id(1), id(2), id(5), id(6)], true);
 
-  // 再点一次：读到的可清会话是 0，不再发任何删除命令（重复点击不产生第二次破坏）。
+  // 再点一次：这一段里已没有可清会话，不再发任何删除命令（重复点击不产生第二次破坏）。
   await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
   await flush();
   expect(mounted.portal("workspace-clear-empty")?.textContent).toContain("没有可清空");
-  expect(server.deletedTargets).toEqual([id(1), id(2)]);
+  expect(server.deletedTargets).toEqual([id(1), id(2), id(5), id(6)]);
 
 
 });
 
-it("被业务引用阻断时如实保留并列出原因，不报成功", async () => {
-  const server = fakeServer([row(1, "可删讨论"), row(2, "被引用讨论")], {
-    deleteBlockedIds: [id(2)]
-  });
-  const onCleared = vi.fn<(ids: readonly string[]) => void>();
+it("被业务引用阻断时如实保留并列出原因，不报整组成功", async () => {
+  const server = fakeServer([
+    row(1, "可删讨论"),
+    row(2, "被引用讨论"),
+    row(3, "另一目录讨论", { context: directory(DIR_B, "D:/work/b") })
+  ], { deleteBlockedIds: [id(2)] });
+  const onCleared = vi.fn<(ids: readonly string[], allDeleted: boolean) => void>();
   const mounted = await mount(makeClient(), onCleared);
 
   await act(async () => { mounted.button()?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
   await flush();
   await mounted.click("workspace-clear-confirm");
 
-  expect(server.deletedTargets).toEqual([id(1), id(2)]);
+  expect(server.deletedTargets).toEqual([id(1), id(2), id(3)]);
   expect(server.rows.map((item) => item.title)).toEqual(["被引用讨论"]);
-  expect(onCleared).toHaveBeenCalledWith([id(1)]);
+  expect(onCleared).toHaveBeenCalledWith([id(1), id(3)], false);
   expect(mounted.portal("workspace-clear-summary")?.textContent).toContain("被业务引用保留");
   expect(mounted.portal("workspace-clear-blocked")?.textContent).toContain("被引用讨论");
+  // 有阻断就不发「整段已清空」的成功回执：摘要如实写 2 成 1 留，而不是报 3 条全删。
   expect(mounted.portal("workspace-clear-success")).toBeNull();
-  expect(document.body.textContent).not.toContain("已清空 2 条会话");
+  expect(mounted.portal("workspace-clear-summary")?.textContent).toContain("已清空 2 条会话");
+  expect(mounted.portal("workspace-clear-summary")?.textContent).not.toContain("已清空 3 条会话");
 
 
 });
 
 it("响应丢失但服务端已提交时，只按原 command_id 核对回执并恢复成功", async () => {
   const server = fakeServer([row(1, "响应丢失讨论")], { deleteResponseLostIds: [id(1)] });
-  const onCleared = vi.fn<(ids: readonly string[]) => void>();
+  const onCleared = vi.fn<(ids: readonly string[], allDeleted: boolean) => void>();
   const mounted = await mount(makeClient(), onCleared);
 
   await act(async () => { mounted.button()?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
@@ -213,8 +234,7 @@ it("响应丢失但服务端已提交时，只按原 command_id 核对回执并�
   await mounted.click("workspace-clear-confirm");
 
   expect(server.deletedTargets).toEqual([id(1)]);
-  expect(onCleared).toHaveBeenCalledWith([id(1)]);
-  expect(mounted.portal("workspace-clear-success")?.textContent).toContain("已清空 1 条会话");
+  expect(onCleared).toHaveBeenCalledWith([id(1)], true);
   // 核对走的是原命令回执读取，没有发第二条删除命令。
   expect(server.requestedPaths.filter((path) => path.includes("/delete")).length).toBe(1);
 
@@ -223,7 +243,7 @@ it("响应丢失但服务端已提交时，只按原 command_id 核对回执并�
 
 it("响应丢失且回执也读不到时停在未确认，重读回执仍不假成功", async () => {
   const server = fakeServer([row(1, "未确认讨论")], { deleteResponseLostIds: [id(1)], dropReceipt: true });
-  const onCleared = vi.fn<(ids: readonly string[]) => void>();
+  const onCleared = vi.fn<(ids: readonly string[], allDeleted: boolean) => void>();
   const mounted = await mount(makeClient(), onCleared);
 
   await act(async () => { mounted.button()?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });

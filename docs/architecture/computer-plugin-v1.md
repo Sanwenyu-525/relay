@@ -150,7 +150,16 @@ V1 的 SendInput/SetForegroundWindow 实现保留为 foreground 路径的实现�
   桌面操作。
 - `resolveSessionReadTools` 不再把 `COMPUTER_READ`/`BROWSER_READ` 放进会话词表。
 - 主流程纯文本回复触发一次**无工具信封修复**（`responseFormat=json_object`）：只在
-  CHAT、没有有副作用的工具调用、且工作区登记了机器插件或用户明确选了插件时发生；
+  CHAT、没有有副作用的工具调用，且满足以下之一时发生：
+  1. 用户显式选择了 `@电脑操控` / `@浏览器操控`；
+  2. 工作区登记了可用的机器插件，且消息包含明确的机器操作意图（动作词 + 桌面/浏览器
+     对象，或截图/点击/拖拽等只可能发生在机器上的动作；能力询问与讨论措辞不算）。
+
+  2026-11-10 收紧理由：旧条件只看「工作区登记了机器插件」，插件工作区里的任何纯文本
+  回复（包括「你好」）都会重发整份 system；实测一条问候因此多花 3,708 输入 token
+  和 6 秒。环境能力不是用户意图。判定在 `plugin-mentions.ts` 的
+  `detectMachineActionIntent`，只用于决定是否多跑一次修复，不产生授权。自然语言里
+  未被规则命中的机器请求不会修复，按普通回复结算——这是保守判定的已知边界。
   修复结果仍走 `readMainLoopOutcome` 与既有候选校验。修复失败时，明确插件请求显示
   「没有登记执行请求、没有执行任何操作」，不把分析正文当成功结算。
 - Run 的工具循环新增 `DRAFT_OPERATION_TOOLS` 路由：工具清单含 COMPUTER_INPUT/

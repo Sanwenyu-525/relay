@@ -153,10 +153,10 @@ DISCUSS 请求没有把该协议落实为 Provider 的 response_format，单靠 
 - **证据写入不改变业务结果**。观测是证据，不是业务动作：写不进去（调用已结算、租约已失、数据库瞬时错误）只丢这一枚时间，不把一次成功的模型调用改判为失败；免费路由的首文本记录同样改为 best-effort。
 - **B 档补账本**。人设助手的默认兼容端口此前直接调用 `modelPort.assist`，没有 `model_calls` 行，因而既没有调用计量，也没有「请求已登记/首流/首正文」。现按 A 档、主流程与子 Agent 的同一形态补 `recordModelInvocation`，免费路由仍不包第二层。
 - **只读阶段投影**。`GET /assist-sessions/:id/messages` 对每条 `RUNNING` 的助手消息返回 `generation_progress`：`phase ∈ PREPARING_CONTEXT | WAITING_MODEL | MODEL_STREAMING | MODEL_OUTPUT | PROCESSING`，`call_count` 与最近一次调用的 `status`/`started_at`/`first_stream_event_at`/`first_text_delta_at`/`first_preview_persisted_at`/`settled_at`。阶段只由「消息已领取 + 最新 PRIMARY 调用的事实」派生：没有调用行是准备上下文；调用 STARTED 且无首流是等待模型；有首流无首文本是「模型已响应，等待正文」；有首文本是「已收到模型输出」；最新调用已结算而消息仍 RUNNING 是处理工具/续轮。辅助外呼按 `purpose='PRIMARY'` 排除。
-- **客户端只读**。`generationStageView()` 把阶段翻成一句等待文案；PENDING 只说「等待处理」，没有阶段读数（旧服务端、未知枚举）只回退到「正在生成」，不按等待时长猜测模型是否已响应。阶段行只在「没有可见草稿、没有工具主进度、没有取消意图、没有核对中」时渲染，正文或工具接手后整行卸下，同一时刻只保留一组动效；`generationStageDiagnostics()` 只提供可展开的延迟读数。
-- **无迁移**。阶段需要的四枚时间列均在既有 `model_calls` 上；本轮不新增列，也不伪造「领取时刻」。诊断把「提交 → 模型请求登记」明确标为含排队与上下文准备的合并区间，Worker 领取时刻标为未记录，前端首次绘制标为本机未观测，避免把消息总耗时当作模型推理耗时。
+- **客户端只读**。`generationStageView()` 把阶段翻成一句等待文案；PENDING 只说「等待处理」，没有阶段读数（旧服务端、未知枚举）只回退到「正在生成」，不按等待时长猜测模型是否已响应。阶段行只在「没有可见草稿、没有工具主进度、没有取消意图、没有核对中」时渲染，正文或工具接手后整行卸下，同一时刻只保留一组动效。2026-11-10 起聊天流只保留这一行，不再就地展开延迟诊断；逐段耗时随会话导出的 `model_calls[]` 提供。
+- **无迁移**。阶段需要的四枚时间列均在既有 `model_calls` 上；本轮不新增列，也不伪造「领取时刻」。逐段耗时在导出里按既有列读取：提交到请求登记含排队与上下文准备，Worker 领取时刻没有观测点，不把消息总耗时当作模型推理耗时。
 
-回归：单元 `assist-generation-progress`（阶段派生与 DTO）、真实 PG/HTTP `assist.integration.test.ts` 的流式观测用例（首流/首文本/首预览/结算四枚时间落库、辅助外呼排除）、组件 `generationStage` 与 `assistStage`、真实 Chromium `assistStageVisibility`（阶段推进、诊断展开、窄窗、减少动效）；成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应行。Breaking Change: **No**——消息 DTO 新增可选只读字段，旧客户端忽略即可；不改命令、表、权限或结算。
+回归：单元 `assist-generation-progress`（阶段派生与 DTO）、真实 PG/HTTP `assist.integration.test.ts` 的流式观测用例（首流/首文本/首预览/结算四枚时间落库、辅助外呼排除）、组件 `generationStage` 与 `assistStage`、真实 Chromium `assistStageVisibility`（阶段推进、无诊断入口、窄窗、减少动效）；真实 PG `session-export` 断言导出 `model_calls[]` 带三枚观测时间。成绩归[功能验收表](../testing/overall-acceptance-2026-09-28.md#当前功能验收表)对应行。Breaking Change: **No**——消息 DTO 新增可选只读字段，旧客户端忽略即可；不改命令、表、权限或结算。
 
 ## 会话标题的后台生成接缝（2026-11-01）
 

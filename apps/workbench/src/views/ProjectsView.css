@@ -5,6 +5,8 @@
  * 详情从常驻右栏改为「查看项目」打开的抽屉，页面因此不再使用 .page-layout / .page-primary。
  *
  * 全部数值只消费 design-tokens.json 安装的 CSS 变量，未新增色值、字号、圆角或动效数值。
+ * 例外与 protoPage.css 同源：`.pv-page` 皮肤段按 V5.28 原型原值固定（含 pv 局部变量），
+ * 不再逐条消费 relay token；这一段以外仍只消费 token。
  * 通用控件（按钮、搜索框、页签、空态）继续复用 styles.css 的全局类，这里只补页面私有布局。
  */
 
@@ -199,13 +201,29 @@
 
 /* ── 卡片网格（原型 V5.11 项目卡皮肤；数值同 views/proto/protoPage.css 的说明） ── */
 
-/* 对齐 V5.28 原型：三列卡片网格，1120px 降两列，窄窗单列。列表视图仍走单列。 */
+/* 对齐 V5.28 原型：三列卡片网格；1120px 降两列（此前注释写了但缺少这条媒体查询，
+   800–1120px 三列会把卡片压到 240px 上下），窄窗单列。列表视图仍走单列。 */
 .pv-page .projects-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   align-items: stretch;
   margin-top: var(--relay-space-4);
+}
+
+@media (width >= 48rem) and (width < 70rem) {
+  .pv-page .projects-grid:not(.is-list) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 两列下项目数为奇数时，新建卡独占末行左格：延到行尾，不留半行空洞。 */
+  .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:nth-child(2n + 1) {
+    grid-column: 1 / -1;
+  }
+
+  .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:nth-child(2n + 1) .project-card__new-desc {
+    max-width: none;
+  }
 }
 
 .pv-page .projects-grid.is-list {
@@ -215,7 +233,7 @@
 /* 创建卡是网格最后一项：项目数不被三整除时，末行右侧会留下整格空细胞（当前示例 4 个项目 → 右下 378px 空洞）。
    按它的落位决定补法：落在第 2 列（项目数 3n+1）延到行尾；独占新行（项目数 3n，落在第 1 列）占满整行；
    落在第 3 列时本来就在行尾，不动。单列（窄窗 / 列表视图）不加跨度，避免撑出横向溢出。 */
-@media (width >= 48rem) {
+@media (width >= 70rem) {
   .pv-page .projects-grid:not(.is-list) > .project-card--new:last-child:nth-child(3n + 2) {
     grid-column: span 2;
   }
@@ -312,6 +330,10 @@
 
 .pv-pcard__name-button:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 
+/* 网格卡片标题预留两行：同一行里单行标题与两行标题的「下一步」落到同一条基线，
+   扫读时不因标题长度上下跳。列表视图是行布局，不预留。 */
+.pv-page .projects-grid:not(.is-list) .pv-pcard__name { min-height: 2.9em; }
+
 .pv-pcard__caption {
   margin: 0;
   color: #566f5f;
@@ -352,6 +374,66 @@
 .pv-pcard__ghost:hover { color: #17664d; text-decoration: underline; text-underline-offset: 0.2em; }
 
 .pv-pcard__footer .secondary-button { min-height: 30px; padding: 4px 11px; font-size: 11px; }
+
+/* 归档卡不再显示下一步，改用中性归档说明（见 ProjectCard）。 */
+.pv-pcard__metrics .pv-pcard__archived-note { color: #566f5f; }
+
+/* 键盘进入卡片任一控件时与悬停同一反馈，不只靠指针位置。 */
+.pv-pcard:hover,
+.pv-pcard:focus-within { border-color: var(--pv-btn-hover-border); }
+
+/* 列表视图：宽屏下同一份卡片标记排成紧凑行。
+   DOM 不变（卡片、testid、按钮顺序都不动），只把 __top 展开为网格项重新落位；
+   窄窗仍回到竖排卡片，避免一行塞不下标题与两个动作。 */
+@media (width >= 48rem) {
+  .pv-page .projects-grid.is-list .pv-pcard {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "icon name status more"
+      "icon caption caption caption"
+      "icon metrics metrics actions";
+    column-gap: var(--relay-space-3);
+    row-gap: var(--relay-space-0-5);
+    align-items: center;
+    padding: var(--relay-space-3) var(--relay-space-4);
+  }
+
+  .pv-page .projects-grid.is-list .pv-pcard__top { display: contents; }
+  .pv-page .projects-grid.is-list .pv-illustration { grid-area: icon; }
+  .pv-page .projects-grid.is-list .pv-pcard__name { grid-area: name; }
+  .pv-page .projects-grid.is-list .pv-pcard__caption { grid-area: caption; }
+  .pv-page .projects-grid.is-list .pv-pcard__metrics { grid-area: metrics; padding-top: 0; }
+
+  .pv-page .projects-grid.is-list .pv-pcard__status {
+    grid-area: status;
+    justify-self: end;
+    margin-left: 0;
+  }
+
+  .pv-page .projects-grid.is-list .pv-pcard__control {
+    grid-area: more;
+    justify-self: end;
+  }
+
+  .pv-page .projects-grid.is-list .pv-pcard__footer {
+    grid-area: actions;
+    justify-self: end;
+    margin-top: 0;
+    padding-top: 0;
+  }
+
+  /* 新建卡同样收成一行，不与上面的项目行抢高度。 */
+  .pv-page .projects-grid.is-list .project-card--new {
+    flex-direction: row;
+    gap: var(--relay-space-3);
+    padding: var(--relay-space-3) var(--relay-space-4);
+    text-align: left;
+  }
+
+  .pv-page .projects-grid.is-list .project-card__new-desc { max-width: none; flex: 1; }
+  .pv-page .projects-grid.is-list .project-card__new-action { margin-top: 0; margin-left: auto; }
+}
 
 /* ── 「开启一个新项目」卡（V5.28 原型的虚线新建卡形态） ──────────────────── */
 
@@ -470,12 +552,9 @@
 
 .pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #566f5f; }
 
-/* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
+/* 窄窗：卡片单列；搜索独占一行，刷新与视图切换在下一行两端对齐，
+   不再让视图切换单独掉到第三行。 */
 @media (width < 48rem) {
-  .projects-page .projects-inner {
-    padding: var(--relay-layout-main-smallPadding);
-  }
-
   .pv-page .projects-grid { grid-template-columns: minmax(0, 1fr); }
 
   .projects-toolbar {
@@ -488,10 +567,50 @@
   }
 
   .projects-tools .search-field {
-    flex: 1;
+    flex: 1 1 100%;
+    order: -1;
     width: auto;
   }
 }
+
+/* ── 首读失败、续页入口与空态收口 ───────────────────────────────────────── */
+
+/* 错误态图标只做装饰，含义由标题承担；配色取 pv 语言里的危险底色。 */
+.projects-state__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+  border-radius: 9px;
+  background: var(--pv-danger-bg);
+  color: var(--pv-danger-ink);
+}
+
+.projects-state__icon > svg { width: 16px; height: 16px; }
+
+/* live 首读失败嵌在页头下，标题用 h2；字号与 pv 页头保持同一档，不作为第二个 h1。 */
+.projects-page .page-state h2,
+.pv-page.page-state h2 {
+  margin: 8px 0 10px;
+  color: #1e3529;
+  font-size: 22px;
+  letter-spacing: -.035em;
+}
+
+.pv-page .page-state .projects-state__hint { color: var(--pv-muted); }
+
+/* 续页入口：网格之后居中，不再是一颗贴左的孤立小按钮。 */
+.projects-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--relay-space-4);
+}
+
+.projects-more .secondary-button { min-width: 12rem; }
+
+/* 空态说明按阅读宽度收口：EmptyState 默认接到 72rem，项目页整行铺满会把说明拉成一条长线。 */
+.projects-page .empty-state { max-width: 46rem; }
 
 /* ── 范围说明与详情抽屉 ─────────────────────────────────────────────────── */
 
@@ -614,27 +733,6 @@
   color: var(--relay-color-text-primary);
   font-size: var(--relay-font-size-body);
   overflow-wrap: anywhere;
-}
-
-/* 窄窗：卡片单列，工具栏纵向堆叠，搜索框占满一行。 */
-@media (width < 48rem) {
-  .projects-page .projects-inner {
-    padding: var(--relay-layout-main-smallPadding);
-  }
-
-  .projects-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .projects-tools {
-    justify-content: space-between;
-  }
-
-  .projects-tools .search-field {
-    flex: 1;
-    width: auto;
-  }
 }
 
 /* ── V4.3 项目总览接续呈现（V43-04）──────────────────────────────────────

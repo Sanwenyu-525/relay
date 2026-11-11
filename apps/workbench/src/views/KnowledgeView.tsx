@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
+import { BookOpen, Brain, List, Scale, Search, ShieldCheck } from "lucide-react";
 import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
 import AppDialog from "../components/AppDialog";
@@ -58,6 +59,14 @@ const kinds: readonly { kind: RelayInformationKind; label: string; noun: string 
   { kind: "DECISION", label: "决定", noun: "决定" },
   { kind: "RULE", label: "规则", noun: "规则" }
 ];
+
+/** 列表行的类型标记：同一形状在四种类型里各用一次，避免每行都写一遍类型名。 */
+function kindIcon(kind: RelayInformationKind) {
+  if (kind === "MEMORY") return <Brain />;
+  if (kind === "DECISION") return <Scale />;
+  if (kind === "RULE") return <ShieldCheck />;
+  return <BookOpen />;
+}
 
 /**
  * 规则没有标题，但规则键是服务端身份（可能由服务端生成成 `rule-<uuid>`），
@@ -1227,13 +1236,16 @@ export default function KnowledgeView() {
   </>;
   const saveActions = <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed) || (captureCeremony && (!artifactPreviewMatches || !captureConfirmed))}>{saveLabel}</button>
     <button type="button" className="secondary-button" data-testid="knowledge-capture-cancel" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>{captureCeremony ? "暂不收录" : "取消"}</button></div>;
+  /**
+   * 类型页签在两种形态下都常驻：阅读形态此前把它连同「新建」一起折进「资料列表」，
+   * 首屏只剩两枚折叠三角，读起来既不知道现在在哪个类型里，也回不到列表。
+   */
+  const kindNav = <nav ref={tabListRef} className="knowledge-tabs" role="tablist" aria-label="资料类型" onKeyDown={handleTabListKeyDown}>{kinds.map((item) =>
+    <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
+      role="tab" id={`${tabId}-tab-${item.kind}`} aria-controls={`${tabId}-panel`} aria-selected={kind === item.kind}
+      tabIndex={kind === item.kind ? 0 : -1} disabled={pendingCommand !== null}
+      data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>;
   const library = <section className="surface-panel knowledge-list">
-    {reading && projectId && <ProjectNav projectId={projectId} active="knowledge" />}
-    <nav ref={tabListRef} className="knowledge-tabs" role="tablist" aria-label="资料类型" onKeyDown={handleTabListKeyDown}>{kinds.map((item) =>
-      <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
-        role="tab" id={`${tabId}-tab-${item.kind}`} aria-controls={`${tabId}-panel`} aria-selected={kind === item.kind}
-        tabIndex={kind === item.kind ? 0 : -1} disabled={pendingCommand !== null}
-        data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>
     <div role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`} tabIndex={0}>
     <div className="section-heading-row"><h2>{currentNoun}</h2>
       <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
@@ -1263,24 +1275,31 @@ export default function KnowledgeView() {
           description={`当前工作空间还没有收录${currentNoun}。${currentNoun}用来沉淀跨任务长期有效的事实与约定；点击「新建」添加第一条，保存后才会出现在这里。`} />)}
     {!loading && error !== null && rows.length === 0 && <p className="helper-text" role="status">当前范围的{currentNoun}没有读到，请查看上方错误并重试；这不代表当前范围确实没有{currentNoun}。</p>}
     {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
-      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}><strong>{rowTitle(row)}</strong><small>{kind === "MEMORY"
+      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}>
+      <span className="knowledge-row-icon" aria-hidden="true">{kindIcon(kind)}</span>
+      <span className="knowledge-row-main"><strong>{rowTitle(row)}</strong><small>{kind === "MEMORY"
         ? memoryRowSummary(row as RelayMemory)
-        : `${statusLabel(row.status)} · 当前 v${row.currentVersion} · ${rowScopeLabel(row)}`}</small></button>)}
+        : `${statusLabel(row.status)} · 当前 v${row.currentVersion} · ${rowScopeLabel(row)}`}</small></span></button>)}
     </div>
   </section>;
 
   return <section className={`knowledge-page pv-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
-    {!reading && !capturing && <><PageHeader testId="knowledge-page-head" title="资料" overline="Knowledge"
-      meta={projectId ? "项目资料" : "工作空间资料"} />
-    {projectId && <ProjectNav projectId={projectId} active="knowledge" />}</>}
+    {!reading && !capturing && <PageHeader testId="knowledge-page-head" title="资料" overline="Knowledge"
+      lede={projectId
+        ? "只显示归属这个项目的资料、记忆、决定与规则；工作空间范围的内容不在这里。"
+        : "按资料、记忆、决定、规则沉淀长期有效的内容，并保留来源与版本。"} />}
+    {/* 项目段导航在阅读形态也保留：它是「这个项目还有哪些分区」的唯一入口，折进
+        资料列表就等于进了正文就再也切不出去。 */}
+    {projectId && !capturing && <ProjectNav projectId={projectId} active="knowledge" />}
 
     {!live ? <section className="surface-panel knowledge-fixture-card" data-testid="knowledge-fixture-gap">
       <h2>示例模式未接入资料</h2>
       <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
     </section> : <>
       <div className="knowledge-tools" hidden={capturing}>
+      {kindNav}
       <details className="knowledge-search" open={query.trim() !== ""}>
-        <summary>搜索资料</summary>
+        <summary><Search aria-hidden="true" />搜索资料</summary>
       <section className="surface-panel" aria-label="资料搜索">
         <label className="field" htmlFor="knowledge-search"><span className="field-label">搜索词</span>
           <span className="field-hint">按当前范围搜索四类资料，支持中文短词；每页最多 20 条。</span>
@@ -1301,7 +1320,7 @@ export default function KnowledgeView() {
       </details>
 
       {reading && <details ref={libraryRef} className="knowledge-library" data-testid="knowledge-library">
-        <summary>资料列表 · {rows.length}</summary>{library}
+        <summary><List aria-hidden="true" />资料列表 · {rows.length}</summary>{library}
       </details>}
 
       {projectId && client && kind === "KNOWLEDGE" && <details className="knowledge-web-import"><summary>导入网页</summary><WebImportPanel
@@ -1334,7 +1353,7 @@ export default function KnowledgeView() {
       {!capturing && writeGateFeedback}
       {!capturing && pendingReceipt}
 
-      <div className="knowledge-columns">
+      <div className={`knowledge-columns${!reading && !loading && error === null && rows.length === 0 ? " knowledge-columns--empty" : ""}`}>
         {!reading && library}
 
         <div className="knowledge-detail">

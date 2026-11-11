@@ -36,6 +36,7 @@ import { checkRecoveryNow, openRecoveryScope, recoveryCommandLabel, recoveryFail
   type RecoveryEntry, type RecoveryFailure, type RecoveryOwner, type RecoveryRecord, type ApplyOutcome } from "../lib/commandRecovery";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { readRecentWorkingDirectories, type RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
+import { readLastModelChoice } from "../lib/modelPreferences";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useRunDraftPreview } from "../lib/useRunDraftPreview";
 import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
@@ -94,6 +95,11 @@ function sameWorkingDirectory(left: string | null, right: string | null): boolea
   if (left === null || right === null) return false;
   const normalize = (value: string) => value.replace(/\\/gu, "/").replace(/\/+$/u, "").toLowerCase();
   return normalize(left) === normalize(right);
+}
+
+/** 会话上下文只给绝对路径；最近目录行需要一个显示名，取最后一段（与细条的兜底同一规则）。 */
+function directoryDisplayName(rootPath: string): string {
+  return rootPath.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? rootPath;
 }
 
 /** 目录已打开但还不能作为新对话工作目录时，给用户一句能行动的原因。 */
@@ -218,19 +224,23 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
   // 可能跨越同一次重挂载，因此 busy 与「已解释」也必须是同一份共享事实。
   // 首条原文同时留在本机：离开这个工作区再回来（路由重挂载）仍能看到没发出去的那段话。
   // 作用域带 `?new=` 键：不同新对话各自一份空白草稿，不会把上一处的正文带进下一条。
-  // 模型选择不带本机历史（MODEL-SETTINGS-03，P0-4）：新对话在没有显式选择时跟随工作区
-  // 聊天默认 → 进程默认，芯片显示「跟随默认」。显式选择只在用户主动点选后随
-  // modelSelection 绑定给新会话（见 AssistView createSession）。
+  // 模型选择沿用本机上次显式点选（2026-11-10 用户指令「模型没有持久化」）：
+  // 新对话草稿从第一帧就带着上次的型号/已登记连接，芯片写出具体名字；没有上次选择时
+  // 仍显示「跟随默认」，由服务端按「工作区聊天默认 → 进程默认」解析。
   const firstDraftScope = `first:${workId ?? "workspace"}:${newConversationKey ?? ""}`;
   /**
    * 当前首条内容属于哪个草稿作用域。作用域切换后、内容还没换成新作用域的草稿之前，
    * 保存 effect 不得把旧正文写进新键——否则 A→B 会先污染 B，再被「恢复」成 A 的文本。
    */
   const firstDraftContentScope = useRef(firstDraftScope);
-  const [firstMessage, setFirstMessage] = useState<FirstMessageProcess>({
-    draft: readComposerDraft(client.workspaceId, firstDraftScope),
-    // 新会话不继承本机「上次模型」：默认跟随工作区聊天默认 → 进程默认（MODEL-SETTINGS-03）。
-    pending: null, busy: false, interpreted: null, execution: null });
+  const [firstMessage, setFirstMessage] = useState<FirstMessageProcess>(() => {
+    const last = readLastModelChoice(client.workspaceId);
+    return {
+      draft: readComposerDraft(client.workspaceId, firstDraftScope),
+      // 上次显式选择成为这一条新对话的初值（芯片写出具体型号）；没有就跟随默认。
+      ...(last === null ? {} : { model: last.model, connectionId: last.connectionId }),
+      pending: null, busy: false, interpreted: null, execution: null };
+  });
   const firstMessageRef = useRef(firstMessage); firstMessageRef.current = firstMessage;
   useEffect(() => {
     if (firstDraftContentScope.current !== firstDraftScope) return;
@@ -522,13 +532,16 @@ function CollaborationLive({ client }: { client: RelayApiClient }) {
     setSelectedPreviewArtifact(null); previewFocusTarget.current = null; setSidePanelRevealed(false);
     setSessionId(newConversationKey !== null ? null : sessionSeed ?? undefined); setNarrowSideOpen(false);
     publishActiveConversation({ taskId: workId, sessionId: null });
-    // 新建对话把首条输入器重置为空白，模型选择也回到「跟随默认」（不继承上一条的显式选择）。
+    // 新建对话只清上一条的草稿与在途状态；模型沿用本机上次显式选择（2026-11-10 用户指令），
+    // 芯片因此不会每点一次新建就退回「跟随默认」。
     // 只在真正换了 `?new=` 键时重置：回到同一个键要读回它自己的本机草稿，不能把首条内容清空
     // 再让保存 effect 用空白覆盖（2026-10-21 用户实机指认）。
     if (newConversationKey !== null && firstDraftContentScope.current !== firstDraftScope) {
       firstDraftContentScope.current = firstDraftScope;
+      const last = readLastModelChoice(client.workspaceId);
       firstMessageOwner.write({
         draft: readComposerDraft(client.workspaceId, firstDraftScope),
+        ...(last === null ? {} : { model: last.model, connectionId: last.connectionId }),
         pending: null, busy: false, interpreted: null, execution: null });
     }
     void reloadAll();
@@ -999,12 +1012,23 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     const version = sessionContextRequest.current;
     void client.getAssistSession(id, true).then((session) => {
       if (activeSessionRef.current !== id || version !== sessionContextRequest.current) return;
+      const rootPath = session.context?.workingDirectory?.canonicalRoot ?? null;
       setBoundDirectory({ sessionId: id, projectId: session.projectId,
-        path: session.context?.workingDirectory?.canonicalRoot ?? null,
+        path: rootPath,
         // 缺字段（旧服务端）保持 null＝历史未知，不在这里补一个「用户选的」或「默认的」。
         source: session.context?.workingDirectory?.source ?? null,
         // 服务端读回：这一份才是归属事实，工具面板的项目身份只认它。
         confirmed: true });
+      // 2026-11-10 用户指令「目录没有持久化」：最近目录不能只在手动打开目录那一下更新。
+      // 读到会话服务端确认的目录就记成最近一项，左栏「新对话」与全局新对话的续记
+      // （recentWorkingDirectories 首项）才会跟着实际工作的会话走；这里只写本机展示偏好，
+      // 目录事实仍归会话行与目录命令。
+      if (rootPath !== null) {
+        setRecents((current) => sameWorkingDirectory(current[0]?.canonicalRoot ?? null, rootPath)
+          ? current
+          : rememberOpened({ status: "READY", canonicalRoot: rootPath,
+            displayName: directoryDisplayName(rootPath) }, current));
+      }
     }).catch((caught: unknown) => {
       if (activeSessionRef.current === id && version === sessionContextRequest.current) setFolderError(describeLiveError(caught).message);
     });

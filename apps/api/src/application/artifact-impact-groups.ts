@@ -170,9 +170,11 @@ export async function readImpactCandidateGroup(db: DbExecutor, workspaceId: stri
       target_is_current_version: targetLatest?.id === item.target_version_id,
       candidate_id: candidate?.id ?? null,
       candidate_status: candidate === undefined ? null
-        : (await r.assist.readMessage(candidate.assist_message_id))?.status ?? 'PENDING',
+        : candidate.assist_message_id === null ? 'FAILED'
+          : (await r.assist.readMessage(candidate.assist_message_id))?.status ?? 'PENDING',
       candidate_error_code: candidate === undefined ? null
-        : (await r.assist.readMessage(candidate.assist_message_id))?.error_code ?? null,
+        : candidate.assist_message_id === null ? 'SOURCE_DELETED'
+          : (await r.assist.readMessage(candidate.assist_message_id))?.error_code ?? null,
       candidate_stale: candidateStale,
       applied_version_id: candidate?.applied_version_id ?? null,
     });

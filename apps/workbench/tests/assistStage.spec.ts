@@ -82,10 +82,10 @@ describe("在途回复的阶段行", () => {
     expect(line().text()).toBe("等待模型响应");
     expect(view.wrapper.find(`[data-testid="assist-inflight-${messageId}"]`).attributes("data-phase"))
       .toBe("WAITING_MODEL");
-    // 诊断是就地展开的只读读数：提交到请求登记的区间已在，首流尚未到达也如实写明。
-    expect(view.wrapper.text()).toContain("延迟诊断");
-    expect(view.wrapper.text()).toContain("模型请求 → 首个流事件");
-    expect(view.wrapper.text()).toContain("尚未收到");
+    // 聊天流只有一行阶段：逐段耗时不再就地展开，原始时间戳随会话导出提供。
+    expect(view.wrapper.text()).not.toContain("延迟诊断");
+    expect(view.wrapper.find(`[data-testid="assist-stage-${messageId}"]`).element
+      ?.closest("details") ?? null).toBeNull();
 
     holder.progress = stage("MODEL_STREAMING");
     await view.wrapper.get('[data-testid="assist-refresh"]').trigger("click");

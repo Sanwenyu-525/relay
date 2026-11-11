@@ -130,3 +130,41 @@ describe("活动行的展开", () => {
     expect(live.wrapper.get('[data-testid="row"]').attributes("data-current")).toBe("true");
   });
 });
+
+/**
+ * 文件类型识别（2026-11-10 用户指令「不同文件要有颜色、图标的区别」）。
+ * 只按扩展名分类；图标与颜色是两层提示，文件名本身仍是正文色。
+ */
+describe("文件类型图标", () => {
+  const kindOf = async (path: string, toolName = "read_file") => {
+    const { wrapper, unmount: drop } = await mount(createElement(ActivityRow, {
+      item: sessionActivityItem(call({ toolName, args: { relative_path: path } }), owner),
+      testId: "row",
+    }));
+    const row = wrapper.get('[data-testid="row"]');
+    const kind = row.attributes("data-filetype");
+    const hasIcon = row.find(".activity-item-filetype").exists();
+    drop();
+    unmount = null;
+    return { kind, hasIcon };
+  };
+
+  it("按扩展名区分代码、文档、配置、数据、图片", async () => {
+    expect(await kindOf("src/views/AssistView.tsx")).toEqual({ kind: "code", hasIcon: true });
+    expect(await kindOf("docs/README.md")).toEqual({ kind: "doc", hasIcon: true });
+    expect(await kindOf("package.json")).toEqual({ kind: "config", hasIcon: true });
+    expect(await kindOf("data/export.csv")).toEqual({ kind: "data", hasIcon: true });
+    expect(await kindOf("assets/logo.png")).toEqual({ kind: "image", hasIcon: true });
+  });
+
+  it("目录与未知扩展名各有兜底：目录用文件夹，未知扩展名用普通文件", async () => {
+    expect(await kindOf("src/components", "list_directory")).toEqual({ kind: "folder", hasIcon: true });
+    expect(await kindOf("scripts/release.cmd")).toEqual({ kind: "file", hasIcon: true });
+  });
+
+  it("不是路径的对象不画文件图标：搜索词与查询没有文件类型", async () => {
+    expect(await kindOf("claim", "search_text")).toEqual({ kind: undefined, hasIcon: false });
+    expect(await kindOf("README", "read_file")).toEqual({ kind: undefined, hasIcon: false });
+    expect(await kindOf("https://example.com/a.md")).toEqual({ kind: undefined, hasIcon: false });
+  });
+});

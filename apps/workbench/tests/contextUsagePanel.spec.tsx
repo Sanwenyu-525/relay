@@ -138,6 +138,33 @@ describe("上下文用量浮层", () => {
     expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
       .toBe(true);
     expect(wrapper.find('[data-testid="context-usage-history"]').exists()).toBe(true);
+    // 两个数字不同时补一句口径说明：冻结预算解释历史，档位从下一次调用生效。
+    const note = wrapper.get('[data-testid="context-usage-frozen-note"]').text();
+    expect(note).toContain("这次调用冻结的 65,536");
+    expect(note).toContain("1024K 从下一次调用生效");
+  });
+
+  it("冻结预算与档位一致时不补差异说明", async () => {
+    const wrapper = await mount(usage({
+      budget: { tokens: 524288, revision: "3" },
+      lastCall: { ...usage().lastCall!, reservedTokens: 524288 },
+    }));
+    expect(wrapper.find('[data-testid="context-usage-frozen-note"]').exists()).toBe(false);
+  });
+
+  it("分项估算合计与 Provider 实报不同时写明两边口径", async () => {
+    const wrapper = await mount(usage({
+      lastCall: { ...usage().lastCall!, inputTokens: 5_549,
+        breakdown: { ...usage().lastCall!.breakdown!, estimatedTotalTokens: 7_452 } },
+    }));
+    const note = wrapper.get('[data-testid="context-usage-estimate-note"]').text();
+    expect(note).toContain("分项合计约 7,452");
+    expect(note).toContain("Provider 本次实报输入 5,549");
+  });
+
+  it("估算合计与实报一致时不重复解释", async () => {
+    const wrapper = await mount(usage());
+    expect(wrapper.find('[data-testid="context-usage-estimate-note"]').exists()).toBe(false);
   });
 
   it("档位区只留三档：不再渲染「当前档位」标题行与「下次调用申请」行", async () => {

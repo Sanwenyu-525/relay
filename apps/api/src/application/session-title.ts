@@ -170,6 +170,20 @@ export function safeRuleSubject(raw: string): string {
 }
 
 /**
+ * 可读的规则主题（2026-11-10）。
+ *
+ * `ruleTitleSubject` 会清掉行首寒暄；首条消息只有「你好」「hi」时它返回空串，
+ * 而空回 `新会话` 反而不如原文可辨认。上游同口径：短首发输入本身就是可读标题，
+ * 不再让模型把它覆盖成泛化名称。带具体内容的句子仍走原来的清洗与格式检查。
+ */
+export function readableRuleSubject(raw: string): string {
+  const subject = ruleTitleSubject(raw);
+  if (subject !== '') return safeRuleSubject(subject);
+  const verbatim = truncateCodepoints(raw.replace(/\s+/gu, ' ').trim(), RULE_SUBJECT_MAX_CHARS);
+  return verbatim === '' ? '新会话' : verbatim;
+}
+
+/**
  * 创建会话时的临时标题。
  *
  * 关联了项目/任务的讨论沿用既有 `关于<目标>`（它是这段讨论的作用域，不是任务判断）；
@@ -186,7 +200,7 @@ export function provisionalSessionTitle(input: {
     return { title: submitted === '' ? '其他-新会话' : submitted, category: null };
   }
   const category = classifySessionTitleCategory(submitted);
-  return { title: buildSessionTitle(category, safeRuleSubject(submitted)), category };
+  return { title: buildSessionTitle(category, readableRuleSubject(submitted)), category };
 }
 
 export function buildSessionTitle(category: SessionTitleCategory, subject: string): string {

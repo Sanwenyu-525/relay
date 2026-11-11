@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { readLastModel, writeLastModel } from "../src/lib/modelPreferences";
+import { readLastModelChoice, writeLastModelChoice } from "../src/lib/modelPreferences";
 import { clickPortal, DomWrapper, flush, folderStripName, mountWorkbench, openUnresolvedDialog } from "./mountApp";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -151,23 +151,23 @@ describe("新对话直接起步", () => {
     expect(view.posts).toHaveLength(0);
   });
   /**
-   * MODEL-SETTINGS-03（P0-4）取代 2026-10-20 的「记住上次模型」：
-   * 本机历史偏好不得悄悄覆盖工作区默认连接。新会话在没有显式选择时显示「跟随默认」，
-   * 并且**不提交** SelectSessionModel——优先级由服务端按
-   * 「会话显式选择 > 工作区聊天默认 > 进程默认」解析。
+   * 2026-11-10 用户指令「模型没有持久化」：新对话沿用本机上次显式点选。
+   * 芯片从第一帧写出具体型号（不是「跟随默认」），首条发送按这个显式选择提交
+   * SelectSessionModel；没有上次选择时才跟随工作区聊天默认 → 进程默认。
    */
-  it("本机历史偏好不覆盖默认：新对话显示跟随默认，首条发送不提交模型选择", async () => {
-    writeLastModel(workspaceId, "v/a:free");
+  it("本机上次显式选择成为新对话初值：芯片写出型号，首条发送按它提交选择", async () => {
+    writeLastModelChoice(workspaceId, { model: "v/a:free", connectionId: null });
     const view = await mount("/agent?new=entry");
     const triggerName = view.wrapper.get('[data-testid="model-selector-open"] .model-selector-trigger-name');
-    expect(triggerName.text()).toBe("跟随默认");
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按工作区默认发送");
+    expect(triggerName.text()).toBe("v/a:free");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按上次选择的模型发送");
     await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
     expect(view.posts.filter((post) => post.path === `${root}/assist-sessions`)).toHaveLength(1);
-    // 没有显式选择就不发选择命令；消息也不带 expected_model_selection_revision。
-    expect(view.posts.filter((post) => post.path.endsWith("/chat-commands"))).toHaveLength(0);
+    const selections = view.posts.filter((post) => post.path.endsWith("/chat-commands"));
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.body).toMatchObject({ text: "/model v/a:free" });
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
-      .not.toHaveProperty("expected_model_selection_revision");
+      .toMatchObject({ expected_model_selection_revision: "7" });
   });
   it("首条选择已登记连接：只提交 connection_id，消息携带该连接声明的型号修订", async () => {
     const view = await mount("/agent?new=conn", false, undefined, false, undefined, true);
@@ -179,8 +179,9 @@ describe("新对话直接起步", () => {
       .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "团队网关")!;
     await act(async () => option.click()); await flush();
     expect(chip()).toBe("vendor/registered");
-    // 连接选择不写本机偏好：下一条新会话不能用 /model 解析别的连接身份。
-    expect(readLastModel(workspaceId)).toBeNull();
+    // 连接选择连同连接身份一起记住：下一条新对话按同一连接提交，不拿型号猜身份。
+    expect(readLastModelChoice(workspaceId))
+      .toEqual({ model: "vendor/registered", connectionId: "44444444-4444-4444-8444-444444444444" });
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("首条走团队网关");
     await view.wrapper.get('[data-testid="assist-first-message"] form').trigger("submit"); await flush();
     const selections = view.posts.filter((post) => post.path.endsWith("/model-selection"));
@@ -190,36 +191,52 @@ describe("新对话直接起步", () => {
     expect(view.posts.find((post) => post.path.endsWith("/messages"))?.body)
       .toMatchObject({ expected_model_selection_revision: "3" });
   });
-  it("首条选择只作用于本会话，不写本机偏好；下一条新对话仍跟随默认", async () => {
+  it("首条选择写成本机偏好；下一条新对话沿用同一型号", async () => {
     const first = await mount("/agent?new=entry");
     await first.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
     const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
       .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
     await act(async () => option.click()); await flush();
-    // 显式选择仍是本会话的草稿选择，但不落本机存储。
-    expect(readLastModel(workspaceId)).toBeNull();
+    // 点选那一下即写入本机偏好；首条发送前也已经是下一次新对话的初值。
+    expect(readLastModelChoice(workspaceId)).toEqual({ model: "v/a:free", connectionId: null });
     first.unmount();
     const second = await mount("/agent?new=second");
     const secondChip = () => second.wrapper
       .get('[data-testid="model-selector-open"] .model-selector-trigger-name').text();
-    expect(secondChip()).toBe("跟随默认");
+    expect(secondChip()).toBe("v/a:free");
     second.unmount();
   });
   // 2026-10-21 接续：上一条用例覆盖「重新挂载那一拍的 useState 种子」，这一条覆盖挂在它
-  // 后面的那次重置——协作页的新对话 effect 会把首条输入器清成空白，模型偏好不能跟着一起被抹。
-  // 用户实机指认「每次点新建会话，模型芯片又变回『模型』两个字」。
-  it("同页再点「新对话」：清空草稿并把芯片重置为跟随默认，不继承上一条的显式选择", async () => {
+  // 后面的那次重置——同页再开新对话只清草稿与在途状态，上次显式选择的模型要留着
+  // （2026-11-10 用户指令「模型没有持久化」）。用户实机指认「每次点新建会话，模型芯片
+  // 又变回『跟随默认』」。
+  it("同页再点「新对话」：清空草稿但保留上次显式选择的模型", async () => {
     const view = await mount("/agent?new=entry");
     const chip = () => document
       .querySelector('[data-testid="model-selector-open"] .model-selector-trigger-name')?.textContent ?? "";
-    expect(chip()).toBe("跟随默认");
-    // 先在首条输入器里写字，再开一次新对话：草稿要清空，型号要留下。
+    await view.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+    const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
+      .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
+    await act(async () => option.click()); await flush();
+    // 目录已读回时芯片写目录里的显示名；本机偏好存的是稳定型号 id。
+    expect(chip()).toBe("免费 A");
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("这段不该带进下一条"); await flush();
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click"); await flush(120);
     expect((document.querySelector('[data-testid="assist-first-draft"]') as HTMLTextAreaElement | null)?.value)
       .toBe("");
-    expect(chip(), "新对话重置后应回到跟随默认，而不是保留上一条会话的显式选择")
-      .toBe("跟随默认");
+    expect(chip(), "新对话重置后应沿用上次显式选择的模型，而不是退回跟随默认")
+      .toBe("v/a:free");
+  });
+  it("会话内切换模型在回执确认后写成本机偏好", async () => {
+    const view = await mount(`/agent?session=${sessionId}`, true);
+    await view.wrapper.get('[data-testid="model-selector-open"]').trigger("click"); await flush();
+    const option = [...document.querySelectorAll<HTMLButtonElement>('.model-selector-menu [role="option"]')]
+      .find((item) => item.querySelector(".model-selector-option-name")?.textContent === "免费 A")!;
+    await act(async () => option.click()); await flush(); await flush();
+    // 服务端回执确认后才写；选择命令本身仍只作用于这条会话。
+    expect(readLastModelChoice(workspaceId)).toEqual({ model: "v/a:free", connectionId: null });
+    expect(view.posts.filter((post) => post.path === `${root}/assist-sessions/${sessionId}/chat-commands`))
+      .toHaveLength(1);
   });
   it("回到同一个新对话地址恢复未发送草稿；换新键保持空白且不串写", async () => {
     const firstDraft = () => document

@@ -6,6 +6,7 @@ import { readAssistLivePreview } from '../application/assist-queries.js';
 import { readRunDraftPreview, type RunDraftPreviewDto } from '../application/run-draft-preview.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import type { DbExecutor } from '../infrastructure/database.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { sendReadError } from './envelope.js';
 import { waitForPoll, writeRunEventFrame } from './run-events-api.js';
@@ -145,6 +146,9 @@ async function sendPreviewStream<TProbe, TDto>(
         // 重连后由流升级前的路径拿到 404 再停。
         if (!(error instanceof DomainError) && !stopped.signal.aborted) {
           request.log.error({ err: error }, `${spec.logLabel}_read_failed`);
+          getRuntimeLogger('preview-events').error(`${spec.logLabel}_read_failed`, {
+            request_id: request.id, error,
+          });
         }
         return;
       }
@@ -158,7 +162,12 @@ async function sendPreviewStream<TProbe, TDto>(
       if (spec.isTerminal(dto)) return;
     }
   } catch (error) {
-    if (!stopped.signal.aborted) request.log.error({ err: error }, `${spec.logLabel}_failed`);
+    if (!stopped.signal.aborted) {
+      request.log.error({ err: error }, `${spec.logLabel}_failed`);
+      getRuntimeLogger('preview-events').error(`${spec.logLabel}_failed`, {
+        request_id: request.id, error,
+      });
+    }
     response.destroy();
   } finally {
     response.off('close', onClose);

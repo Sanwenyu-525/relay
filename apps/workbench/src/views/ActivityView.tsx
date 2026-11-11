@@ -35,6 +35,22 @@ function localTime(utc: string): string {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
+/** 摘要里只放短 ID；完整身份仍以依据面板为准，不在筛选行展开长 UUID。 */
+function shortId(id: string): string {
+  return id.length > 18 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+/** 已应用筛选的可读摘要：折叠时让「当前范围」一眼可读，展开后的表单仍是唯一完整事实。 */
+function appliedFilterSummary(active: RelayActivityFilter, projectTitle: string | null): string {
+  const parts: string[] = [];
+  if (active.projectId) parts.push(`项目 ${projectTitle ?? shortId(active.projectId)}`);
+  if (active.taskId) parts.push(`任务 ${shortId(active.taskId)}`);
+  if (active.runId) parts.push(`Run ${shortId(active.runId)}`);
+  if (active.from) parts.push(`自 ${localInput(active.from).replace("T", " ")}`);
+  if (active.to) parts.push(`至 ${localInput(active.to).replace("T", " ")}`);
+  return parts.join(" · ");
+}
+
 function fullLocalTime(utc: string): string {
   const date = new Date(utc);
   if (!Number.isFinite(date.getTime())) return utc;
@@ -58,7 +74,8 @@ function dayLabel(dayKey: number | null): string {
   return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
 }
 
-function ActivityRow({ item, selected, onSelect }: { item: RelayActivityItem; selected: boolean; onSelect: () => void }) {
+/** 页内事件行（与冻结的共享 components/ActivityRow 无关，专用新名避免混淆；.activity-row 类名是既有测试与样式锚点，保留）。 */
+function ActivityEventRow({ item, selected, onSelect }: { item: RelayActivityItem; selected: boolean; onSelect: () => void }) {
   const category = eventCategory(item.eventType);
   const meta = categoryMeta[category];
   return <li className={`activity-row${selected ? " activity-row--selected" : ""}`}>
@@ -82,30 +99,43 @@ function ActivityRow({ item, selected, onSelect }: { item: RelayActivityItem; se
   </li>;
 }
 
+/** 依据检查器：事实（摘要/关键事实）→ 关联对象 → 判断说明，分区只改阅读顺序，不改文案语义。 */
 function BasisPanel({ item }: { item: RelayActivityItem }) {
   const meta = categoryMeta[eventCategory(item.eventType)];
   return <div className="rail-content activity-basis" data-testid="activity-basis-panel">
-    <p className="eyebrow">事件依据</p>
-    <h2>{eventTypeLabel(item.eventType)}</h2>
-    <span className={`status-chip status-chip--${meta.tone}`}>{meta.chip}</span>
-    <p className="activity-basis-summary">{eventSummary(item)}</p>
-    <p className="activity-basis-note" role="note">{meta.note}</p>
-    <dl className="rail-definition-list">
-      <div><dt>事件类型</dt><dd>{item.eventType}</dd></div>
-      <div><dt>服务端摘要</dt><dd>{item.summary}</dd></div>
-      <div><dt>发生时间</dt><dd>{fullLocalTime(item.createdAt)}（本机）</dd></div>
-      <div><dt>执行方</dt><dd>{actorLabels[item.actorKind]}</dd></div>
-      {item.commandId && <div><dt>原 command_id</dt><dd><code className="hash-code">{item.commandId}</code></dd></div>}
-      <div><dt>Activity ID</dt><dd><code className="hash-code">{item.id}</code></dd></div>
-    </dl>
-    <h3>关联对象</h3>
-    {item.entityRefs.length ? <ul className="activity-basis-refs">{item.entityRefs.map((ref) => {
-      const target = refTarget(ref.kind, ref.id);
-      return <li key={`${ref.kind}:${ref.id}`}>{target
-        ? <Link className="inline-link" to={target}>{refLinkLabels[ref.kind] ?? `打开${refLabels[ref.kind]}`}</Link>
-        : <span className="activity-meta">{refLabels[ref.kind]}：当前无直达页</span>}
-        <code className="activity-ref-id">{ref.id}</code></li>;
-    })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用；不推断关联对象。</p>}
+    <div className="activity-basis-head">
+      <p className="eyebrow">事件依据</p>
+      <div className="activity-basis-title">
+        <h2>{eventTypeLabel(item.eventType)}</h2>
+        <span className={`status-chip status-chip--${meta.tone}`}>{meta.chip}</span>
+      </div>
+      <p className="activity-basis-summary">{eventSummary(item)}</p>
+    </div>
+    <section className="activity-basis-section">
+      <h3>关键事实</h3>
+      <dl className="rail-definition-list">
+        <div><dt>事件类型</dt><dd>{item.eventType}</dd></div>
+        <div><dt>服务端摘要</dt><dd>{item.summary}</dd></div>
+        <div><dt>发生时间</dt><dd>{fullLocalTime(item.createdAt)}（本机）</dd></div>
+        <div><dt>执行方</dt><dd>{actorLabels[item.actorKind]}</dd></div>
+        {item.commandId && <div><dt>原 command_id</dt><dd><code className="hash-code">{item.commandId}</code></dd></div>}
+        <div><dt>Activity ID</dt><dd><code className="hash-code">{item.id}</code></dd></div>
+      </dl>
+    </section>
+    <section className="activity-basis-section">
+      <h3>关联对象</h3>
+      {item.entityRefs.length ? <ul className="activity-basis-refs">{item.entityRefs.map((ref) => {
+        const target = refTarget(ref.kind, ref.id);
+        return <li key={`${ref.kind}:${ref.id}`}>{target
+          ? <Link className="inline-link" to={target}>{refLinkLabels[ref.kind] ?? `打开${refLabels[ref.kind]}`}</Link>
+          : <span className="activity-meta">{refLabels[ref.kind]}：当前无直达页</span>}
+          <code className="activity-ref-id">{ref.id}</code></li>;
+      })}</ul> : <p className="activity-meta">本条未返回可展示的实体引用；不推断关联对象。</p>}
+    </section>
+    <section className="activity-basis-section activity-basis-judgement">
+      <h3>判断说明</h3>
+      <p className="activity-basis-note" role="note">{meta.note}</p>
+    </section>
     <p className="activity-basis-footer">本页面不展示 AI 的原始推理过程；以上摘要、时间与引用均来自服务端已记录的事实。</p>
   </div>;
 }
@@ -252,14 +282,15 @@ export default function ActivityView() {
   const selected = selectedId !== null ? visibleItems.find((item) => item.id === selectedId) ?? null : null;
 
   return <section className="activity-page pv-page">
-    <PageHeader testId="activity-page-head" title="动态" overline="Activity" meta="工作空间" />
+    <PageHeader testId="activity-page-head" title="动态" overline="Activity" meta="工作空间"
+      lede="工作空间内的执行、检查、产物与人工判断事件流，按时间倒序；选中任一事件可核对其确切时间、执行方与关联对象。" />
     {client === null ? <section className="pv-card activity-fixture-card" role="status">
       <div className="pv-card-b">
         <p>当前是示例数据预览，没有真实 Activity 记录。<Link className="inline-link" to="/projects">打开项目</Link> 继续人工工作。</p>
       </div>
     </section> : <>
       <details className="activity-advanced-filter" data-testid="activity-advanced-filter" open={hasActiveFilter}>
-        <summary>按项目、任务与时间筛选{hasActiveFilter ? " · 已应用范围" : ""}</summary>
+        <summary>按项目、任务与时间筛选{hasActiveFilter ? ` · 已应用范围：${appliedFilterSummary(active, projectOptions.find((project) => project.id === active.projectId)?.title ?? null)}` : ""}</summary>
       <form className="surface-panel activity-filter" onSubmit={apply}>
         <label>项目
           <select data-testid="activity-project-filter" value={projectManualMode ? MANUAL_PROJECT_OPTION : projectId}
@@ -281,11 +312,12 @@ export default function ActivityView() {
         {formError && <p className="action-error" role="alert">{formError}</p>}
       </form>
       </details>
-      <nav className="activity-categories" aria-label="按事件类别筛选（仅已加载项）">
-        {categoryFilters.map((option) => <button key={option.value} type="button" className="text-button"
-          aria-pressed={categoryFilter === option.value} onClick={() => setCategoryFilter(option.value)}>{option.label}</button>)}
-      </nav>
       <div className="activity-toolbar">
+        <nav className="activity-categories" aria-label="按事件类别筛选（仅已加载项）">
+          {categoryFilters.map((option) => <button key={option.value} type="button" className="text-button"
+            aria-pressed={categoryFilter === option.value} onClick={() => setCategoryFilter(option.value)}>{option.label}</button>)}
+        </nav>
+        <span className="activity-toolbar-label">执行方</span>
         <div className="segmented" role="group" aria-label="按执行方筛选（仅已加载项）">
           {(["ALL", "HUMAN", "AI", "SYSTEM"] as const).map((option) => <button key={option} type="button"
             className={`segmented-option${actorFilter === option ? " segmented-option--selected" : ""}`}
@@ -302,14 +334,16 @@ export default function ActivityView() {
           {loading && <p className="loading-text" role="status">正在读取当前筛选范围的 Activity…</p>}
           {error && <p className="action-error" role="alert">{error}</p>}
           {!loading && !error && <>
-            <p className="helper-text">当前已读取 {items.length} 条{nextCursor ? "；还有后续页" : "；本次查询没有后续游标"}。不把本页数量当作历史总数。</p>
             {visibleItems.length ? <div className="activity-groups">{groups.map((group) => <section key={`${group.key ?? "unknown"}-${group.items[0]!.id}`} className="activity-group">
               <h2 className="activity-day">{group.label}</h2>
-              <ol className="activity-list">{group.items.map((item) => <ActivityRow key={item.id} item={item} selected={item.id === selectedId} onSelect={() => setSelectedId((current) => current === item.id ? null : item.id)} />)}</ol>
+              <ol className="activity-list">{group.items.map((item) => <ActivityEventRow key={item.id} item={item} selected={item.id === selectedId} onSelect={() => setSelectedId((current) => current === item.id ? null : item.id)} />)}</ol>
             </section>)}</div>
               : <p className="helper-text">{items.length ? "当前筛选在已加载项内没有匹配记录；调整类别、执行方或继续加载后重查。" : "当前筛选范围没有返回 Activity。可调整项目、任务、Run 或时间条件后重查。"}</p>}
-            {moreError && <p className="action-error" role="alert">续页失败：{moreError}；已保留前面加载的结果。</p>}
-            {nextCursor && <button className="secondary-button" type="button" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取后续页" : "继续加载"}</button>}
+            <div className="activity-foot">
+              <p className="helper-text">当前已读取 {items.length} 条{nextCursor ? "；还有后续页" : "；本次查询没有后续游标"}。不把本页数量当作历史总数。</p>
+              {moreError && <p className="action-error" role="alert">续页失败：{moreError}；已保留前面加载的结果。</p>}
+              {nextCursor && <button className="secondary-button" type="button" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取后续页" : "继续加载"}</button>}
+            </div>
           </>}
         </div>
         <aside className="activity-aside" aria-label="所选事件依据">

@@ -9,6 +9,7 @@ import { readProjectInWorkspace, requireWorkspaceVisible } from '../application/
 import { isUuid } from '../application/revisions.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import {
   addTaskDependency,
   cancelTask,
@@ -398,7 +399,13 @@ export function registerTaskRoutes(app: FastifyInstance, dependencies: RouteDepe
 
         if ('control_request_id' in outcome.result) {
           try { await applySafeControl(executor, outcome.result.run_id); }
-          catch (error) { request.log.error({ err: error }, 'task_cancel_safe_point_failed'); }
+          catch (error) {
+            request.log.error({ err: error }, 'task_cancel_safe_point_failed');
+            getRuntimeLogger('task-control').error('task_cancel_safe_point_failed', {
+              request_id: request.id, task_id: params.task_id ?? '',
+              run_id: outcome.result.run_id, error,
+            });
+          }
         }
 
         return { outcome, result: outcome.result };

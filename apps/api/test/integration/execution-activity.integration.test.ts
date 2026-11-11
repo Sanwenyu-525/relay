@@ -273,6 +273,25 @@ test('阶段由模型账本与工具证据推进，HTTP full/summary 使用同�
     'summary 与 full 必须按同一固定信号计算指纹');
 });
 
+test('辅助外呼（标题/记忆）不进入回复过程，也不抬高模型调用计数', async () => {
+  const f = await fixture();
+  await claim(f);
+  const repository = new ModelCallRepository(app.db);
+  const identity = { provider: 'test', model: 'test-model',
+    configFingerprint: '0'.repeat(64) };
+  await repository.begin(randomUUID(), { workspaceId: f.workspaceId,
+    kind: 'ASSIST', assistMessageId: f.messageId }, identity);
+  // 同一条消息上的辅助外呼：它们必须留在账本与导出里，但不能冒充回复步骤。
+  await repository.begin(randomUUID(), { workspaceId: f.workspaceId,
+    kind: 'ASSIST', assistMessageId: f.messageId, purpose: 'TITLE' }, identity);
+  await repository.begin(randomUUID(), { workspaceId: f.workspaceId,
+    kind: 'ASSIST', assistMessageId: f.messageId, purpose: 'MEMORY_CAPTURE' }, identity);
+  const { message } = await activity(f, { detail: 'full' });
+  assert.equal(activityOf(message, 'MODEL_CALL').length, 1);
+  assert.equal(message.activity_counts.model_calls, 1);
+  assert.equal(activityOf(message, 'MODEL_CALL')[0]?.refs.model_call_id !== null, true);
+});
+
 test('指纹只跟随内容事实：心跳 updated_at 不改变，证据变化才改变', async () => {
   const f = await fixture();
   await claim(f);

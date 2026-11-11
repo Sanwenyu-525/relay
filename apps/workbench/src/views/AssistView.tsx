@@ -19,7 +19,9 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
 import type { RelayModelConnection } from "../api/dtos/information";
 import { formatTokenUsageDetail, formatTokenUsageLine, legacyTokenUsage,
   tokenUsageTotal } from "../lib/tokenCount";
-import { generationStageDiagnostics, generationStageView } from "../lib/generationStage";
+import { generationStageView } from "../lib/generationStage";
+import { dropCachedSessionTranscript, readCachedSessionTranscript,
+  writeCachedSessionTranscript } from "../lib/sessionTranscriptCache";
 import { RELAY_REQUIRED_CONTEXT_AGENT } from "../api/resources/requiredContext";
 import AssistSkillOutput from "../components/AssistSkillOutput";
 import AssistRecallUndo from "../components/AssistRecallUndo";
@@ -87,6 +89,7 @@ import { waitForEventRetry } from "../lib/eventRetry";
 import type { PendingContext } from "../lib/usePendingWork";
 import { rememberSourceRefs, readRecentSourceRefs } from "../lib/recentSourceRefs";
 import { readComposerDraft, writeComposerDraft } from "../lib/composerDrafts";
+import { readLastModelChoice, writeLastModelChoice } from "../lib/modelPreferences";
 import { useDelayedVisible } from "../lib/useDelayedVisible";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { chatControlFromText } from "../lib/chatControls";
@@ -844,13 +847,15 @@ onExecutionPrepared?: (taskId: string) => void;
    * 首条消息过程的 Owner。文件夹入口下由协作页持有并跨重挂载存活；
    * 独立使用时退回本实例的局部记录，语义不变。
    *
-   * 首条消息前的模型选择**只由用户显式选择产生**（MODEL-SETTINGS-03，P0-4）。
-   *
-   * 这里不再从本机「上次使用的模型」种下初值：那会让新会话在没有显式选择时悄悄提交
-   * 一次 SelectSessionModel，把「跟随工作区聊天默认 → 进程默认」覆盖成本机历史偏好。
-   * 新会话默认显示「跟随默认」，由服务端按优先级解析。
+   * 新对话的模型初值来自本机上次**显式点选**（2026-11-10 用户指令「模型没有持久化」）：
+   * 芯片从第一帧就写出具体型号，用户看得见这次选择，不存在「历史偏好悄悄覆盖默认」。
+   * 没有上次选择时仍是「跟随默认」，由服务端按「工作区聊天默认 → 进程默认」解析。
    */
-  const [localFirst, setLocalFirst] = useState<FirstMessageProcess>(emptyFirstProcess);
+  const [localFirst, setLocalFirst] = useState<FirstMessageProcess>(() => {
+    const last = client === null ? null : readLastModelChoice(client.workspaceId);
+    return last === null ? emptyFirstProcess
+      : { ...emptyFirstProcess, model: last.model, connectionId: last.connectionId };
+  });
   const localFirstRef = useRef(localFirst); localFirstRef.current = localFirst;
   const localOwner = useMemo<FirstMessageOwner>(() => ({
     read: () => localFirstRef.current,
@@ -2302,11 +2307,22 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         <ModelSelector client={client} open={firstModelPickerOpen} onOpenChange={setFirstModelPickerOpen}
           selectedModel={first.model ?? null}
           selectedConnectionId={first.connectionId ?? null}
-          onChoose={(model) => { updateFirst({ model, connectionId: null }); }}
+          onChoose={(model) => {
+            updateFirst({ model, connectionId: null });
+            // 点选那一下记成本机偏好：下一条新对话沿用这次显式选择（2026-11-10 用户指令）。
+            if (client !== null) writeLastModelChoice(client.workspaceId, { model, connectionId: null });
+          }}
           onChooseConnection={(connection: RelayModelConnection) => {
             // 连接身份与服务端将解析出的型号一起写入草稿；首条发送时按 connection_id 提交。
-            updateFirst({ model: connection.defaultModel, connectionId: connection.id }); }}
-          onFollowDefault={() => { updateFirst({ model: undefined, connectionId: null }); }}
+            updateFirst({ model: connection.defaultModel, connectionId: connection.id });
+            if (client !== null) writeLastModelChoice(client.workspaceId,
+              { model: connection.defaultModel, connectionId: connection.id });
+          }}
+          onFollowDefault={() => {
+            updateFirst({ model: undefined, connectionId: null });
+            // 「跟随默认」也是一次明确选择：清掉本机偏好，下一条新对话同样跟随默认。
+            if (client !== null) writeLastModelChoice(client.workspaceId, null);
+          }}
           disabled={firstBusy || creating || scopedPendingFirst !== null} />
       </div>
       <button className="primary-button agent-chat-send" type="submit" data-testid="assist-first-send"
@@ -2373,9 +2389,11 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
   function newSession() {
     if (!deferSessionCreation) { void createSession(); return; }
     setSessionId(null); setSelectedRefs([]); setFirstSkillKey("");
-    // 新对话只空白草稿与在途状态；模型选择也一起清空（不继承上一条的显式选择），
-    // 芯片因此回到「跟随工作区默认」（MODEL-SETTINGS-03，P0-4）。
-    firstOwner.write({ ...emptyFirstProcess });
+    // 新对话只空白草稿与在途状态；模型沿用本机上次显式选择（2026-11-10 用户指令），
+    // 芯片仍写出具体型号，不退回「跟随默认」。
+    const last = client === null ? null : readLastModelChoice(client.workspaceId);
+    firstOwner.write({ ...emptyFirstProcess,
+      ...(last === null ? {} : { model: last.model, connectionId: last.connectionId }) });
     onSessionSelected?.(null);
   }
   // 协作页（standalone）的会话行引用全局横向 field 与紧凑按钮变体；skill 子页保持
@@ -3790,7 +3808,7 @@ export function MessageElapsed({ message }: { message: RelayAssistMessage }) {
   const end = running ? now : message.updatedAt === null ? Number.NaN : Date.parse(message.updatedAt);
   if (!Number.isFinite(end)) return null;
   return <span className="agent-message-elapsed" data-testid={`assist-elapsed-${message.id}`}>
-    {running ? "已用" : "耗时"} {formatElapsed(end - start)}</span>;
+    {running ? "" : "耗时"} {formatElapsed(end - start)}</span>;
 }
 
 /**
@@ -3887,7 +3905,9 @@ function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSa
     : inputTokens === null ? "上下文用量未上报"
       : ratio === null ? `上下文 ${inputText} tokens · 预算未知`
         : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
-          + (over ? " · 已超出预算" : "");
+          + (over ? " · 已超出预算" : "")
+          // 2026-11-10：改档后悬停读数仍按那次调用的冻结预算解释，补一句避免与三档单选互相矛盾。
+          + (usage !== null && usage.budget.tokens !== limit ? " · 按该次调用冻结预算" : "");
   const cacheRead = lastCall?.cacheReadTokens ?? null;
   const hitRate = inputTokens !== null && cacheRead !== null && inputTokens > 0 &&
     cacheRead <= inputTokens ? cacheRead / inputTokens : null;
@@ -4154,14 +4174,13 @@ function InflightDots({ message, inline = false }: {
  *   * 文案只读 `generationStageView`，它不按等待时长猜「模型是否已响应」；
  *   * 只在「没有可见草稿、没有工具主进度、没有取消意图、没有核对中」时出现——
  *     正文一旦可见就让位，同一时刻只有一组动效；
- *   * 延迟诊断是就地展开的只读读数，不常驻正文，也不把总耗时说成模型推理耗时；
+ *   * 聊天流里只有这一行：逐段耗时不在阶段行下就地展开（2026-11-10），
+ *     原始时间戳仍随「导出会话」的 `model_calls` 提供；
  *   * 终态整行消失，由最终正文、失败行与 meta 行接管。
  */
 function AssistStageLine({ message }: { readonly message: RelayAssistMessage }) {
   const stage = generationStageView(message);
   if (stage === null) return null;
-  const diagnostics = message.status === "RUNNING"
-    ? generationStageDiagnostics(message) : [];
   return <div className="assist-stage" data-testid={`assist-inflight-${message.id}`}
     data-phase={stage.key}>
     <p className="assist-stage-line" role="status">
@@ -4172,16 +4191,6 @@ function AssistStageLine({ message }: { readonly message: RelayAssistMessage }) 
         {stage.text}
       </span>
     </p>
-    {diagnostics.length > 0 && <details className="tech-details chat-disclosure assist-stage-details">
-      <summary><span className="chat-disclosure-chevron" aria-hidden="true"><ChevronRight /></span>延迟诊断</summary>
-      <ul className="assist-stage-diagnostics">
-        {diagnostics.map((row) => <li key={row.label}>
-          <span className="assist-stage-diagnostic-label">{row.label}</span>
-          <span className="assist-stage-diagnostic-value">{row.value}</span>
-        </li>)}
-      </ul>
-      <p className="helper-text">只读模型调用账本。排队时长与服务端未观测的区间已如实标注，不把消息总耗时当作模型推理耗时。</p>
-    </details>}
   </div>;
 }
 
@@ -4205,7 +4214,8 @@ function TokenUsageLine({ usage, phase, live = false, testId }: {
 }
 
 // SCENARIO-LAB-EXPORT-ANCHOR：AI 回复场景实验室直接挂载这一行，产品与演示共用同一个消息行 Owner。
-export function AssistMessageRow({ client, target, message, activity, preview, previewError, onRetryPreview, settling,
+export function AssistMessageRow({ client, target, message, activity, activityReadFailed = false,
+  activitySnapshotLoaded = false, preview, previewError, onRetryPreview, settling,
   handover, onVerifyFinal, writeBlocked, candidates, personaLabel,
   recallReceipt, recallBusy, recallReading, recallError, recallDisabledReason, recallUndoEligible, onRecall, onReadRecall }: { client: RelayApiClient;
   /** 助手档显示冻结人设（名字 · 修订），普通档为 null，仍显示「AI」。 */
@@ -4213,6 +4223,17 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
   target: AssistTarget | null; message: RelayAssistMessage; writeBlocked: boolean;
   /** ENG-OBS-02：服务端执行活动投影里这条消息的真实阶段与过程；历史页外为 null。 */
   activity: RelayExecutionActivityMessage | null;
+  /**
+   * 活动投影读取失败（2026-11-10）：终态消息平时靠计数决定要不要留工具入口，
+   * 读失败时没有计数可用，必须保留「展开查看」入口，不能把读取失败读成没有工具。
+   */
+  activityReadFailed?: boolean;
+  /**
+   * 会话活动快照已经读回过（2026-11-10）。快照只覆盖最新 200 条助手消息，
+   * 更早的消息没有 `activity` 行——那是「不在投影范围」，不是「没有工具」，
+   * 仍要保留工具账本的历史入口。
+   */
+  activitySnapshotLoaded?: boolean;
   preview: RelayAssistLivePreview | null;
   previewError: PreviewReadError | null; onRetryPreview: () => void;
   /** 预览已转终态、最终正文尚未核对的过渡读数；null 表示没有这段空档。 */
@@ -4304,13 +4325,46 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
     automaticSources.length > 0 ? `已参考 ${automaticSources.length} 条长期记忆` : null
   ].filter((part): part is string => part !== null).join(" · ");
   /**
+   * 消息级执行状态只保留「需要人看一眼」的例外（2026-11-10）。
+   *
+   * 正常的生成阶段由 `AssistStageLine` 一行表达，工具轮次由 `SessionRoundTrace`
+   * 自己的标题与明细表达；状态块再列一次模型调用和工具计数，只是同一件事说两遍，
+   * 还会在完成时留下「● 回复已完成 + 查看执行过程（3 项）」两行常驻。
+   *
+   * 审批、UNKNOWN/待核对与执行 Run 摘要没有别的常驻载体，仍在状态块里出现；
+   * 委派由 `SessionDelegations` 承担，工具轮次由 `SessionRoundTrace` 承担；
+   * 失败的可见性由 `assist-failure` 与 meta 行承担，没有错误码时才回退到这里。
+   */
+  const showExecutionStatus = !user && !withdrawn && activity !== null &&
+    (activity.gaps.length > 0 || activity.runSummary !== null ||
+      message.status === "FAILED" && message.errorCode === null);
+  /**
    * 阶段行只在「还在跑、还没有任何可见正文或工具主进度」时出现（AGENT_STREAM_VISIBILITY）：
    * 草稿一出现就让位给正文；工具活动一旦接手主进度动效，这里不再画第二组；
-   * 取消与核对中的事实已有 meta 行，不重复。
+   * 例外状态块占位时也不重复；取消与核对中的事实已有 meta 行，不重复。
+   *
+   * 2026-11-10：不再要求 `activity === null`。活动快照到达后旧状态块会接管，
+   * 但简单回复不再渲染那块状态；如果阶段行同时消失，等待中的回复会空一拍。
+   * 现在它由 `toolActivityOwnsProgress` 与例外状态决定去留：没有工具就一直是同一行。
    */
   const showStageLine = !user && !withdrawn && inFlight && settling === null &&
     !message.cancelRequested && replyState === null && !toolActivityOwnsProgress &&
-    activity === null;
+    !showExecutionStatus;
+  /**
+   * 工具账本入口只在「可能真有工具」时挂载（2026-11-10）。
+   *
+   * 在途时它要轮询，必须常挂；终态消息只有在活动投影确认过工具/待办记录时才留入口。
+   * 否则历史里每条纯文本回复都会带一行「工具活动 · 展开查看」，而它读回零条后又会
+   * 自己消失——既不是用户要的过程，也恰好是切换会话时那一闪的来源。
+   *
+   * 活动快照尚未读回时先不挂：等事实明确再出现，避免先摆一行再撤掉。
+   */
+  const showToolTrace = !user && !withdrawn &&
+    (inFlight || activityReadFailed ||
+      (activity !== null
+        ? activity.activityCounts.toolCalls + activity.activityCounts.todoWrites > 0
+        // 快照已读回却不含这条消息：历史超出投影窗口，保留按需读取的旧入口。
+        : activitySnapshotLoaded));
   // 2026-10-04 按用户要求去掉左右两侧头像：角色已由「我 / AI」标签与气泡位置区分，
   // 头像只是重复占位，还把正文列挤窄。
   return <article className="agent-message" data-role={message.role}>
@@ -4323,12 +4377,18 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
       {/* 完成态与「已提交、Worker 尚未领取」都不占位：正常完成不需要额外标注，
           在途与失败必须显式说明。 */}
       {statusText !== "" && <span className="agent-message-status">{statusText}</span>}</p>
-    {/* 等待不再只有一个转圈：一句服务端事实驱动的阶段文案，紧跟 meta 行与正文之间。 */}
-    {showStageLine && <AssistStageLine message={message} />}
-    {/* ENG-OBS-02：消息级权威执行状态。阶段只由服务端活动投影决定，不按等待时长切换；
-        工具轨迹已接手主进度动效时这里只保留静态状态点，同一消息只有一个主动画。 */}
-    {!user && !withdrawn && activity !== null &&
-      <MessageExecutionStatus activity={activity} animate={!toolActivityOwnsProgress} />}
+    {/* 消息过程只占一个槽位（2026-11-10）：生成中一行阶段、工具轮次一条账本入口、
+        需要人处理的例外一块状态。三块互斥，避免在正文上方反复插入/卸载而闪动。 */}
+    <div className="agent-message-process" data-testid={`assist-process-${message.id}`}>
+      {/* 等待不再只有一个转圈：一句服务端事实驱动的阶段文案，紧跟 meta 行与正文之间。 */}
+      {showStageLine && <AssistStageLine message={message} />}
+      {/* ENG-OBS-02：审批、待核对、委派与 Run 摘要的常驻入口；正常阶段不再重复。
+          工具轨迹已接手主进度动效时这里只保留静态状态点，同一消息只有一个主动画。 */}
+      {showExecutionStatus && activity !== null &&
+        <MessageExecutionStatus activity={activity} animate={!toolActivityOwnsProgress} />}
+      {showToolTrace && <SessionRoundTrace client={client} message={message}
+        onProgressOwnerChange={setToolActivityOwnsProgress} />}
+    </div>
     {/* 0132：回执只挂在被撤回的那条用户消息上；直接回复行只标「已撤回」，不重复同一份回执。 */}
     {message.recall !== null && user && <AssistRecallNote client={client} recall={message.recall}
       undoEligible={recallUndoEligible === true} disabledReason={recallDisabledReason}
@@ -4336,11 +4396,6 @@ export function AssistMessageRow({ client, target, message, activity, preview, p
       error={recallError} onRead={onReadRecall} onResume={onRecall} />}
     {withdrawn && message.recall === null &&
       <p className="assist-withdrawn-note">这条消息已撤回；原文与当时的文件效果不再作为当前事实。</p>}
-    {/* 2026-10-21 用户指认「ai 的思考过程看不到」：§18.10 要求原消息下展示实际阶段，
-        而每轮工具调用此前只落库、界面只剩三点。轮次账本紧跟 meta 行，
-        在途时它是唯一能看出「这一轮在做什么」的活体信号。 */}
-    {!user && !withdrawn && <SessionRoundTrace client={client} message={message}
-      onProgressOwnerChange={setToolActivityOwnsProgress} />}
     {/* 用户输入保持纯文本；只有 AI 最终正文走安全 Markdown，Skill 输出另由 AssistSkillOutput 渲染，避免同一正文出现两次。 */}
     {/* 0093：图片在上、文字在下——先看见"我发了哪张图"，再读当时写的话（§33.3）。 */}
     {!withdrawn && message.attachments.length > 0 && <MessageAttachments client={client}
@@ -5100,7 +5155,16 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     ? "只读子任务记录，请返回主会话补充要求。" : inheritedWriteBlockedReason;
   const [learningState, setLearningState] = useState<RelayLearningState | null>(null);
   const [learningNavigation, setLearningNavigation] = useState<AssistNavigationState>(cleanNavigationState);
-  const [messages, setMessages] = useState<readonly RelayAssistMessage[] | null>(null);
+  /**
+   * 会话切换防闪（2026-11-10）：本面板按 session id 重挂载，消息读回前的那一帧
+   * 没有列表也没有滚动位置。用上一次成功读回的展示缓存同步初始化，首帧就能按
+   * 既有布局滚到底部；随后的 refresh 用权威结果覆盖。缓存不参与业务判断。
+   */
+  const cachedTranscript = useMemo(
+    () => readCachedSessionTranscript(client.workspaceId, session.id),
+    [client.workspaceId, session.id]);
+  const [messages, setMessages] = useState<readonly RelayAssistMessage[] | null>(
+    () => cachedTranscript?.messages ?? null);
   /**
    * ENG-OBS-02：历史补读只保存「比最新一页更早」的消息。
    * 轮询刷新只替换最新一页，已读回的历史继续留在列表里；
@@ -5145,7 +5209,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   const [recallBusyId, setRecallBusyId] = useState<string | null>(null);
   const [recallReadingId, setRecallReadingId] = useState<string | null>(null);
   const [recallErrors, setRecallErrors] = useState<Readonly<Record<string, string>>>({});
-  const [proposals, setProposals] = useState<readonly RelayAssistProposal[]>([]);
+  const [proposals, setProposals] = useState<readonly RelayAssistProposal[]>(
+    () => cachedTranscript?.proposals ?? []);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // 选择器附近的失败出口：明确拒绝才给「重新选择」，未知结果交给原命令核对弹窗。
@@ -5522,7 +5587,10 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       // 已补读的历史不属于「最新一页」，刷新不能把它一并丢掉；边界只由最新页决定时
       // 才前进，否则用户刚读完的历史会在下一次轮询里消失。
       const earlier = earlierMessages.current;
-      setMessages([...earlier, ...nextMessages]); setProposals(nextProposals); setError(null);
+      const authoritative = [...earlier, ...nextMessages];
+      setMessages(authoritative); setProposals(nextProposals); setError(null);
+      writeCachedSessionTranscript(client.workspaceId, session.id,
+        { messages: authoritative, proposals: nextProposals });
       if (earlier.length === 0) {
         setHistoryHasMore(messagePage.hasMore);
         setHistoryBeforeSeq(messagePage.nextBeforeSeq);
@@ -5549,6 +5617,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       const denied = caught instanceof RelayApiError &&
         (caught.problem.status === 403 || caught.problem.status === 404);
       if (denied || !hasTranscript.current) {
+        if (denied) dropCachedSessionTranscript(client.workspaceId, session.id);
         setMessages(null); setProposals([]); setPreviews({}); setPreviewErrors({});
         latestPreview.current = {}; draftedIds.current.clear();
         setSettling({}); setHandovers({});
@@ -5836,6 +5905,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         const selection = await client.selectSessionModel({ sessionId: session.id, commandId: action.commandId, model: action.model });
         if (disposed.current) return;
         setSelectedModel(selection.model); setSelectedConnectionId(null);
+        // 服务端确认后的显式选择才写本机偏好；下一条新对话的芯片沿用这次型号。
+        writeLastModelChoice(client.workspaceId, { model: selection.model, connectionId: null });
         setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
         setNotice(`后续新消息首选 ${selection.model}；活动 Run 保留原策略。`);
       } else if (action.kind === "followDefault") {
@@ -5843,12 +5914,17 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           commandId: action.commandId });
         if (disposed.current) return;
         setSelectedModel(null); setSelectedConnectionId(null);
+        // 「跟随默认」同样记成最近一次显式选择：下一条新对话也跟随默认。
+        writeLastModelChoice(client.workspaceId, null);
         setNotice("已恢复跟随工作区默认：新消息按工作区聊天默认，未设置时按进程默认。");
       } else if (action.kind === "connection") {
         const selection = await client.selectSessionConnection({ sessionId: session.id,
           commandId: action.commandId, connectionId: action.connectionId });
         if (disposed.current) return;
         setSelectedModel(selection.model); setSelectedConnectionId(selection.connectionId);
+        // 连接身份连同服务端解析出的型号一起记住；下一条新对话按同一连接提交。
+        writeLastModelChoice(client.workspaceId,
+          { model: selection.model, connectionId: selection.connectionId });
         setDraft((current) => chatControlFromText(current) === "model" ? "" : current);
         setNotice(`后续新消息首选已登记连接「${action.connectionName}」（型号 ${selection.model}）；活动 Run 保留原策略。`);
       } else if (action.kind === "restart") {
@@ -6844,6 +6920,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
 {/* busy / pending 已随消息内取消按钮一起移除；writeBlocked 只剩预览重读这一处只读入口。 */}
 <AssistMessageRow client={client} target={target} message={message}
         activity={activityByMessage.get(message.id) ?? null}
+        activityReadFailed={sessionActivity.error !== null}
+        activitySnapshotLoaded={sessionActivity.snapshot !== null}
         personaLabel={learningMode ? "学习搭档" : session.personaLabel}
         preview={previews[message.id] ?? null}
         previewError={previewErrors[message.id] ?? null} onRetryPreview={() => setPreviewRetry((value) => value + 1)}
@@ -7601,8 +7679,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             switching={busy && pending !== null && (pending.kind === "model" || pending.kind === "connection")}
             disabled={busy || pending !== null || writeBlockedReason !== null}
             onChoose={(model) => {
-              // 会话级选择仍走原命令落服务端（唯一事实）；本机不再存「上次使用」，
-              // 新会话只跟随工作区默认（MODEL-SETTINGS-03）。
+              // 会话级选择仍走原命令落服务端（唯一事实）；回执确认后由 runAction
+              // 同时记成本机偏好，下一条新对话沿用（2026-11-10 用户指令）。
               void runAction({ kind: "model", commandId: createCommandId(), model });
             }}
             onChooseConnection={(connection) => {

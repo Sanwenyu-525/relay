@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Menu, PanelLeft, PanelLeftClose, SquarePen } from "lucide-react";
 import AppDialog from "./AppDialog";
 import CommandPalette from "./CommandPalette";
 import { FeedbackHost } from "./Feedback";
 import RecentWorkRail from "./RecentWorkRail";
-import WorkspaceClearSessions from "./WorkspaceClearSessions";
 import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
@@ -47,7 +46,6 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   onCommandClose: () => void;
 }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const query = new URLSearchParams(location.search);
   const path = location.pathname;
   // 场景实验室是开发者的全屏工作区：同样让出近期工作栏，把宽度交给预览；
@@ -131,19 +129,6 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
   const newConversationHref = `/agent?new=${encodeURIComponent(newConversationKey)}${
     typeof activeSessionId === "string" && activeSessionId !== ""
       ? `&source_session=${encodeURIComponent(activeSessionId)}` : ""}`;
-  /**
-   * 清空工作区会话后：左栏必须立刻按服务端事实重读，不能留下幽灵行。
-   * 只接受服务端已确认删除的 id；当前会话也在其中时，直接落到一条不带来源的新对话，
-   * 避免协作页继续展示一条已经不存在的会话。
-   */
-  const [railRefreshToken, setRailRefreshToken] = useState(0);
-  const handleWorkspaceSessionsCleared = useCallback((deletedSessionIds: readonly string[]) => {
-    setRailRefreshToken((current) => current + 1);
-    if (typeof activeSessionId === "string" && activeSessionId !== ""
-      && deletedSessionIds.includes(activeSessionId)) {
-      void navigate(`/agent?new=${encodeURIComponent(crypto.randomUUID())}`);
-    }
-  }, [activeSessionId, navigate]);
   const secondaryNavigation: readonly WorkbenchNavEntry[] = bottomWorkbenchNavigation({
     includeDevTools: import.meta.env.DEV,
     devToolsState: devToolsNavState(path, location.search, location.state)
@@ -244,10 +229,6 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
         <div className="context-rail-head">
           <p className="context-rail-brand">Relay<span className="context-rail-brand-tag">工作空间</span></p>
           <div className="context-rail-head-actions">
-            {connection.mode === "live" && connection.client && (
-              <WorkspaceClearSessions key={connection.epoch} client={connection.client}
-                onCleared={handleWorkspaceSessionsCleared} />
-            )}
             {/* 收起/折叠近期工作栏（原型 toggle-side）：外壳单入口，收起后本按钮仍在，作为再展开的把手。 */}
             <button className="icon-button context-rail-collapse" type="button" aria-expanded={!contextCollapsed}
               data-testid="context-rail-collapse"
@@ -264,8 +245,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
         <Link className="primary-button context-rail-new" to={newConversationHref} data-testid="context-new-conversation"
           title="新对话"><SquarePen aria-hidden="true" /><span>新对话</span></Link>
         {connection.mode === "live" && connection.client
-          ? <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId}
-              refreshToken={railRefreshToken} />
+          ? <RecentWorkRail key={connection.epoch} client={connection.client} currentTaskId={currentWorkId} />
           : <p className="helper-text context-rail-placeholder">示例数据没有真实近期工作；连接本机 API 后这里按项目分组显示。</p>}
       </aside>
       <div className="app-content">
@@ -302,7 +282,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
           <SquarePen aria-hidden="true" /><span>新对话</span></Link>
       </div>
       {connection.mode === "live" && connection.client && <RecentWorkRail key={connection.epoch}
-        client={connection.client} currentTaskId={currentWorkId} refreshToken={railRefreshToken}
+        client={connection.client} currentTaskId={currentWorkId}
         onOpen={() => setNavigationOpen(false)} />}
       <nav className="mobile-navigation-list" aria-label="完整导航">
         {[...primaryNavigation, ...secondaryWorkNavigationEntries, ...secondaryNavigation].map((item) => {

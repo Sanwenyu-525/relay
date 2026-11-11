@@ -136,12 +136,15 @@ export async function readArtifactImpactCheck(db: DbExecutor, workspaceId: strin
   if (!check || check.workspace_id !== workspaceId) throw resourceNotFound('Impact check');
   const artifact = await r.artifacts.readArtifact(check.artifact_id);
   const latest = artifact && (await r.artifacts.listArtifactVersions(artifact.id)).at(-1);
-  const message = await r.assist.readMessage(check.assist_message_id);
-  if (!artifact || artifact.workspace_id !== workspaceId || !message) throw resourceNotFound('Impact check');
-  let status = message.status;
-  let errorCode = message.error_code;
+  const message = check.assist_message_id === null ? undefined
+    : await r.assist.readMessage(check.assist_message_id);
+  if (!artifact || artifact.workspace_id !== workspaceId) throw resourceNotFound('Impact check');
+  // 会话被删除后来源消息为空（0161）：检查与其下游组合检查保留，只失去分析正文。
+  // 这里给稳定的失败读数，不把整条影响检查变成 404。
+  let status = message?.status ?? 'FAILED';
+  let errorCode = message?.error_code ?? (message === undefined ? 'SOURCE_DELETED' : null);
   let possible: JsonObject[] = [];
-  if (status === 'COMPLETED') {
+  if (message !== undefined && status === 'COMPLETED') {
     try {
       const parsed = JSON.parse(message.content ?? '') as { possibly_related?: unknown };
       if (!Array.isArray(parsed.possibly_related)) throw new Error('missing possibly_related');
@@ -187,7 +190,8 @@ export async function startArtifactImpactCandidate(db: DbExecutor,
     execute: async (r) => {
       const check = await r.impacts.read(input.checkId);
       if (!check || check.workspace_id !== input.workspaceId) throw resourceNotFound('Impact check');
-      const analysis = await r.assist.readMessage(check.assist_message_id);
+      const analysis = check.assist_message_id === null ? undefined
+        : await r.assist.readMessage(check.assist_message_id);
       if (analysis?.status !== 'COMPLETED' || !analysis.content) {
         throw invalidTransition('影响分析尚未完成，不能生成修改候选。');
       }
@@ -306,13 +310,14 @@ export async function readArtifactImpactCandidate(db: DbExecutor, workspaceId: s
   const target = await r.artifacts.readArtifact(candidate.target_artifact_id);
   const sourceLatest = source && (await r.artifacts.listArtifactVersions(source.id)).at(-1);
   const targetLatest = target && (await r.artifacts.listArtifactVersions(target.id)).at(-1);
-  const message = await r.assist.readMessage(candidate.assist_message_id);
-  if (!check || !source || !target || !message || source.workspace_id !== workspaceId ||
+  const message = candidate.assist_message_id === null ? undefined
+    : await r.assist.readMessage(candidate.assist_message_id);
+  if (!check || !source || !target || source.workspace_id !== workspaceId ||
       target.workspace_id !== workspaceId) throw resourceNotFound('Impact candidate');
-  let status = message.status;
-  let errorCode = message.error_code;
+  let status = message?.status ?? 'FAILED';
+  let errorCode = message?.error_code ?? (message === undefined ? 'SOURCE_DELETED' : null);
   let markdown: string | null = null;
-  if (status === 'COMPLETED') {
+  if (message !== undefined && status === 'COMPLETED') {
     markdown = parseImpactCandidateMarkdown(message.content);
     if (markdown === null) { status = 'FAILED'; errorCode = 'OUTPUT_SCHEMA_INVALID'; }
   }
@@ -346,7 +351,8 @@ export async function applyArtifactImpactCandidate(db: DbExecutor,
         throw invalidTransition('该修改候选已应用，不能再次生成版本。');
       }
       const check = await r.impacts.read(candidate.impact_check_id);
-      const message = await r.assist.readMessage(candidate.assist_message_id);
+      const message = candidate.assist_message_id === null ? undefined
+        : await r.assist.readMessage(candidate.assist_message_id);
       if (!check || check.workspace_id !== input.workspaceId || message?.status !== 'COMPLETED') {
         throw invalidTransition('候选尚未完成或来源不可核对，不能应用。');
       }

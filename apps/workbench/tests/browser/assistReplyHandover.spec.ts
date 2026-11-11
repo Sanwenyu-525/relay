@@ -264,10 +264,10 @@ test.describe("草稿与最终正文的交接", () => {
     expect(finalGeo.left).toBe(draftGeo.left);
     expect(finalGeo.width).toBe(draftGeo.width);
     expect(finalGeo.handover).toBe("true");
-    // 只做一次 opacity 淡入：motion.panel(180ms) + 标准缓动，没有位移/缩放。
-    expect(finalGeo.animationName).toBe("assist-reply-handover");
-    expect(finalGeo.animationDuration).toBe("0.18s");
-    expect(finalGeo.timeline).toBe("cubic-bezier(0.2, 0, 0, 1)");
+    // 2026-11-10：交接不再做 opacity 淡入（用户反馈「完成瞬间会闪一下」）。
+    // `data-handover` 仍是一次性标记；视觉上直接呈现终稿，没有位移/缩放/变暗。
+    expect(finalGeo.animationName).toBe("none");
+    expect(finalGeo.animationDuration).toBe("0s");
     // 页脚（复制/用量）只在完成后出现一次，不在交接中途先出现再消失。
     await expect(page.locator(`[data-testid="assist-copy-${assistantMessageId}"]`)).toHaveCount(1);
     await page.screenshot(save("assist-reply-03-final"));
@@ -355,9 +355,13 @@ test.describe("草稿与最终正文的交接", () => {
     tap().release();
     const final = page.locator(`[data-testid="assist-reply-final-${assistantMessageId}"]`);
     await final.waitFor({ timeout: 10_000 });
-    const duration = await final.evaluate((node) => getComputedStyle(node).animationDuration);
-    // 全局 reduced-motion 规则把过渡时长归零：不留一个 180ms 的动效。
-    expect(duration).toBe("0s");
+    const animation = await final.evaluate((node) => {
+      const computed = getComputedStyle(node);
+      return { name: computed.animationName, duration: computed.animationDuration };
+    });
+    // 交接本身已无动画；reduced-motion 下也没有任何待执行的过渡。
+    expect(animation.name).toBe("none");
+    expect(animation.duration).toBe("0s");
     await expect(final).toBeVisible();
     await expect(final).toContainText("最终正文第一段");
     const opacity = await final.evaluate((node) => getComputedStyle(node).opacity);

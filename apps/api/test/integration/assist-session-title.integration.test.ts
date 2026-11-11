@@ -177,6 +177,23 @@ test('自动命名：首轮完成后入队，受控模型结果经校验落库�
   assert.equal(assistant?.content, '已把消息宽度与布局统一。');
 });
 
+test('短首发输入：不足 10 个字符不发起 AUTO 命名，临时标题保留原文', async () => {
+  const workspaceId = await newWorkspace('short');
+  const sessionId = await newSession(workspaceId, '你好');
+  const created = await readSession(sessionId);
+  assert.match(created.title, /你好/u, `临时标题应保留首条消息：${created.title}`);
+
+  const turn = await seedTurn(sessionId, '你好', '你好，我是 Relay 助手。');
+  assert.equal(await enqueueSessionTitleAfterTurn(app.db, { sessionId,
+    assistantMessageId: turn.assistantId }), false, '短输入不应入队 AUTO 请求');
+  const jobs = await sql<{ n: number }>`select count(*)::int as n from assist_title_generations
+    where session_id = ${sessionId}`.execute(app.db);
+  assert.equal(jobs.rows[0]!.n, 0, '短输入不应写标题生成请求行');
+  const row = await readSession(sessionId);
+  assert.equal(row.title, created.title, '跳过后临时标题保持不变');
+  assert.equal(row.title_source, 'PROVISIONAL');
+});
+
 test('并发保护：手动改名后迟到的生成结果停在 SKIPPED，标题与来源保持用户值', async () => {
   const workspaceId = await newWorkspace('late');
   const sessionId = await newSession(workspaceId, '修复登录报错 FAKE_TITLE_FIX');
@@ -316,7 +333,7 @@ test('显式重新生成在没有模型时如实失败并保留手动标题', as
 test('删除会话级联删除标题请求：新账本没有把删除路径重新堵上', async () => {
   const workspaceId = await newWorkspace('cascade');
   const sessionId = await newSession(workspaceId, '准备删除的讨论');
-  const turn = await seedTurn(sessionId, '这条讨论不用命名', '好的。');
+  const turn = await seedTurn(sessionId, '这条准备删除的讨论不需要生成标题', '好的。');
   await enqueueSessionTitleAfterTurn(app.db, { sessionId,
     assistantMessageId: turn.assistantId });
   assert.equal((await readJob(sessionId)).status, 'PENDING');

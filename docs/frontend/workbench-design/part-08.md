@@ -337,5 +337,12 @@ chip 打开 `AppDialog`，弹窗内才是助手选择、清单状态与重读、
 **2026-11-01 第六轮（用户指令「会话欢迎页就不需要上下文圆圈了」，本轮落地范围）**：上面第二轮「新对话首条发送前和已有会话两种输入器均可操作」的口径被本轮收窄——首条输入器（`firstMessage`）不再渲染 `ContextMeter`，发送键左侧只剩模型下拉；已建会话的输入器与浮层完全不变。随之下线的是**首条消息之前的档位预选链路**：`firstBudgetTier` 本机草稿（`lib/contextBudgetDraft.ts` 及其边界测试整份删除）、来源会话档位的前端预读、创建载荷里的显式 `context_budget_tokens`；建会话只带 `source_session_id`，档位由服务端在创建事务里按既有继承规则写定（无合法来源按 256K）。历史遗留草稿不再被读取，不出现「欢迎页看不见却生效的档位」。
 本轮证据：jsdom `contextBudgetInheritance`（含新增「首条之前无圆环」「旧草稿不改变来源继承」）**3/3**、`contextBudgetSourceEdgeCases`（场景 F 改为不带显式档位、仍按来源继承）**7/7**、`contextBudgetP0Boundaries` 5/5、`contextUsagePanel` 14/14；首条输入器与欢迎页相关 `folderFirstConversation`＋`collaborationWorkspace`＋`firstMessageSendStability` 合计 130/131（唯一失败为并行未提交的默认目录预检用例，DEBUG 输出显示风险预检查询未被夹具覆盖，与本轮改动无关）；`tsc --noEmit` 仅在改文件的并行测试 `assistExecutionTransparency`／`scenarioFixtureContract`／`sessionActivityPolling` 的既有错误。真实 Chromium 的空白新会话用例已改为断言「无圆环」，**本轮未重跑该浏览器套件**；Windows/WebView2 未验。
 
+**2026-11-10 第七轮（用户指认「上下文前端 UI 不匹配」，核对后确认后端口径正确、只补说明）**：截图里三档选中 512K，而摘要与圆环都写 `5,549 / 262,144`（2%），分项又合计 7,452。真实库核对：
+
+- **分母不是当前档位，是那次调用冻结的预算**。时间线：22:14:45.087 建会话（256K）→ 22:14:45.419 首条消息准入，快照冻结 `context_budget_tokens=262144` → 22:14:48.853 该调用结算 → 22:15:11.349 `SetSessionContextBudget` 才改成 512K。改档不会回头改写历史调用（ADR-037），所以 262,144 是那次调用的正确分母；下一次调用才按 512K 申请。
+- **分项合计大于 Provider 实报是估算口径差异，不是丢项或重复计**。分项按请求文本 UTF-8 字节 ÷ 3 估算（与端口预算检查同一换算），英文占比高时比 Provider 分词偏大；`model_calls.context_usage` 的 `precision` 恒为 `ESTIMATED`，后端没有把估算冒充实报。
+- **本轮只补说明，不改口径**：冻结预算与当前档位不同时，摘要下补一句「占比按这次调用冻结的 256K 计算；512K 从下一次调用生效」；分项合计与 Provider 实报不同时，构成区补一句两边口径；圆环悬停提示追加「按该次调用冻结预算」。三档单选仍只表达下一拍档位，不重写已删除的「当前档位 N」行。
+- 证据：jsdom `contextUsagePanel` **17/17**（新增冻结差异、一致不提示、估算差异、一致不提示四例）；`tsc --noEmit` exit 0；真实 Chromium 套件新增两行断言，未重跑。
+
 未运行规格见[测试计划第 26 节](../../testing/verification-plan/part-05.md#26-内置-skill命令压缩与消息文件恢复验收规格)，具体接口、恢复状态名称和定制控件在实施协议中冻结，本节不预定新路由或数据库枚举。
 

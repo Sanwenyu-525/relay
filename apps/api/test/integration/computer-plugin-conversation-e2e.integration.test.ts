@@ -255,6 +255,18 @@ test('T2 普通自然语言「请帮我打开记事本」走同一条执行链',
   assert.equal(applied.status, 'DELEGATED');
 });
 
+test('T8 插件工作区里的普通问候不触发信封修复', async () => {
+  const fx = await fixture({ withComputer: true });
+  const captured: CapturedRequest[] = [];
+  const result = await ask(fx, '你好',
+    sequencedPort(['你好，我是 Relay 助手。'], captured));
+  assert.equal(result.message?.status, 'COMPLETED');
+  // 环境能力不是用户意图：没有 @mention、没有动作词时不应重发整份 system。
+  assert.equal(captured.length, 1, '普通问候只应有一次主调用');
+  assert.equal(captured[0]?.responseFormat, undefined);
+  assert.equal(result.requests.length, 0);
+});
+
 test('T3 询问插件能不能打开记事本时不启动桌面操作', async () => {
   const fx = await fixture({ withComputer: true });
   const result = await ask(fx, '@电脑操控 能不能打开记事本？',

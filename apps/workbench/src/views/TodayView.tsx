@@ -280,15 +280,15 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
         <div className="today-task__side">
           <span className={eligible ? "status-chip status-chip--success" : "status-chip status-chip--neutral"}>
             {eligible ? (item.status === "IN_PROGRESS" ? "可继续" : "可开始") : "待处理"}</span>
-          {eligible && actions.has("START") && <Link className="inline-link" to={`/tasks/${item.taskId}`}>打开任务</Link>}
         </div>
       </div>
-      {rowActions && <div className="today-task__actions">
+      {(rowActions || (eligible && actions.has("START"))) && <div className="today-task__actions">
         {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="text-button" type="button" disabled={busy}
           onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</button>}
         {actions.has("SET_FOCUS") && <button className="text-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</button>}
         {actions.has("CLEAR_LATER") && <button className="text-button" type="button" disabled={busy}
           onClick={() => onSelection(item, item.pin, null, null)}>取消延后</button>}
+        {eligible && actions.has("START") && <Link className="inline-link today-task__open" to={`/tasks/${item.taskId}`}>打开任务</Link>}
       </div>}
     </div>
     <details className="today-task__plans">
@@ -625,19 +625,20 @@ export default function TodayView() {
     <div className="today-body">
       <div className="today-main">
     <PageHeader testId="today-page-head" title="今天" overline="Today" meta={`${longDate} · ${weekday}`} />
-    <div className="today-intro-note">
-      <details className="today-arrange-note">
-      <summary>安排说明</summary>
-      <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
-      <p>跨项目的人工待处理事项在 <Link to="/tasks?tab=attention">人工待处理</Link> 列表中查看。</p>
-      {current && <p>当前选择版本 v{current.selectionRevision}。</p>}
-      </details>
-    </div>
-    {client === null ? <section className="pv-card today-fixture-card" role="status">
-      <div className="pv-card-b">
-        <p>当前为示例数据预览，没有真实 Today 投影。<Link className="inline-link" to="/projects">打开项目</Link> 或 <Link className="inline-link" to="/tasks">打开任务</Link> 继续人工工作。</p>
+    {client === null ? <>
+      <section className="pv-card today-fixture-card" role="status">
+        <div className="pv-card-b">
+          <p>当前为示例数据预览，没有真实 Today 投影。<Link className="inline-link" to="/projects">打开项目</Link> 或 <Link className="inline-link" to="/tasks">打开任务</Link> 继续人工工作。</p>
+        </div>
+      </section>
+      <div className="today-intro-note">
+        <details className="today-arrange-note">
+        <summary>安排说明</summary>
+        <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
+        <p>跨项目的人工待处理事项在 <Link to="/tasks?tab=attention">人工待处理</Link> 列表中查看。</p>
+        </details>
       </div>
-    </section> : <>
+    </> : <>
       <div className="today-query" data-testid="today-query">
         <label className="today-query__field"><span className="today-query__label">日期</span>
           <input type="date" value={date} onChange={(event) => { if (event.target.value) setDate(event.target.value); }} /></label>
@@ -665,14 +666,14 @@ export default function TodayView() {
           {timezoneError && <p className="action-error" role="alert">{timezoneError}</p>}
         </form>}
       </div>
-      {current && <ul className="pv-stats cols-3 today-stats" aria-label="今日任务统计">
-        <li className="pv-stat"><span>可推进</span><strong>{current.eligibleItems.length}</strong>
-          <span>服务端按依赖与阻塞判定</span></li>
-        <li className="pv-stat"><span>已置顶待处理</span><strong>{current.blockedPinnedItems.length}</strong>
-          <span>已置顶但尚未满足开始条件</span></li>
-        <li className="pv-stat"><span>等待中</span><strong>{waitingOther.length}</strong>
-          <span>正在等待前置任务或回执</span></li>
-      </ul>}
+      <div className="today-intro-note">
+        <details className="today-arrange-note">
+        <summary>安排说明</summary>
+        <p>任务能否开始、如何排序由服务端按当前事实判定；置顶、延后和今日焦点只表达你的安排，不会绕过任务准入。等待中的任务里，已置顶的会单独列在「已置顶，待处理」。</p>
+        <p>跨项目的人工待处理事项在 <Link to="/tasks?tab=attention">人工待处理</Link> 列表中查看。</p>
+        {current && <p>当前选择版本 v{current.selectionRevision}。</p>}
+        </details>
+      </div>
       {readError && <p className="action-error" role="alert">读取失败：{readError}</p>}
       {message && <div className="success-callout" role="status"><p>{message}</p>
         {lastReceiptId && <details className="today-receipt-note"><summary>核对信息</summary>
@@ -740,6 +741,14 @@ export default function TodayView() {
           </div>
           <Link className="secondary-button" to="/reviews">打开待审中心</Link>
         </aside>
+        {current && !allEmpty && <ul className="pv-stats cols-3 today-stats" aria-label="今日任务统计">
+          <li className="pv-stat"><span>可推进</span><strong>{current.eligibleItems.length}</strong>
+            <span>服务端按依赖与阻塞判定</span></li>
+          <li className="pv-stat"><span>已置顶待处理</span><strong>{current.blockedPinnedItems.length}</strong>
+            <span>已置顶但尚未满足开始条件</span></li>
+          <li className="pv-stat"><span>等待中</span><strong>{waitingOther.length}</strong>
+            <span>正在等待前置任务或回执</span></li>
+        </ul>}
         {allEmpty
           ? <div className="today-empty" data-testid="today-empty">
             <p className="today-empty__title">当前日期下没有可安排的任务。</p>

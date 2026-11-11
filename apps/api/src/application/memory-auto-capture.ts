@@ -15,6 +15,7 @@ import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
 import { MEMORY_AUTO_CAPTURE_DAILY_LIMIT, MEMORY_AUTO_CAPTURE_MAX_ITEMS,
   recordAutoCapture } from './memory-captures.js';
+import { isTrivialConversationTurn } from './trivial-turn.js';
 
 /**
  * 结算后的自动捕获（ADR-030）。
@@ -271,6 +272,10 @@ export async function captureMemoriesForTurn(db: DbExecutor, input: {
       previous.withdrawn_at !== null || previous.content === null ||
       previous.content.trim() === '') return 0;
   const userText = previous.content;
+
+  // 纯寒暄/致谢轮没有可提取的长期事实：不为「你好」发起一次真实外呼
+  // （实测 516 输入 / 27 输出）。判据与标题门槛共用同一个保守词表。
+  if (isTrivialConversationTurn(userText)) return 0;
 
   // 提取是一次真实外呼，必须与主流程同账本（#140）：STARTED 先提交，结果/失败/取消落真实
   // 用量，预算与归档闸门在 `begin` 里生效。预算不足时这里直接收口，不产生无账本调用。

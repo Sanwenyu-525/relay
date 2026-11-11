@@ -15,6 +15,8 @@ import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
+import type { RuntimeLogLevel } from '../infrastructure/runtime-log.js';
+import { configureRuntimeLog, getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { runAssistGenerationTick } from '../application/assist-runner.js';
 import { runConversationExecutionAutoStartTick }
@@ -60,6 +62,14 @@ async function main(): Promise<void> {
     throw new Error('worker configuration invalid');
   }
   await assertRestoreNotIsolated(dataRoot);
+  // Worker is a separate process: its log must land in its own file, because desktop
+  // mode disables the Fastify logger entirely.
+  configureRuntimeLog({
+    directory: resolve(dataRoot, 'logs'),
+    fileName: 'relay-worker.log',
+    level: (process.env.RELAY_LOG_LEVEL?.trim() ?? 'info') as RuntimeLogLevel,
+    echoToStderr: true,
+  });
   // A partially configured real model must fail the Worker before any delivery.
   validateModelPortConfig(process.env);
   const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
@@ -69,6 +79,10 @@ async function main(): Promise<void> {
   // 非法值按配置错误拒绝（与其余 RELAY_WORKER_* 整数一致）。
   const maxConcurrentExecutions = readInteger('RELAY_MAX_CONCURRENT_EXECUTIONS',
     DEFAULT_MAX_CONCURRENT_EXECUTIONS, 1, 64);
+  getRuntimeLogger('worker').info('worker_started', {
+    worker_id: workerId, poll_ms: pollMs, lease_ms: leaseMs,
+    max_concurrent_executions: maxConcurrentExecutions,
+  });
   const fakeModelDelayMs = process.env.NODE_ENV === 'test'
     ? readInteger('RELAY_WORKER_TEST_MODEL_DELAY_MS', 0, 0, 60_000) : 0;
   const fileWriteEffectHoldMs = process.env.NODE_ENV === 'test' &&
@@ -269,8 +283,47 @@ async function main(): Promise<void> {
       }
     }
   } finally {
+    await closeWorkerRuntime(database, stopCatalogRefresh);
+  }
+  /*
+   * 一次性入口（桌面 Supervisor 按需派发的 `--once` / `--assist-once`）必须真的结束进程
+   * （2026-11-10）。
+   *
+   * 此前只依赖事件循环自然清空：一次真实调用之后如果还有 keep-alive 连接或第三方句柄挂着，
+   * 进程就会在「消息已经 COMPLETED、数据库连接已经空闲」的状态下一直存活。桌面 Supervisor
+   * 按子进程退出推进派发，于是它不再派发下一条消息——聊天一直停在「等待处理」，过程区、
+   * 流式草稿全部看不到（2026-11-10 实机复现：worker_started 后没有 worker_exit）。
+   * 结算已经提交，这里显式退出只结束进程，不改写任何业务事实。
+   */
+  if (once || assistOnce) {
+    getRuntimeLogger('worker').info('worker_one_shot_exit', {
+      mode: assistOnce ? 'ASSIST' : 'RUN', worker_id: workerId,
+    });
+    process.exit(0);
+  }
+}
+
+/**
+ * 关闭运行时（2026-11-10）：目录刷新的收尾与连接池关闭都必须有界。
+ * 目录刷新是附带收益，它不是 Worker 退出的前置条件；池关闭也最多等 5 秒。
+ * 超时如实记一条日志再继续——卡住的收尾不能反过来阻断 Supervisor 的下一拍派发。
+ */
+async function closeWorkerRuntime(
+  database: RelayDatabase, stopCatalogRefresh: (() => Promise<void>) | undefined,
+): Promise<void> {
+  const CLOSE_TIMEOUT_MS = 5_000;
+  let timedOut = false;
+  const close = (async (): Promise<void> => {
     await stopCatalogRefresh?.();
     await database.close();
+  })();
+  const timeout = new Promise<void>((resolve) => {
+    const timer = setTimeout(() => { timedOut = true; resolve(); }, CLOSE_TIMEOUT_MS);
+    timer.unref();
+  });
+  await Promise.race([close, timeout]);
+  if (timedOut) {
+    getRuntimeLogger('worker').error('worker_close_timed_out', { timeout_ms: CLOSE_TIMEOUT_MS });
   }
 }
 
@@ -282,6 +335,10 @@ try {
     (error.message.includes('configuration') || error.message.includes('schema unavailable') ||
       error.message.endsWith(' invalid'));
   process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
+  getRuntimeLogger('worker').error(configFailure ? 'worker_configuration_failed' : 'worker_failed', {
+    error_name: error instanceof Error ? error.name : 'NON_ERROR',
+    error_message: error instanceof Error ? error.message : String(error),
+  });
   if (error instanceof RestoreIsolationError) {
     process.stderr.write(`${error.code}\n`);
   } else if (error instanceof CredentialEnvError) {
