@@ -13,7 +13,8 @@ export const DESKTOP_DEFAULT_API_PORT = 43117;
 
 export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
-import { DEFAULT_LOG_MAX_BYTES, DEFAULT_LOG_RETAIN_FILES } from '../infrastructure/runtime-log.js';
+import { DEFAULT_LOG_LEVEL, DEFAULT_LOG_MAX_BYTES, DEFAULT_LOG_RETAIN_FILES,
+  parseRuntimeLogLevel } from '../infrastructure/runtime-log.js';
 
 export interface ApiConfig {
   readonly bindHost: string;
@@ -384,14 +385,14 @@ export function loadConfig(
     }
   }
 
-  const logLevel = readRequired(env, 'RELAY_LOG_LEVEL', issues);
-  if (logLevel !== undefined) {
-    if (LOG_LEVELS.includes(logLevel as LogLevel)) {
-      config.logLevel = logLevel as LogLevel;
-    } else {
-      issues.push(`RELAY_LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}`);
-    }
+  // Logging level is optional: unset keeps the documented default (info). An explicitly
+  // invalid value is still rejected — silently accepting a typo would hide the intended level.
+  const rawLogLevel = env.RELAY_LOG_LEVEL;
+  const parsedLogLevel = parseRuntimeLogLevel(rawLogLevel);
+  if (rawLogLevel !== undefined && rawLogLevel.trim() !== '' && parsedLogLevel === undefined) {
+    issues.push(`RELAY_LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}`);
   }
+  config.logLevel = parsedLogLevel ?? DEFAULT_LOG_LEVEL;
 
   config.stopOnStdinEof = readBoolean(env, 'RELAY_API_STOP_ON_STDIN_EOF', issues);
 

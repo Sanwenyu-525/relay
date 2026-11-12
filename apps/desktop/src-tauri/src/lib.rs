@@ -279,6 +279,64 @@ async fn select_working_directory(app: tauri::AppHandle) -> Result<Option<String
         .map_err(|error| error.to_string())
 }
 
+/// 受管日志目录：由宿主数据根推导，不接受调用方传入路径。
+fn diagnostics_log_directory(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("logs")
+}
+
+/// 导出文件名只取安全 basename：诊断页给的是固定模板名，但仍不允许路径分隔符、
+/// 上级目录或 Windows 保留字符借文件名逃出用户选定的保存位置。
+fn safe_export_file_name(suggested: &str) -> String {
+    let trimmed = suggested.trim();
+    let valid = !trimmed.is_empty() && trimmed.len() <= 120
+        && trimmed.chars().all(|character| character.is_ascii_alphanumeric()
+            || matches!(character, '-' | '_' | '.'));
+    if valid && trimmed != "." && trimmed != ".." {
+        return trimmed.to_owned();
+    }
+    "relay-diagnostics.log".to_owned()
+}
+
+const MAX_EXPORT_BYTES: usize = 4 * 1024 * 1024;
+
+/// 打开受管日志目录：目录由数据根推导并确保存在，不开放任意路径。
+#[tauri::command]
+fn open_log_directory(state: tauri::State<'_, RuntimeState>) -> Result<String, String> {
+    let directory = diagnostics_log_directory(&state.data_root);
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.to_string_lossy().into_owned();
+    #[cfg(target_os = "windows")]
+    let mut command = std::process::Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(&directory).spawn().map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+/// 保存一份已被 API 脱敏的诊断导出文本；取消保存返回 `Ok(None)`。
+#[tauri::command]
+async fn save_diagnostics_export(app: tauri::AppHandle, suggested_name: String,
+    content: String) -> Result<Option<String>, String> {
+    if content.len() > MAX_EXPORT_BYTES {
+        return Err("diagnostics export exceeds the 4 MiB host limit".into());
+    }
+    let file_name = safe_export_file_name(&suggested_name);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    tauri_plugin_dialog::DialogExt::dialog(&app).file()
+        .add_filter("Relay diagnostics log", &["log", "jsonl", "txt"])
+        .set_file_name(file_name.as_str())
+        .save_file(move |picked| {
+            let _ = sender.send(picked);
+        });
+    let picked = receiver.recv().map_err(|error| error.to_string())?;
+    let Some(picked) = picked else { return Ok(None); };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    fs::write(&path, content.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 #[cfg(windows)]
 struct SingleInstanceGuard { handle: HANDLE }
 #[cfg(windows)]
@@ -371,7 +429,9 @@ fn validate_desktop_config_keys(config: &str) -> Result<(), String> {
             // 宿主会先以 unsupported setting 拒绝启动。
             "RELAY_MODEL_IMAGE_INPUT" |
             // 2026-11-03：RELAY_MODEL_API_KEY 缺省时 Relay 用它作为星火 MaaS 的模型密钥。
-            "SPARK_API_KEY") {
+            "SPARK_API_KEY" |
+            // 2026-11-12：运行日志级别与轮转上限；经 --env-file 同时传给 API/Supervisor/Worker。
+            "RELAY_LOG_LEVEL" | "RELAY_LOG_MAX_BYTES" | "RELAY_LOG_RETAIN_FILES") {
             return Err("desktop.env contains an unsupported setting".into());
         }
     }
@@ -401,14 +461,18 @@ fn rotate_worker_log_if_large(path: &std::path::Path, rotate_bytes: u64) {
 /// 追加一行带 UTC 时间戳的诊断日志；目录不存在则创建。写入失败静默忽略：
 /// 诊断日志不得影响宿主可用性。
 fn append_worker_log_capped(path: &std::path::Path, line: &str, rotate_bytes: u64) {
+    append_log_line(path, &format!("{} {}", iso_utc_timestamp(), line), rotate_bytes);
+}
+
+/// 原样追加一行（不再加前缀），用于本身已是完整 JSON 记录的文件。
+fn append_log_line(path: &std::path::Path, line: &str, rotate_bytes: u64) {
     rotate_worker_log_if_large(path, rotate_bytes);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let stamped = format!("{} {}", iso_utc_timestamp(), line);
     if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
         use std::io::Write;
-        let _ = file.write_all(stamped.as_bytes()).and_then(|_| file.write_all(b"\n"));
+        let _ = file.write_all(line.as_bytes()).and_then(|_| file.write_all(b"\n"));
     }
 }
 
@@ -418,18 +482,30 @@ fn append_worker_log(path: &std::path::Path, line: &str) {
 /// Host-side log file: `<data-root>/logs/desktop.log`.
 ///
 /// The Tauri host must survive a bad `desktop.env` or a panicking WebView2 setup, so it cannot
-/// depend on the API logger. Resolution mirrors the trial data directory: `RELAY_DATA_ROOT`,
-/// then `%APPDATA%\dev.relay.agent\trial-data`, then a temp directory.
+/// depend on the API logger. Resolution follows the same data root the API/Worker children get:
+/// `RELAY_DATA_ROOT`, then the desktop override `RELAY_DESKTOP_DATA_ROOT`, then the packaged
+/// default `%APPDATA%\dev.relay.agent\data`, then a temp directory. Only local absolute paths
+/// qualify; a relative or UNC override would scatter logs, so that candidate is skipped.
 fn desktop_log_path() -> PathBuf {
-    if let Some(root) = std::env::var_os("RELAY_DATA_ROOT").map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-    {
+    desktop_log_path_from(|key| std::env::var_os(key))
+}
+
+fn desktop_log_path_from(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    let local_absolute = |key: &str| -> Option<PathBuf> {
+        let path = PathBuf::from(env(key)?);
+        let text = path.to_string_lossy();
+        (path.is_absolute() && !text.starts_with("\\\\")).then_some(path)
+    };
+    if let Some(root) = local_absolute("RELAY_DATA_ROOT") {
         return root.join("logs").join("desktop.log");
     }
-    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
+    if let Some(root) = local_absolute("RELAY_DESKTOP_DATA_ROOT") {
+        return root.join("logs").join("desktop.log");
+    }
+    if let Some(app_data) = env("APPDATA").map(PathBuf::from) {
         return app_data
             .join("dev.relay.agent")
-            .join("trial-data")
+            .join("data")
             .join("logs")
             .join("desktop.log");
     }
@@ -454,12 +530,14 @@ fn json_escape(value: &str) -> String {
     escaped
 }
 
-/// Append one JSON line to the host log. Write failures stay silent: logging must never be the
-/// reason the desktop refuses to start.
-fn append_desktop_log(event: &str, fields: &[(&str, &str)]) {
-    let mut payload = String::from("{\"event\":\"");
-    payload.push_str(&json_escape(event));
-    payload.push('"');
+/// 宿主日志记录：纯 JSON 一行，字段与 Node 侧运行日志对齐（ts/level/process/event）。
+fn desktop_log_payload(event: &str, level: &str, fields: &[(&str, &str)]) -> String {
+    let mut payload = format!(
+        "{{\"ts\":\"{}\",\"level\":\"{}\",\"process\":\"desktop\",\"event\":\"{}\"",
+        json_escape(&iso_utc_timestamp()),
+        json_escape(level),
+        json_escape(event)
+    );
     for (key, value) in fields {
         payload.push_str(",\"");
         payload.push_str(&json_escape(key));
@@ -468,7 +546,29 @@ fn append_desktop_log(event: &str, fields: &[(&str, &str)]) {
         payload.push('"');
     }
     payload.push('}');
-    append_worker_log_capped(&desktop_log_path(), &payload, WORKER_LOG_ROTATE_BYTES);
+    payload
+}
+
+/// Append one JSON line to the host log. Write failures stay silent: logging must never be the
+/// reason the desktop refuses to start.
+fn append_desktop_log(event: &str, fields: &[(&str, &str)]) {
+    append_desktop_log_level(event, "info", fields);
+}
+
+fn append_desktop_log_level(event: &str, level: &str, fields: &[(&str, &str)]) {
+    append_log_line(&desktop_log_path(), &desktop_log_payload(event, level, fields),
+        WORKER_LOG_ROTATE_BYTES);
+}
+
+/// 宿主启动阶段标记：`run()` 的失败分支据此指出失败发生在哪一步（配置、API、WebView2 等）。
+static STARTUP_STAGE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("process_start");
+
+fn set_startup_stage(stage: &'static str) {
+    if let Ok(mut current) = STARTUP_STAGE.lock() { *current = stage; }
+}
+
+fn startup_stage() -> &'static str {
+    STARTUP_STAGE.lock().map(|current| *current).unwrap_or("unknown")
 }
 
 /// Panic records used to disappear with the console. Persist them before unwinding.
@@ -484,8 +584,9 @@ fn install_panic_log_hook() {
             .location()
             .map(|place| format!("{}:{}", place.file(), place.line()))
             .unwrap_or_else(|| "unknown location".to_owned());
-        append_desktop_log(
+        append_desktop_log_level(
             "desktop_panic",
+            "fatal",
             &[("message", &message), ("location", &location)],
         );
         eprintln!("Relay Agent panic: {message} ({location})");
@@ -1174,15 +1275,34 @@ fn create_window(app: &tauri::AppHandle, state: &RuntimeState) -> Result<(), Str
                 }
             }
         })
-        .build().map_err(|_| "cannot create the Relay Agent window".to_owned())?;
+        .build()
+        .map_err(|error| {
+            // 真实失败原因只落宿主日志；弹窗仍用简短说明，避免把 COM/环境细节铺给用户。
+            append_desktop_log_level("desktop_webview_create_failed", "error",
+                &[("message", &error.to_string())]);
+            "cannot create the Relay Agent window".to_owned()
+        })?;
     // 先钉图标：此时窗口线程还空闲，图标查询必定成功，之后无论多忙任务栏都读得到。
     #[cfg(windows)]
     pin_taskbar_icon(&window);
     #[cfg(windows)]
-    install_frame_guard(&window, Arc::clone(&state.frame_created))?;
+    if let Err(error) = install_frame_guard(&window, Arc::clone(&state.frame_created)) {
+        append_desktop_log_level("desktop_webview_guard_failed", "error",
+            &[("message", &error)]);
+        return Err(error);
+    }
     window.navigate(frontend_origin().parse().map_err(|_| "invalid frontend URL".to_owned())?)
-        .map_err(|_| "cannot load the workbench".to_owned())?;
-    window.show().map_err(|_| "cannot show the Relay Agent window".to_owned())?;
+        .map_err(|error| {
+            append_desktop_log_level("desktop_webview_navigate_failed", "error",
+                &[("message", &error.to_string())]);
+            "cannot load the workbench".to_owned()
+        })?;
+    window.show().map_err(|error| {
+        append_desktop_log_level("desktop_webview_show_failed", "error",
+            &[("message", &error.to_string())]);
+        "cannot show the Relay Agent window".to_owned()
+    })?;
+    append_desktop_log("desktop_window_ready", &[]);
     Ok(())
 }
 
@@ -1281,14 +1401,21 @@ pub fn run() {
         }
     }
     #[cfg(windows)]
+    set_startup_stage("single_instance");
+    #[cfg(windows)]
     let single_instance = acquire_single_instance().unwrap_or_else(|error| {
-        eprintln!("Relay Agent: {error}");
+        let message = error.to_string();
+        append_desktop_log_level("desktop_startup_failed", "error",
+            &[("stage", "single_instance"), ("message", &message)]);
+        eprintln!("Relay Agent: {message}");
         std::process::exit(SINGLE_INSTANCE_EXIT_CODE);
     });
+    set_startup_stage("api_start");
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let state = start_api(app.handle(), #[cfg(windows)] single_instance)?;
+            append_desktop_log("desktop_api_ready", &[("base_url", &state.base_url)]);
             app.manage(state);
             let handle = app.handle().clone();
             let state = app.state::<RuntimeState>();
@@ -1297,18 +1424,25 @@ pub fn run() {
             let api_port = state.base_url.rsplit(':').next().and_then(|value| value.parse::<u16>().ok())
                 .ok_or_else(|| "invalid API port".to_owned())?;
             app.manage(preview_webview::PreviewHost::new(api_port, state.data_root.clone()));
+            set_startup_stage("window_create");
             create_window(&handle, &state)?;
+            set_startup_stage("tray");
             // 托盘失败不阻断主窗口：只记录原因，避免托盘问题把整个桌面应用拖垮。
             if let Err(error) = create_tray(&handle) {
+                append_desktop_log_level("desktop_tray_failed", "warn", &[("message", &error)]);
                 eprintln!("Relay Agent tray icon: {error}");
             }
             // 电脑操控 Overlay（migration 0096）：轮询 API 的操控状态并驱动透明
             // 置顶穿透窗口与全局 Esc。轮询失败只降级为不显示，不影响主窗口。
+            set_startup_stage("control_overlay");
             control_overlay::spawn(handle.clone(), state.base_url.clone(),
                 state.workspace_id.clone(), state.bearer_token.clone());
+            set_startup_stage("ready");
+            append_desktop_log("desktop_setup_complete", &[]);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![desktop_bootstrap, select_working_directory,
+            open_log_directory, save_diagnostics_export,
             preview_webview::preview_open, preview_webview::preview_navigate,
             preview_webview::preview_set_bounds, preview_webview::preview_set_visible,
             preview_webview::preview_nav, preview_webview::preview_state,
@@ -1323,7 +1457,8 @@ pub fn run() {
     if let Err(error) = result {
         let message = error.to_string();
         eprintln!("Relay Agent startup failed: {message}");
-        append_desktop_log("desktop_startup_failed", &[("message", &message)]);
+        append_desktop_log_level("desktop_startup_failed", "error",
+            &[("stage", startup_stage()), ("message", &message)]);
         #[cfg(windows)]
         show_error(&message);
         std::process::exit(1);
@@ -1332,8 +1467,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{csp_with_api, is_packaged_asset_request, read_startup, read_startup_with_timeout,
-        validate_desktop_config_keys};
+    use super::{csp_with_api, diagnostics_log_directory, is_packaged_asset_request, read_startup,
+        read_startup_with_timeout, safe_export_file_name, validate_desktop_config_keys};
     #[cfg(windows)]
     use super::trusted_notification_uri;
     #[cfg(windows)]
@@ -1389,6 +1524,25 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_export_names_stay_inside_the_chosen_directory() {
+        assert_eq!(safe_export_file_name("relay-diagnostics-20261112.log"),
+            "relay-diagnostics-20261112.log");
+        assert_eq!(safe_export_file_name("../../escape.log"), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name("C:\\Windows\\evil.log"), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name("a/b.log"), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name(""), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name(".."), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name(&"x".repeat(121)), "relay-diagnostics.log");
+        assert_eq!(safe_export_file_name("report 1.log"), "relay-diagnostics.log");
+    }
+
+    #[test]
+    fn diagnostics_log_directory_follows_the_host_data_root() {
+        let root = std::path::Path::new("D:/relay-data");
+        assert_eq!(diagnostics_log_directory(root), root.join("logs"));
+    }
+
+    #[test]
     fn private_readiness_rejects_wrong_nonce_and_early_exit() {
         let wrong = Cursor::new(b"{\"type\":\"desktop_ready\",\"nonce\":\"other\",\"port\":32123,\"workspaceId\":\"workspace\",\"nodeVersion\":\"v24.21.0\"}\n".to_vec());
         assert!(read_startup(wrong, "expected").is_err());
@@ -1413,7 +1567,8 @@ mod tests {
              RELAY_DB_CONNECT_TIMEOUT_MS=3000\nRELAY_DESKTOP_WORKSPACE_ID=00000000-0000-4000-8000-000000000000\n\
              RELAY_MODEL_PROVIDER=openai-compatible\nRELAY_MODEL_NAME=test-model\n\
              RELAY_MODEL_API_KEY=sk-local-only\nRELAY_MODEL_BASE_URL=https://api.example.cn/v1\n\
-             RELAY_MODEL_IMAGE_INPUT=true\nSPARK_API_KEY=spark-local-only\nRELAY_COMPUTER_RUNTIME=C:\\\\Relay\\\\runtime.exe\n").is_ok());
+             RELAY_MODEL_IMAGE_INPUT=true\nSPARK_API_KEY=spark-local-only\nRELAY_COMPUTER_RUNTIME=C:\\\\Relay\\\\runtime.exe\n\
+             RELAY_LOG_LEVEL=debug\nRELAY_LOG_MAX_BYTES=1048576\nRELAY_LOG_RETAIN_FILES=3\n").is_ok());
         for text in ["RELAY_DB_URL=x\nNODE_OPTIONS=--import=evil\n",
             "RELAY_DB_URL=x\nRELAY_MODEL_PROVIDER=openai-compatible\nRELAY_SOMETHING=1\n",
             "RELAY_DB_URL=x\nmalformed"] {
@@ -1753,6 +1908,44 @@ mod tests {
         assert_eq!(bytes[23], b'Z');
         assert!(first.as_str() <= super::iso_utc_timestamp().as_str(),
             "same-format timestamps sort chronologically");
+    }
+
+    #[test]
+    fn desktop_log_path_follows_the_api_data_root() {
+        let resolve = |pairs: &[(&str, &str)]| super::desktop_log_path_from(|key| {
+            pairs.iter().find(|(name, _)| *name == key)
+                .map(|(_, value)| std::ffi::OsString::from(*value))
+        });
+        let explicit = resolve(&[("RELAY_DATA_ROOT", r"C:\relay-root"),
+            ("RELAY_DESKTOP_DATA_ROOT", r"D:\desktop-root"),
+            ("APPDATA", r"C:\Users\x\AppData\Roaming")]);
+        assert_eq!(explicit, std::path::PathBuf::from(r"C:\relay-root\logs\desktop.log"));
+        let desktop_override = resolve(&[("RELAY_DATA_ROOT", "relative-root"),
+            ("RELAY_DESKTOP_DATA_ROOT", r"D:\desktop-root"),
+            ("APPDATA", r"C:\Users\x\AppData\Roaming")]);
+        assert_eq!(desktop_override, std::path::PathBuf::from(r"D:\desktop-root\logs\desktop.log"));
+        let packaged = resolve(&[("APPDATA", r"C:\Users\x\AppData\Roaming")]);
+        assert_eq!(packaged, std::path::PathBuf::from(
+            r"C:\Users\x\AppData\Roaming\dev.relay.agent\data\logs\desktop.log"));
+        let unc = resolve(&[("RELAY_DATA_ROOT", r"\\server\share"),
+            ("RELAY_DESKTOP_DATA_ROOT", r"\\server\share"),
+            ("APPDATA", r"C:\Users\x\AppData\Roaming")]);
+        assert_eq!(unc, packaged, "UNC overrides must not receive host logs");
+    }
+
+    #[test]
+    fn desktop_log_payload_is_structured_jsonl() {
+        let payload = super::desktop_log_payload("desktop_startup_failed", "error",
+            &[("stage", "window_create"), ("message", "line1\nline2")]);
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("payload must be JSON");
+        assert_eq!(parsed["level"], "error");
+        assert_eq!(parsed["process"], "desktop");
+        assert_eq!(parsed["event"], "desktop_startup_failed");
+        assert_eq!(parsed["stage"], "window_create");
+        assert_eq!(parsed["message"], "line1\nline2");
+        let ts = parsed["ts"].as_str().expect("timestamp must be a string");
+        assert_eq!(ts.len(), 24);
+        assert!(ts.ends_with('Z'));
     }
 
     #[cfg(windows)]

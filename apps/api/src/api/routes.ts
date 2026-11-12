@@ -67,6 +67,8 @@ import { registerModelConnectionRoutes } from './model-connection-api.js';
 import { registerComposerRoutes } from './composer-api.js';
 import { registerComputerRoutes } from './computer-api.js';
 import { registerBrowserBridgeCommandRoutes, registerBrowserRoutes } from './browser-api.js';
+import { registerClientDiagnosticsRoutes } from './client-diagnostics-api.js';
+import { registerDiagnosticsRoutes } from './diagnostics-api.js';
 import { registerPluginRoutes } from './plugins-api.js';
 import { ensureBridgeRegistration } from '../browser/bridge.js';
 
@@ -223,6 +225,13 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
+      // P0-3：前端异常诊断（固定字段、限频、Bearer 作用域内）。
+      registerClientDiagnosticsRoutes(scope);
+      // 开发者诊断：只读受管日志与运行状态；文件白名单在读取器内二次校验。
+      registerDiagnosticsRoutes(scope, {
+        dataRoot: dependencies.dataRoot,
+        probeDatabase: () => dependencies.database.checkReadiness(dependencies.schemaReadiness),
+      });
       registerAssistMemoryRoutes(scope, apiDependencies);
       registerMemoryCaptureRoutes(scope, apiDependencies);
       registerAssistModelRuntimeRoutes(scope, apiDependencies);

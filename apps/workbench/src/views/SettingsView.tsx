@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Bot, FolderOpen, Info, LayoutGrid, RotateCcw, Settings2, ShieldCheck, X } from "lucide-react";
+import { Bot, FolderOpen, Info, LayoutGrid, RotateCcw, Settings2, ShieldCheck, Stethoscope, X } from "lucide-react";
 import { createCommandId, RelayApiError, type RelayApiClient, type RelayModelPortStatus,
   type RelayModelVerificationState, type RelayViewKind,
   type RelayWorkingDirectory, type RelayWriteTier, type RelayWorkspaceDefaultDirectory } from "../api/relayClient";
@@ -11,6 +11,7 @@ import MemorySettingsCard from "../components/MemorySettingsCard";
 import ContextBudgetCard from "../components/ContextBudgetCard";
 import { CurrentModelUsageCard } from "../components/CurrentModelUsageCard";
 import { ModelConnectionsCard } from "../components/ModelConnectionsCard";
+import DeveloperDiagnosticsPanel from "../components/DeveloperDiagnosticsPanel";
 import PageHeader from "../components/PageHeader";
 import FixtureNote from "../components/FixtureNote";
 import { describeLiveError } from "../lib/liveErrors";
@@ -28,7 +29,7 @@ import "./SettingsView.css";
 export { resolveVerificationState };
 export type { ModelVerificationStateKind };
 
-type SettingsGroup = "basic" | "model" | "execution" | "workbench";
+type SettingsGroup = "basic" | "model" | "execution" | "workbench" | "diagnostics";
 
 /**
  * 分组元数据只描述导航与分组标题，不承载业务状态。
@@ -645,8 +646,10 @@ function GeneralPreferencesCard() {
   const [timeZone, setTimeZone] = useState(preferences.timeZone);
   const [motion, setMotion] = useState<MotionPreference>(storedMotionPreference() ?? "system");
   const [saved, setSaved] = useState(false);
+  /** 动效写进了本机存储但时区那一步失败之外的另一半事实：动效只在当前窗口生效。 */
+  const [motionOnlySession, setMotionOnlySession] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const changed = () => { setSaved(false); setError(null); };
+  const changed = () => { setSaved(false); setError(null); setMotionOnlySession(false); };
 
   // 导航栏位置即时生效、独立保存，不随「保存显示偏好」表单提交——
   // 切换是纯外壳布局，没有可「先草稿再确认」的事实要核对。
@@ -667,17 +670,21 @@ function GeneralPreferencesCard() {
     <h2>显示与界面</h2>
     <p className="helper-text">仅保存在本设备，不改变服务端事实或任务状态。</p>
     <form className="settings-form" onSubmit={(event) => {
-      event.preventDefault(); setError(null); setSaved(false);
+      event.preventDefault(); setError(null); setSaved(false); setMotionOnlySession(false);
       try {
         // 尚未选择默认工作台时保留 null：保存时区不应顺手把「项目初始视图」覆盖成 general。
         saveDisplayPreferences({ timeZone, defaultWorkbench: preferences.defaultWorkbench });
-        // 动效偏好同样是本设备事实：存储失败只影响下次启动，不阻断显示偏好保存。
-        storeMotionPreference(motion);
-        applyMotionPreference(motion);
-        setSaved(true);
       } catch {
         setError("设置未保存：本设备存储不可写，请检查浏览器或应用的存储权限后重试。");
+        return;
       }
+      // 动效偏好同样是本设备事实：写失败只影响下次启动，不阻断显示偏好保存，当次窗口
+      // 仍按所选档位绘制（applyMotionPreference）；但回执必须如实区分「哪些偏好已保存」
+      // 与「哪一项只在本窗口生效」，不能把写失败当保存成功上报（2026-11-11 验收整改）。
+      const motionPersisted = storeMotionPreference(motion);
+      applyMotionPreference(motion);
+      setMotionOnlySession(!motionPersisted);
+      setSaved(true);
     }}>
       <div className="settings-field">
         <label htmlFor="settings-timezone">界面时区</label>
@@ -730,7 +737,11 @@ function GeneralPreferencesCard() {
       <div className="settings-save-actions">
         <button type="submit" className="primary-button" data-testid="settings-save">保存显示偏好</button>
         {saved && <p role="status" className="settings-save-result" data-testid="settings-save-result">
-          显示偏好已保存，仅在本设备生效。</p>}
+          {motionOnlySession ? "时区偏好已保存，仅在本设备生效。"
+            : "显示偏好已保存，仅在本设备生效。"}</p>}
+        {saved && motionOnlySession && <p role="alert" className="action-error"
+          data-testid="settings-motion-save-result">
+          动效偏好未能写入本设备存储，只在当前窗口生效；请重试保存。</p>}
         {error && <p role="alert" className="action-error">{error}</p>}
       </div>
     </form>
@@ -841,7 +852,9 @@ function ExecutionPermissionsCard({ client, projection, loading, readError }: {
   </section>;
 }
 
-export default function SettingsView() {
+export default function SettingsView({ initialGroup = "basic" }: {
+  readonly initialGroup?: SettingsGroup;
+}) {
   const connection = useRelayConnection();
   const client = connection.mode === "live" ? connection.client : null;
   const [status, setStatus] = useState<RelayModelPortStatus | null>(null);
@@ -853,10 +866,12 @@ export default function SettingsView() {
   /** 聊天/Run 默认连接写入后递增：当前使用情况卡按服务端事实重读，不拼回执。 */
   const [defaultsRevision, setDefaultsRevision] = useState(0);
   const requestVersion = useRef(0);
-  const [group, setGroup] = useState<SettingsGroup>("basic");
+  const [group, setGroup] = useState<SettingsGroup>(initialGroup);
   // 页签首次访问才挂载内容：未访问过的页签不发起读取；访问过之后保持挂载，草稿不因切换丢失。
   const [visited, setVisited] = useState<Record<SettingsGroup, boolean>>({
-    basic: true, model: false, execution: false, workbench: false });
+    basic: initialGroup === "basic", model: initialGroup === "model",
+    execution: initialGroup === "execution", workbench: initialGroup === "workbench",
+    diagnostics: initialGroup === "diagnostics" });
   const directory = useWorkspaceDefaultDirectoryProjection(client);
 
   const selectGroup = (value: SettingsGroup) => {
@@ -913,6 +928,8 @@ export default function SettingsView() {
       description: "执行权限按工作目录授予；这里只读展示当前档位、新目录默认档位和修改入口。" },
     { value: "workbench", label: "工作台", icon: LayoutGrid,
       description: "默认工作台进入哪一页，以及本机可见的只读 Pack 清单。" },
+    { value: "diagnostics", label: "开发者诊断", icon: Stethoscope,
+      description: "本机受管日志、进程与数据库状态、诊断文件；只读，不改变任务或执行行为。" },
   ];
 
   return <section className="settings-page" data-testid="settings-page">
@@ -988,6 +1005,14 @@ export default function SettingsView() {
               <SettingsSectionHead title="工作台" description={groups[3]!.description} />
               <WorkbenchPreferencesCard />
               <div id="settings-packs"><PackCatalogPanel /></div>
+            </>}
+          </div>
+
+          <div role="tabpanel" id="settings-panel-diagnostics" aria-labelledby="settings-tab-diagnostics"
+            hidden={group !== "diagnostics"}>
+            {visited.diagnostics && <>
+              <SettingsSectionHead title="开发者诊断" description={groups[4]!.description} />
+              <DeveloperDiagnosticsPanel client={client} active={group === "diagnostics"} />
             </>}
           </div>
         </div>

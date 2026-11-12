@@ -19,11 +19,17 @@ export function storedMotionPreference(): MotionPreference | null {
   }
 }
 
-export function storeMotionPreference(value: MotionPreference): void {
+/**
+ * 写入本机动效选择，返回是否真的落进了存储。存不住只影响下次启动（本次窗口由
+ * `applyMotionPreference` 照常生效），不阻断设置入口本身；调用方必须据此如实区分
+ * 「已保存」与「只在本窗口生效」，不能把写失败当保存成功上报（2026-11-11 验收整改）。
+ */
+export function storeMotionPreference(value: MotionPreference): boolean {
   try {
     window.localStorage.setItem(STORAGE_KEY, value);
+    return true;
   } catch {
-    // 存不住只影响本次会话的选择，不阻断设置入口本身。
+    return false;
   }
 }
 

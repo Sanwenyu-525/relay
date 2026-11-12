@@ -84,6 +84,35 @@ describe("本设备显示偏好", () => {
     expect(mounted.wrapper.get(".desktop-titlebar__date").attributes("title")).toBe("界面时区：UTC");
   });
 
+  it("只拒绝动效写入时如实分项回执：时区已保存、动效只在本窗口生效，重试后恢复完整回执（2026-11-11 验收整改）", async () => {
+    const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
+    await mounted.wrapper.get('[data-testid="settings-motion"]').setValue("off");
+    // 只拒 relay.motion：时区那一项写得进去，回执必须逐项说清，不能整单谎报已保存。
+    const originalSetItem = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage, key: string, value: string) {
+      if (key === "relay.motion") throw new DOMException("quota", "QuotaExceededError");
+      originalSetItem.call(this, key, value);
+    });
+    await mounted.wrapper.get(".settings-basic form").trigger("submit");
+    expect(mounted.wrapper.get('[data-testid="settings-save-result"]').text())
+      .toBe("时区偏好已保存，仅在本设备生效。");
+    expect(mounted.wrapper.get('[data-testid="settings-motion-save-result"]').text())
+      .toContain("动效偏好未能写入本设备存储");
+    // 时区确实落了盘；动效没落盘但当次窗口仍按所选档位绘制。
+    expect((JSON.parse(localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY) ?? "{}") as
+      { timeZone: unknown }).timeZone).toBe("Asia/Shanghai");
+    expect(localStorage.getItem("relay.motion")).toBeNull();
+    expect(document.documentElement.dataset.motion).toBe("off");
+    // 重试：写回成功后旧错误消失，恢复完整回执。
+    write.mockRestore();
+    await mounted.wrapper.get(".settings-basic form").trigger("submit");
+    expect(mounted.wrapper.get('[data-testid="settings-save-result"]').text())
+      .toBe("显示偏好已保存，仅在本设备生效。");
+    expect(mounted.wrapper.find('[data-testid="settings-motion-save-result"]').exists()).toBe(false);
+    expect(localStorage.getItem("relay.motion")).toBe("off");
+  });
+
   it("损坏或无效的本地值回落到安全默认，不能产生无效路由或日期", async () => {
     localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify({ version: 1,
       timeZone: "Invalid/Zone", defaultWorkbench: "thesis" }));

@@ -1139,7 +1139,7 @@ export interface RelayContextUsageCall {
   readonly outputTokens: number | null;
   readonly cacheReadTokens: number | null;
   readonly cacheCreationTokens: number | null;
-  /** 那次调用冻结的单次预算；解释历史占比时用它，而不是当前档位。 */
+  /** 那次调用冻结的单次预算；面板与圆环按当前档位算占比，保留它只作历史差异说明。 */
   readonly reservedTokens: number | null;
   readonly settledAt: string | null;
   readonly breakdown: RelayContextUsageBreakdown | null;

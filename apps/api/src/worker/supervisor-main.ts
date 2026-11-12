@@ -11,8 +11,8 @@ import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
-import type { RuntimeLogLevel } from '../infrastructure/runtime-log.js';
-import { configureRuntimeLog, getRuntimeLogger } from '../infrastructure/runtime-log.js';
+import { bootstrapLogDirectory, configureRuntimeLog, getRuntimeLogger, runtimeLogFile,
+  runtimeLogSettingsFromEnv } from '../infrastructure/runtime-log.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { applySafeControl } from '../application/control-requests.js';
 import { runAssistGoalTick } from '../application/goal-advance.js';
@@ -43,6 +43,28 @@ if (desktopMode || process.env.RELAY_SUPERVISOR_STOP_ON_STDIN_EOF === 'true') {
   process.stdin.on('end', stop);
   process.stdin.resume();
 }
+
+/**
+ * P0-2：Supervisor 的日志在读取启动帧之前就绪。启动帧读取超时、桌面模式标志非法、
+ * dataRoot 缺失等失败此前都发生在 configureRuntimeLog 之前，桌面模式下不留任何记录。
+ */
+let startupStage = 'init';
+const logSettings = runtimeLogSettingsFromEnv(process.env);
+configureRuntimeLog({
+  directory: bootstrapLogDirectory(process.env.RELAY_DATA_ROOT),
+  fileName: 'relay-supervisor.log',
+  level: logSettings.level,
+  processName: 'supervisor',
+  echoToStderr: true,
+  maxBytes: logSettings.maxBytes,
+  retainFiles: logSettings.retainFiles,
+});
+const supervisorLog = getRuntimeLogger('supervisor');
+supervisorLog.info('supervisor_startup_begin', {
+  stage: startupStage, desktop_mode: desktopMode, node_version: process.version,
+  bootstrap_log_file: runtimeLogFile() ?? null,
+});
+for (const issue of logSettings.issues) supervisorLog.warn('runtime_log_env_invalid', { issue });
 
 interface DesktopStartupFrame {
   readonly nonce: string;
@@ -158,12 +180,19 @@ async function readAcceptanceFileWriteHoldMs(dataRoot: string,
   return holdMs;
 }
 
+/** 子进程输出尾部：只在失败时留证，长度有界（凭据由日志层再次脱敏）。 */
+function tailOf(value: string, limit: number): string {
+  return value.length > limit ? '...[truncated]' + value.slice(-limit) : value;
+}
+
 async function main(): Promise<void> {
+  startupStage = 'desktop_frame';
   if (process.env.RELAY_SUPERVISOR_DESKTOP_MODE !== undefined && !desktopMode) {
     throw new Error('supervisor configuration invalid');
   }
   const desktopFrame = desktopMode ? await readDesktopFrame() : undefined;
   if (controller.signal.aborted) return;
+  startupStage = 'config';
   const databaseUrl = process.env.RELAY_DB_URL?.trim();
   const dataRoot = process.env.RELAY_DATA_ROOT?.trim();
   const validDataRoot = dataRoot !== undefined && isAbsolute(dataRoot) &&
@@ -172,16 +201,27 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('supervisor configuration invalid');
   }
+  startupStage = 'restore_isolation';
   await assertRestoreNotIsolated(dataRoot);
   // Supervisor is its own process: keep a dedicated log file so startup failures and
-  // dispatch errors survive after the console is gone.
+  // dispatch errors survive after the console is gone. Rotation knobs come from the same
+  // validated settings used for the bootstrap logger.
+  startupStage = 'runtime_log';
+  const previousLogFile = runtimeLogFile();
   configureRuntimeLog({
     directory: resolve(dataRoot, 'logs'),
     fileName: 'relay-supervisor.log',
-    level: (process.env.RELAY_LOG_LEVEL?.trim() ?? 'info') as RuntimeLogLevel,
+    level: logSettings.level,
+    processName: 'supervisor',
     echoToStderr: true,
+    maxBytes: logSettings.maxBytes,
+    retainFiles: logSettings.retainFiles,
   });
-  const supervisorLog = getRuntimeLogger('supervisor');
+  supervisorLog.info('runtime_log_configured', {
+    stage: startupStage, log_file: runtimeLogFile() ?? null,
+    previous_log_file: previousLogFile ?? null, level: logSettings.level,
+    max_bytes: logSettings.maxBytes, retain_files: logSettings.retainFiles,
+  });
   supervisorLog.info('supervisor_started', { desktop_mode: desktopMode });
   const testHoldAfterGatewayEffectMs = await readAcceptanceFileWriteHoldMs(dataRoot, desktopFrame);
   const workerLeaseMs = Number(process.env.RELAY_WORKER_LEASE_MS ?? '30000');
@@ -204,13 +244,16 @@ async function main(): Promise<void> {
     databaseUrl, databasePoolMax: 4, databaseConnectTimeoutMs: 5_000,
   }, () => controller.abort());
   try {
+    startupStage = 'database_readiness';
     const readiness = await database.checkReadiness(new SchemaReadinessChecker(MIGRATIONS_DIRECTORY));
     if (readiness.database !== 'up' || readiness.schema !== 'up') {
       throw new Error('supervisor schema unavailable');
     }
+    startupStage = 'graph_checkpoints';
     if (!(await graphCheckpointsReady(database.executor, databaseUrl))) {
       throw new Error('supervisor graph checkpoint schema unavailable');
     }
+    startupStage = 'supervisor_ready';
     if (controller.signal.aborted) return;
     process.stdout.write(`${JSON.stringify({ type: 'supervisor_ready',
       nonce: desktopFrame?.nonce ?? process.env.RELAY_SUPERVISOR_READY_NONCE ?? null,
@@ -255,6 +298,10 @@ async function main(): Promise<void> {
         const key = `${claim.run_id}:${claim.epoch}`;
         if (!reported.has(key)) {
           reported.add(key);
+          supervisorLog.warn('worker_recovery_required', {
+            run_id: claim.run_id, epoch: claim.epoch.toString(), status: claim.status,
+            worker_id: claim.worker_id,
+          });
           process.stdout.write(`${JSON.stringify({ type: 'worker_recovery_required',
             run_id: claim.run_id, epoch: claim.epoch.toString(), status: claim.status })}\n`);
         }
@@ -265,9 +312,12 @@ async function main(): Promise<void> {
               runId: claim.run_id, workerId: claim.worker_id });
             // 已释放领取：下一轮由正常派发接续，不再写滞留事实。
             if (outcome === 'REQUEUED') { attempted.delete(key); continue; }
-          } catch {
+          } catch (error) {
             // 恢复竞争（领取/epoch 已变化）不应让常驻 Supervisor 退出；只留诊断，
             // 下一次重试按原证据与同一 operation_id 收口，不换身份或放宽判定。
+            supervisorLog.error('worker_recovery_failed', {
+              run_id: claim.run_id, worker_id: claim.worker_id, error,
+            });
             process.stderr.write(`${JSON.stringify({ type: 'worker_recovery_failed',
               run_id: claim.run_id })}\n`);
           }
@@ -304,6 +354,8 @@ async function main(): Promise<void> {
       if (controller.signal.aborted) break;
       const dispatchLane = async (lane?: 'ASSIST'): Promise<void> => {
         let running: ChildProcessWithoutNullStreams | undefined;
+        let spawnedWorkerId: string | undefined;
+        let spawnedPid: number | undefined;
         const result = await runSupervisedWorkerOnce({
           db: database.executor, databaseUrl, dataRoot,
           ...(lane === undefined ? {} : { task: lane }),
@@ -318,17 +370,35 @@ async function main(): Promise<void> {
             ? {} : { testHoldAfterGatewayEffectMs }),
           onSpawn: (spawned, workerId) => {
             running = spawned;
+            spawnedWorkerId = workerId;
+            spawnedPid = spawned.pid;
             child = spawned;
             liveChildren.add(spawned);
+            supervisorLog.info('worker_spawned', {
+              worker_id: workerId, pid: spawned.pid ?? null, lane: lane ?? 'RUN',
+            });
             process.stdout.write(`${JSON.stringify({ type: 'worker_started',
               pid: spawned.pid, worker_id: workerId })}\n`);
           },
         });
         if (running !== undefined) liveChildren.delete(running);
         child = undefined;
+        const failed = result.exitCode !== 0 && !controller.signal.aborted;
+        const exitFields = {
+          worker_id: spawnedWorkerId ?? null, pid: spawnedPid ?? null, lane: lane ?? 'RUN',
+          exit_code: result.exitCode, signal: result.signal,
+          requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds,
+        };
+        if (failed) {
+          supervisorLog.error('worker_exited', {
+            ...exitFields, output_tail: tailOf(result.output, 4000),
+          });
+        } else {
+          supervisorLog.info('worker_exited', exitFields);
+        }
         process.stdout.write(`${JSON.stringify({ type: 'worker_exit', code: result.exitCode,
           requeued_run_ids: result.requeuedRunIds, blocked_run_ids: result.blockedRunIds })}\n`);
-        if (result.exitCode !== 0 && !controller.signal.aborted) throw new Error('worker failed');
+        if (failed) throw new Error('worker failed');
       };
       // Run 与 Assist 在同一轮内各自判定后**并发**派发（不是交换顺序）：长 Run
       // 在跑时聊天仍能被派发，不再把 Run 的整个生命周期变成聊天的排队时间。
@@ -374,8 +444,9 @@ try {
     (error.message.includes('configuration') || error.message.includes('schema unavailable'));
   process.stderr.write(`${configFailure ? 'supervisor_configuration_failed' : 'supervisor_failed'}\n`);
   getRuntimeLogger('supervisor').error(configFailure ? 'supervisor_configuration_failed' : 'supervisor_failed', {
-    error_name: error instanceof Error ? error.name : 'NON_ERROR',
-    error_message: error instanceof Error ? error.message : String(error),
+    stage: startupStage,
+    log_file: runtimeLogFile() ?? null,
+    error,
   });
   if (error instanceof RestoreIsolationError) process.stderr.write(`${error.code}\n`);
   process.exitCode = configFailure ? 2 : 1;

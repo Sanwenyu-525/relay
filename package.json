@@ -13,9 +13,13 @@
     "test": "pnpm --filter @relay-agent/api run test",
     "test:integration": "pnpm --filter @relay-agent/api run test:integration",
     "check:docs": "node scripts/check-docs.mjs",
+  "check:ui": "node scripts/check-ui-conventions.mjs",
+  "ui:audit": "node scripts/ui-audit.mjs",
     "feature-map": "node scripts/feature-map.mjs",
     "feature-map:live": "node scripts/feature-map.mjs --serve",
     "feature-map:check": "node scripts/feature-map.mjs --check",
-    "test:feature-map": "node --test scripts/feature-map.test.mjs"
+    "test:feature-map": "node --test scripts/feature-map.test.mjs",
+    "test:log-query": "node --test scripts/log-query.test.mjs",
+    "log:query": "node scripts/log-query.mjs"
   }
 }

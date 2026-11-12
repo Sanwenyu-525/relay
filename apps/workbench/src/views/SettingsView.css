@@ -1264,3 +1264,378 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 开发者诊断（2026-11-12）：筛选 → 列表 + 详情 → 运行状态 → 诊断文件。
+   日志条数不可预期，列表在自己的窗口内滚动，页面结构不随结果拉长；
+   详情与列表并排，窄窗改为上下，始终不重排页签顺序。 */
+.settings-diagnostics-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--relay-space-3) var(--relay-space-4);
+  margin-top: var(--relay-space-4);
+  padding-bottom: var(--relay-space-4);
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-diagnostics-filters .settings-field select {
+  max-width: none;
+}
+
+.settings-diagnostics-filter-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-3);
+}
+
+.settings-diagnostics-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  cursor: pointer;
+}
+
+.settings-diagnostics-auto input {
+  width: auto;
+  min-height: auto;
+  accent-color: var(--relay-color-action-text);
+}
+
+.settings-diagnostics-advanced-filter {
+  grid-column: 1 / -1;
+}
+
+.settings-diagnostics-advanced-filter > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--relay-control-height-compact);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  cursor: pointer;
+}
+
+.settings-diagnostics-advanced-filter > summary:hover {
+  color: var(--relay-color-text-primary);
+}
+
+.settings-diagnostics-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--relay-space-3) var(--relay-space-4);
+  margin-top: var(--relay-space-2);
+}
+
+.settings-diagnostics-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--relay-space-1) var(--relay-space-4);
+  margin-top: var(--relay-space-3);
+}
+
+.settings-diagnostics-result-head .helper-text {
+  margin: 0;
+}
+
+.settings-diagnostics-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: var(--relay-space-4);
+  margin-top: var(--relay-space-4);
+  padding-top: var(--relay-space-4);
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-diagnostics-list-pane {
+  display: grid;
+  gap: var(--relay-space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.settings-log-list {
+  display: grid;
+  gap: 0;
+  max-height: 32rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  list-style: none;
+}
+
+.settings-log-row {
+  display: grid;
+  grid-template-columns: 12rem auto minmax(4rem, 7rem) minmax(0, 1fr);
+  grid-template-areas:
+    "time level process event"
+    "message message message message";
+  gap: 2px var(--relay-space-2);
+  width: 100%;
+  padding: var(--relay-space-2);
+  border: 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: 0;
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-log-row:hover {
+  background: var(--relay-color-bg-subtle);
+}
+
+.settings-log-row[aria-pressed="true"] {
+  background: var(--relay-color-selection-bg);
+}
+
+.settings-log-time {
+  grid-area: time;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--relay-color-text-muted);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-log-row .status-chip {
+  grid-area: level;
+  justify-self: start;
+}
+
+.settings-log-process {
+  grid-area: process;
+  align-self: center;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  white-space: nowrap;
+}
+
+.settings-log-event {
+  grid-area: event;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-log-message {
+  grid-area: message;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-diagnostics-empty {
+  margin: 0;
+  padding: var(--relay-space-6) var(--relay-space-4);
+  border: var(--relay-border-width) dashed var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  text-align: center;
+}
+
+.settings-log-detail {
+  display: grid;
+  gap: var(--relay-space-3);
+  align-content: start;
+  min-width: 0;
+  padding: var(--relay-space-4);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+}
+
+.settings-log-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+}
+
+.settings-log-detail-head > h3 {
+  flex: 1 1 12rem;
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  line-height: var(--relay-font-lineHeight-snug);
+  overflow-wrap: anywhere;
+}
+
+.settings-log-detail .settings-diagnostic-list {
+  margin-top: 0;
+}
+
+.settings-log-detail-message {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-log-pre {
+  max-height: 16rem;
+  margin: 0;
+  padding: var(--relay-space-3);
+  overflow: auto;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
+  font-family: var(--relay-font-family-code);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-log-detail > .settings-diagnostics {
+  margin-top: 0;
+}
+
+.settings-diagnostics-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-3);
+}
+
+.settings-diagnostics-card-head > h2 {
+  margin: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--relay-font-lineHeight-snug);
+}
+
+.settings-diagnostics-card-head + .helper-text {
+  margin-top: var(--relay-space-1);
+}
+
+/* 运行状态：六个事实沿用三列事实网格；每行首项去掉左分隔线，避免行首悬空。 */
+@media (width >= 64rem) {
+  .settings-runtime-grid > .settings-fact:nth-child(3n + 1) {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+.settings-log-files {
+  display: grid;
+  margin: var(--relay-space-3) 0 0;
+  padding: 0;
+  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  list-style: none;
+}
+
+.settings-log-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--relay-space-2) var(--relay-space-4);
+  align-items: center;
+  padding: var(--relay-space-2) 0;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.settings-log-file-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-width: 0;
+  font-size: var(--relay-font-size-meta);
+}
+
+.settings-log-file-name code {
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+.settings-log-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--relay-space-1) var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  text-align: right;
+}
+
+.settings-log-file-meta .helper-text {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: right;
+}
+
+.settings-diagnostics-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-3);
+  margin-top: var(--relay-space-4);
+}
+
+.settings-diagnostics-file-actions .helper-text {
+  margin: 0;
+}
+
+@media (width < 80rem) {
+  .settings-diagnostics-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (width < 64rem) {
+  .settings-log-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "time level"
+      "process process"
+      "event event"
+      "message message";
+  }
+
+  .settings-log-process {
+    white-space: normal;
+  }
+}
+
+@media (width < 48rem) {
+  .settings-log-file {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-log-file-meta {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .settings-log-file-meta .helper-text {
+    text-align: left;
+  }
+}

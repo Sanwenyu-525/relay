@@ -1,0 +1,165 @@
+/*
+ * UI Playground 的版式样式（UI-UNIFY-01）。
+ *
+ * 只负责「展示页自己的骨架」：分组、两列样例、token 表与宽度预览框。
+ * 所有样例组件本身用生产组件与生产类名渲染，这里不给它们任何外观覆盖——
+ * 一旦覆盖，Playground 就不再是「真实组件预览」，而是第三套视觉。
+ */
+
+.ui-lab {
+  padding: var(--relay-space-6) var(--relay-layout-page-gutter) var(--relay-space-16);
+  max-width: var(--relay-layout-page-maxWidth);
+  margin: 0 auto;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-pageBase);
+}
+
+.ui-lab-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-4);
+  flex-wrap: wrap;
+  margin-block-end: var(--relay-space-6);
+}
+
+/* 说明段落可伸缩，右侧标签固定不被挤到下一行：flex-wrap 之下必须显式给基准宽度。 */
+.ui-lab-head > div:first-child {
+  flex: 1 1 24rem;
+  min-width: 0;
+}
+
+.ui-lab-head > .status-chip {
+  flex: none;
+}
+
+.ui-lab-title {
+  font-size: var(--relay-font-size-section);
+  font-weight: var(--relay-font-weight-semibold);
+}
+
+.ui-lab-sub {
+  margin-block-start: var(--relay-space-1);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.ui-lab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-2);
+  margin-block-end: var(--relay-space-6);
+}
+
+.ui-lab-section {
+  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  padding-block-start: var(--relay-space-4);
+  margin-block-start: var(--relay-space-6);
+}
+
+.ui-lab-section > h2 {
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-semibold);
+  margin-block-end: var(--relay-space-1);
+}
+
+.ui-lab-section > p {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  margin-block-end: var(--relay-space-4);
+  max-width: 68ch;
+}
+
+.ui-lab-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-3);
+  margin-block-end: var(--relay-space-4);
+}
+
+.ui-lab-label {
+  flex: none;
+  min-width: 6.5rem;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.ui-lab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--relay-space-3);
+}
+
+.ui-lab-card {
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  padding: var(--relay-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+
+.ui-lab-swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  font-size: var(--relay-font-size-micro);
+  color: var(--relay-color-text-muted);
+  min-width: 0;
+}
+
+.ui-lab-swatch__chip {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--relay-radius-badge);
+  border: var(--relay-border-width) solid var(--relay-color-border-subtle);
+}
+
+.ui-lab-swatch__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--relay-font-size-micro);
+}
+
+.ui-lab-table th,
+.ui-lab-table td {
+  text-align: start;
+  padding: var(--relay-space-2);
+  border-block-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+  vertical-align: top;
+}
+
+.ui-lab-table th {
+  color: var(--relay-color-text-muted);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.ui-lab-table code {
+  font-family: var(--relay-font-family-code);
+  color: var(--relay-color-action-text);
+}
+
+.ui-lab-preview {
+  border: var(--relay-border-width) dashed var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  padding: var(--relay-space-3);
+  overflow: auto;
+  transition: max-width var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+
+.ui-lab-form {
+  display: grid;
+  gap: var(--relay-space-4);
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  align-items: start;
+}

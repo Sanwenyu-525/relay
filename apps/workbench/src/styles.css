@@ -1069,12 +1069,14 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   text-align: center;
   line-height: var(--relay-font-lineHeight-ui);
 }
-/* 「任务」分组的运行指示（2026-11-10，用户要求「有任务执行的时候加一个带缺口的
-   点状圆圈，不停转动」）：读任务投影的 executor.run_id，有 Run 持有执行权才出现。
-   环用 SVG dasharray 画成一圈圆点，路径本身留 90° 缺口；12px 与状态图标同一格，
+/* 执行中的任务（聊天）行运行指示（2026-11-10，用户两次指认：带缺口的点状圆圈要挂在
+   「会话/聊天」这一行本身、标题右侧，不停转动，不是项目分组标题上）：
+   读任务投影的 executor.run_id，有 Run 持有执行权的那一行才出现。
+   标题 `flex: 1` 把环顶到行右缘，环宽 12px 与状态图标同一格；任务行没有 ⋯ 菜单，
+   右端不与其它控件抢位。环用 SVG dasharray 画成一圈圆点，路径本身留 90° 缺口；
    匀速旋转取 motion.loop.spin（1s，与清空按钮的加载环同一档），不加发光、不占布局。
    减少动态效果时只停旋转，环与缺口仍可辨认——状态不靠动效单独表达。 */
-.recent-work-group-running {
+.recent-work-running {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1082,13 +1084,13 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   width: var(--relay-font-size-caption);
   height: var(--relay-font-size-caption);
   color: var(--relay-color-text-muted);
-  animation: recent-work-group-running-spin var(--relay-motion-loop-spin) linear infinite;
+  animation: recent-work-running-spin var(--relay-motion-loop-spin) linear infinite;
 }
-.recent-work-group-running > svg { width: 100%; height: 100%; }
-@keyframes recent-work-group-running-spin { to { transform: rotate(1turn); } }
-html[data-motion="off"] .recent-work-group-running { animation: none !important; }
+.recent-work-running > svg { width: 100%; height: 100%; }
+@keyframes recent-work-running-spin { to { transform: rotate(1turn); } }
+html[data-motion="off"] .recent-work-running { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .recent-work-group-running { animation: none !important; }
+  .recent-work-running { animation: none !important; }
 }
 /* 目录行悬停的「＋」（在这个目录新建会话）：与 ⋯ 同一套显形规则——静止 display:none，
    悬停或键盘聚焦才出现，静止时行盒逐像素不变。它压在数字徽标那一格上，显形时徽标
@@ -3475,18 +3477,19 @@ html[data-motion="off"] .feedback-card {
 
 /* checkbox/radio 不进入控件基类：宽度、min-height、padding 与边框都会破坏原生小控件，
    由全局 accent-color（见文件头部）提供主题色，选择框回归原生合理尺寸。 */
+/* 2026-11-12（UI-UNIFY-01）：这条规则原来自带 `border: 1px solid border-control` 与
+   border-radius/padding/background/color 五件套，与文件头部 `:where(input, select, textarea)`
+   基座完全重复，却因为 `.field input:not(...)` 的 (0,2,1) 特异度**盖掉了**错误态：
+   `.field--invalid input` 与 `:is(input)[aria-invalid="true"]` 都是 (0,1,1)，红的边框
+   永远被这行的中性边框冲掉——用 FormField 报错的字段因此在界面上看不出错。
+   这里只留真正新增的 `width: 100%` 与 `font: inherit`，几何交回基座。 */
 .edit-form input:not([type="checkbox"]):not([type="radio"]),
 .edit-form textarea,
 .field input:not([type="checkbox"]):not([type="radio"]),
 .field textarea,
 .field select {
   width: 100%;
-  min-height: var(--relay-control-height);
-  padding: var(--relay-space-2) var(--relay-space-3);
-  background: var(--relay-color-bg-surface);
   color: var(--relay-color-text-primary);
-  border: var(--relay-border-width) solid var(--relay-color-border-control);
-  border-radius: var(--relay-radius-control);
   font: inherit;
 }
 

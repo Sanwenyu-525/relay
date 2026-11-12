@@ -10,8 +10,8 @@ import { flush, mountReact } from "./mountApp";
  * 这一轮的口径变化：
  *   · **选中即改变**——点档位立刻写服务端，没有「保存 / 重新读取」两枚按钮；
  *   · 没有会话时（首条消息之前）也能选，档位先落在新会话草稿作用域；
- *   · 历史调用没有可靠冻结预算时只写「预算未知」，不拿当前档位冒充历史预算、
- *     不显示未经证实的百分比；
+ *   · 占比直接按**当前档位**解释（2026-11-11 用户指令），圆环与浮层共用一个分母；
+ *     那次调用冻结的预算只在两者不同时作为差异说明保留；
  *   · 分项没有就写「暂无分项统计」，总用量照常可读。
  */
 
@@ -127,21 +127,21 @@ describe("上下文用量浮层", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("历史调用与当前档位分开：历史按那次冻结的预算解释，档位另说", async () => {
+  it("占比按当前档位解释：冻结预算不同时只作差异说明，不改分母", async () => {
     const wrapper = await mount(usage({
       budget: { tokens: 1_048_576, revision: "4" },
       nextCall: { reservationTokens: 1_048_576, contextBudgetTokens: 1_048_576,
         providerWindowTokens: null, windowSource: "UNKNOWN" },
     }));
-    // 历史占比仍按那次调用冻结的 65,536 算，不拿当前 1024K 去除。
-    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("16%");
+    // 10,607 / 1,048,576 ≈ 1.01%，按当前 1024K 档位取整为 1%，不按那次冻结的 65,536。
+    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("1%");
     expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
       .toBe(true);
     expect(wrapper.find('[data-testid="context-usage-history"]').exists()).toBe(true);
-    // 两个数字不同时补一句口径说明：冻结预算解释历史，档位从下一次调用生效。
+    // 冻结预算与当前档位不同时补一句历史依据，但占比仍按当前档位。
     const note = wrapper.get('[data-testid="context-usage-frozen-note"]').text();
-    expect(note).toContain("这次调用冻结的 65,536");
-    expect(note).toContain("1024K 从下一次调用生效");
+    expect(note).toContain("这次调用当时冻结 65,536 tokens");
+    expect(note).toContain("占比按当前 1024K 档位计算");
   });
 
   it("冻结预算与档位一致时不补差异说明", async () => {
@@ -193,19 +193,18 @@ describe("上下文用量浮层", () => {
     expect(scroll.contains(dock)).toBe(false);
   });
 
-  it("占比按那次调用冻结的预算解释；冻结预算缺失时写「预算未知」且不给百分比", async () => {
+  it("占比按当前档位解释；冻结预算缺失也给百分比，不再出现「预算未知」", async () => {
     const wrapper = await mount(usage());
-    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("16%");
-    expect(wrapper.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("54,929");
+    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
+    expect(wrapper.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("513,681");
     expect(wrapper.get('[data-testid="assist-context-meter-output"]').text()).toContain("646");
 
     unmount?.(); unmount = null;
-    const unknown = await mount(usage({ lastCall: { ...usage().lastCall!, reservedTokens: null } }));
-    expect(unknown.get('[data-testid="assist-context-meter-budget-unknown"]').text())
-      .toBe("预算未知");
-    expect(unknown.find('[data-testid="assist-context-meter-percent"]').exists()).toBe(false);
-    // 不拿当前档位（524,288）去除历史读数伪造一个百分比。
-    expect(unknown.find('[data-testid="assist-context-meter-remaining"]').exists()).toBe(false);
+    const legacy = await mount(usage({ lastCall: { ...usage().lastCall!, reservedTokens: null } }));
+    // 旧数据没有冻结预算，但当前档位始终存在：占比按当前档位照常给出。
+    expect(legacy.find('[data-testid="assist-context-meter-budget-unknown"]').exists()).toBe(false);
+    expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
+    expect(legacy.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("513,681");
   });
 
   it("分项按固定顺序渲染并标注估算；没有分项时只写「暂无分项统计」", async () => {
@@ -222,8 +221,8 @@ describe("上下文用量浮层", () => {
     expect(legacy.get('[data-testid="context-usage-breakdown-empty"]').text())
       .toContain("当前记录没有分项统计");
     expect(legacy.findAll('[data-testid^="context-usage-row-"]')).toHaveLength(0);
-    // 旧数据没有分项，但总用量照常可读。
-    expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("16%");
+    // 旧数据没有分项，但总用量照常可读（分母是当前 512K 档位）。
+    expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
   });
 
   it("409 冲突不覆盖别人写入的值：重读最新档位并说明", async () => {

@@ -904,6 +904,10 @@ async function prepareExternalWork(db: DbExecutor, input: AdvanceRunStepInput,
                 readOperationId: readEvidence.operationId,
                 readInvocationId: readEvidence.invocationId,
               }) },
+            correlation: {
+              runId: claim.run.id, taskId: claim.task.id, workerId: input.workerId,
+              ...(claim.task.project_id === null ? {} : { projectId: claim.task.project_id }),
+            },
             identity: currentPort.identity,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             invoke: async (callId) => {

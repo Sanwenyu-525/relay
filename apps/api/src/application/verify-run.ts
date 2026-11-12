@@ -189,6 +189,7 @@ export async function verifyRun(
           const recorded = await recordModelInvocation(input.modelCallDb, {
             origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
               stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
+            correlation: { runId: input.run.id, taskId: input.run.task_id },
             identity: checker.modelIdentity,
             invoke: async () => checker.check(checkInput),
             settle: (result) => semanticCheckSettlement(result),
@@ -394,6 +395,7 @@ export async function prepareSemanticChecks(
       const recorded = await recordModelInvocation(db, {
         origin: { workspaceId: input.run.workspace_id, kind: 'SEMANTIC_CHECK',
           stepAttemptId: input.stepAttemptId, criterionId: entry.criterionId, checkAttempt },
+        correlation: { runId: input.run.id, taskId: input.run.task_id },
         identity: checker.modelIdentity,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         invoke: async () => checker.check(checkInput),

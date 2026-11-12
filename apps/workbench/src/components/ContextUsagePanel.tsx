@@ -18,8 +18,9 @@ import "./ContextUsagePanel.css";
  *   3. 以后按哪一档 —— 会话上下文档位（三个横向选项，**选中即是改变**）。
  *
  * 四条不可让步的口径：
- *   · 占比的分母是**那次调用冻结的预算**（`reservedTokens`），不是当前档位；历史调用没有
- *     可靠冻结预算时只写「预算未知」，不拿当前档位冒充、也不显示未经证实的百分比；
+ *   · 占比的分母是**当前会话档位**（`usage.budget.tokens`），圆环、浮层与三档单选共用
+ *     同一个分母；那次调用冻结的预算（`reservedTokens`）只在两者不同时作为差异说明保留，
+ *     不再参与占比计算（2026-11-11 用户指令「圆环直接按当前显示占比」）；
  *   · 分项来自服务端按请求文本的估算，界面必须标「估算」；没有分项就只写「暂无分项统计」，
  *     不补数、不把总量平均分摊到几个分类里；
  *   · 没有「跟随应用默认」这一档：每个会话从建立那一刻起就有确定档位；
@@ -402,12 +403,13 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
 
   const lastCall = usage?.lastCall ?? null;
   const inputTokens = lastCall?.inputTokens ?? null;
-  // 分母优先用那次调用的冻结预算：换档之后历史占比仍按当时的口径解释。
-  // 冻结预算缺失（历史调用没有预留列）时**不借用当前档位**——那会显示一个未经证实的百分比。
+  // 2026-11-11 用户指令：占比直接按**当前档位**解释，圆环与浮层共用一个分母。
+  // 那次调用冻结的预算仍保留在 `reserved` 里，只在两者不同时作为差异说明出现。
   const reserved = lastCall?.reservedTokens ?? null;
-  const ratio = inputTokens !== null && reserved !== null && reserved > 0
-    ? inputTokens / reserved : null;
-  const remaining = inputTokens !== null && reserved !== null ? reserved - inputTokens : null;
+  const budget = usage?.budget.tokens ?? null;
+  const ratio = inputTokens !== null && budget !== null && budget > 0
+    ? inputTokens / budget : null;
+  const remaining = inputTokens !== null && budget !== null ? budget - inputTokens : null;
   const percent = ratio === null ? null : formatRatioPercent(ratio);
   const breakdown = lastCall?.breakdown ?? null;
   const hitRate = cacheHitRate(inputTokens, lastCall?.cacheReadTokens ?? null);
@@ -429,14 +431,14 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
       </div>}
 
       {usage !== null && <>
-        {/* 第一段：这一次调用实际用了多少、当时冻结了多少预算。分母是那次调用的历史记录，
-            与末段的当前档位是两件事，不共用一个数字，也不互相顶替。 */}
+        {/* 第一段：这一次调用实际用了多少、相对当前档位占了多少。分子是那次调用的历史
+            读数，分母是当前档位——两者不同源，但分母与末段三档单选保持同一个数字。 */}
         <section className="context-usage-section" aria-labelledby={`${name}-history`}
           data-testid="context-usage-history">
           <div className="context-usage-heading-row">
             <h2 className="context-usage-section-title" id={`${name}-history`}>最近一次模型调用</h2>
             <span className="context-usage-tag"
-              title="用量来自上一次调用；档位设置只影响后续调用，不改写这条记录。">历史记录</span>
+              title="用量来自上一次调用；占比按当前档位计算，换档会改变占比读数。">历史记录</span>
           </div>
           {lastCall === null || inputTokens === null
             ? <p className="agent-chat-context-meter-empty" data-testid="assist-context-meter-empty">
@@ -448,27 +450,24 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
                 <p className="agent-chat-context-meter-figure">
                   <span className="agent-chat-context-meter-amount">
                     <span data-testid="assist-context-meter-input">{inputTokens.toLocaleString()}</span>
-                    {reserved !== null && <><span className="agent-chat-context-meter-sep"> / </span>
-                      <span>{reserved.toLocaleString()}</span></>}
+                    {budget !== null && <><span className="agent-chat-context-meter-sep"> / </span>
+                      <span>{budget.toLocaleString()}</span></>}
                     <span className="agent-chat-context-meter-unit"> tokens</span>
                   </span>
                   {percent !== null && <span className="agent-chat-context-meter-percent"
                     data-testid="assist-context-meter-percent" data-over={ratio !== null && ratio > 1
                       ? "true" : undefined}>{percent}%</span>}
-                  {percent === null && reserved === null && <span className="agent-chat-context-meter-unknown"
-                    data-testid="assist-context-meter-budget-unknown">预算未知</span>}
                 </p>
                 {ratio !== null && <span className="agent-chat-context-meter-bar" aria-hidden="true"
                   data-over={ratio > 1 ? "true" : undefined}>
                   <span style={{ width: `${Math.min(1, ratio) * 100}%` }} /></span>}
-                {/* 冻结预算与当前档位不一致时明说一句（2026-11-10 用户指认「前后端不匹配」）：
-                    分母是**那次调用**冻结的预算，改档不会回头改写历史读数；三档单选只表示
-                    下一拍按哪一档申请。不重写「当前档位 N」那一行（2026-11-01 已删），
-                    只在两个数字真的不同时解释差异。 */}
-                {reserved !== null && usage.budget.tokens !== reserved &&
+                {/* 冻结预算与当前档位不一致时明说一句（2026-11-11 用户指令「圆环直接按
+                    当前显示占比」）：占比按当前档位计算；那次调用的冻结预算只作为历史依据
+                    保留，避免读者把当时预留的量当成现在生效的档位。 */}
+                {reserved !== null && budget !== null && budget !== reserved &&
                   <p className="context-usage-note" data-testid="context-usage-frozen-note">
-                    占比按这次调用冻结的 {tierLabelOf(reserved)} 计算；{tierLabelOf(usage.budget.tokens)}
-                    {" "}从下一次调用生效。
+                    这次调用当时冻结 {reserved.toLocaleString()} tokens；占比按当前
+                    {" "}{tierLabelOf(budget)} 档位计算。
                   </p>}
                 {/* 二级信息两列：预算余量（估算）与本次输出。余量是「预算 − 上报用量」，
                     不等于模型物理窗口的剩余容量。 */}

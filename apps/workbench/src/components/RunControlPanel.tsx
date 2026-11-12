@@ -290,8 +290,72 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
     } finally { if (context === facts.current) setSubmitting(false); }
   }
 
-  return <section className={compact ? "collaboration-run-control" : "surface-panel"} data-testid="run-control">
-    {!compact && <h2>控制请求</h2>}
+  const pendingReceipt = run.pendingControlRequest && <p className="receipt-message" role="status" data-testid="run-control-pending">{controlLabels[run.pendingControlRequest.type]}：{run.pendingControlRequest.status}。{controlPendingNotes[run.pendingControlRequest.type]}，等待安全点处理；当前执行者仍为 {executorLabels[task.executor]}。请求 {run.pendingControlRequest.id}{run.waitReason === null ? "" : ` · 服务端等待原因 ${run.waitReason}`}。</p>;
+  const acceptedNote = awaitingServer && accepted && <p className="helper-text" role="status" data-testid="run-control-accepted">
+    本地提交记录（尚未被服务端记录覆盖）：{controlLabels[accepted.type]} · 原 command_id {accepted.commandId}
+    · 控制请求 {accepted.controlRequestId}。回执只说明受理，实际是否暂停/停止/交接以下方服务端状态为准。
+  </p>;
+  const recordLine = controlRecord && <p className="helper-text" data-testid="run-control-status">控制请求 {controlRecord.id}：{controlRecord.status}{controlRecord.decidedAt && <> · 处理时间 {controlRecord.decidedAt}</>}</p>;
+  const terminalRace = terminal && controlRecord?.status === "PENDING" && <p className="helper-text" data-testid="run-terminal-race" role="status">Run 已按服务端结果进入「{runLabels[run.status] ?? run.status}」终态；停止与完成发生竞争时以服务端查询结果为准，提交意图不改写事实。控制请求 {controlRecord.id} 的实际处理结果同样以服务端为准。</p>;
+  const handoffNote = (handoffApplied || (task.executor === "HUMAN" && terminal)) && <p className="receipt-message" data-testid="run-handoff-edit" role="status">{handoffApplied ? "已交接，可编辑。" : "任务当前执行者为人工（服务端事实）；本 Run 已结束且只读。"}人工编辑与保存版本在 {taskHref ? <Link className="text-link" to={taskHref}>任务详情</Link> : "本工作区的产物区"}进行；接手完成前的历史产物与原 Run 保持可追溯。任务状态：{taskStatusLabels[task.status] ?? task.status}。</p>;
+  const readbackNote = awaitingReadback && <p className="helper-text" role="status" data-testid="run-control-readback">原命令回执已确认；请重新读取执行状态。核对到回执修订前，不能提交新的控制命令。</p>;
+  const recheckNote = pendingCommand && pendingCommand.confirmedRevision === undefined && !submitting && <p className="helper-text" role="status" data-testid="run-control-recheck">
+    仍在等原命令回执：{pendingCommand.kind === "resume" ? "恢复命令" : controlLabels[pendingCommand.type ?? "PAUSE"]}已提交，
+    但结果尚未核对（页面重读后仍保留这条命令身份）。真实状态以下方服务端查询为准；核对完成前不提交新的控制命令。
+  </p>;
+  const commandIdLine = pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.id}</p>;
+  const controlButtons = pendingCommand && pendingCommand.confirmedRevision === undefined
+    ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>
+    : <>
+      {run.status === "PAUSED"
+        ? <button className="primary-button" type="button" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</button>
+        : <button className="secondary-button" type="button" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</button>}
+      <button className="secondary-button" type="button" data-testid="run-control-CANCEL" disabled={!canControl} onClick={() => void submitControl("CANCEL")}>{controlLabels.CANCEL}</button>
+      <button className="secondary-button" type="button" data-testid="run-control-HANDOFF" disabled={!canControl} onClick={() => void submitControl("HANDOFF")}>{controlLabels.HANDOFF}</button>
+      <button className="danger-button" type="button" data-testid="run-control-CANCEL_TASK" disabled={!canControl} onClick={() => void submitControl("CANCEL_TASK")}>{controlLabels.CANCEL_TASK}</button>
+    </>;
+  const actionsRow = (showControls: boolean) =>
+    <div className="run-actions">
+      {pendingCommand && pendingCommand.confirmedRevision === undefined ? controlButtons : showControls ? controlButtons : null}
+      <button className="secondary-button" type="button" data-testid="run-refresh" disabled={refreshing || submitting} onClick={() => void reload()}>刷新状态</button>
+    </div>;
+  const resumeNote = <p className="helper-text" data-testid="run-control-resume-note">
+    恢复 Run 时服务端会重新检查契约、权限与资源占用；这里按钮可用不等于已经确认安全，也不等于已获得新授权。
+  </p>;
+  const actionMessageLine = actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>;
+
+  // 紧凑形态（协作页页头与聊天顶部）：首屏只留「现在发生了什么」与当前真正可用的控制。
+  // 待处理的请求、请求/命令 ID、控制记录与长说明收进「技术详情」——信息仍在，但不占据首屏；
+  // 不可用的控制按钮不再排一行灰色按钮（canControl 为假时只留刷新）。
+  if (compact) {
+    return <section className="collaboration-run-control collaboration-run-control--brief" data-testid="run-control">
+      {projectWriteBlockedReason && <p className="disabled-reason" data-testid="run-project-archive-reason">{projectWriteBlockedReason}</p>}
+      {/* 在途窗口：受理 ≠ 生效。紧凑形态只说正在提交，真实状态以刷新后的服务端结果为准。 */}
+      {submitting && pendingCommand && <p className="helper-text" role="status" data-testid="run-control-inflight">
+        正在提交控制请求…真实状态以刷新后的服务端结果为准。
+      </p>}
+      {readbackNote}
+      {recheckNote}
+      {refreshFailure && <p className="action-error" role="alert" data-testid="run-refresh-error">{refreshFailure}</p>}
+      {actionError && <p className="action-error" role="alert">{actionError}</p>}
+      {actionsRow(canControl)}
+      <details className="run-control-technical" data-testid="run-control-technical">
+        <summary>技术详情</summary>
+        {pendingReceipt}
+        {acceptedNote}
+        {recordLine}
+        {terminalRace}
+        {terminal && <p className="warning-callout" data-testid="run-stop-limitation">{processStopLimitation}</p>}
+        {handoffNote}
+        {actionMessageLine}
+        {commandIdLine}
+        {resumeNote}
+      </details>
+    </section>;
+  }
+
+  return <section className="surface-panel" data-testid="run-control">
+    <h2>控制请求</h2>
     <p className="helper-text">控制提交回执表示 PENDING；安全点可能随后处理请求。Run、任务执行者与控制状态以重新查询为准。</p>
     {projectWriteBlockedReason && <p className="disabled-reason" data-testid="run-project-archive-reason">{projectWriteBlockedReason}</p>}
     {/* 在途窗口：按钮已受理 ≠ 动作已停止。这里只说「正在处理」，Run 状态一律读服务端。 */}
@@ -300,39 +364,20 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
       {pendingCommand.kind === "resume" ? "Run 尚未恢复执行" : controlPendingNotes[pendingCommand.type ?? "PAUSE"]}。
       真实状态与等待原因以下方服务端查询为准；界面不会先把它改写成已暂停或已停止。
     </p>}
-    {run.pendingControlRequest && <p className="receipt-message" role="status" data-testid="run-control-pending">{controlLabels[run.pendingControlRequest.type]}：{run.pendingControlRequest.status}。{controlPendingNotes[run.pendingControlRequest.type]}，等待安全点处理；当前执行者仍为 {executorLabels[task.executor]}。请求 {run.pendingControlRequest.id}{run.waitReason === null ? "" : ` · 服务端等待原因 ${run.waitReason}`}。</p>}
-    {awaitingServer && accepted && <p className="helper-text" role="status" data-testid="run-control-accepted">
-      本地提交记录（尚未被服务端记录覆盖）：{controlLabels[accepted.type]} · 原 command_id {accepted.commandId}
-      · 控制请求 {accepted.controlRequestId}。回执只说明受理，实际是否暂停/停止/交接以下方服务端状态为准。
-    </p>}
-    {controlRecord && <p className="helper-text" data-testid="run-control-status">控制请求 {controlRecord.id}：{controlRecord.status}{controlRecord.decidedAt && <> · 处理时间 {controlRecord.decidedAt}</>}</p>}
-    {terminal && controlRecord?.status === "PENDING" && <p className="helper-text" data-testid="run-terminal-race" role="status">Run 已按服务端结果进入「{runLabels[run.status] ?? run.status}」终态；停止与完成发生竞争时以服务端查询结果为准，提交意图不改写事实。控制请求 {controlRecord.id} 的实际处理结果同样以服务端为准。</p>}
+    {pendingReceipt}
+    {acceptedNote}
+    {recordLine}
+    {terminalRace}
     {terminal && <p className="warning-callout" data-testid="run-stop-limitation">{processStopLimitation}</p>}
-    {(handoffApplied || (task.executor === "HUMAN" && terminal)) && <p className="receipt-message" data-testid="run-handoff-edit" role="status">{handoffApplied ? "已交接，可编辑。" : "任务当前执行者为人工（服务端事实）；本 Run 已结束且只读。"}人工编辑与保存版本在 {taskHref ? <Link className="text-link" to={taskHref}>任务详情</Link> : "本工作区的产物区"}进行；接手完成前的历史产物与原 Run 保持可追溯。任务状态：{taskStatusLabels[task.status] ?? task.status}。</p>}
-    {awaitingReadback && <p className="helper-text" role="status" data-testid="run-control-readback">原命令回执已确认；请重新读取执行状态。核对到回执修订前，不能提交新的控制命令。</p>}
+    {handoffNote}
+    {readbackNote}
     {refreshFailure && <p className="action-error" role="alert" data-testid="run-refresh-error">{refreshFailure}</p>}
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
-    {actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}
-    {/* 整页重读后取回的命令身份：说明它仍未核对，并继续锁住新的控制提交。 */}
-    {pendingCommand && pendingCommand.confirmedRevision === undefined && !submitting && <p className="helper-text" role="status" data-testid="run-control-recheck">
-      仍在等原命令回执：{pendingCommand.kind === "resume" ? "恢复命令" : controlLabels[pendingCommand.type ?? "PAUSE"]}已提交，
-      但结果尚未核对（页面重读后仍保留这条命令身份）。真实状态以下方服务端查询为准；核对完成前不提交新的控制命令。
-    </p>}
-    {pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.id}</p>}
-    <div className="run-actions">
-      {pendingCommand && pendingCommand.confirmedRevision === undefined ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button> : <>
-        {run.status === "PAUSED"
-          ? <button className="primary-button" type="button" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</button>
-          : <button className="secondary-button" type="button" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</button>}
-        <button className="secondary-button" type="button" data-testid="run-control-CANCEL" disabled={!canControl} onClick={() => void submitControl("CANCEL")}>{controlLabels.CANCEL}</button>
-        <button className="secondary-button" type="button" data-testid="run-control-HANDOFF" disabled={!canControl} onClick={() => void submitControl("HANDOFF")}>{controlLabels.HANDOFF}</button>
-        <button className="danger-button" type="button" data-testid="run-control-CANCEL_TASK" disabled={!canControl} onClick={() => void submitControl("CANCEL_TASK")}>{controlLabels.CANCEL_TASK}</button>
-      </>}
-      <button className="secondary-button" type="button" data-testid="run-refresh" disabled={refreshing || submitting} onClick={() => void reload()}>刷新状态</button>
-    </div>
+    {actionMessageLine}
+    {recheckNote}
+    {commandIdLine}
+    {actionsRow(true)}
     {/* 按钮变亮只说明「当前没有被本地拦住的理由」，不代表服务端已确认安全或授权仍然有效。 */}
-    <p className="helper-text" data-testid="run-control-resume-note">
-      恢复 Run 时服务端会重新检查契约、权限与资源占用；这里按钮可用不等于已经确认安全，也不等于已获得新授权。
-    </p>
+    {resumeNote}
   </section>;
 }

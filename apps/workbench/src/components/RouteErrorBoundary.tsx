@@ -1,4 +1,6 @@
-import { Link, useRouteError } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useLocation, useRouteError } from "react-router-dom";
+import { reportFrontendError } from "../lib/frontendDiagnostics";
 
 /**
  * 路由级兜底错误页（router.tsx 根路由的 errorElement）。
@@ -11,7 +13,12 @@ import { Link, useRouteError } from "react-router-dom";
  */
 export default function RouteErrorBoundary() {
   const error = useRouteError();
+  const location = useLocation();
   const summary = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  // 中文兜底页面向用户；开发者仍需在运行日志里按 kind=render 找到它。
+  useEffect(() => {
+    reportFrontendError({ kind: "render", error, route: location.pathname });
+  }, [error, location.pathname]);
   return <main className="route-error" data-testid="route-error-boundary">
     <h1>界面遇到未处理的错误</h1>
     <p className="action-error" data-testid="route-error-summary">{summary}</p>

@@ -11,36 +11,46 @@
  */
 
 .pv-page {
-  /* 色板：原型 relay-v528-styles :root 四色 + 组件取值 */
-  --pv-ink: #263f31;
-  --pv-green: #23684b;
-  --pv-line: #dfe9df;
-  --pv-subtle: #f6faf7;
-  --pv-muted: #566f5f;
-  --pv-row-sub: #5a7263;
-  --pv-primary: #23704d;
-  --pv-primary-hover: #165b3d;
-  --pv-btn-border: #d6e4d8;
-  --pv-btn-ink: #476b54;
-  --pv-btn-hover-bg: #f0f7f1;
-  --pv-btn-hover-border: #a3c8ae;
-  --pv-card-shadow: 0 3px 15px #22553506;
-  --pv-chip-ink: #4b7757;
-  --pv-chip-border: #dae9dd;
-  --pv-chip-bg: #f2f8f3;
-  --pv-warn-ink: #80602c;
-  --pv-warn-border: #f0dfc1;
-  --pv-warn-bg: #fff6e7;
-  --pv-danger-ink: #aa5347;
-  --pv-danger-border: #f5d6d0;
-  --pv-danger-bg: #fff1ed;
-  --pv-focus-ring: #9dd3ad;
+  /* 兼容层（2026-11-12 全站统一 UI-UNIFY-01）：这层变量原来自带一套十六进制色板，
+     与 /agent 的 --relay-* 是同色系的两个值（主色 #23704d vs #205d47 等），
+     全站因此出现两套「同一个绿色」。现在变量名保留给尚未迁移的规则，值全部指向
+     唯一色源 design-tokens.json；新代码直接写 var(--relay-*)，不要再引用 --pv-*。
+     实测：--pv-* 与最近 relay 色 token 的平均距离 31.0（redmean），收敛为 0。 */
+  --pv-ink: var(--relay-color-text-primary);
+  --pv-green: var(--relay-color-action-primary);
+  --pv-line: var(--relay-color-border-separator);
+  --pv-subtle: var(--relay-color-bg-subtle);
+  --pv-muted: var(--relay-color-text-muted);
+  --pv-row-sub: var(--relay-color-text-muted);
+  --pv-primary: var(--relay-color-action-primary);
+  --pv-primary-hover: var(--relay-color-action-hover);
+  --pv-btn-border: var(--relay-color-border-subtle);
+  --pv-btn-ink: var(--relay-color-text-primary);
+  --pv-btn-hover-bg: var(--relay-color-selection-hover);
+  /* 悬停边框原来单独一档浅绿 var(--relay-color-border-subtle)；基座 .secondary-button 悬停只改底色，
+     这里跟着收掉，避免「同一按钮两处悬停规则」。 */
+  --pv-btn-hover-border: var(--relay-color-border-subtle);
+  /* 卡片投影原来 var(--relay-shadow-surface)（2% 透明度）；shadow.surface=none 与 /agent 的
+     无投影纸面一致，卡片靠 1px 分隔线分层——设计方向明确要求减少装饰性阴影。 */
+  --pv-card-shadow: var(--relay-shadow-surface);
+  --pv-chip-ink: var(--relay-color-text-secondary);
+  --pv-chip-border: var(--relay-color-border-subtle);
+  --pv-chip-bg: var(--relay-color-selection-bg);
+  --pv-warn-ink: var(--relay-color-status-warning-text);
+  --pv-warn-border: color-mix(in srgb, var(--relay-color-status-warning-text) 35%, var(--relay-color-status-warning-bg));
+  --pv-warn-bg: var(--relay-color-status-warning-bg);
+  --pv-danger-ink: var(--relay-color-status-danger-text);
+  --pv-danger-border: color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg));
+  --pv-danger-bg: var(--relay-color-status-danger-bg);
+  /* 焦点环原来是外扩 3px 的浅绿光晕 #9dd3ad；全站焦点是 inset outline + forest，
+     这里只留颜色变量，形状由全局 :focus-visible 决定。 */
+  --pv-focus-ring: var(--relay-color-focus-ring);
 
-  width: min(1220px, 100%);
+  width: min(var(--relay-layout-page-maxWidth), 100%);
   margin: 0 auto;
-  padding: 24px 30px 60px;
+  padding: var(--relay-space-6) var(--relay-layout-page-gutter) var(--relay-space-16);
   min-height: 100%;
-  font-size: 13px;
+  font-size: var(--relay-font-size-pageBase);
   line-height: 1.7;
   color: var(--pv-ink);
 }
@@ -61,7 +71,7 @@
 .pv-page .page-head-overline {
   text-transform: uppercase;
   letter-spacing: .08em;
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   color: var(--pv-muted);
   font-weight: 700;
 }
@@ -71,76 +81,83 @@
   margin: 5px 0;
   letter-spacing: -.035em;
   font-weight: 700;
-  color: #1e3529;
+  color: var(--relay-color-text-primary);
 }
 .pv-page .page-head-title > h2 { font-size: 17px; }
 .pv-page .page-head-meta,
 .pv-page .page-head-lede {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   line-height: 1.75;
-  color: #5a7263;
+  color: var(--relay-color-text-muted);
   margin: 0;
   max-width: 730px;
 }
 .pv-page .page-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-/* ── 按钮：尺寸与色板按原型 v528-btn，沿用共享类名与语义（danger 分级不变）。
-   :not(.rail-trigger) 与 [hidden] 守卫：rail-trigger 依赖媒体查询切换 display，
-   [hidden] 依赖 UA 的 display:none——两者都不能被这里的 display:inline-flex 压掉。 ── */
+/* ── 按钮：沿用共享类名与语义（danger 分级不变），几何与色板全部走 token。
+   2026-11-12 收敛：圆角 9px→radius.control，字号 12px→caption，高度 34px→control.height.page，
+   边框/文字/悬停色指向 relay 语义色。:not(.rail-trigger) 与 [hidden] 守卫保留——
+   rail-trigger 依赖媒体查询切换 display，[hidden] 依赖 UA 的 display:none，
+   两者都不能被这里的 display:inline-flex 压掉。 ── */
 .pv-page .primary-button:not(.rail-trigger),
 .pv-page .secondary-button:not(.rail-trigger),
 .pv-page .danger-button:not(.rail-trigger) {
-  border: 1px solid var(--pv-btn-border);
-  background: #fff;
+  border: var(--relay-border-width) solid var(--pv-btn-border);
+  background: var(--relay-color-bg-surface);
   color: var(--pv-btn-ink);
-  border-radius: 9px;
-  font-weight: 600;
-  font-size: 12px;
-  padding: 8px 12px;
+  border-radius: var(--relay-radius-control);
+  font-weight: var(--relay-font-weight-semibold);
+  font-size: var(--relay-font-size-caption);
+  padding: var(--relay-space-2) var(--relay-space-3);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 34px;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-page);
   white-space: nowrap;
 }
 .pv-page [hidden] { display: none !important; }
-.pv-page .primary-button:not(.rail-trigger) { background: var(--pv-primary); color: #fff; border-color: var(--pv-primary); }
+.pv-page .primary-button:not(.rail-trigger) { background: var(--pv-primary); color: var(--relay-color-text-onAction); border-color: var(--pv-primary); }
 .pv-page .primary-button:hover:not(:disabled) { background: var(--pv-primary-hover); border-color: var(--pv-primary-hover); }
-.pv-page .secondary-button:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); color: #206846; }
-.pv-page .danger-button:not(.rail-trigger) { color: #a14f41; border-color: #efdbd6; background: #fff; }
-.pv-page .danger-button:hover:not(:disabled) { background: #fdf3f0; border-color: #e3bfb6; }
-.pv-page .danger-button:active:not(:disabled) { background: #f6e2dc; }
+.pv-page .secondary-button:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); color: var(--relay-color-selection-text); }
+.pv-page .danger-button:not(.rail-trigger) { color: var(--relay-color-status-danger-text); border-color: var(--pv-danger-border); background: var(--relay-color-bg-surface); }
+.pv-page .danger-button:hover:not(:disabled) { background: var(--pv-danger-bg); border-color: var(--pv-danger-border); }
+.pv-page .danger-button:active:not(:disabled) { background: color-mix(in srgb, var(--relay-color-status-danger-text) 18%, var(--pv-danger-bg)); }
+/* 焦点不再画外扩光晕：全局 :focus-visible 的 inset outline 统一负责，
+   这里只是把 .pv-filter（原生 input）也纳入同一套。 */
 .pv-page .primary-button:focus-visible,
 .pv-page .secondary-button:focus-visible,
 .pv-page .danger-button:focus-visible,
-.pv-page .pv-filter:focus-visible { outline: 3px solid var(--pv-focus-ring); outline-offset: 1px; }
+.pv-page .pv-filter:focus-visible { outline: var(--relay-focus-width) solid var(--pv-focus-ring); outline-offset: calc(-1 * var(--relay-focus-width)); }
 .pv-page .primary-button:disabled,
 .pv-page .secondary-button:disabled,
 .pv-page .danger-button:disabled { opacity: .5; cursor: not-allowed; }
-.pv-page .text-button { color: #246c49; font-weight: 650; font-size: 12px; }
+.pv-page .text-button { color: var(--relay-color-action-text); font-weight: var(--relay-font-weight-semibold); font-size: var(--relay-font-size-caption); }
 .pv-page .text-button:hover:not(:disabled) { text-decoration: underline; }
-.pv-page .secondary-button.secondary-button--compact { min-height: 30px; padding: 4px 10px; }
+.pv-page .secondary-button.secondary-button--compact {
+  min-height: calc(var(--relay-control-height-page) - var(--relay-space-1));
+  padding: var(--relay-space-1) var(--relay-space-2);
+}
 
 /* ── 卡片（v528-card） ── */
 .pv-card {
-  background: #fff;
+  background: var(--relay-color-bg-surface);
   border: 1px solid var(--pv-line);
-  border-radius: 13px;
+  border-radius: var(--relay-radius-panel);
   margin: 13px 0;
   overflow: hidden;
   box-shadow: var(--pv-card-shadow);
 }
 .pv-card-h {
   padding: 14px 17px;
-  border-bottom: 1px solid #edf1ec;
+  border-bottom: 1px solid var(--relay-color-border-separator);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
-.pv-card-h strong { font-size: 13px; color: #294635; display: flex; align-items: center; gap: 8px; }
-.pv-card-h small { color: #5a7263; font-size: 11px; }
+.pv-card-h strong { font-size: var(--relay-font-size-pageBase); color: var(--relay-color-text-primary); display: flex; align-items: center; gap: 8px; }
+.pv-card-h small { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
 .pv-card-b { padding: 15px 17px; }
 .pv-card.pad { padding: 17px; }
 .pv-card > .pv-card-b:first-child { padding-top: 15px; }
@@ -157,12 +174,12 @@
 .pv-stats.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pv-stat {
   border: 1px solid var(--pv-line);
-  background: #fff;
-  border-radius: 12px;
+  background: var(--relay-color-bg-surface);
+  border-radius: var(--relay-radius-panel);
   padding: 15px;
 }
-.pv-stat > span { display: block; font-size: 11px; color: #5a7263; }
-.pv-stat strong { display: block; font-size: 22px; color: #286849; margin: 6px 0 3px; letter-spacing: -.02em; }
+.pv-stat > span { display: block; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
+.pv-stat strong { display: block; font-size: 22px; color: var(--relay-color-action-text); margin: 6px 0 3px; letter-spacing: -.02em; }
 .pv-stat strong.is-text { font-size: 18px; }
 
 /* ── 行（v528-row + v528-illustration） ── */
@@ -171,22 +188,22 @@
   align-items: center;
   gap: 12px;
   padding: 14px 15px;
-  border-bottom: 1px solid #edf1ec;
+  border-bottom: 1px solid var(--relay-color-border-separator);
   min-width: 0;
 }
 .pv-row:last-child { border-bottom: 0; }
-.pv-row-title { font-weight: 650; font-size: 12px; color: #33533d; }
-.pv-row-sub { font-size: 11px; color: var(--pv-row-sub); line-height: 1.65; margin-top: 4px; }
+.pv-row-title { font-weight: 650; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-primary); }
+.pv-row-sub { font-size: var(--relay-font-size-micro); color: var(--pv-row-sub); line-height: 1.65; margin-top: 4px; }
 .pv-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pv-row-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .pv-illustration {
   display: grid;
   place-items: center;
-  background: #eaf5ec;
+  background: var(--relay-color-selection-bg);
   width: 35px;
   height: 35px;
-  border-radius: 10px;
-  color: #36724e;
+  border-radius: var(--relay-radius-panel);
+  color: var(--relay-color-action-text);
   flex: 0 0 auto;
 }
 .pv-illustration svg { width: 16px; height: 16px; }
@@ -196,10 +213,10 @@
   display: inline-flex;
   padding: 4px 8px;
   border: 1px solid var(--pv-chip-border);
-  border-radius: 7px;
+  border-radius: var(--relay-radius-badge);
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   white-space: nowrap;
   align-items: center;
   gap: 5px;
@@ -210,44 +227,44 @@
 
 /* ── 提示条（v528-note / warning / error / success） ── */
 .pv-note {
-  border: 1px solid #dcebdd;
-  background: #f3f9f4;
-  border-radius: 11px;
+  border: 1px solid var(--relay-color-border-subtle);
+  background: var(--relay-color-selection-bg);
+  border-radius: var(--relay-radius-panel);
   padding: 11px 14px;
-  color: #52765e;
+  color: var(--relay-color-text-secondary);
   line-height: 1.75;
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   margin: 12px 0;
 }
-.pv-note strong { color: #3f6350; }
-.pv-note a { color: #246c49; }
+.pv-note strong { color: var(--relay-color-text-primary); }
+.pv-note a { color: var(--relay-color-action-text); }
 .pv-warning {
-  border: 1px solid #ecd8b5;
-  background: #fffbf2;
-  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-warning-text) 35%, var(--relay-color-status-warning-bg));
+  background: var(--relay-color-status-warning-bg);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 15px;
-  color: #91672d;
-  font-size: 12px;
+  color: var(--relay-color-status-warning-text);
+  font-size: var(--relay-font-size-caption);
   line-height: 1.7;
   margin: 11px 0;
 }
 .pv-error {
-  border: 1px solid #eccdcc;
-  background: #fff7f5;
-  color: #a14f44;
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg));
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   line-height: 1.65;
   margin: 11px 0;
 }
 .pv-success {
-  border: 1px solid #c9e3d0;
-  background: #edf7f0;
-  color: #246d45;
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-success-text) 35%, var(--relay-color-status-success-bg));
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-action-text);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   line-height: 1.65;
   margin: 11px 0;
 }
@@ -259,54 +276,54 @@
 
 /* ── 筛选按钮（v528-filter，active 形态取自 v528-btn.active） ── */
 .pv-filter {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   padding: 7px 10px;
-  border: 1px solid #d6e5d8;
-  border-radius: 9px;
-  background: #fff;
-  color: #53705b;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
   cursor: pointer;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
 }
 .pv-filter:hover:not(:disabled) { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
-.pv-filter.active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-filter.active { color: var(--relay-color-action-text); background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
 .pv-inline-filter { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
 
 /* ── 步骤条（v528-steps） ── */
 .pv-steps { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pv-step {
-  font-size: 11px;
-  color: #566f5f;
-  border: 1px solid #d8e6da;
+  font-size: var(--relay-font-size-micro);
+  color: var(--relay-color-text-muted);
+  border: 1px solid var(--relay-color-border-subtle);
   padding: 6px 9px;
-  border-radius: 7px;
+  border-radius: var(--relay-radius-badge);
 }
-.pv-step.is-now { background: #e6f3e9; color: #1f6545; border-color: #a8d1b3; }
+.pv-step.is-now { background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); border-color: var(--relay-color-action-primary); }
 
 /* ── 表格（v528-table） ── */
 .pv-table-wrap { overflow-x: auto; }
-.pv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pv-table { width: 100%; border-collapse: collapse; font-size: var(--relay-font-size-caption); }
 .pv-table th {
   text-align: left;
   font-weight: 650;
-  color: #566f5f;
-  font-size: 11px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
   padding: 12px;
-  border-bottom: 1px solid #e6eee7;
+  border-bottom: 1px solid var(--relay-color-border-subtle);
   white-space: nowrap;
 }
-.pv-table td { padding: 13px 12px; border-bottom: 1px solid #edf1ec; vertical-align: middle; }
+.pv-table td { padding: 13px 12px; border-bottom: 1px solid var(--relay-color-border-separator); vertical-align: middle; }
 .pv-table tr:last-child td { border-bottom: 0; }
 .pv-link {
   border: 0;
   background: transparent;
   font-weight: 650;
-  color: #246c49;
+  color: var(--relay-color-action-text);
   text-align: left;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   cursor: pointer;
 }
 .pv-link:hover { text-decoration: underline; }
@@ -318,19 +335,19 @@
 .pv-form-grid > .field,
 .pv-form-grid > .pv-field { margin-top: 0; }
 .pv-form-grid > .field--wide { grid-column: 1 / -1; }
-.pv-field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #566f5f; font-weight: 650; margin: 5px 0; }
+.pv-field { display: flex; flex-direction: column; gap: 7px; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); font-weight: 650; margin: 5px 0; }
 .pv-field.wide { grid-column: 1 / -1; }
 .pv-field > span { display: block; }
 .pv-field input,
 .pv-field select,
 .pv-field textarea {
-  border: 1px solid #d7e4d8;
-  border-radius: 8px;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
   padding: 10px 11px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   font-weight: 400;
-  color: #34523b;
-  background: #fff;
+  color: var(--relay-color-text-primary);
+  background: var(--relay-color-bg-surface);
   min-width: 0;
   width: 100%;
   outline: none;
@@ -339,25 +356,25 @@
 .pv-field textarea { resize: vertical; min-height: 75px; line-height: 1.75; }
 .pv-field input:focus,
 .pv-field textarea:focus,
-.pv-field select:focus { border-color: #69a77b; box-shadow: 0 0 0 3px #eaf6ed; }
+.pv-field select:focus { border-color: var(--relay-color-focus-ring); outline: none; }
 .pv-field input:disabled,
 .pv-field select:disabled,
-.pv-field textarea:disabled { background: #f4f7f4; color: var(--pv-muted); cursor: not-allowed; }
-.pv-sep { height: 1px; background: #edf1ed; margin: 13px 0; }
+.pv-field textarea:disabled { background: var(--relay-color-disabled-bg); color: var(--pv-muted); cursor: not-allowed; }
+.pv-sep { height: 1px; background: var(--relay-color-border-separator); margin: 13px 0; }
 .pv-weekdays { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
 .pv-weekdays label {
-  border: 1px solid #dde8de;
-  border-radius: 8px;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
   padding: 8px 9px;
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   display: flex;
   gap: 5px;
   align-items: center;
   font-weight: 400;
-  color: #46604e;
+  color: var(--relay-color-text-secondary);
   cursor: pointer;
 }
-.pv-weekdays input { accent-color: #267a52; margin: 0; }
+.pv-weekdays input { accent-color: var(--relay-color-action-primary); margin: 0; }
 
 /* ── page-state（加载/错误/示例空态占位）在 pv 皮肤下回页头档位：
    全局 .page-state h1 用 compactPage(28px)，大于 pv 页头 h1(22px)，形成层级倒置；
@@ -367,30 +384,30 @@
 .pv-page .page-state h1,
 .pv-page.page-state h1 { font-size: 22px; letter-spacing: -.035em; }
 .pv-page .page-state p,
-.pv-page.page-state p { font-size: 12px; }
+.pv-page.page-state p { font-size: var(--relay-font-size-caption); }
 
 /* ── rail 内容区（任务/动态等页右栏）标题回卡片头档位：
    全局 .rail-content > h2 用 section(24px)、rail-section h3 落 body(16px/500)，
    都大于 pv 卡片头；对齐 .resume-section > h2 的 13px/700 档。 ── */
-.pv-page .rail-content > h2 { font-size: 13px; font-weight: 700; color: #294635; }
-.pv-page .rail-section h3 { font-size: 12.5px; font-weight: 650; color: #33533d; }
+.pv-page .rail-content > h2 { font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--relay-color-text-primary); }
+.pv-page .rail-section h3 { font-size: var(--relay-font-size-pageBase); font-weight: 650; color: var(--relay-color-text-primary); }
 /* rail 引言段与表单标签同样越档：全局 .rail-intro 用 reading(18px)、.field-label 用 body(16px)/500，
    pv 语言里分别是 lede(12px) 与表单 label(11px/650) 档。choice-option 单选标签被基座抬到 body(16px)、
    又从 .field 继承 650 字重，回原型单选行 12px/400 档。 */
-.pv-page .rail-intro { font-size: 12px; color: #5a7263; }
-.pv-page .field-label { font-size: 11px; font-weight: 650; color: #566f5f; }
-.pv-page .choice-option { font-size: 12px; font-weight: 400; }
+.pv-page .rail-intro { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }
+.pv-page .field-label { font-size: var(--relay-font-size-micro); font-weight: 650; color: var(--relay-color-text-muted); }
+.pv-page .choice-option { font-size: var(--relay-font-size-caption); font-weight: 400; }
 /* 全局 meta(14px) 档的辅助元素在 pv 上下文回小档：field-hint 跟随表单 label 档并
    去掉从 .field 继承的 650 字重；text-link / disabled-reason / hash-code 回 12px 行内 meta。 */
-.pv-page .field-hint { font-size: 11px; font-weight: 400; }
-.pv-page .text-link { font-size: 12px; }
-.pv-page .disabled-reason { font-size: 12px; }
-.pv-page .hash-code { font-size: 12px; }
+.pv-page .field-hint { font-size: var(--relay-font-size-micro); font-weight: 400; }
+.pv-page .text-link { font-size: var(--relay-font-size-caption); }
+.pv-page .disabled-reason { font-size: var(--relay-font-size-caption); }
+.pv-page .hash-code { font-size: var(--relay-font-size-caption); }
 
 /* ── 键值明细（v528-proof-grid 的 dl 形态） ── */
-.pv-dl { margin: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; font-size: 11px; }
-.pv-dl dt { color: #566f5f; }
-.pv-dl dd { margin: 0; overflow-wrap: anywhere; color: #486452; }
+.pv-dl { margin: 0; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 9px 12px; font-size: var(--relay-font-size-micro); }
+.pv-dl dt { color: var(--relay-color-text-muted); }
+.pv-dl dd { margin: 0; overflow-wrap: anywhere; color: var(--relay-color-text-secondary); }
 .pv-dl.wide { grid-template-columns: minmax(0, 1fr); }
 
 /* ── 验收清单（v528-checklist） ── */
@@ -399,95 +416,95 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  background: #fbfdfb;
-  border: 1px solid #e9f0e9;
-  border-radius: 9px;
+  background: var(--relay-color-bg-subtle);
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   cursor: pointer;
 }
 .pv-checklist label:has(input:disabled) { cursor: not-allowed; color: var(--pv-muted); }
-.pv-checklist input { margin-top: 3px; accent-color: #267a52; }
+.pv-checklist input { margin-top: 3px; accent-color: var(--relay-color-action-primary); }
 
 /* ── 空态（v528-empty / v528-mini-empty） ── */
-.pv-empty { padding: 28px; text-align: center; color: #5a7263; font-size: 12px; }
-.pv-mini-empty { font-size: 11px; color: #5a7263; border: 1px dashed #dce9de; padding: 13px; border-radius: 9px; text-align: center; }
+.pv-empty { padding: 28px; text-align: center; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+.pv-mini-empty { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); border: 1px dashed var(--relay-color-border-subtle); padding: 13px; border-radius: var(--relay-radius-control); text-align: center; }
 
 /* ── 进度条（V5.11 v511-progress 延续） ── */
-.pv-progress { height: 6px; border-radius: 999px; background: #e4eee5; overflow: hidden; }
-.pv-progress > span { display: block; height: 100%; border-radius: 999px; background: #2c7a52; }
+.pv-progress { height: 6px; border-radius: var(--relay-radius-round); background: var(--relay-color-meter-track); overflow: hidden; }
+.pv-progress > span { display: block; height: 100%; border-radius: var(--relay-radius-round); background: var(--relay-color-action-primary); }
 
 /* ── 目标横幅（v511-goal-banner） ── */
 .pv-banner {
   display: flex;
   gap: 14px;
   align-items: center;
-  background: #f4faf5;
-  border: 1px solid #e2efe4;
-  border-radius: 13px;
+  background: var(--relay-color-selection-bg);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
   padding: 16px 18px;
 }
 .pv-banner .pv-banner-symbol {
   display: grid;
   place-items: center;
-  background: #e4f2e8;
+  background: var(--relay-color-selection-hover);
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  color: #2f6c4a;
+  border-radius: var(--relay-radius-panel);
+  color: var(--relay-color-action-text);
   flex: 0 0 auto;
 }
 .pv-banner .pv-banner-symbol svg { width: 20px; height: 20px; }
-.pv-banner strong { font-size: 13px; color: #294635; display: block; }
-.pv-banner p { margin: 3px 0 0; font-size: 11px; color: #5a7263; line-height: 1.65; }
+.pv-banner strong { font-size: var(--relay-font-size-pageBase); color: var(--relay-color-text-primary); display: block; }
+.pv-banner p { margin: 3px 0 0; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); line-height: 1.65; }
 
 /* ── 作用域内的共享辅助类微调：helper/error 等与原型字号对齐 ── */
-.pv-page .helper-text { font-size: 11px; color: var(--pv-muted); }
-.pv-page .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); font-weight: 700; }
+.pv-page .helper-text { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .eyebrow { font-size: var(--relay-font-size-micro); letter-spacing: .08em; text-transform: uppercase; color: var(--pv-muted); font-weight: 700; }
 .pv-page .warning-callout {
-  border: 1px solid #ecd8b5;
-  background: #fffbf2;
-  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-warning-text) 35%, var(--relay-color-status-warning-bg));
+  background: var(--relay-color-status-warning-bg);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 15px;
-  color: #91672d;
-  font-size: 12px;
+  color: var(--relay-color-status-warning-text);
+  font-size: var(--relay-font-size-caption);
   margin: 11px 0;
 }
 .pv-page .action-error {
-  border: 1px solid #eccdcc;
-  background: #fff7f5;
-  color: #a14f44;
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg));
+  background: var(--relay-color-status-danger-bg);
+  color: var(--relay-color-status-danger-text);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   margin: 11px 0;
 }
 .pv-page .receipt-message {
-  border: 1px solid #c9e3d0;
-  background: #edf7f0;
-  color: #246d45;
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--relay-color-status-success-text) 35%, var(--relay-color-status-success-bg));
+  background: var(--relay-color-status-success-bg);
+  color: var(--relay-color-action-text);
+  border-radius: var(--relay-radius-panel);
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   margin: 11px 0;
 }
 .pv-page .subnav { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .pv-page .subnav-item {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   padding: 7px 10px;
-  border: 1px solid #d6e5d8;
-  border-radius: 9px;
-  background: #fff;
-  color: #53705b;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
   min-height: 34px;
   display: inline-flex;
   align-items: center;
 }
 .pv-page .subnav-item:hover { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
-.pv-page .subnav-item--active { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .subnav-item--active { color: var(--relay-color-action-text); background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
 .pv-page .subnav-count { color: inherit; opacity: .75; }
-.pv-page .page-explanation > summary { color: var(--pv-muted); font-size: 11px; cursor: pointer; }
-.pv-page .page-explanation > summary::marker { color: #2c7a52; }
+.pv-page .page-explanation > summary { color: var(--pv-muted); font-size: var(--relay-font-size-micro); cursor: pointer; }
+.pv-page .page-explanation > summary::marker { color: var(--relay-color-action-primary); }
 
 /* ── 目标卡（V5.11 goals 页的两列卡形态） ── */
 .pv-goal-card {
@@ -496,23 +513,23 @@
   gap: 8px;
   min-width: 0;
   padding: 16px;
-  background: #fff;
-  border: 1px solid #e3ebe4;
-  border-radius: 14px;
-  box-shadow: 0 4px 18px #203b2810;
+  background: var(--relay-color-bg-surface);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-card);
 }
 .pv-goal-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pv-goal-card__rev { color: #5a7263; font-size: 11px; }
+.pv-goal-card__rev { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
 .pv-goal-card__title {
-  color: #2d4937;
-  font-size: 13px;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-pageBase);
   font-weight: 700;
   text-decoration: none;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .pv-goal-card__title:hover { text-decoration: underline; text-underline-offset: .2em; }
-.pv-goal-card__desc { margin: 0; color: #5a7263; font-size: 11px; line-height: 1.65; }
+.pv-goal-card__desc { margin: 0; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); line-height: 1.65; }
 .pv-goal-card__footer {
   display: flex;
   align-items: center;
@@ -521,12 +538,12 @@
   margin-top: auto;
   padding-top: 6px;
 }
-.pv-goal-card__footer small { color: #5a7263; font-size: 11px; }
+.pv-goal-card__footer small { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
 .pv-goal-card__open {
   border: 0;
   background: none;
-  color: #3c6c54;
-  font-size: 11px;
+  color: var(--relay-color-action-text);
+  font-size: var(--relay-font-size-micro);
   font-weight: 650;
   text-decoration: none;
   white-space: nowrap;
@@ -537,9 +554,9 @@
 .pv-page .resume-section {
   margin-top: 0;
   padding: 0 17px 15px;
-  background: #fff;
+  background: var(--relay-color-bg-surface);
   border: 1px solid var(--pv-line);
-  border-radius: 13px;
+  border-radius: var(--relay-radius-panel);
   box-shadow: var(--pv-card-shadow);
   overflow: hidden;
 }
@@ -549,26 +566,26 @@
   gap: 8px;
   margin: 0 -17px 12px;
   padding: 14px 17px;
-  border-bottom: 1px solid #edf1ec;
-  font-size: 13px;
+  border-bottom: 1px solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-pageBase);
   font-weight: 700;
-  color: #294635;
+  color: var(--relay-color-text-primary);
 }
-.pv-page .resume-section > h2 small { font-size: 11px; color: #5a7263; font-weight: 400; }
+.pv-page .resume-section > h2 small { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); font-weight: 400; }
 .pv-page .resume-section .run-list > li {
   padding: 11px 0;
-  border-bottom: 1px solid #f0f3f0;
-  font-size: 12px;
+  border-bottom: 1px solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-caption);
 }
 .pv-page .resume-section .run-list > li:last-child { border-bottom: 0; }
 .pv-page .resume-section .run-list > li > small {
   display: block;
   margin-top: 2px;
-  color: #5a7263;
-  font-size: 11px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
 }
-.pv-page .resume-section p { font-size: 12px; }
-.pv-page .resume-section .helper-text { font-size: 11px; }
+.pv-page .resume-section p { font-size: var(--relay-font-size-caption); }
+.pv-page .resume-section .helper-text { font-size: var(--relay-font-size-micro); }
 
 /* Goal 详情页：把「编辑目标」等分区间的空隙与页宽交给 pv 容器 */
 .pv-page .page-layout { max-width: none; padding: 0; margin: 0; }
@@ -583,42 +600,42 @@
 .pv-page .data-row {
   min-height: 0;
   padding: 12px 10px;
-  border-bottom: 1px solid #edf1ec;
+  border-bottom: 1px solid var(--relay-color-border-separator);
 }
-.pv-page .data-row--head { border-bottom: 1px solid #e6eee7; }
+.pv-page .data-row--head { border-bottom: 1px solid var(--relay-color-border-subtle); }
 .pv-page .data-row--head .data-cell {
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   font-weight: 650;
   color: var(--pv-muted);
 }
-.pv-page .data-row--interactive:hover { background: #f7fbf8; }
+.pv-page .data-row--interactive:hover { background: var(--relay-color-selection-hover); }
 .pv-page .data-cell strong {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   font-weight: 650;
-  color: #33533d;
+  color: var(--relay-color-text-primary);
 }
-.pv-page .data-cell small { font-size: 11px; color: var(--pv-muted); }
-.pv-page .data-cell--meta { font-size: 11px; color: var(--pv-muted); }
+.pv-page .data-cell small { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .data-cell--meta { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
 .pv-page .list-count-note,
-.pv-page .list-footer-note { font-size: 11px; color: var(--pv-muted); }
+.pv-page .list-footer-note { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
 
 /* ── 筛选与搜索控件（pv 皮肤对齐原型 12px 控件） ── */
-.pv-page .filter-field { font-size: 11px; color: #566f5f; font-weight: 650; }
+.pv-page .filter-field { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); font-weight: 650; }
 .pv-page .filter-field select {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   font-weight: 400;
-  border-color: #d7e4d8;
-  border-radius: 8px;
-  color: #34523b;
+  border-color: var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  color: var(--relay-color-text-primary);
 }
 .pv-page .search-field {
-  border-color: #d7e4d8;
-  border-radius: 8px;
+  border-color: var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
 }
-.pv-page .search-field input { font-size: 12px; }
+.pv-page .search-field input { font-size: var(--relay-font-size-caption); }
 
 /* ── 通用表单控件（.field / .create-form 在 pv 皮肤下对齐原型 12px 控件） ── */
-.pv-page .field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #566f5f; font-weight: 650; }
+.pv-page .field { display: flex; flex-direction: column; gap: 7px; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); font-weight: 650; }
 .pv-page .field-label { display: block; }
 .pv-page .field input,
 .pv-page .field select,
@@ -626,19 +643,19 @@
 .pv-page .create-form input,
 .pv-page .create-form select,
 .pv-page .create-form textarea {
-  border: 1px solid #d7e4d8;
-  border-radius: 8px;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
   padding: 10px 11px;
-  font-size: 12px;
-  color: #34523b;
-  background: #fff;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-primary);
+  background: var(--relay-color-bg-surface);
 }
 .pv-page .field input:focus,
 .pv-page .field select:focus,
 .pv-page .field textarea:focus,
 .pv-page .create-form input:focus,
 .pv-page .create-form select:focus,
-.pv-page .create-form textarea:focus { border-color: #69a77b; box-shadow: 0 0 0 3px #eaf6ed; outline: none; }
+.pv-page .create-form textarea:focus { border-color: var(--relay-color-focus-ring); outline: none; }
 
 /* ── 键值明细栏（rail-definition-list：设置与授权等事实行） ── */
 .pv-page .rail-definition-list { display: grid; gap: 0; margin: 0; }
@@ -646,22 +663,22 @@
   display: flex;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid #f0f3f0;
-  font-size: 12px;
+  border-bottom: 1px solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-caption);
 }
 .pv-page .rail-definition-list > div:last-child { border-bottom: 0; }
-.pv-page .rail-definition-list dt { flex: 0 0 120px; color: #566f5f; font-size: 11px; }
-.pv-page .rail-definition-list dd { margin: 0; color: #486452; overflow-wrap: anywhere; }
+.pv-page .rail-definition-list dt { flex: 0 0 120px; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.pv-page .rail-definition-list dd { margin: 0; color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
 
 /* ── 状态 chip（status-chip 在 pv 皮肤下用原型 chip 形态） ── */
 .pv-page .status-chip {
   display: inline-flex;
   padding: 4px 8px;
   border: 1px solid var(--pv-chip-border);
-  border-radius: 7px;
+  border-radius: var(--relay-radius-badge);
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   font-weight: 600;
   white-space: nowrap;
   align-items: center;
@@ -683,24 +700,24 @@
   margin: 0;
   padding: 26px 28px;
   border: 1px solid var(--pv-line);
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 3px 15px #22553506;
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-surface);
 }
 .pv-page.page-state h1,
-.pv-page .page-state h1 { font-size: 22px; letter-spacing: -.035em; color: #1e3529; margin: 8px 0 10px; }
+.pv-page .page-state h1 { font-size: 22px; letter-spacing: -.035em; color: var(--relay-color-text-primary); margin: 8px 0 10px; }
 .pv-page.page-state p,
-.pv-page .page-state p { font-size: 12px; line-height: 1.75; color: #486452; }
-.pv-page.page-state--error { border-color: #f0d7d2; }
+.pv-page .page-state p { font-size: var(--relay-font-size-caption); line-height: 1.75; color: var(--relay-color-text-secondary); }
+.pv-page.page-state--error { border-color: color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg)); }
 .pv-page.page-state .secondary-button { margin-top: 13px; }
 
 /* 空态改为「页头 + 卡片」时，卡片与 page-state 同宽（示例模式、只读预览）：
    页面框架先给标题与范围，说明留在卡内。 */
 .pv-page .pv-fixture-card { max-width: 780px; }
-.pv-page .pv-fixture-card--error { border-color: #f0d7d2; }
+.pv-page .pv-fixture-card--error { border-color: color-mix(in srgb, var(--relay-color-status-danger-text) 35%, var(--relay-color-status-danger-bg)); }
 /* 错误态卡片标题用 h2 承载（屏幕阅读器可按标题定位失败区域），视觉与卡片 strong 一致。 */
-.pv-page .pv-fixture-card .pv-card-h h2 { margin: 0; font-size: 13px; font-weight: 700; color: #294635; }
-.pv-page .pv-fixture-card .pv-card-b p { font-size: 12px; line-height: 1.75; color: #486452; margin: 0; }
+.pv-page .pv-fixture-card .pv-card-h h2 { margin: 0; font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--relay-color-text-primary); }
+.pv-page .pv-fixture-card .pv-card-b p { font-size: var(--relay-font-size-caption); line-height: 1.75; color: var(--relay-color-text-secondary); margin: 0; }
 .pv-page .pv-fixture-card .pv-card-b .secondary-button { margin-top: 13px; }
 
 /* 禁用按钮不再沿用主色底：pv 皮肤下主/次按钮的底色覆盖了全局 disabled 档，
@@ -708,9 +725,9 @@
 .pv-page .primary-button:disabled,
 .pv-page .secondary-button:disabled,
 .pv-page .danger-button:disabled {
-  background: #f1f4f1;
-  border-color: #e2e9e2;
-  color: #5a7263;
+  background: var(--relay-color-disabled-bg);
+  border-color: var(--relay-color-border-subtle);
+  color: var(--relay-color-text-muted);
   box-shadow: none;
 }
 
@@ -730,7 +747,7 @@
 @media (max-width: 1120px) {
   .pv-page { padding: 18px; }
   .pv-stats, .pv-stats.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pv-table { font-size: 11px; }
+  .pv-table { font-size: var(--relay-font-size-micro); }
   .pv-table td, .pv-table th { padding: 9px 7px; }
   .pv-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

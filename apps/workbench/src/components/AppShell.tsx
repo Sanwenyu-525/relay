@@ -163,7 +163,10 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
     // 设置内的连接页从「设置」进入：面包屑跟随入口，避免与工作空间级 /connections 完全相同。
     if (path === "/settings/connections") return [{ label: "设置", to: "/settings" }, { label: "连接与同步" }];
     // 开发工具的面包屑跟着路由一起只在开发构建里存在：不加这道折叠，生产产物里会留着
-    // 一条指向不存在入口的「AI 回复场景实验室」（产物串搜由 scripts/check-scenario-lab-isolation.mjs 跑）。
+    // 一条指向不存在入口的「AI 回复场景实验室」（产物串搜由 scripts/check-ui-conventions.mjs 跑）。
+    // 2026-11-12：/__dev/ui 是组件库检查页，不能共用场景实验室的面包屑——两页层级不同，
+    // 读成同一个页面会让「我在哪」失效。
+    if (import.meta.env.DEV && path === "/__dev/ui") return [{ label: "工作空间" }, { label: "开发工具" }, { label: "UI Playground" }];
     if (import.meta.env.DEV && path.startsWith("/__dev/")) return [{ label: "工作空间" }, { label: "开发工具" }, { label: "AI 回复场景实验室" }];
     const workbench = /^\/projects\/([^/]+)\/workbench\/(general|thesis|development)$/u.exec(path);
     if (workbench) {

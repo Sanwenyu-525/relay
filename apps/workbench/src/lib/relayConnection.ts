@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { RelayApiClient, type RelayApiConnection } from "../api/relayClient";
+import { setFrontendDiagnosticSender } from "./frontendDiagnostics";
 import { clearSessionArtifacts } from "./sessionArtifacts";
 import { clearSessionTranscriptCache } from "./sessionTranscriptCache";
 
@@ -22,6 +23,11 @@ function publish(next: Omit<RelayConnectionState, "epoch">): void {
   // 会话转录缓存按连接代次失效：换工作区/重连后不能把上一个连接的列表先画出来。
   clearSessionTranscriptCache();
   relayConnection = { ...next, epoch: relayConnection.epoch + 1 };
+  // 诊断上报跟随当前连接：live 才有可信持久化通道，fixture/断开时清空发送器。
+  const diagnostics = next.client;
+  setFrontendDiagnosticSender(diagnostics === null
+    ? null
+    : (report) => diagnostics.reportClientDiagnostic(report));
   listeners.forEach((listener) => listener());
 }
 

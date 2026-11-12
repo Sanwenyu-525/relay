@@ -15,8 +15,8 @@ import { RelayDatabase } from '../infrastructure/database.js';
 import { graphCheckpointsReady } from '../infrastructure/graph-checkpoints.js';
 import { SchemaReadinessChecker } from '../infrastructure/schema-readiness.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from '../runtime/restore-isolation.js';
-import type { RuntimeLogLevel } from '../infrastructure/runtime-log.js';
-import { configureRuntimeLog, getRuntimeLogger } from '../infrastructure/runtime-log.js';
+import { bootstrapLogDirectory, configureRuntimeLog, getRuntimeLogger, runtimeLogFile,
+  runtimeLogSettingsFromEnv } from '../infrastructure/runtime-log.js';
 import { ManagedContentStore } from '../storage/managed-content-store.js';
 import { runAssistGenerationTick } from '../application/assist-runner.js';
 import { runConversationExecutionAutoStartTick }
@@ -48,11 +48,35 @@ function readInteger(name: string, fallback: number, minimum: number, maximum: n
   return value;
 }
 
+/** 启动阶段：Worker 的顶层兜底日志必须能指出失败发生在哪一步。 */
+let startupStage = 'init';
+
 async function main(): Promise<void> {
+  // P0-2：日志在读取凭据与校验配置之前就绪。此前配置失败时 logger 还是禁用状态，
+  // 结构化日志为空，只剩 supervisor 捕获后丢弃的 stderr。目录不可用时退回临时目录。
+  const logSettings = runtimeLogSettingsFromEnv(process.env);
+  configureRuntimeLog({
+    directory: bootstrapLogDirectory(process.env.RELAY_DATA_ROOT),
+    fileName: 'relay-worker.log',
+    level: logSettings.level,
+    processName: 'worker',
+    echoToStderr: true,
+    maxBytes: logSettings.maxBytes,
+    retainFiles: logSettings.retainFiles,
+  });
+  const workerLog = getRuntimeLogger('worker');
+  workerLog.info('worker_startup_begin', {
+    stage: startupStage, node_version: process.version,
+    bootstrap_log_file: runtimeLogFile() ?? null,
+  });
+  for (const issue of logSettings.issues) workerLog.warn('runtime_log_env_invalid', { issue });
+
   // P2：Worker 与 API 各自是独立进程，必须各自物化凭据引用；否则会出现「API 认得这个连接、
   // Worker 认为未配置」的分裂身份，而 Worker 才是真正发起模型调用的那一侧。
   // 必须在 validateModelPortConfig 之前完成：否则只有引用没有明文时会被判成配置残缺。
+  startupStage = 'credentials';
   await applyCredentialEnvFromStore(process.env);
+  startupStage = 'config';
   const databaseUrl = process.env.RELAY_DB_URL?.trim();
   const dataRoot = process.env.RELAY_DATA_ROOT?.trim();
   const validDataRoot = dataRoot !== undefined && isAbsolute(dataRoot) &&
@@ -61,17 +85,31 @@ async function main(): Promise<void> {
       dataRoot === undefined || !validDataRoot) {
     throw new Error('worker configuration invalid');
   }
+  startupStage = 'restore_isolation';
   await assertRestoreNotIsolated(dataRoot);
   // Worker is a separate process: its log must land in its own file, because desktop
-  // mode disables the Fastify logger entirely.
+  // mode disables the Fastify logger entirely. Level/rotation come from the same parsed
+  // settings as the bootstrap logger so an invalid value cannot silently change rotation.
+  startupStage = 'runtime_log';
+  const previousLogFile = runtimeLogFile();
   configureRuntimeLog({
     directory: resolve(dataRoot, 'logs'),
     fileName: 'relay-worker.log',
-    level: (process.env.RELAY_LOG_LEVEL?.trim() ?? 'info') as RuntimeLogLevel,
+    level: logSettings.level,
+    processName: 'worker',
     echoToStderr: true,
+    maxBytes: logSettings.maxBytes,
+    retainFiles: logSettings.retainFiles,
+  });
+  workerLog.info('runtime_log_configured', {
+    stage: startupStage, log_file: runtimeLogFile() ?? null,
+    previous_log_file: previousLogFile ?? null, level: logSettings.level,
+    max_bytes: logSettings.maxBytes, retain_files: logSettings.retainFiles,
   });
   // A partially configured real model must fail the Worker before any delivery.
+  startupStage = 'model_config';
   validateModelPortConfig(process.env);
+  startupStage = 'worker_options';
   const workerId = process.env.RELAY_WORKER_ID?.trim() || `worker:${randomUUID()}`;
   const pollMs = readInteger('RELAY_WORKER_POLL_MS', 250, 20, 60_000);
   const leaseMs = readInteger('RELAY_WORKER_LEASE_MS', 30_000, 100, 600_000);
@@ -79,7 +117,7 @@ async function main(): Promise<void> {
   // 非法值按配置错误拒绝（与其余 RELAY_WORKER_* 整数一致）。
   const maxConcurrentExecutions = readInteger('RELAY_MAX_CONCURRENT_EXECUTIONS',
     DEFAULT_MAX_CONCURRENT_EXECUTIONS, 1, 64);
-  getRuntimeLogger('worker').info('worker_started', {
+  workerLog.info('worker_started', {
     worker_id: workerId, poll_ms: pollMs, lease_ms: leaseMs,
     max_concurrent_executions: maxConcurrentExecutions,
   });
@@ -93,13 +131,16 @@ async function main(): Promise<void> {
   }, () => controller.abort());
   let stopCatalogRefresh: (() => Promise<void>) | undefined;
   try {
+    startupStage = 'database_readiness';
     const readiness = await database.checkReadiness(new SchemaReadinessChecker(MIGRATIONS_DIRECTORY));
     if (readiness.database !== 'up' || readiness.schema !== 'up') {
       throw new Error('worker database schema unavailable');
     }
+    startupStage = 'graph_checkpoints';
     if (!(await graphCheckpointsReady(database.executor, databaseUrl))) {
       throw new Error('worker graph checkpoint schema unavailable');
     }
+    startupStage = 'worker_loop';
     process.stdout.write(`${JSON.stringify({ type: 'worker_ready', worker_id: workerId })}\n`);
     const storage = new ManagedContentStore(dataRoot);
     const catalogRefresh = startBackgroundModelCatalogSync({ db: database.executor,
@@ -127,6 +168,7 @@ async function main(): Promise<void> {
     if (assistModelPort === undefined) {
       process.stderr.write(`${JSON.stringify({ type: 'worker_model_unavailable',
         code: 'BACKGROUND_MODEL_UNAVAILABLE' })}\n`);
+      workerLog.warn('worker_model_unavailable', { code: 'BACKGROUND_MODEL_UNAVAILABLE' });
     }
     // test 环境默认不启用并发闸（既有崩溃用例遗留在途行会把闸变成抖动源）；
     // 显式设置 RELAY_MAX_CONCURRENT_EXECUTIONS 即为显式开启。
@@ -137,6 +179,8 @@ async function main(): Promise<void> {
         workerId, dataRoot, checkpointUrl: databaseUrl, leaseMs, signal: controller.signal,
         ...(fakeModelDelayMs === 0 ? {} : { fakeModelDelayMs }),
         onClaim: async (claim) => {
+          workerLog.info('worker_claimed', { worker_id: workerId, command_id: claim.commandId,
+            run_id: claim.runId, epoch: claim.epoch.toString(), kind: claim.kind });
           process.stdout.write(`${JSON.stringify({ type: 'worker_claimed', command_id: claim.commandId,
             run_id: claim.runId, epoch: claim.epoch.toString() })}\n`);
           if (process.env.NODE_ENV === 'test' &&
@@ -197,6 +241,8 @@ async function main(): Promise<void> {
         },
       });
       if (result !== undefined) {
+        workerLog.info('worker_settled', { worker_id: workerId, command_id: result.commandId,
+          run_id: result.runId, outcome: result.outcome });
         process.stdout.write(`${JSON.stringify({ type: 'worker_settled', command_id: result.commandId,
           run_id: result.runId, outcome: result.outcome })}\n`);
       }
@@ -336,8 +382,9 @@ try {
       error.message.endsWith(' invalid'));
   process.stderr.write(`${configFailure ? 'worker_configuration_failed' : 'worker_failed'}\n`);
   getRuntimeLogger('worker').error(configFailure ? 'worker_configuration_failed' : 'worker_failed', {
-    error_name: error instanceof Error ? error.name : 'NON_ERROR',
-    error_message: error instanceof Error ? error.message : String(error),
+    stage: startupStage,
+    log_file: runtimeLogFile() ?? null,
+    error,
   });
   if (error instanceof RestoreIsolationError) {
     process.stderr.write(`${error.code}\n`);

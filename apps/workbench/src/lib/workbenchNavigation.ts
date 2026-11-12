@@ -67,12 +67,17 @@ export function devToolsNavState(path: string, search: string, state: unknown):
 export function bottomWorkbenchNavigation(options: { readonly includeDevTools: boolean;
   readonly devToolsState?: { readonly from: string } }): readonly WorkbenchNavEntry[] {
   return [
-    // 开发工具入口只在开发构建里存在：路由本身是构建期隔离的，这里少一条入口只是不让它藏在侧栏外面。
-    // 悬停提示写实验室全名，入口名仍是一个不占宽度的「开发工具」。
-    ...(options.includeDevTools ? [{
-      label: "开发工具", to: "/__dev/assist-scenarios", icon: FlaskConical, title: "AI 回复场景实验室",
-      ...(options.devToolsState === undefined ? {} : { state: options.devToolsState })
-    }] : []),
+    // 2026-11-12：开发工具入口只在开发构建里存在。此前写成 `options.includeDevTools ? [{...}] : []`，
+    // 判断在运行时、字面量留在产物里——生产包仍能搜到 `/__dev/assist-scenarios` 与实验室标题
+    // （UI-UNIFY-01 的产物扫描抓到的就是这处）。改成构建期常量后，DEV=false 时整个数组被折成 []，
+    // 字符串随之消失；`includeDevTools` 仍保留为运行时开关，供测试显式关掉入口。
+    ...(options.includeDevTools ? devToolsEntries(options.devToolsState) : []),
     { label: "设置", to: "/settings", icon: Settings }
   ];
 }
+
+const devToolsEntries = (state: { readonly from: string } | undefined): readonly WorkbenchNavEntry[] =>
+  import.meta.env.DEV ? [{
+    label: "开发工具", to: "/__dev/assist-scenarios", icon: FlaskConical, title: "AI 回复场景实验室",
+    ...(state === undefined ? {} : { state })
+  }] : [];

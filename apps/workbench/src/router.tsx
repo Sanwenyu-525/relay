@@ -54,6 +54,14 @@ const AuroraGlassLabView: ComponentType = import.meta.env.DEV
   ? lazy(() => import("./dev/AuroraGlassLabView"))
   : () => null;
 
+/**
+ * UI Playground（UI-UNIFY-01）：组件库的可视化检查页，同样在构建期隔离。
+ * 与上两条同一写法——`lazy()` 写在条件里，生产构建连 chunk 一起摇掉。
+ */
+const UiLabView: ComponentType = import.meta.env.DEV
+  ? lazy(() => import("./dev/UiLabView"))
+  : () => null;
+
 /** 与归档 Vue router.ts 的 11 条记录一一对应，query 子页由对应组件处理。 */
 export const workbenchRoutes: RouteObject[] = [{
   path: "/",
@@ -89,6 +97,7 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "knowledge", element: <KnowledgeView /> },
     { path: "connections", element: <ConnectionsView /> },
     { path: "settings", element: <SettingsView /> },
+    { path: "settings/diagnostics", element: <SettingsView initialGroup="diagnostics" /> },
     { path: "settings/connections", element: <ConnectionsView /> },
     { path: "runs/:id", element: <RunView /> },
     { path: "tasks/:id", element: <TaskSkillView /> },
@@ -97,7 +106,10 @@ export const workbenchRoutes: RouteObject[] = [{
       <ScenarioLabView /></Suspense> },
       { path: "__dev/aurora-glass", element: <Suspense
         fallback={createElement("p", { className: "loading-text", role: "status" }, "正在载入 Aurora Glass 原型…")}>
-        <AuroraGlassLabView /></Suspense> }] : []),
+        <AuroraGlassLabView /></Suspense> },
+      { path: "__dev/ui", element: <Suspense
+        fallback={createElement("p", { className: "loading-text", role: "status" }, "正在载入 UI Playground…")}>
+        <UiLabView /></Suspense> }] : []),
     { path: "*", element: <UnsupportedView /> }
   ]
 }];

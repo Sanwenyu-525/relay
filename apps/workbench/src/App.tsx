@@ -7,6 +7,7 @@ import AppDialog from "./components/AppDialog";
 import AppShell from "./components/AppShell";
 import DesktopTitleBar from "./components/DesktopTitleBar";
 import { currentDraftGuard, hasUnsavedDraft } from "./lib/draftGuard";
+import { reportFrontendError } from "./lib/frontendDiagnostics";
 import { activateRelayConnection, useFixtureData, useRelayConnection } from "./lib/relayConnection";
 
 function isConnection(value: unknown): value is RelayApiConnection {
@@ -55,7 +56,9 @@ export default function App() {
         if (!active) return;
         activateRelayConnection(input);
         setDesktopStatus("idle");
-      } catch {
+      } catch (caught) {
+        // 连接尚未建立时上报会进本机队列，下一次 live 连接补交；不改变降级为示例数据的判定。
+        reportFrontendError({ kind: "init", error: caught, route: "desktop_bootstrap" });
         if (!active) return;
         useFixtureData();
         setDesktopStatus("error");

@@ -14,8 +14,8 @@ import { applyCredentialEnvFromStore, CredentialEnvError } from './credentials/c
 import { shutdownComputerRuntimeClient } from './computer/client-holder.js';
 import { RelayDatabase } from './infrastructure/database.js';
 import { SchemaReadinessChecker } from './infrastructure/schema-readiness.js';
-import { configureRuntimeLog, getRuntimeLogger, logRuntimeEvent, runtimeLogFile }
-  from './infrastructure/runtime-log.js';
+import { bootstrapLogDirectory, configureRuntimeLog, getRuntimeLogger, logRuntimeEvent,
+  runtimeLogFile, runtimeLogSettingsFromEnv } from './infrastructure/runtime-log.js';
 import { assertRestoreNotIsolated, RestoreIsolationError } from './runtime/restore-isolation.js';
 import {
   desktopChildEnvironment,
@@ -99,41 +99,76 @@ function installShutdownHandlers(
   }
 }
 
+/** 启动阶段：顶层兜底日志也要能说出失败发生在哪一步。 */
+let startupStage = 'init';
+
 async function main(): Promise<void> {
   let config: ApiConfig;
   const desktopChild = process.argv.includes('--desktop-child');
   let desktopFrame: DesktopStartupFrame | undefined;
   let workspaceId: string | undefined;
 
+  // P0-2：日志必须在任何可能失败的步骤（启动帧、凭据、配置、数据库）之前就绪。
+  // RELAY_DATA_ROOT 缺失时退回系统临时目录，保证“配置本身坏了”也有落点。
+  const logSettings = runtimeLogSettingsFromEnv(process.env);
+  configureRuntimeLog({
+    directory: bootstrapLogDirectory(process.env.RELAY_DATA_ROOT),
+    fileName: 'relay-api.log',
+    level: logSettings.level,
+    processName: 'api',
+    echoToStderr: !desktopChild,
+    maxBytes: logSettings.maxBytes,
+    retainFiles: logSettings.retainFiles,
+  });
+  const startupLog = getRuntimeLogger('api-startup');
+  startupLog.info('api_startup_begin', {
+    stage: startupStage, desktop_child: desktopChild, node_version: process.version,
+    bootstrap_log_file: runtimeLogFile() ?? null,
+  });
+  for (const issue of logSettings.issues) startupLog.warn('runtime_log_env_invalid', { issue });
+
   try {
     if (desktopChild) {
+      startupStage = 'desktop_frame';
       desktopFrame = await readDesktopStartupFrame();
       workspaceId = desktopWorkspaceId(process.env.RELAY_DESKTOP_WORKSPACE_ID);
     }
     // P2：模型凭据可以只以 `*_API_KEY_REF` 形式出现（存在系统凭据库里）。这里在**任何**
     // 配置读取之前把引用物化成进程内环境，之后所有同步读取点的行为完全不变。
     // 失败必须让进程起不来：静默回落明文或回落「未配置」都会悄悄改变模型身份。
+    startupStage = 'credentials';
     await applyCredentialEnvFromStore(process.env);
     const env = desktopFrame === undefined ? process.env : desktopChildEnvironment({
       frame: desktopFrame,
       base: process.env,
       extraOrigin: process.env.RELAY_DESKTOP_EXTRA_ORIGIN,
     });
+    startupStage = 'config';
     config = {
       ...loadConfig(env, findRepositoryRoot(), { desktop: desktopChild }),
       desktopMode: desktopChild,
     };
+    startupStage = 'restore_isolation';
     await assertRestoreNotIsolated(config.dataRoot);
+    startupStage = 'runtime_log';
+    const previousLogFile = runtimeLogFile();
     configureRuntimeLog({
       directory: config.logDirectory ?? resolve(config.dataRoot, 'logs'),
       fileName: 'relay-api.log',
       level: config.logLevel,
+      processName: 'api',
       echoToStderr: !config.desktopMode,
       maxBytes: config.logMaxBytes,
       retainFiles: config.logRetainFiles,
     });
+    startupLog.info('runtime_log_configured', {
+      stage: startupStage, log_file: runtimeLogFile() ?? null, previous_log_file: previousLogFile ?? null,
+      level: config.logLevel, max_bytes: config.logMaxBytes ?? null,
+      retain_files: config.logRetainFiles ?? null,
+    });
   } catch (error) {
     if (error instanceof RestoreIsolationError) {
+      startupLog.error('api_startup_failed', { stage: startupStage, failure_code: error.code, error });
       if (desktopChild) {
         writeDesktopEvent({ type: 'desktop_error', nonce: desktopFrame?.nonce ?? '', code: error.code });
         process.stdin.destroy();
@@ -142,6 +177,15 @@ async function main(): Promise<void> {
       process.exitCode = CONFIG_FAILURE_EXIT_CODE;
       return;
     }
+    const failureCode = error instanceof ConfigError || error instanceof CredentialEnvError
+      ? 'CONFIG_INVALID' : 'DESKTOP_STARTUP_INVALID';
+    startupLog.error('api_startup_failed', {
+      stage: startupStage,
+      failure_code: desktopChild ? failureCode : 'STARTUP_INVALID',
+      credential_error_code: error instanceof CredentialEnvError ? error.code : null,
+      config_issues: error instanceof ConfigError ? error.issues : null,
+      error,
+    });
     if (desktopChild) {
       writeDesktopEvent({
         type: 'desktop_error', nonce: desktopFrame?.nonce ?? '',
@@ -161,6 +205,7 @@ async function main(): Promise<void> {
     throw error;
   }
 
+  startupStage = 'server_create';
   const app = createServer(config);
   const database = new RelayDatabase(config, (error) => {
     app.log.error({ err: error }, 'database_pool_error');
@@ -177,6 +222,7 @@ async function main(): Promise<void> {
 
   // F26/M4a：浏览器扩展桥接。路由必须在 Fastify 开始 listen 前注册；
   // 令牌与端口写入数据根的 bridge.json（Worker 与扩展共用）。
+  startupStage = 'browser_bridge';
   const bridge = await ensureBridgeRegistration(config.dataRoot, config.port);
   registerBrowserBridgeRoutes(app, {
     dataRoot: config.dataRoot, database, bridgeToken: bridge.token,
@@ -189,12 +235,13 @@ async function main(): Promise<void> {
     }
     app.log.error({ err: error }, 'api_listen_failed');
     getRuntimeLogger('api').error('api_listen_failed', {
-      bind_host: config.bindHost, port: config.port, error,
+      stage: 'listen', bind_host: config.bindHost, port: config.port, error,
     });
     await settle(database.close(), CLEANUP_TIMEOUT_MS);
     process.exitCode = FAILURE_EXIT_CODE;
   };
 
+  startupStage = 'listen';
   try {
     await app.listen({ host: config.bindHost, port: config.port });
   } catch (error) {
@@ -247,8 +294,10 @@ async function main(): Promise<void> {
         throw new Error('DESKTOP_LISTENER_INVALID');
       }
       const schemaReadiness = new SchemaReadinessChecker(MIGRATIONS_DIRECTORY);
+      startupStage = 'desktop_readiness';
       await probeDesktopReadiness(database, schemaReadiness, workspaceId);
       await probeDesktopBoundary(address.port, desktopFrame.bearerToken);
+      startupStage = 'desktop_ready';
       writeDesktopEvent({
         type: 'desktop_ready', nonce: desktopFrame.nonce,
         port: address.port, workspaceId, nodeVersion: process.version,
@@ -259,10 +308,13 @@ async function main(): Promise<void> {
         'DATABASE_UNAVAILABLE', 'SCHEMA_UNAVAILABLE', 'WORKSPACE_UNAVAILABLE',
         'DESKTOP_BOUNDARY_FAILED', 'DESKTOP_LISTENER_INVALID',
       ]);
+      const failureCode = error instanceof Error && knownCodes.has(error.message)
+        ? error.message : 'DESKTOP_READY_FAILED';
+      getRuntimeLogger('api').error('desktop_ready_failed', {
+        stage: startupStage, failure_code: failureCode, workspace_id: workspaceId, error,
+      });
       writeDesktopEvent({
-        type: 'desktop_error', nonce: desktopFrame.nonce,
-        code: error instanceof Error && knownCodes.has(error.message)
-          ? error.message : 'DESKTOP_READY_FAILED',
+        type: 'desktop_error', nonce: desktopFrame.nonce, code: failureCode,
       });
       await settle(app.close(), CLEANUP_TIMEOUT_MS);
       await settle(database.close(), CLEANUP_TIMEOUT_MS);
@@ -270,6 +322,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  startupStage = 'startup_probe';
   const startupProbe = await database.ping();
 
   if (!startupProbe.ok) {
@@ -281,4 +334,14 @@ async function main(): Promise<void> {
 
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  // 顶层兜底：配置通过后仍有桥接/端口/探针等启动步骤可能抛错。此前这些异常只走
+  // 未处理拒绝，桌面模式下没有任何落盘记录。这里先写结构化日志再退出。
+  getRuntimeLogger('api').fatal('api_unhandled_startup_failure', {
+    stage: startupStage, error,
+  });
+  process.stderr.write(`${error instanceof Error ? error.stack ?? `${error.name}: ${error.message}` : 'api startup failed'}\n`);
+  process.exit(FAILURE_EXIT_CODE);
+}

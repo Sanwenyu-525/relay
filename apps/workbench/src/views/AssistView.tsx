@@ -3877,9 +3877,10 @@ const MIN_PANEL_HEIGHT_PX = 168;
  * 独占（useMenuExclusive）、点外即收、Esc 收起还焦点、焦点进入浮层。
  *
  * 2026-10-30（第三轮，0145）：浮层正文整体交给 `ContextUsagePanel`——
- * 用量摘要 / 上下文构成 / 会话档位三段各自有来源，圆环、占比、余量都取同一次调用的记录。
- * 圆环与浮层共用一份会话用量投影（`usage`），不再各自推导分母；档位改成会话级，
- * 浮层里不再有「跟随应用默认」。读数未知时轨道虚线、不画弧，与「真的 0%」分开。
+ * 用量摘要 / 上下文构成 / 会话档位三段各自有来源；分子取最近一次调用的真实读数，
+ * 分母取当前会话档位（2026-11-11 用户指令），圆环与浮层共用同一份投影（`usage`）。
+ * 档位改成会话级，浮层里不再有「跟随应用默认」。读数未知时轨道虚线、不画弧，
+ * 与「真的 0%」分开。
  */
 function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSaved }: {
   readonly usage: RelaySessionContextUsage | null;
@@ -3892,9 +3893,9 @@ function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSa
 }) {
   const lastCall = usage?.lastCall ?? null;
   const inputTokens = lastCall?.inputTokens ?? null;
-  // 分母**只**用那次调用冻结的预算。历史调用没有可靠冻结预算时宁可显示「预算未知」，
-  // 也不能拿当前档位去除历史读数——那会显示一个未经证实的百分比。
-  const limit = lastCall?.reservedTokens ?? null;
+  // 2026-11-11 用户指令：占比直接按**当前会话档位**解释，与浮层、三档单选共用一个分母。
+  // 那次调用冻结的预算不再参与圆环计算，只在浮层里作为差异说明保留。
+  const limit = usage?.budget.tokens ?? null;
   const ratio = inputTokens !== null && limit !== null && limit > 0 ? inputTokens / limit : null;
   const percent = ratio === null ? null : formatRatioPercent(ratio);
   const high = ratio !== null && ratio >= 0.8;
@@ -3905,9 +3906,7 @@ function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSa
     : inputTokens === null ? "上下文用量未上报"
       : ratio === null ? `上下文 ${inputText} tokens · 预算未知`
         : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
-          + (over ? " · 已超出预算" : "")
-          // 2026-11-10：改档后悬停读数仍按那次调用的冻结预算解释，补一句避免与三档单选互相矛盾。
-          + (usage !== null && usage.budget.tokens !== limit ? " · 按该次调用冻结预算" : "");
+          + (over ? " · 已超出当前档位" : "");
   const cacheRead = lastCall?.cacheReadTokens ?? null;
   const hitRate = inputTokens !== null && cacheRead !== null && inputTokens > 0 &&
     cacheRead <= inputTokens ? cacheRead / inputTokens : null;
@@ -4049,7 +4048,7 @@ function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSa
   // 标题旁的小信息图标：口径说明只留这一句，悬停/聚焦即浮出，不占浮层正文。
   const { tooltipHandlers: infoHandlers, tooltipNode: infoTooltipNode,
     dismissTooltip: dismissInfoTooltip } = usePathTooltip(
-    () => (open ? "总用量取最近一次模型调用的真实读数，占比相对那次调用冻结的预算；分项按请求文本估算，不是 Provider 的分词结果。" : null),
+    () => (open ? "总用量取最近一次模型调用的真实读数，占比相对当前会话档位；分项按请求文本估算，不是 Provider 的分词结果。" : null),
     "context-meter-info-tooltip");
   // 浮层关掉后信息图标的锚点已经不在文档里，已浮出的提示要一并收掉。
   useEffect(() => {
@@ -5376,8 +5375,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   /* CONTEXT_USAGE_SESSION（0145 / 2026-10-30）：圆环与浮层共用**同一份**会话用量投影。
      以前圆环的分母读工作区档位、分子读消息上的聚合用量，两处口径不同：换过档之后
      同一份读数会变形，多轮工具调用还会把几轮输入量加在一起当成「这次上下文」。
-     现在分母取那次调用冻结的预算（`reservedTokens`），分子取那次调用的输入量，
-     档位单独从 `budget` 读——三段各自有来源，不互相顶替。 */
+     2026-11-11 用户指令：分母直接取**当前会话档位**（`budget.tokens`），圆环、浮层与
+     三档单选共用一个分母；分子取那次调用的输入量；冻结预算 `reservedTokens` 只作差异说明。 */
   const [contextUsage, setContextUsage] = useState<RelaySessionContextUsage | null>(null);
   const [contextUsageLoading, setContextUsageLoading] = useState(true);
   const [contextUsageError, setContextUsageError] = useState<string | null>(null);

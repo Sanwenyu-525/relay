@@ -18,10 +18,13 @@ import { resourceNotFound } from './domain-error.js';
  *
  * 三件事刻意分开，因为它们回答三个不同的问题：
  *   * `budget`——这个会话**现在**按哪一档走（会话级事实，可随时改）；
- *   * `last_call.reserved_tokens`——历史那一次调用**当时**申请了多少额度。档位改过之后
- *     两者不同，历史占比必须按当时的额度解释，否则同一份读数会因为后来换档而变形；
+ *   * `last_call.reserved_tokens`——历史那一次调用**当时**申请了多少额度，作为历史依据保留；
  *   * `last_call.input_tokens`——Provider 真的回了多少输入量。这是唯一可以直接相信的
  *     总量；分项是本地按请求文本估算的，两者口径不同，因此不强行相加相等。
+ *
+ * 前端占比的分母由产品口径决定：2026-11-11 用户指令改为**当前档位**（`budget.tokens`），
+ * 圆环、浮层与三档单选共用同一个分母；`reserved_tokens` 只在两者不同时作为差异说明出现。
+ * 投影同时给出两者，读法由界面选择，后端不替界面挑选分母。
  *
  * 不返回提示词、文件正文、工具输出或任何路径：面板只需要数值与来源分类。
  */
@@ -55,7 +58,7 @@ export interface SessionContextUsageProjection {
     readonly output_tokens: number | null;
     readonly cache_read_tokens: number | null;
     readonly cache_creation_tokens: number | null;
-    /** 那次调用冻结的单次预算；没有记录为 null（此时占比只能按当前档位解释）。 */
+    /** 那次调用冻结的单次预算；没有记录为 null。占比按当前档位计算，它只作差异说明。 */
     readonly reserved_tokens: number | null;
     readonly settled_at: string | null;
     /** 分项构成；`null` = 这次调用没有分项统计（0145 之前的数据或非对话调用）。 */

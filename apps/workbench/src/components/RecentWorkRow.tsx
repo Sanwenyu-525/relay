@@ -54,6 +54,12 @@ export interface RecentWorkRowProps {
    * 状态同时写进行的可访问名称，不只靠颜色。
    */
   readonly unread: boolean;
+  /**
+   * 任务（聊天）行有 Run 正在执行（2026-11-10 用户二次指认：环要挂在执行中的那一行右侧，
+   * 不是项目分组标题上）。判据由调用方按任务投影的 `executor.run_id` 给出，行内不猜状态；
+   * 环是装饰元素，同一事实写进行按钮的可访问名称。
+   */
+  readonly running: boolean;
   /** 已按本地日期简写的更新时刻；没有更新时间时为 null，不编一个。 */
   readonly timeLabel: string | null;
   readonly timeValue: string | null;
@@ -197,7 +203,7 @@ function RowSummary({ anchor, cardId, title, timeLabel, timeValue, timeTitle, sc
   </div>;
 }
 
-export default function RecentWorkRow({ kind, title, testId, label, active, pinned, unread, timeLabel,
+export default function RecentWorkRow({ kind, title, testId, label, active, pinned, unread, running, timeLabel,
   timeValue, timeTitle, scopeName, rowKey, dragging, carryY, session, client, onOpen, onChanged, onStale,
   selected, onSelectedChange, selectionBusy }: RecentWorkRowProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -243,6 +249,15 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
         onPointerLeave={hide}
         onFocus={(event) => show(event.currentTarget)}
         onBlur={hide}
+        onKeyDown={(event) => {
+          // Esc 收起当前可见的摘要卡（2026-11-11 验收整改：键盘聚焦后 Esc 原先关不掉它）。
+          // 焦点留在行上，不需要移焦，也不发命令、不打开会话；stopPropagation 防止同一记
+          // Esc 误关外层窗口。摘要没开着时不拦：⋯ 菜单开着时 anchor 已被置空，Esc 交给
+          // 菜单自己的处理（SessionRowMenu），外层窗口的 Esc 语义也不受影响。
+          if (event.key !== "Escape" || anchor === null) return;
+          event.stopPropagation();
+          hide();
+        }}
         onClick={onOpen}>
         <span className="recent-work-copy">
           {/* 类型差异只用一枚图标：会话有、任务没有，不靠读文字区分。
@@ -259,6 +274,15 @@ export default function RecentWorkRow({ kind, title, testId, label, active, pinn
           {/* 置顶只画一枚图标 + 无障碍文本：行只有一档高，加字会把标题挤短。 */}
           {pinned && <span className="recent-work-pin" title="已置顶" aria-label="已置顶">
             <Pin aria-hidden="true" />置顶</span>}
+          {/* 运行指示（2026-11-10 用户二次指认）：标题右侧、行尾一枚带缺口的点状环匀速旋转。
+              标题 `flex: 1` 把环顶到行右缘（任务行没有 ⋯ 菜单，右端不与其它控件抢位）；
+              环本身 `aria-hidden`，同一事实由行按钮的可访问名称「有任务正在执行」承担。 */}
+          {running && <span className="recent-work-running" aria-hidden="true" title="有任务正在执行">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M6.34 17.66 A8 8 0 1 1 17.66 17.66" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeDasharray="0.1 4.2" />
+            </svg>
+          </span>}
         </span>
       </button>
       {session !== undefined && <SessionRowMenu ref={menuRef} client={client} session={session}

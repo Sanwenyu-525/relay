@@ -360,20 +360,23 @@ describe("设置页模型端口状态", () => {
     expect(mounted.wrapper.find('[data-testid="plan-execution"]').exists()).toBe(false);
   });
 
-  it("四个页签按用途组织，未访问的页签不挂载内容", async () => {
+  it("五个页签按用途组织，未访问的页签不挂载内容", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/settings"); unmount = mounted.unmount;
     expect(mounted.wrapper.findAll('[role="tab"]').map((tab) => tab.text()))
-      .toEqual(["通用设置", "AI 与模型", "权限与执行", "工作台"]);
+      .toEqual(["通用设置", "AI 与模型", "权限与执行", "工作台", "开发者诊断"]);
     expect(mounted.wrapper.find('[data-testid="settings-ai-scope"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="execution-permissions"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="settings-workbench-preferences"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="diagnostics-logs"]').exists()).toBe(false);
     await mounted.wrapper.get('[data-testid="settings-group-execution"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="execution-permissions"]').text()).toContain("当前执行权限");
     expect(mounted.wrapper.get('[data-testid="execution-permissions"]').text()).toContain("打开连接与权限");
     expect(mounted.wrapper.get("#settings-panel-execution").findAll("select")).toHaveLength(0);
     await mounted.wrapper.get('[data-testid="settings-group-workbench"]').trigger("click");
     expect(mounted.wrapper.get('[data-testid="settings-default-workbench"]').exists()).toBe(true);
+    await mounted.wrapper.get('[data-testid="settings-group-diagnostics"]').trigger("click");
+    expect(mounted.wrapper.find('[data-testid="diagnostics-logs"]').exists()).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

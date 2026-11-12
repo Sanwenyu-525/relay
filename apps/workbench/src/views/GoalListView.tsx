@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, RotateCcw, Target } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
+import { Button, buttonClassName } from "../ui";
 import type { RelayApiClient, RelayGoalRecord } from "../api/relayClient";
 import { RelayApiError } from "../api/relayClient";
 import { goalStatusLabels } from "../lib/labels";
@@ -41,7 +42,7 @@ export default function GoalListView() {
     : <div className="pv-page goals-page">
       <PageHeader title="目标" testId="goal-list-head" overline="Goals"
         lede="目标与聊天里的自主执行目标是两套事实。"
-        actions={<Link className="secondary-button" to="/projects" data-testid="goal-list-back-projects">返回项目</Link>} />
+        actions={<Link className={buttonClassName({ variant: "secondary" })} to="/projects" data-testid="goal-list-back-projects">返回项目</Link>} />
       {/* 示例空态也保留页头与卡片框：示例模式不是另一种页面，只是这次没有可读事实。 */}
       <section className="pv-card pv-fixture-card" data-testid="goal-list-fixture-gap">
         <div className="pv-card-h"><strong>示例模式没有正式 Goal 列表</strong></div>
@@ -108,8 +109,8 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
       <PageHeader title="目标" testId="goal-list-head" overline="Goals"
         lede="目标与聊天里的自主执行目标是两套事实。"
         actions={<>
-          <Link className="secondary-button" to="/projects" data-testid="goal-list-back-projects">返回项目</Link>
-          <Link className="primary-button" to="/projects?view=goal" data-testid="goal-list-create"><Plus aria-hidden="true" />记录目标</Link>
+          <Link className={buttonClassName({ variant: "secondary" })} to="/projects" data-testid="goal-list-back-projects">返回项目</Link>
+          <Link className={buttonClassName({ variant: "primary" })} to="/projects?view=goal" data-testid="goal-list-create"><Plus aria-hidden="true" />记录目标</Link>
         </>} />
       <nav className="skill-tabs pv-inline-filter" aria-label="目标范围">
         {scopes.map((item) => <Link key={item.key}
@@ -125,8 +126,8 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
       {loading ? <section className="page-state" role="status"><p>正在读取目标列表…</p></section>
         : error ? <section className="page-state page-state--error" role="alert">
           <p>{error}</p>
-          <button className="secondary-button" type="button" data-testid="goal-list-reload"
-            onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button>
+          <Button variant="secondary" data-testid="goal-list-reload"
+            icon={RotateCcw} onClick={() => void loadPage(null)}>重新读取</Button>
         </section>
           : items.length === 0
             ? <EmptyState icon={Target} as="h2"
@@ -136,8 +137,8 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
                 ? "归档不会删除目标；没有目标归档过时，这个范围就是空的。"
                 : "目标可以先独立存在，之后再关联到一个或多个项目。创建目标与建项目是两条独立命令。"}
               actions={<>
-                <Link className="primary-button" to="/projects?view=goal">记录第一个目标</Link>
-                <Link className="secondary-button" to="/projects">先看项目</Link>
+                <Link className={buttonClassName({ variant: "primary" })} to="/projects?view=goal">记录第一个目标</Link>
+                <Link className={buttonClassName({ variant: "secondary" })} to="/projects">先看项目</Link>
               </>} />
             : <>
               <p className="list-footer-note" data-testid="goal-list-count">
@@ -164,19 +165,19 @@ function LiveGoalList({ client, scope }: { client: RelayApiClient; scope: GoalSc
               </div>
               {moreError && <p className="action-error" role="alert" data-testid="goal-list-more-error">
                 {moreError}；已读目标与原游标保留。
-                <button className="text-button" type="button" data-testid="goal-list-more-retry"
-                  disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>按原游标重试</button>
+                <Button variant="text" data-testid="goal-list-more-retry"
+                  disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>按原游标重试</Button>
               </p>}
-              {nextCursor && <button className="secondary-button" type="button" data-testid="goal-list-more"
+              {nextCursor && <Button variant="secondary" data-testid="goal-list-more"
                 disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>
-                {loadingMore ? "正在加载" : "加载更多目标"}</button>}
+                {loadingMore ? "正在加载" : "加载更多目标"}</Button>}
             </>}
       <details className="page-explanation"><summary>目标与项目的关系</summary>
         <p className="helper-text">一个 Goal 可以关联多个 Project；关联与解除都是独立命令。
           关联不代表任何 Task 自动对齐该 Goal，也不改变项目阶段、执行权限或审批。</p>
       </details>
-      <p className="metadata-row"><button className="text-button" type="button"
-        onClick={() => navigate("/projects")}>返回项目列表</button></p>
+      <p className="metadata-row"><Button variant="text"
+        onClick={() => navigate("/projects")}>返回项目列表</Button></p>
     </div>
   </section>;
 }

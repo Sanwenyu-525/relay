@@ -1,10 +1,10 @@
 {
   "metadata": {
-    "version": "0.5.0",
+    "version": "0.6.0",
     "status": "Proposed",
     "theme": "light",
-    "updated": "2026-10-14",
-    "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。",
+    "updated": "2026-11-12",
+    "format": "Relay 文档用扁平 token 数据；不是 DTCG 兼容声明或已集成的主题包。0.6.0（2026-11-12，UI-UNIFY-01）新增 color.border.subtle、control.height.page、font.size.micro、font.size.pageBase、layout.page.maxWidth、layout.page.gutter：承接 .pv-page 原来写死的页面档数值，没有新增色相。",
     "basis": "2026-10-01 用户选定工作主线图作为重做基准；2026-10-14 用户选定 Relay V4.2 页面原型作为配色与密度的当前基准，把原型那套冷绿语言收敛进本文件（不是新增第二套色值表）。原型中的辅助文字过浅（#88998D 在画布上仅 2.92:1），本文件在同色系内加深到通过既有 contrastChecks；色值为归一推荐，尺寸/响应式待实际页面与 Windows 验证。",
     "unit": "rem 按桌面 WebView 默认 16 CSS px 解释，保留字号缩放；window.content.* 的 number 单位为逻辑 DIP，不能当成物理像素或 rem。",
     "sourceDocument": "design-system.md",
@@ -236,6 +236,11 @@
       "$type": "color",
       "$value": "{color.palette.control}"
     },
+    "color.border.subtle": {
+      "$type": "color",
+      "$value": "{color.palette.lineStrong}",
+      "$description": "比 separator 明显的浅边框：次按钮、状态芯片、表格分组框。2026-11-12 从 .pv-page 的 --pv-btn-border/--pv-chip-border 收敛而来——同一语义此前散成 #d6e4d8 / #dae9dd / #d7e4d8 / #d6e5d8 四个值，取值与 palette.lineStrong 差 4-8（redmean）。"
+    },
     "color.focus.ring": {
       "$type": "color",
       "$value": "{color.palette.forest}"
@@ -440,6 +445,16 @@
       "$type": "dimension",
       "$value": "0.875rem"
     },
+    "font.size.micro": {
+      "$type": "dimension",
+      "$value": "0.6875rem",
+      "$description": "页面档最小字号（11px）：字段旁注、行副标题、统计格标签。2026-11-12 前全站有 94 处 font-size: 11px 字面值，集中在 .pv-page 页面；收敛为一档，不再出现 10.5/11/11.5px 混用。小于本值的文字一律不合格：Windows 100% 缩放下 10px 中文已难辨认。"
+    },
+    "font.size.pageBase": {
+      "$type": "dimension",
+      "$value": "0.8125rem",
+      "$description": "页面档正文（13px）：.pv-page 页面的基础字号。与 font.size.body（16px）并存属于密度分层，不是遗漏——协作工作台是长文本阅读面，页面档是列表与表单的高密度面。两者都由本文件定义，页面不得再写自己的基准字号。"
+    },
     "font.size.body": {
       "$type": "dimension",
       "$value": "1rem"
@@ -599,6 +614,16 @@
       "$type": "dimension",
       "$value": "80rem"
     },
+    "layout.page.maxWidth": {
+      "$type": "dimension",
+      "$value": "76.25rem",
+      "$description": "页面档内容列宽度上限（1220px / 16 = 76.25rem）。2026-11-12 统一前写死在 .pv-page 的 min(1220px,100%)；页面档工作区（列表、详情、设置）与协作工作区（layout.content.maxWidth 80rem）刻意不同宽：页面上限更窄，长行不超过可读宽度。"
+    },
+    "layout.page.gutter": {
+      "$type": "dimension",
+      "$value": "1.875rem",
+      "$description": "页面档左右留白（30px）。与 layout.main.padding 分开：后者是工作区内的主区内边距，前者是页面列自己的边距，两者叠加时不能互相顶替。"
+    },
     "layout.workspace.sideWidth": {
       "$type": "dimension",
       "$value": "34rem",
@@ -669,6 +694,11 @@
       "$type": "dimension",
       "$value": "2rem",
       "$description": "紧凑图标按钮（如对话输入器的发送键）的高度与最小宽度。比 control.height 小一号，但仍高于 control.target.minimum，键盘与指针目标不缩水。"
+    },
+    "control.height.page": {
+      "$type": "dimension",
+      "$value": "2.125rem",
+      "$description": "页面档按钮高度（34px）：列表、详情、设置这些信息密度更高的页面用它，协作工作台的输入器与发送键仍用 control.height / compact。2026-11-12 前是 .pv-page 里的字面值 34px；收敛后仍保留这一档，是因为把 72 处页面直接抬到 control.height（40px）会让密集表格行整体变高，属于需要单独验收的密度变更，不随色板一起动。"
     },
     "control.icon.size": {
       "$type": "dimension",

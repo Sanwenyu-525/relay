@@ -233,6 +233,11 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
       // 0153：压缩是辅助外呼——同样记账与受预算闸门约束，但不是「最近一次调用」。
       origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
         assistMessageId: job.anchor_message_id, purpose: 'MEMORY_COMPACT' },
+      correlation: {
+        sessionId: session.id, messageId: job.anchor_message_id, workerId: options.workerId,
+        ...(session.project_id === null ? {} : { projectId: session.project_id }),
+        ...(session.task_id === null ? {} : { taskId: session.task_id }),
+      },
       identity: port.identity, signal: controller.signal,
       invoke: async (callId) => {
         if (!await repository.bindCall(job.id, options.workerId, job.claim_epoch, callId)) {

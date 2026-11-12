@@ -105,12 +105,65 @@
 .collab-task-objective-label { display: inline-block; margin-inline-end: var(--relay-space-2); padding: 0 var(--relay-space-2); border-radius: var(--relay-radius-badge); background: var(--relay-color-bg-subtle); color: var(--relay-color-text-secondary); }
 .collab-run-controls { min-width: 0; }
 .collab-run-controls .collaboration-run-control { border: 0; padding: 0; }
-.collab-run-controls .collaboration-run-control > .helper-text:first-child { display: none; }
 .collab-run-controls .run-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--relay-space-1); margin: 0; }
 /* Run 按钮的紧凑密度本应归全局 --compact 变体，但按钮类名在 RunControlPanel.tsx
    （本轮禁改文件）：组件侧加 --compact 后删除这条页面压回。 */
 .collab-run-controls .run-actions > button { min-height: var(--relay-control-height); padding: var(--relay-space-1) var(--relay-space-2); font-size: var(--relay-font-size-meta); }
 .collab-run-controls .collaboration-run-control > p { margin-block: var(--relay-space-1); }
+/* 聊天视图的执行状态卡（2026-11-11 用户指认「有些不该展示到前端，布局、样式都有问题」）：
+   首屏只留「现在发生了什么 / 去哪看证据」，请求 ID、PENDING、Run 编号与修订号进展开区。
+   卡片与对话同宽同轴，不再横铺整个主区；等待类状态用 warning 底，不用成功绿。 */
+.collab-run-controls--chat { padding: var(--relay-space-2) var(--relay-space-4) 0; }
+/* 专注对话形态下与 AssistView.css 的 `.agent-assist` 同一列宽 owner（46.5rem），卡片与对话同宽同轴；
+   展开右侧面板后这一条属于整个工作区，回落到阅读列上限（72rem）居中，不假装只属于左栏。 */
+.collab-run-controls--chat[data-layout="chat"] { --chat-measure: min(46.5rem, 100%); }
+.collab-attention {
+  width: 100%;
+  max-width: var(--chat-measure, var(--relay-layout-reading-maxWidth));
+  margin-inline: auto;
+  background: var(--relay-color-bg-subtle);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+.collab-attention[data-tone="warning"] {
+  background: var(--relay-color-status-warning-bg);
+  border-color: var(--relay-color-status-warning-text);
+}
+.collab-attention[data-tone="danger"] {
+  background: var(--relay-color-status-danger-bg);
+  border-color: var(--relay-color-status-danger-text);
+}
+.collab-attention-head { display: flex; align-items: flex-start; gap: var(--relay-space-2); padding: var(--relay-space-2) var(--relay-space-3); }
+.collab-attention-icon { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); margin-top: 2px; color: var(--relay-color-text-secondary); }
+.collab-attention[data-tone="warning"] .collab-attention-icon { color: var(--relay-color-status-warning-text); }
+.collab-attention[data-tone="danger"] .collab-attention-icon { color: var(--relay-color-status-danger-text); }
+.collab-attention-copy { display: grid; flex: 1; gap: var(--relay-space-0-5); min-width: 0; }
+.collab-attention-state { margin: 0; font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-medium); color: var(--relay-color-text-primary); overflow-wrap: anywhere; }
+.collab-attention-note { margin: 0; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); overflow-wrap: anywhere; }
+.collab-attention-evidence { flex: none; align-self: center; font-size: var(--relay-font-size-caption); }
+.collab-attention .collaboration-run-control--brief { padding: 0 var(--relay-space-3) var(--relay-space-2); }
+/* 控制按钮靠右，与标题行的「执行记录」同一侧，读成「这一块的操作区」。 */
+.collab-attention .run-actions { justify-content: flex-end; }
+/* 紧凑控制面板：首屏只留可用的控制；技术回执与编号收进「技术详情」。 */
+.collab-run-controls .collaboration-run-control--brief { display: grid; gap: var(--relay-space-1); }
+.collab-run-controls .collaboration-run-control--brief > p { margin: 0; }
+.run-control-technical { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.run-control-technical > summary { cursor: pointer; padding-block: var(--relay-space-1); }
+.run-control-technical > p { margin-block: var(--relay-space-1); }
+.run-control-technical .receipt-message,
+.run-control-technical .warning-callout {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+/* 任务与执行详情：任务/验收修订、Run 编号与检查记录入口按需展开，不铺首屏。 */
+.collab-run-facts { min-width: 0; }
+.collab-run-facts > summary { cursor: pointer; padding-block: var(--relay-space-1); font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.collab-run-facts .fact-bar { grid-template-columns: minmax(0, 1fr); margin: var(--relay-space-1) 0 0; }
+.collab-attention .collab-run-facts--bordered { padding: 0 var(--relay-space-3); border-top: var(--relay-border-width) solid var(--relay-color-border-separator); }
 .collab-notices { padding-inline: var(--relay-space-3); }
 .collab-notices:empty { display: none; }
 .collab-notices p { margin: 0; }

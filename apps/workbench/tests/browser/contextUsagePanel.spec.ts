@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 // 上下文用量浮层（0145 / 2026-10-30，UI-CONTEXT-FINAL-POLISH / 2026-11-01 收口）：真实 Chromium 里的几何与状态验收。
 //
 // 浮层三段内容各有来源，读序按「先看事实 → 再看构成 → 最后才改档位」：
-//   ① 最近一次模型调用——主读数一行「已用 / 该次冻结预算 tokens + 占比」、细进度线、两列二级信息；
+//   ① 最近一次模型调用——主读数一行「已用 / 当前档位 tokens + 占比」、细进度线、两列二级信息；
 //   ② 上下文构成——只显示服务端真的采到的分项，标「估算」；没有分项时只写「暂无分项统计」；
 //   ③ 当前档位——三档严格横排，落在浮层最底部的**停靠区**（真实布局，不是 sticky 覆盖层）。
 //
@@ -25,8 +25,17 @@ const prefix = `/api/v1/workspaces/${workspaceId}`;
 // 夹具的 CORS 允许源必须跟着实际预览端口走：playwright.config.ts 支持 RELAY_E2E_PORT 覆盖，
 // 写死 4173 会让换端口的整轮用例卡在「已连接」之前（响应被浏览器按 CORS 拦掉）。
 const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
-// 本轮（UI-CONTEXT-FINAL-POLISH）新增材料只落在这一个目录，不再往 output/ 的既有验收证据里追加。
-const shots = "D:/Develop/Relay-Agent/tmp/UI-context-final-polish";
+
+/**
+ * 截图默认写本次运行的输出目录（test-results/<spec>/<test>/…，playwright 每轮开局清空、
+ * 随 --output 换目录）：两轮运行互不覆盖，`--output` 单独设置也真正管得到。
+ * 旧写法把绝对路径写死在页面代码里，runner 的输出隔离碰不到它（2026-11-11 验收整改）。
+ * 需要把对照图固定导出到验收目录时设 RELAY_ACCEPTANCE_SHOTS_DIR。
+ */
+function shot(name: string): string {
+  const override = process.env.RELAY_ACCEPTANCE_SHOTS_DIR;
+  return override === undefined ? test.info().outputPath(name) : `${override}/${name}`;
+}
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -249,7 +258,7 @@ test("用量浮层：有三档横排、无「跟随应用默认」，选中即�
   expect(writes.map((body) => [body.expected_revision, body.context_budget_tokens]))
     .toEqual([["2", 524_288], ["3", 1_048_576]]);
 
-  await page.screenshot({ path: `${shots}/panel-breakdown.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-breakdown.png"), fullPage: true });
 });
 
 test("用量浮层：分项按固定顺序、标「估算」，与圆环读数同一份记录", async ({ page }) => {
@@ -258,11 +267,11 @@ test("用量浮层：分项按固定顺序、标「估算」，与圆环读数�
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  // 圆环与浮层读同一份记录：10,607 / 65,536 = 16%。
+  // 圆环与浮层读同一份记录、同一个分母（当前档位 262,144）：10,607 / 262,144 ≈ 4%。
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 65,536 tokens（16%）");
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("16%");
-  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("54,929 tokens");
+  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
+  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("251,537 tokens");
   await expect(panel.getByTestId("assist-context-meter-output")).toHaveText("646 tokens");
 
   await expect(panel.getByTestId("context-usage-estimate")).toHaveText("估算");
@@ -287,11 +296,11 @@ test("用量浮层：没有分项时只写「当前记录没有分项统计」�
   await expect(panel.locator('[data-testid^="context-usage-row-"]')).toHaveCount(0);
   // 「估算」标签只属于分项区：没有分项时它也不该出现（摘要里的「预算余量（估算）」是另一回事）。
   await expect(panel.getByTestId("context-usage-estimate")).toHaveCount(0);
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("16%");
-  await page.screenshot({ path: `${shots}/panel-no-breakdown.png`, fullPage: true });
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
+  await page.screenshot({ path: shot("panel-no-breakdown.png"), fullPage: true });
 });
 
-test("用量浮层：历史 65,536 与当前 1024K 各说各的——不互相冒充", async ({ page }) => {
+test("用量浮层：占比按当前 1024K 档位；那次冻结的 65,536 只作差异说明", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
   // 当前档位是 1024K，但那次历史调用冻结的是 65,536。
@@ -303,15 +312,16 @@ test("用量浮层：历史 65,536 与当前 1024K 各说各的——不互相�
 
   // 当前档位：1024K（服务端已保存的那一档），只由单选态表达。
   await expect(panel.getByTestId("context-budget-option-1048576")).toBeChecked();
-  // 历史读数仍按那次调用冻结的 65,536 解释，不拿 1024K 去除。
+  // 2026-11-11 用户指令：占比直接按当前档位解释——10,607 / 1,048,576 ≈ 1%。
   await expect(panel.getByTestId("assist-context-meter-input")).toHaveText("10,607");
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("16%");
-  // 2026-11-10：两个数字不同时补一句口径说明，避免把 65,536 当成当前档位。
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("1%");
+  // 冻结预算与当前档位不同时补一句历史依据，但不再拿它当分母。
   await expect(panel.getByTestId("context-usage-frozen-note")).toContainText("65,536");
-  await expect(panel.getByTestId("context-usage-frozen-note")).toContainText("1024K 从下一次调用生效");
+  await expect(panel.getByTestId("context-usage-frozen-note"))
+    .toContainText("占比按当前 1024K 档位计算");
   await expect(panel.getByTestId("context-usage-history")).toContainText("最近一次模型调用");
   await expect(panel.getByTestId("context-usage-breakdown")).toBeVisible();
-  await page.screenshot({ path: `${shots}/panel-history-vs-current.png`,
+  await page.screenshot({ path: shot("panel-history-vs-current.png"),
     fullPage: true });
 });
 
@@ -350,19 +360,12 @@ test("用量浮层：420／560／1024／1366／1920 五档宽度下都贴环、�
     }
     expect(geometry.dockVisible, `${width}px 下档位区必须在首屏`).toBe(true);
   }
-  await page.screenshot({ path: `${shots}/panel-width-1920.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-width-1920.png"), fullPage: true });
 });
 
 test("用量浮层：圆环被同行控件推走时浮层跟着重算，不留在环已经离开的位置", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
-  // 模型档位迟到 1.2s：这一行右侧多出一枚「gpt-4.1-mini」下拉，把圆环往左推。
-  // 卡片和圆环自己的尺寸都没变——只有打开期间持续比对环的矩形，浮层才不会停在旧位置。
-  await page.route(`${apiBase}${prefix}/model-port`, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
-    return fulfillJson(route, { provider: "openai-compatible", configured: true,
-      model: "gpt-4.1-mini", base_url: null, max_call_tokens: 65_536 });
-  });
   await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
@@ -371,11 +374,20 @@ test("用量浮层：圆环被同行控件推走时浮层跟着重算，不留�
   await expect(panel).toBeVisible();
   const before = await measure(page);
   if (before.panel === null || before.ring === null) throw new Error("缺少浮层几何采样");
-  // 迟到之前先对齐一次，否则「跟着重算」这条判据没有对照。
+  // 推走之前先对齐一次，否则「跟着重算」这条判据没有对照。
   const centerOf = (rect: Rect) => (rect.left + rect.right) / 2;
   expect(Math.abs(centerOf(before.panel) - centerOf(before.ring))).toBeLessThanOrEqual(1);
 
-  await page.getByTestId("model-selector-open").getByText("gpt-4.1-mini").waitFor({ timeout: 10_000 });
+  // 打开期间把圆环所在的一组视觉左移 120px：圆环自身尺寸不变、窗口也没有 resize，
+  // transform 也不触发布局，只有「打开期间逐帧比对环的矩形」才能发现它挪了。
+  // 模型芯片的收起态只写「跟随默认」（2026-10-21 用户指令），型号到达不再改变芯片宽度，
+  // 因此这里直接制造同等的「只挪位不变大」位移。
+  await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>(
+      '[data-testid="assist-composer"] .agent-chat-context-meter-group');
+    if (group === null) throw new Error("缺少圆环组");
+    group.style.transform = "translateX(-120px)";
+  });
   await expect.poll(async () => {
     const now = await measure(page);
     if (now.panel === null || now.ring === null) return Number.NaN;
@@ -387,7 +399,7 @@ test("用量浮层：圆环被同行控件推走时浮层跟着重算，不留�
     .toBeGreaterThan(4);
   const gap = after.side === "above" ? after.ring.top - after.panel.bottom : after.panel.top - after.ring.bottom;
   expect(gap, "重算后仍保持 7px 贴环间距").toBeCloseTo(7, 0);
-  await page.screenshot({ path: `${shots}/panel-retrack-after-model-arrives.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-retrack-after-sibling-shift.png"), fullPage: true });
 });
 
 test("用量浮层：窄窗（560×700）三档仍横排、浮层贴环且不压住工具行", async ({ page }) => {
@@ -431,7 +443,7 @@ test("用量浮层：窄窗（560×700）三档仍横排、浮层贴环且不压
   expect(geometry.dockVisible, "窄窗里档位区也必须整块在视口内").toBe(true);
   expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
 
-  await page.screenshot({ path: `${shots}/panel-narrow-560.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-narrow-560.png"), fullPage: true });
 });
 
 test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收", async ({ page }) => {
@@ -459,7 +471,7 @@ test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收"
   await expect(panel).toBeHidden();
 });
 
-test("用量浮层：历史调用没有可靠冻结预算时写「预算未知」，不给未经证实的百分比", async ({ page }) => {
+test("用量浮层：那次调用没有冻结预算记录时，占比仍按当前档位给出", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
   await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
@@ -471,12 +483,13 @@ test("用量浮层：历史调用没有可靠冻结预算时写「预算未知�
     });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
-  await expect(panel.getByTestId("assist-context-meter-budget-unknown")).toHaveText("预算未知");
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveCount(0);
-  // 圆环同样回到未知态：不画弧、不给百分比。
+  // 2026-11-11：分母是当前档位，冻结预算缺失不再让占比变成未知。
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
+  await expect(panel.getByTestId("assist-context-meter-budget-unknown")).toHaveCount(0);
+  await expect(panel.getByTestId("context-usage-frozen-note")).toHaveCount(0);
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("data-state", "unknown");
-  await expect(meter.locator(".agent-chat-context-meter-fill")).toHaveCount(0);
+  await expect(meter).toHaveAttribute("data-state", "normal");
+  await expect(meter.locator(".agent-chat-context-meter-fill")).toHaveCount(1);
 });
 
 test("空白新会话（还没有会话）不显示上下文圆环，也没有档位入口", async ({ page }) => {
@@ -554,7 +567,7 @@ test("用量浮层：读序是最近一次模型调用 → 上下文构成 → �
     "停靠区不得盖住读数区（短窗口里靠收窄滚动区让位，不靠覆盖）").toBe(0);
   expect(await panel.evaluate((node) => node.getBoundingClientRect().bottom),
     "浮层整体不得越出视口").toBeLessThanOrEqual(430 + 0.5);
-  await page.screenshot({ path: `${shots}/panel-short-430.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-short-430.png"), fullPage: true });
 });
 
 test("用量浮层：慢响应保存期间菜单不关、不跳顶、滚动位置不重置", async ({ page }) => {
@@ -585,15 +598,15 @@ test("用量浮层：慢响应保存期间菜单不关、不跳顶、滚动位�
   await expect(panel.getByTestId("context-usage-tier-state"))
     .toContainText("正在保存 512K；确认之前仍按 256K 生效");
   expect(await scroll.evaluate((node) => node.scrollTop), "在途不得跳回顶部").toBeGreaterThan(0);
-  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("16%");
+  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("4%");
 
   release();
   await expect(panel.getByTestId("context-budget-notice")).toContainText("524,288");
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
   expect(await scroll.evaluate((node) => node.scrollTop), "回执落地后仍不得跳顶").toBeGreaterThan(0);
-  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("16%");
-  await page.screenshot({ path: `${shots}/panel-slow-save.png`, fullPage: true });
+  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("4%");
+  await page.screenshot({ path: shot("panel-slow-save.png"), fullPage: true });
 });
 
 test("用量浮层：六类分项各上一色，文本与数值保持中性，颜色不是唯一载体", async ({ page }) => {
@@ -667,10 +680,10 @@ test("用量浮层：六类分项各上一色，文本与数值保持中性，�
   expect(new Set(sampled.map((row) => row.glyph)).size).toBe(6);
   const labels = await rows.locator(".context-usage-row-label").allTextContents();
   expect(new Set(labels).size).toBe(6);
-  await page.screenshot({ path: `${shots}/panel-categories.png`, fullPage: true });
+  await page.screenshot({ path: shot("panel-categories.png"), fullPage: true });
 });
 
-test("圆环：视觉 24px 但点击区不小于 32px，右侧独立百分比文本已删，读数仍在 aria-label 与 Tooltip", async ({ page }) => {
+test("圆环：视觉 18px 但点击区不小于 32px，右侧独立百分比文本已删，读数仍在 aria-label 与 Tooltip", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
   await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
@@ -679,24 +692,24 @@ test("圆环：视觉 24px 但点击区不小于 32px，右侧独立百分比文
   await expect(page.getByTestId("assist-context-meter-panel")).toHaveCount(0);
 
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 65,536 tokens（16%）");
+  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
   // 独立百分比文本删掉了：圆环右侧不再有那枚数字（详情浮层与 Tooltip 才是它的去处）。
   await expect(meter.locator(".agent-chat-context-meter-value")).toHaveCount(0);
   await expect(meter.locator("span")).toHaveCount(0);
 
   const geometry = await measure(page);
   if (geometry.ring === null || geometry.ringSvg === null) throw new Error("缺少圆环几何");
-  expect(geometry.ringSvg.width, "圆环视觉尺寸 24px").toBeCloseTo(24, 0.6);
-  expect(geometry.ringSvg.height, "圆环视觉尺寸 24px").toBeCloseTo(24, 0.6);
+  expect(geometry.ringSvg.width, "圆环视觉尺寸 18px").toBeCloseTo(18, 0.6);
+  expect(geometry.ringSvg.height, "圆环视觉尺寸 18px").toBeCloseTo(18, 0.6);
   expect(geometry.ring.width, "点击区不小于 32px").toBeGreaterThanOrEqual(31.5);
   expect(geometry.ring.height, "点击区不小于 32px").toBeGreaterThanOrEqual(31.5);
 
   await meter.hover();
-  await expect(page.getByTestId("context-meter-tooltip")).toContainText("16%");
+  await expect(page.getByTestId("context-meter-tooltip")).toContainText("4%");
   await meter.click();
   await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
   await expect(page.getByTestId("context-meter-tooltip")).toHaveCount(0);
-  await page.screenshot({ path: `${shots}/ring-24px.png`, fullPage: true });
+  await page.screenshot({ path: shot("ring-18px.png"), fullPage: true });
 });
 
 test("圆环：未知／正常／高占用／超额四态各有真实差异，且没有永久动效", async ({ page }) => {
@@ -704,15 +717,16 @@ test("圆环：未知／正常／高占用／超额四态各有真实差异，�
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
   const fill = () => meter.locator(".agent-chat-context-meter-fill");
 
-  async function openWith(options: { readonly input: number; readonly reserved: number | null }) {
+  async function openWith(options: { readonly input: number | null; readonly reserved: number | null }) {
     await installRoutes(page, { withBreakdown: true });
     await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
       async (route) => {
-        const body = contextUsage({ withBreakdown: true, input: options.input,
+        const body = contextUsage({ withBreakdown: true, input: options.input ?? undefined,
           reserved: options.reserved ?? 65_536 }) as {
           last_call: { reserved_tokens: number | null } | null };
-        // 夹具里的 `??` 会把 null 吞回 65,536，未知态要真的把这一项写成 null。
-        if (body.last_call !== null && options.reserved === null) body.last_call.reserved_tokens = null;
+        // 夹具里的 `??` 会把 null 吞回默认值：未知态要真的把整条调用记录写成 null。
+        if (options.input === null) body.last_call = null;
+        else if (body.last_call !== null && options.reserved === null) body.last_call.reserved_tokens = null;
         return fulfillJson(route, body);
       });
     await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
@@ -726,24 +740,26 @@ test("圆环：未知／正常／高占用／超额四态各有真实差异，�
   await expect(meter).not.toHaveAttribute("data-over", "true");
   const normalDash = await fill().getAttribute("stroke-dasharray");
   expect(normalDash).not.toBeNull();
-  // 弧长按真实比例算（10,607 / 65,536），不是按四舍五入后的 16%。
-  expect(Number(normalDash!.split(" ")[0])).toBeCloseTo(10_607 / 65_536 * 94.25, 1);
+  // 弧长按真实比例算（10,607 / 当前档位 262,144），不是按四舍五入后的 4%。
+  expect(Number(normalDash!.split(" ")[0])).toBeCloseTo(10_607 / 262_144 * 94.25, 1);
 
-  await openWith({ input: 52_429, reserved: 65_536 });
+  await openWith({ input: 210_000, reserved: 65_536 });
   await expect(meter).toHaveAttribute("data-state", "high");
   expect(await fill().getAttribute("stroke-dasharray")).not.toBe(normalDash);
 
-  await openWith({ input: 70_000, reserved: 65_536 });
+  // 冻结预算缺失也不影响分母：仍然按当前 262,144 算，280,000 已超出当前档位。
+  await openWith({ input: 280_000, reserved: null });
   await expect(meter).toHaveAttribute("data-state", "high");
   await expect(meter).toHaveAttribute("data-over", "true");
-  // 超额画满一圈，但读数不粉饰：浮层里仍是那 70,000 / 65,536 的比例。
+  // 超额画满一圈，但读数不粉饰：浮层里仍是那 280,000 / 262,144 的比例。
   expect(Number((await fill().getAttribute("stroke-dasharray"))!.split(" ")[0])).toBeCloseTo(94.25, 1);
   await meter.click();
   await expect(page.getByTestId("assist-context-meter-percent")).toHaveText("106.8%");
-  await page.screenshot({ path: `${shots}/ring-over.png`, fullPage: true });
+  await page.screenshot({ path: shot("ring-over.png"), fullPage: true });
   await page.keyboard.press("Escape");
 
-  await openWith({ input: 10_607, reserved: null });
+  // 没有调用记录才是未知态：不画弧、不给百分比。
+  await openWith({ input: null, reserved: null });
   await expect(meter).toHaveAttribute("data-state", "unknown");
   await expect(fill()).toHaveCount(0);
   // 未知态的轨道是虚线，与「真的 0%」分开；三种状态都不是会转的加载指示。

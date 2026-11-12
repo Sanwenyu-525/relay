@@ -199,7 +199,7 @@
 
 会话级上下文档位（0145）让浮层正文从两段变三段（摘要／构成／档位），排版随之定三条规则。
 
-- **摘要仍是「一行一读」**：`已用 / 冻结预算 tokens` 与占比同一基线，占比靠右并用 tabular-nums；下面一条 4px 进度线，再下面两列二级信息（预算余量（估算）／本次输出）。数字全部 tabular-nums，位数变化不带着 `tokens` 左右跳。缓存读取／写入／命中率用 `dl` 一行一项，未上报整项不出现，不写「未采集」占位。
+- **摘要仍是「一行一读」**：`已用 / 当前档位 tokens` 与占比同一基线，占比靠右并用 tabular-nums；下面一条 4px 进度线，再下面两列二级信息（预算余量（估算）／本次输出）。数字全部 tabular-nums，位数变化不带着 `tokens` 左右跳。缓存读取／写入／命中率用 `dl` 一行一项，未上报整项不出现，不写「未采集」占位。**2026-11-11 口径调整**：分母由那次调用冻结的预算改为当前会话档位（与三档单选同值）；冻结值只在与当前档位不同时以一条 caption 说明，不再出现在主读数行。
 - **构成列表用行，不用卡片**：`图标(14px) + 分类名 + 右对齐数值`，行内上下 `space-1`，分隔线只画在相邻行之间（`li + li` 的 1px `border-separator`），首行与末行不留半截线。分类顺序固定，零值项不渲染——`0 tokens` 会被读成「占了一点」。区块标题旁的「估算」是 `selection-bg` 底的小标签，不是标题的一部分。
 - **三档横排**：`flex` + `nowrap`，radio 与文字同属一个 `label` 命中区，间距 `space-3`；选中态只改文字颜色与字重（`:has(input:checked)`），不加边框、不改字号，避免一行三枚一起抖。窄容器（`composer-actions` ≤ 34rem）只收紧间距与字号到 caption 档，仍不换行——换行会把「选一个数」读成「两组选项」。
 - **选中即改变，因此没有动作行**：档位区**不设**「保存上下文长度 / 重新读取」两枚按钮——点档位即写服务端，写完用一行 `status` 文案回执（`color.text.muted` + caption 档）说明结果。理由是这两枚按钮把「选一个数」拆成三步（选 → 保存 → 等回执），而档位本身是**低风险、可逆**的单值设置，多一步确认只是仪式。回执/冲突/异常因此都以**行内状态行**呈现，不占独立动作区：正常状态一行 `meta` 文案，异常时多一行 `role="alert"`，回执查询入口（`text-link`）只在传输失败待核对时出现。
@@ -343,14 +343,14 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 - 草稿→终稿交接不再做 opacity 0.6 → 1 的淡入；`.assist-reply[data-state="final"][data-handover="true"]` 显式 `animation:none`。`data-handover` 仅保留为一枚一次性标记，不驱动视觉。
 - 不新增色值、阴影或第三套动效；上述规则只使用既有 `--relay-space-*` 与 `--relay-motion-*` token。减少动效偏好下这些规则本来就是静态终态。
 
-## §9.31 任务分组的运行指示（2026-11-10）
+## §9.31 任务行的运行指示（2026-11-10）
 
-- **位置**：`.recent-work-group-running` 只在「任务」段的分组标题里、标题文字与计数徽标之间出现；分组收起时仍可见（它在 `<summary>` 内）。
+- **位置**：`.recent-work-running` 挂在「任务」段执行中的任务（聊天）行内、标题之后的行右端。标题 `flex: 1` 把环顶到行尾内边距（`space.2` = 8px）；任务行没有 ⋯ 菜单，右端不与其它控件抢位。项目分组标题与计数徽标不再携带运行指示（2026-11-10 用户二次指认「放到箭头指向的地方」「有任务在进行的时候右侧加一个这个图标」）。
 - **形状**：12px（`font.size.caption`）内联 SVG，`viewBox="0 0 24 24"`；路径是 270° 圆弧，留 90° 缺口，`stroke-width: 2`（用户单位）、`stroke-linecap: round`、`stroke-dasharray: 0.1 4.2`——圆头短划排成一圈圆点，缺口处自然断开。颜色取 `color.text.muted`，不新增色值。
 - **动效**：整枚环 `rotate(1turn)`，时长取 `motion.loop.spin`（1s）、`linear`、`infinite`；只旋转自身，不发光、不闪烁、不改变盒子尺寸（SVG 内部图形，HTML 盒固定 12px）。
 - **减少动态效果**：`html[data-motion="off"]` 与 `@media (prefers-reduced-motion: reduce)` 都把 `animation` 置为 `none !important`；环与缺口保持静止可见，不把状态藏起来。
-- **语义**：只在任务投影的 `executor.run_id` 非空（有 Run 持有执行权）时出现；同一组多条在跑也只出现一枚，不按条数重复。环旁带视觉隐藏文案「有任务正在执行」，读屏与视觉用户读到同一件事。
-- **验证出口**：jsdom `tests/recentWorkPagination.spec.ts` 新增一例（无执行权不出现、有执行权出现一枚、`stroke-dasharray` 与隐藏文案、指示属于分组 summary），该文件 **15/15**；真实 Chromium `tests/browser/recentWorkRailDensity.spec.ts` 新增一例 **1/1**（`offsetWidth` 12px、`animation-name: recent-work-group-running-spin`、1s、infinite、虚线、分组收起后仍可见、`reducedMotion: reduce` 后 `animation: none` 且 `display` 不变）。
+- **语义**：只在任务投影的 `executor.run_id` 非空（有 Run 持有执行权）的那一行出现；同组其它空闲任务行、分组标题与计数徽标都不显示。环 `aria-hidden`，同一事实写进行按钮的可访问名称（「有任务正在执行」），读屏与视觉用户读到同一件事；分组收起时随该行一起隐藏。
+- **验证出口**：jsdom `tests/recentWorkPagination.spec.ts` 一例（无执行权不出现、执行行标题之后一枚、`stroke-dasharray`、`aria-label` 含运行文案、分组标题与同组空闲行无环），该文件 **15/15**；真实 Chromium `tests/browser/recentWorkRailDensity.spec.ts` 一例 **1/1**（`offsetWidth` 12px、`animation-name: recent-work-running-spin`、1s、infinite、虚线、环是标题内容最后一项、右缘距行尾 8px、垂直居中、空闲行与 summary 无环、`reducedMotion: reduce` 后 `animation: none` 且 `display` 不变）。
 
 ## §9.32 活动行的文件类型图标与五色（CHAT-PROCESS-FILES-20261110，2026-11-10）
 
@@ -373,3 +373,60 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 - **响应式补口**：新增 48–70rem 两列断点（此前注释写了 1120px 降两列但缺少规则，800–1120px 三列会把卡片压到 240px 上下）；两列下项目数为奇数时新建卡延到行尾。窄窗工具栏改为搜索独占一行、刷新与视图切换在下一行两端对齐，不再让视图切换单独掉到第三行。网格卡标题预留两行（`min-height: 2.9em`），同一行内「下一步」落到同一基线。
 - **空态与图标**：项目页内 EmptyState 阅读宽度收到 46rem，避免说明句被拉成 1150px 长线；页头「记录目标」改用 `SquarePen`，与「目标列表」的 `Target` 区分。新增的少量数值沿用 pv 语言既有档位（`--pv-muted`、`--pv-danger-*`、`space.3/4`），未新增色值或 token。
 - **验证出口**：Workbench `tsc --noEmit` exit 0；项目相关 Vitest 5 文件 **28/28**；真实 Chromium 空态/抽屉/可读性 **10/10**、项目列表验收 fixture **3/3**；隔离 API 截图与宽度扫描 390 / 640 / 768 / 900 / 1120 / 1280 / 1440 七档无横向溢出（含空态、归档空、搜索无匹配、部分加载、错误态、键盘焦点、200% CSS 缩放）。证据留在本机 `tmp/POLISH-PROJECTS-20261110/shots2/`。**未验**：真实 Windows/WebView2 窗口与多 DPI、真实 PG/HTTP 下的视觉复核、独立 Agent 验收；本轮为当前 Agent 自检。
+
+## §9.34 协作页执行状态卡（2026-11-11）
+
+用户指认聊天顶部执行控制「有些不该展示到前端，布局、样式都有问题」。只改呈现与信息层级，**不动控制命令、幂等身份、服务端判据与 testid**。
+
+- **位置与宽度**：只在聊天视图（任务页头隐藏时）显示，挂在对话区上方；宽度取与 AssistView 同一列宽 owner `--chat-measure`（46.5rem）并在主区居中，不再横铺整个主区；外层留白 `space.2`（上）/`space.4`（左右）。
+- **首屏只说两件事**：左侧 16px `AlertTriangle` 图标；状态行 `font.size.meta`（13px、medium）写「停止请求已提交，等待当前步骤结束」这类人话；说明行 `font.size.caption`（12px、secondary）写后果与执行权归属；右侧只有一颗 `text-link`「执行记录」。请求 ID、`PENDING`、`Run` 编号、任务/验收修订、控制记录与长说明不进首屏。
+- **色调按语义**：等待类（控制请求在途、外部结果待核对）用 `status.warning.bg` + `status.warning.text`；失败用 `status.danger.bg` + `status.danger.text`。停止请求是「已受理、未生效」，不再借用成功绿的回执底色。
+- **控制按钮按可用性渲染**：只有 `canControl` 为真时才渲染暂停/停止/交接/取消任务；等待安全点、终态、归档禁写或命令待核对期间不再排一行灰色按钮，只保留「刷新状态」（以及必不可少的「核对原命令回执」）。按钮行右对齐，与「执行记录」同侧。
+- **渐进披露**：`技术详情` 与 `任务与执行详情` 都是默认收起的 `<details>`，展开后仍可读到原始回执、请求编号、Run/修订与检查记录入口；两者不是「更多操作」菜单，状态与刷新仍常驻首屏。
+- **无新 token**：颜色、间距、圆角、字号全部引用既有 `--relay-color-status-*`、`--relay-space-*`、`--relay-radius-control`、`--relay-font-size-*`。
+- **验证出口**：`tests/collaborationWorkspace.spec.ts` 的「暂停请求中、已暂停与等待安全接手」一例断言首屏状态/说明不含 `PENDING` 与请求 ID、技术详情默认收起且仍含原始回执、事实条在收起区；全文件复跑 **96/96**（首跑有 5 条既有序依赖失败，单跑与复跑均通过）。`impeccable detect --json` 对 `CollaborationView.tsx` 与 `RunControlPanel.tsx` 返回 `[]`；静态视觉预览（1440/760）见 `tmp/COLLAB-ATTENTION-BAR/`。
+
+## §9.35 全站统一：单色板、组件层与守卫（UI-UNIFY-01，2026-11-12）
+
+范围是「让全站回到一套语言」，不是重画页面。基线仍是 V5.28 pv 皮肤 + `/agent` 工作台，两者此前各自带一套值；本轮把值收进唯一来源，并给后续开发加了硬约束。审计数字与逐条处置见 [`ui-audit-2026-11-12.md`](../ui-audit-2026-11-12.md)，逐页迁移状态与完成度见 [`ui-migration-2026-11-12.md`](../ui-migration-2026-11-12.md)。
+
+### 单色板：`--pv-*` 降级为兼容层
+
+- `.pv-page` 里 23 个 `--pv-*` 变量**保留名字、改值**，全部指向 `--relay-*`（含两处 `color-mix` 状态边框）。新代码直接写 `var(--relay-*)`，不再引用 `--pv-*`；`node scripts/check-ui-conventions.mjs` 会拦住新定义的局部 token。
+- 页面内 100 余处裸色值按显式映射表替换为语义 token：墨色/次级/弱文字走 `color.text.*`，动作绿走 `color.action.*`，分隔线走 `color.border.separator`，浅边框走新增的 `color.border.subtle`（`palette.lineStrong`），状态框边框复用既有配方 `color-mix(text 35%, bg)`。
+- 卡片投影由 `0 3px 15px #22553506` 收为 `shadow.surface`（none）：卡片靠 1px 分隔线分层，与 `/agent` 一致；浮层仍用 `shadow.floating`。
+- 焦点只有一种画法：全局 `:focus-visible` 的 inset outline + `color.focus.ring`。`.pv-page` 原来的外扩 3px 浅绿光晕与两处 `box-shadow: 0 0 0 3px` 已删除。
+
+### 密度分档：两个档位，一个来源
+
+页面档（列表/详情/设置）与工作台档（协作页）的差别是**密度**，不是两套设计。差别写进 `design-tokens.json`：
+
+| 维度 | 页面档 | 工作台档 |
+|---|---|---|
+| 正文基准 | `font.size.pageBase` 13px | `font.size.body` 16px / `reading` 18px |
+| 按钮高度 | `control.height.page` 34px | `control.height.prominent` 48px / `control.height` 40px |
+| 小字 | `font.size.micro` 11px / `caption` 12px | `caption` 12px / `meta` 14px |
+| 内容列宽 | `layout.page.maxWidth` 1220px + `layout.page.gutter` 30px | `layout.content.maxWidth` 1280px |
+
+- 原则：**同一语义在同一档位里只有一种尺寸**；跨档位允许不同，但必须引用上表的 token，不能写 px。
+- 仍未合并的是页面档标题阶梯（22/17px）与工作台档（28/24px）：两者比例分别约 1.69 与 1.75，属于同一条比例链。把 72 处页面整体抬到 40px 按钮与 16px 正文会改所有密集列表的行高，列为单独验收项，不在本轮色板收敛里顺手做。
+
+### 组件层：`src/ui`
+
+- 目录：`primitives` 与 `patterns` 暂未分家，先按文件平铺（`Button.tsx` / `IconButton.tsx` / `FormField.tsx` / `Choice.tsx` / `Badge.tsx` / `Alert.tsx` / `Loading.tsx` + `ui.css` + `index.ts`）；组件数量到两位数再拆目录，现在拆只是多一层空壳。
+- **组件输出与既有类名完全一致**：`<Button variant="primary">` 渲染 `class="primary-button"`，`<Badge>` 渲染 `status-chip status-chip--<tone>`。因此迁移是「换写法不换像素」，也保证既有 CSS 与断言继续有效。链接类入口用 `buttonClassName({ variant })` 复用同一套类名。
+- `ui.css` 只补基础类缺失的东西（Switch / Spinner / Skeleton / Alert / 尺寸档），不重画 `.primary-button`、`.field`、`.status-chip`；该文件禁止出现十六进制与 px 字号。
+- `Dialog` / `EmptyState` / `PageHeader` 从 `src/ui` 统一出口再导出，不复制第二份实现。
+- 没有引入 Radix：现有 `AppDialog` 已实现焦点陷阱、Tab 循环、Esc 关闭与焦点归还，`useDetailsMenu` 负责浮层关闭；换库只会重新引入一套未经验证的行为。Tooltip 同理——项目约定是原生 `title`，不另造浮层提示。
+
+### Playground：`/__dev/ui`
+
+- 只在开发构建注册（`import.meta.env.DEV ? lazy(...) : () => null`，与场景实验室同一写法）。页面渲染真实生产组件与 `getComputedStyle` 读到的 token 计算值；token 分组由 `design-tokens.json` 动态生成，新增 token 自动出现。
+- 生产隔离有产物证据：重新构建后扫描所有 `.js`，`__dev/ui`、`__dev/assist-scenarios`、`Relay UI Playground` 均为 0 命中。此前导航层把 `/__dev/assist-scenarios` 写成运行时分支，字符串一直留在包里，本轮一并修掉。
+- 顺带修掉一处真实缺陷：`.field input:not([type="checkbox"])` 的 (0,2,1) 规则自带 `border` 简写，压掉了错误态 (0,1,1) 的红边框——用 `FormField` 报错的字段在界面上看不出错。该规则只保留 `width: 100%`，几何交回全局基座；`uiLab.spec.ts` 钉住「错误态边框 = 状态色」。
+
+### 守卫
+
+- `node scripts/check-ui-conventions.mjs`：存量基线 `scripts/ui-conventions-baseline.json`（78 个 CSS 文件、366 处裸色值）。只阻止**新增**：组件层零容忍、`--pv-*` 只许出现在兼容层、`protoPage.css` 必须 0、产物不得含开发路由。存量下降后可 `--update-baseline` 收紧。
+- 浏览器侧：`tests/browser/uiDesignTokens.spec.ts`（按钮档位、列宽、卡片分层、焦点画法，全部拿 token 计算值比对）、`tests/browser/uiLab.spec.ts`（Playground 渲染、对话框焦点、容器宽度、token 无空值、错误态边框）。
+- 组件侧：`tests/uiPrimitives.spec.tsx`（变体到类名映射、aria 接线、busy 与禁用耦合）。

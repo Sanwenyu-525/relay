@@ -1005,12 +1005,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         // 文案与服务端的八态同源（`lib/sessionState`），不只覆盖运行与排队两档；
         // 旧服务端没有 list_state 时退回只有「未开始」这一条能从 hasMessages 确认的事实。
         const stateNote = sessionStateNote(session?.listState ?? null);
-        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${stateNote || (notStarted ? " · 未开始" : "")}${row.unread ? " · 未读" : ""}`;
+        // 运行态也进可访问名称：行右侧的圆环是视觉信号，读屏用户要读到同一件事。
+        const label = `${row.kind === "session" ? "会话 · " : ""}${row.title} · ${projectName(row.projectId)}${stateNote || (notStarted ? " · 未开始" : "")}${row.unread ? " · 未读" : ""}${row.running ? " · 有任务正在执行" : ""}`;
         // 同一组里出现同名行时，时刻要带上时分才分得清是哪一条；完整时间留在摘要卡的 time 上。
         const sameTitle = groupRows.some((other) => other.key !== row.key && other.title === row.title);
         return <RecentWorkRow key={row.key} kind={row.kind} title={row.title}
           testId={goalId ? `recent-work-goal-${goalId}-${row.id}` : `recent-work-${row.id}`}
-          label={label} active={isActiveRow(row)} pinned={row.pinned} unread={row.unread}
+          label={label} active={isActiveRow(row)} pinned={row.pinned} unread={row.unread} running={row.running}
           // 拖拽要认得出「这是哪一行」：被抓着的那一行只出现在起手那一列，
           // 同一会话在另一列里的副本留在原地等落位动画。
           rowKey={row.key} dragging={drop !== null && drop.rowKey === row.key}
@@ -1188,22 +1189,10 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
           </summary>
           {[...groups].map(([projectId, groupRows]) => {
             const key = railGroupKey(projectId);
-            const running = groupRows.some((row) => row.running);
             return <details className="recent-work-group" key={key} open={!collapsed.includes(key)}
               onToggle={(event) => groupToggle(event.currentTarget, key)}>
               <summary><ChevronDown aria-hidden="true" />{projectId !== null && <Folder aria-hidden="true" className="recent-work-group-folder" />}
                 <span className="recent-work-group-title">{projectName(projectId)}</span>
-                {/* 运行指示（2026-11-10）：这一组里有任务被 Run 持有执行权时，标题右侧一枚
-                    带缺口的点状圆环匀速旋转；形状与文案同时存在，不靠动效单独表达状态。
-                    指示挂在分组行上，分组收起时仍看得见「这一组还在跑」。 */}
-                {running && <span className="recent-work-group-running"
-                  data-testid={`recent-work-task-running-${projectId ?? "unassigned"}`}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M6.34 17.66 A8 8 0 1 1 17.66 17.66" fill="none" stroke="currentColor"
-                      strokeWidth="2" strokeLinecap="round" strokeDasharray="0.1 4.2" />
-                  </svg>
-                  <span className="visually-hidden">有任务正在执行</span>
-                </span>}
                 <span className="recent-work-group-count">{groupRows.length}</span></summary>
               {renderRows(groupRows, `task:${key}`)}
             </details>;

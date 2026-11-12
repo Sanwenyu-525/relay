@@ -960,33 +960,35 @@ describe("协作工作区主路径", () => {
   for (const scenario of [
     { name: "有真实读数时给出命中率与占用圆环", maxCallTokens: 1_000,
       usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600, cache_creation_tokens: 100 },
-      hit: "75%", state: "high", aria: "80%" },
+      hit: "75%", state: "normal", aria: "0%" },
     { name: "Provider 未上报缓存时不显示命中率，也不画成 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: null, cache_creation_tokens: null },
-      hit: null, state: "normal", aria: "50%" },
+      hit: null, state: "normal", aria: "0%" },
     // 0% 是真实读数（Provider 上报了缓存读取为 0），必须显示，不能与「未上报」混为一谈。
     { name: "命中率为 0 时如实显示 0%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: null },
-      hit: "0%", state: "normal", aria: "50%" },
+      hit: "0%", state: "normal", aria: "0%" },
     // 全部命中是 100%，与「未上报」的空位分开。
     { name: "全部命中时显示 100%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 500, cache_creation_tokens: null },
-      hit: "100%", state: "normal", aria: "50%" },
-    // 0145：会话档位恒存在，「预算未配置」不再是可达状态。占比的分母仍是那次调用
-    // 冻结的预算——这里档位 262,144、冻结 1,000，读数必须按 1,000 算。
-    { name: "档位与冻结预算不同时，占比按那次调用的冻结预算", maxCallTokens: 1_000,
-      usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 250, cache_creation_tokens: null },
+      hit: "100%", state: "normal", aria: "0%" },
+    // 2026-11-11：分母是当前会话档位（这里 262,144），不是那次调用冻结的 1,000。
+    { name: "冻结预算与当前档位不同时，占比按当前档位", maxCallTokens: 1_000,
+      usage: { input_tokens: 131_072, output_tokens: 20, cache_read_tokens: 65_536,
+        cache_creation_tokens: null },
       hit: "50%", state: "normal", aria: "50%" },
     { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "unknown", aria: "尚无模型调用" },
-    // 996/1000 进位后是 100%，但 4 个 token 确实未命中。显示 100% 是把未命中说成完美命中。
+    // 261,100/262,144 未达 100%，四舍五入到一位是 99.6%：未命中的 token 不能被说成完美命中。
     { name: "部分命中不进位成 100%", maxCallTokens: 1_000,
-      usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 996, cache_creation_tokens: null },
+      usage: { input_tokens: 262_144, output_tokens: 200, cache_read_tokens: 261_100,
+        cache_creation_tokens: null },
       hit: "99.6%", state: "high", aria: "100%" },
     // 缓存读取量超过上报的完整上下文时两个读数互相矛盾，命中率没有可靠分母，整项不出现。
     { name: "上报缓存读取超过输入时不显示命中率", maxCallTokens: 1_000,
-      usage: { input_tokens: 1_000, output_tokens: 200, cache_read_tokens: 1_200, cache_creation_tokens: null },
+      usage: { input_tokens: 262_144, output_tokens: 200, cache_read_tokens: 300_000,
+        cache_creation_tokens: null },
       hit: null, state: "high", aria: "100%" },
   ]) {
     it(`输入区底栏：${scenario.name}`, async () => {
@@ -1061,8 +1063,8 @@ describe("协作工作区主路径", () => {
       model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000 }) });
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
-        return response(contextUsageProjection({ input_tokens: 800, output_tokens: 200,
-          cache_read_tokens: 600, cache_creation_tokens: 100 }, 1_000));
+        return response(contextUsageProjection({ input_tokens: 200_000, output_tokens: 200,
+          cache_read_tokens: 150_000, cache_creation_tokens: 100 }, 1_000));
       }
       if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
         return response({ items: [
@@ -1072,7 +1074,7 @@ describe("协作工作区主路径", () => {
               cache_creation_tokens: null }, cancel_requested: false },
           { id: "assistant-usage", session_id: sessionId, seq: "2", role: "ASSISTANT", status: "COMPLETED",
             intent: "DISCUSS", content: "好的", error_code: null, sources: [],
-            usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600,
+            usage: { input_tokens: 200_000, output_tokens: 200, cache_read_tokens: 150_000,
               cache_creation_tokens: 100 }, cancel_requested: false }] });
       }
       return read(input, init);
@@ -1089,17 +1091,18 @@ describe("协作工作区主路径", () => {
       // 2026-10-29 第二轮整改：打开先读数据；「属于哪一次」只用一枚短标签。
       expect(panel.get(".agent-chat-context-meter-heading").text()).toBe("上下文用量");
       expect(panel.get(".agent-chat-context-meter-source").text()).toBe("最近一次记录");
-      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("800");
-      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("1,000");
-      expect(panel.get(".agent-chat-context-meter-percent").text()).toBe("80%");
+      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("200,000");
+      // 2026-11-11：分母取当前会话档位 262,144（投影 budget），不取那次调用冻结的 1,000。
+      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("262,144");
+      expect(panel.get(".agent-chat-context-meter-percent").text()).toBe("76%");
       // 二级信息：预算余量（估算）与本次输出并排，各自一个读数。
-      expect(panel.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("200");
+      expect(panel.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("62,144");
       expect(panel.get('[data-testid="assist-context-meter-output"]').text()).toContain("200");
       // 缓存读取与写入分列，命中率另起一行；未上报的项不占行。
       const cacheRows = panel.findAll(".agent-chat-context-meter-cache-row").map((row) => row.text());
       expect(cacheRows).toHaveLength(3);
       expect(cacheRows[0]).toContain("缓存读取");
-      expect(cacheRows[0]).toContain("600");
+      expect(cacheRows[0]).toContain("150,000");
       expect(cacheRows[1]).toContain("缓存写入");
       expect(cacheRows[1]).toContain("100");
       expect(cacheRows[2]).toContain("缓存命中率");
@@ -1117,10 +1120,10 @@ describe("协作工作区主路径", () => {
         info.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
       }); await flush(0);
       const infoTip = document.querySelector('[data-testid="context-meter-info-tooltip"]');
-      // 0145：口径改成「最近一次调用的真实读数 + 相对那次调用冻结的预算」——
-      // 分母不再是工作区配置，分项也不是 Provider 的分词结果。
+      // 2026-11-11：口径是「最近一次调用的真实读数 + 相对当前会话档位」——
+      // 分母既不是工作区配置，也不是那次调用冻结的预算；分项也不是 Provider 的分词结果。
       expect(infoTip?.textContent).toContain("总用量取最近一次模型调用的真实读数");
-      expect(infoTip?.textContent).toContain("占比相对那次调用冻结的预算");
+      expect(infoTip?.textContent).toContain("占比相对当前会话档位");
       expect(infoTip?.textContent).toContain("不是 Provider 的分词结果");
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
@@ -1771,7 +1774,9 @@ describe("协作工作区主路径", () => {
     expect(facts).toContain("证据：检查记录");
     // 项目归属改为页头那行 meta 常驻，不再由面包屑重复承载。
     expect(view.wrapper.get('[data-testid="collab-current-need"]').text()).toContain("人机协作工作流研究");
-    expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("控制提交回执表示 PENDING");
+    // 紧凑控制面板首屏只留可用控制；回执语义与长说明收进「技术详情」（2026-11-11 去技术噪音）。
+    expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("请求暂停 Run");
+    expect(view.wrapper.get('[data-testid="run-control-technical"]').text()).toContain("恢复 Run 时服务端会重新检查");
     // 判断卡内联在文档页签正文下方。
     expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("等待你的判断");
     expect(view.wrapper.get('[data-testid="collab-judgment"]').text()).toContain("判断不会暂停执行或转移执行权");
@@ -1781,7 +1786,7 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="collab-panel-DOCUMENT"]').attributes("hidden")).toBeDefined();
     await flush(40);
     expect(view.wrapper.get('[data-testid="collab-run-progress"]').text()).toContain("生成草稿");
-    expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("控制提交回执表示 PENDING");
+    expect(view.wrapper.get('[data-testid="run-control"]').text()).toContain("请求暂停 Run");
     expect(posts).toHaveLength(0);
     view.unmount();
   });
@@ -1954,7 +1959,22 @@ describe("协作工作区主路径", () => {
     expect(control).toContain("请求暂停 Run：PENDING");
     expect(control).toContain("Run 尚未暂停");
     expect(control).toContain("等待安全点处理");
-    expect(view.wrapper.get('[data-testid="run-control-PAUSE"]').attributes("disabled")).toBeDefined();
+    // 2026-11-11 去技术噪音：聊天顶部只说「已提交／等待」，不把 PENDING、请求 ID 与修订号铺上首屏。
+    const brief = view.wrapper.get('[data-testid="collab-attention-state"]').text()
+      + view.wrapper.get('[data-testid="collab-attention-note"]').text();
+    expect(brief).toContain("暂停请求已提交，等待当前步骤结束");
+    expect(brief).toContain("执行尚未暂停");
+    expect(brief).toContain("执行权仍归");
+    expect(brief).not.toContain("PENDING");
+    expect(brief).not.toContain("req-1");
+    // 技术回执与任务/验收修订收进默认收起的展开区，信息仍可核对但不占首屏。
+    const technical = view.wrapper.get('[data-testid="run-control-technical"]');
+    expect(technical.attributes("open")).toBeUndefined();
+    expect(technical.text()).toContain("请求暂停 Run：PENDING");
+    expect(view.wrapper.get('.collab-attention .collab-run-facts').attributes("open")).toBeUndefined();
+    // 待处理请求期间控制入口不可用：不再排一行灰按钮，只保留刷新与技术详情。
+    expect(view.wrapper.find('[data-testid="run-control-PAUSE"]').exists()).toBe(false);
+    expect(view.wrapper.get('[data-testid="run-refresh"]').exists()).toBe(true);
     expect(view.wrapper.find('[data-testid="run-resume"]').exists()).toBe(false);
     expect(view.wrapper.find('[data-testid="run-handoff-edit"]').exists()).toBe(false);
     expect(view.wrapper.get('[data-testid="collab-facts"]').text()).toContain("等待人工判断");

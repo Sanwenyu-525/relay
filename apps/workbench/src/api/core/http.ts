@@ -1,6 +1,21 @@
 import { RelayApiError, RelayContractError, RelayTransportError } from "./errors";
 import { isRecord, optionalString } from "./primitives";
 import type { RelayFieldError } from "./errors";
+import { reportFrontendApiError } from "../../lib/frontendDiagnostics";
+
+/** 前端诊断正文：字段固定且有界，绝不携带聊天/输入/请求体。 */
+export interface ClientDiagnosticReport {
+  readonly kind: "render" | "uncaught" | "unhandled_rejection" | "init" | "api_5xx";
+  readonly message: string;
+  readonly name?: string | undefined;
+  readonly stack?: string | undefined;
+  readonly componentStack?: string | undefined;
+  readonly route?: string | undefined;
+  readonly requestId?: string | undefined;
+  readonly errorCode?: string | undefined;
+  readonly status?: number | undefined;
+  readonly clientTs?: string | undefined;
+}
 
 /**
  * 客户端默认时限。它不是服务端执行预算，只是「不让界面无限停在加载中」的上界，
@@ -67,7 +82,7 @@ export class RelayHttp {
     if (!response.ok) {
       const record = isRecord(body) ? body : {};
       const conflict = isRecord(record.conflict) ? record.conflict : {};
-      throw new RelayApiError({
+      const problem = {
         status: response.status,
         code: optionalString(record, "code") ?? "HTTP_ERROR",
         detail: optionalString(record, "detail") ?? `服务端返回 HTTP ${response.status}。`,
@@ -84,7 +99,12 @@ export class RelayHttp {
           ? conflict.recall_paths.filter((path): path is string => typeof path === "string") : [],
         // 5xx 的问题体里带服务端追溯号：只在详情区展示，主提示句不出现内部诊断信息。
         requestId: optionalString(record, "request_id")
+      };
+      reportFrontendApiError({
+        status: problem.status, code: problem.code, detail: problem.detail,
+        requestId: problem.requestId ?? null, method: init.method ?? "GET", path,
       });
+      throw new RelayApiError(problem);
     }
     if (expectedStatus !== undefined && response.status !== expectedStatus) {
       throw new RelayTransportError(`命令响应为 HTTP ${response.status}，无法按预期核对回执。`);
@@ -108,7 +128,7 @@ export class RelayHttp {
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       const record = isRecord(body) ? body : {};
-      throw new RelayApiError({
+      const problem = {
         status: response.status,
         code: optionalString(record, "code") ?? "HTTP_ERROR",
         detail: optionalString(record, "detail") ?? `服务端返回 HTTP ${response.status}。`,
@@ -116,8 +136,14 @@ export class RelayHttp {
         retryAction: optionalString(record, "retry_action"),
         fieldErrors: fieldErrorsFrom(record),
         expectedRevision: null,
-        actualRevision: null
+        actualRevision: null,
+        requestId: optionalString(record, "request_id") ?? null
+      };
+      reportFrontendApiError({
+        status: problem.status, code: problem.code, detail: problem.detail,
+        requestId: problem.requestId, method: "GET", path,
       });
+      throw new RelayApiError(problem);
     }
 
     try {
@@ -130,6 +156,40 @@ export class RelayHttp {
 
   workspacePath(path: string): string {
     return `/api/v1/workspaces/${encodeURIComponent(this.#workspaceId)}${path}`;
+  }
+
+  /**
+   * 前端诊断上报（P0-3）：固定字段、独立短时限、永不抛错。
+   *
+   * 不走 request()——诊断失败不能再进入 api_5xx 上报形成循环；keepalive 让页面
+   * 崩溃/刷新时请求仍有机会送达。4xx/5xx 一律静默丢弃，由服务端日志自身记录。
+   */
+  async postClientDiagnostic(input: ClientDiagnosticReport): Promise<void> {
+    try {
+      await fetch(`${this.#baseUrl}${this.workspacePath("/client-diagnostics")}`, {
+        method: "POST",
+        keepalive: true,
+        signal: AbortSignal.timeout(5000),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.#bearerToken}`,
+        },
+        body: JSON.stringify({
+          kind: input.kind,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          message: input.message,
+          ...(input.stack === undefined ? {} : { stack: input.stack }),
+          ...(input.componentStack === undefined ? {} : { component_stack: input.componentStack }),
+          ...(input.route === undefined ? {} : { route: input.route }),
+          ...(input.requestId === undefined ? {} : { request_id: input.requestId }),
+          ...(input.errorCode === undefined ? {} : { error_code: input.errorCode }),
+          ...(input.status === undefined ? {} : { status: input.status }),
+          ...(input.clientTs === undefined ? {} : { client_ts: input.clientTs }),
+        }),
+      });
+    } catch {
+      // 诊断通道失败必须静默：网络不可达时上报本身不是业务错误。
+    }
   }
 }
 

@@ -300,6 +300,9 @@ async function processClaimedWakeup(db: DbExecutor, context: {
   try {
     const result = (await recordModelInvocation(db, {
       origin: { workspaceId: message.workspace_id, kind: 'MEMBER', memberMessageId: message.id },
+      correlation: {
+        messageId: message.id, projectId: conversation.project_id, workerId: options.workerId,
+      },
       identity: port.identity,
       signal: controller.signal,
       invoke: async () => port.assist({ ...request, signal: controller.signal }),

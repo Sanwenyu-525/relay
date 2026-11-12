@@ -15,11 +15,46 @@ import { classifyProviderError } from '../workflow/model-error-classification.js
  */
 const FIRST_STREAM_EVIDENCE_TIMEOUT_MS = 500;
 
+/** 调用方已知的日志关联事实；只用于排障，不参与记账或授权。 */
+export interface ModelCallCorrelation {
+  readonly sessionId?: string;
+  readonly messageId?: string;
+  readonly projectId?: string;
+  readonly taskId?: string;
+  readonly runId?: string;
+  readonly workerId?: string;
+  readonly operationId?: string;
+  readonly invocationId?: string;
+}
+
+/** 只复制调用方已经确知的关联事实；缺失的键不补空值，避免伪造追踪链。 */
+export function correlationFields(origin: ModelCallOrigin,
+  correlation: ModelCallCorrelation | undefined): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  const add = (key: string, value: string | undefined): void => {
+    if (value !== undefined && value !== '') fields[key] = value;
+  };
+  const first = (...values: readonly (string | undefined)[]): string | undefined =>
+    values.find((value) => value !== undefined && value !== '');
+  add('session_id', correlation?.sessionId);
+  add('message_id', first(correlation?.messageId, origin.assistMessageId));
+  add('project_id', correlation?.projectId);
+  add('task_id', correlation?.taskId);
+  add('run_id', correlation?.runId);
+  add('worker_id', correlation?.workerId);
+  add('operation_id', first(correlation?.operationId, origin.readOperationId));
+  add('invocation_id', first(correlation?.invocationId, origin.readInvocationId));
+  if (origin.memberMessageId !== undefined) fields.member_message_id = origin.memberMessageId;
+  return fields;
+}
+
 /** The begin insert commits before invoking a Provider. A lost process leaves
  * STARTED as an unknown outcome and never silently invents zero usage. */
 export async function recordModelInvocation<T>(db: DbExecutor, input: {
   readonly callId?: string;
   readonly origin: ModelCallOrigin;
+  /** 跨模块排障关联；缺省时从 origin 能确定的部分补齐。 */
+  readonly correlation?: ModelCallCorrelation;
   /**
    * 0145：本次请求的上下文构成。与 STARTED 行一起提交——它是「这次调用送进去了什么」
    * 的事实，必须在调用发出前就固定；结算时再补写就变成事后重构。
@@ -31,11 +66,14 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
   readonly settle: (result: T) => ModelCallSettlement;
 }): Promise<{ readonly callId: string; readonly result: T }> {
   const callId = input.callId ?? randomUUID();
+  const startedAt = Date.now();
+  const correlation = correlationFields(input.origin, input.correlation);
   const calls = new ModelCallRepository(db);
   await calls.begin(callId, input.contextUsage === undefined ? input.origin
     : { ...input.origin, contextUsage: input.contextUsage }, input.identity);
   getRuntimeLogger('model-call').info('model_call_started', {
-    model_call_id: callId, model: input.identity.model,
+    ...correlation,
+    model_call_id: callId, kind: input.origin.kind, model: input.identity.model,
     provider: input.identity.provider, origin: input.origin,
   });
   let result: T;
@@ -67,18 +105,35 @@ export async function recordModelInvocation<T>(db: DbExecutor, input: {
       ...(typeof evidence.providerRequestId === 'string'
         ? { providerRequestId: evidence.providerRequestId } : {}),
       ...(knownUsage === undefined ? {} : { usage: knownUsage }) });
-    getRuntimeLogger('model-call').error('model_call_failed', {
-      model_call_id: callId, status: aborted ? 'CANCELLED' : 'FAILED',
+    const failureFields = {
+      ...correlation,
+      model_call_id: callId, kind: input.origin.kind,
+      duration_ms: Date.now() - startedAt,
+      status: aborted ? 'CANCELLED' : 'FAILED',
+      failure_stage: 'provider_invoke',
       error_kind: aborted ? null
         : providerCategory ?? (error instanceof Error ? error.name : 'UNKNOWN'),
       provider_request_id: typeof evidence.providerRequestId === 'string'
         ? evidence.providerRequestId : null,
       usage: knownUsage ?? null,
-    });
+    };
+    // 用户主动取消与宿主停机不是程序缺陷：记 info、不带错误栈，避免污染 error 日志。
+    if (aborted) {
+      getRuntimeLogger('model-call').info('model_call_cancelled', failureFields);
+    } else {
+      getRuntimeLogger('model-call').error('model_call_failed', {
+        ...failureFields,
+        failure_origin: providerCategory === undefined ? 'internal' : 'provider',
+        error,
+      });
+    }
     throw error;
   }
   await calls.settle(callId, input.settle(result));
-  getRuntimeLogger('model-call').info('model_call_settled', { model_call_id: callId });
+  getRuntimeLogger('model-call').info('model_call_settled', {
+    ...correlation, model_call_id: callId, kind: input.origin.kind,
+    duration_ms: Date.now() - startedAt,
+  });
   return { callId, result };
 }
 

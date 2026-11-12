@@ -10,7 +10,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? "4173"}`;
+// 跨域桩的允许源必须跟 playwright.config.ts 的 webServer 同端口（2026-11-11 验收整改）：
+// 只设公共的 RELAY_E2E_PORT 时本文件此前仍回落 4173，CORS 对不上就整轮卡在「已连接」之前。
+// 显式的 RELAY_RAIL_TEST_PORT 保留优先级，供把本文件单独指到别的端口的场合使用。
+const origin = `http://127.0.0.1:${process.env.RELAY_RAIL_TEST_PORT ?? process.env.RELAY_E2E_PORT ?? "4173"}`;
 
 const projectA = "22222222-2222-4222-8222-222222222222";
 const projectB = "22222222-2222-4222-8222-222222222223";
@@ -170,6 +173,7 @@ function measure(page: Page) {
       titleFont: Number.parseFloat(getComputedStyle(rows[0].querySelector<HTMLElement>(".recent-work-title")!).fontSize),
       titleRoom: rows[0].querySelector<HTMLElement>(".recent-work-title")!.getBoundingClientRect().width,
       compactHeight: rem("--relay-control-height-compact"),
+      targetMinimum: rem("--relay-control-target-minimum"),
       metaSize: rem("--relay-font-size-meta"),
       space05: rem("--relay-space-0-5"),
       space1: rem("--relay-space-1"),
@@ -267,9 +271,10 @@ test.describe("近期工作栏窄列几何", () => {
       expect(look.searchOverflow, detail).toBeLessThanOrEqual(0.5);
       // placeholder 必须整条放得下，还要留出余量：字体回退时度量会变。
       expect(look.placeholderWidth, detail).toBeLessThanOrEqual(look.inputTextRoom - 8);
-      // 行高不低于 control.height.compact，行与行至少隔开一档 space.0.5（2026-10-16 第七轮
-      // 统一行距后分组内与已归档区都是这一档；此前下限写的是 space.1，对应分组覆盖遗留的 4px）。
-      expect(look.rowHeight, detail).toBeGreaterThanOrEqual(look.compactHeight - 0.5);
+      // 行高不低于 control.target.minimum（2026-10-24 第十二轮起本列三类行统一 24px，
+      // styles.css 同日说明；旧断言对 compact(32px) 是基线漂移），行与行至少隔开一档
+      // space.0.5（2026-10-16 第七轮统一行距后分组内与已归档区都是这一档）。
+      expect(look.rowHeight, detail).toBeGreaterThanOrEqual(look.targetMinimum - 0.5);
       expect(look.rowPitch, detail).toBeGreaterThanOrEqual(look.space05 - 0.5);
       // 窄栏里的行标题用 meta 档，不用正文档去挤 160px 的内容盒。
       expect(look.titleFont, detail).toBeCloseTo(look.metaSize, 1);
@@ -309,7 +314,8 @@ test.describe("近期工作栏窄列几何", () => {
         summaryTop: box.top, summaryHeight: box.height, summaryRight: box.right,
         triggerRight: triggerBox.right, triggerWidth: triggerBox.width,
         titleWidth: title.getBoundingClientRect().width,
-        compactHeight: rem("--relay-control-height-compact")
+        compactHeight: rem("--relay-control-height-compact"),
+        targetMinimum: rem("--relay-control-target-minimum")
       };
     });
 
@@ -326,9 +332,10 @@ test.describe("近期工作栏窄列几何", () => {
     expect(hovered.summaryTop, detail).toBe(rest.summaryTop);
     expect(hovered.summaryHeight, detail).toBe(rest.summaryHeight);
     expect(hovered.titleWidth, detail).toBe(rest.titleWidth);
-    // 「＋」落在这一行右端内缘，命中区仍是紧凑控件那一档。
+    // 「＋」落在这一行右端内缘，命中区是 control.target.minimum（24px）：2026-10-24 第十二轮
+    // 随行从 compact(32px) 收到同档（styles.css .recent-work-group-new 同日说明），断言跟着对齐。
     expect(hovered.triggerRight, detail).toBeLessThanOrEqual(hovered.summaryRight + 0.5);
-    expect(hovered.triggerWidth, detail).toBeCloseTo(hovered.compactHeight, 1);
+    expect(hovered.triggerWidth, detail).toBeCloseTo(hovered.targetMinimum, 1);
     // 指针从行移到「＋」上：它自己就是悬停目标，不能闪断回徽标。
     await button.hover();
     const onTrigger = await read();
@@ -762,13 +769,18 @@ test.describe("近期工作栏窄列几何", () => {
     await expect(page).toHaveURL(/\/tasks\?view=create/);
   });
 
-  test("「任务」分组有执行中的 Run 时显示旋转的点状缺口圆环", async ({ page }) => {
+  test("「任务」段执行中的聊天行右侧显示旋转的点状缺口圆环", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installRoutes(page, { runningFirstTask: true });
     await page.goto("/agent");
     await connect(page);
 
-    const ring = page.getByTestId(`recent-work-task-running-${projectA}`);
+    // 2026-11-10 用户两次指认：环挂在执行中的聊天（任务）行本身、标题右侧，
+    // 不是项目分组标题上。判据是任务投影的 executor.run_id 非空。
+    const runningTaskId = "33333333-3333-4333-8333-333333333331";
+    const idleTaskId = "33333333-3333-4333-8333-333333333332";
+    const row = page.getByTestId(`recent-work-${runningTaskId}`).first();
+    const ring = row.locator(".recent-work-running");
     await expect(ring).toBeVisible();
     const facts = await ring.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -782,14 +794,28 @@ test.describe("近期工作栏窄列几何", () => {
     // 与状态图标同一格：12px；匀速旋转取 motion.loop.spin（1s、infinite）。
     expect(facts.width).toBeCloseTo(12, 1);
     expect(facts.height).toBeCloseTo(12, 1);
-    expect(facts.animationName).toBe("recent-work-group-running-spin");
+    expect(facts.animationName).toBe("recent-work-running-spin");
     expect(facts.duration).toBe("1s");
     expect(facts.iteration).toBe("infinite");
     // 带缺口的点状：短划 + 间隔组成圆点，路径本身只画 270°。
     expect(facts.dash).toContain("4.2");
-    // 指示挂在分组行上：收起分组后仍可见。
-    await page.locator('[data-testid="recent-work-tasks"] .recent-work-group > summary').first().click();
-    await expect(ring).toBeVisible();
+
+    // 位置在行右侧：环是标题内容的最后一项，右缘贴行尾内边距（space.2 = 8px）并与行垂直居中。
+    const geometry = await page.evaluate((target) => {
+      const item = document.querySelector<HTMLElement>(`[data-testid="recent-work-${target}"]`)!;
+      const ringEl = item.querySelector<HTMLElement>(".recent-work-running")!;
+      const copy = item.querySelector<HTMLElement>(".recent-work-copy")!;
+      const rowBox = item.getBoundingClientRect(); const ringBox = ringEl.getBoundingClientRect();
+      // 环在旋转：外接矩形会随角度变宽，右缘只能量布局值（offsetLeft/offsetWidth）。
+      return { gap: item.clientWidth - (ringEl.offsetLeft + ringEl.offsetWidth), last: copy.lastElementChild === ringEl,
+        centered: Math.abs((ringBox.top + ringBox.bottom) / 2 - (rowBox.top + rowBox.bottom) / 2) < 1 };
+    }, runningTaskId);
+    expect(geometry.gap).toBeCloseTo(8, 0);
+    expect(geometry.last).toBe(true);
+    expect(geometry.centered).toBe(true);
+    // 只有执行权成立的那一行有环；同组的空闲任务行与分组标题都没有。
+    await expect(page.getByTestId(`recent-work-${idleTaskId}`).first().locator(".recent-work-running")).toHaveCount(0);
+    await expect(page.locator('[data-testid="recent-work-tasks"] .recent-work-group > summary .recent-work-running')).toHaveCount(0);
     // 减少动态效果只停旋转，环的形状与位置保留。
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect.poll(async () => ring.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
@@ -918,7 +944,8 @@ test.describe("近期工作栏窄列几何", () => {
     expect(rest.unreadDot!.titleWeight, detail).toBeGreaterThan(rest.readTitleWeight);
     expect(await page.locator('[data-testid="recent-work-66666666-6666-4666-8666-666666666661"] [data-testid="recent-work-unread-dot"]').count(), detail).toBe(0);
     // 静止态这一列的几何仍达基线：藏起来的触发器不该改变行高或行距。
-    expect(look.rowHeight, detail).toBeGreaterThanOrEqual(look.compactHeight - 0.5);
+    // 行高下限同第 272 行：control.target.minimum(24px)，不是 compact(32px)。
+    expect(look.rowHeight, detail).toBeGreaterThanOrEqual(look.targetMinimum - 0.5);
     expect(look.rowPitch, detail).toBeGreaterThanOrEqual(look.space05 - 0.5);
 
     await page.getByTestId(`recent-work-${sessionId}`).first().hover();
@@ -940,28 +967,32 @@ test.describe("近期工作栏窄列几何", () => {
     const opened = await read();
     expect(opened.expanded, JSON.stringify(opened)).toBe("true");
     // 2026-10-16 按用户参考菜单重排：置顶／重命名／未读／分叉在前，分组细线之后复制身份、归档与删除收尾；
-    // 七条动作各带一枚前缀图标（图标不进 textContent，这里只核对顺序与存在性）。
+    // 动作各带一枚前缀图标（图标不进 textContent，这里只核对顺序与存在性）。
     // 这条种子会话本身是未读态，所以第三项显示反向动作「取消未读」。
     // 2026-10-19：删除条目由「删除这段讨论」收成「删除」，确认改成就地浮层（见 sessionRowMenu.spec.ts）。
+    // 2026-11-01 起「重新生成标题」（SESSION_AUTO_TITLE）与「导出会话」（会话诊断导出）先后入列，
+    // 本用例此前先挂在行高断言上，这里第一次真正跑到菜单内容。
     expect(opened.panelActions, JSON.stringify(opened))
-      .toEqual(["置顶", "重命名", "取消未读", "分叉这段讨论", "复制会话 ID", "归档", "删除"]);
+      .toEqual(["置顶", "重命名", "重新生成标题", "取消未读", "分叉这段讨论", "复制会话 ID", "导出会话", "归档", "删除"]);
     expect(opened.panelSeparators, JSON.stringify(opened)).toBe(1);
     expect(opened.panelActionIcons, JSON.stringify(opened))
-      .toEqual([true, true, true, true, true, true, true]);
-    // 收尾的归档与删除用状态红色（color.status.danger.text），上面五条常规动作用正文黑
+      .toEqual([true, true, true, true, true, true, true, true, true]);
+    // 收尾的归档与删除用状态红色（color.status.danger.text），上面七条常规动作用正文黑
     // （color.text.primary）——2026-10-17 用户指认「文字要黑色、危险操作像归档用红色」。
     // 常规动作绝不能退回共享基座 `.text-button` 的森林绿动作色，那是这轮改掉的读感。
     expect(opened.panelActionColors, JSON.stringify(opened)).toEqual(
       [opened.tokenTextPrimary.primary, opened.tokenTextPrimary.primary,
         opened.tokenTextPrimary.primary, opened.tokenTextPrimary.primary,
+        opened.tokenTextPrimary.primary, opened.tokenTextPrimary.primary,
         opened.tokenTextPrimary.primary, opened.tokenTextPrimary.danger,
         opened.tokenTextPrimary.danger]);
     expect(opened.panelActionColors![0], JSON.stringify(opened))
       .not.toBe(opened.tokenTextPrimary.action);
-    // 七条都左对齐（图标在左、名称跟着）：`.text-button` 基座的 justify-content:center
+    // 全部条目都左对齐（图标在左、名称跟着）：`.text-button` 基座的 justify-content:center
     // 是同特异度后置声明，曾把这里的 flex-start 静默压成居中（用户指认「文字要左对齐」）。
     expect(opened.panelActionJustify, JSON.stringify(opened))
-      .toEqual(["flex-start", "flex-start", "flex-start", "flex-start", "flex-start", "flex-start", "flex-start"]);
+      .toEqual(["flex-start", "flex-start", "flex-start", "flex-start", "flex-start",
+        "flex-start", "flex-start", "flex-start", "flex-start"]);
     // 菜单宽度跟条目一致（用户指认）：面板宽 - 最宽条目自然宽 = 两侧内间距 + 细边，右侧不留空底。
     expect(opened.panelWidth! - opened.panelItemNaturalWidth!, JSON.stringify(opened))
       .toBeCloseTo(opened.panelInlineInsets!, 0);
@@ -1068,6 +1099,106 @@ test.describe("近期工作栏窄列几何", () => {
     // 移开指针后收起，不留浮层。
     await page.mouse.move(700, 420);
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+  });
+
+  // 键盘收起语义（2026-11-11 验收整改）：摘要卡此前只认 pointerLeave/blur/scroll，
+  // 键盘聚焦后按 Esc 关不掉——焦点停在行上等一秒，卡片仍有一个可见实例。这里按键盘
+  // 旅程收口：聚焦出现（停留一秒仍在）→ Esc 收起（焦点留行、aria-describedby 撤净、
+  // 路由与会话不变、不触发打开）→ 移出再重新进入仍可打开 → Tab 到下一行自动换卡
+  // → 打开操作菜单时摘要让位、Esc 先关菜单 → 滚动收起。截图记键盘路径下的位置与收起后状态。
+  test("键盘聚焦的摘要卡可用 Esc 收起：焦点留行、可重进、不误触打开", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installRoutes(page);
+    await page.goto("/agent");
+    await connect(page);
+
+    const sessionId = "66666666-6666-4666-8666-666666666662";
+    const row = page.getByTestId(`recent-work-${sessionId}`).first();
+    await expect(row).toBeVisible();
+    await row.focus();
+    const card = page.getByTestId("recent-work-summary");
+    await expect(card).toBeVisible();
+    // 停留一秒：卡片保持恰好一个实例（此前缺陷正是「等一秒仍在」）。
+    await page.waitForTimeout(1000);
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(1);
+    await page.screenshot({ path: "results/rail-row-summary-keyboard-open.png" });
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+    // 焦点仍在触发行上，描述引用撤干净，没有触发打开、没有路由变化。
+    expect(await page.evaluate((target) => document.activeElement?.getAttribute("data-testid"), sessionId))
+      .toBe(`recent-work-${sessionId}`);
+    expect(await row.getAttribute("aria-describedby")).toBeNull();
+    await page.screenshot({ path: "results/rail-row-summary-keyboard-closed.png" });
+    expect(page.url()).not.toContain(`session=${sessionId}`);
+
+    // 指针还停在按钮上也不会立即重新打开；重新进入必须真离开再回来（对已聚焦元素
+    // 再调 focus() 不产生 focus 事件，键盘用户走 Tab 去回的真实路径）。
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+
+    // Tab 到下一行：上一张卡随 blur 收起，下一行按自己的聚焦出卡。
+    const nextSession = "66666666-6666-4666-8666-666666666663";
+    await page.keyboard.press("Tab");
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(1);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
+      .toBe(`recent-work-${nextSession}`);
+    // Shift+Tab 回到原行：下一次真正重新进入仍可打开。
+    await page.keyboard.press("Shift+Tab");
+    await expect(card).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+
+    // 操作菜单打开时摘要让位；Esc 先关菜单，摘要保持收起（菜单自己处理 Esc）。
+    await page.locator(`.recent-work-row:has([data-testid="recent-work-${sessionId}"])`)
+      .getByTestId(`recent-work-menu-${sessionId}`).click();
+    const panel = page.getByTestId(`recent-work-panel-${sessionId}`);
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+
+    // 滚动收起：摘要开着时滚动列表，卡片立刻收起、不留在旧坐标上。
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await row.focus();
+    await expect(card).toBeVisible();
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>(".recent-work-scroll");
+      if (scroller !== null) scroller.scrollTop += 40;
+    });
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
+  });
+
+  // 窄窗 + 长中文标题：摘要卡左右边界量测（2026-11-11 验收整改记录）。卡宽上限是
+  // min(15rem, 100vw - space.4)，左缘贴行右缘外 8px——超窄窗下「上限」不含左缘偏移，
+  // 这里量真实坐标判断是否溢出视口，作为是否需要第二个修复的依据。
+  test("窄窗长中文标题：摘要卡贴行右缘且不出视口右缘", async ({ page }) => {
+    const longTitle = "整理论文资料：把三份实验记录的原始数据表、清洗脚本与图表逐一对齐并标注尚待核实的实验项";
+    const longId = "66666666-6666-4666-8666-666666666664";
+    await installRoutes(page);
+    await page.route(`${apiBase}/**`, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (route.request().method() === "GET" && path === `${prefix}/assist-sessions`)
+        return fulfillJson(route, { items: [session(longId, null, longTitle, "2026-11-11T02:00:00Z")] });
+      return route.fallback();
+    });
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.goto("/agent");
+    await connect(page);
+    const row = page.getByTestId(`recent-work-${longId}`).first();
+    await expect(row).toBeVisible();
+    await row.hover();
+    const card = page.getByTestId("recent-work-summary");
+    await expect(card).toBeVisible();
+    const bounds = await card.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, viewport: window.innerWidth, width: box.width };
+    });
+    // 实测坐标贴在报告里；断言只锁「不出视口」与「贴行右缘」两条硬边界。
+    console.log("rail summary bounds (768px viewport):", JSON.stringify(bounds));
+    expect(bounds.right, JSON.stringify(bounds)).toBeLessThanOrEqual(bounds.viewport);
+    expect(bounds.left, JSON.stringify(bounds)).toBeGreaterThanOrEqual(0);
   });
 
   // 删除确认（2026-10-19 用户指令「这个弹窗改成这样的简单弹窗」）：不再是 AppDialog，而是贴着 ⋯ 的

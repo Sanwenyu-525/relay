@@ -121,6 +121,11 @@ Promise<LearningRoundOutcome> {
         const recorded = await recordModelInvocation(db, {
           origin: { workspaceId: session.workspace_id, kind: 'ASSIST',
             assistMessageId: message.id },
+          correlation: {
+            sessionId: session.id, messageId: message.id,
+            ...(session.project_id === null ? {} : { projectId: session.project_id }),
+            ...(session.task_id === null ? {} : { taskId: session.task_id }),
+          },
           contextUsage: contextUsageToJson(describeAssistRequestContext(request)),
           identity: input.modelPort.identity,
           signal: input.signal,

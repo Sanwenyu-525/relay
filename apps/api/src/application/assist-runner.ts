@@ -507,6 +507,11 @@ export async function runAssistGenerationTick(db: DbExecutor,
     const result = modelRoute.invokeWithCallId === undefined
       ? (await recordModelInvocation(db, {
         origin: { workspaceId: session.workspace_id, kind: 'ASSIST', assistMessageId: message.id },
+        correlation: {
+          sessionId: session.id, messageId: message.id, workerId: options.workerId,
+          ...(session.project_id === null ? {} : { projectId: session.project_id }),
+          ...(session.task_id === null ? {} : { taskId: session.task_id }),
+        },
         // 0145：这次单次生成的上下文构成（系统 + 资料 + 历史），随 STARTED 行一起提交。
         contextUsage: contextUsageToJson(describeAssistRequestContext(baseRequest)),
         identity: modelRoute.modelPort.identity, signal: controller.signal,
@@ -738,12 +743,21 @@ export async function runAssistGenerationTick(db: DbExecutor,
           modelInvocationFailed && Object.is(error, modelInvocationError) &&
           !(error instanceof DomainError)
         ? classifyProviderError(error) ?? routingStop?.providerErrorKind ?? null : null;
-      getRuntimeLogger('assist').error('assist_generation_failed', {
+      const failureFields = {
         message_id: message.id, session_id: message.session_id,
         worker_id: options.workerId, status, error_code: errorCode,
         provider_error_kind: providerErrorKind,
+        failure_stage: modelInvocationFailed ? 'model_invoke' : 'before_model_invoke',
         error_name: error instanceof Error ? error.name : 'NON_ERROR',
-      });
+      };
+      // 用户主动取消是预期状态变化：记 info 且不带错误栈，不混进程序缺陷。
+      if (status === 'CANCELLED') {
+        getRuntimeLogger('assist').info('assist_generation_cancelled', failureFields);
+      } else {
+        getRuntimeLogger('assist').error('assist_generation_failed', {
+          ...failureFields, error,
+        });
+      }
       const settled = await settle(tx, message, options.workerId, { status,
         errorCode: status === 'FAILED' ? errorCode : null, providerErrorKind,
         content: null, ...modelErrorEvidence(error) });
@@ -897,6 +911,13 @@ async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
     return { messageId: message.id, sessionId: session.id,
       status: settled ? 'CANCELLED' : 'DISCARDED', errorCode: null, proposalIds: [] };
   }
+  // 只读轮次的失败此前只落在消息行；工具输出解析失败等类型化停因没有日志入口。
+  // 记同一 `assist_generation_failed` 事件并标明阶段，跨会话/消息/model_call 可检索。
+  getRuntimeLogger('assist').error('assist_generation_failed', {
+    message_id: message.id, session_id: session.id, worker_id: options.workerId,
+    status: 'FAILED', error_code: outcome.errorCode, failure_stage: 'readonly_round',
+    provider_error_kind: outcome.providerErrorKind ?? null,
+  });
   await settleInTransaction(db, message, options.workerId, { status: 'FAILED',
     errorCode: outcome.errorCode, content: null,
     providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });
@@ -1612,6 +1633,10 @@ async function runLearningGeneration(db: DbExecutor, context: {
     return { messageId: message.id, sessionId: session.id,
       status: settled ? 'CANCELLED' : 'DISCARDED', errorCode: null, proposalIds: [] };
   }
+  getRuntimeLogger('assist').error('assist_generation_failed', {
+    message_id: message.id, session_id: session.id, worker_id: options.workerId,
+    status: 'FAILED', error_code: outcome.errorCode, failure_stage: 'learning_round',
+  });
   await settleInTransaction(db, message, options.workerId, { status: 'FAILED',
     errorCode: outcome.errorCode, content: null,
     providerRequestId: outcome.providerRequestIds.at(-1) ?? null, usage: outcome.usage });

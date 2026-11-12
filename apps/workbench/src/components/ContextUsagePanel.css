@@ -200,15 +200,5 @@
   border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
-/* 「预算未知」：那次调用没有可靠的冻结预算时，占比无法计算——
-   宁可写明未知，也不拿当前档位冒充历史预算。 */
-.agent-chat-context-meter-unknown {
-  margin-inline-start: auto;
-  flex: none;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
-  line-height: var(--relay-font-lineHeight-heading);
-}
-
 /* 2026-10-31 用户指令：档位点击即保存，删掉「保存档位 / 重新读取」两枚动作键——
    这一节只剩三档与状态行，不再有按钮行。 */

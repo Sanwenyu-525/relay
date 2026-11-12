@@ -86,6 +86,37 @@ it("行内不再常驻时间；悬停摘要卡按本地日期简写，同组同�
   }
 });
 
+it("键盘聚焦出现的摘要卡可用 Esc 收起：焦点留行上、可重进、不触发打开（2026-11-11 验收整改）", async () => {
+  const { container, router } = await mount(200, [{ id: id(30), project_id: projectId, task_id: null,
+    title: "键盘收起摘要卡的讨论", status: "ACTIVE", revision: "1",
+    created_at: "2026-11-11T02:00:00Z", updated_at: "2026-11-11T02:00:00Z" }]);
+  const row = container.querySelector<HTMLButtonElement>(`[data-testid="recent-work-${id(30)}"]`)!;
+  const li = row.closest("li")!;
+  // 键盘聚焦打开摘要（行为与悬停一致），Esc 收起：焦点留在行上，不需要移焦，
+  // 也不发命令、不打开会话、不误关外层（jsdom 里没有外层窗口，这里核对路由未动）。
+  await act(async () => { row.focus(); });
+  expect(li.querySelector(".recent-work-summary")).not.toBeNull();
+  expect(row.getAttribute("aria-describedby")).toBeTruthy();
+  await act(async () => {
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+  expect(li.querySelector(".recent-work-summary")).toBeNull();
+  expect(row.getAttribute("aria-describedby")).toBeNull();
+  expect(document.activeElement).toBe(row);
+  expect(router.state.location.pathname).toBe("/projects");
+  // 悬停打开的摘要同样能被 Esc 收起（两种打开方式都收口）。
+  await act(async () => {
+    row.dispatchEvent(new Event("pointerenter"));
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+  expect(li.querySelector(".recent-work-summary")).toBeNull();
+  // 指针还停在按钮上时不会立即重新打开；下一次真正重新进入（blur 后再聚焦）仍可打开。
+  await act(async () => { row.blur(); });
+  expect(li.querySelector(".recent-work-summary")).toBeNull();
+  await act(async () => { row.focus(); });
+  expect(li.querySelector(".recent-work-summary")).not.toBeNull();
+});
+
 it("新会话读回近期工作并高亮，保留已加载的更早任务", async () => {
   const sessionId = "77777777-7777-4777-8777-777777777777";
   const { container } = await mount(200, [], { id: sessionId, project_id: null, task_id: null,
@@ -167,24 +198,28 @@ it("「任务」段标题右侧常有「＋新建任务」：点击进创建页�
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
 
-it("任务分组有 Run 持有执行权时显示带缺口的点状圆环；没有执行权时不显示", async () => {
-  // 2026-11-10 用户要求「会话有任务执行的时候，那个地方加一个有缺口的点状圆圈，不停转动」。
-  // 口径是任务投影的 executor.run_id：服务端说 Run 还持有执行权才转动，不看状态文字推断。
+it("执行中的任务行在标题右侧显示带缺口的点状圆环；没有执行权的行不显示", async () => {
+  // 2026-11-10 用户两次指认：圆环挂在「会话/聊天」这一行本身、标题右侧，
+  // 不是项目分组标题上。口径仍是任务投影的 executor.run_id：Run 还持有执行权才转动。
   const idle = await mount();
-  expect(idle.container.querySelector('[data-testid^="recent-work-task-running-"]')).toBeNull();
+  expect(idle.container.querySelector(".recent-work-running")).toBeNull();
   cleanup?.(); cleanup = undefined;
 
   const { container } = await mount(200, [], undefined, [1]);
-  const group = container.querySelector<HTMLDetailsElement>('[data-testid="recent-work-tasks"] .recent-work-group')!;
-  const ring = group.querySelector<HTMLElement>(`:scope > summary [data-testid="recent-work-task-running-${projectId}"]`);
+  const runningRow = container.querySelector<HTMLElement>(`[data-testid="recent-work-${id(1)}"]`)!;
+  const ring = runningRow.querySelector<HTMLElement>(".recent-work-running");
   expect(ring).not.toBeNull();
-  // 12px 环与计数徽标同处分组行；形状之外还有文案，读屏听到的是同一件事。
-  expect(ring!.textContent).toContain("有任务正在执行");
+  // 环在行按钮内、紧接标题之后：标题 flex:1 把环顶到行右缘。
+  expect(ring!.closest("button")).toBe(runningRow);
+  expect(ring!.previousElementSibling?.classList.contains("recent-work-title")).toBe(true);
   expect(ring!.querySelector("path")?.getAttribute("stroke-dasharray")).toBe("0.1 4.2");
-  // 指示属于分组行本身：分组收起时仍看得见「这一组还在跑」。
-  expect(ring!.closest("summary")).toBe(group.querySelector(":scope > summary"));
-  // 同组里只有一条在跑也只出现一枚，不按任务条数重复。
-  expect(group.querySelectorAll(".recent-work-group-running")).toHaveLength(1);
+  // 运行是事实的一部分：进可访问名称，不只靠转动的图形。
+  expect(runningRow.getAttribute("aria-label")).toContain("有任务正在执行");
+  // 只有执行权成立的那一行有环；分组标题与同组的空闲任务行都没有。
+  const group = runningRow.closest(".recent-work-group")!;
+  expect(group.querySelectorAll(".recent-work-running")).toHaveLength(1);
+  expect(group.querySelector(":scope > summary")!.querySelector(".recent-work-running")).toBeNull();
+  expect(container.querySelector(`[data-testid="recent-work-${id(2)}"] .recent-work-running`)).toBeNull();
 });
 
 it("会话（按目录）与任务分开：会话行仍打开原会话身份", async () => {

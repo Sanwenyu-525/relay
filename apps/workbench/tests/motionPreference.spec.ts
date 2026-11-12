@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyMotionPreference, resolveMotionPreference, storeMotionPreference,
   storedMotionPreference, systemPrefersReducedMotion } from "../src/lib/motionPreference";
 
@@ -68,5 +68,21 @@ describe("运行期动效偏好", () => {
     expect(storedMotionPreference()).toBeNull();
     expect(resolveMotionPreference()).toBe(true);
     if (original !== undefined) Object.defineProperty(window.localStorage, "getItem", original);
+  });
+
+  it("写入被拒时如实返回 false，不落存储；重试成功返回 true（2026-11-11 验收整改）", () => {
+    // jsdom 的 localStorage 实例上 defineProperty 遮不住方法（displayPreferences 套件同款路径）：
+    // 只拒 relay.motion 这一个键，其余键照常写。
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation((key: string) => {
+      if (key === STORAGE_KEY) throw new DOMException("quota", "QuotaExceededError");
+    });
+    try {
+      expect(storeMotionPreference("off")).toBe(false);
+      expect(storedMotionPreference()).toBeNull();
+    } finally {
+      write.mockRestore();
+    }
+    expect(storeMotionPreference("off")).toBe(true);
+    expect(storedMotionPreference()).toBe("off");
   });
 });

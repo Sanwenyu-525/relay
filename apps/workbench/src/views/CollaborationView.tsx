@@ -628,6 +628,26 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
   const waitReason = run?.waitReason ?? task?.waitingReason ?? null;
   // 这三类状态一旦收进「更多操作」就不再可发现，因此 Run 控制留在页头常驻。
   const runNeedsAttention = (run?.unresolvedOperationIds.length ?? 0) > 0 || run?.pendingControlRequest != null || runFailureReasons.length > 0;
+  /**
+   * 聊天视图没有任务页头，这条摘要承担「现在发生了什么」：首屏只说人话，
+   * 请求 ID、PENDING、Run 编号、任务/验收修订与控制记录都留在「任务与执行详情」。
+   * 判据仍读服务端事实：受理写成「已提交／等待」，绝不写成已暂停、已停止或已交接。
+   */
+  const attention = run === null || task === null ? null
+    : run.pendingControlRequest !== null
+      ? {
+        tone: "warning" as const,
+        state: ({ PAUSE: "暂停请求已提交，等待当前步骤结束", CANCEL: "停止请求已提交，等待当前步骤结束",
+          HANDOFF: "交接请求已提交，等待当前步骤结束", CANCEL_TASK: "取消任务请求已提交，等待当前步骤结束" })[run.pendingControlRequest.type],
+        note: `${({ PAUSE: "执行尚未暂停", CANCEL: "执行尚未停止", HANDOFF: "尚未交接",
+          CANCEL_TASK: "任务尚未取消" })[run.pendingControlRequest.type]}；执行权仍归${executorLabels[task.executor]}。`
+      }
+      : run.unresolvedOperationIds.length > 0
+        ? { tone: "warning" as const, state: `${run.unresolvedOperationIds.length} 项外部动作结果待核对`,
+          note: "沿原记录核对，不要重复执行同一动作。" }
+        : runFailureReasons.length > 0
+          ? { tone: "danger" as const, state: "执行失败，需要处理", note: "失败原因已记录，可在执行记录中核对。" }
+          : null;
   const setLayoutMode = (mode: CollaborationLayoutMode) => {
     setLayout((current) => saveCollaborationLayoutPreferences({ ...current, mode }));
   };
@@ -1674,17 +1694,39 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               </button>
             </div>
           </div>
-          {/* UNKNOWN、控制请求与失败原因不折叠：这三类一旦收进「更多操作」就不再可发现。
-              事实条同步移出展开区，否则「无法确认的执行结果」只剩展开后才可见。 */}
+          {/* UNKNOWN、控制请求与失败原因不折叠：状态行与 Run 控制留在页头常驻；
+              任务/验收修订、Run 编号、检查记录入口清进「任务与执行详情」的展开区，
+              首屏不再铺一条技术事实带（2026-11-11 用户指认「不该展示到前端、布局样式有问题」）。 */}
           {runNeedsAttention && <div className="collab-run-controls" data-testid="collab-run-disclosure">
-            {taskObjective}
             {runControl}
-            <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} /></div>}
+            <details className="collab-run-facts">
+              <summary>任务与执行详情</summary>
+              {taskObjective}
+              <FactBar label="任务与执行事实" testId="collab-facts" cells={factCells} />
+            </details></div>}
         </PageHeader>
       </header>}
-      {task !== null && workbenchView === "chat" && runNeedsAttention && <div className="collab-run-controls">
-        {runControl}<FactBar label="任务与执行事实" testId="collab-chat-facts" cells={factCells} />
-      </div>}
+      {task !== null && workbenchView === "chat" && runNeedsAttention && attention !== null
+        && <div className="collab-run-controls collab-run-controls--chat" data-layout={renderedLayoutMode}>
+          <section className="collab-attention" data-tone={attention.tone}
+            data-testid="collab-attention" aria-label="执行状态">
+            <div className="collab-attention-head">
+              <AlertTriangle className="collab-attention-icon" aria-hidden="true" />
+              <div className="collab-attention-copy">
+                <p className="collab-attention-state" data-testid="collab-attention-state">{attention.state}</p>
+                <p className="collab-attention-note" data-testid="collab-attention-note">{attention.note}</p>
+              </div>
+              <button className="text-link collab-attention-evidence" type="button"
+                data-testid="collab-attention-evidence" onClick={() => revealSidePanel("CHECK")}>执行记录</button>
+            </div>
+            {runControl}
+            <details className="collab-run-facts collab-run-facts--bordered">
+              <summary>任务与执行详情</summary>
+              {taskObjective}
+              <FactBar label="任务与执行事实" testId="collab-chat-facts" cells={factCells} />
+            </details>
+          </section>
+        </div>}
       {task !== null && <div className="collab-notices">
         {taskUpdatingVisible && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}
         {error && <p className="action-error" role="alert" data-testid="collab-task-error">{error} 任务事实尚未重新核对，不能提交新的判断或任务命令。</p>}

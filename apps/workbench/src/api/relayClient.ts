@@ -43,6 +43,12 @@ export type { RelayAssistGoal, RelayAssistPlan, RelayChatModeTransition, RelayGo
 export type { RelayModelCatalog, RelayCatalogModel, RelaySessionModelSelection } from "./resources/modelSelection";
 import * as pluginsApi from "./resources/plugins";
 export type { RelayPluginRuntimeStatus, RelayPluginRuntimeState } from "./resources/plugins";
+import * as diagnosticsApi from "./resources/diagnostics";
+export type { RelayDiagnosticFileInfo, RelayDiagnosticInventory, RelayDiagnosticLogEntry,
+  RelayDiagnosticLogLevel, RelayDiagnosticProcessStatus, RelayDiagnosticProcessStatusKind,
+  RelayDiagnosticsLogPage, RelayDiagnosticsQuery, RelayDiagnosticsRuntimeStatus }
+  from "./resources/diagnostics";
+export { RELAY_DIAGNOSTIC_LEVELS } from "./resources/diagnostics";
 import * as composerDraftAssistApi from "./resources/composerDraftAssist";
 import type { ComposerDraftOperation, RelayComposerDraftAssist } from "./resources/composerDraftAssist";
 import * as learningApi from "./resources/learning";
@@ -106,7 +112,7 @@ import type { RelayReadiness } from "./dtos/readiness";
 import type { RelayContextManifestDetail, RelayContextManifestList, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
 import type { RelayCompletion, RelayCompletionEvidence, RelayReopen, RelayTaskAcceptanceRevision, RelayTaskAcceptanceRevisionInput, RelayTaskCheckPlanPreview, RelayTaskCreation, RelayTaskDetail, RelayTaskMutation, RelayTaskPage, RelayTaskSummary, RelayToday, RelayTodayPriority } from "./dtos/tasks";
 import { RelayHttp } from "./core/http";
-import type { RelayApiConnection } from "./core/http";
+import type { ClientDiagnosticReport, RelayApiConnection } from "./core/http";
 
 export { createCommandId } from "./core/command-id";
 export type { ComposerDraftOperation, RelayComposerDraftAssist } from "./resources/composerDraftAssist";
@@ -239,6 +245,12 @@ export class RelayApiClient {
   get baseUrl(): string {
     return this.#http.baseUrl;
   }
+
+  /** 前端诊断上报（P0-3）：固定字段，失败静默，不参与业务重试。 */
+  reportClientDiagnostic(input: ClientDiagnosticReport): Promise<void> {
+    return this.#http.postClientDiagnostic(input);
+  }
+
   getChatCommands() { return chatControlsApi.getChatCommands(this.#http); }
   /**
    * 发送前草稿辅助（工作台 §30）：只送当前草稿与操作类型。
@@ -1328,6 +1340,22 @@ export class RelayApiClient {
   /** 模型端口只读状态：服务端保证不含密钥。 */
   async getModelPortStatus(): Promise<RelayModelPortStatus> {
     return informationApi.getModelPortStatus(this.#http);
+  }
+
+  /** 开发者诊断：读取受管日志窗口；文件白名单与脱敏由服务端负责。 */
+  async getDiagnosticsLogs(query: diagnosticsApi.RelayDiagnosticsQuery,
+    limit = 100, cursor?: string): Promise<diagnosticsApi.RelayDiagnosticsLogPage> {
+    return diagnosticsApi.getDiagnosticsLogs(this.#http, query, limit, cursor);
+  }
+
+  async getDiagnosticsRuntime(): Promise<diagnosticsApi.RelayDiagnosticsRuntimeStatus> {
+    return diagnosticsApi.getDiagnosticsRuntime(this.#http);
+  }
+
+  /** 导出已脱敏的筛选结果；正文由宿主保存对话框写入用户选定位置。 */
+  async exportDiagnosticsLogs(query: diagnosticsApi.RelayDiagnosticsQuery,
+    limit = 1000): Promise<string> {
+    return diagnosticsApi.exportDiagnosticsLogs(this.#http, query, limit);
   }
 
   /** 模型能力声明（2026-10-19）：实例级配置，覆盖写与撤销都没有命令回执。 */
