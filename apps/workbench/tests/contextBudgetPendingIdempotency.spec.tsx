@@ -3,6 +3,7 @@ import { RelayApiClient } from "../src/api/relayClient";
 import type { RelaySessionContextUsage } from "../src/api/dtos/assist";
 import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
+import { contextCompactionFixture } from "./contextUsageFixture";
 
 /**
  * 档位保存幂等性与显示态收敛的验收用例（2026-10-30 复审；2026-10-31 改为档位点击即写）。
@@ -33,7 +34,9 @@ function usage(id: string, tokens: 262_144 | 524_288 | 1_048_576,
   revision: string): RelaySessionContextUsage {
   return { sessionId: id, budget: { tokens, revision },
     nextCall: { reservationTokens: tokens, contextBudgetTokens: tokens,
-      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null };
+      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null,
+    compaction: contextCompactionFixture({ targetWindowTokens: tokens,
+      effectiveWindowTokens: tokens }) };
 }
 
 function receipt(commandId: string, id: string, tokens: number, revision: string): Response {
@@ -64,8 +67,8 @@ function stubFetch(respond: (url: string, method: string,
 
 function panel(id: string, data: RelaySessionContextUsage | null,
   handlers: { readonly onSaved?: () => void; readonly onReload?: () => void } = {}) {
-  return <ContextUsagePanel client={client} sessionId={id} usage={data} loading={false}
-    error={null} onReload={handlers.onReload ?? (() => {})}
+  return <ContextUsagePanel client={client} sessionId={id} sessionRevision="7"
+    usage={data} loading={false} error={null} onReload={handlers.onReload ?? (() => {})}
     onSaved={handlers.onSaved ?? (() => {})} />;
 }
 

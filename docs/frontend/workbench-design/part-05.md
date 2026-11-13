@@ -207,3 +207,7 @@
 
 旧 class 与 `data-testid` 一律保留（`app-frame`/`app-topbar`/`recent-work-*`/`.breadcrumbs`/`collab-*`/`review-*`），测试不因视觉重组而改写断言。本轮不覆盖 §17.6 的分栏、专注模式、草稿保护与恢复规则，也不改 `/projects`、`/tasks`、三工作台、`/knowledge`、`/reviews`、`/settings` 的现有页头——推广到这六类页面属于下一批，规则仍是第 9.2 节的三个原语。
 
+### 18.6.5 待整理任务的「整理与开始」入口（2026-11-13 PROJECT-ACCEPTANCE-20261111，已实施、自检）
+
+接受任务定义提案后新建的 Task 落在 INBOX，服务端允许 `MARK_READY`，但此前只有创建任务表单会在同一流程里调用 `MarkTaskReady`——单独从任务详情进入时没有任何入口，用户无法把「从对话到任务」走进正式执行。任务详情「概览」新增「整理与开始」一节：仅当服务端事实为 `INBOX` 且 `allowed_actions` 含 `MARK_READY` 时显示；按钮提交 `MarkTaskReady`（携带写时读到的 revision），成功后重读任务事实、该节随状态收起；transport 类失败保留原 `command_id` 并给出「核对原命令回执」，明确失败才释放命令身份。标记不自动开始执行、不提交产物、不代替人工验收。D2 旅程在真实 API/PG 上验证：提案→接受→INBOX→补充验收条件→标记可开始→委托→恰一个 Run。
+

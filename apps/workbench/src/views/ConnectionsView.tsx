@@ -16,6 +16,7 @@ import { gatewayCapabilityLabel } from "../lib/labels";
 import { type RelayPluginRuntimeStatus } from "../api/resources/plugins";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ConnectionsView.css";
+import { Button } from "../ui";
 
 /**
  * 普通入口只列真实工具能力。测试能力（FAKE_*）不是用户要用的工具，把它们混进正常下拉，
@@ -320,7 +321,7 @@ export default function ConnectionsView() {
         <Link className="secondary-button" to={viaSettings ? "/settings" : "/projects"}>{viaSettings ? "返回设置" : "返回项目入口"}</Link>
       </div>
     </section>}
-    {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects()}>刷新</button></div>
+    {client && <section className="surface-panel connections-project-picker" aria-label="选择项目"><div className="section-heading-row"><h2>项目</h2><Button variant="secondary" disabled={loading} onClick={() => void loadProjects()}>刷新</Button></div>
       {loading && <p className="helper-text" role="status">正在读取项目…</p>}{error && <p className="action-error" role="alert">{error}</p>}
       {!loading && !error && projects.length === 0 && <p className="helper-text">当前没有进行中项目。<Link to="/projects">打开项目列表</Link></p>}
       <ul className="connections-list">{projects.map((project) => <li key={project.id}>
@@ -328,7 +329,7 @@ export default function ConnectionsView() {
         <Link className="text-link" data-testid="connections-picker-project"
           to={projectLink(search, project.id)}>{project.title}</Link>
         <span className="helper-text">v{project.revision}</span></li>)}</ul>
-      {nextCursor && <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</button>}
+      {nextCursor && <Button variant="secondary" disabled={loading} onClick={() => void loadProjects(nextCursor)}>继续加载项目</Button>}
     </section>}
     {connection.mode !== "fixture" && <Link className="inline-link" to="/projects">返回项目入口</Link>}
   </section>;
@@ -618,7 +619,7 @@ export function ProjectConnectionsView() {
     </details>
     {client === null ? <FixtureNote>当前为示例数据预览；没有真实连接或权限配置。请先连接本机 API。</FixtureNote> : <>
       <div className="connections-title"><h2>{snapshot?.project.title ?? "当前项目"}</h2>
-        <button className="secondary-button" type="button" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</button></div>
+        <Button variant="secondary" onClick={() => { void refresh(client); }} disabled={loading || busy}>刷新服务端配置</Button></div>
       <details className="connections-identity"><summary>项目身份与配置范围</summary><p className="helper-text">Project ID：<code className="hash-code">{projectId}</code></p><p className="helper-text">连接绑定能力和目标边界；权限策略另行授权。默认拒绝，不会因创建连接自动放行。</p></details>
       {loading && <p role="status">正在读取项目连接、受管资源与权限版本…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
@@ -627,8 +628,8 @@ export function ProjectConnectionsView() {
       {actionError && <p className="action-error" role="alert">{actionError}{failedCommandId && <> 原 command_id：{failedCommandId}。请核对新修订后明确重新提交。</>}</p>}
       {pending && <div className="warning-callout" data-testid="connections-pending">
         <strong>提交结果待核对</strong><p>原 command_id：{pending.id}。在结果确认前，不提交其他配置变更。</p>
-        <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendCommand(pending, true); }}>用原 ID 和内容重试</button>}
+        <Button variant="secondary" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" disabled={submitting} onClick={() => { void sendCommand(pending, true); }}>用原 ID 和内容重试</Button>}
       </div>}
       {snapshot && <>
         {/* 日常区：只回答「现在能做什么、缺什么、去哪儿补」。这里不出现能力、动作、
@@ -662,11 +663,11 @@ export function ProjectConnectionsView() {
                     本机：{runtimeStateLabels[runtime.state] ?? runtime.state}</small>)}</div>
               <div className="connections-actions">
                 <span className={`status-chip status-chip--${state.tone}`}>{state.text}</span>
-                {row.plugin !== undefined && <button className="secondary-button" type="button"
+                {row.plugin !== undefined && <Button variant="secondary"
                   data-testid={`connections-tool-enable-${row.key}`}
                   disabled={busy || writeBlockedReason !== null || runtimeBlocked}
                   title={runtimeTitle}
-                  onClick={() => { if (row.plugin !== undefined) submitEnablePlugin(row.plugin); }}>一键启用</button>}
+                  onClick={() => { if (row.plugin !== undefined) submitEnablePlugin(row.plugin); }}>一键启用</Button>}
               </div>
             </li>;
           })}</ul>
@@ -689,11 +690,11 @@ export function ProjectConnectionsView() {
               {healthState?.result && <small className="connection-health" role="status">{healthState.result}</small>}
               {healthState?.error && <small className="action-error" role="alert">健康核对失败：{healthState.error}</small>}</div>
             <div className="connections-actions">
-              <button className="secondary-button" type="button" disabled={healthState?.checking === true} onClick={() => { void checkConnectionHealth(item.id); }} data-testid={`connection-health-${item.id}`}>{healthState?.checking ? "正在只读核对…" : "只读健康核对"}</button>
-              {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
+              <Button variant="secondary" disabled={healthState?.checking === true} onClick={() => { void checkConnectionHealth(item.id); }} data-testid={`connection-health-${item.id}`}>{healthState?.checking ? "正在只读核对…" : "只读健康核对"}</Button>
+              {item.status === "ACTIVE" && <Button variant="danger" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableGatewayConnection", resultKey: "connection_id", targetId: item.id, expectedStatus: "DISABLED",
               label: "连接停用", send: (api, commandId) => api.disableGatewayConnection({ projectId, connectionId: item.id,
-                expectedVersion: item.version, commandId }) }); }}>停用连接</button>}
+                expectedVersion: item.version, commandId }) }); }}>停用连接</Button>}
             </div>
           </li>; })}</ul>}
           <p className="field-hint">「只读健康核对」只重新读取服务端连接配置，不触发任何写入或外部动作；主机/目录真实可达性探针当前无只读接口，标记为待接入。</p>
@@ -703,20 +704,20 @@ export function ProjectConnectionsView() {
             {connectionCapability === "WEB_FETCH" && <label className="field"><span className="field-label">允许主机</span><input value={connectionHost} onChange={(event) => setConnectionHost(event.target.value)} disabled={busy} required placeholder="example.org" data-testid="connection-host" /><span className="field-hint">只填 DNS 主机，不含 scheme、端口和路径；本页不启用私有地址例外。</span></label>}
             {rootBoundCapabilities.includes(connectionCapability) && <label className="field"><span className="field-label">连接目录</span><input value={connectionRoot} onChange={(event) => setConnectionRoot(event.target.value)} disabled={busy} required placeholder="本机已有绝对目录" data-testid="connection-root" /><span className="field-hint">服务端要求现存目录；提交后查询接口不读回原目录。</span></label>}
             {connectionCapability === "CLI_RUN" && <label className="field"><span className="field-label">允许的可执行文件</span><textarea value={connectionExecutables} onChange={(event) => setConnectionExecutables(event.target.value)} disabled={busy} rows={3} data-testid="connection-executables" /><span className="field-hint">每行填写一个完整绝对路径（路径可含空格），留空表示未配置。服务端会核验现存普通文件并返回规范化路径；根目录内脚本无需列出，根目录外可执行文件需与此列表匹配。此列表不替代动作权限。</span></label>}
-            <button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null}>创建连接</button>
+            <Button variant="primary" type="submit" disabled={busy || writeBlockedReason !== null}>创建连接</Button>
           </form></details>
         </section>
 
         <section className="surface-panel"><h2>受管资源</h2><p className="helper-text">本列表最多读取服务端前 100 条，没有下一页。下列目录是文件读取 / 写入类策略可引用的独立受管资源，不等于文件读取连接自身的目录。</p>
           {snapshot.resources.length === 0 ? <p className="helper-text">本项目尚无受管资源。</p> : <ul className="connections-list">{snapshot.resources.map((item) => <li key={item.id}><div><strong>{item.canonicalRoot}</strong><small title={item.status}>{recordStatusLabel(item.status)} · rev {item.revision} · epoch {item.resourceEpoch} · <code className="hash-code">{item.id}</code></small>
             <small>Windows 文件写入目录身份：{item.fileWriteIdentityBound ? "已绑定" : "未绑定；若需在 Windows 使用 FILE_WRITE，请在 Windows 停用后重新登记此目录"}</small></div>
-            {item.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
+            {item.status === "ACTIVE" && <Button variant="danger" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
               id: createCommandId(), type: "DisableManagedResource", resultKey: "resource_id", targetId: item.id, expectedStatus: "DISABLED",
               label: "受管资源停用", send: (api, commandId) => api.disableManagedResource({ projectId, resourceId: item.id,
-                expectedRevision: item.revision, commandId }) }); }}>停用资源</button>}</li>)}</ul>}
+                expectedRevision: item.revision, commandId }) }); }}>停用资源</Button>}</li>)}</ul>}
           <details className="connections-create" open={snapshot.resources.length === 0}><summary>登记受管目录</summary><form className="connections-form" onSubmit={submitResource}><h3>登记受管目录</h3>
             <label className="field"><span className="field-label">本机已有绝对目录</span><input value={resourceRoot} onChange={(event) => setResourceRoot(event.target.value)} disabled={busy} required data-testid="resource-root" /></label>
-            <button className="secondary-button" type="submit" disabled={busy || writeBlockedReason !== null}>登记受管资源</button></form></details>
+            <Button variant="secondary" type="submit" disabled={busy || writeBlockedReason !== null}>登记受管资源</Button></form></details>
         </section>
 
         <section className="surface-panel"><h2>权限策略</h2>
@@ -731,11 +732,11 @@ export function ProjectConnectionsView() {
               {policy.activeVersion && !active && <small>当前版本详情尚未读到，不推断授权。</small>}
               <details className="tech-details"><summary>查看已读取版本（{versions.length}，最多最近 100 条）</summary><ol>{versions.map((version) => <li key={version.version}>v{version.version} · {version.capability} · {version.decision} · {version.targetPrefix} · {version.maxPayloadBytes} bytes</li>)}</ol></details>
             </div><div className="connections-actions">
-              {policy.status === "ACTIVE" && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy(policy.id)}>修订</button>}
-              {policy.status === "ACTIVE" && <button className="danger-button" type="button" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
+              {policy.status === "ACTIVE" && <Button variant="secondary" disabled={busy} onClick={() => selectPolicy(policy.id)}>修订</Button>}
+              {policy.status === "ACTIVE" && <Button variant="danger" disabled={busy || writeBlockedReason !== null} onClick={() => { void sendCommand({
                 id: createCommandId(), type: "RevokeGatewayPolicy", resultKey: "policy_id", targetId: policy.id, expectedStatus: "REVOKED",
                 label: "权限策略撤销", send: (api, commandId) => api.revokeGatewayPolicy({ projectId, policyId: policy.id,
-                  expectedRevision: policy.revision, commandId }) }); }}>撤销</button>}
+                  expectedRevision: policy.revision, commandId }) }); }}>撤销</Button>}
             </div></li>;
           })}</ul>}
           <details className="connections-create" open={selectedPolicy !== null || snapshot.policies.length === 0}><summary>{selectedPolicy ? "修订权限策略" : "新建权限策略"}</summary><form className="connections-form" onSubmit={submitPolicy} data-testid="policy-form"><h3>{selectedPolicy ? `修订策略 ${selectedPolicy.policy.id}` : "新建策略"}</h3>
@@ -753,8 +754,8 @@ export function ProjectConnectionsView() {
             <label className="field"><span className="field-label">决定</span><select value={policyDecision} onChange={(event) => setPolicyDecision(event.target.value as RelayGatewayDecision)} disabled={busy} data-testid="policy-decision">
               <option value="DENY">DENY · 拒绝（默认）</option><option value="ASK">ASK · 每次请求审批</option><option value="AUTO">AUTO · 匹配时自动准入</option></select></label>
             <label className="field"><span className="field-label">最大载荷字节</span><input type="number" min="0" max="262144" step="1" value={maxPayloadBytes} onChange={(event) => setMaxPayloadBytes(event.target.value)} disabled={busy} required data-testid="policy-max-bytes" /><span className="field-hint">当前只读动作的空参数编码为 2 字节；上限由服务端校验。</span></label>
-            <div className="connections-actions"><button className="primary-button" type="submit" disabled={busy || writeBlockedReason !== null || (isResourceBoundPolicy(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</button>
-              {selectedPolicy && <button className="secondary-button" type="button" disabled={busy} onClick={() => selectPolicy("")}>取消修订</button>}</div>
+            <div className="connections-actions"><Button variant="primary" type="submit" disabled={busy || writeBlockedReason !== null || (isResourceBoundPolicy(policyCapability) && activeResources.length === 0)} data-testid="policy-save">{selectedPolicy ? "提交策略新版本" : "明确创建策略"}</Button>
+              {selectedPolicy && <Button variant="secondary" disabled={busy} onClick={() => selectPolicy("")}>取消修订</Button>}</div>
           </form></details>
         </section>
         </details>

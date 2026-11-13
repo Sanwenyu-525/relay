@@ -14,6 +14,7 @@ import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import type { CreateTaskDraft, FixtureError, InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
 import "./CreateTaskView.css";
+import { Button } from "../ui";
 
 type LiveStep = "create" | "dependency" | "ready";
 type Intent = "ready" | "inbox";
@@ -80,14 +81,14 @@ function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
   const visible = items.filter((project) => !needle || project.title.toLocaleLowerCase().includes(needle));
   return <section className="surface-panel" aria-label="从真实进行中项目选择">
     <h2>所属项目</h2><p className="helper-text">选择一个进行中的项目，或暂不归属项目。</p>
-      <button className="secondary-button" type="button" data-testid="task-project-list-refresh"
-        disabled={disabled || loading} onClick={() => void load(null)}>刷新项目列表</button>
+      <Button variant="secondary" data-testid="task-project-list-refresh"
+        disabled={disabled || loading} onClick={() => void load(null)}>刷新项目列表</Button>
       <label className="field"><span className="field-label">搜索已加载项目</span><input type="search"
         value={search} onChange={(event) => setSearch(event.target.value)} disabled={disabled} name="task-project-search" /></label>
       {loading && <p role="status">正在读取进行中项目…</p>}
       {error && <p className="action-error" role="alert">项目列表不可读取：{error}。可以重试，或在下方按已知项目 ID 指定。</p>}
-      {error && <button className="secondary-button" type="button" data-testid="task-project-list-retry"
-        disabled={disabled || loading} onClick={() => void load(null)}>重试读取项目列表</button>}
+      {error && <Button variant="secondary" data-testid="task-project-list-retry"
+        disabled={disabled || loading} onClick={() => void load(null)}>重试读取项目列表</Button>}
       {!loading && !error && <><p className="helper-text" data-testid="task-project-list-count">已加载 {items.length} 项 · 当前搜索显示 {visible.length} 项
         {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。搜索和数量只覆盖已加载项目。</p>
         {visible.length === 0 ? <p className="helper-text">{items.length === 0 ? "当前没有已加载的进行中项目。" : "已加载项目中没有匹配项；后续页可能仍有匹配项目。"}</p> :
@@ -95,8 +96,8 @@ function LiveProjectPicker({ client, selectedId, disabled, onSelect }: {
             className={`data-row data-row--interactive${selectedId === project.id ? " data-row--selected" : ""}`}
             data-testid={`task-project-choice-${project.id}`} aria-pressed={selectedId === project.id}
             disabled={disabled} onClick={() => onSelect(project.id)}><span className="data-cell"><strong>{project.title}</strong>{selectedId === project.id && <small>已关联到当前任务</small>}</span></button></li>)}</ul>}
-        {nextCursor && <button className="secondary-button" type="button" data-testid="task-project-list-more"
-          disabled={disabled} onClick={() => void load(nextCursor)}>加载更多进行中项目</button>}
+        {nextCursor && <Button variant="secondary" data-testid="task-project-list-more"
+          disabled={disabled} onClick={() => void load(nextCursor)}>加载更多进行中项目</Button>}
       </>}
   </section>;
 }
@@ -409,15 +410,15 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
         保存只会把它登记为「待整理」。验收标准、执行方式和依赖都不是这一步的前置：
         没有可判断的完成条件时，系统不会把它变成「可开始」，也不会启动任何执行。</p>
       <div className="form-actions">
-        <button className="primary-button" type="submit" data-testid="task-lightweight-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存为待整理"}</button>
+        <Button variant="primary" type="submit" data-testid="task-lightweight-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存为待整理"}</Button>
         {/* 与 TasksView 的完整定义入口一致：从收件箱进入后改用完整表单，不丢 tab=inbox。 */}
         <Link className="text-button" to={`/tasks?view=create${inboxScope ? "&tab=inbox" : ""}`} data-testid="task-lightweight-full">补充详细信息（完整表单）</Link>
-        <button className="text-button" type="button" disabled={formFrozen} onClick={onCancel}>返回列表</button>
+        <Button variant="text" disabled={formFrozen} onClick={onCancel}>返回列表</Button>
       </div>
       {receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}
       {live && pendingStep.current && <p className="helper-text" data-testid="task-create-command-id">原 command ID：{pendingStep.current.commandId}</p>}
-      {(actionError?.kind === "timeout" || actionError?.kind === "transport" || live && actionError?.kind === "not-submitted") && <button className="secondary-button" type="button" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</button>}
-      {mayRetryCreate && pendingStep.current?.step === "create" && liveScope === pendingStep.current.scope && <button className="secondary-button" type="button" data-testid="task-create-retry" disabled={submitting} onClick={() => void retryCreate()}>用原 ID 和载荷重试创建</button>}
+      {(actionError?.kind === "timeout" || actionError?.kind === "transport" || live && actionError?.kind === "not-submitted") && <Button variant="secondary" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</Button>}
+      {mayRetryCreate && pendingStep.current?.step === "create" && liveScope === pendingStep.current.scope && <Button variant="secondary" data-testid="task-create-retry" disabled={submitting} onClick={() => void retryCreate()}>用原 ID 和载荷重试创建</Button>}
       {actionError?.kind === "transport" && <p className="helper-text">这一步结果不确定时先查回执，不要换 command ID 重新提交。</p>}
     </form> : <form ref={form} className="create-form" noValidate aria-busy={submitting || undefined} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void submit("ready"); }}>
       {field("title", "任务名称", draft.title, (value) => updateDraft({ title: value }))}
@@ -430,20 +431,20 @@ export default function CreateTaskView({ inboxScope, onCancel }: { inboxScope: b
       <label className="field"><span className="field-label">依赖任务（可选）</span><select value={draft.dependencyId ?? ""} onChange={(event) => updateDraft({ dependencyId: event.target.value || null })} name="task-dependency" disabled={formFrozen || (live ? taskPages.loading : optionsLoading) || dependencyOptions.length === 0}><option value="">无</option>{dependencyOptions.map((task) => <option key={task.id} value={task.id}>{task.title}（{taskStatusLabels[task.status]}）</option>)}</select><span className="field-hint">{live ? !projectId.trim() ? "请先选择所属项目，再选择前置任务。" : taskPages.loading && dependencyOptions.length === 0 ? "正在读取已登记的任务……" : !dependencyOptions.length ? "当前没有已加载的依赖候选，可以不选依赖继续创建。" : "依赖候选按项目分页读取；前置任务完成后才能准备开始。" : !dependencyOptions.length ? "当前项目范围内没有可选的前置任务。" : "如需先完成其他任务，请选择依赖的任务；依赖未完成时不能转为可开始。"}</span></label>
       {live && taskPages.error !== null && <div className="action-error" role="alert" data-testid="task-dependency-page-error">
         已保留已读取的任务和原游标。{taskPages.error}
-        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
-          onClick={taskPages.retry}>重试读取任务</button>
+        <Button variant="text" disabled={taskPages.loading || taskPages.loadingMore}
+          onClick={taskPages.retry}>重试读取任务</Button>
       </div>}
       {live && taskPages.items.length > 0 && <p className="helper-text" data-testid="task-dependency-page-count">
         已加载 {taskPages.items.length} 项{taskPages.nextCursor === null ? "，已到列表末页。" : "；还有后续页。"}</p>}
-      {live && taskPages.nextCursor !== null && <button className="secondary-button" type="button"
+      {live && taskPages.nextCursor !== null && <Button variant="secondary"
         data-testid="task-dependency-page-more" disabled={taskPages.loadingMore}
-        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多依赖任务"}</button>}
-      <div className="form-actions"><button className="primary-button" type="submit" data-testid="task-create-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存任务"}</button><button className="secondary-button" type="button" data-testid="task-create-inbox" disabled={formFrozen} onClick={() => void submit("inbox")}>暂存待整理</button><button className="text-button" type="button" disabled={formFrozen} onClick={onCancel}>返回列表</button></div>
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多依赖任务"}</Button>}
+      <div className="form-actions"><Button variant="primary" type="submit" data-testid="task-create-save" aria-busy={submitting || undefined} disabled={formFrozen}>{submitting ? "正在保存" : "保存任务"}</Button><Button variant="secondary" data-testid="task-create-inbox" disabled={formFrozen} onClick={() => void submit("inbox")}>暂存待整理</Button><Button variant="text" disabled={formFrozen} onClick={onCancel}>返回列表</Button></div>
       {receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}
       {live && pendingStep.current && <p className="helper-text" data-testid="task-create-command-id">原 command ID：{pendingStep.current.commandId}</p>}
-      {(actionError?.kind === "timeout" || actionError?.kind === "transport" || live && actionError?.kind === "not-submitted") && <button className="secondary-button" type="button" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</button>}
-      {mayRetryCreate && pendingStep.current?.step === "create" && liveScope === pendingStep.current.scope && <button className="secondary-button" type="button" data-testid="task-create-retry" disabled={submitting} onClick={() => void retryCreate()}>用原 ID 和载荷重试创建</button>}
+      {(actionError?.kind === "timeout" || actionError?.kind === "transport" || live && actionError?.kind === "not-submitted") && <Button variant="secondary" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</Button>}
+      {mayRetryCreate && pendingStep.current?.step === "create" && liveScope === pendingStep.current.scope && <Button variant="secondary" data-testid="task-create-retry" disabled={submitting} onClick={() => void retryCreate()}>用原 ID 和载荷重试创建</Button>}
       {actionError?.kind === "timeout" && <p className="helper-text">提交结果暂不明确时先查回执，不要直接重复创建。</p>}{actionError?.kind === "transport" && <p className="helper-text">这一步结果不确定时先查回执，不要换 command ID 重新提交。</p>}{actionError?.kind === "conflict" && <p className="helper-text">冲突时草稿仍然保留，修改后可以重新提交。</p>}{optionsError && <p className="helper-text">{optionsError}</p>}
-    </form> : live ? <section className="surface-panel" aria-label="任务创建结果" data-testid="task-created-result"><p className="eyebrow">已完成本次创建</p><h2 ref={resultHeading} tabIndex={-1}>任务已创建</h2><dl className="rail-definition-list"><div><dt>任务 ID</dt><dd><Link className="text-link" to={`/tasks/${createdTaskId}`} aria-label="查看刚创建的任务详情" data-testid="task-created-open-detail">{createdTaskId}</Link></dd></div>{liveCreate && <><div><dt>状态</dt><dd>{taskStatusLabels[liveCreate.status]}</dd></div><div><dt>任务修订</dt><dd>v{liveCreate.revision}</dd></div><div><dt>验收版本</dt><dd>v{liveCreate.acceptanceRevision}</dd></div></>}</dl>{receipt && <p className="receipt-message" role="status">{receipt}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}{pendingStep.current && <p className="helper-text">原 command ID：{pendingStep.current.commandId}</p>}{actionError?.kind === "transport" && <><button className="secondary-button secondary-button--wide" type="button" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</button><p className="helper-text">这一步结果不确定时先查回执，不要换 command ID 重新提交。</p></>}<p className="helper-text">开始不等于完成，创建后不会自动开始执行。</p><div className="form-actions"><button className="primary-button" type="button" disabled={formFrozen} onClick={onCancel}>返回任务入口</button><button className="secondary-button" type="button" data-testid="task-create-another" disabled={formFrozen} onClick={resetDraft}>新建另一项任务</button></div></section> : <section className="surface-panel" aria-label="任务创建结果" data-testid="task-created-result"><p className="eyebrow">已完成本次创建</p><h2 ref={resultHeading} tabIndex={-1}>任务已创建，等待后续处理</h2><p>示例任务 ID：{createdTaskId}。同一创建意图已关闭，不能再次保存而产生重复任务。</p>{receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}<div className="form-actions"><button className="primary-button" type="button" onClick={onCancel}>查看任务列表</button><button className="secondary-button" type="button" data-testid="task-create-another" onClick={resetDraft}>新建另一项任务</button></div></section>}
+    </form> : live ? <section className="surface-panel" aria-label="任务创建结果" data-testid="task-created-result"><p className="eyebrow">已完成本次创建</p><h2 ref={resultHeading} tabIndex={-1}>任务已创建</h2><dl className="rail-definition-list"><div><dt>任务 ID</dt><dd><Link className="text-link" to={`/tasks/${createdTaskId}`} aria-label="查看刚创建的任务详情" data-testid="task-created-open-detail">{createdTaskId}</Link></dd></div>{liveCreate && <><div><dt>状态</dt><dd>{taskStatusLabels[liveCreate.status]}</dd></div><div><dt>任务修订</dt><dd>v{liveCreate.revision}</dd></div><div><dt>验收版本</dt><dd>v{liveCreate.acceptanceRevision}</dd></div></>}</dl>{receipt && <p className="receipt-message" role="status">{receipt}</p>}{actionError && <p className="action-error" role="alert">{actionError.message}</p>}{pendingStep.current && <p className="helper-text">原 command ID：{pendingStep.current.commandId}</p>}{actionError?.kind === "transport" && <><Button variant="secondary" className="secondary-button--wide" data-testid="task-create-receipt" disabled={submitting} onClick={() => void lookupReceipt()}>查询本次回执</Button><p className="helper-text">这一步结果不确定时先查回执，不要换 command ID 重新提交。</p></>}<p className="helper-text">开始不等于完成，创建后不会自动开始执行。</p><div className="form-actions"><Button variant="primary" disabled={formFrozen} onClick={onCancel}>返回任务入口</Button><Button variant="secondary" data-testid="task-create-another" disabled={formFrozen} onClick={resetDraft}>新建另一项任务</Button></div></section> : <section className="surface-panel" aria-label="任务创建结果" data-testid="task-created-result"><p className="eyebrow">已完成本次创建</p><h2 ref={resultHeading} tabIndex={-1}>任务已创建，等待后续处理</h2><p>示例任务 ID：{createdTaskId}。同一创建意图已关闭，不能再次保存而产生重复任务。</p>{receipt && <p className="receipt-message" role="status">{receipt}</p>}{readyBlockedReason && <p className="warning-callout" role="status" data-testid="task-ready-blocked"><Info aria-hidden="true" />{readyBlockedReason}</p>}<div className="form-actions"><Button variant="primary" onClick={onCancel}>查看任务列表</Button><Button variant="secondary" data-testid="task-create-another" onClick={resetDraft}>新建另一项任务</Button></div></section>}
   </div><ResponsiveRail label="查看完成标准说明" title="完成标准要可判断"><div className="rail-content"><h2>完成标准要可判断</h2><p className="rail-intro">三条明确的验收标准，比一句“写得更好”更有用。</p><section className="rail-section"><h3>好的验收标准通常具备</h3>{[["具体明确", "说明要达到什么结果，而不是模糊的描述。"], ["可验证", "有客观的判断依据或检验方法。"], ["可追溯", "成果能关联到相应的过程与原始记录。"]].map(([heading, copy]) => <div className="suggestion-row" key={heading}><Check aria-hidden="true" /><span className="suggestion-copy"><strong>{heading}</strong><small>{copy}</small></span></div>)}</section><section className="rail-section"><h3>示例</h3><div className="summary-card summary-card--source-list"><p>指标计算方式明确</p><p>基线步骤可复现</p><p>结果可追溯到原始记录</p></div><p className="helper-text">示例只说明写法，不构成这个任务的必需条件，也不限制条件数量。</p></section><section className="rail-section"><h3>保存后的状态</h3><p>任务会先保存为“待整理”，由我执行。选择“保存任务”后，系统会核对目标、验收条件与前置依赖；条件满足时才会显示为“可开始”，且不会自动开始执行。</p>{inboxScope && <p className="helper-text">当前从收件箱范围进入：默认不归属项目，任务会出现在收件箱列表中。</p>}</section></div></ResponsiveRail></div>;
 }

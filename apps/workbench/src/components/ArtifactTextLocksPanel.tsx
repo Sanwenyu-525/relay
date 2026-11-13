@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createCommandId, type RelayApiClient, type RelayArtifact,
   type RelayArtifactTextLock, type RelayArtifactLineage } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 type Kind = "PARAGRAPH" | "SECTION";
 
@@ -92,12 +93,12 @@ export default function ArtifactTextLocksPanel({ client, lineage }:
     <p className="helper-text">锁定只约束 AI 写入；人工可直接修订，新版本保存后继续受保护，结构无法可靠映射时 AI 写入被拒绝。</p>
     {error && <p className="action-error" role="alert">{error}</p>}
     {message && <p className="receipt-message" role="status">{message}</p>}
-    <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryRead()}>刷新锁定事实</button>
+    <Button variant="secondary" disabled={busy} onClick={() => void retryRead()}>刷新锁定事实</Button>
     {locks.length > 0 && <ul>{locks.map((lock) => <li key={lock.id}>
       <strong>{lock.blockKind === "SECTION" ? "章节" : "段落"} · {lock.status === "UNMAPPED" ? "待人工核对映射" : `第 ${lock.blockIndex! + 1} 块`}</strong>
       <p>{lock.text.slice(0, 160)}{lock.text.length > 160 ? "…" : ""}</p>
       <p className="helper-text">绑定版本 {lock.baseVersionId}</p>
-      <button className="secondary-button" type="button" disabled={busy || pending !== null} onClick={() => void unlock(lock.id)}>解除这一处锁定</button>
+      <Button variant="secondary" disabled={busy || pending !== null} onClick={() => void unlock(lock.id)}>解除这一处锁定</Button>
     </li>)}</ul>}
     {!locks.length && <p className="helper-text">该产物没有当前锁定区域。</p>}
     {!current ? <p className="helper-text">这是历史版本；只能在该产物最新版本上新增锁定。</p> : <>
@@ -107,8 +108,8 @@ export default function ArtifactTextLocksPanel({ client, lineage }:
       <label className="field"><span className="field-label">选择确切原文</span>
         <select value={index} onChange={(event) => setIndex(Number(event.target.value))}>
           {options.map((block, blockIndex) => <option key={blockIndex} value={blockIndex}>{blockIndex + 1} · {block.slice(0, 100)}</option>)}</select></label>
-      <button className="primary-button" type="button" disabled={busy || pending !== null || !options[index]}
-        onClick={() => void lock()}>锁定所选原文</button>
+      <Button variant="primary" disabled={busy || pending !== null || !options[index]}
+        onClick={() => void lock()}>锁定所选原文</Button>
     </>}
   </section>;
 }

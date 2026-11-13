@@ -6,6 +6,7 @@ import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { checkResultLabel, reviewReasonText } from "../lib/labels";
 import { liveClient } from "../lib/relayConnection";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { Button } from "../ui";
 
 export const reviewDecisionLabels: Record<RelayReviewDecision, string> = {
   ACCEPT: "接受这项判断", REQUEST_CHANGES: "请求修改", SET_RETRY_BUDGET: "设置修正预算",
@@ -239,11 +240,11 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
             ? "这条请求的目标或当前准入状态已失效，未保存新的决定。请刷新核对最新状态。"
             : `这条请求当前状态为 ${review.status}，不能提交新的决定；请刷新核对最新状态。`}
     </p>
-    {review.status !== "DECIDED" && <button className="secondary-button" type="button" data-testid="review-terminal-refresh"
-      disabled={busy || submitting} onClick={() => void onRefresh()}>刷新核对最新状态</button>}
+    {review.status !== "DECIDED" && <Button variant="secondary" data-testid="review-terminal-refresh"
+      disabled={busy || submitting} onClick={() => void onRefresh()}>刷新核对最新状态</Button>}
     {receiptMessage && <p className="receipt-message" role="status">{receiptMessage}</p>}
     {pendingCommand?.reviewId === review.id &&
-      <button className="secondary-button" type="button" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>}
+      <Button variant="secondary" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</Button>}
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
   </div>;
 
@@ -277,7 +278,7 @@ export default function ReviewDecisionPanel({ live, review, writeBlockedReason, 
         disabled={!live || submitting || pendingCommand !== null || decisionBlockedReason !== null} /></label>}
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
     {receiptMessage && <p className="receipt-message" role="status">{receiptMessage}</p>}
-    {pendingCommand ? <button className="secondary-button" type="button" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>
+    {pendingCommand ? <Button variant="secondary" data-testid="review-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</Button>
       : <div className="review-actions" data-testid="review-decision-actions" tabIndex={-1}>{review.allowedDecisions.map((decision) => <button key={decision}
         className={decision === "DENY" || decision === "REQUEST_CHANGES" ? "secondary-button" : "primary-button"} type="button"
         data-testid={`review-decision-${decision}`} disabled={!live || submitting || decisionBlockedReason !== null}

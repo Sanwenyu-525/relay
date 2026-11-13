@@ -3,6 +3,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayCommandE
   type RelayContinuationComparison, type RelayContinuationPointSummary,
   type RelayContinuationRefChange } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 const changeLabels: Readonly<Record<RelayContinuationRefChange, string>> = {
   UNCHANGED: "未变化", REVISED: "已修订", CLOSED: "已终结", MISSING: "当前不可见",
@@ -229,11 +230,11 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
     <label className="field"><span className="field-label">接续说明（可选）</span>
       <input data-testid="continuation-note" value={note} maxLength={2000} disabled={busy}
         onChange={(event) => setNote(event.target.value)} placeholder="留给下次回来时的一句话" /></label>
-    <button className="primary-button" type="button" data-testid="continuation-capture"
+    <Button variant="primary" data-testid="continuation-capture"
       disabled={blockedReason !== null}
       onClick={() => void capture({ id: createCommandId(), name: trimmedName,
         note: note.trim() === "" ? null : note.trim() })}>
-      {busy ? "正在核对" : "保存当前接续点"}</button>
+      {busy ? "正在核对" : "保存当前接续点"}</Button>
     {blockedReason && <p className="disabled-reason">{blockedReason}</p>}
     </details>
     {(error ?? listError) && <p className="action-error" role="alert">{error ?? listError}</p>}
@@ -241,8 +242,8 @@ export default function ContinuationPointPanel({ client, projectId, captureBlock
     {pending && <div className="warning-callout" data-testid="continuation-pending">
       <strong>保存结果待核对</strong>
       <p>原 command_id：{pending.id} · 名称「{pending.name}」。核对完成前不会生成新命令，也不会重复保存。</p>
-      <button className="secondary-button" type="button" disabled={busy}
-        onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
+      <Button variant="secondary" disabled={busy}
+        onClick={() => void checkReceipt(pending)}>查询原命令回执</Button>
     </div>}
   </section>;
 }

@@ -4,6 +4,7 @@ import { createCommandId, RelayApiError, RelayTransportError,
   type RelaySkillDefinition } from "../api/relayClient";
 import type { RelayProjectGoal } from "../api/blueprintDtos";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 const skillId = "goal-to-project-blueprint";
 const skillVersion = "1.0.0";
@@ -303,7 +304,7 @@ export default function BlueprintSkillGenerator({ client, projectId, goals, pack
             {packs.filter((pack) => pack.availability === "AVAILABLE").map((pack) =>
               <option key={`${pack.id}@${pack.version}`} value={`${pack.id}@${pack.version}`}>
                 {pack.title} v{pack.version}</option>)}</select></label>
-        <button className="primary-button" type="submit" data-testid="blueprint-skill-generate">生成 Skill 建议</button>
+        <Button variant="primary" type="submit" data-testid="blueprint-skill-generate">生成 Skill 建议</Button>
       </fieldset>
     </form>
     {notice && <p className="success-callout" role="status">{notice}</p>}
@@ -311,19 +312,19 @@ export default function BlueprintSkillGenerator({ client, projectId, goals, pack
     {frozen && <div className="warning-callout" data-testid="blueprint-skill-pending">
       {frozen.stage === "wait" ? <>
         <p>Assist 会话 <code className="hash-code">{frozen.sessionId}</code> · assistant message <code className="hash-code">{frozen.messageId}</code>。服务端状态轮询中。</p>
-        <button className="secondary-button" type="button" onClick={() => {
+        <Button variant="secondary" onClick={() => {
           save(null); setNotice(`已停止页面轮询；Assist 消息 ${frozen.messageId} 未被取消。稍后可刷新服务端候选。`);
-        }}>停止页面轮询</button>
+        }}>停止页面轮询</Button>
       </> : <>
         <p>原 {frozen.stage === "create" ? "CreateAssistSession" : "RequestAssistMessage"} command_id：
           <code className="hash-code">{frozen.commandId}</code>。原内容与 Skill 输入已冻结。</p>
-        <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => void run(() => checkReceipt(frozen, scope.current))}>查询原命令回执</button>
-        {mayRetry && !frozen.conflict && <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => void run(() => execute(frozen, scope.current))}>用原 ID 和载荷重试</button>}
-        {frozen.conflict && <button className="secondary-button" type="button" disabled={busy}
+        <Button variant="secondary" disabled={busy}
+          onClick={() => void run(() => checkReceipt(frozen, scope.current))}>查询原命令回执</Button>
+        {mayRetry && !frozen.conflict && <Button variant="secondary" disabled={busy}
+          onClick={() => void run(() => execute(frozen, scope.current))}>用原 ID 和载荷重试</Button>}
+        {frozen.conflict && <Button variant="secondary" disabled={busy}
           onClick={() => { save(null); setMayRetry(false); setError(null);
-            setNotice("原命令没有回执；请核对当前事实后明确重新生成。"); }}>按当前事实重新确认</button>}
+            setNotice("原命令没有回执；请核对当前事实后明确重新生成。"); }}>按当前事实重新确认</Button>}
       </>}
     </div>}
   </section>;

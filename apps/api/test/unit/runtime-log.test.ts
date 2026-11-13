@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync,
+  utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { bootstrapLogDirectory, configureRuntimeLog, getRuntimeLogger, redactRecord,
-  resetRuntimeLog, runtimeLogFile, runtimeLogSettingsFromEnv,
+import { acquireRotationLock, bootstrapLogDirectory, configureRuntimeLog,
+  flushRuntimeLogSuppressions, getRuntimeLogger, redactLogText, redactRecord,
+  releaseRotationLock, resetRuntimeLog, runtimeLogFile, runtimeLogSettingsFromEnv,
   MAX_LOG_RECORD_BYTES } from '../../src/infrastructure/runtime-log.js';
 
 function withTempLog<T>(run: (directory: string) => T): T {
@@ -19,6 +22,37 @@ function withTempLog<T>(run: (directory: string) => T): T {
 
 function readLines(directory: string, fileName = 'relay-api.log'): string[] {
   return readFileSync(join(directory, fileName), 'utf8').trim().split('\n');
+}
+
+function readRecords(directory: string, fileName = 'relay-api.log'): Record<string, unknown>[] {
+  return readLines(directory, fileName).map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+const runtimeLogModuleUrl = new URL(
+  '../../src/infrastructure/runtime-log.js', import.meta.url,
+).href;
+
+/** 子进程脚本写在临时目录，验证跨进程行为（退出钩子、并发轮转）。 */
+function writeChildScript(directory: string, name: string, body: string): string {
+  const file = join(directory, name);
+  writeFileSync(file, `const log = await import(${JSON.stringify(runtimeLogModuleUrl)});\n${body}`,
+    'utf8');
+  return file;
+}
+
+function runChild(script: string, env: Record<string, string> = {}): Promise<{
+  status: number | null;
+  stderr: string;
+}> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [script], {
+      env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.on('close', (status) => resolve({ status, stderr }));
+  });
 }
 
 test('未配置时不写磁盘：单测不会留下日志文件', () => {
@@ -200,22 +234,244 @@ test('超大记录折叠成紧凑记录，保留关联 id 与错误摘要', () =
   assert.equal(record.error_message, 'oversized payload');
 }));
 
-test('高频重复错误在窗口内只写上限条数并留下抑制摘要', () => withTempLog((directory) => {
-  configureRuntimeLog({ directory, fileName: 'dedupe.log', level: 'error' });
-  const logger = getRuntimeLogger('test');
-  for (let index = 0; index < 8; index += 1) {
-    logger.error('repeated_failure', { error: new Error('same failure') });
+test('100 个不同 request_id 的相同错误逐条保留，不被聚合吞掉', () => withTempLog((directory) => {
+  configureRuntimeLog({ directory, fileName: 'requests.log', level: 'error' });
+  const logger = getRuntimeLogger('api');
+  for (let index = 0; index < 100; index += 1) {
+    logger.error('request_failed', {
+      request_id: `req-${String(index)}`,
+      error: Object.assign(new Error('same failure'), { code: 'E_SAME' }),
+    });
   }
-  const records = readLines(directory, 'dedupe.log')
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-  const failures = records.filter((record) => record.event === 'repeated_failure');
-  const summaries = records.filter((record) => record.event === 'log_suppressed');
-  assert.equal(failures.length, 5);
-  assert.equal(summaries.length, 1);
-  assert.equal(summaries[0]?.suppressed_event, 'repeated_failure');
-  assert.equal(summaries[0]?.error_message, 'same failure');
-  assert.ok(Number(summaries[0]?.suppressed_count) >= 6);
+  flushRuntimeLogSuppressions();
+  const records = readRecords(directory, 'requests.log');
+  const failures = records.filter((record) => record.event === 'request_failed');
+  assert.equal(failures.length, 100);
+  assert.equal(new Set(failures.map((record) => record.request_id)).size, 100);
+  assert.equal(records.filter((record) => record.event === 'log_suppressed').length, 0);
 }));
+
+test('10/100/1000 次相同后台错误：行数有界且 total/emitted/suppressed 准确', () => withTempLog((directory) => {
+  for (const total of [10, 100, 1000]) {
+    const fileName = `count-${String(total)}.log`;
+    configureRuntimeLog({ directory, fileName, level: 'error' });
+    const logger = getRuntimeLogger('scheduler');
+    for (let index = 0; index < total; index += 1) {
+      logger.error('tick_failed', { error: new Error('same background failure') });
+    }
+    flushRuntimeLogSuppressions();
+    const records = readRecords(directory, fileName);
+    const failures = records.filter((record) => record.event === 'tick_failed');
+    const summaries = records.filter((record) => record.event === 'log_suppressed');
+    assert.equal(failures.length, 5, `total=${String(total)} 只写前 5 条原文`);
+    assert.equal(summaries.length, 1, `total=${String(total)} 只有一个汇总`);
+    assert.equal(summaries[0]?.total_count, total);
+    assert.equal(summaries[0]?.emitted_count, 5);
+    assert.equal(summaries[0]?.suppressed_count, total - 5);
+    assert.equal(records.length, 6, `total=${String(total)} 行数保持有界`);
+  }
+}));
+
+test('run_id 参与去重键：不同执行链的相同错误不合并', () => withTempLog((directory) => {
+  configureRuntimeLog({ directory, fileName: 'runs.log', level: 'error' });
+  const logger = getRuntimeLogger('worker');
+  for (let index = 0; index < 6; index += 1) {
+    logger.error('run_failed', { run_id: 'run-a', error: new Error('same failure') });
+    logger.error('run_failed', { run_id: 'run-b', error: new Error('same failure') });
+  }
+  flushRuntimeLogSuppressions();
+  const records = readRecords(directory, 'runs.log');
+  const summaries = records.filter((record) => record.event === 'log_suppressed');
+  assert.equal(records.filter((record) => record.event === 'run_failed').length, 10);
+  assert.equal(summaries.length, 2);
+  assert.deepEqual(summaries.map((record) => record.run_id).sort(), ['run-a', 'run-b']);
+  for (const summary of summaries) {
+    assert.equal(summary.total_count, 6);
+    assert.equal(summary.suppressed_count, 1);
+  }
+}));
+
+test('窗口到期后先写旧窗口汇总，再为新窗口重新计数', () => withTempLog((directory) => {
+  configureRuntimeLog({ directory, fileName: 'window.log', level: 'error' });
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  try {
+    const logger = getRuntimeLogger('test');
+    for (let index = 0; index < 8; index += 1) {
+      logger.error('window_failure', { error: new Error('same failure') });
+    }
+    assert.equal(readRecords(directory, 'window.log').length, 5);
+    offset += 11_000;
+    logger.error('window_failure', { error: new Error('same failure') });
+    flushRuntimeLogSuppressions();
+  } finally {
+    Date.now = realNow;
+  }
+  const records = readRecords(directory, 'window.log');
+  const summaries = records.filter((record) => record.event === 'log_suppressed');
+  assert.equal(records.filter((record) => record.event === 'window_failure').length, 6);
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0]?.total_count, 8);
+  assert.equal(summaries[0]?.emitted_count, 5);
+  assert.equal(summaries[0]?.suppressed_count, 3);
+}));
+
+test('进程正常退出时自动写出未到期的抑制汇总', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'relay-runtime-log-'));
+  try {
+    const script = writeChildScript(directory, 'exit-child.mjs', `
+log.configureRuntimeLog({ directory: ${JSON.stringify(directory)}, fileName: 'exit.log', level: 'error' });
+const logger = log.getRuntimeLogger('child');
+for (let index = 0; index < 12; index += 1) {
+  logger.error('exit_failure', { error: new Error('same failure') });
+}
+`);
+    const result = await runChild(script);
+    assert.equal(result.status, 0, result.stderr);
+    const records = readRecords(directory, 'exit.log');
+    const summaries = records.filter((record) => record.event === 'log_suppressed');
+    assert.equal(records.filter((record) => record.event === 'exit_failure').length, 5);
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0]?.total_count, 12);
+    assert.equal(summaries[0]?.suppressed_count, 7);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('抑制表达到容量上限：先写旧窗口汇总再驱逐，不静默丢计数', () => withTempLog((directory) => {
+  configureRuntimeLog({ directory, fileName: 'capacity.log', level: 'error' });
+  const logger = getRuntimeLogger('worker');
+  for (let worker = 0; worker < 256; worker += 1) {
+    for (let index = 0; index < 6; index += 1) {
+      logger.error('background_failure', {
+        worker_id: `w-${String(worker)}`, error: new Error('same failure'),
+      });
+    }
+  }
+  const beforeFlush = readRecords(directory, 'capacity.log');
+  const evicted = beforeFlush.filter((record) => record.event === 'log_suppressed');
+  assert.equal(evicted.length, 0, '未超出容量时不提前汇总');
+  logger.error('background_failure', { worker_id: 'w-final', error: new Error('same failure') });
+  const afterEviction = readRecords(directory, 'capacity.log');
+  const evictionSummary = afterEviction.filter((record) => record.event === 'log_suppressed');
+  assert.equal(evictionSummary.length, 1);
+  assert.equal(evictionSummary[0]?.worker_id, 'w-0');
+  assert.equal(evictionSummary[0]?.total_count, 6);
+  assert.equal(evictionSummary[0]?.suppressed_count, 1);
+  flushRuntimeLogSuppressions();
+  const all = readRecords(directory, 'capacity.log');
+  assert.equal(all.filter((record) => record.event === 'log_suppressed').length, 256);
+}));
+
+test('轮转锁只释放自己持有的锁', () => withTempLog((directory) => {
+  const file = join(directory, 'owned.log');
+  writeFileSync(file, 'x');
+  const lockPath = file + '.rotate.lock';
+  const lock = acquireRotationLock(file);
+  assert.ok(lock !== undefined);
+  assert.equal(acquireRotationLock(file), undefined, '存活进程持有的新锁不可抢占');
+  releaseRotationLock(file, lock);
+  assert.equal(existsSync(lockPath), false, '释放自己的锁');
+
+  const second = acquireRotationLock(file);
+  assert.ok(second !== undefined);
+  // 模拟旧锁恢复把锁文件换成了另一个进程的锁（inode 改变）。
+  unlinkSync(lockPath);
+  writeFileSync(lockPath, `${String(process.pid)}\n`);
+  releaseRotationLock(file, second);
+  assert.equal(existsSync(lockPath), true, '不删除别人的锁');
+}));
+
+test('旧轮转锁：持锁进程存活时不抢占，进程已消失才恢复', () => withTempLog((directory) => {
+  const file = join(directory, 'stale.log');
+  writeFileSync(file, 'x');
+  const lockPath = file + '.rotate.lock';
+  const old = new Date(Date.now() - 60_000);
+
+  writeFileSync(lockPath, `${String(process.pid)}\n`);
+  utimesSync(lockPath, old, old);
+  assert.equal(acquireRotationLock(file), undefined);
+  assert.equal(existsSync(lockPath), true);
+
+  unlinkSync(lockPath);
+  writeFileSync(lockPath, '999999\n');
+  utimesSync(lockPath, old, old);
+  const recovered = acquireRotationLock(file);
+  assert.ok(recovered !== undefined);
+  releaseRotationLock(file, recovered);
+  assert.equal(existsSync(lockPath), false);
+}));
+
+test('两个进程并发写同一日志并轮转：行数不丢且文件可解析', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'relay-runtime-log-'));
+  try {
+    const body = (writer: string): string => `
+log.configureRuntimeLog({ directory: ${JSON.stringify(directory)}, fileName: 'concurrent.log',
+  level: 'info', maxBytes: 4096, retainFiles: 50 });
+const logger = log.getRuntimeLogger('child');
+for (let index = 0; index < 300; index += 1) {
+  logger.info('concurrent_tick', { writer: '${writer}', index, padding: 'x'.repeat(40) });
+}
+`;
+    const first = writeChildScript(directory, 'writer-a.mjs', body('a'));
+    const second = writeChildScript(directory, 'writer-b.mjs', body('b'));
+    const [resultA, resultB] = await Promise.all([runChild(first), runChild(second)]);
+    assert.equal(resultA.status, 0, resultA.stderr);
+    assert.equal(resultB.status, 0, resultB.stderr);
+    const files = readdirSync(directory).filter((name) => /^concurrent\.log(?:\.\d+)?$/u.test(name));
+    assert.ok(files.length > 1, '产生了轮转文件');
+    const records = files.flatMap((name) => readRecords(directory, name));
+    assert.equal(records.length, 600);
+    assert.equal(records.filter((record) => record.writer === 'a').length, 300);
+    assert.equal(records.filter((record) => record.writer === 'b').length, 300);
+    assert.equal(readdirSync(directory).some((name) => name.endsWith('.rotate.lock')), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('凭据脱敏覆盖字段、嵌套数组、Error 链与内嵌连接串', () => {
+  const error = new Error('request failed with sk-1234567890123456');
+  error.stack = 'Error: request failed\n    Authorization: Bearer abcdefghijklmnop';
+  (error as Error & { cause?: unknown }).cause = new Error('db password=hunter2');
+  const redacted = redactRecord({
+    request_id: 'req-keep', run_id: 'run-keep', task_id: 'task-keep',
+    comment: '普通说明保持原样',
+    access_token: 'access-123456789',
+    refresh_token: { value: 'refresh-123456789' },
+    session_token: 'session-123456789',
+    cookie: 'sid=abc; theme=dark',
+    nested: { list: [{ password: 'hunter2' }, { apiKey: 'sk-abcdefghijklmnop' }] },
+    database_url: 'postgres://relay:s3cret-pw@127.0.0.1:5432/relay',
+    note: 'Authorization: Bearer abcdefghijklmnop',
+    error,
+  });
+  const raw = JSON.stringify(redacted);
+  for (const secret of ['access-123456789', 'refresh-123456789', 'session-123456789',
+    'hunter2', 'sk-abcdefghijklmnop', 's3cret-pw', 'abcdefghijklmnop']) {
+    assert.equal(raw.includes(secret), false, `泄露了 ${secret}`);
+  }
+  assert.equal(redacted.request_id, 'req-keep');
+  assert.equal(redacted.run_id, 'run-keep');
+  assert.equal(redacted.task_id, 'task-keep');
+  assert.equal(redacted.comment, '普通说明保持原样');
+  assert.ok(String(redacted.database_url).includes('postgres://relay:[redacted]@'));
+  const serialized = redacted.error as { message?: string; stack?: string; cause?: { message?: string } };
+  assert.equal(String(serialized.message).includes('sk-1234567890123456'), false);
+  assert.equal(String(serialized.stack).includes('abcdefghijklmnop'), false);
+  assert.equal(String(serialized.cause?.message).includes('hunter2'), false);
+  assert.ok(String(redacted.note).includes('Bearer [redacted]'));
+  assert.equal(typeof redacted.nested, 'object');
+});
+
+test('超长文本脱敏保持有界且不泄露内嵌 token', () => {
+  const text = redactLogText(`Authorization: Bearer ${'a'.repeat(200)} password=hunter2 `
+    + 'y'.repeat(5000), 1000);
+  assert.ok(text.length <= 1000 + '...[truncated]'.length);
+  assert.equal(text.includes('hunter2'), false);
+});
 
 test('写盘失败不抛异常：回退 stderr 并给出可诊断记录', () => withTempLog((directory) => {
   const logDirectory = join(directory, 'gone');
@@ -238,6 +494,29 @@ test('写盘失败不抛异常：回退 stderr 并给出可诊断记录', () => 
   assert.ok(combined.includes('disk_full_simulation'));
   assert.ok(combined.includes('m-4'));
   assert.ok(combined.includes('runtime_log_write_failed'));
+}));
+
+test('日志目录创建失败：不抛错、记 runtime_log_directory_unavailable 并回退 stderr', () => withTempLog((directory) => {
+  const blocker = join(directory, 'not-a-directory');
+  writeFileSync(blocker, 'block');
+  const writes: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: unknown) => {
+    writes.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    assert.doesNotThrow(() => {
+      configureRuntimeLog({ directory: join(blocker, 'logs'), fileName: 'x.log', level: 'error' });
+      getRuntimeLogger('test').error('after_directory_failure', { request_id: 'req-dir-1' });
+    });
+  } finally {
+    process.stderr.write = original;
+  }
+  const combined = writes.join('');
+  assert.ok(combined.includes('runtime_log_directory_unavailable'));
+  assert.ok(combined.includes('after_directory_failure'));
+  assert.ok(combined.includes('req-dir-1'));
 }));
 
 test('环境变量解析：合法值生效，非法值回退默认并给出说明', () => {

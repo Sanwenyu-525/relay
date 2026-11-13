@@ -6,6 +6,7 @@ import { createCommandId, RelayApiError, type RelayApiClient,
 import type { RelayModelConnection } from "../api/dtos/information";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
+import { Button, IconButton } from "../ui";
 import { serverVerificationKind, verificationLabels,
   type ModelVerificationStateKind } from "../lib/modelVerification";
 
@@ -182,9 +183,9 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
     return <section className="surface-panel settings-card" data-testid="model-connections">
       <h2>模型连接</h2>      <p className="helper-text">登记 OpenAI 兼容或 Anthropic 连接（协议、端点、确切型号、调用预算）；凭据存系统凭据库，业务库只有不透明引用。</p>
       <p className="settings-verify-actions">
-        <button className="secondary-button" type="button" data-testid="model-connections-open"
+        <Button variant="secondary" data-testid="model-connections-open"
           onClick={() => { void open(); }}>
-          <Plug aria-hidden="true" />管理连接</button>
+          <Plug aria-hidden="true" />管理连接</Button>
       </p>
     </section>;
   }
@@ -194,8 +195,8 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
     {loading && <p role="status">正在读取模型连接…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="model-connections-error">
       <p>{error}</p>
-      <button className="secondary-button" type="button" onClick={() => { void load(); }}>
-        <RotateCcw aria-hidden="true" />重新读取</button>
+      <Button variant="secondary" onClick={() => { void load(); }}>
+        <RotateCcw aria-hidden="true" />重新读取</Button>
     </div>}
     {notice !== null && <p className="helper-text" role="status" data-testid="model-connections-notice">
       {notice}</p>}
@@ -205,9 +206,9 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
         还没有登记任何连接；此时会话与新任务执行都跟随进程默认。</p>}
 
     {connections.length === 0 && !formOpen && <p className="settings-verify-actions">
-      <button className="secondary-button" type="button" data-testid="model-connection-add"
+      <Button variant="secondary" data-testid="model-connection-add"
         onClick={openCreate}>
-        <Plus aria-hidden="true" />新增连接</button>
+        <Plus aria-hidden="true" />新增连接</Button>
     </p>}
 
     {connections.length === 0 && formOpen &&
@@ -219,9 +220,8 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
       <aside className="settings-connections-list" aria-label="已登记连接">
         <div className="settings-connections-list-head">
           <span className="settings-connections-list-title">已登记连接</span>
-          <button className="icon-button" type="button" aria-label="刷新模型连接"
-            title="刷新模型连接" disabled={loading} onClick={() => { void load(); }}>
-            <RotateCcw aria-hidden="true" /></button>
+          <IconButton icon={RotateCcw} label="刷新模型连接"
+            disabled={loading} onClick={() => { void load(); }} />
         </div>
         <ul>
           {connections.map((connection) => {
@@ -247,10 +247,10 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
             </li>;
           })}
         </ul>
-        <button className="secondary-button settings-connections-add" type="button"
+        <Button variant="secondary" className="settings-connections-add"
           data-testid="model-connection-add" aria-pressed={formOpen}
           onClick={openCreate}>
-          <Plus aria-hidden="true" />新增连接</button>
+          <Plus aria-hidden="true" />新增连接</Button>
       </aside>
       <div className="settings-connections-detail">
         {formOpen && <CreateConnectionForm client={client} busy={blocked}
@@ -293,20 +293,20 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                 </div>
               </div>
               <div className="settings-connection-head-actions">
-                <button className="secondary-button" type="button"
+                <Button variant="secondary"
                   data-testid={`model-connection-verify-${connection.id}`}
                   disabled={blocked || connection.status !== "ACTIVE"}
                   title={connection.status !== "ACTIVE" ? "先启用连接再验证。" : undefined}
                   onClick={() => { void verify(connection); }}>
-                  <ShieldCheck aria-hidden="true" />{verifyingId === connection.id ? "验证中…" : "验证"}</button>
-                <button className="secondary-button" type="button"
+                  <ShieldCheck aria-hidden="true" />{verifyingId === connection.id ? "验证中…" : "验证"}</Button>
+                <Button variant="secondary"
                   data-testid={`model-connection-edit-${connection.id}`}
                   disabled={blocked}
                   onClick={() => {
                     setEditingId(editingId === connection.id ? null : connection.id);
                     setRotatingId(null);
-                  }}>编辑</button>
-                <button className="secondary-button" type="button"
+                  }}>编辑</Button>
+                <Button variant="secondary"
                   data-testid={`model-connection-status-${connection.id}`}
                   disabled={blocked}
                   onClick={() => { void act(connection.id, async () => {
@@ -319,7 +319,7 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                     setNotice(connection.status === "ACTIVE"
                       ? `已停用「${connection.name}」；已冻结在它上面的 Run 会停止，不再发起新调用。`
                       : `已启用「${connection.name}」。`);
-                  }); }}>{connection.status === "ACTIVE" ? "停用" : "启用"}</button>
+                  }); }}>{connection.status === "ACTIVE" ? "停用" : "启用"}</Button>
               </div>
             </div>
             {presence === false && <p className="settings-connection-warning">
@@ -365,14 +365,14 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                     <div><dt>API 格式</dt><dd><code className="hash-code">{
                       protocolLabels[connection.providerKind]}</code></dd></div>
                     <div><dt>凭据</dt><dd>凭据第 {connection.credentialVersion} 代
-                      <button className="secondary-button" type="button"
+                      <Button variant="secondary"
                         data-testid={`model-connection-rotate-${connection.id}`}
                         disabled={blocked}
                         onClick={() => {
                           setRotatingId(rotatingId === connection.id ? null : connection.id);
                           setEditingId(null);
                         }}>
-                        <KeyRound aria-hidden="true" />轮换凭据</button></dd></div>
+                        <KeyRound aria-hidden="true" />轮换凭据</Button></dd></div>
                   </dl>
                   <div className="settings-connection-defaults">
                     <span className="field-label">默认用途</span>
@@ -381,45 +381,45 @@ export function ModelConnectionsCard({ client, defaultExpanded = false, onDefaul
                         ? <>
                           <span className="status-chip status-chip--neutral"
                             data-testid="model-connection-chat-default-badge">聊天默认</span>
-                          <button className="secondary-button" type="button"
+                          <Button variant="secondary"
                             data-testid={`model-connection-chat-default-clear-${connection.id}`}
                             disabled={blocked}
                             onClick={() => { void act(connection.id, async () => {
                               await client.setChatDefaultModelConnection(null, createCommandId());
                               onDefaultsChanged?.();
                               setNotice("已取消工作区聊天默认。");
-                            }); }}>取消聊天默认</button>
+                            }); }}>取消聊天默认</Button>
                         </>
-                        : <button className="secondary-button" type="button"
+                        : <Button variant="secondary"
                           data-testid={`model-connection-chat-default-${connection.id}`}
                           disabled={blocked || connection.status !== "ACTIVE"}
                           onClick={() => { void act(connection.id, async () => {
                             await client.setChatDefaultModelConnection(connection.id, createCommandId());
                             onDefaultsChanged?.();
                             setNotice(`已把「${connection.name}」设为工作区聊天默认。`);
-                          }); }}>设为聊天默认</button>}
+                          }); }}>设为聊天默认</Button>}
                       {isRunDefault
                         ? <span className="status-chip status-chip--neutral"
                           data-testid="model-connection-default-badge">Run 默认</span>
-                        : <button className="secondary-button" type="button"
+                        : <Button variant="secondary"
                           data-testid={`model-connection-default-${connection.id}`}
                           disabled={blocked || connection.status !== "ACTIVE"}
                           onClick={() => { void act(connection.id, async () => {
                             await client.setDefaultModelConnection(connection.id, createCommandId());
                             onDefaultsChanged?.();
                             setNotice(`已把「${connection.name}」设为 Run 默认连接。`);
-                          }); }}>设为 Run 默认</button>}
+                          }); }}>设为 Run 默认</Button>}
                     </div>
                   </div>
                   <div className="settings-connection-models">
                     <div className="settings-connection-models-head">
                       <span className="field-label">模型</span>
-                      <button className="text-button" type="button"
+                      <Button variant="text"
                         data-testid={`model-connection-model-edit-${connection.id}`}
                         onClick={() => {
                           setEditingId(connection.id);
                           setRotatingId(null);
-                        }}>编辑型号</button>
+                        }}>编辑型号</Button>
                     </div>
                     <div className="settings-connection-model-row">
                       <span className="settings-connection-model-name">
@@ -489,7 +489,7 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
     <p className="helper-text">API Key 不变；更换凭据请用「轮换凭据」。改协议会改变配置指纹：旧验证结论失效，冻结在旧协议上的在途执行会停止。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
-      <button className="secondary-button" type="button" disabled={busy}
+      <Button variant="secondary" disabled={busy}
         data-testid="model-connection-edit-submit"
         onClick={() => {
           if (name.trim() === "") { setLocalError("请填写连接名称。"); return; }
@@ -499,8 +499,8 @@ function EditConnectionForm({ connection, busy, onSubmit, onCancel }: {
           setLocalError(null);
           void onSubmit({ name: name.trim(), protocol, defaultModel: model.trim(),
             baseUrl: baseUrl.trim() === "" ? null : baseUrl.trim(), timeoutMs });
-        }}>保存设置</button>
-      <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
+        }}>保存设置</Button>
+      <Button variant="secondary" onClick={onCancel}>取消</Button>
     </p>
   </div>;
 }
@@ -525,7 +525,7 @@ function RotateCredentialForm({ connection, busy, onSubmit, onCancel }: {
     <p className="helper-text">轮换后旧验证结论失效；冻结在旧凭据代数上的 Run 会停止。</p>
     {localError !== null && <p className="action-error" role="alert">{localError}</p>}
     <p className="settings-verify-actions">
-      <button className="secondary-button" type="button" disabled={busy}
+      <Button variant="secondary" disabled={busy}
         data-testid="model-connection-rotate-submit"
         onClick={() => {
           const trimmed = apiKey.trim();
@@ -533,8 +533,8 @@ function RotateCredentialForm({ connection, busy, onSubmit, onCancel }: {
           setLocalError(null);
           setApiKey("");
           void onSubmit(trimmed);
-        }}>保存新凭据</button>
-      <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
+        }}>保存新凭据</Button>
+      <Button variant="secondary" onClick={onCancel}>取消</Button>
     </p>
   </div>;
 }
@@ -708,7 +708,7 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
     {saveError !== null && <p className="action-error" role="alert"
       data-testid="model-connection-create-error">{saveError}</p>}
     <p className="settings-verify-actions">
-      <button className="secondary-button" type="button" disabled={busy || probing || saving}
+      <Button variant="secondary" disabled={busy || probing || saving}
         data-testid="model-connection-probe"
         onClick={() => {
           setLocalError(null); setSaveError(null); setProbe(null);
@@ -725,8 +725,8 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
                 ? cause.message : "测试连接失败，请稍后重试。" });
             })
             .finally(() => { setProbing(false); });
-        }}>{probing ? "测试中…" : "测试连接"}</button>
-      <button className="primary-button" type="button" disabled={busy || probing || saving}
+        }}>{probing ? "测试中…" : "测试连接"}</Button>
+      <Button variant="primary" disabled={busy || probing || saving}
         data-testid="model-connection-create-submit"
         onClick={() => {
           setLocalError(null); setSaveError(null);
@@ -752,8 +752,8 @@ function CreateConnectionForm({ client, busy, onCreated, onCancel }: {
                 : "创建连接失败；已填内容保留，可直接重试。");
             })
             .finally(() => { setSaving(false); });
-        }}>{saving ? "保存中…" : "保存模型"}</button>
-      <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
+        }}>{saving ? "保存中…" : "保存模型"}</Button>
+      <Button variant="secondary" onClick={onCancel}>取消</Button>
     </p>
   </div>;
 }

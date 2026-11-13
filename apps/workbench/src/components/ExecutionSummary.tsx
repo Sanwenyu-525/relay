@@ -1,5 +1,6 @@
 import type { RelayConversationExecution } from "../api/relayClient";
 import "./FolderScope.css";
+import { Button } from "../ui";
 
 /**
  * 会话执行摘要（工作台 §43）。
@@ -79,12 +80,12 @@ export default function ExecutionSummary({ execution, busy, onApply, onOpenTask,
       </>}
       {/* 失败原因已提到阶段行下方；这里只保留重试与详情入口。 */}
       {(failed || request.taskId !== null) && <div className="form-actions">
-        {failed && <button className="secondary-button" type="button"
+        {failed && <Button variant="secondary"
           data-testid="execution-start" disabled={busy} onClick={() => onApply(request.requestId)}>
-          {busy ? "正在继续" : "继续原请求"}</button>}
-        {request.taskId !== null && <button className="secondary-button" type="button"
+          {busy ? "正在继续" : "继续原请求"}</Button>}
+        {request.taskId !== null && <Button variant="secondary"
           data-testid="execution-open-task" onClick={() => onOpenTask(request.taskId as string)}>
-          查看执行详情</button>}
+          查看执行详情</Button>}
       </div>}
       {/* 2026-10-24 用户指令：正常态不再宣告「不需要再确认一次」；只有 DELEGATED 的
           「何时会需要你决定」是用户无从预知的，保留。 */}

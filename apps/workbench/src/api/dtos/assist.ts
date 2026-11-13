@@ -1154,10 +1154,64 @@ export interface RelayNextCallBudget {
   readonly windowSource: "MODEL_CATALOG" | "UNKNOWN";
 }
 
-/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 下次预算 + 最近一次调用，一次读完。 */
+/** 一次压缩请求为什么发生：用户手动、达到阈值、还是关闭自动压缩后的溢出保护。 */
+export type RelayCompactionTrigger = "MANUAL" | "THRESHOLD" | "OVERFLOW";
+
+/**
+ * 0162：自动压缩策略与当前读数。
+ *
+ * 口径分开表达，界面不能把「达到压缩阈值」画成「达到模型窗口上限」：
+ *   · `modelWindowTokens` 是模型真实窗口（未知为 null，`windowSource` 说明读数来源）；
+ *   · `targetWindowTokens` 是这个会话选的档位（1M 目标窗口只是最高一档）；
+ *   · `effectiveThresholdTokens` 才是真正生效的阈值，可能低于用户保存值（`thresholdClamped`）。
+ * `contextSource` 标明当前上下文量是 Provider 真实上报为基线，还是整份估算。
+ */
+export interface RelayContextCompaction {
+  readonly enabled: boolean;
+  /** 用户保存的阈值；null = 使用产品默认。 */
+  readonly thresholdTokens: number | null;
+  readonly defaultThresholdTokens: number;
+  readonly recommended: { readonly min: number; readonly max: number };
+  readonly requestedThresholdTokens: number;
+  readonly effectiveThresholdTokens: number;
+  readonly thresholdClamped: boolean;
+  readonly targetWindowTokens: number;
+  readonly modelWindowTokens: number | null;
+  readonly windowSource: "MODEL_CATALOG" | "SESSION_TIER";
+  readonly effectiveWindowTokens: number;
+  readonly outputReserveTokens: number;
+  readonly protocolOverheadTokens: number;
+  readonly safetyReserveTokens: number;
+  readonly safeInputTokens: number;
+  readonly postCompactionTargetTokens: number;
+  readonly contextTokens: number;
+  readonly contextSource: "PROVIDER_USAGE" | "ESTIMATED";
+  /** 距离生效阈值还有多少 tokens；已超过时为负。 */
+  readonly distanceTokens: number;
+  readonly active: { readonly requestId: string;
+    readonly status: "PENDING" | "RUNNING";
+    readonly trigger: RelayCompactionTrigger } | null;
+  readonly lastResult: { readonly requestId: string;
+    readonly reason: "MANUAL" | "AUTO";
+    readonly trigger: RelayCompactionTrigger;
+    readonly status: "COMPLETED" | "FAILED" | "CANCELLED";
+    readonly errorCode: string | null;
+    readonly throughSeq: DecimalRevision;
+    readonly tokensBefore: number | null;
+    /** 压缩完成后重新量到的规模；没有回填成功时为 null（界面不猜）。 */
+    readonly tokensAfter: number | null;
+    /** 压缩后预算复核：`true` = 压完仍不低于安全输入上限；`null` = 没有可核对的读数。 */
+    readonly budgetUnmet: boolean | null;
+    /** 这次压缩判定时冻结的安全输入上限；与 `budgetUnmet` 同一口径。 */
+    readonly safeInputTokens: number | null;
+    readonly at: string } | null;
+}
+
+/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 下次预算 + 最近一次调用 + 压缩策略。 */
 export interface RelaySessionContextUsage {
   readonly sessionId: string;
   readonly budget: { readonly tokens: RelayContextBudgetTokens; readonly revision: DecimalRevision };
   readonly nextCall: RelayNextCallBudget | null;
   readonly lastCall: RelayContextUsageCall | null;
+  readonly compaction: RelayContextCompaction;
 }

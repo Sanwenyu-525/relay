@@ -4,6 +4,7 @@ import { RelayApiError, type RelayApiClient, type RelayRunTrace } from "../api/r
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
 import "./RunTracePanel.css";
+import { Button } from "../ui";
 
 function resultRef(value: boolean): string { return value ? "有结果引用（不代表成功）" : "无结果引用"; }
 
@@ -32,7 +33,7 @@ export default function RunTracePanel({ client, runId, taskId, runRevision }: {
 
   return <section className="surface-panel run-trace" data-testid="run-trace"><div className="run-trace-heading"><div><h2>Run Trace</h2>
     <p className="helper-text">从实际 Step、Attempt、模型调用、Manifest、验证、Review、Gateway 和 Run Effect 读取；批准、调用与效果分别核对。</p></div>
-    <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新证据</button></div>
+    <Button variant="secondary" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新证据</Button></div>
     {loading && <p role="status">正在读取 Run Trace…</p>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {trace && <div className="run-trace-groups"><p className="helper-text">Run {trace.runId} · 状态 {trace.status}。下列“有结果引用”只说明证据指针存在，不代表结果成功。</p>

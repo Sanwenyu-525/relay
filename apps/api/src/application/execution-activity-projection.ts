@@ -474,6 +474,36 @@ function activityForDelegation(delegation: AssistDelegationRow,
 function phaseFor(message: AssistMessageRow, modelCalls: readonly ModelCallRow[],
   toolRows: readonly SessionToolCallRow[], recoveries: ReadonlyMap<string, ActivityRecovery>,
   run: RunSummary | null): MessagePhase {
+  const base = basePhaseFor(message, modelCalls, toolRows, recoveries, run);
+  // 0163：中断接续事实只由服务端派生。前端读 phase.detail / wait，不自行推断恢复成功。
+  if (message.status === 'PENDING' && message.generation_attempt > 1) {
+    return { raw: message.status, view: 'RECOVERING', tone: 'wait',
+      since: iso(message.interrupted_at ?? message.created_at),
+      detail: `上次执行意外中断，正在自动恢复（第 ${message.generation_attempt} 次生成）`,
+      wait: { code: 'RECOVERY', detail: message.interruption_reason } };
+  }
+  if (message.status === 'FAILED' && message.error_code === 'RECOVERY_BLOCKED_UNRESOLVED_TOOL') {
+    return { raw: message.status, view: 'BLOCKED', tone: 'error',
+      since: iso(message.settled_at),
+      detail: '执行中断；有外部操作结果未确认，需要人工核对',
+      wait: { code: 'RECOVERY_BLOCKED_UNRESOLVED_TOOL',
+        detail: '存在未结算的有副作用工具请求或 UNKNOWN 动作；核对真实结果后才能继续。' } };
+  }
+  if (message.status === 'FAILED' && message.error_code === 'RECOVERY_EXHAUSTED') {
+    return { raw: message.status, view: 'RECOVERY_EXHAUSTED', tone: 'error',
+      since: iso(message.settled_at),
+      detail: `已自动恢复 ${Math.max(0, message.generation_attempt - 1)} 次仍未完成，已停止自动重试`,
+      wait: { code: 'RECOVERY_EXHAUSTED', detail: '可以重新发送请求或检查执行环境。' } };
+  }
+  if (message.status === 'RUNNING' && message.generation_attempt > 1) {
+    return { ...base, detail: `已自动恢复 · ${base.detail}` };
+  }
+  return base;
+}
+
+function basePhaseFor(message: AssistMessageRow, modelCalls: readonly ModelCallRow[],
+  toolRows: readonly SessionToolCallRow[], recoveries: ReadonlyMap<string, ActivityRecovery>,
+  run: RunSummary | null): MessagePhase {
   const terminal = (view: string, tone: MessagePhase['tone'], detail: string,
     since: Date | null, wait: MessagePhase['wait'] = null): MessagePhase =>
     ({ raw: message.status, view, tone, since: iso(since), detail, wait });
@@ -495,6 +525,17 @@ function phaseFor(message: AssistMessageRow, modelCalls: readonly ModelCallRow[]
   }
   if (message.status === 'PENDING') return terminal('WAITING_WORKER', 'wait',
     '已排队，等待执行', message.created_at, { code: 'QUEUE', detail: null });
+  if (message.status === 'RUNNING' && message.generation_attempt > 1 &&
+      message.interrupted_at !== null) {
+    // 0163：上一次尝试的调用行还在账本里。它早于中断时刻就说明本回合还没有登记新请求，
+    // 不能据此显示「正在处理返回结果」——那是上一次尝试的结论。
+    const previous = modelCalls.slice().sort((left, right) =>
+      right.started_at.getTime() - left.started_at.getTime())[0];
+    if (previous === undefined || previous.started_at < message.interrupted_at) {
+      return terminal('RECOVERING', 'wait', '正在恢复原任务，准备下一次请求',
+        message.interrupted_at, { code: 'RECOVERY', detail: message.interruption_reason });
+    }
+  }
   const unresolvedTool = toolRows.find((row) => {
     const recovery = recoveries.get(row.id);
     return recovery !== undefined && recovery.reconcile_required;

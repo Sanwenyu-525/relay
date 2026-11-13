@@ -8,6 +8,7 @@ import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useDelayedVisible } from "../lib/useDelayedVisible";
 import "./TaskViewDashboard.css";
+import { Button } from "../ui";
 
 export interface TaskViewDashboardProps {
   readonly client: RelayApiClient;
@@ -140,13 +141,10 @@ export default function TaskViewDashboard({
               <h3>任务已完成</h3>
               <p>任务已有当前完成凭据，可查看本次接受的成果与记录。</p>
             </div>
-            <button
-              type="button"
-              className="secondary-button secondary-button--compact"
-              onClick={() => setSubtab("files")}
-            >
+            <Button variant="secondary" className="secondary-button--compact"
+              onClick={() => setSubtab("files")}>
               查看成果
-            </button>
+            </Button>
           </div>
         )}
         {task.status === "DONE" && task.currentCompletionId === null && (
@@ -173,32 +171,23 @@ export default function TaskViewDashboard({
               </span>
               <span style={{ flex: 1 }} />
               {isRunning && (
-                <button
-                  type="button"
-                  className="secondary-button secondary-button--compact"
+                <Button variant="secondary" className="secondary-button--compact"
                   disabled={controlBusy}
-                  onClick={() => void handleTogglePause()}
-                >
+                  onClick={() => void handleTogglePause()}>
                   <Pause size={14} aria-hidden="true" /> 暂停任务
-                </button>
+                </Button>
               )}
               {isPaused && (
-                <button
-                  type="button"
-                  className="secondary-button secondary-button--compact"
+                <Button variant="secondary" className="secondary-button--compact"
                   disabled={controlBusy}
-                  onClick={() => void handleTogglePause()}
-                >
+                  onClick={() => void handleTogglePause()}>
                   <Play size={14} aria-hidden="true" /> 继续执行
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
-                className="secondary-button secondary-button--compact"
-                onClick={onSwitchToChat}
-              >
+              <Button variant="secondary" className="secondary-button--compact"
+                onClick={onSwitchToChat}>
                 进入对话
-              </button>
+              </Button>
             </div>
             {controlError && <p className="action-error" role="alert">{controlError}</p>}
           </section>
@@ -244,9 +233,7 @@ export default function TaskViewDashboard({
               </div>
             )}
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
-              <button
-                type="button"
-                className="primary-button primary-button--compact"
+              <Button variant="primary" className="primary-button--compact"
                 disabled={Boolean(reviewWriteBlockedReason) || controlBusy}
                 onClick={async () => {
                   if (controlBusy) return;
@@ -266,13 +253,10 @@ export default function TaskViewDashboard({
                   } finally {
                     setControlBusy(false);
                   }
-                }}
-              >
+                }}>
                 批准并继续
-              </button>
-              <button
-                type="button"
-                className="secondary-button secondary-button--compact"
+              </Button>
+              <Button variant="secondary" className="secondary-button--compact"
                 disabled={Boolean(reviewWriteBlockedReason) || controlBusy}
                 onClick={async () => {
                   if (controlBusy) return;
@@ -293,10 +277,9 @@ export default function TaskViewDashboard({
                   } finally {
                     setControlBusy(false);
                   }
-                }}
-              >
+                }}>
                 拒绝
-              </button>
+              </Button>
             </div>
             {reviewWriteBlockedReason && <p className="disabled-reason" role="status">{reviewWriteBlockedReason}</p>}
             {reviewError && <p className="action-error" role="alert">{reviewError}</p>}
@@ -403,7 +386,7 @@ export default function TaskViewDashboard({
             ) : currentArtifactRead.status === "error" ? (
               <div role="alert" data-testid="collab-artifacts-error">
                 <p>成果读取失败：{currentArtifactRead.error}</p>
-                <button type="button" className="secondary-button" onClick={() => setArtifactReload((value) => value + 1)}>重新读取成果</button>
+                <Button variant="secondary" onClick={() => setArtifactReload((value) => value + 1)}>重新读取成果</Button>
               </div>
             ) : artifacts?.items.length ? (
               <div className="task-files-grid">

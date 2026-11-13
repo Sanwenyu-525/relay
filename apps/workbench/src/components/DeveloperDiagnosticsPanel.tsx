@@ -7,6 +7,7 @@ import {
   type RelayDiagnosticsRuntimeStatus,
 } from "../api/relayClient";
 import { describeLiveRead } from "../lib/liveErrors";
+import { Button } from "../ui";
 import {
   nativeLogDirectoryAvailable, openLogDirectory, saveDiagnosticsExport,
 } from "../lib/desktopHost";
@@ -442,19 +443,19 @@ function LogsCard({ client, active, appliedQuery, onApply }: {
       {filterError !== null && <p className="action-error" role="alert"
         data-testid="diagnostics-filter-error">{filterError}</p>}
       <div className="settings-diagnostics-filter-actions">
-        <button type="submit" className="primary-button" data-testid="diagnostics-query">
-          <Search aria-hidden="true" />查询日志</button>
-        <button type="button" className="secondary-button" data-testid="diagnostics-refresh"
+        <Button variant="primary" type="submit" data-testid="diagnostics-query">
+          <Search aria-hidden="true" />查询日志</Button>
+        <Button variant="secondary" data-testid="diagnostics-refresh"
           disabled={loading} onClick={() => { void read(appliedQuery, undefined, "replace"); }}>
-          <RotateCcw aria-hidden="true" />刷新当前结果</button>
+          <RotateCcw aria-hidden="true" />刷新当前结果</Button>
         <label className="settings-diagnostics-auto">
           <input type="checkbox" checked={autoRefresh} disabled={!active || client === null}
             data-testid="diagnostics-auto-refresh"
             onChange={(event) => { setAutoRefresh(event.target.checked); }} />
           每 10 秒自动刷新（离开本页或失败后停止）
         </label>
-        <button type="button" className="text-button" data-testid="diagnostics-reset"
-          onClick={resetFilters}>重置筛选</button>
+        <Button variant="text" data-testid="diagnostics-reset"
+          onClick={resetFilters}>重置筛选</Button>
       </div>
     </form>
 
@@ -474,9 +475,9 @@ function LogsCard({ client, active, appliedQuery, onApply }: {
     </div>
     {error !== null && <div className="action-error" role="alert" data-testid="diagnostics-error">
       <p>读取失败：{error}</p>
-      <button className="secondary-button" type="button" data-testid="diagnostics-error-retry"
+      <Button variant="secondary" data-testid="diagnostics-error-retry"
         onClick={() => { void read(appliedQuery, undefined, "replace"); }}>
-        <RotateCcw aria-hidden="true" />重试</button>
+        <RotateCcw aria-hidden="true" />重试</Button>
     </div>}
 
     <div className="settings-diagnostics-body">
@@ -499,9 +500,8 @@ function LogsCard({ client, active, appliedQuery, onApply }: {
               </button>
             </li>)}
           </ul>}
-        {nextCursor !== null && entries.length > 0 && <button className="secondary-button"
-          type="button" data-testid="diagnostics-load-more" disabled={loadingMore}
-          onClick={loadMore}>{loadingMore ? "正在加载…" : "加载更多"}</button>}
+        {nextCursor !== null && entries.length > 0 && <Button variant="secondary" data-testid="diagnostics-load-more" disabled={loadingMore}
+          onClick={loadMore}>{loadingMore ? "正在加载…" : "加载更多"}</Button>}
       </div>
       <LogDetail entry={selected} copyNotice={copyNotice} onCopy={(kind) => void copy(kind)} />
     </div>
@@ -523,10 +523,10 @@ function LogDetail({ entry, copyNotice, onCopy }: {
   return <aside className="settings-log-detail" data-testid="diagnostics-detail">
     <div className="settings-log-detail-head">
       <h3>{entry.event ?? "（无事件名）"}</h3>
-      <button className="secondary-button secondary-button--compact" type="button"
-        data-testid="diagnostics-copy-error" onClick={() => onCopy("error")}>复制错误</button>
-      <button className="secondary-button secondary-button--compact" type="button"
-        data-testid="diagnostics-copy-summary" onClick={() => onCopy("summary")}>复制诊断摘要</button>
+      <Button variant="secondary" className="secondary-button--compact"
+        data-testid="diagnostics-copy-error" onClick={() => onCopy("error")}>复制错误</Button>
+      <Button variant="secondary" className="secondary-button--compact"
+        data-testid="diagnostics-copy-summary" onClick={() => onCopy("summary")}>复制诊断摘要</Button>
     </div>
     {copyNotice !== null && <p className={copyNotice.tone === "ok" ? "settings-save-result" : "action-error"}
       role={copyNotice.tone === "ok" ? "status" : "alert"}
@@ -584,10 +584,10 @@ function RuntimeCard({ client, active }: { readonly client: RelayApiClient | nul
   return <section className="settings-card" data-testid="diagnostics-runtime">
     <div className="settings-diagnostics-card-head">
       <h2>运行状态</h2>
-      <button className="secondary-button secondary-button--compact" type="button"
+      <Button variant="secondary" className="secondary-button--compact"
         data-testid="diagnostics-runtime-refresh" disabled={loading || client === null}
         onClick={() => { void read(); }}>
-        <RotateCcw aria-hidden="true" />{loading ? "读取中…" : "刷新状态"}</button>
+        <RotateCcw aria-hidden="true" />{loading ? "读取中…" : "刷新状态"}</Button>
     </div>
     <p className="helper-text">只反映本次读取时能核实的进程与数据库事实；不能核实时显示「未知」。</p>
     {client === null
@@ -748,10 +748,10 @@ function FilesCard({ client, active, appliedQuery }: {
   return <section className="settings-card" data-testid="diagnostics-files">
     <div className="settings-diagnostics-card-head">
       <h2>诊断文件</h2>
-      <button className="secondary-button secondary-button--compact" type="button"
+      <Button variant="secondary" className="secondary-button--compact"
         data-testid="diagnostics-file-refresh" disabled={client === null}
         onClick={() => { void readInventory(); }}>
-        <RotateCcw aria-hidden="true" />重新读取清单</button>
+        <RotateCcw aria-hidden="true" />重新读取清单</Button>
     </div>
     <p className="helper-text">
       只列白名单内的运行日志；轮转文件与当前文件分开列出。导出内容由服务端再次脱敏并限制大小。
@@ -777,14 +777,14 @@ function FilesCard({ client, active, appliedQuery }: {
                 </ul>}
             <div className="settings-diagnostics-file-actions">
               {nativeLogDirectoryAvailable()
-                ? <button className="secondary-button" type="button" data-testid="diagnostics-open-directory"
+                ? <Button variant="secondary" data-testid="diagnostics-open-directory"
                   disabled={busy !== null} onClick={() => { void open(); }}>
-                  <FolderOpen aria-hidden="true" />{busy === "open" ? "正在打开…" : "打开日志目录"}</button>
-                : <button className="secondary-button" type="button" data-testid="diagnostics-copy-directory"
-                  onClick={() => { void copyDirectory(); }}>复制目录路径</button>}
-              <button className="primary-button" type="button" data-testid="diagnostics-export"
+                  <FolderOpen aria-hidden="true" />{busy === "open" ? "正在打开…" : "打开日志目录"}</Button>
+                : <Button variant="secondary" data-testid="diagnostics-copy-directory"
+                  onClick={() => { void copyDirectory(); }}>复制目录路径</Button>}
+              <Button variant="primary" data-testid="diagnostics-export"
                 disabled={busy !== null} onClick={() => { void exportLogs(); }}>
-                {busy === "export" ? "正在导出…" : "导出当前筛选结果"}</button>
+                {busy === "export" ? "正在导出…" : "导出当前筛选结果"}</Button>
               {!nativeLogDirectoryAvailable() && <span className="helper-text">
                 浏览器模式直接下载文本；桌面宿主会打开保存对话框。</span>}
             </div>

@@ -11,6 +11,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import "./ReviewsView.css";
+import { Button } from "../ui";
 
 const kindLabels = reviewKindLabels;
 const preview: RelayReview = { id: "sample-review", kind: "CRITERION", status: "OPEN", revision: "1", projectId: "sample-project", taskId: "sample-task", runId: "sample-run", operationId: null, reason: "需要你判断候选产物是否满足必需验收条件。", targetHash: "示例摘要", target: { artifact_version_id: "示例产物 v3", acceptance_revision: "2", criterion_id: "human-1" }, evidence: { check_result: "自动检查无法代替人工判断" }, effect: { on_accept: "保存人工判断后重新核对完成条件", on_request_changes: "按原验收契约继续修正" }, allowedDecisions: ["ACCEPT", "REQUEST_CHANGES"], expiresAt: null, createdAt: "2026-09-23T00:00:00.000Z", decidedAt: null };
@@ -152,18 +153,18 @@ export default function ReviewsView() {
       <PageHeader title="验证、审批与完成" testId="review-page-head" overline="Verification & Approval"
         lede="独立展示执行结果、检查证据、人工判断与动作批准；Run 结束 ≠ 检查通过 ≠ Review 通过 ≠ 正式完成。"
         meta={loading ? "正在核对请求" : `${reviews.length} 项请求 · 查看对象与依据后逐项处理`}
-        actions={<button className="secondary-button" type="button" data-testid="review-refresh" disabled={loading || refreshing}
-          onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</button>} />
+        actions={<Button variant="secondary" data-testid="review-refresh" disabled={loading || refreshing}
+          onClick={() => void load()}><RotateCcw aria-hidden="true" />{refreshing ? "正在更新" : "刷新"}</Button>} />
       {/* 单列时正文接在列表下方、决定区在正文之后（约 1162×782 窗口，2026-10-21 第三轮 R3-04）：
           读完长正文才知道决定区在哪，首屏又没有通往它的入口。这两个键挂在第一列，
           只负责滚动与移动焦点，不代替阅读，也不代替逐项判断。 */}
       {selected !== null && selected.status === "OPEN" && (selectedId === null || selected.id === selectedId) &&
         <nav className="review-jump" aria-label="页内定位">
-          <button type="button" className="secondary-button" data-testid="review-jump-conditions"
-            onClick={() => jumpTo("review-bound-summary")}>查看判断条件</button>
-          <button type="button" className="secondary-button" data-testid="review-jump-decision"
+          <Button variant="secondary" data-testid="review-jump-conditions"
+            onClick={() => jumpTo("review-bound-summary")}>查看判断条件</Button>
+          <Button variant="secondary" data-testid="review-jump-decision"
             title="移动到决定区；这里不会替你提交任何决定"
-            onClick={() => jumpTo("review-decision-actions", "review-decision")}>前往决定</button>
+            onClick={() => jumpTo("review-decision-actions", "review-decision")}>前往决定</Button>
         </nav>}
       {!live && <FixtureNote>当前为只读示例。连接本机 API 后可处理真实 Review 请求。</FixtureNote>}
       {error && <p className="action-error" role="alert" data-testid="review-read-error">{error}</p>}

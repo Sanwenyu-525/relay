@@ -4,6 +4,7 @@ import type { RelayApiClient, RelaySessionDelegation } from "../api/relayClient"
 import { describeLiveError } from "../lib/liveErrors";
 import "./SessionDelegations.css";
 import SubagentSupplements from "./SubagentSupplements";
+import { Button } from "../ui";
 
 type DelegationClient = Pick<RelayApiClient, "workspaceId" | "getAssistSessionDelegations">;
 interface Props {
@@ -68,9 +69,9 @@ function SessionDelegationsContent({ client, sessionId, parentRunning = false,
     <div className="session-delegations-content" aria-busy={loading}>
       {error !== null && <div className="session-delegations-error" role="alert">
         <p>协作状态读取失败：{error}{items.length > 0 ? " 当前显示上次读取的记录。" : ""}</p>
-        <button className="text-button" type="button" disabled={loading}
+        <Button variant="text" disabled={loading}
           data-testid="session-delegations-retry" onClick={() => setRetry((value) => value + 1)}>
-          {loading ? "正在重试…" : "重试读取"}</button>
+          {loading ? "正在重试…" : "重试读取"}</Button>
       </div>}
       <ul className="session-delegations-list">
         {items.map((item) => <li key={item.delegationId} className="session-delegations-item"
@@ -90,9 +91,9 @@ function SessionDelegationsContent({ client, sessionId, parentRunning = false,
             data-testid="session-delegation-result">{item.resultSummary}</p>}
           {item.resultSummary === null && item.status === "FAILED" &&
             <p className="session-delegations-result">未返回结果，请查看子任务记录。</p>}
-          {onOpenSession !== undefined && item.childSessionId !== null && <button className="text-button" type="button"
+          {onOpenSession !== undefined && item.childSessionId !== null && <Button variant="text"
             data-testid="session-delegation-open" onClick={() => onOpenSession(item.childSessionId!)}>
-            查看子任务记录</button>}
+            查看子任务记录</Button>}
         </li>)}
       </ul>
     </div>

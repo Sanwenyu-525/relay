@@ -1,5 +1,6 @@
 import {
-  appendFileSync, closeSync, mkdirSync, openSync, renameSync, statSync, unlinkSync,
+  appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync,
+  unlinkSync, writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -20,7 +21,8 @@ import { isAbsolute, join } from 'node:path';
  * - Errors are serialized with name / message / bounded stack / code / bounded cause chain.
  * - Records are capped at {@link MAX_LOG_RECORD_BYTES}; oversized payloads collapse instead of
  *   growing without bound.
- * - Repeated warn/error records are throttled per (event, error) with an explicit summary line.
+ * - Repeated warn/error records are throttled per (event, error, correlation ids) with an explicit
+ *   summary line; request-scoped errors are never aggregated.
  * - Size-based rotation with a bounded retention window; a best-effort lock file keeps several
  *   processes sharing one log file from interleaving renames.
  * - Log failures never throw into business code: first failure falls back to stderr, further
@@ -66,6 +68,7 @@ const NEWLINE = String.fromCharCode(10);
 
 const SECRET_KEY = new RegExp(
   'api[_-]?key|apikey|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token'
+  + '|session[_-]?token|csrf[_-]?token|xsrf[_-]?token'
   + '|bearer|secret|password|passwd|credential|cookie|private[_-]?key|set-cookie',
   'i',
 );
@@ -135,9 +138,16 @@ let state: RuntimeLogState = DISABLED;
 interface SuppressEntry {
   windowStart: number;
   count: number;
+  readonly namespace: string;
+  readonly level: RuntimeLogLevel;
+  readonly event: string;
+  readonly bound: Record<string, unknown>;
+  readonly fields: Record<string, unknown>;
 }
 
 let suppressState = new Map<string, SuppressEntry>();
+let suppressTimer: NodeJS.Timeout | undefined;
+let exitHookInstalled = false;
 
 interface WriteFailureState {
   lastReportAt: number;
@@ -244,6 +254,10 @@ export function configureRuntimeLog(config: RuntimeLogConfig = {}): void {
 export function resetRuntimeLog(): void {
   state = DISABLED;
   suppressState = new Map<string, SuppressEntry>();
+  if (suppressTimer !== undefined) {
+    clearTimeout(suppressTimer);
+    suppressTimer = undefined;
+  }
   writeFailure = { lastReportAt: 0, dropped: 0 };
 }
 
@@ -254,13 +268,21 @@ function truncate(value: string, limit: number): string {
 /** 错误消息、栈和普通字符串都可能内嵌凭据；按 token 替换，而不是只看整串。 */
 function scrubSecretTokens(value: string): string {
   return value
-    .replace(/Bearer\s+\S+/giu, 'Bearer [redacted]')
-    .replace(/sk-[A-Za-z0-9_-]{12,}/gu, REDACTED)
-    // 数据库连接串里的口令：postgres://user:pass@host/db -> postgres://user:[redacted]@host/db
-    .replace(/(postgres(?:ql)?:\/\/[^:\s/@]+:)[^@\s/]+(@)/giu, '$1' + REDACTED + '$2')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{6,}/giu, 'Bearer ' + REDACTED)
+    .replace(/\bBasic\s+[A-Za-z0-9+/=]{8,}/giu, 'Basic ' + REDACTED)
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}/gu, REDACTED)
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/gu,
+      REDACTED)
+    .replace(/\bAIza[0-9A-Za-z_-]{30,}\b/gu, REDACTED)
+    // JWT（三段 base64url）常被直接粘进消息或 Header 值。
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, REDACTED)
+    // Cookie / Set-Cookie 整行；字段名脱敏之外的字符串路径也要覆盖。
+    .replace(/\b(set-?cookie|cookie)\s*:\s*[^\r\n]+/giu, '$1: ' + REDACTED)
+    // 任意 scheme 的 URL 口令：postgres://user:pass@host -> postgres://user:[redacted]@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+(@)/giu, '$1' + REDACTED + '$2')
     // 错误消息里内嵌的凭据赋值（password=… / api_key: …）；只匹配带值分隔符的形式，
     // 普通英文句子（如 "password authentication failed"）不会被误伤。
-    .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|secret|password|passwd)(\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;)}\]]+)/giu,
+    .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|token|secret|password|passwd)(\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;)}\]&]+)/giu,
       '$1$2' + REDACTED);
 }
 
@@ -374,18 +396,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function acquireRotationLock(file: string): number | undefined {
+export interface LogRotationLock {
+  readonly fd: number;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (caught) {
+    // EPERM 说明进程存在但当前用户无权发信号；同机 Relay 进程不会走到这里。
+    return (caught as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** 旧锁恢复只清理确实没人持有的锁：持锁进程仍存活时，年龄再大也不抢占。 */
+function lockHolderIsGone(lockPath: string): boolean {
+  try {
+    const holder = Number(readFileSync(lockPath, 'utf8').trim());
+    return !processAlive(holder);
+  } catch {
+    return true;
+  }
+}
+
+export function acquireRotationLock(file: string): LogRotationLock | undefined {
   const lockPath = file + ROTATION_LOCK_SUFFIX;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return openSync(lockPath, 'wx');
+      const fd = openSync(lockPath, 'wx');
+      try {
+        try {
+          writeSync(fd, `${String(process.pid)}\n`);
+        } catch {
+          // pid 只是旧锁恢复的辅助证据，写不进去不影响持锁本身。
+        }
+        const stats = fstatSync(fd);
+        return { fd, dev: Number(stats.dev), ino: Number(stats.ino) };
+      } catch {
+        try {
+          closeSync(fd);
+        } catch {
+          // Already closed.
+        }
+        return undefined;
+      }
     } catch (caught) {
       if ((caught as NodeJS.ErrnoException).code !== 'EEXIST') return undefined;
       try {
-        if (Date.now() - statSync(lockPath).mtimeMs > ROTATION_LOCK_STALE_MS) {
-          unlinkSync(lockPath);
-          continue;
+        if (Date.now() - statSync(lockPath).mtimeMs <= ROTATION_LOCK_STALE_MS) {
+          return undefined;
         }
+        if (!lockHolderIsGone(lockPath)) return undefined;
+        unlinkSync(lockPath);
+        continue;
       } catch {
         // Lock vanished between open and stat: retry once.
       }
@@ -395,18 +462,24 @@ function acquireRotationLock(file: string): number | undefined {
   return undefined;
 }
 
-function releaseRotationLock(file: string, lock: number | undefined): void {
-  if (lock !== undefined) {
-    try {
-      closeSync(lock);
-    } catch {
-      // Already closed.
-    }
-  }
+/**
+ * 只释放自己持有的锁。轮转期间锁文件可能已被旧锁恢复换掉；
+ * 此时 unlink 会删掉另一个进程的锁，让两次轮转同时发生。
+ */
+export function releaseRotationLock(file: string, lock: LogRotationLock | undefined): void {
+  if (lock === undefined) return;
   try {
-    unlinkSync(file + ROTATION_LOCK_SUFFIX);
+    closeSync(lock.fd);
   } catch {
-    // Another process already released it.
+    // Already closed.
+  }
+  const lockPath = file + ROTATION_LOCK_SUFFIX;
+  try {
+    const current = statSync(lockPath);
+    if (Number(current.dev) !== lock.dev || Number(current.ino) !== lock.ino) return;
+    unlinkSync(lockPath);
+  } catch {
+    // Already released or replaced by another process.
   }
 }
 
@@ -515,27 +588,137 @@ function errorKeyParts(fields: Record<string, unknown>): { name: string; code: s
   };
 }
 
+/** 关联身份参与去重键：不同 request/run/task 的同文案错误不能合并成一条。 */
 function dedupeKey(level: RuntimeLogLevel, namespace: string, event: string,
   fields: Record<string, unknown>): string {
   const parts = errorKeyParts(fields);
-  return [level, namespace, event, parts.name, parts.code, parts.message].join('|');
+  const correlations = JSON.stringify(
+    CORRELATION_FIELDS.map((field) => textOf(fields[field])),
+  );
+  return [level, namespace, event, parts.name, parts.code, parts.message, correlations].join('|');
 }
 
-/** 'emit' = write now, 'summary' = write once then silence the window, 'drop' = count only. */
-function checkSuppression(key: string, now: number): 'emit' | 'summary' | 'drop' {
-  const entry = suppressState.get(key);
-  if (entry === undefined || now - entry.windowStart >= SUPPRESS_WINDOW_MS) {
-    if (suppressState.size >= SUPPRESS_MAP_LIMIT) {
-      const oldest = suppressState.keys().next().value;
-      if (typeof oldest === 'string') suppressState.delete(oldest);
+function hasRequestId(fields: Record<string, unknown>): boolean {
+  const value = fields.request_id;
+  return (typeof value === 'string' && value.trim() !== '') ||
+    (typeof value === 'number' && Number.isFinite(value));
+}
+
+/** 请求级错误是必须逐条保留的事实；后台重复诊断才走窗口抑制。 */
+function checkSuppression(current: RuntimeLogState, key: string, now: number,
+  entry: Omit<SuppressEntry, 'windowStart' | 'count'>): 'emit' | 'drop' {
+  const existing = suppressState.get(key);
+  if (existing !== undefined) {
+    if (now - existing.windowStart < SUPPRESS_WINDOW_MS) {
+      existing.count += 1;
+      return existing.count <= SUPPRESS_AFTER ? 'emit' : 'drop';
     }
-    suppressState.set(key, { windowStart: now, count: 1 });
-    return 'emit';
+    // 定时器被业务阻塞错过窗口：新窗口开始前先把旧窗口的准确计数收尾。
+    suppressState.delete(key);
+    try {
+      writeSuppressionSummary(current, existing, now);
+    } catch {
+      // 汇总失败只影响日志自身，不能冒泡到业务。
+    }
   }
-  entry.count += 1;
-  if (entry.count <= SUPPRESS_AFTER) return 'emit';
-  if (entry.count === SUPPRESS_AFTER + 1) return 'summary';
-  return 'drop';
+  if (suppressState.size >= SUPPRESS_MAP_LIMIT) {
+    const oldest = suppressState.entries().next().value as [string, SuppressEntry] | undefined;
+    if (oldest !== undefined) {
+      suppressState.delete(oldest[0]);
+      try {
+        writeSuppressionSummary(current, oldest[1], now);
+      } catch {
+        // 容量驱逐前先收尾，仍然失败时只能放弃这一条汇总。
+      }
+    }
+  }
+  suppressState.set(key, { windowStart: now, count: 1, ...entry });
+  installExitHook();
+  scheduleSuppressionFlush(current);
+  return 'emit';
+}
+
+/** 窗口结束时写出准确汇总；只统计真正被抑制的条数。 */
+function writeSuppressionSummary(current: RuntimeLogState, entry: SuppressEntry, now: number): void {
+  const suppressed = entry.count - SUPPRESS_AFTER;
+  if (suppressed <= 0) return;
+  const merged = { ...entry.bound, ...entry.fields };
+  const parts = errorKeyParts(merged);
+  const correlations: Record<string, unknown> = {};
+  for (const field of CORRELATION_FIELDS) {
+    const value = merged[field];
+    if (value !== undefined && value !== '') correlations[field] = value;
+  }
+  writeRecord(current, entry.level, 'log_suppressed', { namespace: entry.namespace }, {
+    suppressed_event: entry.event,
+    total_count: entry.count,
+    emitted_count: Math.min(entry.count, SUPPRESS_AFTER),
+    suppressed_count: suppressed,
+    window_ms: SUPPRESS_WINDOW_MS,
+    window_started_at: new Date(entry.windowStart).toISOString(),
+    window_ended_at: new Date(now).toISOString(),
+    ...correlations,
+    ...(parts.name === '' ? {} : { error_name: parts.name }),
+    ...(parts.code === '' ? {} : { error_code: parts.code }),
+    ...(parts.message === '' ? {} : { error_message: parts.message }),
+  });
+}
+
+function flushSuppressions(current: RuntimeLogState, now: number, onlyExpired: boolean): void {
+  for (const [key, entry] of [...suppressState.entries()]) {
+    if (onlyExpired && now - entry.windowStart < SUPPRESS_WINDOW_MS) continue;
+    suppressState.delete(key);
+    try {
+      writeSuppressionSummary(current, entry, now);
+    } catch {
+      // 日志自身异常不向业务传播。
+    }
+  }
+}
+
+function scheduleSuppressionFlush(current: RuntimeLogState): void {
+  if (suppressTimer !== undefined) {
+    clearTimeout(suppressTimer);
+    suppressTimer = undefined;
+  }
+  if (suppressState.size === 0) return;
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const entry of suppressState.values()) {
+    earliest = Math.min(earliest, entry.windowStart + SUPPRESS_WINDOW_MS);
+  }
+  if (!Number.isFinite(earliest)) return;
+  suppressTimer = setTimeout(() => {
+    suppressTimer = undefined;
+    try {
+      flushSuppressions(state, Date.now(), true);
+    } catch {
+      // 同上：定时器里没有任何可冒泡的调用方。
+    }
+    scheduleSuppressionFlush(state);
+  }, Math.max(1, earliest - Date.now()));
+  suppressTimer.unref();
+}
+
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.once('exit', () => {
+    try {
+      flushSuppressions(state, Date.now(), false);
+    } catch {
+      // 退出阶段所有持久化通道都可能不可用，不能再抛错。
+    }
+  });
+}
+
+/** 立即写出尚未到期的抑制汇总；进程正常退出时也会自动执行。 */
+export function flushRuntimeLogSuppressions(): void {
+  try {
+    flushSuppressions(state, Date.now(), false);
+  } catch {
+    // 日志自身异常不向业务传播。
+  }
+  scheduleSuppressionFlush(state);
 }
 
 function buildRecord(current: RuntimeLogState, level: RuntimeLogLevel, event: string,
@@ -611,35 +794,18 @@ function writeRecord(current: RuntimeLogState, level: RuntimeLogLevel, event: st
   emitLine(current, line);
 }
 
-function writeSuppressionSummary(current: RuntimeLogState, level: RuntimeLogLevel,
-  namespace: string, event: string, bound: Record<string, unknown>,
-  fields: Record<string, unknown>): void {
-  const entry = suppressState.get(dedupeKey(level, namespace, event, { ...bound, ...fields }));
-  const parts = errorKeyParts(fields);
-  writeRecord(current, level, 'log_suppressed', { namespace, ...bound }, {
-    suppressed_event: event,
-    suppressed_count: entry?.count ?? SUPPRESS_AFTER + 1,
-    window_ms: SUPPRESS_WINDOW_MS,
-    ...(parts.name === '' ? {} : { error_name: parts.name }),
-    ...(parts.code === '' ? {} : { error_code: parts.code }),
-    ...(parts.message === '' ? {} : { error_message: parts.message }),
-  });
-}
-
 function createLogger(namespace: string, bound: Record<string, unknown>): RuntimeLogger {
   const emit = (level: RuntimeLogLevel, event: string, fields?: Record<string, unknown>): void => {
     try {
       const current = state;
       if (LEVEL_ORDER[level] > LEVEL_ORDER[current.level]) return;
       const payload = fields ?? {};
-      if (level === 'warn' || level === 'error') {
-        const key = dedupeKey(level, namespace, event, { ...bound, ...payload });
-        const verdict = checkSuppression(key, Date.now());
+      const merged = { ...bound, ...payload };
+      // 请求级错误逐条保留：request_id 是用户报告问题后唯一的追查入口，不能被聚合吞掉。
+      if ((level === 'warn' || level === 'error') && !hasRequestId(merged)) {
+        const verdict = checkSuppression(current, dedupeKey(level, namespace, event, merged),
+          Date.now(), { namespace, level, event, bound: { ...bound }, fields: { ...payload } });
         if (verdict === 'drop') return;
-        if (verdict === 'summary') {
-          writeSuppressionSummary(current, level, namespace, event, bound, payload);
-          return;
-        }
       }
       writeRecord(current, level, event, { namespace, ...bound }, payload);
     } catch (caught) {

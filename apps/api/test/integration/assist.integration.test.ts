@@ -93,16 +93,19 @@ async function readTaskRevision(taskId: string): Promise<string> {
 async function readMessage(messageId: string): Promise<{
   status: string; content: string | null; error_code: string | null;
   provider_error_kind: string | null;
+  generation_attempt: number; interrupted_at: Date | null; interruption_reason: string | null;
 cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
     usage_cache_read_tokens: number | null; usage_cache_creation_tokens: number | null;
     sources: unknown; provider_request_id: string | null; worker_id: string | null;
 }> {
   const row = await sql<{ status: string; content: string | null; error_code: string | null;
     provider_error_kind: string | null;
+    generation_attempt: number; interrupted_at: Date | null; interruption_reason: string | null;
     cancel_requested: boolean; usage_input_tokens: number | null; usage_output_tokens: number | null;
     usage_cache_read_tokens: number | null; usage_cache_creation_tokens: number | null;
     sources: unknown; provider_request_id: string | null; worker_id: string | null }>`
-    select status, content, error_code, provider_error_kind, cancel_requested, usage_input_tokens,
+    select status, content, error_code, provider_error_kind, generation_attempt, interrupted_at,
+      interruption_reason, cancel_requested, usage_input_tokens,
       usage_output_tokens, usage_cache_read_tokens, usage_cache_creation_tokens,
       sources, provider_request_id, worker_id
     from assist_messages where id = ${messageId}`.execute(app.db);
@@ -771,11 +774,16 @@ test('host abort without a persisted user cancel leaves the claim for lease reco
   assert.equal(calls[0]!.error_kind, null);
   await sql`update assist_messages set updated_at = now() - interval '1 minute'
     where id = ${requested.result.assistant_message_id}`.execute(app.db);
-  assert.equal(await runAssistGenerationTick(app.db, { workerId: 'assist-recovery', storage,
-    modelPort, leaseMs: 30_000 }), undefined);
+  // 0163：宿主停机不是用户取消，也不是业务失败——同一消息身份自动接续并完成。
+  const resumed = await runAssistGenerationTick(app.db, { workerId: 'assist-recovery', storage,
+    modelPort, leaseMs: 30_000 });
+  assert.equal(resumed?.messageId, requested.result.assistant_message_id);
+  assert.equal(resumed?.status, 'COMPLETED');
   const recovered = await readMessage(requested.result.assistant_message_id);
-  assert.equal(recovered.error_code, 'LEASE_LOST');
-  assert.equal(recovered.provider_error_kind, null);
+  assert.equal(recovered.status, 'COMPLETED');
+  assert.equal(recovered.cancel_requested, false);
+  assert.equal(recovered.generation_attempt, 2);
+  assert.equal(recovered.interruption_reason, 'LEASE_LOST');
 });
 
 test('Provider classification cannot bypass a lost generation claim', async () => {
@@ -802,9 +810,15 @@ test('Provider classification cannot bypass a lost generation claim', async () =
   assert.equal(calls[0]!.error_kind, 'AUTH');
   await sql`update assist_messages set updated_at = now() - interval '1 minute'
     where id = ${requested.result.assistant_message_id}`.execute(app.db);
-  assert.equal(await runAssistGenerationTick(app.db, { workerId: 'assist-new', storage,
-    modelPort, leaseMs: 30_000 }), undefined);
-  assert.equal((await readMessage(requested.result.assistant_message_id)).error_code, 'LEASE_LOST');
+  // 0163：旧 Worker 的 AUTH 归因留在它自己的调用行上，不影响同一消息身份的接续。
+  const resumed = await runAssistGenerationTick(app.db, { workerId: 'assist-new', storage,
+    modelPort, leaseMs: 30_000 });
+  assert.equal(resumed?.messageId, requested.result.assistant_message_id);
+  assert.equal(resumed?.status, 'COMPLETED');
+  const settled = await readMessage(requested.result.assistant_message_id);
+  assert.equal(settled.status, 'COMPLETED');
+  assert.equal(settled.provider_error_kind, null);
+  assert.equal(settled.generation_attempt, 2);
 });
 
 test('PostgreSQL rejects unknown Provider kinds and kinds on every non-FAILED status', async () => {
@@ -916,7 +930,7 @@ test('model invocation rows retain separate failed, successful and unknown outco
     messageId, commandId: randomUUID() });
 });
 
-test('expired lease converges a dead worker generation to LEASE_LOST', async () => {
+test('expired lease resumes the same message instead of failing it', async () => {
   const f = await fixture('READY');
   const session = await createAssistSession(app.db, { workspaceId: f.workspaceId,
     commandId: randomUUID(), projectId: f.projectId, title: '租约' });
@@ -929,13 +943,20 @@ test('expired lease converges a dead worker generation to LEASE_LOST', async () 
   // 时钟精度：把 RUNNING 行的租约时间回拨到窗口之外，模拟已死的旧 Worker。
   await sql`update assist_messages set updated_at = now() - interval '50 milliseconds'
     where id = ${requested.result.assistant_message_id}`.execute(app.db);
+  // 0163：没有未核对的外部动作，同一消息身份重排并在同一 tick 内接续完成。
   const outcome = await runAssistGenerationTick(app.db, { workerId: 'assist-w1', storage,
     modelPort, leaseMs: 10 });
-  assert.equal(outcome, undefined);
+  assert.equal(outcome?.messageId, requested.result.assistant_message_id);
+  assert.equal(outcome?.status, 'COMPLETED');
   const settled = await readMessage(requested.result.assistant_message_id);
-  assert.equal(settled.status, 'FAILED');
-  assert.equal(settled.error_code, 'LEASE_LOST');
+  assert.equal(settled.status, 'COMPLETED');
+  assert.equal(settled.generation_attempt, 2);
+  assert.equal(settled.interruption_reason, 'LEASE_LOST');
   assert.equal(settled.provider_error_kind, null);
+  // 同一会话仍然只有一条助手回复：恢复不新增伪造的用户或助手消息。
+  const rows = await sql<{ count: string }>`select count(*)::text as count from assist_messages
+    where session_id = ${session.result.session_id} and role = 'ASSISTANT'`.execute(app.db);
+  assert.equal(rows.rows[0]?.count, '1');
 });
 
 test('base revision conflict expires the proposal instead of overwriting business facts', async () => {

@@ -141,7 +141,12 @@ test('256K compacts at its pressure threshold while 512K and 1024K retain the sa
     await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
       expectedRevision: '1', recallEnabled: true, automaticCompaction: true, autoCapture: false });
     const r = createRepositories(app.db);
-    for (let i = 1; i <= 12; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
+    /*
+     * 0162：触发口径从「输入字节的 80%」改为 token 阈值。20 × 42,000 字符 ≈ 280K tokens：
+     * 高于 256K 档位的安全阈值（209,386），低于 512K/1M 档位的 350K 默认阈值。
+     * 这样三个档位在同一份内容上给出不同结论，档位语义仍被真实区分。
+     */
+    for (let i = 1; i <= 20; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
       seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
       content: 'x'.repeat(42_000), sources: [] });
     const modelPort = new FakeModelPort();
@@ -157,9 +162,11 @@ test('256K compacts at its pressure threshold while 512K and 1024K retain the sa
       const compacted = await runAssistMemoryTick(app.db, options);
       assert.equal(compacted?.status, 'COMPLETED', JSON.stringify(compacted));
       const state = await r.assistMemory.state(f.sessionId);
-      assert.equal((await r.assistMemory.checkpoint(state!.checkpoint_id!))?.through_seq, 4n);
+      // 20 条里保留最近 8 条原文，候选 1..12 在输入上限内全部成批，锚点是最后一条
+      // 已完成的 ASSISTANT 轮（seq 12）。
+      assert.equal((await r.assistMemory.checkpoint(state!.checkpoint_id!))?.through_seq, 12n);
     }
-    assert.equal((await r.assist.listMessages(f.sessionId)).length, 12, 'compression preserves originals');
+    assert.equal((await r.assist.listMessages(f.sessionId)).length, 20, 'compression preserves originals');
   }
 });
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import type { RelayAssistSourceRef, RelaySearchItem } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
+import { Button } from "../ui";
 
 /** 每次消息可选资料版本的上限：沿用既有约束（「+」二级菜单同一条口径），不另立第二套。
  *  导出给输入器芯片上的「已选 N / 上限」摘要读同一份数值。 */
@@ -93,7 +94,7 @@ export default function AssistSourcePicker({ projectId, selectedRefs, onChange, 
     </header>}
     <form className="form-actions" onSubmit={(event) => void search(event)}>
       <label className="field" htmlFor="assist-source-query"><span className="field-label">检索词</span><input id="assist-source-query" value={query} onChange={(event) => changeQuery(event.target.value)} type="search" maxLength={200} autoComplete="off" disabled={disabled} /></label>
-      <button className="secondary-button" type="submit" disabled={disabled || loading || connection.mode !== "live"}>查找来源</button>
+      <Button variant="secondary" type="submit" disabled={disabled || loading || connection.mode !== "live"}>查找来源</Button>
     </form>
     <p className="assist-source-scope" data-testid="assist-source-scope">引用范围：{projectId ? "当前项目与未限定项目的启用资料（不含规则）" : "未绑定项目，没有可选资料"} · 只作用于本次消息。</p>
     <div className="assist-source-body" data-testid="assist-source-body">

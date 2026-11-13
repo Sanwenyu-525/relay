@@ -270,7 +270,8 @@ export class RelayApiClient {
   /* ---- 长短期记忆（HTTP §10.99）---- */
   getMemorySettings() { return memoryApi.getMemorySettings(this.#http); }
   saveMemorySettings(input: { commandId: string; expectedRevision: DecimalRevision;
-    recallEnabled: boolean; automaticCompaction: boolean; autoCapture: boolean }) {
+    recallEnabled: boolean; automaticCompaction: boolean; autoCapture: boolean;
+    compactionThresholdTokens: number | null }) {
     return memoryApi.saveMemorySettings(this.#http, input);
   }
   createMemoryFromMessage(input: { sessionId: string; messageId: string; commandId: string;

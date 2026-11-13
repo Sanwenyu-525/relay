@@ -60,6 +60,19 @@ export class SessionToolCallRepository {
       where message_id = ${messageId} order by round, ordinal`.execute(this.db)).rows;
   }
 
+  /**
+   * 0163：按「哪条消息的第几轮第几个请求」读回原行。
+   *
+   * 恢复时唯一可靠的请求身份：轮次与序号由模型响应决定，插入后不再改写；同一位置的
+   * 唯一约束保证不会因为恢复而产生第二条请求。
+   */
+  async readByMessageRoundOrdinal(messageId: string, round: number,
+    ordinal: number): Promise<SessionToolCallRow | undefined> {
+    return (await sql<SessionToolCallRow>`select ${COLUMNS} from session_tool_calls
+      where message_id = ${messageId} and round = ${round} and ordinal = ${ordinal}`
+      .execute(this.db)).rows[0];
+  }
+
   /** 批量读取；投影按页一次取齐，避免逐消息 N+1。 */
   async listByMessages(messageIds: readonly string[]): Promise<readonly SessionToolCallRow[]> {
     if (messageIds.length === 0) return [];

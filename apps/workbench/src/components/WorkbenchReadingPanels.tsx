@@ -9,6 +9,7 @@ import { liveClient } from "../lib/relayConnection";
 import SafeMarkdown from "./SafeMarkdown";
 import StatusChip from "./StatusChip";
 import { runLabels, stepLabels, stepStatusLabels } from "./RunControlPanel";
+import { Button } from "../ui";
 
 function readError(caught: unknown): string {
   return caught instanceof RelayTransportError ? "读取失败，请检查本机服务连接后重新读取。" : describeLiveError(caught).message;
@@ -76,7 +77,7 @@ export function WorkbenchDocumentReader({ client, projectId, target }: {
       {target && <span>v{target.version} · 只读</span>}</header>
     {!target ? <div className="workbench-paper-empty"><FileText aria-hidden="true" /><h2>选择一份资料或草稿</h2><p>从左侧目录选择确切版本后，在这里阅读全文。</p></div> : <>
       {loading && <p role="status">正在读取所选版本正文…</p>}
-      {error && <div className="workbench-paper-empty" role="alert"><h2>正文暂时不可读</h2><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取正文</button></div>}
+      {error && <div className="workbench-paper-empty" role="alert"><h2>正文暂时不可读</h2><p>{error}</p><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>重新读取正文</Button></div>}
       {currentReading && <><h2 className="workbench-document-title">{currentReading.title}</h2>
         {currentReading.partial && <p className="warning-callout">当前来源只提供部分正文，不能视为完整资料。</p>}
         <div className="workbench-document-body" data-testid="workbench-document-body">{currentReading.mediaType.includes("markdown") ? <SafeMarkdown source={currentReading.body} /> : <pre>{currentReading.body}</pre>}</div>

@@ -3,6 +3,7 @@ import { createCommandId, RelayApiError, taskAcceptanceRevisionFrom, type RelayA
   type RelayTaskAcceptance, type RelayTaskAcceptanceRevision, type RelayTaskAcceptanceRevisionInput } from "../api/relayClient";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 /** 只补充人工必需条件，完整保留当前版本；不改变目标、产物规格或任务状态。 */
 export default function TaskAcceptanceEditPanel({ client, taskId, taskRevision, acceptance, blockedReason, onSaved }: {
@@ -114,19 +115,19 @@ export default function TaskAcceptanceEditPanel({ client, taskId, taskRevision, 
         <textarea data-testid="task-acceptance-additions" ref={textareaRef} rows={4} value={text} disabled={busy || pending !== null}
           onChange={event => setText(event.target.value)} /></label>
       {inputError && <p className="helper-text">{inputError}</p>}
-      <div className="form-actions"><button className="primary-button" type="submit" data-testid="task-acceptance-save"
-        disabled={busy || pending !== null || writeBlocked !== null || inputError !== null}>{busy ? "正在核对…" : "保存完成条件"}</button>
-        <button className="secondary-button" type="button" data-testid="task-acceptance-cancel" disabled={busy || pending !== null}
-          onClick={() => { textRef.current = ""; setText(""); setEditing(false); setError(null); }}>放弃本次输入</button></div>
+      <div className="form-actions"><Button variant="primary" type="submit" data-testid="task-acceptance-save"
+        disabled={busy || pending !== null || writeBlocked !== null || inputError !== null}>{busy ? "正在核对…" : "保存完成条件"}</Button>
+        <Button variant="secondary" data-testid="task-acceptance-cancel" disabled={busy || pending !== null}
+          onClick={() => { textRef.current = ""; setText(""); setEditing(false); setError(null); }}>放弃本次输入</Button></div>
     </form>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {saved && <p className="receipt-message" role="status" data-testid="task-acceptance-saved">已保存验收版本 v{saved.acceptanceRevision}。任务状态仍以重新读取的事实为准。</p>}
     {pending && <div className="warning-callout" data-testid="task-acceptance-pending">
       <p>保存结果待核对。原命令：<code>{pending.commandId}</code>，原验收版本 v{pending.expectedAcceptanceRevision}。</p>
-      <button className="secondary-button" type="button" disabled={busy} data-testid="task-acceptance-receipt"
-        onClick={() => void act(() => checkReceipt(pending))}>核对原命令回执</button>
-      {mayRetry && <button className="secondary-button" type="button" disabled={busy || writeBlocked !== null}
-        data-testid="task-acceptance-retry" onClick={() => void act(() => send(pending))}>用原身份和原内容重试</button>}
+      <Button variant="secondary" disabled={busy} data-testid="task-acceptance-receipt"
+        onClick={() => void act(() => checkReceipt(pending))}>核对原命令回执</Button>
+      {mayRetry && <Button variant="secondary" disabled={busy || writeBlocked !== null}
+        data-testid="task-acceptance-retry" onClick={() => void act(() => send(pending))}>用原身份和原内容重试</Button>}
     </div>}
   </section>;
 }

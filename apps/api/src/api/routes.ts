@@ -17,7 +17,7 @@ import { registerCommandRoutes } from './command-api.js';
 import { registerContextRoutes } from './context-api.js';
 import { registerCompletionRoutes } from './completion-api.js';
 import type { RouteDependencies } from './envelope.js';
-import { databaseUnavailable, problemBody, schemaUnavailable } from './problem.js';
+import { registerHealthRoutes } from './health-api.js';
 import { registerProjectRoutes } from './project-api.js';
 import { registerProjectContinuationRoutes } from './project-continuation-api.js';
 import { registerProjectKnowledgeGuideRoutes } from './project-knowledge-guide-api.js';
@@ -29,7 +29,6 @@ import { registerRequiredContextRoutes } from './required-context-api.js';
 import { registerAssistantProfileRoutes } from './assistant-profile-api.js';
 import { registerInformationRoutes } from './information-api.js';
 import { registerReviewRoutes } from './review-api.js';
-import { LivenessSchema, ReadinessNotReadySchema, ReadinessReadySchema } from './schemas.js';
 import { registerStateRoutes } from './state-api.js';
 import { registerTaskRoutes } from './task-api.js';
 import { registerTodayRoutes } from './today-api.js';
@@ -124,57 +123,10 @@ export function registerRoutes(
     credentials: createDpapiCredentialStore({ root: resolveCredentialRootForApi(dependencies.dataRoot) }),
   };
 
-  app.get(
-    '/health/live',
-    { schema: { response: { 200: LivenessSchema } } },
-    async () => ({ status: 'alive' as const }),
-  );
-
-  app.register(async (scope) => {
-    scope.addHook('onRequest', createBearerGuard(dependencies.config.bearerToken));
-
-    scope.get(
-      '/health/ready',
-      {
-        schema: {
-          response: {
-            200: ReadinessReadySchema,
-            503: ReadinessNotReadySchema,
-          },
-        },
-      },
-      async (request, reply) => {
-        const probe = await dependencies.database.checkReadiness(dependencies.schemaReadiness);
-
-        if (probe.database === 'up' && probe.schema === 'up') {
-          return {
-            status: 'ready' as const,
-            components: {
-              database: { status: 'up' as const },
-              schema: { status: 'up' as const },
-            },
-          };
-        }
-
-        if (probe.database === 'up') {
-          return reply.code(503).type('application/problem+json').send({
-            ...problemBody(schemaUnavailable(), request.id),
-            components: {
-              database: { status: 'up' },
-              schema: { status: 'down' },
-            },
-          });
-        }
-
-        return reply.code(503).type('application/problem+json').send({
-          ...problemBody(databaseUnavailable(), request.id),
-          components: {
-            database: { status: 'down' },
-            schema: { status: 'unknown' },
-          },
-        });
-      },
-    );
+  registerHealthRoutes(app, {
+    bearerToken: dependencies.config.bearerToken,
+    database: dependencies.database,
+    schemaReadiness: dependencies.schemaReadiness,
   });
 
   app.register(

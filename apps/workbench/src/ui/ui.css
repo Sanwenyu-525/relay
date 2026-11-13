@@ -270,3 +270,340 @@
   padding: var(--relay-space-4);
   min-width: 0;
 }
+
+/* ── 菜单 / 弹出层（Disclosure.tsx） ─────────────────────────────────── */
+.ui-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.ui-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-3);
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font-weight: var(--relay-font-weight-medium);
+  cursor: pointer;
+  list-style: none;
+}
+
+.ui-menu__trigger::-webkit-details-marker { display: none; }
+.ui-menu__trigger:hover { background: var(--relay-color-selection-hover); }
+
+/* 触发器本身就是图标按钮时（summary + .icon-button），不叠加内边距。 */
+.ui-menu__trigger.icon-button { padding: 0; }
+
+.ui-menu__panel,
+.ui-popover__panel {
+  position: absolute;
+  top: calc(100% + var(--relay-space-1));
+  left: 0;
+  z-index: var(--relay-zIndex-popover);
+  display: grid;
+  gap: var(--relay-space-0-5);
+  min-width: 10rem;
+  padding: var(--relay-space-2);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-floating);
+}
+
+.ui-menu__panel--end,
+.ui-popover__panel--end {
+  left: auto;
+  right: 0;
+}
+
+.ui-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  width: 100%;
+  min-height: var(--relay-control-height);
+  padding: 0 var(--relay-space-3);
+  border: 0;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-meta);
+  text-align: start;
+}
+
+.ui-menu__item:hover:not(:disabled) { background: var(--relay-color-selection-hover); }
+.ui-menu__item:disabled { color: var(--relay-color-disabled-text); cursor: not-allowed; }
+.ui-menu__item--danger { color: var(--relay-color-status-danger-text); }
+.ui-menu__item--danger:hover:not(:disabled) { background: var(--relay-color-status-danger-bg); }
+.ui-menu__item-label { min-width: 0; overflow-wrap: anywhere; }
+.ui-menu__item > svg { width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); flex: none; }
+
+.ui-menu__separator {
+  height: var(--relay-border-width);
+  margin: var(--relay-space-1) calc(-1 * var(--relay-space-2));
+  background: var(--relay-color-border-separator);
+}
+
+.ui-popover {
+  position: relative;
+  display: inline-block;
+}
+
+/* ── 切换条（Tabs.tsx） ─────────────────────────────────────────────── */
+.ui-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--relay-space-1);
+  border-block-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+  padding-block-end: var(--relay-space-1);
+}
+
+.ui-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  min-height: var(--relay-control-height-page);
+  padding: 0 var(--relay-space-3);
+  border: var(--relay-border-width) solid transparent;
+  border-radius: var(--relay-radius-control);
+  background: transparent;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-medium);
+  text-decoration: none;
+}
+
+.ui-tabs__item:hover { background: var(--relay-color-selection-hover); }
+
+/* 选中态只改色与底色，不再画一条下划线：下划线在窄窗换行时会与分隔线重叠。 */
+.ui-tabs__item.is-active {
+  background: var(--relay-color-selection-bg);
+  border-color: var(--relay-color-border-subtle);
+  color: var(--relay-color-selection-text);
+}
+
+.ui-tabs__badge {
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 卡片 / 分隔线 / 滚动区（Surface.tsx） ──────────────────────────── */
+.ui-card {
+  display: flex;
+  flex-direction: column;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  overflow: hidden;
+}
+
+.ui-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--relay-space-4);
+  padding: var(--relay-space-3) var(--relay-space-4);
+  border-block-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.ui-card__heading { display: grid; gap: var(--relay-space-0-5); min-width: 0; }
+
+.ui-card__title {
+  margin: 0;
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-semibold);
+  color: var(--relay-color-text-primary);
+}
+
+.ui-card__description {
+  margin: 0;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
+  line-height: var(--relay-font-lineHeight-ui);
+}
+
+.ui-card__actions { display: flex; gap: var(--relay-space-2); flex: none; }
+.ui-card__body { padding: var(--relay-space-4); min-width: 0; }
+.ui-card__footer {
+  padding: var(--relay-space-3) var(--relay-space-4);
+  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-subtle);
+}
+.ui-card--dense .ui-card__body { padding: var(--relay-space-3); }
+
+.ui-separator {
+  height: 0;
+  margin: var(--relay-space-3) 0;
+  border: 0;
+  border-block-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.ui-separator--vertical {
+  width: 0;
+  height: auto;
+  align-self: stretch;
+  margin: 0 var(--relay-space-3);
+  border-block-start: 0;
+  border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
+}
+
+.ui-scroll {
+  overflow: auto;
+  min-width: 0;
+  border-radius: var(--relay-radius-control);
+}
+
+/* ── 表格（Table.tsx） ──────────────────────────────────────────────── */
+.ui-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-primary);
+}
+
+.ui-table__caption {
+  padding: var(--relay-space-2) var(--relay-space-3);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
+  text-align: start;
+}
+
+.ui-table__th {
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-block-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
+  font-weight: var(--relay-font-weight-medium);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.ui-table--sticky .ui-table__th { position: sticky; top: 0; z-index: 1; }
+
+.ui-table__td {
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-block-end: var(--relay-border-width) solid var(--relay-color-border-separator);
+  vertical-align: top;
+}
+
+.ui-table__body .ui-table__row:last-child .ui-table__td { border-block-end: 0; }
+.ui-table__row.is-selected .ui-table__td { background: var(--relay-color-selection-bg); }
+.ui-table__th.is-end, .ui-table__td.is-end { text-align: end; }
+.ui-table__th.is-center, .ui-table__td.is-center { text-align: center; }
+.ui-table--dense .ui-table__th, .ui-table--dense .ui-table__td { padding: var(--relay-space-1) var(--relay-space-2); }
+
+.ui-table__empty {
+  padding: var(--relay-space-6) var(--relay-space-3);
+  color: var(--relay-color-text-muted);
+  text-align: center;
+}
+
+/* ── 可搜索单选（Combobox.tsx） ─────────────────────────────────────── */
+.ui-combobox { position: relative; display: block; }
+.ui-combobox__field { position: relative; display: block; }
+.ui-combobox__field input { width: 100%; padding-inline-end: var(--relay-space-8); }
+
+.ui-combobox__chevron {
+  position: absolute;
+  inset-inline-end: var(--relay-space-3);
+  inset-block-start: 50%;
+  translate: 0 -50%;
+  width: var(--relay-control-icon-size);
+  height: var(--relay-control-icon-size);
+  color: var(--relay-color-text-muted);
+  pointer-events: none;
+}
+
+.ui-combobox__list {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + var(--relay-space-1));
+  z-index: var(--relay-zIndex-popover);
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--relay-space-1);
+  list-style: none;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-floating);
+}
+
+.ui-combobox__option {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border-radius: var(--relay-radius-control);
+  cursor: pointer;
+}
+
+.ui-combobox__option.is-active { background: var(--relay-color-selection-hover); }
+.ui-combobox__option[aria-selected="true"] { color: var(--relay-color-selection-text); }
+.ui-combobox__option[aria-disabled="true"] { color: var(--relay-color-disabled-text); cursor: not-allowed; }
+.ui-combobox__option-body { display: grid; gap: var(--relay-space-0-5); min-width: 0; }
+.ui-combobox__option-label { font-size: var(--relay-font-size-meta); }
+.ui-combobox__option-description { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+.ui-combobox__check { flex: none; width: var(--relay-control-icon-size); height: var(--relay-control-icon-size); }
+.ui-combobox__empty { padding: var(--relay-space-3); color: var(--relay-color-text-muted); font-size: var(--relay-font-size-caption); }
+
+/* ── 密度档（Density.tsx） ────────────────────────────────────────────
+   密度不是第二套设计：它只把「工作台档」的四个尺寸变量重绑到「页面档」，
+   组件与页面的其余规则一律不动，因此同一个 <Button> 在两种密度下只是高矮不同。
+   用 CSS 变量作用域而不是 Provider：没有新的运行时状态，SSR/测试都不需要包裹。 */
+.ui-density-compact {
+  --relay-control-height: var(--relay-control-height-page);
+  --relay-control-height-prominent: var(--relay-control-height-page);
+  --relay-font-size-body: var(--relay-font-size-pageBase);
+  --relay-font-size-meta: var(--relay-font-size-caption);
+  font-size: var(--relay-font-size-pageBase);
+}
+
+/* ── 右键菜单（ContextMenu.tsx） ──────────────────────────────────────
+   外观完全复用 .ui-menu__panel / .ui-menu__item；这里只补 fixed 定位版需要
+   的视口约束（长菜单不能顶出屏幕，内部滚动而不是截断）。 */
+.ui-context-menu {
+  position: fixed;
+  max-width: min(20rem, calc(100vw - var(--relay-space-4)));
+  max-height: calc(100vh - var(--relay-space-4));
+  overflow-y: auto;
+}
+
+/* ── 轻提示（Tooltip.tsx） ────────────────────────────────────────────
+   反色气泡：文字色用 onAction 的浅色，背景取正文色，因此两档密度下都能读；
+   不加边框与箭头，靠 floating 投影和 4px 偏移与触发元素分开。 */
+.ui-tooltip {
+  z-index: var(--relay-zIndex-popover);
+  max-width: 18rem;
+  padding: var(--relay-space-1) var(--relay-space-2);
+  border-radius: var(--relay-radius-badge);
+  background: var(--relay-color-text-primary);
+  color: var(--relay-color-text-onAction);
+  box-shadow: var(--relay-shadow-floating);
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-ui);
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+/* 拖拽手柄的公共命中区：宽度由页面决定，纵向拉满父级；交互逻辑见 ResizableHandle.tsx。 */
+.ui-resizable-handle {
+  cursor: col-resize;
+  touch-action: none;
+}

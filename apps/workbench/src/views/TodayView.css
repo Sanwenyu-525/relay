@@ -192,9 +192,9 @@
 
 .pv-page .today-group h2 {
   margin: 18px 0 10px;
-  font-size: 13px;
+  font-size: var(--relay-font-size-pageBase);
   font-weight: 700;
-  color: #294635;
+  color: var(--relay-color-text-primary);
 }
 
 .pv-page .today-task {
@@ -202,70 +202,70 @@
   flex-direction: column;
   gap: 8px;
   padding: 13px 15px;
-  background: #fff;
-  border: 1px solid #e3ebe4;
-  border-radius: 12px;
-  box-shadow: 0 3px 15px #22553506;
+  background: var(--relay-color-bg-surface);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-surface);
   margin-bottom: 10px;
 }
-.pv-page .today-task__title { font-size: 13.5px; font-weight: 650; color: #33533d; }
-.pv-page .today-task__actions .today-task__open { margin-left: auto; font-size: 12px; align-self: center; }
-.pv-page .today-task__meta { margin: 3px 0 0; font-size: 11px; color: var(--pv-muted); }
+.pv-page .today-task__title { font-size: 13.5px; font-weight: 650; color: var(--relay-color-text-primary); }
+.pv-page .today-task__actions .today-task__open { margin-left: auto; font-size: var(--relay-font-size-caption); align-self: center; }
+.pv-page .today-task__meta { margin: 3px 0 0; font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
 .pv-page .today-task__actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pv-page .today-task__actions .text-button {
   min-height: 28px;
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   padding: 2px 10px;
-  border: 1px solid #d6e4d8;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
 }
-.pv-page .today-task__actions .text-button:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; text-decoration: none; }
-.pv-page .today-task__plans summary { font-size: 11px; color: var(--pv-muted); cursor: pointer; }
+.pv-page .today-task__actions .text-button:hover:not(:disabled) { background: var(--relay-color-selection-hover); border-color: var(--relay-color-border-subtle); text-decoration: none; }
+.pv-page .today-task__plans summary { font-size: var(--relay-font-size-micro); color: var(--pv-muted); cursor: pointer; }
 .pv-page .today-task__forms { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
 .pv-page .today-task__forms form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
-  color: #566f5f;
+  font-size: var(--relay-font-size-micro);
+  color: var(--relay-color-text-muted);
   font-weight: 650;
-  border: 1px dashed #dce9de;
-  border-radius: 9px;
+  border: 1px dashed var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
   padding: 10px 12px;
 }
-.pv-page .today-task__forms form strong { font-size: 11px; color: #3f6350; flex-basis: 100%; }
+.pv-page .today-task__forms form strong { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-primary); flex-basis: 100%; }
 .pv-page .today-task__forms input,
 .pv-page .today-task__forms select {
-  border: 1px solid #d7e4d8;
-  border-radius: 8px;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   font-weight: 400;
-  color: #34523b;
+  color: var(--relay-color-text-primary);
 }
-.pv-page .today-task__trace summary { font-size: 11px; color: var(--pv-muted); cursor: pointer; }
-.pv-page .today-task__trace p { font-size: 11px; color: var(--pv-muted); margin: 4px 0 0; overflow-wrap: anywhere; }
+.pv-page .today-task__trace summary { font-size: var(--relay-font-size-micro); color: var(--pv-muted); cursor: pointer; }
+.pv-page .today-task__trace p { font-size: var(--relay-font-size-micro); color: var(--pv-muted); margin: 4px 0 0; overflow-wrap: anywhere; }
 
 /* 2026-11-11 UI-PAGE-TODAY-01：焦点卡升级为页面主卡——白卡与任务行同语言，标题 17px 成为视觉中心；
    「开始任务」主按钮与「清除今日焦点」保持同一动作行。 */
-.pv-page .today-focus__header h2 { font-size: 13px; font-weight: 700; color: #294635; }
-.pv-page .today-focus { margin-top: 14px; padding: 15px 17px 16px; background: #fff;
-  border: 1px solid #e3ebe4; border-radius: 12px; box-shadow: 0 3px 15px #22553506; }
+.pv-page .today-focus__header h2 { font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--relay-color-text-primary); }
+.pv-page .today-focus { margin-top: 14px; padding: 15px 17px 16px; background: var(--relay-color-bg-surface);
+  border: 1px solid var(--relay-color-border-subtle); border-radius: var(--relay-radius-panel); box-shadow: var(--relay-shadow-surface); }
 .pv-page .today-focus__title { margin-top: 8px; }
-.pv-page .today-focus__title a { font-size: 17px; letter-spacing: -.01em; color: #244431; }
-.pv-page .today-focus__meta { font-size: 11px; color: var(--pv-muted); margin-top: 10px; }
-.pv-page .today-focus__empty, .pv-page .today-focus__missing { font-size: 12px; color: var(--pv-muted); }
-.pv-page .today-focus__facts { font-size: 11px; }
-.pv-page .today-focus__facts summary { font-size: 11px; color: var(--pv-muted); cursor: pointer; }
+.pv-page .today-focus__title a { font-size: 17px; letter-spacing: -.01em; color: var(--relay-color-text-primary); }
+.pv-page .today-focus__meta { font-size: var(--relay-font-size-micro); color: var(--pv-muted); margin-top: 10px; }
+.pv-page .today-focus__empty, .pv-page .today-focus__missing { font-size: var(--relay-font-size-caption); color: var(--pv-muted); }
+.pv-page .today-focus__facts { font-size: var(--relay-font-size-micro); }
+.pv-page .today-focus__facts summary { font-size: var(--relay-font-size-micro); color: var(--pv-muted); cursor: pointer; }
 .pv-page .today-focus__actions { margin-top: 12px; gap: 10px; }
-.pv-page .today-focus__actions .text-button { min-height: 28px; font-size: 11px; padding: 2px 10px;
-  border: 1px solid #d6e4d8; border-radius: 8px; background: #fff; }
-.pv-page .today-focus__actions .text-button:hover:not(:disabled) { background: #f0f7f1; border-color: #a3c8ae; text-decoration: none; }
-.pv-page .today-focus__actions .primary-button { min-height: 30px; padding: 4px 14px; font-size: 12px; }
+.pv-page .today-focus__actions .text-button { min-height: 28px; font-size: var(--relay-font-size-micro); padding: 2px 10px;
+  border: 1px solid var(--relay-color-border-subtle); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); }
+.pv-page .today-focus__actions .text-button:hover:not(:disabled) { background: var(--relay-color-selection-hover); border-color: var(--relay-color-border-subtle); text-decoration: none; }
+.pv-page .today-focus__actions .primary-button { min-height: 30px; padding: 4px 14px; font-size: var(--relay-font-size-caption); }
 
-.pv-page .today-rail__section > h2 { font-size: 13px; font-weight: 700; color: var(--pv-ink); }
+.pv-page .today-rail__section > h2 { font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--pv-ink); }
 .pv-page .today-rail__number { font-size: 22px; }
 
 .pv-page .today-review-entry {
@@ -275,12 +275,12 @@
   justify-content: space-between;
   gap: 12px;
   padding: 13px 16px;
-  background: #f4faf5;
-  border: 1px solid #e2efe4;
-  border-radius: 12px;
+  background: var(--relay-color-selection-bg);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
 }
-.pv-page .today-review-entry h2 { margin: 0; font-size: 12.5px; color: #294635; }
-.pv-page .today-review-entry p { margin: 2px 0 0; font-size: 11px; color: var(--pv-muted); }
+.pv-page .today-review-entry h2 { margin: 0; font-size: 12.5px; color: var(--relay-color-text-primary); }
+.pv-page .today-review-entry p { margin: 2px 0 0; font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
 
 /* 右栏常驻时只保留右栏的判断入口；pv display 覆写不能重新展开窄窗横幅。 */
 @media (min-width: 80rem) {
@@ -300,18 +300,18 @@
 /* 示例模式空态：中性只读提示不是告警，改用 pv 卡片（白底/1px 边框/13px 圆角/780px 阅读宽），
    与 /goals、/knowledge 的空态卡同一条左对齐边与同一宽度；原 1062px 的整行琥珀条只占文字约 400px。 */
 .pv-page .today-fixture-card { max-width: 780px; margin: 0; }
-.pv-page .today-fixture-card p { margin: 0; font-size: 12px; line-height: 1.75; color: #486452; }
+.pv-page .today-fixture-card p { margin: 0; font-size: var(--relay-font-size-caption); line-height: 1.75; color: var(--relay-color-text-secondary); }
 /* 390px 下「打开项目 / 打开任务」曾逐字竖排：链接自身不参与折行。 */
 .pv-page .today-fixture-card a { white-space: nowrap; }
 
 /* 「安排说明」是折叠说明而非常规小标题：补回可点击的折三角（同 .page-explanation 的画法，取 pv 墨色），
    字号降到注释档，避免在 h1 与正文之间冒充分区标题。 */
-.pv-page .today-arrange-note { font-size: 12px; }
+.pv-page .today-arrange-note { font-size: var(--relay-font-size-caption); }
 .pv-page .today-arrange-note > summary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   color: var(--pv-muted);
   list-style: none;
 }

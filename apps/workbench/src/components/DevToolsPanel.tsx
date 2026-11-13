@@ -10,6 +10,7 @@ import type { PreviewBridge } from "../lib/previewBridge";
 import { describeLiveError } from "../lib/liveErrors";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./DevToolsPanel.css";
+import { Button, IconButton } from "../ui";
 
 type Tab = "FILES" | "GIT" | "WEB" | "TERMINAL" | "RUNS" | "TRACE";
 
@@ -138,8 +139,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
   useEffect(() => { if (drawerTab === "OUTPUT") void loadOperations(); }, [drawerTab, loadOperations]);
 
   const hasOutput = operations.some((operation) => operation.invocations.some((item) => item.commandOutput !== null));
-  const switchToPreview = <button type="button" className="secondary-button secondary-button--compact"
-    data-testid="devtools-empty-open-web" onClick={() => setTab("WEB")}>切换到网页预览</button>;
+  const switchToPreview = <Button variant="secondary" className="secondary-button--compact"
+    data-testid="devtools-empty-open-web" onClick={() => setTab("WEB")}>切换到网页预览</Button>;
 
   return <section className="devtools" data-testid="devtools-panel" data-tab={tab} aria-label="文件、网页与运行工具">
     <div className="devtools-pane">
@@ -159,8 +160,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
             onClick={() => setTab(key)}><Icon aria-hidden="true" /><span className="devtools-tab-label">{label}</span></button>)}
         </nav>
         {/* 收起入口只留这一颗，放在页签条右端：与底部「执行输出」抽屉无关，避免两颗同义键。 */}
-        <button className="icon-button devtools-close" type="button" aria-label="收起工具面板"
-          title="收起工具面板" data-testid="devtools-close" onClick={onClose}><X aria-hidden="true" /></button>
+        <IconButton className="devtools-close" icon={X} label="收起工具面板"
+          data-testid="devtools-close" onClick={onClose} />
       </header>
 
       <div className="devtools-body" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${tab}`}
@@ -182,8 +183,8 @@ export default function DevToolsPanel({ client, projectId, taskId, run, previewB
                 <span><code className="hash-code">{resource.canonicalRoot}</code>
                   <small>状态 {resource.status} · 资源修订 v{resource.revision} · 写身份已绑定：{resource.fileWriteIdentityBound ? "是" : "否"}</small></span>
               </li>)}</ul>}
-              <button className="secondary-button secondary-button--compact" type="button" data-testid="devtools-reload-resources"
-                disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</button>
+              <Button variant="secondary" className="secondary-button--compact" data-testid="devtools-reload-resources"
+                disabled={loading} onClick={() => void loadResources()}>重新读取受管目录</Button>
               <FileBrowsePanel client={client} projectId={projectId} resources={resources}
                 resourceLoading={loading} resourceError={resourceError} />
               <h3>本任务的受管产物</h3>

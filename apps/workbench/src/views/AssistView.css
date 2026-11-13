@@ -112,8 +112,8 @@
 .agent-chat-suggestion > svg { flex: none; width: var(--relay-font-size-body); height: var(--relay-font-size-body); color: var(--relay-color-action-primary); }
 .agent-chat-suggestion[data-tone="plan"] > svg { color: var(--relay-color-status-warning-text); }
 .agent-chat-suggestion[data-tone="build"] > svg { color: var(--relay-color-action-primary); }
-/* 2026-10-23 二轮：紫调降饱和至 #5F3DC4，与琥珀/墨绿同档柔和；仍只用于实现功能/补充测试两张。 */
-:root { --relay-color-accent-violet: #5F3DC4; }
+/* 2026-10-23 二轮：紫调降饱和至 #5F3DC4，与琥珀/墨绿同档柔和；仍只用于实现功能/补充测试两张。
+   2026-11-12 UI-UNIFY-02：色值登记为 color.accent.violet，这里不再局部定义 --relay-*。 */
 .agent-chat-suggestion[data-tone="purple"] > svg { color: var(--relay-color-accent-violet); }
 .agent-chat-suggestion:hover { color: var(--relay-color-action-primary); border-color: var(--relay-color-action-primary); }
 /* 功能族分隔板：2px 竖线落在卡缝正中（2026-10-18 用户指令「加粗 1px」，1px 档读着偏细）。

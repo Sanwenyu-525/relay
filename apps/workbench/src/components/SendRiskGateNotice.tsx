@@ -1,5 +1,6 @@
 import type { RiskGateWindow } from "../lib/sendRiskGate";
 import "./ContextRiskNotice.css";
+import { Button } from "../ui";
 
 /**
  * 发送前风险确认条（P0-B / P0-C）。
@@ -25,10 +26,10 @@ export default function SendRiskGateNotice({ gate, onContinue, onCancel }: {
         {" 是否仍然发送？"}
       </p>
       <div className="context-risk-actions">
-        <button type="button" className="primary-button" data-testid="context-risk-gate-continue"
-          onClick={onContinue}>仍然发送</button>
-        <button type="button" className="secondary-button" data-testid="context-risk-gate-cancel"
-          onClick={onCancel}>取消发送</button>
+        <Button variant="primary" data-testid="context-risk-gate-continue"
+          onClick={onContinue}>仍然发送</Button>
+        <Button variant="secondary" data-testid="context-risk-gate-cancel"
+          onClick={onCancel}>取消发送</Button>
       </div>
     </div>;
   }
@@ -41,10 +42,10 @@ export default function SendRiskGateNotice({ gate, onContinue, onCancel }: {
       {" 有效输入预算。"}
     </p>
     <div className="context-risk-actions">
-      <button type="button" className="primary-button" data-testid="context-risk-gate-continue"
-        onClick={onContinue}>仍然发送</button>
-      <button type="button" className="secondary-button" data-testid="context-risk-gate-cancel"
-        onClick={onCancel}>先去精简</button>
+      <Button variant="primary" data-testid="context-risk-gate-continue"
+        onClick={onContinue}>仍然发送</Button>
+      <Button variant="secondary" data-testid="context-risk-gate-cancel"
+        onClick={onCancel}>先去精简</Button>
     </div>
   </div>;
 }

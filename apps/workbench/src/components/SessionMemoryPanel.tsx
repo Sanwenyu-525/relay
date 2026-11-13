@@ -4,6 +4,7 @@ import { createCommandId, type RelayApiClient, type RelayMemoryCompactionRequest
   type RelaySessionMemory } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./SessionMemoryPanel.css";
+import { Button } from "../ui";
 
 /**
  * 会话短期记忆（工作台 §40 / HTTP §10.99）。
@@ -262,7 +263,7 @@ export default function SessionMemoryPanel({ client, sessionId, sessionRevision,
       {readError !== null && <div className="action-error" role="alert" data-testid="session-memory-read-error">
         <p>会话记忆读取失败：{readError}</p>
         <p className="helper-text">{memory === null ? "没有可展示的窗口状态。" : "下面显示的是上一次成功读到的状态，可能已经变化。"}</p>
-        <button className="secondary-button" type="button" disabled={busy} onClick={() => void read()}>重新读取</button>
+        <Button variant="secondary" disabled={busy} onClick={() => void read()}>重新读取</Button>
       </div>}
 
       {memory !== null && <>
@@ -307,9 +308,9 @@ export default function SessionMemoryPanel({ client, sessionId, sessionRevision,
                 <span className="helper-text">覆盖至第 {request.throughSeq} 条 · {request.updatedAt}</span>
                 {request.errorCode !== null && <span className="action-error" data-testid={`session-memory-request-error-${request.id}`}>
                   {errorLabels[request.errorCode] ?? `整理失败（${request.errorCode}）；原文与旧摘要保留。`}</span>}
-                {!terminal && !request.cancelRequested && <button className="secondary-button" type="button"
+                {!terminal && !request.cancelRequested && <Button variant="secondary"
                   data-testid={`session-memory-cancel-${request.id}`} disabled={disabled}
-                  onClick={() => void cancel(request)}>取消整理</button>}
+                  onClick={() => void cancel(request)}>取消整理</Button>}
                 {!terminal && request.cancelRequested && <span className="helper-text">已请求停止，等待安全结束</span>}
               </li>;
             })}</ol>}
@@ -318,13 +319,13 @@ export default function SessionMemoryPanel({ client, sessionId, sessionRevision,
         </section>
 
         <div className="session-memory-actions">
-          <button className="secondary-button" type="button" data-testid="session-memory-compact"
-            disabled={disabled} onClick={() => void runCompact()}>整理记忆</button>
-          <button className="secondary-button" type="button" data-testid="session-memory-remember"
+          <Button variant="secondary" data-testid="session-memory-compact"
+            disabled={disabled} onClick={() => void runCompact()}>整理记忆</Button>
+          <Button variant="secondary" data-testid="session-memory-remember"
             disabled={disabled} onClick={() => void toggleRemember(!remember)}>
-            {remember ? "改为一次性模式" : "重新记住本会话"}</button>
-          <button className="secondary-button" type="button" data-testid="session-memory-clear"
-            disabled={disabled} onClick={() => setConfirmingClear(true)}>清除工作记忆…</button>
+            {remember ? "改为一次性模式" : "重新记住本会话"}</Button>
+          <Button variant="secondary" data-testid="session-memory-clear"
+            disabled={disabled} onClick={() => setConfirmingClear(true)}>清除工作记忆…</Button>
           <button className="text-link" type="button" data-testid="session-memory-refresh"
             disabled={busy} onClick={() => { setPollTick(0); void read(); }}>刷新状态</button>
         </div>
@@ -337,10 +338,10 @@ export default function SessionMemoryPanel({ client, sessionId, sessionRevision,
           {inflight && <p className="helper-text" data-testid="session-memory-clear-inflight">
             当前仍有在途消息：服务端会拒绝这次清除。请先等待或停止生成，再清除。</p>}
           <div className="session-memory-actions">
-            <button className="danger-button" type="button" data-testid="session-memory-clear-confirm-button"
-              disabled={disabled} onClick={() => void clearWindow()}>确认清除工作记忆</button>
-            <button className="secondary-button" type="button" data-testid="session-memory-clear-cancel"
-              disabled={busy} onClick={() => setConfirmingClear(false)}>取消</button>
+            <Button variant="danger" data-testid="session-memory-clear-confirm-button"
+              disabled={disabled} onClick={() => void clearWindow()}>确认清除工作记忆</Button>
+            <Button variant="secondary" data-testid="session-memory-clear-cancel"
+              disabled={busy} onClick={() => setConfirmingClear(false)}>取消</Button>
           </div>
         </div>}
       </>}
@@ -351,10 +352,10 @@ export default function SessionMemoryPanel({ client, sessionId, sessionRevision,
         <p>「{unresolved.label}」的结果未核对：请求响应丢失，这条命令是否已生效尚未确定。</p>
         <p className="helper-text">原 command_id：{unresolved.commandId}。先查回执；查不到时只能用同一命令与同一载荷重试，不换新 ID。</p>
         <div className="session-memory-actions">
-          <button className="secondary-button" type="button" data-testid="session-memory-receipt"
-            disabled={checking || busy} onClick={() => void checkReceipt()}>{checking ? "正在查询" : "查询原命令回执"}</button>
-          <button className="secondary-button" type="button" data-testid="session-memory-retry"
-            disabled={checking || busy} onClick={unresolved.retry}>按原命令重试</button>
+          <Button variant="secondary" data-testid="session-memory-receipt"
+            disabled={checking || busy} onClick={() => void checkReceipt()}>{checking ? "正在查询" : "查询原命令回执"}</Button>
+          <Button variant="secondary" data-testid="session-memory-retry"
+            disabled={checking || busy} onClick={unresolved.retry}>按原命令重试</Button>
         </div>
       </div>}
       {writeBlocked && writeBlockedReason !== null &&

@@ -46,7 +46,9 @@ function envelope(commandId: string, result: Record<string, unknown>) {
 
 function settingsBody(overrides: Record<string, unknown> = {}) {
   return { workspace_id: workspaceId, revision: "3", recall_enabled: true,
-    automatic_compaction: false, auto_capture: true, ...overrides };
+    automatic_compaction: false, auto_capture: true,
+    compaction_threshold_tokens: 300_000, compaction_threshold_default_tokens: 350_000,
+    compaction_threshold_recommended: { min: 256_000, max: 400_000 }, ...overrides };
 }
 
 function sessionMemoryBody(overrides: Record<string, unknown> = {}) {
@@ -73,7 +75,9 @@ describe("记忆设置 client", () => {
   it("读设置走 GET /memory-settings，并按服务端返回值解析", async () => {
     const fetchMock = stub(settingsBody());
     await expect(client.getMemorySettings()).resolves.toEqual({ workspaceId, revision: "3",
-      recallEnabled: true, automaticCompaction: false, autoCapture: true });
+      recallEnabled: true, automaticCompaction: false, autoCapture: true,
+      compactionThresholdTokens: 300_000, compactionThresholdDefaultTokens: 350_000,
+      compactionThresholdRecommended: { min: 256_000, max: 400_000 } });
     expect(requestedUrl(fetchMock)).toBe(`${root}/memory-settings`);
     expect((fetchMock.mock.calls[0]![1] as RequestInit | undefined)?.method ?? "GET").toBe("GET");
   });
@@ -88,21 +92,25 @@ describe("记忆设置 client", () => {
     const fetchMock = stub(envelope(commandId, settingsBody({ revision: "4",
       recall_enabled: false, automatic_compaction: true, auto_capture: false })));
     await expect(client.saveMemorySettings({ commandId, expectedRevision: "3",
-      recallEnabled: false, automaticCompaction: true, autoCapture: false })).resolves.toMatchObject({ revision: "4",
+      recallEnabled: false, automaticCompaction: true, autoCapture: false,
+      compactionThresholdTokens: null })).resolves.toMatchObject({ revision: "4",
       recallEnabled: false, automaticCompaction: true, autoCapture: false });
     expect(requestedUrl(fetchMock)).toBe(`${root}/memory-settings`);
     expect(requestedBody(fetchMock)).toEqual({ command_id: commandId, expected_revision: "3",
-      recall_enabled: false, automatic_compaction: true, auto_capture: false });
+      recall_enabled: false, automatic_compaction: true, auto_capture: false,
+      compaction_threshold_tokens: null });
   });
 
   it("回执修订倒退或换 Workspace 都算无法核对，不当作保存成功", async () => {
     const commandId = "77777777-7777-4777-8777-777777777777";
     stub(envelope(commandId, settingsBody({ revision: "2" })));
     await expect(client.saveMemorySettings({ commandId, expectedRevision: "3",
-      recallEnabled: true, automaticCompaction: true, autoCapture: true })).rejects.toBeInstanceOf(RelayTransportError);
+      recallEnabled: true, automaticCompaction: true, autoCapture: true,
+      compactionThresholdTokens: null })).rejects.toBeInstanceOf(RelayTransportError);
     stub(envelope(commandId, settingsBody({ workspace_id: projectId, revision: "4" })));
     await expect(client.saveMemorySettings({ commandId, expectedRevision: "3",
-      recallEnabled: true, automaticCompaction: true, autoCapture: true })).rejects.toBeInstanceOf(RelayTransportError);
+      recallEnabled: true, automaticCompaction: true, autoCapture: true,
+      compactionThresholdTokens: null })).rejects.toBeInstanceOf(RelayTransportError);
   });
 
   it("409 冲突保留服务端给出的两个修订，供界面说明冲突", async () => {
@@ -110,7 +118,7 @@ describe("记忆设置 client", () => {
       expected_revision: "3", actual_revision: "5" } }, 409);
     const caught = await client.saveMemorySettings({ commandId: "77777777-7777-4777-8777-777777777777",
       expectedRevision: "3", recallEnabled: true, automaticCompaction: true,
-      autoCapture: true }).catch((error: unknown) => error);
+      autoCapture: true, compactionThresholdTokens: null }).catch((error: unknown) => error);
     expect(caught).toBeInstanceOf(RelayApiError);
     expect((caught as RelayApiError).problem).toMatchObject({ status: 409,
       expectedRevision: "3", actualRevision: "5" });

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useConversationDiff } from "../lib/useConversationDiff";
 import { localDiffReasonText } from "./ChatLocalFileDiff";
 import { RelayApiError, type RelayApiClient, type RelayConversationDiff, type RelayConversationDiffFile, type RelayConversationDiffScanSide, type RelayConversationDiffScope } from "../api/relayClient";
+import { Button } from "../ui";
 
 /**
  * 与目录细条同处输入卡**外**上方那一行的会话总 diff（工作台 §34.2 / §34.4，CD-01、CD-12、CD-17、CD-18）。
@@ -337,9 +338,9 @@ export default function ConversationDiffSummary({ client, sessionId, enabled, di
         {diff !== null && !diff.available && diff.reason === "NO_BASELINE" && <>
           <p className="helper-text">这个会话还没有可核对的统计起点，因此不给行数。可以从现在重新开始统计，
             {" "}新起点之后的变化才会计入；会话开始前的改动不会倒推。</p>
-          <button className="secondary-button" type="button" data-testid="conversation-diff-establish"
+          <Button variant="secondary" data-testid="conversation-diff-establish"
             disabled={establishing} onClick={() => void establishBaseline()}>
-            {establishing ? "正在建立统计起点…" : "从现在开始统计"}</button>
+            {establishing ? "正在建立统计起点…" : "从现在开始统计"}</Button>
         </>}
         {diff !== null && !diff.available && diff.reason === "RESOURCE_UNAVAILABLE" &&
           <p className="helper-text" data-testid="conversation-diff-hidden-by-permission">

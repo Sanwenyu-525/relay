@@ -13,6 +13,7 @@ import { sha256Hex } from "../lib/sha256";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import type { DecimalRevision, TaskStatus } from "../types";
 import "./ArtifactPanel.css";
+import { Button } from "../ui";
 
 interface Props {
   documentHeader?: ReactNode;
@@ -583,8 +584,8 @@ export default function ArtifactPanel(props: Props) {
     {readingLoading && <p className="helper-text" role="status" data-testid="artifact-content-loading">正在读取 v{readingTarget?.versionNumber} 的确切正文…</p>}
     {readingFailure && <div className="artifact-paper-state" role="alert" data-testid="artifact-content-error">
       <h3>正文读取失败</h3><p className="helper-text">{readingFailure}</p>
-      <button className="secondary-button" type="button" data-testid="artifact-content-retry"
-        onClick={() => { if (readingTarget) void readVersion(readingTarget.versionId); }}>重试读取正文</button>
+      <Button variant="secondary" data-testid="artifact-content-retry"
+        onClick={() => { if (readingTarget) void readVersion(readingTarget.versionId); }}>重试读取正文</Button>
     </div>}
     {visibleReading && <div data-testid="artifact-saved-content"><SafeMarkdown source={visibleReading.content} /></div>}
     {/* versionsFailure 时不能落到「还没有已保存的正文」：版本读不到时 versions 为空、readingTarget
@@ -628,8 +629,8 @@ export default function ArtifactPanel(props: Props) {
         <article className="artifact-paper" data-testid="artifact-conflict-current">
           <header className="artifact-paper-heading"><h3>当前版本 · {latest ? `v${latest.versionNumber}` : "尚未核实"}</h3><p className="helper-text">已保存版本 · 只读核对</p></header>
           {versionsLoading || conflictReadingLoading ? <p className="helper-text" role="status">正在读取当前确切版本…</p>
-            : versionsFailure ? <div className="artifact-paper-state" role="alert"><p>{versionsFailure}</p><button className="secondary-button" type="button" onClick={() => void loadArtifacts()}>重新读取产物</button></div>
-              : conflictReadingFailure ? <div className="artifact-paper-state" role="alert" data-testid="artifact-conflict-content-error"><h3>当前正文读取失败</h3><p className="helper-text">{conflictReadingFailure}</p><button className="secondary-button" type="button" data-testid="artifact-conflict-content-retry" onClick={() => { if (latest) void readConflictVersion(latest.versionId); }}>重试读取当前正文</button></div>
+            : versionsFailure ? <div className="artifact-paper-state" role="alert"><p>{versionsFailure}</p><Button variant="secondary" onClick={() => void loadArtifacts()}>重新读取产物</Button></div>
+              : conflictReadingFailure ? <div className="artifact-paper-state" role="alert" data-testid="artifact-conflict-content-error"><h3>当前正文读取失败</h3><p className="helper-text">{conflictReadingFailure}</p><Button variant="secondary" data-testid="artifact-conflict-content-retry" onClick={() => { if (latest) void readConflictVersion(latest.versionId); }}>重试读取当前正文</Button></div>
                 : visibleConflictReading ? <SafeMarkdown source={visibleConflictReading.content} /> : <p className="helper-text">当前版本尚未核实，不会显示其他版本的正文。</p>}
         </article>
       </div> : <section className="artifact-paper" aria-label="产物正文">
@@ -646,7 +647,7 @@ export default function ArtifactPanel(props: Props) {
       {contentTooLarge && <p className="field-error" role="alert"><Info aria-hidden="true" />正文超过 256 KiB（按 UTF-8 字节判定），请拆分后再保存。</p>}
       <details className="artifact-version-history" data-testid="artifact-versions"><summary>版本详情</summary><p className="helper-text">阅读版本、当前选用与本轮接受分开操作；三者分别来自版本、项目 State 与完成凭据。</p>
         {versionsLoading && <p className="helper-text" role="status">正在读取产物版本。</p>}
-        {versionsFailure && <p className="action-error" role="alert">{versionsFailure} 草稿仍保留；产物列表尚未核实，暂不能保存或完成。<button className="secondary-button" type="button" onClick={() => void loadArtifacts()}>重新读取产物</button></p>}
+        {versionsFailure && <p className="action-error" role="alert">{versionsFailure} 草稿仍保留；产物列表尚未核实，暂不能保存或完成。<Button variant="secondary" onClick={() => void loadArtifacts()}>重新读取产物</Button></p>}
         {versionsReady && (!versions.length ? <p className="helper-text">该任务尚无已保存的产物版本。</p> : <ul className="version-list">{versions.map((version) => <li key={version.versionId} className="version-row">
           <label className="version-choice"><input checked={selectedVersionId === version.versionId} onChange={() => setSelectedVersionId(version.versionId)} type="radio" name="artifact-version" value={version.versionId} data-testid={`artifact-version-${version.versionId}`} /><span className="version-copy"><strong>v{version.versionNumber} · {version.title}</strong><small>sha256 {version.sha256.slice(0, 12)}… · {version.size} 字节</small></span></label>
           <span className="version-tags">{artifacts?.items.some((item) => item.latestVersionId === version.versionId) && <span className="status-chip">最新</span>}{selectedByProject.some((ref) => ref.artifactVersionId === version.versionId) && <span className="status-chip status-chip--neutral">当前选用</span>}{artifacts?.currentAcceptedVersionIds.includes(version.versionId) && <span className="status-chip status-chip--neutral">本轮接受</span>}</span>
@@ -664,25 +665,25 @@ export default function ArtifactPanel(props: Props) {
         {writeBlockedReason && <p className="disabled-reason" data-testid="artifact-project-write-blocked">{writeBlockedReason}</p>}
         {done ? <p className="warning-callout" role="status" data-testid="artifact-editor-locked"><Info aria-hidden="true" />该任务本轮已完成：编辑入口已关闭，请先在下方重开任务再保存新版本。</p> : !allowedActions.includes("SAVE_ARTIFACT_VERSION") && <p className="disabled-reason" data-testid="artifact-editor-reason"><Info aria-hidden="true" />服务端未投影 SAVE_ARTIFACT_VERSION：当前状态是{taskStatusLabels[taskStatus]}，只有进行中的人工任务可以保存产物。</p>}
         {!editableArtifact && <label className="field"><span className="field-label">产物名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} name="artifact-title" disabled={done || activeSavePending !== null || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} /></label>}
-        <div className="form-actions"><button className="primary-button" type="button" data-testid="artifact-save" disabled={saving || !(canSave || (saveRecoveryReady && activeSavePending !== null && !sourceUnavailable))} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : activeSavePending ? "按原命令重试保存" : "保存新版本"}</button></div>
-        {draftBase && conflicting && <div className="form-actions"><button className="secondary-button" type="button" data-testid="artifact-confirm-new-base" disabled={rebasing || saving || activeSavePending !== null || !versionsReady || !latest || writeBlockedReason !== null || done} onClick={() => void confirmCurrentBase()}>{rebasing ? "正在核对" : `确认以当前 v${latest?.versionNumber ?? "?"} 为基线（保留草稿）`}</button>{latest && <Link className="inline-link" to={`/artifact-versions/${latest.versionId}/lineage`}>查看版本历史与差异</Link>}</div>}
+        <div className="form-actions"><Button variant="primary" data-testid="artifact-save" disabled={saving || !(canSave || (saveRecoveryReady && activeSavePending !== null && !sourceUnavailable))} onClick={() => void saveVersion()}><Save aria-hidden="true" />{saving ? "正在保存" : activeSavePending ? "按原命令重试保存" : "保存新版本"}</Button></div>
+        {draftBase && conflicting && <div className="form-actions"><Button variant="secondary" data-testid="artifact-confirm-new-base" disabled={rebasing || saving || activeSavePending !== null || !versionsReady || !latest || writeBlockedReason !== null || done} onClick={() => void confirmCurrentBase()}>{rebasing ? "正在核对" : `确认以当前 v${latest?.versionNumber ?? "?"} 为基线（保留草稿）`}</Button>{latest && <Link className="inline-link" to={`/artifact-versions/${latest.versionId}/lineage`}>查看版本历史与差异</Link>}</div>}
         {rebaseFailure && <p className="action-error" role="alert">{rebaseFailure}</p>}
-        {latest && <button className="secondary-button" type="button" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || activeSavePending !== null || !versionsReady || content !== savedContentSnapshot.current || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} onClick={() => void loadLatestDraft()}>{draftLoading ? "正在读取" : `从最新版本 v${latest.versionNumber} 起草修订`}</button>}
+        {latest && <Button variant="secondary" data-testid="artifact-load-latest-draft" disabled={done || draftLoading || rebasing || saving || activeSavePending !== null || !versionsReady || content !== savedContentSnapshot.current || !allowedActions.includes("SAVE_ARTIFACT_VERSION")} onClick={() => void loadLatestDraft()}>{draftLoading ? "正在读取" : `从最新版本 v${latest.versionNumber} 起草修订`}</Button>}
         {draftFailure && <p className="action-error" role="alert">{draftFailure}</p>}
         {draftBase && !sourceUnavailable && <details className="artifact-binding-details"><summary>草稿基线{draftVersion ? ` · v${draftVersion.versionNumber}` : ""} · 任务修订 v{draftBase.taskRevision}</summary><p className="helper-text" data-testid="artifact-draft-base">草稿修订基线：版本 {draftBase.versionId} · Artifact revision v{draftBase.artifactRevision} · Task revision v{draftBase.taskRevision}。</p></details>}
         {activeSavePending && <p className="helper-text" data-testid="artifact-save-pending">原 command_id：{activeSavePending.commandId}。原请求{activeSavePending.kind === "create" ? "创建产物" : `续写产物 ${activeSavePending.artifactId}`}，正文 {new TextEncoder().encode(activeSavePending.content).length} 字节；结果未核对前不能提交新草稿。</p>}
         {saveReceipt && <p className="receipt-message" role="status" data-testid="artifact-save-receipt">{saveReceipt}</p>}
         {saveFailure && saveFailure.kind !== "conflict" && <p className="action-error" role="alert">{saveFailure.message}</p>}
-        {activeSavePending && !saving && <button className="secondary-button" type="button" data-testid="artifact-save-receipt-query" onClick={() => void lookupSaveReceipt()}>查询本次保存回执</button>}
+        {activeSavePending && !saving && <Button variant="secondary" data-testid="artifact-save-receipt-query" onClick={() => void lookupSaveReceipt()}>查询本次保存回执</Button>}
       </section>
       <section className="artifact-selection-section"><h3>当前选用（来自项目 State）</h3>
         <label className="field"><span className="field-label">设置为当前选用的版本</span><select value={selectedVersionId ?? ""} data-testid="artifact-accept-version" disabled={!versionsReady} onChange={(event) => setSelectedVersionId(event.target.value || null)}><option value="">选择确切版本</option>{versions.map((version) => <option key={version.versionId} value={version.versionId}>v{version.versionNumber} · {version.title}</option>)}</select></label>
         {stateFailure ? <p className="action-error" role="alert">{stateFailure}</p> : projectId === null ? <p className="helper-text">该任务未归属项目：选择版本为当前选用是 Project State 命令，因此不可用。</p> : selectedByProject.length === 0 ? <p className="helper-text">项目 State 还没有选用任何产物版本。</p> : <ul className="version-list">{selectedByProject.map((ref) => <li key={ref.artifactVersionId} className="version-row"><span className="version-copy"><strong>v{ref.versionNumber}</strong><small>来源：{ref.sourceRef}</small></span></li>)}</ul>}
         <p className="helper-text">当前选用候选：{selectedVersion ? `v${selectedVersion.versionNumber} · ${selectedVersion.title}` : "尚未选择版本"}</p>
         {selectedVersion && <details className="artifact-binding-details"><summary>核对当前选用候选身份</summary><p className="helper-text" data-testid="artifact-selected-version">当前选用候选：v{selectedVersion.versionNumber} · {selectedVersion.title} · {selectedVersion.versionId}</p></details>}
-        <button className="secondary-button" type="button" data-testid="artifact-select-version" disabled={writeBlockedReason !== null || !versionsReady || selecting || selectionPending !== null || !selectedVersion || !projectId || !state} onClick={() => void selectVersion()}>{selecting ? "正在提交" : "选择这个版本为当前选用"}</button>
+        <Button variant="secondary" data-testid="artifact-select-version" disabled={writeBlockedReason !== null || !versionsReady || selecting || selectionPending !== null || !selectedVersion || !projectId || !state} onClick={() => void selectVersion()}>{selecting ? "正在提交" : "选择这个版本为当前选用"}</Button>
         <p className="helper-text">“当前选用”是项目级事实，与“本轮接受”不同；下方完成命令接受的是明确选择的确切版本。</p>
-        {selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectionPending && <p className="helper-text" data-testid="artifact-select-pending">{selectionFlight.current === selectionPending.commandId ? "正在提交选择，原命令身份已保存。" : selectionChecking ? "正在核对原选择结果，不重新提交。" : "原选择结果尚待核对；仅查询原命令，不重新提交。"}原 command_id：{selectionPending.commandId}</p>}{selectionPending && <button className="secondary-button" type="button" data-testid="artifact-select-receipt-query" disabled={selecting || selectionChecking} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</button>}
+        {selectReceipt && <p className="receipt-message" role="status">{selectReceipt}</p>}{selectFailure && <p className="action-error" role="alert">{selectFailure.message}</p>}{selectionPending && <p className="helper-text" data-testid="artifact-select-pending">{selectionFlight.current === selectionPending.commandId ? "正在提交选择，原命令身份已保存。" : selectionChecking ? "正在核对原选择结果，不重新提交。" : "原选择结果尚待核对；仅查询原命令，不重新提交。"}原 command_id：{selectionPending.commandId}</p>}{selectionPending && <Button variant="secondary" data-testid="artifact-select-receipt-query" disabled={selecting || selectionChecking} onClick={() => void lookupSelectReceipt()}>查询本次选择回执</Button>}
       </section>
       <TaskCompletionPanel live={live} target={{ taskId, taskStatus, taskRevision, acceptanceRevision,
         allowedActions: sourceUnavailable ? [] : allowedActions, criteria: sourceUnavailable ? [] : criteria,

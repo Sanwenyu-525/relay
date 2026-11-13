@@ -96,45 +96,45 @@
 
 .pv-page .review-filters { gap: 7px; }
 .pv-page .review-filters > button {
-  font-size: 12px;
+  font-size: var(--relay-font-size-caption);
   padding: 7px 10px;
   min-height: 34px;
-  border: 1px solid #d6e5d8;
-  border-radius: 9px;
-  background: #fff;
-  color: #53705b;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
 }
-.pv-page .review-filters > button[aria-pressed="true"] { color: #206846; background: #eaf5eb; border-color: #9ccbab; }
+.pv-page .review-filters > button[aria-pressed="true"] { color: var(--relay-color-action-text); background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
 .pv-page .review-filters > button span { opacity: .7; font-variant-numeric: tabular-nums; }
 
 .pv-page .review-list-item {
   text-align: left;
-  border: 1px solid #e3ebe4;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 3px 15px #22553506;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-surface);
   padding: 12px 14px;
   margin-bottom: 9px;
   gap: 8px;
 }
-.pv-page .review-list-item:hover { border-color: #c6ddcc; }
-.pv-page .review-list-item--selected { border-color: #9ccbab; background: #f7fcf8; }
-.pv-page .review-list-item strong { font-size: 12.5px; color: #33533d; }
-.pv-page .review-list-meta { font-size: 11px; color: var(--pv-muted); gap: 8px; }
+.pv-page .review-list-item:hover { border-color: var(--relay-color-border-subtle); }
+.pv-page .review-list-item--selected { border-color: var(--relay-color-action-primary); background: var(--relay-color-selection-hover); }
+.pv-page .review-list-item strong { font-size: 12.5px; color: var(--relay-color-text-primary); }
+.pv-page .review-list-meta { font-size: var(--relay-font-size-micro); color: var(--pv-muted); gap: 8px; }
 .pv-page .review-kind { text-transform: none; color: var(--pv-muted); font-weight: 650; }
 
 .pv-page .review-detail,
 .pv-page .review-reading {
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 3px 15px #22553506;
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  background: var(--relay-color-bg-surface);
+  box-shadow: var(--relay-shadow-surface);
 }
 .pv-page .review-detail-heading h2,
-.pv-page .review-reading h2 { font-size: 13px; font-weight: 700; color: #294635; }
-.pv-page .review-reason { font-size: 12px; color: #486452; }
-.pv-page .review-request-facts dt { font-size: 11px; color: var(--pv-muted); }
-.pv-page .review-request-facts dd { font-size: 12px; color: #486452; }
+.pv-page .review-reading h2 { font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--relay-color-text-primary); }
+.pv-page .review-reason { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.pv-page .review-request-facts dt { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .review-request-facts dd { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
 
 /* pv 皮肤：评审页保留 pv 页面留白。此前 .review-page{padding:0} 让内容贴到容器边缘，
    与其他 pv 页面左边距不一致（列表/详情卡都少 30px）。 */
@@ -158,16 +158,16 @@
 /* pv 皮肤：migrated-scoped 的 .review-fact-section h3 / .review-decision h3 用 section(24px) 档，
    在 pv 卡片里大于页头 h1(22px)，层级倒置；回卡片分区头 13px/700 档（同 .resume-section > h2）。
    决策面板的全部分区标题（判断对象与条件/依据/影响/绑定/作出决定）都在 .review-decision 内。 */
-.pv-page .review-decision h3 { font-size: 13px; font-weight: 700; color: #294635; }
+.pv-page .review-decision h3 { font-size: var(--relay-font-size-pageBase); font-weight: 700; color: var(--relay-color-text-primary); }
 
 /* pv 皮肤：这些元素全局用 meta(14px) 档，在 pv 详情卡里比正文(13px)还大、且大于同卡
    .review-request-facts 的 dt 11/dd 12 基线；按原型 review-center 的 meta 档回落。 */
-.pv-page .review-kind { font-size: 11px; }
-.pv-page .review-facts dt { font-size: 11px; color: var(--pv-muted); }
-.pv-page .review-facts dd { font-size: 12px; color: #486452; }
-.pv-page .review-bound-summary > p { font-size: 12px; color: #486452; }
-.pv-page .review-list-item time { font-size: 11px; }
-.pv-page .review-raw-data summary { font-size: 12px; }
+.pv-page .review-kind { font-size: var(--relay-font-size-micro); }
+.pv-page .review-facts dt { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .review-facts dd { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.pv-page .review-bound-summary > p { font-size: var(--relay-font-size-caption); color: var(--relay-color-text-secondary); }
+.pv-page .review-list-item time { font-size: var(--relay-font-size-micro); }
+.pv-page .review-raw-data summary { font-size: var(--relay-font-size-caption); }
 .pv-page .review-raw-json { font-size: 11.5px; }
 
 /* 窄窗留白与事实列：断点用 design-system §9.6 的四档语义值（64rem/48rem），
@@ -187,7 +187,7 @@
 .pv-page .review-request-facts { margin-bottom: 4px; }
 /* 详情链接行：三个只读入口（关联任务/版本来源/执行与完成状态）同行节奏，窄窗换行。 */
 .pv-page .review-detail-links { gap: 14px; flex-wrap: wrap; margin: 6px 0; }
-.pv-page .review-detail-links .text-link { font-size: 12px; }
+.pv-page .review-detail-links .text-link { font-size: var(--relay-font-size-caption); }
 /* 空态/加载/读取失败共用卡内空态：图标与文案已由 Info + helper-text 承担，补一行内边距节奏。 */
 .pv-page .review-empty { padding-bottom: 20px; }
 .pv-page .review-empty .helper-text { display: inline-flex; align-items: center; gap: 8px; margin: 0; }

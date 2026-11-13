@@ -170,3 +170,22 @@ DISCUSS 请求没有把该协议落实为 Provider 的 response_format，单靠 
 6. **输入不可信**：会话文本、任务/项目标题与回复摘要都包在 `<untrusted_data>` 里；系统提示词要求只输出 JSON，数据中的任何指令都不能改变分类、格式或权限。模型看不到会话 ID、权限、工具日志与文件正文。
 
 回归：单元 `session-title`（分类、格式、模型信封、恶意结构）、真实 PG/HTTP `assist-session-title.integration.test`（入队/领取/落库、手动改名后迟到 SKIPPED、显式重新生成、降级、LEGACY 保护、删除级联）、组件 `sessionRowMenu` 与真实 Chromium `sessionTitleRegeneration`；规则归 [HTTP §10.132](../api/http-command-contract/part-08.md#10132-会话标题的来源与系统命名2026-11-01-源码实现迁移-0157) 与 [ADR-040](../decisions/ADR-040-session-title-ownership.md)。
+
+## 意外中断后的持久接续（2026-11-12 Durable Task Continuation，迁移 0163）
+
+此前租约过期的会话生成一律落 `FAILED / LEASE_LOST`：用户只发一次请求、宿主意外退出，回复就永久失败，已完成的工具回合也随内存一起丢失。本轮把「租约到期」从**业务失败**改成**接续候选**，只加恢复所需的最小事实：
+
+1. **接续判定在唯一入口完成**。生成 tick 先调 `recoverExpiredGenerations`（`assist-repository`），按真实账本把每条过期生成判成四档：
+   - `REQUEUE`：根会话、无运行中委派、无未核对的副作用 —— 同一消息身份回到 `PENDING`，`generation_attempt + 1`，下一次领取从检查点继续；
+   - `CANCELLED`：`cancel_requested` 已持久化 —— 收口 `CANCELLED`，用户停止永远优先；
+   - `BLOCKED`：存在 `UNKNOWN` 工具行，或未结算的**有副作用**工具请求 —— 落 `FAILED / RECOVERY_BLOCKED_UNRESOLVED_TOOL`，不重排、不派发；
+   - `EXHAUSTED`：已达 `GENERATION_RECOVERY_MAX_ATTEMPTS = 3` —— 落 `FAILED / RECOVERY_EXHAUSTED`，不无限重启。
+   判定与状态推进在同一条 SQL 里完成（`for update skip locked` + 状态/租约 CAS），两个恢复者不会双重递增；重复扫描零新增。
+2. **检查点是逐回合的**。`assist_generation_rounds` 只记录**已完成的工具回合**：模型给出的完整请求（工具调用、前导说明、推理片段、回合前插话）先落库，再派发；每个工具结果在结算后立刻追加。恢复时按原轮次回灌，已结算结果直接复用，不再派发同一工具。纯模型调用没有外部副作用，不写检查点。
+3. **恢复与首次执行共用同一条路径**。`runSessionReadonlyRounds` 接收 `generationAttempt` / `resume`：有持久回合时从下一轮继续，并先补完没有结果的请求 —— 有账本行按原身份核对（已结算的按 Gateway `result_ref` 还原，`PREPARED` 按同一 `operation_id` 继续，`DISPATCHING/UNKNOWN` 不碰），没有账本行则按首次执行重新登记并派发（只读安全）。补完的结果立刻回写检查点，恢复过程中再次崩溃不会重做。
+4. **服务端派生恢复状态**。`execution-activity-projection` 对 `PENDING` + `generation_attempt > 1` 输出 `RECOVERING`（「上次执行意外中断，正在自动恢复（第 N 次生成）」），对恢复中的 `RUNNING` 在阶段文案前加「已自动恢复 · 」，阻塞与耗尽各有独立文案。前端只读 `phase.detail`，不自行推断恢复成功；任务完成后不再残留恢复文案。
+5. **不依赖前端在线**。Supervisor 的 `hasRunnableGeneration` 本来就覆盖「PENDING」与「RUNNING 且租约过期」；重排后正常 ASSIST 车道会启动一次性 Worker 接续，不需要用户重新发消息或打开页面。
+
+**不覆盖**：子 Agent 结果消息仍按委派恢复核对（`reconcileDelegationAttempts`，不盲重跑）；Run 的文件/终端/Gateway 恢复沿用既有 fence + 逐文件回读 + `reconcileGatewayInvocation`；浏览器、电脑输入与 MCP 写操作没有通用幂等/查询协议，结果未确认时一律保持 `UNKNOWN` 阻塞。Breaking Change: **No**——只加三列与一张表，消息 DTO 的 `phase` 是只读投影。
+
+回归：真实 PG `assist-generation-continuation` 9/9（中断接续、检查点复用、未结算只读续跑、副作用阻塞、停止优先、上界、幂等、删除级联、纯判定）；`assist.integration` 的三条租约用例改为新契约（接续完成、`generation_attempt=2`、旧 Worker 迟到结算被 CAS 拒绝）。

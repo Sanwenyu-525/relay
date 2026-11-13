@@ -5,6 +5,7 @@ import AppDialog from "./AppDialog";
 import { describeLiveError } from "../lib/liveErrors";
 import { currentDraftGuard, hasUnsavedDraft } from "../lib/draftGuard";
 import { activateRelayConnection, relayConnection, useFixtureData, useRelayConnection } from "../lib/relayConnection";
+import { Button } from "../ui";
 
 export default function RelayConnectionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const connection = useRelayConnection();
@@ -85,9 +86,9 @@ export default function RelayConnectionDialog({ open, onClose }: { open: boolean
         <span className="field-hint">令牌只保存在当前页面内存，不写入浏览器存储、URL 或日志，刷新即清除。</span>
       </label>
       <div className="form-actions">
-        <button className="primary-button" type="submit" data-testid="relay-connect" aria-busy={checking || undefined} disabled={checking || connection.mode === "live"}>{checking ? "正在检查" : "连接并检查就绪"}</button>
-        {connection.mode === "live" && <button className="secondary-button" type="button" data-testid="relay-disconnect" onClick={disconnect}><Unplug aria-hidden="true" />断开并回到示例数据</button>}
-        <button className="text-button" type="button" onClick={close}>关闭</button>
+        <Button variant="primary" type="submit" data-testid="relay-connect" aria-busy={checking || undefined} disabled={checking || connection.mode === "live"}>{checking ? "正在检查" : "连接并检查就绪"}</Button>
+        {connection.mode === "live" && <Button variant="secondary" data-testid="relay-disconnect" onClick={disconnect}><Unplug aria-hidden="true" />断开并回到示例数据</Button>}
+        <Button variant="text" onClick={close}>关闭</Button>
       </div>
       {success && <p className="receipt-message" role="status">{success}</p>}
       {failure && <p className="action-error" role="alert" data-testid="relay-connection-error">{failure}</p>}

@@ -98,10 +98,15 @@ test("上报字段截断后仍落在服务端 maxLength 内", () => {
 });
 
 test("上报发送失败不影响业务，也不产生新的异常", async () => {
-  setFrontendDiagnosticSender(async () => { throw new Error("offline"); });
+  const sender = vi.fn(async (_report: ClientDiagnosticReport): Promise<void> => { throw new Error("offline"); });
+  setFrontendDiagnosticSender(sender);
   expect(() => reportFrontendError({ kind: "uncaught", error: new Error("x") })).not.toThrow();
+  // 通道失败后仍然可用：下一条业务错误照样送到 sender，而不是被失败状态卡住。
+  reportFrontendError({ kind: "render", error: new Error("y") });
   await Promise.resolve();
-  expect(true).toBe(true);
+  await Promise.resolve();
+  expect(sender).toHaveBeenCalledTimes(2);
+  expect(sender.mock.calls.map((call) => call[0]?.message)).toEqual(["x", "y"]);
 });
 
 test("全局监听收未捕获异常与未处理拒绝，忽略主动取消", () => {

@@ -7,6 +7,7 @@ import { learningCommandType, learningResultMatches, type RelayLearningCommand,
 import { describeLiveError } from "../lib/liveErrors";
 import { liveClient } from "../lib/relayConnection";
 import type { AssistNavigationState } from "../views/AssistView";
+import { Button } from "../ui";
 
 const kindLabels: Record<string, string> = { EXPOSURE: "接触过", SELF_REPORT: "用户自述",
   OBSERVED: "具体表现", GAP: "具体缺口" };
@@ -113,7 +114,7 @@ export default function LearningRecordsPanel({ client, sessionId, refreshKey, bl
     <p className="helper-text">个人学习记录跨项目可用，对项目只读；未观察到不表示不会。</p>
     {notice && <p role="status">{notice}</p>}
     {readError ? <p role="alert">记录暂不可读：{readError}</p> : records === null && !blocked ? <p role="status">正在读取学习记录…</p> : null}
-    <button className="text-button" type="button" disabled={busy || blocked} onClick={() => setReload((n) => n + 1)}>刷新学习记录</button>
+    <Button variant="text" disabled={busy || blocked} onClick={() => setReload((n) => n + 1)}>刷新学习记录</Button>
     {state && <label className="field"><span>后续记录</span><input type="checkbox" checked={state.recordsEnabled}
       disabled={locked} data-testid="learning-record-control" onChange={(event) => void submit({ kind: "control",
         commandId: createCommandId(), sessionId, recordsEnabled: event.target.checked, expectedRevision: state.revision })} />
@@ -131,10 +132,10 @@ export default function LearningRecordsPanel({ client, sessionId, refreshKey, bl
         <p>{evidence.detail}</p><p className="helper-text">{evidence.sourceKind === "USER_CONTROL" ? "用户明确纠正" : "学习消息依据"} ·
           <time dateTime={evidence.observedAt}>{new Date(evidence.observedAt).toLocaleString()}</time></p>
         {evidence.sessionId && evidence.sourceMessageId && <Link to={`/agent?session=${encodeURIComponent(evidence.sessionId)}`}>查看来源会话</Link>}
-        <button className="text-button" type="button" disabled={locked} onClick={() => void submit({ kind: "delete",
-          commandId: createCommandId(), evidenceId: evidence.evidenceId, expectedGeneration: concept.generation })}>删除这条依据</button>
+        <Button variant="text" disabled={locked} onClick={() => void submit({ kind: "delete",
+          commandId: createCommandId(), evidenceId: evidence.evidenceId, expectedGeneration: concept.generation })}>删除这条依据</Button>
       </div>)}
-      <button className="secondary-button" type="button" disabled={locked} onClick={() => { setCorrecting(concept); setScenario(""); setDetail(""); }}>纠正我的记录</button>
+      <Button variant="secondary" disabled={locked} onClick={() => { setCorrecting(concept); setScenario(""); setDetail(""); }}>纠正我的记录</Button>
     </details>)}
     {correcting && <form className="create-form" onSubmit={(event) => { event.preventDefault();
       if (!scenario.trim() || !detail.trim()) return;
@@ -145,29 +146,29 @@ export default function LearningRecordsPanel({ client, sessionId, refreshKey, bl
         onChange={(event) => setScenario(event.target.value)} /></label>
       <label className="field"><span>纠正说明</span><textarea value={detail} maxLength={400} disabled={busy || pending !== null}
         onChange={(event) => setDetail(event.target.value)} /></label>
-      <button className="secondary-button" disabled={locked || !detail.trim() || !scenario.trim()}>保存纠正</button>
-      <button className="text-button" type="button" disabled={busy || pending !== null}
-        onClick={() => { setCorrecting(null); setScenario(""); setDetail(""); }}>取消纠正</button>
+      <Button variant="secondary" disabled={locked || !detail.trim() || !scenario.trim()}>保存纠正</Button>
+      <Button variant="text" disabled={busy || pending !== null}
+        onClick={() => { setCorrecting(null); setScenario(""); setDetail(""); }}>取消纠正</Button>
     </form>}
-    <button className="text-button" type="button" disabled={locked} onClick={() => setConfirmClear(true)}>清空全部学习记录</button>
+    <Button variant="text" disabled={locked} onClick={() => setConfirmClear(true)}>清空全部学习记录</Button>
     {confirmClear && <div><p>清除当前工作空间全部个人学习记录。原聊天、项目资料和执行事实保留；清除后旧轮次不能补回记录。</p>
-      <button className="danger-button" type="button" disabled={locked} onClick={() => void submit({ kind: "clear", commandId: createCommandId() })}>确认清除学习记录</button>
-      <button className="text-button" type="button" disabled={busy} onClick={() => setConfirmClear(false)}>保留记录</button></div>}
+      <Button variant="danger" disabled={locked} onClick={() => void submit({ kind: "clear", commandId: createCommandId() })}>确认清除学习记录</Button>
+      <Button variant="text" disabled={busy} onClick={() => setConfirmClear(false)}>保留记录</Button></div>}
     {onTransfer && <details className="tech-details"><summary onClick={() => { if (!background) setBackground(defaultBackground); }}>转入普通执行会话</summary>
       <p className="helper-text">输入明确执行要求与所选方案、约束和未决项。将新建普通会话；原学习身份保留，动作仍需原权限和验收。</p>
       <label className="field"><span>执行要求</span><textarea value={instruction} maxLength={2000}
         onChange={(event) => setInstruction(event.target.value)} disabled={busy || pending !== null} /></label>
       <label className="field"><span>方案、约束与未决项</span><textarea value={background} maxLength={4000}
         onChange={(event) => setBackground(event.target.value)} disabled={busy || pending !== null} /></label>
-      <button className="secondary-button" type="button" disabled={locked || inflight || composerDirty || Boolean(detail.trim() || scenario.trim()) || !instruction.trim()}
-        onClick={() => onTransfer(instruction.trim(), background.trim())}>转入执行</button>
+      <Button variant="secondary" disabled={locked || inflight || composerDirty || Boolean(detail.trim() || scenario.trim()) || !instruction.trim()}
+        onClick={() => onTransfer(instruction.trim(), background.trim())}>转入执行</Button>
       {inflight && <p>正在生成，安全结束后才能转入执行。</p>}
       {(composerDirty || Boolean(detail.trim() || scenario.trim())) && <p>有未提交的消息或纠正，请先发送、保存或明确取消，草稿会保留。</p>}
     </details>}
     {error && <p role="alert">{error}</p>}
     {pending && <div><p>学习命令结果待核对。核对前不提交新操作。</p>
-      <button className="secondary-button" type="button" disabled={busy} onClick={() => void checkReceipt()}>核对学习命令回执</button>
-      <button className="secondary-button" type="button" disabled={busy || blocked || writeBlocked} onClick={() => void submit(pending, true)}>按原学习命令重试</button></div>}
+      <Button variant="secondary" disabled={busy} onClick={() => void checkReceipt()}>核对学习命令回执</Button>
+      <Button variant="secondary" disabled={busy || blocked || writeBlocked} onClick={() => void submit(pending, true)}>按原学习命令重试</Button></div>}
   </details>;
 }
 

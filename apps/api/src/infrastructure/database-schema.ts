@@ -1,4 +1,4 @@
-import type { JsonObject } from './json.js';
+import type { JsonObject, JsonValue } from './json.js';
 
 /**
  * V001 的持久化词汇与行类型。
@@ -983,6 +983,11 @@ export interface MemorySettingsRow {
   readonly automatic_compaction: boolean;
   /** 0125：结算后是否自动提取长期记忆（ADR-030）。默认开启。 */
   readonly auto_capture: boolean;
+  /**
+   * 0162：自动压缩阈值（tokens）。`null` = 产品默认 350,000，不是「关闭」；
+   * 关闭普通自动压缩走 `automatic_compaction`。生效值还要按模型真实窗口收敛。
+   */
+  readonly compaction_threshold_tokens: number | null;
   readonly revision: bigint;
   readonly updated_at: Date;
 }
@@ -1631,6 +1636,17 @@ export interface AssistMessageRow {
   readonly usage_cache_read_tokens: number | null;
   readonly usage_cache_creation_tokens: number | null;
   readonly worker_id: string | null;
+  /**
+   * 0163：这条助手消息已开始的生成次数（1 = 首次）。
+   *
+   * 意外中断（Worker 崩溃、宿主停机）后同一消息身份重新排队时递增；到上界仍失败则
+   * 落 `FAILED` + `RECOVERY_EXHAUSTED`。它不是重试次数统计：用户主动停止不会递增。
+   */
+  readonly generation_attempt: number;
+  /** 0163：最近一次观察到生成中断的时刻；旧行 NULL，不回填推测值。 */
+  readonly interrupted_at: Date | null;
+  /** 0163：最近一次中断的类型化原因（LEASE_LOST / RECOVERY_BLOCKED_* / RECOVERY_EXHAUSTED）。 */
+  readonly interruption_reason: string | null;
   /** 0156：Worker 领取该消息的观察时刻；重新排队时清空，旧行 NULL。 */
   readonly claimed_at: Date | null;
   /** 0156：消息进入终态的观察时刻；撤回/编辑不覆盖，旧行 NULL。 */
@@ -1803,6 +1819,29 @@ export interface AssistMessagePreviewRow {
    * null 表示还没有可用的估算，不是 0。
    */
   readonly usage: JsonObject | null;
+  readonly updated_at: Date;
+}
+
+/**
+ * 0163：会话生成的逐回合检查点。
+ *
+ * 只记录**已完成的工具回合**：模型给出的完整回合（工具请求、前导说明、推理片段、
+ * 回合前插话）与逐调用结果正文。恢复时按原轮次回灌，已结算的工具不再派发。
+ * 纯模型调用不写检查点——它没有需要复用的外部副作用。
+ */
+export interface AssistGenerationRoundRow {
+  readonly id: string;
+  readonly message_id: string;
+  /** 产生这一回合的生成次数（`assist_messages.generation_attempt`）。 */
+  readonly attempt: number;
+  readonly round: number;
+  /** `{ calls, steers_before?, preamble?, reasoning_content? }`。 */
+  readonly assistant_turn: JsonObject;
+  /** `[{ provider_tool_call_id, name, content, is_error, slot }]`；逐次追加，可为部分结果。 */
+  readonly tool_results: readonly JsonValue[];
+  readonly usage: JsonObject | null;
+  readonly provider_request_id: string | null;
+  readonly created_at: Date;
   readonly updated_at: Date;
 }
 
@@ -2064,6 +2103,7 @@ export interface RelayDatabaseSchema {
   assist_delegation_supplements: AssistDelegationSupplementRow;
   assist_message_attachments: AssistMessageAttachmentRow;
   assist_message_previews: AssistMessagePreviewRow;
+  assist_generation_rounds: AssistGenerationRoundRow;
   assist_message_baselines: AssistMessageBaselineRow;
   assist_message_baseline_files: AssistMessageBaselineFileRow;
   assist_message_snapshot_blobs: AssistMessageSnapshotBlobRow;

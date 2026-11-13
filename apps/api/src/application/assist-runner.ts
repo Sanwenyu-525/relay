@@ -70,6 +70,8 @@ import { captureMemoriesForTurn } from './memory-auto-capture.js';
 import { enqueueSessionTitleAfterTurn } from './session-title-generation.js';
 import { AssistMemoryUnavailable, historicalReplyAvailable, readWorkingMemory } from './assist-memory.js';
 import { prepareAutomaticMemory, runAssistMemoryTick } from './assist-memory-runner.js';
+import { GENERATION_RECOVERY_MAX_ATTEMPTS, loadGenerationResumeState,
+  recoveryReadOnlyTools, type ResumedGenerationRound } from './assist-generation-resume.js';
 import { AssistHistorySourceUnavailable, loadAssistSourceContent, recheckAssistSources } from './assist-source-content.js';
 export { AssistHistorySourceUnavailable, loadAssistSourceContent, recheckAssistSources } from './assist-source-content.js';
 export type { FrozenSourceRef } from './assist-source-content.js';
@@ -170,7 +172,23 @@ export async function runAssistGenerationTick(db: DbExecutor,
   // AGENT_STOP_CLAIM_FENCE：已停止的宿主不能开始领取或调用模型。
   if (options.signal?.aborted) return undefined;
   const r = createRepositories(db);
-  await r.assist.failExpiredLeases(new Date(Date.now() - options.leaseMs));
+  // 0163：过期生成先做接续判定——安全的重排同一条消息，不安全的如实阻塞。
+  // 用户停止意图优先：这些行收口 CANCELLED，不自动恢复。
+  const expired = await r.assist.recoverExpiredGenerations({
+    olderThan: new Date(Date.now() - options.leaseMs),
+    maxAttempts: GENERATION_RECOVERY_MAX_ATTEMPTS,
+    readOnlyTools: recoveryReadOnlyTools(),
+  });
+  if (expired.requeued.length > 0 || expired.blocked.length > 0 || expired.exhausted.length > 0 ||
+      expired.delegationFailed.length > 0) {
+    getRuntimeLogger('assist').warn('assist_generation_recovery', {
+      worker_id: options.workerId,
+      requeued: expired.requeued.map((item) => item.messageId),
+      cancelled: expired.cancelled,
+      blocked: expired.blocked, exhausted: expired.exhausted,
+      delegation_failed: expired.delegationFailed,
+    });
+  }
   // 0128：委派尝试的恢复核对。租约清扫之后跑：崩溃窗口里「子消息已结算、尝试行未落定」
   // 与「子消息被清扫」都按原身份补结算，不盲重跑、不让悬空 RUNNING 永久占槽。
   await reconcileDelegationAttempts(db, { now: new Date(), leaseMs: options.leaseMs });
@@ -226,6 +244,11 @@ export async function runAssistGenerationTick(db: DbExecutor,
   let modelInvocationFailed = false;
   let modelInvocationError: unknown;
   try {
+    // 0163：意外中断后的同一消息身份重新排队时按持久检查点续跑；首次生成为空。
+    // 读取放在 try 内：心跳已在上面启动，任何异常都必须走 finally 收口。
+    const generationAttempt = message.generation_attempt;
+    const resumeRounds = generationAttempt > 1
+      ? await loadGenerationResumeState(db, message.id) : [];
     if (controller.signal.aborted) {
       return { messageId: message.id, sessionId: message.session_id,
         status: 'DISCARDED', errorCode: null, proposalIds: [] };
@@ -255,6 +278,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
     if (session.conversation_mode === 'ASSISTANT') {
       return await runAssistantReadonlyGeneration(db, { message, session,
         options: { ...options, modelPort: modelRoute.modelPort }, controller,
+        generationAttempt, resume: resumeRounds,
         ...(modelRoute.invokeAssist === undefined ? {} : { invokeAssist: modelRoute.invokeAssist }) });
     }
 
@@ -382,7 +406,7 @@ export async function runAssistGenerationTick(db: DbExecutor,
               readTools: availableTools.length > 0 }).system;
         // AGENT_GENERATION_LIFETIME：等待生成结算，finally 才能移除心跳与停止监听。
         return await runAgentMainLoopGeneration(db, { message, session, options, controller,
-          availableTools,
+          availableTools, generationAttempt, resume: resumeRounds,
           system: `${system}\n\n${capabilityNotice}` +
             (officialSkillNotice === null ? '' : `\n\n${officialSkillNotice}`),
           allowWrite,
@@ -875,6 +899,8 @@ async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
   readonly options: AssistGenerationOptions;
   readonly controller: AbortController;
   readonly invokeAssist?: (request: AssistRequest) => Promise<AssistResult>;
+  readonly generationAttempt: number;
+  readonly resume: readonly ResumedGenerationRound[];
 }): Promise<AssistGenerationOutcome> {
   const { message, session, options, controller } = context;
   // B 档的默认兼容端口此前直接调用 `modelPort.assist`：既没有账本行，也就没有
@@ -892,7 +918,8 @@ async function runAssistantReadonlyGeneration(db: DbExecutor, context: {
     })).result);
   const outcome = await runAssistantReadonlyRounds(db, { session, message,
     availableTools: await sessionReadToolsForCurrentConnections(db, session), modelPort: options.modelPort,
-    signal: controller.signal, invokeAssist });
+    signal: controller.signal, invokeAssist,
+    generationAttempt: context.generationAttempt, resume: context.resume });
   if (options.signal?.aborted && !await createRepositories(db).assist.isCancelRequested(message.id)) {
     return { messageId: message.id, sessionId: session.id,
       status: 'DISCARDED', errorCode: null, proposalIds: [] };
@@ -1111,6 +1138,9 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
   readonly options: AssistGenerationOptions;
   readonly controller: AbortController;
   readonly availableTools: readonly InternalToolName[];
+  /** 0163：生成次数与持久回合；`attempt > 1` 时从检查点续跑。 */
+  readonly generationAttempt: number;
+  readonly resume: readonly ResumedGenerationRound[];
   /** 本轮 system 文本：普通会话用 AGENT_MAIN_LOOP，已冻结方法用方法自己的模板。 */
   readonly system: string;
   /** 0126：本轮是否允许写文件；与 `system` 由同一个档位结论决定。 */
@@ -1216,6 +1246,7 @@ async function runAgentMainLoopGeneration(db: DbExecutor, context: {
     }
   };
   const outcome = await runAgentSessionReadonlyRounds(db, { session, message,
+    generationAttempt: context.generationAttempt, resume: context.resume,
     ...(context.chatMode === 'PLAN' || context.chatMode === 'GOAL_ROUND'
       ? { responseFormat: 'json_object' as const } : {}),
     allowTodo: context.chatMode !== 'PLAN',

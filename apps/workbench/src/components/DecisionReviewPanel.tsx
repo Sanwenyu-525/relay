@@ -6,6 +6,7 @@ import {
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import "./DecisionReviewPanel.css";
+import { Button } from "../ui";
 
 /**
  * 决定依据与复核（HTTP 契约 §10.72）。
@@ -483,7 +484,7 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
     </header>
 
     {readError && <p className="action-error" role="alert" data-testid="decision-review-read-error">
-      读取决定依据失败：{readError} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button>
+      读取决定依据失败：{readError} <Button variant="text" onClick={() => { void load(); }}>重新读取</Button>
     </p>}
     {reading && <p className="helper-text" role="status">正在读取决定依据与复核候选…</p>}
     {actionError && <p className="action-error" role="alert" data-testid="decision-review-action-error">{actionError}</p>}
@@ -495,13 +496,13 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
         不会改变本次重试发送的载荷。
       </p>
       <div className="knowledge-actions">
-        <button type="button" className="secondary-button" disabled={busy || checking}
+        <Button variant="secondary" disabled={busy || checking}
           data-testid="decision-review-receipt"
-          onClick={() => { void checkReceipt(pending); }}>{checking ? "正在查询回执" : "查询原命令回执"}</button>
-        <button type="button" className="primary-button" disabled={busy || checking}
-          data-testid="decision-review-retry" onClick={retryPending}>按原命令重试（冻结载荷）</button>
-        <button type="button" className="text-button" disabled={busy || checking}
-          data-testid="decision-review-abandon" onClick={abandonPending}>放弃核对，按当前表单新建请求</button>
+          onClick={() => { void checkReceipt(pending); }}>{checking ? "正在查询回执" : "查询原命令回执"}</Button>
+        <Button variant="primary" disabled={busy || checking}
+          data-testid="decision-review-retry" onClick={retryPending}>按原命令重试（冻结载荷）</Button>
+        <Button variant="text" disabled={busy || checking}
+          data-testid="decision-review-abandon" onClick={abandonPending}>放弃核对，按当前表单新建请求</Button>
       </div>
       {receiptNote && <p className="helper-text" role="status" data-testid="decision-review-receipt-note">{receiptNote}</p>}
     </div>}
@@ -510,10 +511,10 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
       <section className="decision-review__premises">
         <div className="decision-review__section-head">
           <h4>已登记依据 · {premises.length}</h4>
-          {decision.status === "ACTIVE" && <button type="button" className="secondary-button"
+          {decision.status === "ACTIVE" && <Button variant="secondary"
             data-testid="decision-premise-open" disabled={busy} onClick={() => { void openForm(); }}>
             {formOpen ? "收起登记" : "登记依据"}
-          </button>}
+          </Button>}
         </div>
         {premises.length === 0
           ? <p className="helper-text" data-testid="decision-premise-empty">还没有登记依据；未登记时无法识别依据变化。</p>
@@ -577,11 +578,11 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
           data-testid="decision-premise-confirmed"
           onChange={(event) => setConfirmed(event.target.checked)} />我已核对这条依据，确认以它作为决定前提</label>
         <div className="knowledge-actions">
-          <button type="button" className="primary-button" disabled={busy || !confirmed || pending !== null}
+          <Button variant="primary" disabled={busy || !confirmed || pending !== null}
             data-testid="decision-premise-submit"
-            onClick={() => { void submitPremise(); }}>登记依据</button>
-          <button type="button" className="secondary-button" disabled={busy}
-            onClick={() => { setFormOpen(false); setActionError(null); }}>取消</button>
+            onClick={() => { void submitPremise(); }}>登记依据</Button>
+          <Button variant="secondary" disabled={busy}
+            onClick={() => { setFormOpen(false); setActionError(null); }}>取消</Button>
         </div>
       </section>}
 
@@ -605,17 +606,17 @@ export default function DecisionReviewPanel({ client, projectId, decision }:
                       onChange={(event) => setReasons((old) => ({ ...old, [key]: event.target.value }))} />
                   </label>
                   <div className="knowledge-actions">
-                    <button type="button" className="primary-button" disabled={busy || pending !== null || reason.trim().length === 0}
+                    <Button variant="primary" disabled={busy || pending !== null || reason.trim().length === 0}
                       data-testid={`decision-review-keep-${key}`}
-                      onClick={() => { void resolve(review, "KEEP_DECISION"); }}>依据仍支持决定</button>
-                    <button type="button" className="secondary-button" disabled={busy || pending !== null || reason.trim().length === 0}
+                      onClick={() => { void resolve(review, "KEEP_DECISION"); }}>依据仍支持决定</Button>
+                    <Button variant="secondary" disabled={busy || pending !== null || reason.trim().length === 0}
                       data-testid={`decision-review-dismiss-${key}`}
-                      onClick={() => { void resolve(review, "DISMISS"); }}>忽略本次变化</button>
+                      onClick={() => { void resolve(review, "DISMISS"); }}>忽略本次变化</Button>
                   </div>
                 </>
                 : <p className="helper-text" data-testid={`decision-review-stale-${key}`}>
                   依据已再次变化，当前候选不能处理；请按最新来源重新判断。刷新后会读取新候选。
-                  <button type="button" className="text-button" disabled={busy} onClick={() => { void load(); }}>刷新</button>
+                  <Button variant="text" disabled={busy} onClick={() => { void load(); }}>刷新</Button>
                 </p>}
             </li>;
           })}</ul>}

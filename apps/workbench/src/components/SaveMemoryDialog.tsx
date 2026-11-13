@@ -7,6 +7,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { sha256Hex } from "../lib/sha256";
 import AppDialog from "./AppDialog";
 import "./SaveMemoryDialog.css";
+import { Button } from "../ui";
 
 /**
  * 「保存为长期记忆」（工作台 §40 / HTTP §10.99）。
@@ -203,8 +204,8 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
           {source.kind === "READING" && <p className="helper-text" role="status">正在读取原消息正文…</p>}
           {source.kind === "UNAVAILABLE" && <>
             <p className="action-error" role="alert" data-testid="save-memory-source-error">{source.reason}</p>
-            <button className="secondary-button" type="button" data-testid="save-memory-source-retry"
-              onClick={() => void readSource()}>重新读取来源</button>
+            <Button variant="secondary" data-testid="save-memory-source-retry"
+              onClick={() => void readSource()}>重新读取来源</Button>
           </>}
           {ready !== null && <>
             <p className="helper-text" data-testid="save-memory-source-ref">
@@ -240,35 +241,35 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
           {conflict !== null && <div className="action-error" role="alert" data-testid="save-memory-conflict">
             <p>会话或来源已变化：{conflict}</p>
             <p className="helper-text">草稿保留在这里。请先重新读取来源与最新修订，再决定是否保存；不会用旧修订覆盖。</p>
-            <button className="secondary-button" type="button" data-testid="save-memory-reload"
-              disabled={saving} onClick={() => void readSource()}>重新读取来源</button>
+            <Button variant="secondary" data-testid="save-memory-reload"
+              disabled={saving} onClick={() => void readSource()}>重新读取来源</Button>
           </div>}
           {error !== null && <p className="action-error" role="alert" data-testid="save-memory-error">
             {createdMemoryId === null ? "保存失败：" : "记忆已创建（命令已确认），读取已保存内容失败："}{error}</p>}
           {createdMemoryId !== null && saved === null && <div className="save-memory-actions">
-            <button className="secondary-button" type="button" data-testid="save-memory-reread"
-              disabled={saving} onClick={() => void rereadCreated()}>重新读取已保存的记忆</button>
+            <Button variant="secondary" data-testid="save-memory-reread"
+              disabled={saving} onClick={() => void rereadCreated()}>重新读取已保存的记忆</Button>
           </div>}
           {pending !== null && <div className="action-error" role="alert" data-testid="save-memory-pending">
             <p>保存结果未核对：请求响应丢失，这条命令是否已生效尚未确定。草稿与载荷都保留在这里。</p>
             <p className="helper-text">原 command_id：{pending.commandId}。先查回执；查不到时只能按同一命令与同一载荷重试，不换新 ID。</p>
             <div className="save-memory-actions">
-              <button className="secondary-button" type="button" data-testid="save-memory-receipt"
-                disabled={saving} onClick={() => void checkReceipt()}>查询原命令回执</button>
-              <button className="secondary-button" type="button" data-testid="save-memory-retry"
-                disabled={saving} onClick={() => void submit(pending)}>按原命令重试</button>
+              <Button variant="secondary" data-testid="save-memory-receipt"
+                disabled={saving} onClick={() => void checkReceipt()}>查询原命令回执</Button>
+              <Button variant="secondary" data-testid="save-memory-retry"
+                disabled={saving} onClick={() => void submit(pending)}>按原命令重试</Button>
             </div>
           </div>}
           <div className="save-memory-actions">
-            <button className="primary-button" type="button" data-testid="save-memory-confirm"
+            <Button variant="primary" data-testid="save-memory-confirm"
               disabled={!canSubmit || pending !== null} onClick={() => void submit()}>
-              {saving ? "正在保存" : "确认保存为长期记忆"}</button>
-            <button className="secondary-button" type="button" data-testid="save-memory-cancel"
-              disabled={saving} onClick={onClose}>取消</button>
+              {saving ? "正在保存" : "确认保存为长期记忆"}</Button>
+            <Button variant="secondary" data-testid="save-memory-cancel"
+              disabled={saving} onClick={onClose}>取消</Button>
           </div>
         </>}
         {ready === null && <div className="save-memory-actions">
-          <button className="secondary-button" type="button" data-testid="save-memory-close" onClick={onClose}>关闭</button>
+          <Button variant="secondary" data-testid="save-memory-close" onClick={onClose}>关闭</Button>
         </div>}
       </> : <section className="save-memory-saved" data-testid="save-memory-saved">
         <h3>已保存</h3>
@@ -297,7 +298,7 @@ export default function SaveMemoryDialog({ client, sessionId, sessionRevision, s
         <div className="save-memory-actions">
           <Link className="inline-link" to={`/knowledge?kind=MEMORY&item=${encodeURIComponent(saved.memory.id)}`}
             data-testid="save-memory-open">在资料页打开这条记忆</Link>
-          <button className="secondary-button" type="button" data-testid="save-memory-done" onClick={onClose}>完成</button>
+          <Button variant="secondary" data-testid="save-memory-done" onClick={onClose}>完成</Button>
         </div>
       </section>}
     </div>

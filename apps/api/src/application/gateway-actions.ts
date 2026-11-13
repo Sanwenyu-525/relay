@@ -3279,6 +3279,20 @@ export async function reconcileGatewayInvocation(db: DbExecutor, input: {
       // DISPATCHING/UNKNOWN 且结果丢失：不能凭缺 PID 或进程停止断定未执行或已知失败，保守 UNKNOWN 隔离。
       toolReconciliation = { status: cliCheck.outcome, result: cliCheck.details };
     }
+  } else if (op.capability_key === 'BROWSER_READ' || op.capability_key === 'BROWSER_ACTION' ||
+      op.capability_key === 'BROWSER_COMMIT' || op.capability_key === 'COMPUTER_READ' ||
+      op.capability_key === 'COMPUTER_INPUT') {
+    /*
+     * 浏览器与桌面动作没有可复现的查询/幂等协议：页面 URL 不变不等于没提交、按钮消失
+     * 不等于远端成功、截图与窗口枚举也不能证明输入没有发生。结果丢失时唯一诚实的结论
+     * 是 UNKNOWN（隔离资源、阻断新的冲突执行、等待人工核对），不能用「目标文件不存在」
+     * 去推断未执行。
+     */
+    toolReconciliation = invocation.status === 'PREPARED'
+      ? { status: 'NOT_EXECUTED', result: { reason: 'PREPARED_NOT_EXECUTED' } }
+      : { status: 'UNKNOWN', result: {
+          reason: 'MACHINE_ACTION_RESULT_NOT_OBSERVABLE',
+          capability: op.capability_key, action_type: op.action_type } };
   } else if (invocation.status === 'PREPARED' || op.capability_key === 'FAKE_PUBLIC_READ') {
     observed = 'MISSING';
   } else {

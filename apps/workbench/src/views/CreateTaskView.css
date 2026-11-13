@@ -15,7 +15,7 @@
 /* V5.28 创建页说明是辅助阅读，示例条目不沿用旧 reading(18px) 档。 */
 .pv-page.create-task-page .rail-section > p,
 .pv-page.create-task-page .summary-card p,
-.pv-page.create-task-page .suggestion-copy small { font-size: 12px; }
+.pv-page.create-task-page .suggestion-copy small { font-size: var(--relay-font-size-caption); }
 
 /* 主区不再叠一层 relay 内边距（pv 页的 30px 已给足留白），标题与卡片左缘回到 336.4。 */
 .pv-page.create-task-page .page-primary { max-width: none; padding: 0; }
@@ -25,9 +25,9 @@
 .pv-page.create-task-page .create-form {
   margin-top: var(--relay-space-6);
   padding: 17px;
-  background: #fff;
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
   box-shadow: var(--pv-card-shadow);
 }
 
@@ -36,9 +36,9 @@
   align-self: start;
   margin-left: var(--relay-space-6);
   padding: 17px;
-  background: #fff;
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
+  background: var(--relay-color-bg-surface);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
   box-shadow: var(--pv-card-shadow);
 }
 

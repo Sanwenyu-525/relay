@@ -46,10 +46,10 @@
 
 /* V5.28：步骤与资源要点不继承旧 rowTitle(20px) 档。 */
 .pv-page.run-detail-page .run-step-title strong,
-.pv-page.run-detail-page .run-resource-points strong { font-size: 13px; }
+.pv-page.run-detail-page .run-resource-points strong { font-size: var(--relay-font-size-pageBase); }
 .pv-page.run-detail-page .run-step-status,
 .pv-page.run-detail-page .run-step-time,
-.pv-page.run-detail-page .run-step-reason { font-size: 12px; }
+.pv-page.run-detail-page .run-step-reason { font-size: var(--relay-font-size-caption); }
 .pv-page.run-detail-page .run-step-time { color: var(--pv-muted); }
 
 /* 并入 48rem 折行档，原 60rem：时间列折到标题下一行，行内保持「标题 + 状态」两列；

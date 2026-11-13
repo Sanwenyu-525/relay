@@ -10,6 +10,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ProjectTaskChainsView.css";
+import { Button } from "../ui";
 
 type ChainIntent =
   | { readonly kind: "CREATE"; readonly input: RelayTaskChainCreate }
@@ -320,7 +321,7 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
       <div className="pv-card-h"><strong>暂时无法读取项目任务链</strong></div>
       <div className="pv-card-b">
         <p>{error}</p>
-        <button className="secondary-button" type="button" onClick={() => void refresh()}>重新读取</button>
+        <Button variant="secondary" onClick={() => void refresh()}>重新读取</Button>
       </div>
     </section>
   </TaskChainsStatePage>;
@@ -331,8 +332,8 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
     {archived && <p className="action-error" role="status">项目已归档；任务链不能创建或授权。</p>}
     {pending && <section className="surface-panel task-chain-pending" data-testid="task-chain-pending">
       <h2>命令结果待核对</h2><p>原 command ID：<code>{pending.input.commandId}</code>。原请求已保存在本机此工作区，不会自动更换 ID。</p>
-      <button className="secondary-button" type="button" disabled={busy} onClick={() => void recover()}>查询原命令回执</button>
-      {pendingAbsent && <button className="secondary-button" type="button" disabled={busy} onClick={() => void execute(pending)}>用原 ID 与原载荷重试</button>}
+      <Button variant="secondary" disabled={busy} onClick={() => void recover()}>查询原命令回执</Button>
+      {pendingAbsent && <Button variant="secondary" disabled={busy} onClick={() => void execute(pending)}>用原 ID 与原载荷重试</Button>}
     </section>}
     {error && <p className="action-error" role="alert">刷新失败：{error}；已保留本地已读任务链。</p>}
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
@@ -345,15 +346,15 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
       <label className="field"><span className="field-label">任务链名称</span><input value={chainTitle} maxLength={200}
         disabled={pending !== null} onChange={(event) => setChainTitle(event.target.value)} /></label>
       {taskPages.error && <div className="action-error" role="alert">已保留已加载任务与原游标：{taskPages.error}
-        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore} onClick={taskPages.retry}>重试任务列表</button></div>}
+        <Button variant="text" disabled={taskPages.loading || taskPages.loadingMore} onClick={taskPages.retry}>重试任务列表</Button></div>}
       <p className="helper-text">已加载 {taskPages.items.length} 项{taskPages.nextCursor === null ? "，任务列表已到末页。" : "，任务列表仍有后续页。"}</p>
       <div className="task-chain-task-list">{taskPages.items.map((task) => <label key={task.id} className="planning-check">
         <input type="checkbox" checked={selectedTaskIds.includes(task.id)} disabled={pending !== null ||
           (!selectedTaskIds.includes(task.id) && selectedTaskIds.length >= 16)} onChange={() => toggleTask(task)} />
         <span>{task.title}<small>{task.status} · {task.executor} · Task 修订 v{task.revision}</small></span>
       </label>)}</div>
-      {taskPages.nextCursor !== null && <button className="secondary-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
-        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多任务"}</button>}
+      {taskPages.nextCursor !== null && <Button variant="secondary" disabled={taskPages.loading || taskPages.loadingMore}
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多任务"}</Button>}
       {selectedTaskIds.length > 0 && <ol className="task-chain-order">{selectedTaskIds.map((taskId, index) => {
         const task = taskDetails.get(taskId);
         return <li key={taskId}><div><strong>{task?.title ?? taskId}</strong><span>{task ? `${task.status} · ${task.executor} · 验收 v${task.acceptance.acceptanceRevision}` : "正在读取当前验收与依赖…"}</span>
@@ -368,22 +369,22 @@ function LiveTaskChains({ client, projectId }: { readonly client: RelayApiClient
           {task?.unresolvedBlockerIds.map((id) => <span className="action-error" key={id}>
             未解除 blocker {id}：{projectState?.blockers.find((blocker) => blocker.blockerId === id && blocker.resolvedAt === null)?.reason ?? "阻塞原因暂不可读"}
           </span>)}
-        </div><div className="task-chain-order-actions"><button className="text-button" type="button" disabled={pending !== null || index === 0} onClick={() => reorder(index, -1)}>上移</button>
-          <button className="text-button" type="button" disabled={pending !== null || index === selectedTaskIds.length - 1} onClick={() => reorder(index, 1)}>下移</button></div></li>;
+        </div><div className="task-chain-order-actions"><Button variant="text" disabled={pending !== null || index === 0} onClick={() => reorder(index, -1)}>上移</Button>
+          <Button variant="text" disabled={pending !== null || index === selectedTaskIds.length - 1} onClick={() => reorder(index, 1)}>下移</Button></div></li>;
       })}</ol>}
       {detailError && <p className="action-error" role="alert">任务详情或验收版本读取失败：{detailError}。确认权限恢复后可重新选择任务再读取。</p>}
       {blockerReadError && <p className="action-error" role="alert">项目阻塞事实读取失败：{blockerReadError}；任务链创建已禁用。</p>}
       {missingPrerequisite && <p className="action-error" role="alert">所选顺序没有把全部未完成的必要前置排在依赖任务之前。</p>}
       {unresolvedBlockers.length > 0 && <p className="action-error" role="alert">存在无法通过本任务链顺序解决的 blocker；先解除后才能创建草稿。</p>}
-      <button className="primary-button" type="button" data-testid="task-chain-create" disabled={busy || pending !== null || archived ||
+      <Button variant="primary" data-testid="task-chain-create" disabled={busy || pending !== null || archived ||
         !selectedTasksReady || missingPrerequisite || detailError !== null || blockerReadError !== null || chainTitle.trim() === ""}
         onClick={() => void execute({ kind: "CREATE", input: { commandId: createCommandId(), projectId, title: chainTitle.trim(), confirmed: true,
           tasks: selectedTasks.map((task) => ({ taskId: task.id, expectedRevision: task.revision,
-            expectedAcceptanceRevision: task.acceptance.acceptanceRevision })) } })}>创建任务链草稿</button>
+            expectedAcceptanceRevision: task.acceptance.acceptanceRevision })) } })}>创建任务链草稿</Button>
     </section>
 
     <section className="surface-panel task-chain-history" aria-label="任务链历史">
-      <div className="task-chain-section-head"><h2>任务链与运行事实</h2><button className="text-button" type="button" onClick={() => void refresh()}>重新读取</button></div>
+      <div className="task-chain-section-head"><h2>任务链与运行事实</h2><Button variant="text" onClick={() => void refresh()}>重新读取</Button></div>
       {chains.length === 0 ? <p className="helper-text">本项目还没有任务链。</p> : <label className="field"><span className="field-label">选择任务链</span>
         <select value={selectedChainId} onChange={(event) => setSelectedChainId(event.target.value)}>
           {chains.map((chain) => <option key={chain.chainId} value={chain.chainId}>{chain.title} · {chainLabels[chain.status] ?? chain.status} · v{chain.revision}</option>)}
@@ -467,13 +468,13 @@ function ChainDetail({ chain, reviews, reviewsError, uncertainCalls, usage, canA
       </div>
       <label className="planning-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
         <span>我已核对这条固定任务链、累计预算和到期时间，并明确授权（最多 24 小时）。</span></label>
-      <button className="primary-button" type="button" data-testid="task-chain-authorize" disabled={busy || archived || !confirmed || !timeValid || !budgetsValid || uncertainCalls > 0}
-        onClick={onAuthorize}>{chain.status === "DRAFT" ? "明确授权并启动受限准入" : "明确恢复并继续"}</button>
+      <Button variant="primary" data-testid="task-chain-authorize" disabled={busy || archived || !confirmed || !timeValid || !budgetsValid || uncertainCalls > 0}
+        onClick={onAuthorize}>{chain.status === "DRAFT" ? "明确授权并启动受限准入" : "明确恢复并继续"}</Button>
     </section>}
     {chain.status === "ACTIVE" && <section className="task-chain-stop" aria-label="暂停或撤销任务链">
       <h3>控制当前执行</h3><label className="field"><span className="field-label">停止理由</span><input value={stopReason} maxLength={4000} onChange={(event) => setStopReason(event.target.value)} /></label>
-      <button className="secondary-button" type="button" disabled={busy || archived || stopReason.trim() === ""} onClick={() => onStop("PAUSE")}>请求安全暂停</button>
-      <button className="danger-button" type="button" disabled={busy || stopReason.trim() === ""} onClick={() => onStop("REVOKE")}>撤销任务链授权</button>
+      <Button variant="secondary" disabled={busy || archived || stopReason.trim() === ""} onClick={() => onStop("PAUSE")}>请求安全暂停</Button>
+      <Button variant="danger" disabled={busy || stopReason.trim() === ""} onClick={() => onStop("REVOKE")}>撤销任务链授权</Button>
     </section>}
   </div>;
 }

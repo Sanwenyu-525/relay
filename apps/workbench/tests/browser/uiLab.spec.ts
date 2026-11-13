@@ -94,3 +94,40 @@ test("错误态字段的边框用状态色，不是默认控件边框", async ({
   const borderColor = await invalid.evaluate((element) => getComputedStyle(element).borderTopColor);
   expect(borderColor).toBe(rgb);
 });
+
+test("交互组件区：菜单选中后收起、弹出层 Esc 关闭、切换条方向键换页", async ({ page }) => {
+  await page.goto("/__dev/ui");
+  await expect(page.getByTestId("ui-lab")).toBeVisible();
+
+  const menu = page.locator("#lab-interactive .ui-menu");
+  await menu.locator("summary").click();
+  await expect(menu.locator(".ui-menu__panel")).toBeVisible();
+  await menu.getByRole("menuitem", { name: "新建" }).click();
+  // 选中即收起：DOM 上的 details.open 必须回到 false。
+  await expect.poll(() => menu.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+  await expect(page.locator("#lab-interactive")).toContainText("已选择：新建");
+
+  const trigger = page.getByRole("button", { name: "筛选", exact: true });
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "筛选条件" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "筛选条件" })).toHaveCount(0);
+
+  const tabs = page.locator("#lab-interactive [role=\"tablist\"]");
+  await tabs.getByRole("tab", { name: /全部/ }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(tabs.getByRole("tab", { name: /收件箱/ })).toHaveAttribute("aria-selected", "true");
+});
+
+test("容器区与反馈区：表格/卡片渲染真实类名，Toast 走既有反馈宿主", async ({ page }) => {
+  await page.goto("/__dev/ui");
+  await expect(page.getByTestId("ui-lab")).toBeVisible();
+
+  await expect(page.locator("#lab-containers table.ui-table").first()).toBeVisible();
+  await expect(page.locator("#lab-containers .ui-card").first()).toBeVisible();
+  await expect(page.locator("#lab-containers [role=\"region\"][aria-label=\"滚动区示例\"]")).toBeVisible();
+
+  await page.getByRole("button", { name: "触发 Toast" }).click();
+  // 反馈宿主挂在页壳里：Toast 不是本地渲染的节点，而是进队列后由宿主画出来。
+  await expect(page.locator(".feedback-stack").getByText("示例回执：设置已保存")).toBeVisible();
+});

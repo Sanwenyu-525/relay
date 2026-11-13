@@ -26,6 +26,18 @@ test('IPv6 loopback requests pass Host and Origin checks while other hosts and p
       url: '/probe', headers: { host: '[::1]:8787', origin: 'http://[2001:db8::1]:5173' },
     });
     assert.equal(wrongOrigin.statusCode, 403);
+    // 预检必须放行工作台实际使用的全部写方法：PUT/DELETE 漏配会让模型连接默认用途等
+    // 浏览器动作被拦在 CORS 预检（2026-11-12 验收复现「操作失败，请重试。」）。
+    const preflight = await app.inject({
+      method: 'OPTIONS', url: '/probe',
+      headers: { host: '[::1]:8787', origin: 'http://[::1]:5173',
+        'access-control-request-method': 'PUT' },
+    });
+    assert.equal(preflight.statusCode, 204);
+    const allowedMethods = String(preflight.headers['access-control-allow-methods']).split(',');
+    for (const method of ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS']) {
+      assert.ok(allowedMethods.includes(method), `preflight must allow ${method}`);
+    }
     const address = await app.listen({ host: '::1', port: 0 });
     const response = await fetch(`${address}/probe`, { headers: { origin: 'http://[::1]:5173' } });
     assert.equal(response.status, 200);

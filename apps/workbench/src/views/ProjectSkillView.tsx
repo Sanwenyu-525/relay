@@ -19,6 +19,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectSnapshot, ProjectSummary, SourceReference } from "../types";
 import type { ProjectType } from "../types";
 import "./ProjectSkillView.css";
+import { Button } from "../ui";
 
 const tabs = [["overview", "总览"], ["blueprint", "蓝图预览"], ["resume", "继续项目"], ["assist", "Assist"]] as const;
 type TabKey = typeof tabs[number][0];
@@ -123,8 +124,8 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
   }, [client, id, reload]);
 
   if (loading && !facts) return <section className="page-state pv-page" role="status"><p className="eyebrow">Projects</p><h1>正在读取项目当前状态</h1><p>只读查询 Project 与 State 事实，不会开始任务或恢复执行。</p></section>;
-  if (error && !facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
-  if (!facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>项目事实不可用。</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>;
+  if (error && !facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>{error}</p><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>重新读取</Button></section>;
+  if (!facts) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Projects</p><h1>暂时无法读取项目总览</h1><p>项目事实不可用。</p><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>重新读取</Button></section>;
 
   const { project, state, goals, nextAction, reviews, decisions, artifacts } = facts;
   const { tasks, tasksNextCursor, tasksReadFailed } = facts;
@@ -145,7 +146,7 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
     <PageHeader testId="project-overview-page-head" title={project.title} meta={`${type} · ${phaseLabel(state.phaseKey)}`}
       status={<span className={`status-chip ${archived ? "status-chip--neutral" : "status-chip--success"}`}>{archived ? "已归档" : phaseLabel(state.phaseKey)}</span>}
       lede={activeGoals && activeGoals.length ? activeGoals.map((goal) => goal.title).join("；") : `${type}项目 · ${phaseLabel(state.phaseKey)}`}
-      actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</button>} />
+      actions={<Button variant="secondary" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新</Button>} />
     {(loading || error !== null) && <p className="warning-callout" role="status" data-testid="project-overview-stale-facts">
       {error ? `刷新失败：${error}。当前展示的是上次成功读取的事实，标题编辑已暂停。` : "正在重新读取项目事实；刷新完成前标题编辑暂不可用。"}
     </p>}
@@ -159,7 +160,7 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
       <DailyContinuationCard key={reload} client={client} projectId={id} />
       <div className="project-resume-actions">
         {archived ? <>
-          <button className="primary-button" type="button" disabled data-testid="project-resume-continue">继续工作</button>
+          <Button variant="primary" disabled data-testid="project-resume-continue">继续工作</Button>
           <p className="disabled-reason" data-testid="project-resume-archived-reason"><Info aria-hidden="true" />项目已归档：只能阅读历史，恢复归档后才能继续。</p>
         </> : state.nextActionTaskId !== null && nextAction
           ? <Link className="primary-button" data-testid="project-resume-continue" to={`/tasks/${nextAction.id}`}>继续工作<ArrowRight aria-hidden="true" /></Link>
@@ -299,7 +300,7 @@ function FixtureProjectOverview() {
     {/* V43-04：总览是接续摘要主入口；示例模式同样只导航，不创建任何执行事实。 */}
     <div className="project-resume-actions" data-testid="project-resume-card">
       {summary.archived ? <>
-        <button className="primary-button" type="button" disabled data-testid="project-resume-continue">继续工作</button>
+        <Button variant="primary" disabled data-testid="project-resume-continue">继续工作</Button>
         <p className="disabled-reason" data-testid="project-resume-archived-reason"><Info aria-hidden="true" />项目已归档：只能阅读历史，恢复归档后才能继续。</p>
       </> : <>
         {snapshot?.tasks.some((task) => task.status === "IN_PROGRESS")

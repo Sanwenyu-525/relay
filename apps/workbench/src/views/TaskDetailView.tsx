@@ -8,7 +8,8 @@ import TaskAcceptanceEditPanel from "../components/TaskAcceptanceEditPanel";
 import TaskDelegatePanel from "../components/TaskDelegatePanel";
 import TaskRunHistory from "../components/TaskRunHistory";
 import StatusChip from "../components/StatusChip";
-import { RelayApiError, type RelayAcceptanceCriterion, type RelayApiClient, type RelayTaskAcceptance } from "../api/relayClient";
+import { createCommandId, RelayApiError, taskMutationFrom,
+  type RelayAcceptanceCriterion, type RelayApiClient, type RelayTaskAcceptance } from "../api/relayClient";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { acceptanceSourceLabels, criterionMethodLabel, executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
@@ -17,6 +18,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import type { DecimalRevision, ExecutorKind, FixtureError, InteractionMode, TaskStatus } from "../types";
 import "./TaskDetailView.css";
+import { Button } from "../ui";
 
 interface TaskDetailResult {
   readonly source: "fixture" | "live";
@@ -36,6 +38,73 @@ const tabs = [{ key: "overview", label: "概览" }, { key: "artifacts", label: "
 function criteriaNoteFrom(source: string): string {
   const label = acceptanceSourceLabels[source];
   return label === undefined ? `来源：${source}。` : `来源：${label}（${source}）。`;
+}
+
+/**
+ * 待整理任务的「标记为可开始」（2026-11-13 验收整改）。
+ *
+ * 背景：接受任务定义提案后新建的 Task 处于 INBOX，服务端给出 MARK_READY 允许动作，
+ * 但此前只有创建任务表单会在同一流程里调用 MarkTaskReady——单独从任务详情进入时
+ * 没有任何入口，用户无法把「从对话到任务」走进正式执行。这里补的是这条既有动作的
+ * 最小入口：命令身份、结果待核对（transport 时保留原 command_id 并可查回执）、
+ * 成功后重读任务事实；不自动开始执行。
+ */
+function MarkTaskReadyAction({ client, taskId, revision, onDone }: {
+  client: RelayApiClient;
+  taskId: string;
+  revision: DecimalRevision;
+  onDone: () => Promise<void>;
+}) {
+  const pendingCommand = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [needsReceipt, setNeedsReceipt] = useState(false);
+  const apply = async (commandId: string): Promise<void> => {
+    const mutation = await client.markTaskReady({ taskId, commandId, expectedRevision: revision });
+    pendingCommand.current = null;
+    setNeedsReceipt(false);
+    setReceipt(`已标记为可开始：任务修订 v${mutation.revision}。标记不会自动开始执行。`);
+    await onDone();
+  };
+  const submit = () => {
+    if (busy) return;
+    const commandId = pendingCommand.current ?? createCommandId();
+    pendingCommand.current = commandId;
+    setBusy(true); setError(null); setReceipt(null);
+    void apply(commandId).catch((caught: unknown) => {
+      const described = describeLiveError(caught);
+      if (described.kind === "transport") setNeedsReceipt(true);
+      else pendingCommand.current = null;
+      setError(`标记可开始失败：${described.message}${described.kind === "transport"
+        ? "。结果暂不明确，请先核对原命令回执，不要重复提交。" : ""}`);
+    }).finally(() => setBusy(false));
+  };
+  const checkReceipt = () => {
+    const commandId = pendingCommand.current;
+    if (commandId === null || busy) return;
+    setBusy(true); setError(null);
+    void client.getCommandReceipt(commandId).then(async (body) => {
+      if (body.commandType !== "MarkTaskReady") throw new Error("回执命令类型与原操作不匹配。");
+      const mutation = taskMutationFrom(body.result);
+      if (mutation.taskId !== taskId) throw new Error("回执 Task 与原任务不匹配。");
+      await apply(commandId);
+    }).catch((caught: unknown) => {
+      setError(`回执核对失败：${describeLiveError(caught).message}`);
+    }).finally(() => setBusy(false));
+  };
+  return <section className="task-detail-section" data-testid="task-mark-ready" aria-labelledby="task-mark-ready-heading">
+    <div className="task-detail-section-heading"><h2 id="task-mark-ready-heading">整理与开始</h2></div>
+    <p className="helper-text">任务当前是待整理：确认定义与验收条件后标记为可开始；标记不会自动开始执行，也不会代替人工验收。</p>
+    <div className="form-actions">
+      <Button variant="primary" data-testid="task-mark-ready-submit" disabled={busy} onClick={submit}>
+        {busy ? "正在提交" : "标记为可开始"}</Button>
+      {needsReceipt && <Button variant="secondary" data-testid="task-mark-ready-receipt" disabled={busy}
+        onClick={checkReceipt}>核对原命令回执</Button>}
+    </div>
+    {receipt && <p className="receipt-message" role="status" data-testid="task-mark-ready-receipt-message">{receipt}</p>}
+    {error && <p className="action-error" role="alert" data-testid="task-mark-ready-error">{error}</p>}
+  </section>;
 }
 
 export default function TaskDetailView() {
@@ -116,7 +185,7 @@ export default function TaskDetailView() {
     : result && !["INBOX", "READY", "IN_PROGRESS"].includes(result.task.status)
       ? "当前任务周期不可编辑；已完成的任务需先重开。" : null);
   if (loadedTarget.current !== targetKey || loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">任务详情</p><h1>正在读取任务</h1><p>{live ? "正在从本机 API 读取真实任务事实。" : "示例数据正在加载。"}</p></section>;
-  if (error && !result) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">任务详情</p><h1>暂时无法读取这个任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (error && !result) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">任务详情</p><h1>暂时无法读取这个任务</h1><p>{error}</p><Button variant="secondary" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   if (!result) return <section className="page-state pv-page"><p className="eyebrow">任务详情</p><h1>{live ? "服务端没有返回这个任务" : "示例数据没有这个任务"}</h1><p>{live ? "跨作用域或已删除的任务按不可见处理；页面不会据此创建任务。" : "示例数据里只有“确定实验评价指标”这一个任务，其他任务不显示示例内容。"}</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
   const taskAlerts = taskUnavailable ? <p className="disabled-reason">任务来源暂不可读；本页不显示缓存或推断的任务事实。</p>
     : <>{refreshing && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}{projectWriteBlockedReason && <p className="disabled-reason" data-testid="task-project-archive-reason">{projectWriteBlockedReason}</p>}</>;
@@ -157,7 +226,7 @@ export default function TaskDetailView() {
   const taskTitleBlock = taskUnavailable ? null
     : <PageHeader testId="task-detail-page-head" title={result.task.title} status={<StatusChip status={result.task.status} />}
       overline="Task Detail" meta={headerMeta} actions={headerActions}>{headerIdentity}</PageHeader>;
-  const taskReadError = error && <div className="warning-callout" role="alert" data-testid="task-refresh-error"><p>刷新任务事实失败：{error} 草稿与原命令反馈仍保留，核对成功前不能提交新的命令。</p><button className="secondary-button" type="button" data-testid="task-refresh-retry" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取任务</button></div>;
+  const taskReadError = error && <div className="warning-callout" role="alert" data-testid="task-refresh-error"><p>刷新任务事实失败：{error} 草稿与原命令反馈仍保留，核对成功前不能提交新的命令。</p><Button variant="secondary" data-testid="task-refresh-retry" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取任务</Button></div>;
   // 页签行右侧的辅助文字入口：路由与准入逻辑不变，只移动呈现位置。
   const taskTabRow = <div className="task-detail-tabrow" data-testid="task-detail-tabrow"><nav className="skill-tabs" role="tablist" aria-label="任务详情页签" onKeyDown={handleTabListKeyDown}>{tabs.map((item) => <button key={item.key} className={`skill-tab${tab === item.key ? " skill-tab--active" : ""}`} type="button" role="tab" id={`task-detail-tab-${item.key}`} aria-controls="task-detail-content" aria-selected={tab === item.key} tabIndex={tab === item.key ? 0 : -1} data-testid={`task-detail-tab-${item.key}`} onClick={() => { setTab(item.key); if (item.key === "artifacts") setArtifactVisited(true); }}>{item.label}</button>)}</nav><div className="task-detail-quick-links"><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=definition`}>{aiHolds ? "只读查看任务定义" : "完善定义"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=verification`}>{aiHolds ? "只读查看验收方案" : "验收方案"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=assist`}>AI 讨论</Link></div></div>;
   const objectiveSection = <section className="task-detail-section" aria-labelledby="task-objective-heading"><div className="task-detail-section-heading"><h2 id="task-objective-heading">任务目标</h2></div>{result.objective ? <p className="task-detail-objective">{result.objective}</p> : <p className="helper-text">当前响应未提供任务目标。</p>}</section>;
@@ -188,6 +257,10 @@ export default function TaskDetailView() {
         executorRunId: result.task.runId, allowedActions: result.task.allowedActions ?? [] }}
         recoveryOnly={result.task.runId !== null || (tab !== "runs" && !(result.task.status === "READY" && result.task.executor === "HUMAN"))}
         projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={(runId) => navigate(`/runs/${runId}`)} /></div>}
+    {tab === "overview" && !taskUnavailable && result.source === "live" && connection.client &&
+      result.task.status === "INBOX" && (result.task.allowedActions ?? []).includes("MARK_READY") && !aiHolds &&
+      <MarkTaskReadyAction key={`${connection.epoch}:${result.task.id}:${result.task.revision}`}
+        client={connection.client} taskId={result.task.id} revision={result.task.revision} onDone={load} />}
     {criteriaSection}
     {tab === "overview" && !taskUnavailable && result.source === "live" && result.acceptance && connection.client &&
       <TaskAcceptanceEvidence client={connection.client} taskId={result.task.id} taskRevision={result.task.revision}

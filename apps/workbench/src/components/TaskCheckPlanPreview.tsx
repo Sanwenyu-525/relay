@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RelayApiClient, RelayTaskCheckPlanPreview } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./TaskCheckPlanPreview.css";
+import { Button } from "../ui";
 
 /** 当前验收和规则的读时派生；不会把它包装成 Run 证据。 */
 export default function TaskCheckPlanPreview({ client, taskId, taskRevision, acceptanceRevision }: {
@@ -28,7 +29,7 @@ export default function TaskCheckPlanPreview({ client, taskId, taskRevision, acc
     (acceptanceRevision === undefined || preview.sources.acceptanceRevision === acceptanceRevision);
   return <section className="surface-panel task-check-plan" data-testid="task-check-plan-preview">
     <div className="task-check-plan-heading"><h3>当前检查方案</h3>
-      <button className="secondary-button" type="button" disabled={loading} onClick={() => void load()}>刷新准入预览</button></div>
+      <Button variant="secondary" disabled={loading} onClick={() => void load()}>刷新准入预览</Button></div>
     <p className="helper-text">由读取时的 Task 验收与规则派生；不是活动 Run 的冻结计划，也没有执行检查或得出 PASS。</p>
     {loading && <p role="status">正在读取当前准入预览…</p>}
     {error && <p className="action-error" role="alert">预览不可读取：{error}</p>}

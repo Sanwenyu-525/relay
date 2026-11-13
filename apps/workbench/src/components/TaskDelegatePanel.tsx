@@ -9,6 +9,7 @@ import { checkRecoveryNow, recoveryScope, recoveryStorageKey, registerRecoveryOw
   subscribeRecoveries, upsertRecovery, type RecoveryRecord } from "../lib/commandRecovery";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import type { DecimalRevision, ExecutorKind, TaskStatus } from "../types";
+import { Button } from "../ui";
 
 export interface DelegateTarget {
   readonly id: string;
@@ -283,12 +284,12 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
     {delegateError && <p className="action-error" role="alert">{delegateError}</p>}
     {pendingDelegate ? <>
       <p className="helper-text" data-testid="delegate-command-id">原 command_id：{pendingDelegate.commandId}</p>
-      <button className="secondary-button" type="button" data-testid="delegate-check-receipt" disabled={delegating || recoveryChecking}
-        onClick={() => void checkDelegateReceipt()}>{delegating || recoveryChecking ? "正在核对原命令回执" : "核对原命令回执"}</button>
+      <Button variant="secondary" data-testid="delegate-check-receipt" disabled={delegating || recoveryChecking}
+        onClick={() => void checkDelegateReceipt()}>{delegating || recoveryChecking ? "正在核对原命令回执" : "核对原命令回执"}</Button>
     </> : <>
-      <button className="primary-button" type="button" data-testid="task-delegate"
+      <Button variant="primary" data-testid="task-delegate"
         disabled={delegateBlockedReason !== null || mockActionBlockedReason !== null || readActionBlockedReason !== null || delegating}
-        onClick={() => void delegate()}>{delegating ? "正在提交" : "委托 AI 执行"}</button>
+        onClick={() => void delegate()}>{delegating ? "正在提交" : "委托 AI 执行"}</Button>
       {delegateBlockedReason && <p className="disabled-reason">{delegateBlockedReason}</p>}
       {!compact && (mockActionBlockedReason || readActionBlockedReason) && <p className="disabled-reason">{mockActionBlockedReason ?? readActionBlockedReason}</p>}
     </>}
@@ -343,8 +344,8 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
             onChange={(event) => setReadUrl(event.target.value)} placeholder="https://example.org/article" /></label>}
         <p className="helper-text">本次委托只读取一个目标；运行时仍会核对连接、权限、目标、网页主机和重定向。</p>
         {readActionBlockedReason && <p className="disabled-reason" data-testid="task-read-blocked">{readActionBlockedReason}</p>}
-        <button className="secondary-button" type="button" data-testid="task-read-reload" disabled={readConfigLoading || frozen}
-          onClick={() => { clearReadConfig(); setReadConfigLoading(true); setReadConfigEpoch((value) => value + 1); }}>重读读取配置</button>
+        <Button variant="secondary" data-testid="task-read-reload" disabled={readConfigLoading || frozen}
+          onClick={() => { clearReadConfig(); setReadConfigLoading(true); setReadConfigEpoch((value) => value + 1); }}>重读读取配置</Button>
       </>}
     </div>;
   }
@@ -373,8 +374,8 @@ export default function TaskDelegatePanel({ client, task, projectWriteBlockedRea
           disabled={pendingDelegate !== null || delegating} data-testid="task-mock-content" /></label>
         <p className="helper-text">连接、目录与写入权限需先在项目登记。委托回执不执行文件动作；审批回执不代表写入已完成。</p>
         {mockActionBlockedReason && <p className="disabled-reason" data-testid="task-mock-blocked">{mockActionBlockedReason}</p>}
-        {mockConfigError && <button className="secondary-button" type="button" disabled={pendingDelegate !== null || delegating}
-          onClick={() => setMockConfigEpoch((value) => value + 1)}>重读动作配置</button>}
+        {mockConfigError && <Button variant="secondary" disabled={pendingDelegate !== null || delegating}
+          onClick={() => setMockConfigEpoch((value) => value + 1)}>重读动作配置</Button>}
       </>}
     </div>;
   }

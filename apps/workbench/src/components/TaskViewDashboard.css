@@ -96,7 +96,7 @@
   border-radius: var(--relay-radius-card);
   background: var(--relay-color-bg-surface);
   padding: var(--relay-space-4);
-  box-shadow: 0 2px 8px rgba(36, 60, 40, 0.04);
+  box-shadow: var(--relay-shadow-surface);
   display: flex;
   flex-direction: column;
 }
@@ -320,7 +320,7 @@
   background: var(--relay-color-selection-bg);
   color: var(--relay-color-action-primary);
   border-color: var(--relay-color-action-primary);
-  box-shadow: 0 0 0 3px rgba(34, 92, 71, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--relay-color-action-primary) 10%, transparent);
 }
 
 .task-step-mark.warn {

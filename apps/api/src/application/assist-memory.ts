@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AssistMessageRow, AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import type { AssistMemoryCheckpointRow } from '../assist/assist-memory-repository.js';
 import { computePayloadHash } from '../receipt/payload-hash.js';
@@ -14,10 +15,11 @@ import { createRepositories, type Repositories } from './unit-of-work.js';
 import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
 import { freezeChatModelSnapshot } from './model-connection-runtime.js';
 import { recheckAssistSources } from './assist-source-content.js';
+import { estimateTokens } from './assist-context-usage.js';
+import { decideContextCompaction, measureSessionContextTokens, resolveSessionCompactionPolicy }
+  from './assist-context-policy.js';
 
 export const MEMORY_RECENT_MESSAGES = 8;
-export const MEMORY_AUTO_MESSAGES = 32;
-export const MEMORY_AUTO_BYTES = 48000;
 export const MEMORY_INPUT_BYTES = 128000;
 export const MEMORY_BATCH_MESSAGES = 1000;
 
@@ -28,12 +30,16 @@ export function memoryCompactionTurn(message: AssistMessageRow): JsonObject {
       ? message.content ?? '（该轮无可用文本，不能推断图片或执行成功。）' : null };
 }
 
-/** Same UTF-8 / 3 estimate as the model port; reserve 25% for prompts, tools and output. */
+/**
+ * 压缩输入（不是触发阈值）的字节上限。
+ *
+ * 0162 起「什么时候压」由 token 策略判定（`assist-context-policy.ts`）；这里只剩
+ * 「一次压缩请求最多能读多少历史」——它是外呼容量的硬边界，与触发阈值无关。
+ * 保留 25% 给提示词、工具与输出。
+ */
 export function memoryContextLimits(callTokens: number | null) {
-  if (callTokens === null) return { inputBytes: MEMORY_INPUT_BYTES, autoBytes: MEMORY_AUTO_BYTES,
-    autoMessages: MEMORY_AUTO_MESSAGES };
-  const inputBytes = Math.floor(callTokens * 0.75) * 3;
-  return { inputBytes, autoBytes: Math.floor(inputBytes * 0.8), autoMessages: null };
+  if (callTokens === null) return { inputBytes: MEMORY_INPUT_BYTES };
+  return { inputBytes: Math.floor(callTokens * 0.75) * 3 };
 }
 
 export async function resolveMemoryContextLimits(r: Repositories, workspaceId: string,
@@ -143,7 +149,39 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   const existing = await r.assistMemory.activeRequest(session.id);
   if (existing !== undefined) return existing.id;
   const settings = await r.information.readMemorySettings(session.workspace_id);
-  if (!session.remember || reason === 'AUTO' && settings?.automatic_compaction === false) return null;
+  // 一次性模式（remember=false）不建立摘要：那正是它的语义。
+  if (!session.remember) return null;
+  /*
+   * 0162：触发判定改为 token 策略。
+   *
+   * 两个读数取较大值，因为它们量的是同一份请求的两个侧面：
+   *   * `measured`——上一次真实调用报的输入量 + 之后新增的消息（真实基线与估算增量）；
+   *   * `projected`——装配方已经算好的本轮请求字节（含资料正文等注入段）。
+   * 只取其中一个都会漏：资料注入不在历史行里，历史增量也不在请求字节里。
+   *
+   * 手动压缩不看阈值：用户按下就是一次显式请求，有没有收益由候选轮次决定。
+   */
+  const { policy, automaticCompaction, model } = await resolveSessionCompactionPolicy(r, session, env);
+  /*
+   * Token 读数异常不能把整轮对话打死：它是判定依据，不是业务事实。读不到时退回
+   * 「装配方给出的请求字节」，并在统一日志里留下一条可追的异常记录；真正的硬保护
+   * 仍是端口的外呼前闸门与溢出保护。
+   */
+  let measured: Awaited<ReturnType<typeof measureSessionContextTokens>>;
+  try {
+    measured = await measureSessionContextTokens(r, session);
+  } catch (error) {
+    getRuntimeLogger('context-compaction').error('context_token_measurement_failed', {
+      session_id: session.id, error });
+    measured = { tokens: 0, source: 'ESTIMATED', baselineInputTokens: null,
+      deltaTokens: 0, deltaMessages: 0 };
+  }
+  const contextTokens = Math.max(measured.tokens, estimateTokens(Math.max(0, projectedInputBytes)));
+  const decision = reason === 'MANUAL'
+    ? { action: 'COMPACT' as const, trigger: 'MANUAL' as const }
+    : decideContextCompaction({ policy, tokens: contextTokens, automaticCompaction });
+  if (decision.action === 'NONE') return null;
+  const trigger = decision.trigger ?? 'MANUAL';
   const state = await r.assistMemory.state(session.id);
   const checkpoint = state?.checkpoint_id == null ? null : await r.assistMemory.checkpoint(state.checkpoint_id) ?? null;
   // MEMORY_BATCH_CURSOR: scan only the active prefix; completed batches are linked by checkpoint.
@@ -161,11 +199,6 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   const snapshot = modelSnapshot ?? frozen?.snapshot ?? { mock: true };
   const connectionId = modelConnectionId ?? frozen?.connectionId ?? null;
   const limits = await resolveMemoryContextLimits(r, session.workspace_id, snapshot, session.id);
-  const bytes = delta.reduce((sum, m) => sum + Buffer.byteLength(m.content ?? '', 'utf8'),
-    forceRebuild ? 0 : Buffer.byteLength(checkpoint?.summary ?? '', 'utf8'));
-  if (reason === 'AUTO' && history.length <= MEMORY_BATCH_MESSAGES &&
-      Math.max(bytes, projectedInputBytes) < limits.autoBytes &&
-      (limits.autoMessages === null || delta.length < limits.autoMessages)) return null;
   const candidates = delta.slice(0, -MEMORY_RECENT_MESSAGES);
   const summary = forceRebuild ? null : checkpoint?.summary ?? null;
   let inputBytes = Buffer.byteLength(JSON.stringify({ previous_summary: summary, completed_turns: [] }), 'utf8');
@@ -186,6 +219,27 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   if (reason === 'AUTO' && latest?.reason === 'AUTO' && latest.through_seq >= anchor.seq &&
       latest.status !== 'COMPLETED') return null;
   const covered = history.filter((m) => m.seq <= anchor.seq);
+  /*
+   * 只有真的要建请求时才记「已发起」：判定命中但无候选轮次（或同一失败边界）会
+   * 在上面返回 null，那两次都不该在日志里留下一次并不存在的压缩。
+   */
+  const logger = getRuntimeLogger('context-compaction');
+  logger.info('context_compaction_requested', {
+    session_id: session.id, reason, trigger, model,
+    tokens_before: contextTokens, tokens_source: measured.source,
+    threshold_tokens: policy.effectiveThresholdTokens,
+    requested_threshold_tokens: policy.requestedThresholdTokens,
+    window_tokens: policy.modelWindowTokens,
+    target_window_tokens: policy.targetWindowTokens,
+    window_source: policy.windowSource,
+    automatic_compaction: automaticCompaction });
+  if (policy.thresholdClamped) {
+    // 不静默使用无效配置：保存值超过模型安全上限时记录下来，界面另有同口径提示。
+    logger.warn('context_compaction_threshold_clamped', {
+      session_id: session.id, model, requested_threshold_tokens: policy.requestedThresholdTokens,
+      effective_threshold_tokens: policy.effectiveThresholdTokens,
+      window_tokens: policy.modelWindowTokens, target_window_tokens: policy.targetWindowTokens });
+  }
   const authority = await r.workspaces.readAuthority(session.workspace_id);
   if (authority === undefined) throw resourceNotFound('Workspace authority');
   const id = randomUUID();
@@ -198,7 +252,20 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
       // 0158：压缩请求记住它冻结在哪条连接上；执行端据此解析，不重新读「当前默认」。
       ...(connectionId === null ? {} : { model_connection_id: connectionId }),
       memory_compaction: { after_seq: after.toString(),
-        base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null } }, reason });
+        base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null,
+        // 0162：这次请求为什么发生，以及判定当时的读数。`reason` 只区分 MANUAL/AUTO
+        // （0119 的 CHECK），溢出保护也走 AUTO，所以触发方式单独记一份；它是派生元数据，
+        // 不是新的事实源，旧行没有这些键时由 `readCompactionAudit` 按 reason 推回。
+        trigger, tokens_before: contextTokens,
+        threshold_tokens: policy.effectiveThresholdTokens,
+        window_tokens: policy.modelWindowTokens,
+        window_source: policy.windowSource,
+        // 执行端在压缩完成后要复核「压完到底够不够」，因此把判定当时的两个边界一起冻结：
+        // 安全输入上限（硬上限）与压缩后目标。它们只是这次请求的判定依据，不是新的事实源。
+        safe_input_tokens: policy.safeInputTokens,
+        post_compaction_target_tokens: policy.postCompactionTargetTokens,
+        // 模型名只作可读元数据：执行端日志要说明「哪次压缩、用哪个模型」，避免只能记 null。
+        model } }, reason });
   return id;
 }
 

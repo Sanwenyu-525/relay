@@ -6,6 +6,7 @@ import { deleteSessionAndVerify, verifyDeleteReceipt } from "../lib/sessionDelet
 import { reserveSessionExportFileName, saveExportFile } from "../lib/sessionExportFile";
 import { useMenuExclusive } from "../lib/popoverMenu";
 import { closeUndoFeedback, escalateFeedback, openUndoFeedback, Toast } from "./Feedback";
+import { Button } from "../ui";
 
 /**
  * 会话改动只回这一行自身的事实（改名/置顶/未读/归档/重开），调用方据此收敛这一行。
@@ -578,13 +579,13 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
    * 样式只复用 `.recent-work-row-action`（同一档 20px 图标、字号、内边距与焦点环），不新增类：
    * 菜单的尺寸与节奏是前九轮定下来的，多一个条目不该改这几项。
    */
-  const exportItem = <button type="button" className="text-button recent-work-row-action"
+  const exportItem = <Button variant="text" className="recent-work-row-action"
     aria-disabled={exporting} title={EXPORT_HINT}
     data-testid={`recent-work-export-${session.id}`}
     onClick={() => void exportSession()}>
     <Download aria-hidden="true" />
     {exporting ? "导出中…" : exported === null ? "导出会话" : "已导出会话"}
-  </button>;
+  </Button>;
 
   return <>
     <button type="button" className="recent-work-row-trigger" ref={triggerRef}
@@ -600,78 +601,77 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
       data-testid={`recent-work-panel-${session.id}`}>
       {panel === "actions" && (archived
         ? <>
-          <button type="button" className="text-button recent-work-row-action" disabled={busy}
+          <Button variant="text" className="recent-work-row-action" disabled={busy}
             onClick={() => void run((commandId) => client.reopenAssistSession({ sessionId: session.id,
               commandId, expectedRevision: session.revision }), () => ({ kind: "reopen" }))}>
-            <RotateCcw aria-hidden="true" />重开这段讨论</button>
+            <RotateCcw aria-hidden="true" />重开这段讨论</Button>
           {/* 归档态同样给导出：要拿去外部分析的往往是已经结束、需要复盘的那一段。
               它在「重开」与危险项之间——只读取，不动这一行任何事实。 */}
           {exportItem}
           {/* 归档态也能删：删除与归档是两条通道，归档不先拦住删除（ADR-027）。 */}
           <div role="separator" className="recent-work-row-separator" />
-          <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger"
+          <Button variant="text" className="recent-work-row-action recent-work-row-action--danger"
             disabled={busy} data-testid={`recent-work-delete-${session.id}`} onClick={openDelete}>
-            <Trash2 aria-hidden="true" />删除</button>
+            <Trash2 aria-hidden="true" />删除</Button>
         </>
         : <>
-          <button type="button" className="text-button recent-work-row-action" disabled={busy}
+          <Button variant="text" className="recent-work-row-action" disabled={busy}
             onClick={() => void run((commandId) => client.setAssistSessionPin({ sessionId: session.id,
               commandId, expectedRevision: session.revision, pinned: !pinned }), () => ({ kind: "pin" }))}>
             {pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}
             {pinned ? "取消置顶" : "置顶"}
-          </button>
-          <button type="button" className="text-button recent-work-row-action" disabled={busy}
+          </Button>
+          <Button variant="text" className="recent-work-row-action" disabled={busy}
             onClick={() => { setDraft(session.title); setPanel("rename"); }}>
-            <Pencil aria-hidden="true" />重命名</button>
+            <Pencil aria-hidden="true" />重命名</Button>
           {/*
             重新生成标题（0157）：紧挨重命名——它们是同一件事的两种写法（用户写 / 语义生成）。
             手动命名过的会话先弹一次确认，因为这一次会替换用户自己设置的名字；
             其他来源直接发起。归档态不提供：服务端与改名同一条「先重开」边界。
           */}
-          <button type="button" className="text-button recent-work-row-action"
+          <Button variant="text" className="recent-work-row-action"
             disabled={busy || titleRegenerating}
             data-testid={`recent-work-regenerate-title-${session.id}`}
             onClick={() => { setError(null); setTitleNotice(null);
               if (session.titleSource === "USER_DEFINED") setPanel("regenerate");
               else void startRegenerate(); }}>
             <Sparkles aria-hidden="true" />
-            {titleRegenerating ? "正在生成标题…" : "重新生成标题"}</button>
-          <button type="button" className="text-button recent-work-row-action" disabled={busy}
+            {titleRegenerating ? "正在生成标题…" : "重新生成标题"}</Button>
+          <Button variant="text" className="recent-work-row-action" disabled={busy}
             data-testid={`recent-work-unread-${session.id}`}
             onClick={() => void run((commandId) => client.setAssistSessionUnread({ sessionId: session.id,
               commandId, expectedRevision: session.revision, unread: !unread }), () => ({ kind: "unread" }))}>
             {unread ? <MailOpen aria-hidden="true" /> : <Mail aria-hidden="true" />}
             {unread ? "取消未读" : "标记为未读"}
-          </button>
+          </Button>
           {/* 分叉留在常用这一组：它新建一条讨论，不带归档那种不可逆读感。
               编号（1）（2）由服务端决定，界面不自己拼（2026-10-18 用户指令）。
               还没有消息的讨论不给这一项：没有可搬的历史，服务端只会拒绝（2026-10-24）。
               判据是服务端读时派生的 hasMessages，不从活动键的可空性推断。 */}
-          {session.hasMessages && <button type="button"
-            className="text-button recent-work-row-action" disabled={busy}
+          {session.hasMessages && <Button variant="text" className="recent-work-row-action" disabled={busy}
             data-testid={`recent-work-fork-${session.id}`}
             onClick={() => void run((commandId) => client.forkAssistSession({ sessionId: session.id,
               commandId, expectedRevision: session.revision }),
             (result) => ({ kind: "fork", forkedSessionId: result.sessionId }))}>
-            <GitFork aria-hidden="true" />分叉这段讨论</button>}
+            <GitFork aria-hidden="true" />分叉这段讨论</Button>}
           {/* 分组细线：常用改动（置顶/重命名/未读/分叉）与收尾动作（复制身份、归档）之间一刀切开，
               与参考菜单的两组读法一致；归档仍是唯一带不可逆读感的动作，单独收尾。 */}
           <div role="separator" className="recent-work-row-separator" />
-          <button type="button" className="text-button recent-work-row-action"
+          <Button variant="text" className="recent-work-row-action"
             data-testid={`recent-work-copy-id-${session.id}`} onClick={copyId}>
             <Copy aria-hidden="true" />{copied ? "已复制会话 ID" : "复制会话 ID"}
-          </button>
+          </Button>
           {/* 导出与复制同属「取一份东西出去」这一组：都不写服务端事实，都排在带不可逆读感的
               归档与删除之前（2026-11-01 用户任务书 §二）。 */}
           {exportItem}
-          <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger" disabled={busy}
+          <Button variant="text" className="recent-work-row-action recent-work-row-action--danger" disabled={busy}
             onClick={() => void archiveSession()}>
-            <Archive aria-hidden="true" />归档</button>
+            <Archive aria-hidden="true" />归档</Button>
           {/* 归档可撤销（上面那条 Snackbar），删除不可撤销——两者不合并成一个「移除」。
               条目名只留「删除」：这一行本身就在左栏列着，「这段讨论」四个字由浮层标题接手。 */}
-          <button type="button" className="text-button recent-work-row-action recent-work-row-action--danger" disabled={busy}
+          <Button variant="text" className="recent-work-row-action recent-work-row-action--danger" disabled={busy}
             data-testid={`recent-work-delete-${session.id}`} onClick={openDelete}>
-            <Trash2 aria-hidden="true" />删除</button>
+            <Trash2 aria-hidden="true" />删除</Button>
         </>)}
       {/* 标题生成在途：只说明「已受理、正在等后台落定」，不是「标题已经更新」。
           面板收起后这一行仍会在左栏的既有轮询里更新。 */}
@@ -685,12 +685,12 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
           你当前手动设置的标题会被替换；聊天内容、执行与各项状态不受影响。
           如果模型不可用，原标题会保留。</p>
         <div className="recent-work-confirm-actions">
-          <button className="primary-button" type="button" disabled={busy}
+          <Button variant="primary" disabled={busy}
             data-testid={`session-title-regenerate-confirm-${session.id}`}
-            onClick={() => void startRegenerate()}>{busy ? "正在提交…" : "重新生成"}</button>
-          <button ref={cancelRef} className="secondary-button" type="button"
+            onClick={() => void startRegenerate()}>{busy ? "正在提交…" : "重新生成"}</Button>
+          <Button variant="secondary" ref={cancelRef}
             disabled={busy} data-testid={`session-title-regenerate-cancel-${session.id}`}
-            onClick={close}>取消</button>
+            onClick={close}>取消</Button>
         </div>
       </>}
       {panel === "rename" && <form className="recent-work-rename" onSubmit={(event) => {
@@ -698,8 +698,8 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
         <input ref={inputRef} type="text" value={draft} maxLength={TITLE_LIMIT} aria-label="会话标题"
           data-testid={`recent-work-rename-input-${session.id}`}
           onChange={(event) => { setDraft(event.target.value); setError(null); }} />
-        <button type="submit" className="primary-button recent-work-rename-save" disabled={busy}>保存</button>
-        <button type="button" className="text-button" disabled={busy} onClick={close}>取消</button>
+        <Button variant="primary" className="recent-work-rename-save" type="submit" disabled={busy}>保存</Button>
+        <Button variant="text" disabled={busy} onClick={close}>取消</Button>
       </form>}
       {/* 确认浮层（2026-10-19）：标题 + 一句后果 + 两键，与动作面板同一个容器、同一套摆位。
           长正文里那条「被引用不能删」不再常驻——它只在服务端真的拒绝时由结果态说出。 */}
@@ -710,12 +710,12 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
         <div className="recent-work-confirm-actions">
           {/* 删除在左、取消在右（2026-10-19 用户指令）：两键各占一半，合计铺满卡片内容宽，
               与菜单条目同一条左右边界；初始焦点仍压在「取消」上，回车不会直接删。 */}
-          <button className="danger-button" type="button" disabled={busy}
+          <Button variant="danger" disabled={busy}
             data-testid={`session-delete-confirm-${session.id}`} onClick={() => void deleteSession()}>
             {busy ? "正在删除…" : "删除"}
-          </button>
-          <button ref={cancelRef} className="secondary-button" type="button"
-            disabled={busy} data-testid={`session-delete-cancel-${session.id}`} onClick={closeDelete}>取消</button>
+          </Button>
+          <Button variant="secondary" ref={cancelRef}
+            disabled={busy} data-testid={`session-delete-cancel-${session.id}`} onClick={closeDelete}>取消</Button>
         </div>
       </>}
       {/* 结果态（2026-10-31）：确认之后只有终态，没有第二次确认。
@@ -741,12 +741,12 @@ export default function SessionRowMenu({ client, session, onChanged, onStale, on
         </div>
         <div className="recent-work-confirm-actions">
           {deleteResult.kind === "unresolved" && (
-            <button className="secondary-button" type="button" disabled={busy}
+            <Button variant="secondary" disabled={busy}
               data-testid={`session-delete-recheck-${session.id}`}
-              onClick={() => void recheckDeleteReceipt()}>{busy ? "核对中…" : "核对回执"}</button>
+              onClick={() => void recheckDeleteReceipt()}>{busy ? "核对中…" : "核对回执"}</Button>
           )}
-          <button ref={resultCloseRef} className="secondary-button" type="button"
-            data-testid={`session-delete-close-${session.id}`} onClick={closeDelete}>关闭</button>
+          <Button variant="secondary" ref={resultCloseRef}
+            data-testid={`session-delete-close-${session.id}`} onClick={closeDelete}>关闭</Button>
         </div>
       </>}
       {error !== null && <p className="recent-work-row-error" role="alert">{error}</p>}

@@ -8,6 +8,7 @@ import type { RelayApiClient, RelayDirectoryWorkContext } from "../api/relayClie
 import { goalStatusLabels, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import { Button } from "../ui";
 
 /**
  * 普通受管目录的只读工作上下文。
@@ -70,8 +71,8 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
       <div className="pv-card-h"><strong>暂时无法读取目录</strong></div>
       <div className="pv-card-b">
         <p>{error ?? "目录事实不可用。"}</p>
-        <button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
-          <RotateCcw aria-hidden="true" />重新读取</button>
+        <Button variant="secondary" onClick={() => setReload((value) => value + 1)}>
+          <RotateCcw aria-hidden="true" />重新读取</Button>
       </div>
     </section>
   </div>;
@@ -87,8 +88,8 @@ function LiveDirectoryContext({ id, client }: { id: string; client: RelayApiClie
         status={<span className={`status-chip ${directory.status === "ACTIVE" ? "status-chip--success" : "status-chip--neutral"}`}>
           {directory.status === "ACTIVE" ? "目录可用" : "目录已停用"}</span>}
         lede="只汇集精确绑定到该目录的普通会话；切换入口不改 Session ID、Project 绑定或历史。"
-        actions={<button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>
-          <RotateCcw aria-hidden="true" />刷新</button>} />
+        actions={<Button variant="secondary" onClick={() => setReload((value) => value + 1)}>
+          <RotateCcw aria-hidden="true" />刷新</Button>} />
       {project.archiveStatus === "ARCHIVED" && <p className="warning-callout" role="status">
         所属项目已归档：目录与会话只读；归档不会删除原有历史。
       </p>}

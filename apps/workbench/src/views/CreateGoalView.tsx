@@ -7,6 +7,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
 import { describeLiveError } from "../lib/liveErrors";
 import GoalProjectLinkPanel from "./GoalProjectLinkPanel";
+import { Button } from "../ui";
 
 /**
  * 轻量 Goal 创建入口（工作台 §18.7、总纲 §0.8、LC-01/LC-02）。
@@ -213,9 +214,9 @@ export default function CreateGoalView({ client, onCancel }: {
     </div>
     <GoalProjectLinkPanel client={client} goalId={created.goalId} goalTitle={created.title} />
     <div className="form-actions">
-      <button className="secondary-button" type="button" data-testid="goal-create-again"
-        onClick={() => { setCreated(null); setInput(""); setTitle(""); setTitleTouched(false); }}>再记录一个目标</button>
-      <button className="secondary-button" type="button" data-testid="goal-create-close" onClick={onCancel}>返回项目</button>
+      <Button variant="secondary" data-testid="goal-create-again"
+        onClick={() => { setCreated(null); setInput(""); setTitle(""); setTitleTouched(false); }}>再记录一个目标</Button>
+      <Button variant="secondary" data-testid="goal-create-close" onClick={onCancel}>返回项目</Button>
     </div>
   </section>;
 
@@ -242,20 +243,20 @@ export default function CreateGoalView({ client, onCancel }: {
           保存只登记这个目标本身。关联项目、建立任务、交给 AI 执行都是各自的独立步骤，
           不会被这一步顺带完成。</p>
         <div className="form-actions">
-          <button className="primary-button" type="submit" data-testid="goal-submit"
-            disabled={!canSubmit}>{busy ? "正在保存" : "保存这个目标"}</button>
-          <button className="secondary-button" type="button" data-testid="goal-cancel"
-            disabled={busy} onClick={onCancel}>取消</button>
+          <Button variant="primary" type="submit" data-testid="goal-submit"
+            disabled={!canSubmit}>{busy ? "正在保存" : "保存这个目标"}</Button>
+          <Button variant="secondary" data-testid="goal-cancel"
+            disabled={busy} onClick={onCancel}>取消</Button>
         </div>
       </form>
       {error && <p className="action-error" role="alert" data-testid="goal-error">{error}</p>}
       {pending !== null && <div className="warning-callout" data-testid="goal-pending">
         <strong>Goal 命令待核对</strong>
         <p>原 command ID：{pending.commandId}。核对前不会创建另一个 Goal。</p>
-        <button className="secondary-button" type="button" data-testid="goal-receipt" disabled={busy}
-          onClick={() => { const request = scope.current; setBusy(true); void checkReceipt(pending, request); }}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" data-testid="goal-retry" disabled={busy}
-          onClick={() => { const request = ++scope.current; setBusy(true); void send(pending, request); }}>用原 ID 和原载荷重试</button>}
+        <Button variant="secondary" data-testid="goal-receipt" disabled={busy}
+          onClick={() => { const request = scope.current; setBusy(true); void checkReceipt(pending, request); }}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" data-testid="goal-retry" disabled={busy}
+          onClick={() => { const request = ++scope.current; setBusy(true); void send(pending, request); }}>用原 ID 和原载荷重试</Button>}
       </div>}
     </div>
     <div className="page-rail"><div className="rail-content">

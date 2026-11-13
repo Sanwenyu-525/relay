@@ -25,7 +25,7 @@
 }
 
 .pv-page .projects-footnote { margin-top: 22px; border-top: none; padding-top: 0; }
-.pv-page .projects-footnote__note { font-size: 11px; color: #566f5f; }
+.pv-page .projects-footnote__note { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
 
 /* ── 推进摘要条 ─────────────────────────────────────────────────────────── */
 
@@ -254,16 +254,16 @@
   gap: 9px;
   min-width: 0;
   padding: 16px;
-  background: #fff;
-  border: 1px solid #e3ebe4;
-  border-radius: 14px;
-  box-shadow: 0 4px 18px #203b2810;
+  background: var(--relay-color-bg-surface);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-card);
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.pv-pcard:hover { border-color: #c6ddcc; }
+.pv-pcard:hover { border-color: var(--relay-color-border-subtle); }
 
 .pv-pcard--archived { background: var(--pv-subtle); }
 
@@ -278,8 +278,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: #566f5f;
+  font-size: var(--relay-font-size-micro);
+  color: var(--relay-color-text-muted);
   margin-left: auto;
 }
 
@@ -287,10 +287,10 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #55a579;
+  background: var(--relay-color-action-primary);
 }
 
-.pv-pcard__status.is-archived .pv-pcard__status-dot { background: #b7c2b9; }
+.pv-pcard__status.is-archived .pv-pcard__status-dot { background: var(--relay-color-text-muted); }
 
 .pv-pcard__control {
   display: grid;
@@ -298,13 +298,13 @@
   width: 26px;
   height: 26px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--relay-radius-badge);
   background: none;
-  color: #5a7263;
+  color: var(--relay-color-text-muted);
   cursor: pointer;
 }
 
-.pv-pcard__control:hover { color: #294635; background: #eef6ef; }
+.pv-pcard__control:hover { color: var(--relay-color-text-primary); background: var(--relay-color-border-separator); }
 
 .pv-pcard__control > svg { width: 15px; height: 15px; }
 
@@ -313,7 +313,7 @@
   min-width: 0;
   font-size: 13.5px;
   font-weight: 700;
-  color: #22422f;
+  color: var(--relay-color-text-primary);
   line-height: 1.45;
 }
 
@@ -336,8 +336,8 @@
 
 .pv-pcard__caption {
   margin: 0;
-  color: #566f5f;
-  font-size: 11px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
   line-height: 1.65;
 }
 
@@ -346,11 +346,11 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   padding-top: 2px;
-  color: #566f5f;
-  font-size: 11px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-micro);
 }
 
-.pv-pcard__metrics .is-unset { color: #88622c; }
+.pv-pcard__metrics .is-unset { color: var(--relay-color-status-warning-text); }
 
 .pv-pcard__footer {
   display: flex;
@@ -365,18 +365,18 @@
   padding: 0;
   border: none;
   background: none;
-  color: #526c5a;
-  font-size: 11px;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-micro);
   font-weight: 650;
   cursor: pointer;
 }
 
-.pv-pcard__ghost:hover { color: #17664d; text-decoration: underline; text-underline-offset: 0.2em; }
+.pv-pcard__ghost:hover { color: var(--relay-color-action-text); text-decoration: underline; text-underline-offset: 0.2em; }
 
-.pv-pcard__footer .secondary-button { min-height: 30px; padding: 4px 11px; font-size: 11px; }
+.pv-pcard__footer .secondary-button { min-height: 30px; padding: 4px 11px; font-size: var(--relay-font-size-micro); }
 
 /* 归档卡不再显示下一步，改用中性归档说明（见 ProjectCard）。 */
-.pv-pcard__metrics .pv-pcard__archived-note { color: #566f5f; }
+.pv-pcard__metrics .pv-pcard__archived-note { color: var(--relay-color-text-muted); }
 
 /* 键盘进入卡片任一控件时与悬停同一反馈，不只靠指针位置。 */
 .pv-pcard:hover,
@@ -452,7 +452,7 @@
 }
 
 .pv-page .project-card--new {
-  border-radius: 14px;
+  border-radius: var(--relay-radius-panel);
   box-shadow: none;
 }
 
@@ -467,8 +467,8 @@
 }
 
 .pv-page .project-card--new:hover {
-  border-color: #a3c8ae;
-  background: #f0f7f1;
+  border-color: var(--relay-color-border-subtle);
+  background: var(--relay-color-selection-hover);
 }
 
 .project-card__new-icon {
@@ -522,20 +522,20 @@
 .pv-page .projects-summary {
   margin-top: 15px;
   padding: 13px 16px;
-  background: #f4faf5;
-  border: 1px solid #e2efe4;
-  border-radius: 12px;
+  background: var(--relay-color-selection-bg);
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-panel);
 }
 
-.pv-page .projects-summary__main { font-size: 12.5px; color: #294635; }
-.pv-page .projects-summary__desc { font-size: 11px; color: #566f5f; }
-.pv-page .projects-summary__right { font-size: 11px; color: #566f5f; }
+.pv-page .projects-summary__main { font-size: 12.5px; color: var(--relay-color-text-primary); }
+.pv-page .projects-summary__desc { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
+.pv-page .projects-summary__right { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
 .pv-page .projects-summary__symbol {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: #e4f2e8;
-  color: #2f6c4a;
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-selection-hover);
+  color: var(--relay-color-action-text);
 }
 .pv-page .projects-summary__symbol > svg { width: 15px; height: 15px; }
 
@@ -547,10 +547,10 @@
 
 .pv-page .projects-tools { padding-bottom: 0; }
 .pv-page .projects-tools .search-field { width: 14rem; }
-.pv-page .projects-view-toggle { background: #f1f6f1; border-radius: 9px; }
-.pv-page .projects-view-toggle__btn.is-active { background: #fff; color: #206846; }
+.pv-page .projects-view-toggle { background: var(--relay-color-border-separator); border-radius: var(--relay-radius-control); }
+.pv-page .projects-view-toggle__btn.is-active { background: var(--relay-color-bg-surface); color: var(--relay-color-action-text); }
 
-.pv-page .projects-note { margin-top: 14px; font-size: 11px; color: #566f5f; }
+.pv-page .projects-note { margin-top: 14px; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
 
 /* 窄窗：卡片单列；搜索独占一行，刷新与视图切换在下一行两端对齐，
    不再让视图切换单独掉到第三行。 */
@@ -582,7 +582,7 @@
   width: 32px;
   height: 32px;
   margin-bottom: 10px;
-  border-radius: 9px;
+  border-radius: var(--relay-radius-control);
   background: var(--pv-danger-bg);
   color: var(--pv-danger-ink);
 }
@@ -593,7 +593,7 @@
 .projects-page .page-state h2,
 .pv-page.page-state h2 {
   margin: 8px 0 10px;
-  color: #1e3529;
+  color: var(--relay-color-text-primary);
   font-size: 22px;
   letter-spacing: -.035em;
 }

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { RelayApiClient, RelayMessageMemoryUse } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./MemorySources.css";
+import { Button } from "../ui";
 
 /**
  * 一条消息的记忆使用足迹（HTTP §10.99）。
@@ -60,8 +61,8 @@ export default function MessageMemorySources({ client, sessionId, messageId }: {
       {loading && <p className="helper-text" role="status">正在读取这条消息的记忆来源…</p>}
       {error !== null && <div className="action-error" role="alert" data-testid={`message-memory-error-${messageId}`}>
         <p>记忆来源读取失败：{error}</p>
-        <button className="secondary-button" type="button" data-testid={`message-memory-retry-${messageId}`}
-          disabled={loading} onClick={() => void read()}>重新读取</button>
+        <Button variant="secondary" data-testid={`message-memory-retry-${messageId}`}
+          disabled={loading} onClick={() => void read()}>重新读取</Button>
       </div>}
       {use !== null && <>
         {!use.recorded && <p className="helper-text" data-testid={`message-memory-unrecorded-${messageId}`}>
@@ -137,8 +138,8 @@ export function MemoryProvenancePanel({ client, memoryId }: {
       {loading && <p className="helper-text" role="status">正在读取保存来源…</p>}
       {error !== null && <div className="action-error" role="alert" data-testid="memory-provenance-error">
         <p>保存来源读取失败：{error}</p>
-        <button className="secondary-button" type="button" disabled={loading}
-          onClick={() => void read()}>重新读取</button>
+        <Button variant="secondary" disabled={loading}
+          onClick={() => void read()}>重新读取</Button>
       </div>}
       {sources !== null && (sources.length === 0
         ? <p className="helper-text" data-testid="memory-provenance-empty">

@@ -10,6 +10,7 @@ import KnowledgeCurationPanel from "../components/KnowledgeCurationPanel";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ArtifactLineageView.css";
+import { Button } from "../ui";
 
 const relationLabels = {
   DERIVED_FROM: "派生自", REVISED_FROM: "修订自", GENERATED_BY: "生成于", VERIFIED_BY: "经验证", ACCEPTED_BY: "经接受"
@@ -71,7 +72,7 @@ export default function ArtifactLineageView() {
         <Link className="secondary-button" to="/tasks">返回任务列表</Link>
       </div>
     </section> : <>
-      <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新来源</button>
+      <Button variant="secondary" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新来源</Button>
       {loading && <p role="status">正在读取版本 {id} 的来源关系…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {lineage && <><section className="surface-panel lineage-summary"><h2>确切版本 · v{lineage.versionNumber}</h2>
@@ -98,7 +99,7 @@ export default function ArtifactLineageView() {
           versionNumber={lineage.versionNumber} />
         <section className="surface-panel lineage-uses" data-testid="artifact-direct-uses"><h2>主动检查直接引用</h2>
           <p className="helper-text">只检查服务端已登记、直接指向版本 {lineage.artifactVersionId} 的派生或修订关系。未登记关系、间接下游和语义影响仍未分析。</p>
-          <button className="secondary-button" type="button" disabled={usesLoading} onClick={() => void checkDirectUses()}>{usesLoading ? "正在检查" : "检查已登记直接引用"}</button>
+          <Button variant="secondary" disabled={usesLoading} onClick={() => void checkDirectUses()}>{usesLoading ? "正在检查" : "检查已登记直接引用"}</Button>
           {usesError && <p className="action-error" role="alert">{usesError}；不能据此判断没有影响。</p>}
           {uses && (uses.sourceContentAvailability === "UNAVAILABLE" ? <p className="warning-callout">来源版本正文不可用；直接引用未展示，影响仍待核对。</p>
             : <><p className="helper-text">检查结果仅覆盖已登记的直接关系，完整影响范围未知。{uses.hasMore ? "还有未展示的登记关系。" : "本次登记关系已展示完毕。"}</p>

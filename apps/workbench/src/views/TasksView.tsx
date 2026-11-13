@@ -16,6 +16,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./TasksView.css";
 import type { ExecutorKind, InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
+import { Button } from "../ui";
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
 const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
@@ -85,7 +86,7 @@ function ActiveFilterBar({ filters, onClear }: {
         <button className="active-filter-remove" type="button" aria-label={`移除筛选：${filter.label}`} onClick={filter.onRemove}><X aria-hidden="true" /></button>
       </li>)}
     </ul>
-    <button className="text-button" type="button" onClick={onClear}>清除筛选</button>
+    <Button variant="text" onClick={onClear}>清除筛选</Button>
   </div>;
 }
 
@@ -158,11 +159,11 @@ export default function TasksView() {
   if (live && connection.client) return <LiveTaskListView key={connection.epoch} client={connection.client} onCreate={openCreate} onCreateLightweight={openLightweight} />;
   if (scope === "attention") return <section className="skill-page pv-page"><PageHeader title="人工待处理" lede="当前是示例预览，无法读取跨项目待处理事实。连接本机 API 后再查看。" /><Link className="text-link" to="/tasks">返回任务</Link></section>;
   if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Tasks</p><h1>正在读取任务列表</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
-  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Tasks</p><h1>暂时无法显示任务</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Tasks</p><h1>暂时无法显示任务</h1><p>{error}</p><Button variant="secondary" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   return <section className="skill-page task-list-page pv-page"><div className="page-layout"><div className="page-primary">
     <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
-      actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
-        <button className="secondary-button" type="button" data-testid="task-create-full" onClick={openCreate}>填写完整定义</button></>} />
+      actions={<><Button variant="primary" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</Button>
+        <Button variant="secondary" data-testid="task-create-full" onClick={openCreate}>填写完整定义</Button></>} />
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks" data-testid="tasks-tab-all" aria-current="page">全部</Link><Link className="subnav-item" to="/tasks?tab=inbox" data-testid="tasks-tab-inbox">收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
     <div className="list-toolbar list-toolbar--compact" data-testid="tasks-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label></div>
     <ActiveFilterBar filters={activeFilters} onClear={clearFilters} />
@@ -173,11 +174,11 @@ export default function TasksView() {
         ? <EmptyState size="compact" icon={SearchX} title="当前筛选没有匹配的任务"
           description="清除筛选后可以看到全部任务；筛选只作用于已加载范围，不代表工作空间里没有别的工作。"
           testId="tasks-fixture-no-match"
-          actions={<button className="secondary-button" type="button" data-testid="task-clear-filters" onClick={clearFilters}>清除筛选</button>} />
+          actions={<Button variant="secondary" data-testid="task-clear-filters" onClick={clearFilters}>清除筛选</Button>} />
         : <EmptyState icon={ListTodo} as="h2" title="还没有任务"
           description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
           testId="tasks-empty"
-          actions={<><button className="primary-button" type="button" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</button>
+          actions={<><Button variant="primary" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</Button>
             <Link className="secondary-button" to="/projects">打开项目</Link></>} />
       : <TaskTable rows={taskRows} />}
     <div className="task-list-foot">
@@ -285,8 +286,8 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
     <div className="page-primary">
       <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
         lede="整个工作空间的任务；筛选只作用于已加载的页。"
-        actions={<><button className="primary-button" type="button" data-testid="task-create-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</button>
-          <button className="secondary-button" type="button" data-testid="task-create-full" onClick={onCreate}>填写完整定义</button></>} />
+        actions={<><Button variant="primary" data-testid="task-create-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</Button>
+          <Button variant="secondary" data-testid="task-create-full" onClick={onCreate}>填写完整定义</Button></>} />
       <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks"
         data-testid="tasks-tab-all" aria-current="page">全部</Link>
         <Link className="subnav-item" to="/tasks?tab=inbox"
@@ -308,31 +309,31 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
           onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode">
           <option value="all">全部</option>{modeOptions.map((item) =>
             <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label>
-        <button className="secondary-button" type="button" data-testid="tasks-live-refresh"
-          disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新任务列表</button></div>
+        <Button variant="secondary" data-testid="tasks-live-refresh"
+          disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新任务列表</Button></div>
       {loading ? <div className="page-state" aria-live="polite"><p>正在从本机服务读取工作空间任务…</p></div> :
         error ? <div className="page-state page-state--error" role="alert"><p>{error}</p>
-          <button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
+          <Button variant="secondary" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</Button></div> : <>
           <ActiveFilterBar filters={activeFilters} onClear={clearFilters} />
           {visible.length === 0
             ? items.length === 0
               ? <EmptyState icon={ListTodo} as="h2" title="还没有任务"
                 description="任务是一次可验收的工作：写清验收条件后即可开始，完成时留下确切产物版本。可以直接新建一条，也可以先建项目再在项目内拆任务。"
                 testId="tasks-empty"
-                actions={<><button className="primary-button" type="button" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</button>
+                actions={<><Button variant="primary" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</Button>
                   <Link className="secondary-button" to="/projects">打开项目</Link></>} />
               // 筛选无匹配与工作空间为空不同：只能说已加载范围内没有命中。
               : <EmptyState size="compact" icon={SearchX} title="已加载任务里没有匹配项"
                 description={`已加载 ${items.length} 项，当前筛选显示 0 项。状态、模式与标题筛选只作用于已加载范围，后续页可能仍有匹配任务。`}
                 testId="tasks-live-no-match"
-                actions={hasFilters ? <button className="secondary-button" type="button" onClick={clearFilters}>清除筛选</button> : undefined} />
+                actions={hasFilters ? <Button variant="secondary" onClick={clearFilters}>清除筛选</Button> : undefined} />
             : <TaskTable rows={taskRows} />}
           <div className="task-list-foot">
             <p className="list-count-note" data-testid="tasks-live-count">已加载 {items.length} 项 · 当前筛选显示 {visible.length} 项
               {nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。筛选只作用于已加载任务。</p>
             {moreError && <p className="action-error" role="alert" data-testid="tasks-live-more-error">续页失败：{moreError}；已保留前面加载的结果，可按原游标重试。</p>}
-            {nextCursor && <button className="secondary-button" type="button" data-testid="tasks-live-load-more"
-              disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : moreError ? "重试加载后续页" : "加载更多"}</button>}
+            {nextCursor && <Button variant="secondary" data-testid="tasks-live-load-more"
+              disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : moreError ? "重试加载后续页" : "加载更多"}</Button>}
           </div>
         </>}
     </div><ResponsiveRail label="查看任务范围" title="已加载范围"><div className="rail-content"><h2>全工作空间范围</h2>
@@ -346,12 +347,12 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
           if (liveProjectId.trim()) navigate(`/projects/${encodeURIComponent(liveProjectId.trim())}/tasks`);
         }}><label className="field"><span className="field-label">项目 ID</span><input value={liveProjectId}
           onChange={(event) => setLiveProjectId(event.target.value)} name="live-task-project-id" autoComplete="off" placeholder="Project UUID" /></label>
-          <button className="secondary-button" type="submit" data-testid="tasks-live-open-project" disabled={!liveProjectId.trim()}>打开项目任务</button></form>
+          <Button variant="secondary" type="submit" data-testid="tasks-live-open-project" disabled={!liveProjectId.trim()}>打开项目任务</Button></form>
         <form className="create-form" noValidate onSubmit={(event) => { event.preventDefault();
           if (liveTaskId.trim()) navigate(`/tasks/${encodeURIComponent(liveTaskId.trim())}`);
         }}><label className="field"><span className="field-label">任务 ID</span><input value={liveTaskId}
           onChange={(event) => setLiveTaskId(event.target.value)} name="live-task-id" autoComplete="off" placeholder="Task UUID" /></label>
-          <button className="secondary-button" type="submit" data-testid="tasks-live-open-task" disabled={!liveTaskId.trim()}>打开任务详情</button></form>
+          <Button variant="secondary" type="submit" data-testid="tasks-live-open-task" disabled={!liveTaskId.trim()}>打开任务详情</Button></form>
       </details>
     </div></ResponsiveRail>
   </div></section>;

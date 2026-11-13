@@ -11,6 +11,7 @@ import { reviewKindLabels, taskStatusLabels } from "../lib/labels";
 import { useRelayConnection } from "../lib/relayConnection";
 import PageHeader from "../components/PageHeader";
 import "./TodayView.css";
+import { Button } from "../ui";
 
 type TodayCommand = (
   { readonly kind: "selection"; readonly taskId: string; readonly pin: boolean;
@@ -283,11 +284,11 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
         </div>
       </div>
       {(rowActions || (eligible && actions.has("START"))) && <div className="today-task__actions">
-        {actions.has(item.pin ? "UNPIN" : "PIN") && <button className="text-button" type="button" disabled={busy}
-          onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</button>}
-        {actions.has("SET_FOCUS") && <button className="text-button" type="button" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</button>}
-        {actions.has("CLEAR_LATER") && <button className="text-button" type="button" disabled={busy}
-          onClick={() => onSelection(item, item.pin, null, null)}>取消延后</button>}
+        {actions.has(item.pin ? "UNPIN" : "PIN") && <Button variant="text" disabled={busy}
+          onClick={() => onSelection(item, !item.pin, item.laterLocalDate, item.laterTimezone)}>{item.pin ? "取消置顶" : "置顶"}</Button>}
+        {actions.has("SET_FOCUS") && <Button variant="text" disabled={busy} onClick={() => onFocus(item)}>设为今日焦点</Button>}
+        {actions.has("CLEAR_LATER") && <Button variant="text" disabled={busy}
+          onClick={() => onSelection(item, item.pin, null, null)}>取消延后</Button>}
         {eligible && actions.has("START") && <Link className="inline-link today-task__open" to={`/tasks/${item.taskId}`}>打开任务</Link>}
       </div>}
     </div>
@@ -297,24 +298,24 @@ function TodayTask({ item, eligible, busy, queryTimezone, queryDate, projectTitl
       {actions.has("SET_LATER") && <form onSubmit={submitLater}>
         <strong>延后</strong><label>日期<input type="date" value={laterDate} onChange={(event) => setLaterDate(event.target.value)} min={queryDate} disabled={busy} required /></label>
         <label>时区<input value={laterZone} onChange={(event) => setLaterZone(event.target.value)} disabled={busy} required /></label>
-        <button className="secondary-button" type="submit" disabled={busy || stale !== null}>保存延后</button>
+        <Button variant="secondary" type="submit" disabled={busy || stale !== null}>保存延后</Button>
       </form>}
       <form onSubmit={submitPlanning}>
         <strong>任务计划</strong><label>优先级<select value={priority} onChange={(event) => setPriority(event.target.value as RelayTodayPriority | "") } disabled={busy}>
           <option value="">未设</option><option value="LOW">低</option><option value="NORMAL">中</option><option value="HIGH">高</option></select></label>
         <label>截止日期<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={busy} /></label>
         <label>截止时区<input value={dueZone} onChange={(event) => setDueZone(event.target.value)} disabled={busy || !dueDate} /></label>
-        <button className="secondary-button" type="submit" disabled={busy || stale !== null}>保存计划</button>
+        <Button variant="secondary" type="submit" disabled={busy || stale !== null}>保存计划</Button>
       </form>
       </div>
       {/* 草稿基线冻结（#21）：已编辑的表单遇到新事实时保草稿、展示差异，由用户明确选择后才能继续。 */}
       {stale !== null && <div className="warning-callout" data-testid="today-task-stale">
         <strong>任务最新事实已变化，保存已暂停</strong>
         <p>{staleDiffSummary(formBase, stale)}。你的未保存修改仍基于 v{formBase.taskRevision}，不会静默按新修订提交。</p>
-        <button className="secondary-button" type="button" data-testid="today-task-stale-adopt"
-          onClick={() => adoptFacts(stale)}>放弃修改，按最新事实重填</button>
-        <button className="secondary-button" type="button" data-testid="today-task-stale-keep"
-          onClick={() => { setFormBase(stale); setStale(null); }}>保留我的修改（按新基线提交）</button>
+        <Button variant="secondary" data-testid="today-task-stale-adopt"
+          onClick={() => adoptFacts(stale)}>放弃修改，按最新事实重填</Button>
+        <Button variant="secondary" data-testid="today-task-stale-keep"
+          onClick={() => { setFormBase(stale); setStale(null); }}>保留我的修改（按新基线提交）</Button>
       </div>}
     </details>
     {fieldError && <p className="action-error" role="alert">{fieldError}</p>}
@@ -649,7 +650,7 @@ export default function TodayView() {
             ref={zoneSummaryRef}
             onClick={() => { if (zoneEditorOpen) cancelTimezoneEdit(); else { setTimezoneDraft(timezone); setTimezoneError(null); setZoneEditorOpen(true); } }}>调整时区</button>
         </div>
-        <button className="secondary-button" type="button" disabled={loading} onClick={() => { void loadToday(client, date, timezone); }}>刷新</button>
+        <Button variant="secondary" disabled={loading} onClick={() => { void loadToday(client, date, timezone); }}>刷新</Button>
         {loading && <p role="status" className="today-query__status">{current ? "正在刷新…" : "正在读取…"}</p>}
         {zoneEditorOpen && <form className="today-query__editor" onSubmit={applyTimezone}>
           <label><span>选择时区</span>
@@ -661,8 +662,8 @@ export default function TodayView() {
             </select></label>
           <label><span>或手动填写</span>
             <input value={timezoneDraft} onChange={(event) => setTimezoneDraft(event.target.value)} aria-label="时区名称" /></label>
-          <button className="secondary-button" type="submit">应用</button>
-          <button className="text-button" type="button" onClick={cancelTimezoneEdit}>取消</button>
+          <Button variant="secondary" type="submit">应用</Button>
+          <Button variant="text" onClick={cancelTimezoneEdit}>取消</Button>
           {timezoneError && <p className="action-error" role="alert">{timezoneError}</p>}
         </form>}
       </div>
@@ -683,8 +684,8 @@ export default function TodayView() {
       {pending && <div className="warning-callout" data-testid="today-pending"><strong>提交结果待核对</strong>
         <p>原 command_id：{pending.id}；expected_revision：{pending.expectedRevision}。保留原内容与 ID，不提交其他 Today 变更。</p>
         <p>原内容：{commandSummary(pending)}。</p>
-        <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" disabled={submitting} onClick={() => { void sendFrozen(pending, true); }}>用原 ID 和内容重试</button>}
+        <Button variant="secondary" disabled={submitting} onClick={() => { void checkReceipt(); }}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" disabled={submitting} onClick={() => { void sendFrozen(pending, true); }}>用原 ID 和内容重试</Button>}
       </div>}
           {loading && current === null && <p className="today-loading" role="status">正在读取今日安排…</p>}
           {current && <>
@@ -713,7 +714,7 @@ export default function TodayView() {
                   ? <Link className="primary-button" to={`/tasks/${focusTask.taskId}`}>
                     {focusTask.status === "IN_PROGRESS" ? "继续任务" : "开始任务"}</Link>
                   : <Link className="inline-link" to={`/tasks/${focusTask.taskId}`}>打开任务</Link>}
-                <button className="text-button" type="button" disabled={busy} onClick={clearFocus}>清除今日焦点</button>
+                <Button variant="text" disabled={busy} onClick={clearFocus}>清除今日焦点</Button>
               </div>
             </div>
             : <div className="today-focus__target">
@@ -723,7 +724,7 @@ export default function TodayView() {
                 <p>选择原时区：{current.focus.timezone}；查询时区：{current.timezone}；{current.focus.activeInQuery ? "本次查询生效" : "本次查询不生效"}。</p>
               </details>
               <div className="today-focus__actions">
-                <button className="text-button" type="button" disabled={busy} onClick={clearFocus}>清除今日焦点</button>
+                <Button variant="text" disabled={busy} onClick={clearFocus}>清除今日焦点</Button>
               </div>
             </div>)
             : <p className="today-focus__empty">还未选择今日焦点。{hasCandidates

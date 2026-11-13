@@ -4,6 +4,7 @@ import { createCommandId, RelayApiError, type RelayApiClient,
   type RelayKnowledgeGuideEntryInput, type RelayProjectKnowledgeGuide } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
+import { Button } from "../ui";
 
 interface Props {
   readonly client: RelayApiClient;
@@ -216,9 +217,9 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
               <span className="knowledge-guide__kind">{KIND_TEXT[row.refKind]}</span>
               {row.refKind !== "ARTIFACT_VERSION" && row.targetStatus !== null && row.targetStatus !== "ACTIVE"
                 && <span className="knowledge-guide__status">{row.targetStatus}</span>}
-              <button type="button" className="text-button"
+              <Button variant="text"
                 onClick={() => row.refKind !== "ARTIFACT_VERSION" && onOpen(row.refKind as "KNOWLEDGE" | "DECISION" | "RULE", row.targetId)}>
-                {row.label === "" ? row.title : `${row.label}（${row.title}）`}</button>
+                {row.label === "" ? row.title : `${row.label}（${row.title}）`}</Button>
               {row.version !== null && <span className="helper-text">v{row.version}{row.referenceMode === "PINNED" ? " · 已钉住" : ""}</span>}
             </div>
             <div className="knowledge-guide__entry-controls">
@@ -232,12 +233,12 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
                   ? { ...item, referenceMode: event.target.checked ? "PINNED" : "CURRENT" } : item))} />
                 钉住这个确切版本</label>}
               <span className="knowledge-guide__moves">
-                <button type="button" className="text-button" disabled={index === 0 || busy}
-                  onClick={() => move(index, -1)} aria-label="上移">上移</button>
-                <button type="button" className="text-button" disabled={index === rows.length - 1 || busy}
-                  onClick={() => move(index, 1)} aria-label="下移">下移</button>
-                <button type="button" className="text-button" disabled={busy}
-                  onClick={() => mutate(rows.filter((item) => item.key !== row.key))}>移除</button>
+                <Button variant="text" disabled={index === 0 || busy}
+                  onClick={() => move(index, -1)} aria-label="上移">上移</Button>
+                <Button variant="text" disabled={index === rows.length - 1 || busy}
+                  onClick={() => move(index, 1)} aria-label="下移">下移</Button>
+                <Button variant="text" disabled={busy}
+                  onClick={() => mutate(rows.filter((item) => item.key !== row.key))}>移除</Button>
               </span>
             </div>
             {warning && <p className="knowledge-guide__warning">{warning}{row.note === null ? "" : ` ${row.note}`}</p>}
@@ -270,16 +271,16 @@ export default function ProjectKnowledgeGuide({ client, projectId, onOpen }: Pro
         {artifactTasksLoading ? " 正在读取这些任务的产物版本。" : ""}</p>
       {taskPages.error !== null && <div className="action-error" role="alert">
         已保留已读取任务、成果候选和原游标。{taskPages.error}
-        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
-          onClick={taskPages.retry}>重试任务列表</button>
+        <Button variant="text" disabled={taskPages.loading || taskPages.loadingMore}
+          onClick={taskPages.retry}>重试任务列表</Button>
       </div>}
-      {taskPages.nextCursor !== null && <button className="secondary-button" type="button"
+      {taskPages.nextCursor !== null && <Button variant="secondary"
         disabled={taskPages.loadingMore || taskPages.loading}
-        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多成果候选任务"}</button>}
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多成果候选任务"}</Button>}
       {artifactTasksError !== null && !taskPages.scopeLost && <div className="action-error" role="alert">
         {artifactTasksError}
-        {failedArtifactTasks.current.size > 0 && <button className="text-button" type="button"
-          disabled={artifactTasksLoading} onClick={retryArtifactTasks}>重试失败的产物读取</button>}
+        {failedArtifactTasks.current.size > 0 && <Button variant="text"
+          disabled={artifactTasksLoading} onClick={retryArtifactTasks}>重试失败的产物读取</Button>}
       </div>}
 
       {available.length === 0 && rows.length > 0 && <p className="helper-text">本项目可收录的决定、规则、资料与成果版本都已在导读中。</p>}

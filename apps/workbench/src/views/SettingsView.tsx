@@ -13,6 +13,7 @@ import { CurrentModelUsageCard } from "../components/CurrentModelUsageCard";
 import { ModelConnectionsCard } from "../components/ModelConnectionsCard";
 import DeveloperDiagnosticsPanel from "../components/DeveloperDiagnosticsPanel";
 import PageHeader from "../components/PageHeader";
+import { Button } from "../ui";
 import FixtureNote from "../components/FixtureNote";
 import { describeLiveError } from "../lib/liveErrors";
 import { modelErrorGuides } from "../lib/modelErrorGuides";
@@ -115,9 +116,9 @@ function ServiceStateCard({ loading, error, status, verification, verifying, onV
     {showGuide && last?.errorCategory != null && <p className="helper-text" data-testid="verify-error-guide">
       <Info aria-hidden="true" />{modelErrorGuides[last.errorCategory]}</p>}
     {onVerify !== null && <div className="settings-verify-actions">
-      <button className="secondary-button" type="button" data-testid="verify-model-port"
+      <Button variant="secondary" data-testid="verify-model-port"
         disabled={verifying} onClick={onVerify}>
-        <ShieldCheck aria-hidden="true" />{verifying ? "验证中…" : "验证连接"}</button>
+        <ShieldCheck aria-hidden="true" />{verifying ? "验证中…" : "验证连接"}</Button>
       <span className="helper-text">用固定短文本发起一次连接验证，不携带项目资料。</span>
     </div>}
   </section>;
@@ -204,12 +205,12 @@ function ImageInputDeclaration({ client, model, onSaved }: {
         onChange={(event) => { setNote(event.target.value); setSaved(null); }}
         placeholder="例如：官方文档写明原生支持图片输入" data-testid="model-image-input-note" /></label>
     <div className="settings-save-actions">
-      <button className="secondary-button" type="button" disabled={saving}
-        data-testid="model-image-input-support" onClick={() => void write(true)}>声明支持图片</button>
-      <button className="secondary-button" type="button" disabled={saving}
-        data-testid="model-image-input-deny" onClick={() => void write(false)}>声明不支持</button>
-      <button className="text-button" type="button" disabled={saving}
-        data-testid="model-image-input-revoke" onClick={() => void write(null)}>撤销声明</button>
+      <Button variant="secondary" disabled={saving}
+        data-testid="model-image-input-support" onClick={() => void write(true)}>声明支持图片</Button>
+      <Button variant="secondary" disabled={saving}
+        data-testid="model-image-input-deny" onClick={() => void write(false)}>声明不支持</Button>
+      <Button variant="text" disabled={saving}
+        data-testid="model-image-input-revoke" onClick={() => void write(null)}>撤销声明</Button>
     </div>
     {saved !== null && <p className="settings-save-result" role="status"
       data-testid="model-image-input-saved">{saved}</p>}
@@ -580,27 +581,27 @@ function DefaultWorkingDirectoryRow({ client, projection, loading, readError, re
         data-testid="settings-default-directory-pending">
         <p className="helper-text">原命令 {pending.commandId} 结果待核对（
           {pending.resourceId === null ? "清除默认目录" : "设置默认目录"}，基准修订 {pending.expectedRevision}）。</p>
-        <button className="secondary-button secondary-button--compact" type="button"
+        <Button variant="secondary" className="secondary-button--compact"
           data-testid="settings-default-directory-receipt" disabled={checking}
           onClick={() => void checkReceipt()}>
-          {checking ? "正在查询" : "查询原命令回执"}</button>
+          {checking ? "正在查询" : "查询原命令回执"}</Button>
       </div>}
       {pickerError !== null && <p className="action-error" role="alert">{pickerError}</p>}
       <div className="settings-default-directory-actions">
-        <button className={status === "READY" ? "secondary-button" : "primary-button"} type="button"
+        <Button variant={status === "READY" ? "secondary" : "primary"}
           data-testid="settings-default-directory-choose"
           disabled={disabled}
           onClick={() => { if (pickerAvailable) void pick(); else manualInputRef.current?.focus(); }}
           title={pickerAvailable ? "选择本机文件夹；只有已登记且就绪的目录才能设为默认"
             : "这个宿主没有原生目录选择器；点击后在下方填写本机已有绝对路径"}>
-          <FolderOpen aria-hidden="true" />{status === null || status === "UNSET" ? "选择目录" : "更换目录"}</button>
-        {status !== null && status !== "UNSET" && <button className="secondary-button" type="button"
+          <FolderOpen aria-hidden="true" />{status === null || status === "UNSET" ? "选择目录" : "更换目录"}</Button>
+        {status !== null && status !== "UNSET" && <Button variant="secondary"
           data-testid="settings-default-directory-clear" disabled={disabled} onClick={() => void save(null)}>
-          <X aria-hidden="true" />{busy === "CLEAR" ? "正在清除…" : "清除默认目录"}</button>}
+          <X aria-hidden="true" />{busy === "CLEAR" ? "正在清除…" : "清除默认目录"}</Button>}
         {(readError !== null || status === "UNAVAILABLE" || status === "READY") &&
-          <button className="secondary-button secondary-button--compact" type="button"
+          <Button variant="secondary" className="secondary-button--compact"
             data-testid="settings-default-directory-recheck" disabled={loading} onClick={() => void read()}>
-            <RotateCcw aria-hidden="true" />重新检查</button>}
+            <RotateCcw aria-hidden="true" />重新检查</Button>}
         {busy === "OPEN" && <span className="helper-text" role="status">正在打开并核对这个目录…</span>}
         {busy === "SET" && <span className="helper-text" role="status">正在保存默认目录…</span>}
       </div>
@@ -609,10 +610,10 @@ function DefaultWorkingDirectoryRow({ client, projection, loading, readError, re
         <input id="settings-default-directory-manual" data-testid="settings-default-directory-manual"
           ref={manualInputRef} value={manualPath} disabled={disabled} placeholder={"D:\\Develop\\MyProject"}
           onChange={(event) => setManualPath(event.target.value)} />
-        <button className="secondary-button secondary-button--compact" type="button"
+        <Button variant="secondary" className="secondary-button--compact"
           data-testid="settings-default-directory-manual-submit"
           disabled={disabled || manualPath.trim() === ""} onClick={() => void choose(manualPath.trim())}>
-          使用这个目录</button>
+          使用这个目录</Button>
       </div>}
       {client !== null && (projection !== null || readError !== null) &&
         <details className="settings-diagnostics" data-testid="settings-default-directory-diagnostics">
@@ -735,7 +736,7 @@ function GeneralPreferencesCard() {
         <p id="settings-motion-help" className="helper-text">只影响装饰动画，不隐藏状态文字、进度或操作入口。</p>
       </div>
       <div className="settings-save-actions">
-        <button type="submit" className="primary-button" data-testid="settings-save">保存显示偏好</button>
+        <Button type="submit" variant="primary" data-testid="settings-save">保存显示偏好</Button>
         {saved && <p role="status" className="settings-save-result" data-testid="settings-save-result">
           {motionOnlySession ? "时区偏好已保存，仅在本设备生效。"
             : "显示偏好已保存，仅在本设备生效。"}</p>}
@@ -783,8 +784,8 @@ function WorkbenchPreferencesCard() {
         </div>
       </div>
       <div className="settings-save-actions">
-        <button type="submit" className="primary-button" data-testid="settings-default-workbench-save">
-          保存默认工作台</button>
+        <Button type="submit" variant="primary" data-testid="settings-default-workbench-save">
+          保存默认工作台</Button>
         {saved && <p role="status" className="settings-save-result" data-testid="settings-default-workbench-result">
           默认工作台已保存。</p>}
         {error && <p role="alert" className="action-error">{error}</p>}
@@ -970,9 +971,9 @@ export default function SettingsView({ initialGroup = "basic" }: {
               {loading && status === null && <p role="status">正在读取服务实例配置状态…</p>}
               {error && <div className="action-error" role="alert">
                 <p>读取失败：{error}</p>
-                <button className="secondary-button" type="button" data-testid="model-port-retry"
+                <Button variant="secondary" data-testid="model-port-retry"
                   onClick={refresh}>
-                  <RotateCcw aria-hidden="true" />重新读取</button>
+                  <RotateCcw aria-hidden="true" />重新读取</Button>
               </div>}
               {verifyError && <div className="action-error" role="alert" data-testid="verify-error">
                 <p>验证未完成：{verifyError}</p></div>}

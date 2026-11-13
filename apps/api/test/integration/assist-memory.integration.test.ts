@@ -126,8 +126,15 @@ test('oversized history is compacted in bounded complete-turn batches with exact
 test('injected source pressure compacts old turns before the first model invocation', async () => {
   const f = await fixture(0);
   const r = createRepositories(app.db);
+  /*
+   * 0162 起自动压缩按 **token 阈值** 判定（默认 350K），不再按输入字节的 80% 触发。
+   * 12 × 15,000 字符 ≈ 180K tokens：低于产品默认阈值时整份请求本来就装得下，
+   * 压缩不是正确动作。这里把阈值下调到 100K，保留「先整理旧轮次、再调主模型」的原意，
+   * 同时不让用例依赖已废弃的字节口径。
+   */
   await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
-    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false,
+    compactionThresholdTokens: 100_000 });
   for (let i = 1; i <= 12; i++) await r.assist.insertMessage({ id: randomUUID(), sessionId: f.sessionId,
     seq: BigInt(i), role: i % 2 ? 'USER' : 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS',
     content: 'h'.repeat(15_000), sources: [] });
@@ -256,11 +263,12 @@ test('compaction refuses tool results and records their request and usage as a f
 
 test('automatic compaction requeues original message, commits checkpoint, then completes that same message', async () => {
   const f = await fixture(17); const p = port(f.marker);
-  // 0145 gives every session 256K: trigger real byte pressure rather than the retired 32-row rule.
+  // 0162：17 × 14,500 字符 ≈ 82K tokens。阈值下调到 50K，让「到量就整理」可被确定触发，
+  // 不依赖已废弃的字节压力口径。
   await sql`update assist_messages set content = repeat('h', 14500)
     where session_id = ${f.sessionId} and seq > 1`.execute(app.db);
   await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(), expectedRevision: '0',
-    recallEnabled: true, automaticCompaction: true, autoCapture: false });
+    recallEnabled: true, automaticCompaction: true, autoCapture: false, compactionThresholdTokens: 50_000 });
   const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'automatic-continue' });
   assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'DISCARDED');
   assert.equal(p.inputs.length, 0);
@@ -503,8 +511,9 @@ test('AUTO malformed summary does not retry same boundary and the original pendi
   const f = await fixture(17); const p = port('invalid', true);
   await sql`update assist_messages set content = repeat('h', 14500)
     where session_id = ${f.sessionId} and seq > 1`.execute(app.db);
+  // 0162：82K tokens 的读数配 50K 阈值，确保自动压缩真的被触发（失败边界才有意义）。
   await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(), expectedRevision: '0',
-    recallEnabled: true, automaticCompaction: true, autoCapture: false });
+    recallEnabled: true, automaticCompaction: true, autoCapture: false, compactionThresholdTokens: 50_000 });
   await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue-after-auto-failure' });
   await runAssistGenerationTick(app.db, p.options);
   await runAssistGenerationTick(app.db, p.options);

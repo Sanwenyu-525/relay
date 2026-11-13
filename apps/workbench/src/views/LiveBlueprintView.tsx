@@ -21,6 +21,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectType } from "../types";
 import "./LiveBlueprintView.css";
+import { Button } from "../ui";
 
 const kinds: readonly { kind: RelayViewKind; label: string }[] = [
   { kind: "general", label: "通用" }, { kind: "thesis", label: "论文" },
@@ -451,14 +452,14 @@ export default function LiveBlueprintView() {
   if (loading && !facts) return <section className="page-state" aria-live="polite"><h1>正在读取项目蓝图</h1>
     <p>正在核对 Project、State、View、Goal、Pack 与已有候选。</p></section>;
   if (!facts) return <section className="page-state page-state--error" role="alert"><h1>暂时无法读取项目蓝图</h1>
-    <p>{error ?? "没有可用的项目事实。"}</p><button className="secondary-button" type="button"
-      onClick={() => void load(client, scope.current, selectedId.current, true)}>重新读取</button>
+    <p>{error ?? "没有可用的项目事实。"}</p><Button variant="secondary"
+      onClick={() => void load(client, scope.current, selectedId.current, true)}>重新读取</Button>
     {message && <p className="success-callout" role="status">{message}</p>}
     {pending && <div className="warning-callout" data-testid="blueprint-pending"><p>原命令 <code className="hash-code">{pending.id}</code> 仍待核对。</p>
-      <button className="secondary-button" type="button" disabled={busy}
-        onClick={() => void checkReceipt(pending, client, scope.current)}>查询原命令回执</button>
-      {mayRetry && !pending.conflict && <button className="secondary-button" type="button" disabled={busy}
-        onClick={() => void send(pending, true)}>用原 ID 和载荷重试</button>}</div>}</section>;
+      <Button variant="secondary" disabled={busy}
+        onClick={() => void checkReceipt(pending, client, scope.current)}>查询原命令回执</Button>
+      {mayRetry && !pending.conflict && <Button variant="secondary" disabled={busy}
+        onClick={() => void send(pending, true)}>用原 ID 和载荷重试</Button>}</div>}</section>;
 
   return <section className="skill-page live-blueprint"><div className="page-layout">
     <div className="page-primary">
@@ -467,8 +468,8 @@ export default function LiveBlueprintView() {
       <p className="metadata-row">项目类型：{projectTypeLabels[facts.project.projectType as ProjectType] ?? facts.project.projectType}
         <span aria-hidden="true"> · </span> 当前阶段：{phaseLabel(facts.state.phaseKey)}
         <span aria-hidden="true"> · </span> Project v{facts.project.revision} / State v{facts.state.revision} / View v{facts.view.revision}</p>
-      <div className="live-blueprint-toolbar"><button className="secondary-button" type="button" disabled={busy || loading}
-        onClick={() => void load(client, scope.current, selectedId.current, true)}><RotateCcw aria-hidden="true" />刷新事实与候选</button>
+      <div className="live-blueprint-toolbar"><Button variant="secondary" disabled={busy || loading}
+        onClick={() => void load(client, scope.current, selectedId.current, true)}><RotateCcw aria-hidden="true" />刷新事实与候选</Button>
         <Link className="text-link" to={`/projects/${id}/workbench`}>打开当前工作台</Link></div>
       {loading && <p role="status">正在核对服务端当前事实…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
@@ -580,13 +581,13 @@ export default function LiveBlueprintView() {
               <label className="field"><span className="field-label">目标</span>
                 <textarea value={task.objective} maxLength={2000} data-testid={`blueprint-task-objective-${index}`}
                   onChange={(event) => setTask(task.localKey, "objective", event.target.value)} /></label>
-              <button className="text-button" type="button" onClick={() => setForm({ ...form,
-                tasks: form.tasks.filter((item) => item.localKey !== task.localKey) })}>移除这项</button>
+              <Button variant="text" onClick={() => setForm({ ...form,
+                tasks: form.tasks.filter((item) => item.localKey !== task.localKey) })}>移除这项</Button>
             </div>)}
-            {form.tasks.length < 5 && <button className="secondary-button" type="button" onClick={() => {
+            {form.tasks.length < 5 && <Button variant="secondary" onClick={() => {
               const localKey = `task${nextLocalKey.current++}`;
               setForm({ ...form, tasks: [...form.tasks, { localKey, title: "", objective: "" }] });
-            }}>添加新任务</button>}
+            }}>添加新任务</Button>}
           </div>
           <label className="field"><span className="field-label">项目下一步</span>
             <select data-testid="blueprint-next-kind" value={form.nextKind}
@@ -625,9 +626,9 @@ export default function LiveBlueprintView() {
                 <option value={JSON.stringify(form.packRef)} disabled>历史 Pack 已不可用</option>}
             </select></label>
           <p className="helper-text">Pack 仅登记确切版本来源；不授予 Permission，也不自动执行 Skill。</p>
-          <div className="form-actions"><button className="primary-button" type="submit" data-testid="blueprint-preview"
-            disabled={busy || generationBusy || pending !== null || writeBlockedReason !== null}>{busy ? "正在提交" : proposal?.status === "PENDING" ? "生成替代候选并预览" : "生成候选并预览"}</button>
-            {dirty && <button className="text-button" type="button" onClick={resetDraft}>放弃草稿修改</button>}</div>
+          <div className="form-actions"><Button variant="primary" type="submit" data-testid="blueprint-preview"
+            disabled={busy || generationBusy || pending !== null || writeBlockedReason !== null}>{busy ? "正在提交" : proposal?.status === "PENDING" ? "生成替代候选并预览" : "生成候选并预览"}</Button>
+            {dirty && <Button variant="text" onClick={resetDraft}>放弃草稿修改</Button>}</div>
         </fieldset>
       </form>
     </div>
@@ -641,17 +642,17 @@ export default function LiveBlueprintView() {
           <p className="helper-text">新任务进入收件箱，由我执行；应用蓝图不会开始任务。</p>
         </div>}
         <p className="helper-text">应用绑定候选 ID、SHA-256 与 Project/State/View 三项基线修订。</p>
-        <button className="primary-button primary-button--wide" type="button" data-testid="live-blueprint-apply"
+        <Button variant="primary" className="primary-button--wide" data-testid="live-blueprint-apply"
           disabled={!eligibleApply} onClick={() => void send({ action: "apply", id: createCommandId(),
             conflict: false, proposalId: proposal.id, candidateSha256: proposal.candidateSha256,
             expectedProjectRevision: proposal.baseline?.projectRevision ?? "",
             expectedStateRevision: proposal.baseline?.stateRevision ?? "",
-            expectedViewRevision: proposal.baseline?.viewRevision ?? "" })}>应用这份候选</button>
-        <button className="secondary-button secondary-button--wide" type="button" data-testid="live-blueprint-reject"
+            expectedViewRevision: proposal.baseline?.viewRevision ?? "" })}>应用这份候选</Button>
+        <Button variant="secondary" className="secondary-button--wide" data-testid="live-blueprint-reject"
           disabled={proposal.status !== "PENDING" || proposal.contentAvailability !== "AVAILABLE" ||
             dirty || pending !== null || busy || generationBusy || writeBlockedReason !== null}
           onClick={() => void send({ action: "reject", id: createCommandId(), conflict: false,
-            proposalId: proposal.id, candidateSha256: proposal.candidateSha256 })}>暂不采用</button>
+            proposalId: proposal.id, candidateSha256: proposal.candidateSha256 })}>暂不采用</Button>
         {!eligibleApply && <p className="disabled-reason">{proposal.contentAvailability !== "AVAILABLE" ?
           "来源不可用，候选正文已隐藏，不能应用。" : proposal.status !== "PENDING" ?
           `候选${statusLabel(proposal.status)}，不可再次应用。` : proposal.stale ?
@@ -661,14 +662,14 @@ export default function LiveBlueprintView() {
       {pending && <div className="warning-callout" data-testid="blueprint-pending">
         <strong>{pending.conflict ? "冲突待核对" : "提交结果待核对"}</strong>
         <p>原 command_id：<code className="hash-code">{pending.id}</code> · {commandType(pending)}。原载荷已冻结，核对前不提交其他蓝图命令。</p>
-        <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => void checkReceipt(pending, client, scope.current)}>查询原命令回执</button>
-        {mayRetry && !pending.conflict && <button className="secondary-button" type="button" disabled={busy}
-          onClick={() => void send(pending, true)}>用原 ID 和载荷重试</button>}
-        {pending.conflict && <button className="secondary-button" type="button" disabled={busy || loading}
+        <Button variant="secondary" disabled={busy}
+          onClick={() => void checkReceipt(pending, client, scope.current)}>查询原命令回执</Button>
+        {mayRetry && !pending.conflict && <Button variant="secondary" disabled={busy}
+          onClick={() => void send(pending, true)}>用原 ID 和载荷重试</Button>}
+        {pending.conflict && <Button variant="secondary" disabled={busy || loading}
           onClick={() => { freeze(null); setError(null);
             setMessage("原命令无回执；已保留草稿，请按最新事实重新生成或核对候选。"); }}>
-          按最新事实重新确认</button>}
+          按最新事实重新确认</Button>}
       </div>}
       {result && <section className="rail-section"><h3>已应用的实际效果</h3>
         <p>Project v{result.projectRevision} · State v{result.stateRevision} · View v{result.viewRevision}</p>
@@ -683,10 +684,10 @@ export default function LiveBlueprintView() {
       <section className="rail-section"><h3>最近候选</h3>
         <p className="helper-text">服务端最多返回最近 30 条；以下不是完整历史。</p>
         {facts.proposals.length ? <ul className="live-blueprint-history">{facts.proposals.map((item) =>
-          <li key={item.id}><button className="text-button" type="button" disabled={busy || generationBusy || pending !== null || dirty}
+          <li key={item.id}><Button variant="text" disabled={busy || generationBusy || pending !== null || dirty}
             aria-current={item.id === proposal?.id ? "true" : undefined}
             onClick={() => void load(client, scope.current, item.id, false)}>
-            {statusLabel(item.status)} · {item.id.slice(0, 8)} · {item.origin === "USER_DRAFT" ? "人工" : "Skill"}</button></li>)}</ul> :
+            {statusLabel(item.status)} · {item.id.slice(0, 8)} · {item.origin === "USER_DRAFT" ? "人工" : "Skill"}</Button></li>)}</ul> :
           <p>尚无候选。</p>}
       </section>
       <Link className="secondary-button secondary-button--wide" to={`/projects/${id}`}>返回项目页</Link>

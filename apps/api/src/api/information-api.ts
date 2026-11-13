@@ -96,7 +96,10 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
   const settingsBody = Type.Object({ command_id: uuid, expected_revision: rev,
     recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
     // 0125 新增：缺省视为 true，旧客户端（只发两个开关）不会被 422 打断。
-    auto_capture: Type.Optional(Type.Boolean()) }, strict);
+    auto_capture: Type.Optional(Type.Boolean()),
+    // 0162：缺省 = 保持已保存的阈值（旧客户端不会把它清空）；null = 恢复默认 350K。
+    // 具体区间由应用层校验并给出可执行说明，schema 只保证它是整数或 null。
+    compaction_threshold_tokens: Type.Optional(Type.Union([Type.Integer(), Type.Null()])) }, strict);
   app.get('/memories/:id/provenance', { schema: { params: item } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
@@ -114,12 +117,17 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
   app.post('/memory-settings', { schema: { params: base, body: settingsBody,
     response: { 200: commandEnvelopeSchema(Type.Object({ workspace_id: uuid, revision: rev,
       recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
-      auto_capture: Type.Boolean() }, strict)) } } }, createCommandHandler(dependencies, {
+      auto_capture: Type.Boolean(),
+      // 0162：响应必须声明，否则 TypeBox 会把它从回执里静默删掉。
+      compaction_threshold_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict)) } } },
+  createCommandHandler(dependencies, {
     commandType: 'SetMemorySettings', bodySchema: settingsBody, execute: async ({ executor, params, body }) => {
       const outcome = await setMemorySettings(executor, { workspaceId: params.workspace_id ?? '',
         commandId: body.command_id, expectedRevision: body.expected_revision,
         recallEnabled: body.recall_enabled, automaticCompaction: body.automatic_compaction,
-        autoCapture: body.auto_capture ?? true });
+        autoCapture: body.auto_capture ?? true,
+        ...(body.compaction_threshold_tokens === undefined ? {}
+          : { compactionThresholdTokens: body.compaction_threshold_tokens }) });
       return { outcome, result: outcome.result };
     } }));
   const saveMemoryBody = Type.Object({ command_id: uuid, expected_session_revision: rev,

@@ -25,6 +25,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import "./KnowledgeView.css";
+import { Button } from "../ui";
 
 type InformationRow = RelayKnowledge | RelayMemory | RelayDecision | RelayRule;
 type Scope = "WORKSPACE" | "PROJECT" | "TASK";
@@ -1161,10 +1162,10 @@ export default function KnowledgeView() {
   const retiredStatus = retiredStatusOf(kind);
   const restoreEntry = selected !== null && retiredStatus !== null && selected.status === retiredStatus
     ? restoreCopy[kind as "KNOWLEDGE" | "MEMORY" | "RULE"] : null;
-  const writeGateFeedback = writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <button type="button" className="text-button" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</button></p>;
+  const writeGateFeedback = writeBlockedReason && <p className="disabled-reason" data-testid="knowledge-project-write-blocked">{writeBlockedReason} <Button variant="text" onClick={() => setGateReload((value) => value + 1)}>重读项目状态</Button></p>;
   const pendingReceipt = pendingCommand && <div className="surface-panel" data-testid="knowledge-pending-receipt">
     <h2>提交结果待核对</h2><p>原 command_id：{pendingCommand.id}。查询原命令回执前不再次提交。</p>
-    <button type="button" className="secondary-button" data-testid="knowledge-check-receipt" disabled={submitting} onClick={() => { void checkReceipt(); }}>核对原命令回执</button>
+    <Button variant="secondary" data-testid="knowledge-check-receipt" disabled={submitting} onClick={() => { void checkReceipt(); }}>核对原命令回执</Button>
   </div>;
   const saveLabel = submitting ? "正在提交"
     : captureCeremony ? (revisionMode ? "确认收录新版本" : "确认收录")
@@ -1179,8 +1180,8 @@ export default function KnowledgeView() {
       <p className="helper-text" role="status" data-testid="knowledge-artifact-loading">正在读取已加载任务的 Markdown 产物版本…</p>}
     {artifactCandidates.status === "ERROR" && <div className="helper-text" data-testid="knowledge-artifact-candidates-error" role="alert">
       {artifactCandidates.error}仍可在下面按版本 ID 指定。
-      {artifactTaskPages.error !== null && <button type="button" className="text-button"
-        onClick={retryArtifactTaskPage}>重试读取任务</button>}
+      {artifactTaskPages.error !== null && <Button variant="text"
+        onClick={retryArtifactTaskPage}>重试读取任务</Button>}
     </div>}
     {artifactCandidates.items.length === 0 && artifactCandidates.status === "READY" &&
       <p className="helper-text" data-testid="knowledge-artifact-candidates-empty">
@@ -1200,18 +1201,18 @@ export default function KnowledgeView() {
     </ul>}
     {artifactCandidates.error !== null && artifactCandidates.status !== "ERROR" && <div className="action-error" role="alert">
       {artifactCandidates.error}已保留已读取候选。
-      <button type="button" className="text-button" onClick={retryArtifactReads}>重试读取失败任务</button>
+      <Button variant="text" onClick={retryArtifactReads}>重试读取失败任务</Button>
     </div>}
     {artifactTaskPages.error !== null && artifactCandidates.status !== "ERROR" && <div className="action-error" role="alert">
       已保留已加载产物候选与原任务游标。{artifactTaskPages.error}
-      <button type="button" className="text-button" disabled={artifactTaskPages.loading || artifactTaskPages.loadingMore}
-        onClick={retryArtifactTaskPage}>重试读取任务页</button>
+      <Button variant="text" disabled={artifactTaskPages.loading || artifactTaskPages.loadingMore}
+        onClick={retryArtifactTaskPage}>重试读取任务页</Button>
     </div>}
     {artifactTaskPages.loadingMore && <p className="helper-text" role="status">正在读取下一批项目任务及其产物…</p>}
     {artifactTaskPages.nextCursor !== null && <p className="helper-text">
       已读取 {artifactTaskPages.items.length} 项项目任务；当前候选只覆盖这些已加载任务。
-      <button type="button" className="text-button" disabled={artifactTaskPages.loadingMore}
-        onClick={artifactTaskPages.loadMore}>加载更多任务</button>
+      <Button variant="text" disabled={artifactTaskPages.loadingMore}
+        onClick={artifactTaskPages.loadMore}>加载更多任务</Button>
     </p>}
     {artifactCandidates.status === "LOADING" && artifactCandidates.items.length > 0 &&
       <p className="helper-text" role="status">正在补充已加载任务的产物；已读候选仍可选。</p>}
@@ -1225,8 +1226,8 @@ export default function KnowledgeView() {
         <summary>按版本 ID 指定</summary>
         <label className="field"><span className="field-label">产物版本 ID</span>
           <input value={artifactVersionId} onChange={(event) => { previewReadVersion.current++; setArtifactVersionId(event.target.value); setArtifactPreview(null); setCaptureConfirmed(false); }} data-testid="knowledge-artifact-id" disabled={pendingCommand !== null} /></label>
-        <button type="button" className="secondary-button" data-testid="knowledge-read-artifact" disabled={pendingCommand !== null}
-          onClick={() => { void readArtifactPreview(); }}>核对确切产物版本</button>
+        <Button variant="secondary" data-testid="knowledge-read-artifact" disabled={pendingCommand !== null}
+          onClick={() => { void readArtifactPreview(); }}>核对确切产物版本</Button>
       </details>
       {artifactPreviewError && <p className="action-error" role="alert">{artifactPreviewError}</p>}
       <p className="helper-text" data-testid="knowledge-artifact-status">{artifactPreviewMatches ? "已读取此确切版本正文，请在本页核对。" : "当前来源正文尚未核对；选中或输入版本 ID 不代表已读取。"}</p>
@@ -1234,8 +1235,8 @@ export default function KnowledgeView() {
       <label className="field"><span className="field-label">媒体类型</span><select value={mediaType} onChange={(event) => setMediaType(event.target.value)} data-testid="knowledge-media-type" disabled={pendingCommand !== null}>
         <option value="text/plain">text/plain</option>{sourceKind === "MANAGED_TEXT" && <option value="text/markdown">text/markdown</option>}</select></label></>}
   </>;
-  const saveActions = <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed) || (captureCeremony && (!artifactPreviewMatches || !captureConfirmed))}>{saveLabel}</button>
-    <button type="button" className="secondary-button" data-testid="knowledge-capture-cancel" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>{captureCeremony ? "暂不收录" : "取消"}</button></div>;
+  const saveActions = <div className="knowledge-actions"><Button variant="primary" type="submit" data-testid="knowledge-save" disabled={submitting || pendingCommand !== null || writeBlockedReason !== null || (kind === "MEMORY" && !confirmed) || (captureCeremony && (!artifactPreviewMatches || !captureConfirmed))}>{saveLabel}</Button>
+    <Button variant="secondary" data-testid="knowledge-capture-cancel" disabled={pendingCommand !== null} onClick={() => setFormOpen(false)}>{captureCeremony ? "暂不收录" : "取消"}</Button></div>;
   /**
    * 类型页签在两种形态下都常驻：阅读形态此前把它连同「新建」一起折进「资料列表」，
    * 首屏只剩两枚折叠三角，读起来既不知道现在在哪个类型里，也回不到列表。
@@ -1248,7 +1249,7 @@ export default function KnowledgeView() {
   const library = <section className="surface-panel knowledge-list">
     <div role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`} tabIndex={0}>
     <div className="section-heading-row"><h2>{currentNoun}</h2>
-      <button type="button" className="secondary-button" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</button></div>
+      <Button variant="secondary" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</Button></div>
     {/* 有效状态筛选只作用于记忆，由服务端按数据库时间裁决；不新增一级导航，也不本地过滤。 */}
     {kind === "MEMORY" && <div className="knowledge-memory-filter">
       <div className="segmented" role="group" aria-label="按有效状态筛选记忆">{memoryFilterOptions.map((option) =>
@@ -1266,8 +1267,8 @@ export default function KnowledgeView() {
       ? <EmptyState size="compact" testId="knowledge-memory-filter-empty"
         title={`当前筛选没有${memoryFilterLabel(memoryFilter)}的记忆`}
         description={`筛选由服务端按数据库时间判定，「${memoryFilterLabel(memoryFilter)}」下没有命中不代表工作空间没有记忆。切换「全部」可查看所有记忆。`}
-        actions={<button type="button" className="secondary-button" data-testid="knowledge-memory-filter-clear"
-          onClick={() => changeMemoryFilter("ALL")}>查看全部记忆</button>} />
+        actions={<Button variant="secondary" data-testid="knowledge-memory-filter-clear"
+          onClick={() => changeMemoryFilter("ALL")}>查看全部记忆</Button>} />
       : projectId
         ? <EmptyState size="compact" testId="knowledge-list-empty" title={`当前项目还没有${currentNoun}`}
           description={`项目范围只显示归属当前项目的${currentNoun}，工作空间范围的${currentNoun}不会出现在这里。可以点「新建」添加第一条，或到工作空间资料查看已有内容。`} />
@@ -1314,8 +1315,8 @@ export default function KnowledgeView() {
             <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}
             <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code className="hash-code">{item.sourceRef}</code></small>
           </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的当前有效资料。试试更短的关键词或切换资料类型；这只说明搜索没有结果，不代表当前范围没有{currentNoun}。</p>}
-        {nextCursor && <button type="button" className="secondary-button" data-testid="knowledge-more" disabled={searching || loadingMore}
-          onClick={() => { void loadMore(); }}>{loadingMore ? "正在加载下一页" : moreError ? "重试加载下一页" : "加载下一页"}</button>}
+        {nextCursor && <Button variant="secondary" data-testid="knowledge-more" disabled={searching || loadingMore}
+          onClick={() => { void loadMore(); }}>{loadingMore ? "正在加载下一页" : moreError ? "重试加载下一页" : "加载下一页"}</Button>}
       </section>
       </details>
 
@@ -1333,8 +1334,8 @@ export default function KnowledgeView() {
           });
         }} /></details>}
 
-      {projectId && client && <button type="button" className="text-button" data-testid="knowledge-guide-toggle"
-        onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "关闭项目导读" : "打开项目导读"}</button>}
+      {projectId && client && <Button variant="text" data-testid="knowledge-guide-toggle"
+        onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "关闭项目导读" : "打开项目导读"}</Button>}
       </div>
       {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
         client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
@@ -1345,7 +1346,7 @@ export default function KnowledgeView() {
           });
         }} />}
 
-      {error && <p className="action-error" role="alert" data-testid="knowledge-read-error">{error} <button type="button" className="text-button" onClick={() => { void load(); }}>重新读取</button></p>}
+      {error && <p className="action-error" role="alert" data-testid="knowledge-read-error">{error} <Button variant="text" onClick={() => { void load(); }}>重新读取</Button></p>}
       {loading && <p role="status">正在读取资料…</p>}
       {refreshing && <p role="status">正在读取最新版本…</p>}
       {actionError && !capturing && <p className="action-error" role="alert" data-testid="knowledge-action-error">{actionError}</p>}
@@ -1364,7 +1365,7 @@ export default function KnowledgeView() {
               onNewVersion={selected.status === "ACTIVE" && pendingCommand === null ? () => openForm(true) : undefined}
               newVersionDisabled={writeBlockedReason !== null} />}
             {!reading && <header className="knowledge-item-heading"><div><h2>{rowTitle(selected)}</h2><p className="helper-text">当前版本 v{selected.currentVersion} · {selectedMemory ? memoryStatusText(selectedMemory) : statusLabel(selected.status)}</p></div>
-              {selected.status === "ACTIVE" && pendingCommand === null && kind !== "DECISION" && <button type="button" className="secondary-button" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</button>}</header>}
+              {selected.status === "ACTIVE" && pendingCommand === null && kind !== "DECISION" && <Button variant="secondary" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</Button>}</header>}
             {selectedMemory && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedMemory.text}</p><p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt} · {selectedMemory.expiresAt === null ? "无到期时间" : `到期 ${selectedMemory.expiresAt}`}</p></article>}
             {/* ADR-030：自动记住的记忆不能显示成人工确认。撤销就用既有的「停用记忆」。 */}
             {selectedMemory?.origin === "AUTO_CAPTURE" && <p className="helper-text" data-testid="memory-auto-capture-note">
@@ -1382,8 +1383,8 @@ export default function KnowledgeView() {
             {selectedMemory && selectedMemory.effectiveStatus === "EXPIRED" && <section className="knowledge-expired" data-testid="memory-expired-hint">
               <p className="helper-text">这条记忆已过有效期。恢复状态不会延长有效期；要续期或取消到期，请追加新版本并明确确认，产生新的确认版本。</p>
               {selectedMemory.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-                <button type="button" className="secondary-button" data-testid="memory-renew" disabled={writeBlockedReason !== null}
-                  onClick={() => openForm(true)}>去追加新版本</button></div>}
+                <Button variant="secondary" data-testid="memory-renew" disabled={writeBlockedReason !== null}
+                  onClick={() => openForm(true)}>去追加新版本</Button></div>}
             </section>}
             {selectedDecision && <article className="knowledge-fact-paper"><h3>做出的选择</h3><p className="knowledge-body">{selectedDecision.choice}</p><h3>依据</h3><p className="knowledge-body">{selectedDecision.rationale}</p><h3>备选与代价</h3><p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>{selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</article>}
             {/* 决定依据与复核：登记与判断都在这里，服务端负责变化检测、去重与修订冲突。 */}
@@ -1392,9 +1393,9 @@ export default function KnowledgeView() {
             {selectedRule && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedRule.statement}</p><p>{selectedRule.strength === "HARD" ? "硬约束" : "偏好"} · 执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p></article>}
             {restoreEntry && <section className="knowledge-restore" data-testid="knowledge-restore-entry" aria-label="恢复状态">
               <p className="helper-text" data-testid="knowledge-restore-note">{restoreEntry.note}</p>
-              <div className="knowledge-actions"><button type="button" className="secondary-button" data-testid="knowledge-restore"
+              <div className="knowledge-actions"><Button variant="secondary" data-testid="knowledge-restore"
                 disabled={restoring || submitting || pendingCommand !== null || loading || refreshing || writeBlockedReason !== null}
-                onClick={() => { void restoreRetired(); }}>{restoring ? "正在恢复" : restoreEntry.button}</button></div>
+                onClick={() => { void restoreRetired(); }}>{restoring ? "正在恢复" : restoreEntry.button}</Button></div>
             </section>}
             <details className="knowledge-management">
             <summary>资料管理与范围</summary>
@@ -1410,13 +1411,13 @@ export default function KnowledgeView() {
               {selectedRuleSpec.json !== null && <details className="knowledge-tech-details" data-testid="knowledge-rule-target-spec-json"><summary>目标约束 JSON</summary><code>{selectedRuleSpec.json}</code></details>}</>}
 
             {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-              {kind === "KNOWLEDGE" && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</button>}
-              {(kind === "MEMORY" || kind === "RULE") && <button type="button" className="danger-button" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</button>}
+              {kind === "KNOWLEDGE" && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</Button>}
+              {(kind === "MEMORY" || kind === "RULE") && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</Button>}
             </div>}
             {selectedDecision?.status === "ACTIVE" && pendingCommand === null && <>
               <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的决定 ID</span>
                 <input id="decision-replacement" value={replacementId} onChange={(event) => setReplacementId(event.target.value)} data-testid="decision-replacement" /></label>
-              <button type="button" className="secondary-button" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</button>
+              <Button variant="secondary" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</Button>
             </>}
 
             {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
@@ -1520,10 +1521,10 @@ export default function KnowledgeView() {
     </>}
     <AppDialog open={draftTransition !== null} title="保留未保存的资料" onClose={() => setDraftTransition(null)}>
       <p>当前资料还有未保存的修改。继续编辑会保留正文；丢弃后再切换阅读对象。</p>
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setDraftTransition(null)}>保留并继续编辑</button>
-        <button type="button" className="danger-button" data-testid="knowledge-discard-and-switch" onClick={() => {
+      <div className="dialog-actions"><Button variant="secondary" onClick={() => setDraftTransition(null)}>保留并继续编辑</Button>
+        <Button variant="danger" data-testid="knowledge-discard-and-switch" onClick={() => {
           const proceed = draftTransition; draftGuard.current.discard(); setDraftTransition(null); proceed?.();
-        }}>丢弃草稿并切换</button></div>
+        }}>丢弃草稿并切换</Button></div>
     </AppDialog>
   </section>;
 }

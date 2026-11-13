@@ -6,6 +6,9 @@ import {
   feedbackEntries, nextFeedbackId, putFeedback, removeFeedback, subscribeFeedback,
 } from "../lib/feedback";
 import { resolvedTokenValue } from "../lib/tokens";
+// Feedback 被 ui/index.ts 再导出；这里直接取组件，避免「桶文件互相 import」的循环。
+import Button from "../ui/Button";
+import IconButton from "../ui/IconButton";
 
 /** token 存的是 CSS 时长写法（`4s`、`180ms`），JS 定时器要的是毫秒数。 */
 function tokenMs(name: string): number {
@@ -126,10 +129,10 @@ function FeedbackCard({ entry }: { readonly entry: FeedbackEntry }) {
     onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}
     onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
     <p className="feedback-text">{entry.text}</p>
-    {entry.actionLabel !== null && <button type="button" className="text-button feedback-action"
-      onClick={() => { entry.onAction?.(); removeFeedback(entry.id); }}>{entry.actionLabel}</button>}
-    {entry.dwellMs === null && <button type="button" className="icon-button feedback-close"
-      aria-label="关闭提示" title="关闭提示" onClick={() => removeFeedback(entry.id)}><X aria-hidden="true" /></button>}
+    {entry.actionLabel !== null && <Button variant="text" className="feedback-action"
+      onClick={() => { entry.onAction?.(); removeFeedback(entry.id); }}>{entry.actionLabel}</Button>}
+    {entry.dwellMs === null && <IconButton icon={X} label="关闭提示" className="feedback-close"
+      onClick={() => removeFeedback(entry.id)} />}
   </div>;
 }
 

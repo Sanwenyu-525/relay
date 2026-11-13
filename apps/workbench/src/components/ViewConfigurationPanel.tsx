@@ -4,6 +4,7 @@ import { createCommandId, RelayApiError, RelayTransportError, viewConfigurationF
   from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./ViewConfigurationPanel.css";
+import { Button } from "../ui";
 
 const kinds: readonly { kind: RelayViewKind; label: string }[] = [
   { kind: "general", label: "通用" }, { kind: "thesis", label: "论文" },
@@ -197,10 +198,10 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
               onChange={(event) => setSelectedKind(event.target.value as RelayViewKind)}>
               {kinds.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}
             </select></label>}
-        <button className="primary-button" type="button" data-testid="view-save-default"
+        <Button variant="primary" data-testid="view-save-default"
           disabled={pending !== null || busy || writeBlockedReason !== null || chosen === current.kind}
           onClick={() => void send({ id: createCommandId(), expectedRevision: current.revision,
-            kind: chosen, conflict: false })}>{busy ? "正在核对" : `将${kindLabel(chosen)}设为默认`}</button>
+            kind: chosen, conflict: false })}>{busy ? "正在核对" : `将${kindLabel(chosen)}设为默认`}</Button>
         {writeBlockedReason && <p className="disabled-reason" data-testid="view-archive-reason">{writeBlockedReason}</p>}
         <p className="helper-text">仅保存展示组合；Project Type、State、Task 与 Run 不随之更改。页面顺序由服务端模板解析，不提供逐页编辑。</p>
       </>}
@@ -213,23 +214,23 @@ export default function ViewConfigurationPanel({ client, projectId, browseKind, 
         <p>{busy ? "正在核对是否保存成功…" : pending.conflict
           ? "这个视图在别处已经被改过；先核对最新修订，再决定是否按它重新保存。"
           : "还没查到这次保存的结果；核对之前不会生成新的保存。"}</p>
-        <button className="secondary-button" type="button" disabled={busy} data-testid="view-recheck"
-          onClick={() => client && void checkReceipt(pending, client, scope.current)}>重新核对</button>
-        {mayRetry && !pending.conflict && <button className="secondary-button" type="button" disabled={busy}
-          data-testid="view-retry" onClick={() => void send(pending, true)}>重试保存</button>}
+        <Button variant="secondary" disabled={busy} data-testid="view-recheck"
+          onClick={() => client && void checkReceipt(pending, client, scope.current)}>重新核对</Button>
+        {mayRetry && !pending.conflict && <Button variant="secondary" disabled={busy}
+          data-testid="view-retry" onClick={() => void send(pending, true)}>重试保存</Button>}
         {pending.conflict && current && BigInt(current.revision) > BigInt(pending.expectedRevision) &&
-          <button className="secondary-button" type="button" disabled={busy || loading}
+          <Button variant="secondary" disabled={busy || loading}
           data-testid="view-reconfirm"
           onClick={() => { freeze(null); setError(null); setMessage("已保留目标选择；请按当前修订明确重新提交。"); }}>
-          按当前修订重新确认</button>}
+          按当前修订重新确认</Button>}
         <details className="tech-details" data-testid="view-diagnostics">
           <summary>诊断信息</summary>
           <p className="helper-text">命令：SetViewConfiguration · 标识：<code className="hash-code">{pending.id}</code></p>
           <p className="helper-text">原修订 v{pending.expectedRevision} · 目标：{kindLabel(pending.kind)}</p>
         </details>
       </div>}
-      <button className="secondary-button" type="button" disabled={loading || busy}
-        onClick={() => client && void refresh(client, scope.current)}>刷新当前配置</button>
+      <Button variant="secondary" disabled={loading || busy}
+        onClick={() => client && void refresh(client, scope.current)}>刷新当前配置</Button>
     </>}
   </section>;
 }

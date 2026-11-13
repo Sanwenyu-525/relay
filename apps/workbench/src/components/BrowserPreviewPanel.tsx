@@ -7,6 +7,7 @@ import { localPreviewRestoreStore, type PreviewRestoreStore } from "../lib/previ
 import { checkPreviewUrl, previewDisplayUrl, previewOriginOf } from "../lib/previewUrl";
 import { handleTabListKeyDown } from "../lib/tabNavigation";
 import "./BrowserPreviewPanel.css";
+import { Button } from "../ui";
 
 /**
  * 内置人工网页预览。
@@ -354,8 +355,8 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
           onChange={(event) => patchTab(current.key, (tab) => ({ ...tab, input: event.target.value, notice: null }))}
           onKeyDown={handleAddressKeyDown} />
       </label>
-      <button type="button" className="secondary-button secondary-button--compact" data-testid="preview-go"
-        disabled={busy} onClick={submitAddress}>{busy ? "打开中" : "打开"}</button>
+      <Button variant="secondary" className="secondary-button--compact" data-testid="preview-go"
+        disabled={busy} onClick={submitAddress}>{busy ? "打开中" : "打开"}</Button>
       <button type="button" className="preview-icon-button" data-testid="preview-external" aria-label="在系统浏览器打开"
         title="在系统浏览器打开" disabled={current.url === ""}
         onClick={() => { void bridge.openExternal(current.url).catch((caught: unknown) => {
@@ -395,12 +396,12 @@ export default function BrowserPreviewPanel({ bridge, scope, restoreStore, activ
       {current.status === "STOPPED" && <div className="preview-start" data-testid="preview-stopped">
         <h3>已停止加载</h3>
         <p className="helper-text">停止只影响本次加载，不撤销页面已经发出的请求。可以重新加载，或在系统浏览器打开。</p>
-        <button type="button" className="secondary-button" onClick={reload}>重新加载</button>
+        <Button variant="secondary" onClick={reload}>重新加载</Button>
       </div>}
       {current.status === "CRASHED" && <div className="preview-start" data-testid="preview-crashed">
         <h3>页面进程异常退出</h3>
         <p className="helper-text">这是宿主报告的渲染进程故障，不是加载超时。可以重新加载；若反复发生，请在系统浏览器打开。</p>
-        <button type="button" className="secondary-button" onClick={reload}>重新加载</button>
+        <Button variant="secondary" onClick={reload}>重新加载</Button>
       </div>}
       {(current.status === "LOADING" || current.status === "READY") && <p className="preview-native-hint">
         网页由桌面应用的原生子窗口渲染，位于这块区域上方；它不接受工作台的样式与脚本注入。

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "./cn";
 
@@ -36,6 +36,8 @@ export function buttonClassName({ variant = "secondary", size = "md", block = fa
 }
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
+  /** React 19 把 ref 当普通 prop 传给函数组件；调用方要用它聚焦按钮时直接传即可。 */
+  readonly ref?: Ref<HTMLButtonElement>;
   readonly variant?: ButtonVariant;
   readonly size?: ButtonSize;
   /** 占满父容器宽度；等价于旧的 `primary-button--wide`，但对四档变体都成立。 */
@@ -47,13 +49,16 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   readonly type?: "button" | "submit" | "reset";
 }
 
-export default function Button({ variant, size, block, busy, icon: Icon, className, children, type = "button", disabled, ...rest }: ButtonProps) {
+// 调用方写在 aria-busy 上的进行中语义不能被抹掉：`busy` 只负责置 true，其余情况原样透传
+// （RelayConnectionDialog 的 readiness 检查就靠这个属性表达「正在检查」）。
+export default function Button({ variant, size, block, busy, icon: Icon, className, children, type = "button", disabled, ref, ...rest }: ButtonProps) {
   return <button
     {...rest}
+    ref={ref}
     type={type}
     className={buttonClassName({ variant, size, block, className })}
     disabled={disabled === true || busy === true}
-    aria-busy={busy === true ? true : undefined}
+    aria-busy={busy === true ? true : rest["aria-busy"]}
   >
     {Icon ? <Icon aria-hidden="true" /> : null}
     {children}

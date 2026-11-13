@@ -6,6 +6,7 @@ import { interventionReasonText, reviewKindLabels, reviewReasonText, taskStatusL
 import { controlLabels, runLabels } from "./RunControlPanel";
 import { reviewDecisionLabels } from "./ReviewDecisionPanel";
 import PageHeader from "./PageHeader";
+import { Button } from "../ui";
 
 interface AttentionSnapshot {
   readonly queriedAt: string;
@@ -249,8 +250,8 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
   return <section className="skill-page page-primary" data-testid="attention-queue">
     <PageHeader testId="attention-page-head" title="需要你查看的事项" meta="跨项目人工待处理"
       lede="按 Review、当前 Run 与 Task 的服务端事实分组。每组保留原读取顺序，分组不表示紧急程度或截止时间。"
-      actions={<button className="secondary-button" type="button" data-testid="attention-refresh" style={{ flexShrink: 0 }} disabled={loading}
-        onClick={() => void load()}>刷新事实</button>} />
+      actions={<Button variant="secondary" data-testid="attention-refresh" style={{ flexShrink: 0 }} disabled={loading}
+        onClick={() => void load()}>刷新事实</Button>} />
     <nav className="subnav" aria-label="任务范围"><Link className="subnav-item" to="/tasks">全部任务</Link>
       <Link className="subnav-item" to="/tasks?tab=inbox">未归属任务收件箱</Link>
       <Link className="subnav-item subnav-item--active" to="/tasks?tab=attention" aria-current="page">人工待处理</Link></nav>
@@ -262,7 +263,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
         <p>已读取的事项仍可打开；不能据此判断其他项目或 Run 没有待办。</p>
         {snapshot.failures.length > 0 && <ul>{snapshot.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>}
         {snapshot.taskPageFailure && <p className="action-error" data-testid="attention-continuation-error">续页失败：{snapshot.taskPageFailure.message}；已保留前面加载的结果，可按同一游标重试这一页。</p>}
-        {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<button className="secondary-button" type="button" data-testid="attention-continue-pages" disabled={loading} onClick={() => void load(true)}>继续读取后续页</button></p>}</div>}
+        {snapshot.nextCursor && <p>Task 分页每次最多读取 10 页，尚有后续页。<Button variant="secondary" data-testid="attention-continue-pages" disabled={loading} onClick={() => void load(true)}>继续读取后续页</Button></p>}</div>}
       <section className="surface-panel" data-testid="required-interventions"><h2>必须介入 · {visibleInterventions.length}</h2>
         <p className="helper-text">来自当前服务端事实；进入原入口后重新核对是否仍待处理。</p>
         {visibleInterventions.length ? <ul>{visibleInterventions.map((item) => <li key={`${item.itemKey}:${item.changeKey}`}

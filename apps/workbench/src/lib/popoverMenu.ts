@@ -56,11 +56,14 @@ export function useDetailsMenu(ref: RefObject<HTMLDetailsElement | null>, option
   const { enabled = true } = options;
   const onClosed = useRef(options.onClosed);
   onClosed.current = options.onClosed;
-  // details 可能条件渲染（页头「更多操作」等）：渲染期读一次 ref，节点挂载后 effect 依赖
-  // 变化会重挂监听；卸载时 React 置空 ref，依赖归 null 后监听一并拆除。
-  const node = ref.current;
+  // 不在渲染期读 ref：首次 render 时 ref.current 还是 null，若把它写进依赖数组，
+  // effect 只会在挂载后跑一次 null 分支，Esc/点外面/独占永远不会生效。
+  // 这里在每次 commit 后读取当前节点并重挂监听；菜单节点替换时也会自动接管，
+  // 代价只是浮层组件的一次 effect 重跑（渲染频率极低）。
   useEffect(() => {
-    if (!enabled || node === null) return;
+    if (!enabled) return;
+    const node = ref.current;
+    if (node === null) return;
     const token = Symbol("detailsMenu");
     const close = () => { node.open = false; onClosed.current?.(); };
     registered.set(token, close);
@@ -85,7 +88,7 @@ export function useDetailsMenu(ref: RefObject<HTMLDetailsElement | null>, option
       node.removeEventListener("toggle", onToggle);
       registered.delete(token);
     };
-  }, [enabled, node]);
+  });
 }
 
 /**
@@ -96,10 +99,11 @@ export function useDetailsMenu(ref: RefObject<HTMLDetailsElement | null>, option
 export function useMenuDismiss(open: boolean, onClose: () => void, root: RefObject<HTMLElement | null>): void {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  // 外壳与 details 一样可能条件渲染：渲染期读 ref，挂载后 effect 依赖变化自动接管。
-  const rootNode = root.current;
+  // 外壳与 details 同理：在 effect 里读取节点，避免首次 render 的 null ref 被写进依赖。
   useEffect(() => {
-    if (!open || rootNode === null) return;
+    if (!open) return;
+    const rootNode = root.current;
+    if (rootNode === null) return;
     const token = Symbol("menuLayer");
     registered.set(token, () => onCloseRef.current());
     closeOthers(token);
@@ -118,7 +122,7 @@ export function useMenuDismiss(open: boolean, onClose: () => void, root: RefObje
       document.removeEventListener("keydown", onKeyDown);
       registered.delete(token);
     };
-  }, [open, rootNode]);
+  }, [open]);
 }
 
 /**

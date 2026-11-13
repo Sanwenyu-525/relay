@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayArtifact, RelayArtifactLineage, RelayArtifactVersionSummary } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 interface Comparison {
   readonly version: RelayArtifactVersionSummary;
@@ -93,7 +94,7 @@ export default function ArtifactVersionCompare({ client, lineage }: {
     <h2>正文与确切版本比较</h2>
     <p className="helper-text">正文由确切版本内容接口重新校验摘要后读取。比较范围仅限这份产物的已保存版本；未保存草稿不参与比较。</p>
     {lineage.contentAvailability === "UNAVAILABLE" ? <p className="warning-callout">当前版本正文不可用，不能比较；不会用最新版本替代。</p>
-      : <button className="secondary-button" type="button" disabled={loading} onClick={() => void readCurrent()}>{loading ? "正在读取" : "读取当前版本正文与历史"}</button>}
+      : <Button variant="secondary" disabled={loading} onClick={() => void readCurrent()}>{loading ? "正在读取" : "读取当前版本正文与历史"}</Button>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {currentContent !== null && artifact && <>
       <p className="helper-text">当前版本 v{lineage.versionNumber} · {lineage.artifactVersionId} · sha256 {lineage.sha256}</p>
@@ -101,7 +102,7 @@ export default function ArtifactVersionCompare({ client, lineage }: {
       <label className="field"><span className="field-label">比较基线</span><select value={baselineId} data-testid="artifact-compare-select" onChange={(event) => {
         request.current++; setBaselineId(event.target.value); setComparison(null); setCompareError(null); setComparing(false);
       }}><option value="">选择已保存版本</option>{artifact.versions.map((version) => <option key={version.artifactVersionId} value={version.artifactVersionId}>v{version.versionNumber} · {version.artifactVersionId === lineage.artifactVersionId ? "当前版本" : version.sourceKind}</option>)}</select></label>
-      <button className="secondary-button" type="button" data-testid="artifact-compare-submit" disabled={!baselineId || comparing} onClick={() => void readComparison()}>{comparing ? "正在比较" : "比较确切版本"}</button>
+      <Button variant="secondary" data-testid="artifact-compare-submit" disabled={!baselineId || comparing} onClick={() => void readComparison()}>{comparing ? "正在比较" : "比较确切版本"}</Button>
       {compareError && <p className="action-error" role="alert">{compareError}</p>}
       {comparison && diff && <section className="lineage-diff" data-testid="artifact-compare-result"><h3>v{comparison.version.versionNumber} → v{lineage.versionNumber}</h3>
         <p className="helper-text">基线 {comparison.version.artifactVersionId} · sha256 {comparison.version.sha256} · {comparison.lineage.sourceKind} · {comparison.version.createdAt}。<Link className="inline-link" to={`/artifact-versions/${comparison.version.artifactVersionId}/lineage`}>查看基线完整来源</Link></p>

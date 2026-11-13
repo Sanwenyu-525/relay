@@ -4,6 +4,7 @@ import { createCommandId, RelayApiClient, RelayTransportError,
   type RequiredContextAudit, type RequiredContextFileRisk } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./ContextRiskNotice.css";
+import { Button } from "../ui";
 
 /**
  * 必读文件体积预警（2026-10-30）。
@@ -190,12 +191,12 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
             <span aria-hidden="true">·</span>
             <span className="context-risk-share">{formatShare(file.share)}</span>
           </p>
-          <button type="button" className="text-button context-risk-view"
+          <Button variant="text" className="context-risk-view"
             data-testid={`context-risk-view-${file.path}`}
             disabled={audit.access === null || previewBusy !== null}
             onClick={() => void openFile(file)}>
             {previewBusy === file.path ? "读取中" : "查看文件"}
-          </button>
+          </Button>
         </li>)}
       </ul>
 
@@ -204,8 +205,8 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
       {preview !== null && <div className="context-risk-preview" data-testid="context-risk-preview">
         <div className="context-risk-preview-head">
           <span>{preview.path}</span>
-          <button type="button" className="text-button" data-testid="context-risk-preview-close"
-            onClick={() => setPreview(null)}>收起</button>
+          <Button variant="text" data-testid="context-risk-preview-close"
+            onClick={() => setPreview(null)}>收起</Button>
         </div>
         <pre>{preview.text}{preview.truncated ? "\n…（只显示开头一段，文件本身未改动）" : ""}</pre>
       </div>}
@@ -249,13 +250,13 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
 
       <p className="context-risk-estimate-note">{audit.budget.estimate.note}</p>
       <div className="context-risk-actions">
-        <button type="button" className="secondary-button" data-testid="context-risk-refresh"
-          disabled={loading} onClick={() => onRefresh()}>{loading ? "正在读取" : "刷新读数"}</button>
-        <button type="button" className="secondary-button" data-testid="context-risk-dismiss"
+        <Button variant="secondary" data-testid="context-risk-refresh"
+          disabled={loading} onClick={() => onRefresh()}>{loading ? "正在读取" : "刷新读数"}</Button>
+        <Button variant="secondary" data-testid="context-risk-dismiss"
           onClick={() => {
             writeDismissed(workspaceId, resourceId, audit.fingerprint);
             setDismissed(audit.fingerprint); setOpen(false);
-          }}>本次忽略</button>
+          }}>本次忽略</Button>
       </div>
       {error !== null && <p className="context-risk-error" role="alert"
         data-testid="context-risk-error">{error}</p>}

@@ -4,6 +4,7 @@ import { createCommandId, type RelayApiClient,
 import { describeLiveError } from "../lib/liveErrors";
 import { phaseLabel } from "../lib/labels";
 import "./DailyContinuationCard.css";
+import { Button } from "../ui";
 
 /**
  * 返回项目时的顶部接续卡（总纲 §0.8.1、工作台 §18.9）。
@@ -195,7 +196,7 @@ export default function DailyContinuationCard({ client, projectId }: {
       data-testid="daily-continuation" data-state="failed">
       <p className="warning-callout" role="alert">接续进度读取失败：{error ?? "项目事实不可用。"}</p>
       <p className="helper-text">不显示变化摘要，避免把读取失败当成没有变化。</p>
-      <button className="secondary-button" type="button" data-testid="daily-continuation-retry"
+      <Button variant="secondary" data-testid="daily-continuation-retry"
         onClick={() => { setError(null); setLoading(true);
           const request = ++version.current;
           void client.getDailyContinuation(projectId).then((next) => {
@@ -210,7 +211,7 @@ export default function DailyContinuationCard({ client, projectId }: {
           }).finally(() => {
             if (!disposed.current && request === version.current) setLoading(false);
           });
-        }}>重试</button>
+        }}>重试</Button>
     </section>;
   }
   const baseline = projection.baseline;

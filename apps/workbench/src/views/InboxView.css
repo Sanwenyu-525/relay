@@ -288,7 +288,7 @@
   margin-top: 10px;
 }
 
-.active-filters-label { color: var(--pv-muted); font-size: 11px; }
+.active-filters-label { color: var(--pv-muted); font-size: var(--relay-font-size-micro); }
 .active-filters-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 
 .active-filter-chip {
@@ -297,10 +297,10 @@
   gap: 4px;
   padding: 2px 4px 2px 9px;
   border: 1px solid var(--pv-chip-border);
-  border-radius: 7px;
+  border-radius: var(--relay-radius-badge);
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   white-space: nowrap;
 }
 
@@ -325,7 +325,7 @@
 .inbox-filter-project-note {
   max-width: 17rem;
   color: var(--pv-muted);
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   font-weight: 400;
   line-height: 1.55;
 }
@@ -339,9 +339,9 @@
 }
 
 .pv-page .inbox-head { align-items: flex-start; }
-.pv-page .inbox-kicker { font-size: 11px; color: var(--pv-muted); font-weight: 700; }
-.pv-page .inbox-head h1 { margin: 5px 0 0; font-size: 22px; letter-spacing: -.035em; color: #1e3529; }
-.pv-page .inbox-lede { margin-top: 6px; font-size: 12px; line-height: 1.75; color: var(--pv-muted); }
+.pv-page .inbox-kicker { font-size: var(--relay-font-size-micro); color: var(--pv-muted); font-weight: 700; }
+.pv-page .inbox-head h1 { margin: 5px 0 0; font-size: 22px; letter-spacing: -.035em; color: var(--relay-color-text-primary); }
+.pv-page .inbox-lede { margin-top: 6px; font-size: var(--relay-font-size-caption); line-height: 1.75; color: var(--pv-muted); }
 
 .pv-page .inbox-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin-top: 15px; }
 /* 紧凑统计卡（UI-PAGE-INBOX-01）：数字与状态名基线同行，提示独占下一行；高度由 ~90px 收到 ~64px。 */
@@ -351,40 +351,40 @@
   align-items: baseline;
   gap: 3px 8px;
   padding: 12px 15px;
-  border: 1px solid #dfe9df;
-  border-radius: 12px;
-  box-shadow: 0 3px 15px #22553506;
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-surface);
 }
-.pv-page .inbox-stat-label { font-size: 11px; color: var(--pv-muted); }
-.pv-page .inbox-stat-value { font-size: 20px; color: #286849; letter-spacing: -.02em; }
-.pv-page .inbox-stat-hint { flex-basis: 100%; font-size: 11px; color: var(--pv-muted); }
+.pv-page .inbox-stat-label { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .inbox-stat-value { font-size: 20px; color: var(--relay-color-action-text); letter-spacing: -.02em; }
+.pv-page .inbox-stat-hint { flex-basis: 100%; font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
 
 .pv-page .inbox-card {
   margin-top: var(--relay-space-4);
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
-  box-shadow: 0 3px 15px #22553506;
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  box-shadow: var(--relay-shadow-surface);
 }
-.pv-page .inbox-card-head { padding: 14px 17px; border-bottom: 1px solid #edf1ec; }
-.pv-page .inbox-card-head strong { font-size: 13px; color: #294635; }
-.pv-page .inbox-card-head strong > svg { color: #36724e; width: 15px; height: 15px; }
-.pv-page .inbox-card-head small { font-size: 11px; color: var(--pv-muted); }
-.pv-page .inbox-card-body { padding: 4px 17px; background: #fff; }
+.pv-page .inbox-card-head { padding: 14px 17px; border-bottom: 1px solid var(--relay-color-border-separator); }
+.pv-page .inbox-card-head strong { font-size: var(--relay-font-size-pageBase); color: var(--relay-color-text-primary); }
+.pv-page .inbox-card-head strong > svg { color: var(--relay-color-action-text); width: 15px; height: 15px; }
+.pv-page .inbox-card-head small { font-size: var(--relay-font-size-micro); color: var(--pv-muted); }
+.pv-page .inbox-card-body { padding: 4px 17px; background: var(--relay-color-bg-surface); }
 
-.pv-page .inbox-row { padding: 13px 0; border-bottom: 1px solid #edf1ec; }
+.pv-page .inbox-row { padding: 13px 0; border-bottom: 1px solid var(--relay-color-border-separator); }
 .pv-page .inbox-card-body > .inbox-row:last-child { border-bottom: 0; }
-.pv-page .inbox-row:hover { background: #f7fbf8; }
-.pv-page .inbox-row--untriaged { background: #f4faf6; }
-.pv-page .inbox-row-icon { width: 35px; height: 35px; border-radius: 10px; }
+.pv-page .inbox-row:hover { background: var(--relay-color-selection-hover); }
+.pv-page .inbox-row--untriaged { background: var(--relay-color-selection-hover); }
+.pv-page .inbox-row-icon { width: 35px; height: 35px; border-radius: var(--relay-radius-panel); }
 .pv-page .inbox-row-icon > svg { width: 16px; height: 16px; }
-.pv-page .inbox-row-icon--neutral { background: #eef3ef; color: #5c6f62; }
-.pv-page .inbox-row-icon--success { background: #eaf5ec; color: #347455; }
-.pv-page .inbox-row-icon--warning { background: #fdf3e3; color: #96622a; }
-.pv-page .inbox-row-icon--danger { background: #fdeeea; color: #a34f43; }
-.pv-page .inbox-row-title { font-size: 12.5px; font-weight: 650; color: #33533d; }
+.pv-page .inbox-row-icon--neutral { background: var(--relay-color-border-separator); color: var(--relay-color-text-secondary); }
+.pv-page .inbox-row-icon--success { background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); }
+.pv-page .inbox-row-icon--warning { background: var(--relay-color-status-warning-bg); color: var(--relay-color-status-warning-text); }
+.pv-page .inbox-row-icon--danger { background: var(--relay-color-status-danger-bg); color: var(--relay-color-status-danger-text); }
+.pv-page .inbox-row-title { font-size: 12.5px; font-weight: 650; color: var(--relay-color-text-primary); }
 /* 事实行含修订号：tabular 数字让长列表的同位数字对齐（与任务页同一处理）。 */
-.pv-page .inbox-row-facts { font-size: 11px; color: var(--pv-muted); font-variant-numeric: tabular-nums; }
-.pv-page .inbox-row-reason { font-size: 11px; color: #566f5f; }
+.pv-page .inbox-row-facts { font-size: var(--relay-font-size-micro); color: var(--pv-muted); font-variant-numeric: tabular-nums; }
+.pv-page .inbox-row-reason { font-size: var(--relay-font-size-micro); color: var(--relay-color-text-muted); }
 .pv-page .inbox-row-arrow { width: 14px; height: 14px; }
 
 @media (max-width: 760px) {

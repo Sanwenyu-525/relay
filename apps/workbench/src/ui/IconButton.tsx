@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "./cn";
 
@@ -15,11 +15,13 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   readonly size?: "md" | "sm";
   readonly tone?: "default" | "danger";
   readonly type?: "button" | "submit";
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
-export default function IconButton({ label, icon: Icon, size = "md", tone = "default", className, type = "button", title, ...rest }: IconButtonProps) {
+export default function IconButton({ label, icon: Icon, size = "md", tone = "default", className, type = "button", title, ref, ...rest }: IconButtonProps) {
   return <button
     {...rest}
+    ref={ref}
     type={type}
     className={cn("icon-button", size === "sm" && "ui-icon-button--sm", tone === "danger" && "ui-icon-button--danger", className)}
     aria-label={label}

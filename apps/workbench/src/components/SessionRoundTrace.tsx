@@ -15,6 +15,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import ActivityDetail from "./ActivityDetail";
 import ActivityRow from "./ActivityRow";
 import "./SessionRoundTrace.css";
+import { Button } from "../ui";
 
 /**
  * 工具活动（docs/frontend/workbench-design.md §18.10；2026-10-29 V3 重构，2026-10-31 UI-08 收口）。
@@ -247,8 +248,8 @@ export function SessionRoundTrace({ client, message, pollIntervalMs = POLL_MS,
       <p className="activity-panel-notice-title"><CircleX aria-hidden="true" />过程读取失败</p>
       <p>{error}</p>
       <p className="helper-text">正文与最终回复不受这条影响；这里只说明工具轮次没读到。</p>
-      <button className="secondary-button" type="button" data-testid={`session-round-trace-retry-${message.id}`}
-        disabled={loading} onClick={() => void read()}>重新读取</button>
+      <Button variant="secondary" data-testid={`session-round-trace-retry-${message.id}`}
+        disabled={loading} onClick={() => void read()}>重新读取</Button>
     </div>}
 
     {loading && !loaded && error === null && <p className="helper-text activity-panel-loading" role="status"

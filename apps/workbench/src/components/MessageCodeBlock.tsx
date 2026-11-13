@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Toast } from "./Feedback";
+import { IconButton } from "../ui";
 import "./MessageCodeBlock.css";
 
 /**
@@ -58,10 +59,8 @@ export default function MessageCodeBlock({ label, text, testId, maxHeight, copyL
   return <figure className="msg-code" data-testid={testId} data-copy-state={state}>
     <figcaption className="msg-code-bar">
       {label !== "" && <span className="msg-code-label">{label}</span>}
-      <button className="icon-button msg-code-copy" type="button"
-        aria-label={copyName} title={copyName} onClick={onCopy}>
-        {state === "done" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-      </button>
+      <IconButton className="msg-code-copy" icon={state === "done" ? Check : Copy}
+        label={copyName} title={copyName} onClick={onCopy} />
     </figcaption>
     <pre className="msg-code-body" style={maxHeight === undefined ? undefined : { maxHeight }}><code>{text}</code></pre>
     {/* 回执走共享浮层：固定定位，不参与这块的网格布局，因此出现/消失都不会推走正文。 */}

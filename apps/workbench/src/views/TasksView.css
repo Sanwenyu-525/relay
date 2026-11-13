@@ -11,7 +11,7 @@
 /* pv 皮肤：styles 基座 `.page-primary > .subnav .subnav-item`（0,3,0）把范围页签抬到
    reading(18px) 档，压过 protoPage 的 `.pv-page .subnav-item` 12px 档；这里以更高特异性回 12px 页签档。 */
 .pv-page .page-primary > .subnav .subnav-item,
-.pv-page .subnav-row .subnav-item { font-size: 12px; }
+.pv-page .subnav-row .subnav-item { font-size: var(--relay-font-size-caption); }
 
 /* 列宽（UI-PAGE-TASKS-01）：data-row--tasks 只有本页使用，列宽在页面内收口——
    任务列（标题+修订）放宽到 2.2fr，项目 1.1fr，状态 1.6fr，模式 0.9fr、执行者 0.8fr；
@@ -31,7 +31,7 @@
   gap: 6px 8px;
   margin-top: 10px;
 }
-.active-filters-label { color: var(--pv-muted); font-size: 11px; }
+.active-filters-label { color: var(--pv-muted); font-size: var(--relay-font-size-micro); }
 .active-filters-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .active-filter-chip {
   display: inline-flex;
@@ -42,7 +42,7 @@
   border-radius: 7px;
   background: var(--pv-chip-bg);
   color: var(--pv-chip-ink);
-  font-size: 11px;
+  font-size: var(--relay-font-size-micro);
   white-space: nowrap;
 }
 .active-filter-remove {
@@ -124,7 +124,7 @@
   .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(5)::before {
     content: attr(data-label) "：";
     color: var(--pv-muted);
-    font-size: 11px;
+    font-size: var(--relay-font-size-micro);
   }
   .pv-page.task-list-page .list-toolbar--compact {
     display: grid;

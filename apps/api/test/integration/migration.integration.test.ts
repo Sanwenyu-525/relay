@@ -243,6 +243,10 @@ const ALL_MIGRATIONS = [
   // 0161（ADR-027 2026-11-10 修订）：删除会话改为解除外部引用；artifact 影响检查来源列
   // 允许为空、蓝图提案新增来源脱钩时刻、验收观察/假设版本补列级 UPDATE。清单必须同步。
   '0161_session_delete_detach_external_references',
+  // 0162（并行会话）：上下文压缩阈值；0163（Durable Task Continuation）：会话生成次数、
+  // 中断事实与逐回合检查点。清单必须同步，否则真实库上会因多两条而失败。
+  '0162_context_compaction_threshold',
+  '0163_assist_generation_continuation',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

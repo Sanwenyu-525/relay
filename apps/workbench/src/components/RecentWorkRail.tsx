@@ -17,6 +17,7 @@ import { Notice, Toast } from "./Feedback";
 import RecentWorkRow from "./RecentWorkRow";
 import WorkspaceClearSessions from "./WorkspaceClearSessions";
 import type { SessionRowPatch } from "./SessionRowMenu";
+import { Button, IconButton } from "../ui";
 
 /**
  * 批量删除的结果报告（2026-10-31）。
@@ -798,18 +799,18 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
       消息、附件与工具调用记录将永久移除，无法恢复。</p>}
     <div className="recent-work-confirm-actions">
       {batch === "idle" ? <>
-        <button type="button" className="text-button recent-work-selection-danger"
+        <Button variant="text" className="recent-work-selection-danger"
           data-testid="recent-work-batch-delete"
-          onClick={() => { setBatchResult(null); setBatch("confirm"); }}>删除</button>
-        <button type="button" className="text-button" data-testid="recent-work-selection-clear"
-          onClick={clearSelection}>取消</button>
+          onClick={() => { setBatchResult(null); setBatch("confirm"); }}>删除</Button>
+        <Button variant="text" data-testid="recent-work-selection-clear"
+          onClick={clearSelection}>取消</Button>
       </> : <>
-        <button type="button" className="danger-button" disabled={batch === "busy"}
+        <Button variant="danger" disabled={batch === "busy"}
           data-testid="recent-work-batch-delete-confirm"
-          onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</button>
-        <button type="button" className="secondary-button" disabled={batch === "busy"}
+          onClick={() => void deleteSelected()}>{batch === "busy" ? "正在删除…" : "删除"}</Button>
+        <Button variant="secondary" disabled={batch === "busy"}
           data-testid="recent-work-batch-delete-cancel"
-          onClick={() => setBatch("idle")}>取消</button>
+          onClick={() => setBatch("idle")}>取消</Button>
       </>}
     </div>
   </div> : null;
@@ -1106,8 +1107,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         <EmptyState size="compact" title="还没有任务或会话"
           description="新建任务开始，或用上方「新对话」直接讨论。这里只显示本机内容，归档过的收在下方「已归档」里。"
           testId="recent-work-empty"
-          actions={<button className="text-button" type="button"
-            onClick={() => { void navigate("/tasks?view=create"); onOpen?.(); }}>新建任务</button>} />}
+          actions={<Button variant="text"
+            onClick={() => { void navigate("/tasks?view=create"); onOpen?.(); }}>新建任务</Button>} />}
       {!loading && !error && loadedCount > 0 && rows.length === 0 &&
         <EmptyState size="compact" title="没有匹配项"
           description={`已加载的 ${loadedCount} 项里没有匹配项；搜索只覆盖已加载范围，可继续读取更早任务。`}
@@ -1179,13 +1180,13 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
               preventDefault + stopPropagation，否则这一击会先被读成折叠这一段）。
               目标沿用左栏空态与标题栏既有的 `/tasks?view=create`，不新造创建流程。 */}
           <summary><ChevronDown aria-hidden="true" /><span className="recent-work-group-title">任务</span>
-            <button type="button" className="icon-button recent-work-section-new"
-              title="新建任务" aria-label="新建任务" data-testid="recent-work-new-task"
+            <IconButton className="recent-work-section-new" icon={Plus} label="新建任务"
+              data-testid="recent-work-new-task"
               onClick={(event) => {
                 event.preventDefault(); event.stopPropagation();
                 void navigate("/tasks?view=create");
                 onOpen?.();
-              }}><Plus aria-hidden="true" /></button>
+              }} />
           </summary>
           {[...groups].map(([projectId, groupRows]) => {
             const key = railGroupKey(projectId);
@@ -1221,8 +1222,8 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
               ? <p className="action-error recent-work-scope-note" role="alert"
                 data-testid="recent-work-archived-error">{archivedError}
                 {/* 失败后的只读重试：与收起再展开（archived 仍为 null，重开会重读）等效，都在本页内。 */}
-                <button type="button" className="text-button" data-testid="recent-work-archived-retry"
-                  onClick={() => void loadArchived()}>重试</button></p>
+                <Button variant="text" data-testid="recent-work-archived-retry"
+                  onClick={() => void loadArchived()}>重试</Button></p>
               : archived === null
                 ? <p className="helper-text recent-work-scope-note">展开时读取归档列表</p>
                 : archivedRows.length === 0
@@ -1231,9 +1232,9 @@ export default function RecentWorkRail({ client, currentTaskId, onOpen }: {
         </details>}
       </div>
       {pagingError && <p className="action-error" role="alert">{pagingError}</p>}
-      {loaded?.nextCursor && <button className="secondary-button" type="button" disabled={loadingMore}
+      {loaded?.nextCursor && <Button variant="secondary" disabled={loadingMore}
         title={`已加载 ${tasks.length} 项任务，继续读取更早任务`} data-testid="recent-work-more"
-        onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : `更早的任务（已加载 ${tasks.length} 项）`}</button>}
+        onClick={() => void load(loaded.nextCursor)}>{loadingMore ? "正在读取" : `更早的任务（已加载 ${tasks.length} 项）`}</Button>}
     </div>
     {sessionsError !== null && <p className="helper-text" role="status" data-testid="recent-work-sessions-error">
       会话列表暂时读不到：{sessionsError} 任务列表仍按已加载范围显示。</p>}

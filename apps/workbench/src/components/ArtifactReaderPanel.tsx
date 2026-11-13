@@ -4,6 +4,7 @@ import SafeMarkdown from "./SafeMarkdown";
 import { RelayApiError, RelayTransportError, type RelayApiClient, type RelayArtifactVersionSummary, type RelayRunDraftPreview, type RelayTaskArtifacts } from "../api/relayClient";
 import { useDetailsMenu } from "../lib/popoverMenu";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 interface Reading {
   readonly version: RelayArtifactVersionSummary;
@@ -154,7 +155,7 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
       <summary>版本与比较 · {versions.length} 个已保存版本</summary>
       {compact && document && <p className="helper-text">最后保存：{savedAt(document.version.createdAt)}</p>}
       <p className="helper-text">最新、当前选用与本轮接受三者分别表达，不互相继承。</p>
-      <button className="text-button" type="button" data-testid="collab-reader-refresh" disabled={loading || readingLoading || compareLoading} onClick={() => void load()}>刷新产物与确切正文</button>
+      <Button variant="text" data-testid="collab-reader-refresh" disabled={loading || readingLoading || compareLoading} onClick={() => void load()}>刷新产物与确切正文</Button>
     {versions.length > 0 && <ul className="version-list version-list--compact">{versions.map((item) => {
       const isLatest = artifacts?.items.some((artifact) => artifact.latestVersionId === item.version.artifactVersionId) === true;
       const isReading = reading?.version.artifactVersionId === item.version.artifactVersionId;
@@ -167,8 +168,8 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
           {stateRefs.some((ref) => ref.artifactVersionId === item.version.artifactVersionId) && <span className="status-chip status-chip--neutral">当前选用</span>}
           {artifacts?.currentAcceptedVersionIds.includes(item.version.artifactVersionId) && <span className="status-chip status-chip--neutral">本轮接受</span>}
         </span>
-        <button className="secondary-button" type="button" data-testid={`collab-read-${item.version.artifactVersionId}`}
-          onClick={() => void open(item)}>{isReading ? "正在阅读" : "展开阅读"}</button>
+        <Button variant="secondary" data-testid={`collab-read-${item.version.artifactVersionId}`}
+          onClick={() => void open(item)}>{isReading ? "正在阅读" : "展开阅读"}</Button>
         <Link className="inline-link" to={`/artifact-versions/${item.version.artifactVersionId}/lineage`}>来源与历史</Link>
       </li>;
     })}</ul>}
@@ -179,8 +180,8 @@ export default function ArtifactReaderPanel({ client, taskId, projectId, selecte
           {versions.filter((item) => item.version.artifactVersionId !== requestedVersion?.version.artifactVersionId)
             .map((item) => <option key={item.version.artifactVersionId} value={item.version.artifactVersionId}>v{item.version.versionNumber} · {item.title}</option>)}
         </select></label>
-      <button className="secondary-button" type="button" data-testid="collab-compare-open" disabled={!compareWith || !requestedVersion || readingLoading || compareLoading}
-        onClick={() => void openCompare()}>{compareLoading ? "正在读取比较版本" : "比较两份确切版本"}</button>
+      <Button variant="secondary" data-testid="collab-compare-open" disabled={!compareWith || !requestedVersion || readingLoading || compareLoading}
+        onClick={() => void openCompare()}>{compareLoading ? "正在读取比较版本" : "比较两份确切版本"}</Button>
     </div>}
     </details>;
 const documentHeading = document && <header className="artifact-doc-heading">
@@ -194,9 +195,9 @@ const documentHeading = document && <header className="artifact-doc-heading">
     {!compact && <h2>产物</h2>}
     {loading && <p className="helper-text loading-text" role="status">正在读取产物版本…</p>}
     {error && <p className="action-error" role="alert" data-testid="collab-artifact-error">{error}
-      <button className="secondary-button" type="button" onClick={() => void load()}>重新读取产物</button></p>}
+      <Button variant="secondary" onClick={() => void load()}>重新读取产物</Button></p>}
     {!loading && !error && versions.length === 0 && <div className="collab-artifact-state"><h3>暂时没有已保存产物</h3><p className="helper-text">保存首版后，这里会显示正文与版本。执行中的预览单独展示，不计为已保存版本。</p></div>}
-    {!loading && !error && selectedVersionId !== null && active === null && <div className="collab-artifact-state" role="alert" data-testid="collab-bound-version-unavailable"><h3>绑定版本暂不可读</h3><p className="helper-text">当前版本列表没有返回所引用的确切版本，不会用最新版替代。</p><details><summary>核对版本身份</summary><p className="helper-text">版本 ID：{selectedVersionId}</p></details><button className="secondary-button" type="button" onClick={() => void load()}>重新读取版本</button></div>}
+    {!loading && !error && selectedVersionId !== null && active === null && <div className="collab-artifact-state" role="alert" data-testid="collab-bound-version-unavailable"><h3>绑定版本暂不可读</h3><p className="helper-text">当前版本列表没有返回所引用的确切版本，不会用最新版替代。</p><details><summary>核对版本身份</summary><p className="helper-text">版本 ID：{selectedVersionId}</p></details><Button variant="secondary" onClick={() => void load()}>重新读取版本</Button></div>}
 
     {draft?.previewAvailable && draft.previewText !== null && <section className="collab-draft" data-testid="collab-run-draft">
       <h3>生成中预览 · 未保存</h3>
@@ -214,8 +215,8 @@ const documentHeading = document && <header className="artifact-doc-heading">
     {readingLoading && <p className="helper-text" role="status" data-testid="collab-read-loading">正在读取当前版本正文…</p>}
     {readingError && <div className="collab-artifact-state" data-testid="collab-read-error" role="alert">
       <h3>正文读取失败</h3><p className="helper-text">{readingError}</p>
-      <div className="form-actions"><button className="secondary-button" type="button" data-testid="collab-read-retry"
-        onClick={() => { if (requestedVersion) void open(requestedVersion); }}>重试读取正文</button>
+      <div className="form-actions"><Button variant="secondary" data-testid="collab-read-retry"
+        onClick={() => { if (requestedVersion) void open(requestedVersion); }}>重试读取正文</Button>
       <Link className="text-link" to={`/tasks/${taskId}?tab=artifacts`}>查看任务产物</Link></div>
     </div>}
 
@@ -238,7 +239,7 @@ const documentHeading = document && <header className="artifact-doc-heading">
     requestedVersion.version.artifactVersionId !== selectedVersionId
     ? <p className="collab-review-version-mismatch warning-callout" role="status" data-testid="collab-review-version-mismatch">
       正在阅读 v{requestedVersion.version.versionNumber}；当前判断仍绑定「{active.title}」v{active.version.versionNumber}。
-      <button className="text-button" type="button" onClick={() => void open(active)}>返回判断版本</button>
+      <Button variant="text" onClick={() => void open(active)}>返回判断版本</Button>
     </p>
     : null;
   return <div className={compact ? "collab-reader" : "surface-panel"} data-testid="collab-artifact-reader"

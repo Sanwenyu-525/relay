@@ -6,6 +6,7 @@ import { nativeFolderPickerAvailable, selectWorkingDirectory } from "../lib/desk
 import { usePathTooltip } from "../lib/pathTooltip";
 import type { RecentWorkingDirectory } from "../lib/recentWorkingDirectories";
 import "./FolderScope.css";
+import { Button } from "../ui";
 
 /**
  * 工作台 §18.1 的文件夹入口。
@@ -81,9 +82,9 @@ const needsScopeChoice = directory !== null && directory.candidates.length > 0 &
       <span className="field-label">本机已有绝对目录</span>
       <input data-testid="folder-manual-root" value={manualPath} disabled={busy} required
         onChange={(event) => setManualPath(event.target.value)} placeholder="D:\\Develop\\MyProject" /></label>}
-    {!pickerAvailable && <button className="secondary-button secondary-button--compact" type="button"
+    {!pickerAvailable && <Button variant="secondary" className="secondary-button--compact"
       data-testid="folder-open-manual"
-      disabled={busy || manualPath.trim() === ""} onClick={() => onOpen(manualPath.trim())}>打开这个目录</button>}
+      disabled={busy || manualPath.trim() === ""} onClick={() => onOpen(manualPath.trim())}>打开这个目录</Button>}
     {pickerError && <p className="action-error" role="alert" data-testid="folder-picker-error">{pickerError}</p>}
 
     {needsScopeChoice && directory !== null && <section className="folder-scope-ambiguous"

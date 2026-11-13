@@ -3,6 +3,9 @@ import { describeAssistRequestContext } from './assist-context-usage.js';
 import { join } from 'node:path';
 
 import { SessionToolCallRepository } from '../assist/session-tool-call-repository.js';
+import type { SessionToolCallRow } from '../assist/session-tool-call-repository.js';
+import type { ResumedGenerationRound, ResumedToolResult }
+  from './assist-generation-resume.js';
 import { officialGithubSkillGuidanceForTools } from '../skills/official-skills.js';
 import { canonicalizeJson } from '../receipt/payload-hash.js';
 import type { AssistMessageRow, AssistSessionRow, GatewayCapability } from '../infrastructure/database-schema.js';
@@ -167,6 +170,12 @@ export interface AssistantReadonlyRoundInput {
    * 因此这一轮同样不声明委派工具（宁可让模型看不见，不给它一条注定被拒的词表项）。
    */
   readonly workerId?: string | undefined;
+  /**
+   * 0163：这条消息的生成次数与已完成回合。`generationAttempt > 1` 时按持久检查点续跑；
+   * 缺省时行为与之前完全一致（不写检查点、不从检查点回灌）。
+   */
+  readonly generationAttempt?: number | undefined;
+  readonly resume?: readonly ResumedGenerationRound[] | undefined;
 }
 
 /**
@@ -253,6 +262,9 @@ export interface SessionReadonlyRoundInput {
    * 不缺省成空串——没有 Worker 身份的轮次不应建立委派。
    */
   readonly workerId?: string | undefined;
+  /** 0163：生成次数与已完成回合；见 `AssistantReadonlyRoundInput.generationAttempt`。 */
+  readonly generationAttempt?: number | undefined;
+  readonly resume?: readonly ResumedGenerationRound[] | undefined;
 }
 
 /**
@@ -577,6 +589,60 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
   let effectfulCalls = 0;
   /** 本次生成里 `todo_write` 的独立额度用量（不占读取额度，见 `MAX_TODO_SETTLEMENT_CALLS`）。 */
   let settlementCalls = 0;
+  /**
+   * 0163：生成次数与持久回合。
+   *
+   * `attempt > 1` 时先回灌已完成回合：已结算的工具结果直接复用，未结算的按
+   * `session_tool_calls` 与 Gateway 证据补核对（只读可重放、有副作用的不重放）。
+   * 首次生成没有历史回合，行为与之前完全一致。
+   */
+  const generationAttempt = input.generationAttempt ?? message.generation_attempt ?? 1;
+  let resumeStartRound = 0;
+  if (input.resume !== undefined && input.resume.length > 0) {
+    const completed = await completeResumedRounds(db, {
+      session, message, repository, rounds: input.resume,
+      availableTools: input.availableTools, resolveOrigin: input.resolveOrigin,
+      allowWrite: input.allowWrite ?? false, allowTodo: input.allowTodo === true,
+      allowDelegate: input.allowDelegate === true, runDelegation: input.runDelegation,
+      workerId: input.workerId, signal: input.signal,
+      maxRounds, maxToolCalls, maxSettlementCalls: MAX_TODO_SETTLEMENT_CALLS,
+      usedCalls, settlementCalls,
+    });
+    for (const round of completed) {
+      toolTurns.push({ calls: [...round.calls], results: [...round.results],
+        steersBefore: [...round.steersBefore],
+        ...(round.preamble === undefined ? {} : { preamble: round.preamble }),
+        ...(round.reasoningContent === undefined
+          ? {} : { reasoningContent: round.reasoningContent }) });
+      usedCalls += round.results.filter((item) => item.slot === 'READ').length;
+      settlementCalls += round.results.filter((item) => item.slot === 'SETTLEMENT').length;
+      effectfulCalls += round.calls.filter((call) => isEffectfulToolCall(call)).length;
+      if (round.usage !== null) usage = addUsage(usage, round.usage);
+      if (round.providerRequestId !== null) providerRequestIds.push(round.providerRequestId);
+      resumeStartRound = Math.max(resumeStartRound, round.round + 1);
+    }
+  }
+  /**
+   * 0163：把本轮每个工具结果立刻写进检查点。
+   *
+   * 逐条追加而不是整轮一次写：模型可能在一次响应里声明多个请求，崩溃发生在第 2 个
+   * 之后时，第 1 个结果必须还在。没有启用检查点的调用方（子轮次等）保持原样。
+   */
+  const recordToolResult = async (round: number, result: ModelToolTurnResult,
+    slot: 'READ' | 'SETTLEMENT', request: { readonly usage: ModelUsage | undefined;
+      readonly providerRequestId: string | undefined }): Promise<void> => {
+    if (input.generationAttempt === undefined) return;
+    await createRepositories(db).assist.appendGenerationRoundResult({
+      messageId: message.id, round,
+      result: { provider_tool_call_id: result.providerToolCallId, name: result.name,
+        content: result.content, is_error: result.isError, slot },
+      usage: request.usage === undefined ? null : { input_tokens: request.usage.inputTokens,
+        output_tokens: request.usage.outputTokens,
+        cache_read_tokens: request.usage.cacheReadTokens ?? null,
+        cache_creation_tokens: request.usage.cacheCreationTokens ?? null },
+      providerRequestId: request.providerRequestId ?? null,
+    });
+  };
   /** 上一轮正文为空：本请求强制收尾，只给一次机会（发出后即消费）。 */
   let emptyReplyNudge = false;
   const turns = input.contextTurns ?? await historyTurns(db, message);
@@ -628,7 +694,8 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     await new SessionTodoRepository(db).freezeTurnScope(message.session_id, message.id);
   }
 
-  for (let round = 0; round <= maxRounds; round += 1) {
+  // 0163：有持久回合时从下一轮继续；没有时从第 0 轮开始，行为不变。
+  for (let round = resumeStartRound; round <= maxRounds; round += 1) {
     if (input.signal.aborted || await isCancelRequested(db, message.id)) {
       return { kind: 'CANCELLED', providerRequestId: providerRequestIds.at(-1) ?? null,
         usage, providerRequestIds };
@@ -756,6 +823,18 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
     effectfulCalls += response.calls.filter((call) => isEffectfulToolCall(call)).length;
     const steersBefore = steers.splice(0);
     let interrupted = false;
+    // 0163：先把模型这一回合的完整请求落成检查点，再派发。崩溃后按原轮次续跑。
+    if (input.generationAttempt !== undefined) {
+      await createRepositories(db).assist.insertGenerationRound({
+        id: randomUUID(), messageId: message.id, attempt: generationAttempt, round,
+        assistantTurn: {
+          calls: response.calls.map((call) => ({ provider_tool_call_id: call.providerToolCallId,
+            name: call.name, arguments: call.arguments })),
+          steers_before: steersBefore,
+          ...(response.preamble === undefined ? {} : { preamble: response.preamble }),
+          ...(response.reasoningContent === undefined
+            ? {} : { reasoning_content: response.reasoningContent }) } });
+    }
     // SESSION_SUBAGENT_FANOUT: only independent read-only delegations may overlap.
     // Mixed read/write batches retain their original ordered execution.
     if (response.calls.length > 1 &&
@@ -781,6 +860,8 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
           for (const settled of batch) {
             if (settled.status === 'rejected') throw settled.reason;
             results.push(settled.value);
+            await recordToolResult(round, settled.value, 'READ',
+              { usage: response.usage, providerRequestId: response.providerRequestId });
           }
           usedCalls += batch.length;
         }
@@ -803,18 +884,26 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       const signature = effectful ? actionSignature(call) : null;
       if (signature !== null &&
           isWithdrawnActionBlocked(withdrawnActions, signature, steerEpoch)) {
-        results.push({ providerToolCallId: call.providerToolCallId, name: call.name,
+        const skipped: ModelToolTurnResult = {
+          providerToolCallId: call.providerToolCallId, name: call.name,
           isError: true, content: JSON.stringify({ status: 'NOT_EXECUTED',
             reason: 'ACTION_WITHDRAWN',
             detail: '该动作已被用户的新输入撤回，且此后没有新的用户输入；不要机械重试，'
-              + '请依据最新要求重新决定。' }) });
+              + '请依据最新要求重新决定。' }) };
+        results.push(skipped);
+        await recordToolResult(round, skipped, 'READ',
+          { usage: response.usage, providerRequestId: response.providerRequestId });
         continue;
       }
       if (interrupted) {
         if (effectful && signature !== null) withdrawnActions.set(signature, steerEpoch);
-        results.push({ providerToolCallId: call.providerToolCallId, name: call.name,
+        const skipped: ModelToolTurnResult = {
+          providerToolCallId: call.providerToolCallId, name: call.name,
           isError: true, content: JSON.stringify({ status: 'NOT_EXECUTED',
-            reason: 'NEW_USER_INPUT', detail: '用户有新输入；此工具未执行，请依据最新要求重新决定。' }) });
+            reason: 'NEW_USER_INPUT', detail: '用户有新输入；此工具未执行，请依据最新要求重新决定。' }) };
+        results.push(skipped);
+        await recordToolResult(round, skipped, 'READ',
+          { usage: response.usage, providerRequestId: response.providerRequestId });
         continue;
       }
       const settled = await settleSessionReadonlyToolCall(db, { session, message,
@@ -833,6 +922,9 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       if (call.name === TODO_WRITE_TOOL_NAME && input.allowTodo === true) settlementCalls += 1;
       else usedCalls += 1;
       results.push(settled);
+      await recordToolResult(round, settled,
+        call.name === TODO_WRITE_TOOL_NAME && input.allowTodo === true ? 'SETTLEMENT' : 'READ',
+        { usage: response.usage, providerRequestId: response.providerRequestId });
       if (input.signal.aborted || await isCancelRequested(db, message.id)) {
         return { kind: 'CANCELLED', providerRequestId: response.providerRequestId,
           usage, providerRequestIds };
@@ -842,6 +934,84 @@ export async function runSessionReadonlyRounds(db: DbExecutor,
       reasoningContent: response.reasoningContent });
   }
   return { kind: 'FAILED', errorCode: 'SESSION_TOOL_ROUNDS_EXHAUSTED', usage, providerRequestIds };
+}
+
+/**
+ * 0163：恢复时补完持久回合里**没有结果**的那些工具请求。
+ *
+ * 每个请求按原轮次与序号找账本行：
+ *   * 已有账本行 → `resumeSessionReadonlyToolCall` 按原身份核对/继续，绝不新建身份；
+ *   * 没有账本行 → 说明崩溃发生在登记之前，按首次执行登记并派发（只读安全）。
+ * 每得到一条结果就立刻追加进检查点：恢复过程中再次崩溃时，下一次不必重做这一步。
+ */
+async function completeResumedRounds(db: DbExecutor,
+  params: {
+    readonly session: AssistSessionRow;
+    readonly message: AssistMessageRow;
+    readonly repository: SessionToolCallRepository;
+    readonly rounds: readonly ResumedGenerationRound[];
+    readonly availableTools: readonly InternalToolName[];
+    readonly resolveOrigin: () => Promise<SessionReadOriginResolution>;
+    readonly allowWrite: boolean;
+    readonly allowTodo: boolean;
+    readonly allowDelegate: boolean;
+    readonly runDelegation: DelegationChildRunner | undefined;
+    readonly workerId: string | undefined;
+    readonly signal: AbortSignal;
+    readonly maxRounds: number;
+    readonly maxToolCalls: number;
+    readonly maxSettlementCalls: number;
+    readonly usedCalls: number;
+    readonly settlementCalls: number;
+  }): Promise<ResumedGenerationRound[]> {
+  const output: ResumedGenerationRound[] = [];
+  let usedCalls = params.usedCalls;
+  let settlementCalls = params.settlementCalls;
+  for (const round of [...params.rounds].sort((left, right) => left.round - right.round)) {
+    if (params.signal.aborted) break;
+    const persisted = new Map(round.results.map((item) => [item.providerToolCallId, item]));
+    const results: ResumedToolResult[] = [];
+    for (const [ordinal, call] of round.calls.entries()) {
+      const hit = persisted.get(call.providerToolCallId);
+      if (hit !== undefined) {
+        results.push(hit);
+        continue;
+      }
+      if (params.signal.aborted) break;
+      const slot: ResumedToolResult['slot'] = call.name === TODO_WRITE_TOOL_NAME &&
+        params.allowTodo ? 'SETTLEMENT' : 'READ';
+      const context: SessionReadonlyToolCallContext = {
+        session: params.session, message: params.message, availableTools: params.availableTools,
+        repository: params.repository, round: round.round, ordinal, call,
+        usedCalls, maxToolCalls: params.maxToolCalls, maxRounds: params.maxRounds,
+        settlementCalls, maxSettlementCalls: params.maxSettlementCalls,
+        resolveOrigin: params.resolveOrigin, allowWrite: params.allowWrite,
+        allowTodo: params.allowTodo, allowDelegate: params.allowDelegate,
+        runDelegation: params.runDelegation, workerId: params.workerId, signal: params.signal,
+      };
+      const ledger = await params.repository
+        .readByMessageRoundOrdinal(params.message.id, round.round, ordinal);
+      const settled = ledger === undefined
+        ? await settleSessionReadonlyToolCall(db, context)
+        : await resumeSessionReadonlyToolCall(db, context, ledger);
+      const result: ResumedToolResult = { ...settled, slot };
+      results.push(result);
+      if (slot === 'SETTLEMENT') settlementCalls += 1;
+      else usedCalls += 1;
+      await createRepositories(db).assist.appendGenerationRoundResult({
+        messageId: params.message.id, round: round.round,
+        result: { provider_tool_call_id: result.providerToolCallId, name: result.name,
+          content: result.content, is_error: result.isError, slot },
+        usage: round.usage === null ? null : { input_tokens: round.usage.inputTokens,
+          output_tokens: round.usage.outputTokens,
+          cache_read_tokens: round.usage.cacheReadTokens ?? null,
+          cache_creation_tokens: round.usage.cacheCreationTokens ?? null },
+        providerRequestId: round.providerRequestId,
+      });
+    }
+    output.push({ ...round, results });
+  }
+  return output;
 }
 
 /**
@@ -923,7 +1093,10 @@ export async function runAgentSessionReadonlyRounds(db: DbExecutor,
       runDelegation: input.runDelegation, workerId: input.workerId,
       delegationScopeReady }),
     ...(input.runDelegation === undefined ? {} : { runDelegation: input.runDelegation }),
-    ...(input.workerId === undefined ? {} : { workerId: input.workerId }) });
+    ...(input.workerId === undefined ? {} : { workerId: input.workerId }),
+    ...(input.generationAttempt === undefined ? {}
+      : { generationAttempt: input.generationAttempt }),
+    ...(input.resume === undefined ? {} : { resume: input.resume }) });
 }
 
 interface AssistantToolCallSettlement {
@@ -1004,11 +1177,125 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
     arguments: call.arguments, argumentsSha256: argumentsSha,
     providerToolCallId: call.providerToolCallId });
 
+  return executeSessionToolCall(db, context, row);
+}
+
+/**
+ * 0163：恢复时继续一个**已登记但未结算**的工具请求。
+ *
+ * 与首次执行共用同一条准入与派发路径，差别只有三点：
+ *   * 不新建账本行——原行身份（也是 Gateway operation_id）必须保留；
+ *   * 已结算/已拒绝/已放弃的行直接还原结果，**不重新派发**；
+ *   * 绑定过 Operation 的行先按 Gateway 证据核对：成功/失败按原结果还原，仍在
+ *     PREPARED 的按同一 operation_id 继续派发，DISPATCHING/UNKNOWN 不碰。
+ */
+export async function resumeSessionReadonlyToolCall(db: DbExecutor,
+  context: SessionReadonlyToolCallContext, row: SessionToolCallRow): Promise<AssistantToolCallSettlement> {
+  const { call, repository } = context;
+  const definition = readInternalTool(call.name);
+  const settled = (content: string, isError: boolean): AssistantToolCallSettlement =>
+    ({ providerToolCallId: call.providerToolCallId, name: call.name, content, isError });
+
+  // 检查点与账本必须是同一个请求：参数摘要不一致说明其中一份被改写，两边都不采信。
+  const expectedSha = createHash('sha256')
+    .update(canonicalizeJson(call.arguments), 'utf8').digest('hex');
+  if (row.status !== 'REJECTED' && row.arguments_sha256 !== expectedSha) {
+    await repository.abandon(row.id, 'SESSION_TOOL_CALL_MISMATCH');
+    return settled(JSON.stringify({ status: 'NOT_EXECUTED',
+      reason: 'SESSION_TOOL_CALL_MISMATCH',
+      detail: '恢复时发现检查点与工具账本的请求参数不一致；这次调用没有重新执行。' }), true);
+  }
+
+  if (row.status === 'REJECTED') {
+    // 原拒因与原文都还在账本上；按原样还给模型，不重新判定（判定依据可能已经变了）。
+    return settled(`【${row.rejection_reason ?? 'TOOL_REQUEST_REJECTED'}】` +
+      (row.rejection_detail ?? '这次工具请求此前已被拒绝。'), true);
+  }
+  if (row.status === 'ABANDONED') {
+    return settled(JSON.stringify({ status: 'NOT_EXECUTED',
+      reason: row.rejection_reason ?? 'ABANDONED_BEFORE_RESUME',
+      detail: '这次工具请求在中断前没有执行，也没有外部副作用；需要时请重新请求。' }), true);
+  }
+  if (row.status === 'UNKNOWN') {
+    return settled('【GATEWAY_RESULT_UNRESOLVED】这次动作的结果在中断前没有确认；'
+      + '不要重复同一动作，请先核对真实结果再继续。', true);
+  }
+  if (row.status === 'SETTLED') {
+    return settled(await readSettledToolCallContent(db, context, row), false);
+  }
+
+  // REQUESTED：可能已 prepare，也可能已经派发。先看 Gateway 证据。
+  if (row.operation_id !== null) {
+    const operation = await createRepositories(db).gateway.readOperation(row.operation_id);
+    if (operation === undefined) {
+      return settled(JSON.stringify({ status: 'NOT_EXECUTED',
+        reason: 'OPERATION_MISSING', detail: '原动作身份已不存在；未重新派发。' }), true);
+    }
+    if (operation.status === 'SUCCEEDED' || operation.status === 'FAILED') {
+      const content = projectAssistantToolResult(definition?.actionType ?? 'READ_FILE',
+        operation.result_ref);
+      await repository.settle(row.id, createHash('sha256').update(content, 'utf8').digest('hex'));
+      return settled(content, operation.status !== 'SUCCEEDED');
+    }
+    if (operation.status === 'DISPATCHING' || operation.status === 'UNKNOWN') {
+      // 恢复判定已经在重排前拦下这类消息；这里只做防御：绝不重发，也不改写状态。
+      return settled('【GATEWAY_RESULT_UNRESOLVED】原动作可能已经派发但结果未确认；'
+        + '不重新执行，需人工核对后再继续。', true);
+    }
+    if (operation.status === 'WAITING_APPROVAL' || operation.status === 'DENIED') {
+      // 审批等待或已拒绝都确定没有外部效果：账本按「不再派发」收口，避免下一次恢复
+      // 继续把它当成未决动作而阻塞整条消息。
+      await repository.abandon(row.id, operation.status === 'WAITING_APPROVAL'
+        ? 'SESSION_WRITE_NEEDS_APPROVAL' : 'GATEWAY_ACTION_DENIED');
+      const reason = operation.status === 'WAITING_APPROVAL'
+        ? 'SESSION_WRITE_NEEDS_APPROVAL' : 'GATEWAY_ACTION_DENIED';
+      return settled(`【${reason}】原动作没有执行；它在中断前停在人工审批或已被拒绝。`, true);
+    }
+  }
+  // PREPARED 或从未 prepare：按原行身份继续（prepare 按 operation_id 幂等返回既有动作）。
+  return executeSessionToolCall(db, context, row);
+}
+
+/** 已结算行还原结果：有 Operation 的按冻结结果投影，应用内工具按账本事实还原。 */
+async function readSettledToolCallContent(db: DbExecutor, context: SessionReadonlyToolCallContext,
+  row: SessionToolCallRow): Promise<string> {
+  const definition = readInternalTool(row.tool_name);
+  if (row.operation_id !== null) {
+    const operation = await createRepositories(db).gateway.readOperation(row.operation_id);
+    if (operation !== undefined && operation.result_ref !== null && definition !== undefined) {
+      return projectAssistantToolResult(definition.actionType, operation.result_ref);
+    }
+    return JSON.stringify({ status: 'ALREADY_EXECUTED', reason: 'RESULT_EVIDENCE_UNAVAILABLE',
+      detail: '这次工具在中断前已经执行；结果正文无法重读。不要重复执行同一动作。' });
+  }
+  if (row.tool_name === TODO_WRITE_TOOL_NAME) {
+    return JSON.stringify({ status: 'ALREADY_APPLIED', tool: row.tool_name,
+      detail: '这次清单写入在中断前已经提交；不要重复写入，以最新的清单块为准。' });
+  }
+  if (row.tool_name === DELEGATE_SUBAGENT_TOOL_NAME) {
+    const delegation = await createRepositories(db).subagents
+      .readByParentToolCall(row.id).catch(() => undefined);
+    return JSON.stringify({ status: delegation?.status ?? 'ALREADY_SETTLED',
+      delegation_id: delegation?.id ?? null,
+      result_summary: delegation?.result_summary ?? null,
+      detail: '这次委派在中断前已经结算；不要重复委派，以上面的结论为准。' });
+  }
+  return JSON.stringify({ status: 'ALREADY_EXECUTED', tool: row.tool_name,
+    detail: '这次工具在中断前已经结算；不要重复执行。' });
+}
+
+/** 首次执行与恢复共用：从已登记的行继续校验、准入、派发与结算。 */
+async function executeSessionToolCall(db: DbExecutor, context: SessionReadonlyToolCallContext,
+  row: SessionToolCallRow): Promise<AssistantToolCallSettlement> {
+  const { repository, round, ordinal, call } = context;
+  const session = context.session;
+
   const refuse = async (reason: string, detail: string): Promise<AssistantToolCallSettlement> => {
     await repository.reject(row.id, reason, detail);
     return { providerToolCallId: call.providerToolCallId, name: call.name,
       content: `【${reason}】${detail}`, isError: true };
   };
+
 
   /*
    * 两条额度各自判定（2026-11-01 E2E-ALL-01）。
@@ -1143,8 +1430,13 @@ export async function settleSessionReadonlyToolCall(db: DbExecutor,
     return refuse(prepared.status === 'DENIED' ? 'GATEWAY_ACTION_DENIED' : 'GATEWAY_NOT_DISPATCHABLE',
       `本次${capability === 'FILE_WRITE' ? '写入' : '读取'}没有进入可派发状态（${prepared.status}）。`);
   }
-  if (!await repository.attachOperation(row.id, prepared.operation_id, origin.kind)) {
-    return refuse('SESSION_OPERATION_ATTACH_FAILED', '本次读取的动作身份无法绑定到这条请求。');
+  if (row.operation_id === null) {
+    if (!await repository.attachOperation(row.id, prepared.operation_id, origin.kind)) {
+      return refuse('SESSION_OPERATION_ATTACH_FAILED', '本次读取的动作身份无法绑定到这条请求。');
+    }
+  } else if (row.operation_id !== prepared.operation_id) {
+    // 恢复时原行已经绑过另一个 Operation：不能换身份绕过核对。
+    return refuse('SESSION_OPERATION_ATTACH_FAILED', '恢复时动作身份与账本不一致，未重新派发。');
   }
 
   let dispatched;

@@ -175,6 +175,18 @@ export class SubagentRepository {
       where child_session_id = ${childSessionId}`.execute(this.db)).rows;
   }
 
+  /**
+   * 0163：按父会话工具请求身份读回委派结果。
+   *
+   * 恢复时「这次委派在中断前已经结算」的结论不能靠推断：`parent_tool_call_id` 是
+   * 唯一关联，查不到就说明没有委派事实，结果正文只能按「不可重读」还原。
+   */
+  async readByParentToolCall(parentToolCallId: string):
+  Promise<AssistDelegationRow | undefined> {
+    return (await sql<AssistDelegationRow>`select ${DELEGATION_COLUMNS} from assist_delegations
+      where parent_tool_call_id = ${parentToolCallId}`.execute(this.db)).rows[0];
+  }
+
   async updateDelegation(id: string, expectedRevision: bigint,
     patch: DelegationPatch): Promise<boolean> {
     const assignments = [sql`updated_at = now()`, sql`revision = revision + 1`];

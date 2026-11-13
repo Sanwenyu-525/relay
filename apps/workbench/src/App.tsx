@@ -10,6 +10,8 @@ import { currentDraftGuard, hasUnsavedDraft } from "./lib/draftGuard";
 import { reportFrontendError } from "./lib/frontendDiagnostics";
 import { activateRelayConnection, useFixtureData, useRelayConnection } from "./lib/relayConnection";
 
+import { Button } from "./ui";
+
 function isConnection(value: unknown): value is RelayApiConnection {
   if (typeof value !== "object" || value === null) return false;
   const row = value as Record<string, unknown>;
@@ -213,13 +215,13 @@ export default function App() {
           data-testid="keep-editing"
           onClick={() => { keepEditingFocus.current = true; blocker.reset?.(); }}>
           {pendingCommandId ? pendingInFlight ? "留在本页等待结果" : "留在本页核对回执" : "保留并继续编辑"}</button>
-        {pendingCommandId && pendingRecovers && !hasDraftChanges && <button className="secondary-button" type="button"
-          data-testid="pending-keep-and-leave" onClick={() => blocker.proceed?.()}>离开并保留待核对</button>}
-        {pendingCommandId && hasDraftChanges && <button className="danger-button" type="button"
-          data-testid="discard-draft-stay-pending" onClick={discardDraftAndStayWithPending}>丢弃草稿并留在本页</button>}
-        {pendingCommandId && pendingRecovers && hasDraftChanges && <button className="secondary-button" type="button"
-          data-testid="discard-draft-keep-pending-leave" onClick={discardDraftAndLeaveWithPending}>丢弃草稿并离开，保留待核对</button>}
-        {!pendingCommandId && <button className="danger-button" type="button" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</button>}
+        {pendingCommandId && pendingRecovers && !hasDraftChanges && <Button variant="secondary"
+          data-testid="pending-keep-and-leave" onClick={() => blocker.proceed?.()}>离开并保留待核对</Button>}
+        {pendingCommandId && hasDraftChanges && <Button variant="danger"
+          data-testid="discard-draft-stay-pending" onClick={discardDraftAndStayWithPending}>丢弃草稿并留在本页</Button>}
+        {pendingCommandId && pendingRecovers && hasDraftChanges && <Button variant="secondary"
+          data-testid="discard-draft-keep-pending-leave" onClick={discardDraftAndLeaveWithPending}>丢弃草稿并离开，保留待核对</Button>}
+        {!pendingCommandId && <Button variant="danger" data-testid="discard-draft-leave" onClick={discardAndContinue}>丢弃草稿并离开</Button>}
       </div>
     </AppDialog>
     <AppDialog open={closeDialogOpen} title={pendingCommandId ? pendingInFlight ? "命令正在提交" : "命令结果待核对" : "保留未保存的修改"}
@@ -243,9 +245,9 @@ export default function App() {
         <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
           onClick={() => setCloseDialogOpen(false)}>
           {pendingCommandId ? pendingInFlight ? "留在本页等待结果" : "留在本页核对回执" : "保留并继续编辑"}</button>
-        {pendingCommandId && <button className="danger-button" type="button"
-          data-testid="pending-close-anyway" onClick={() => void closeWithPending()}>{hasDraftChanges ? "丢弃草稿并仍要关闭窗口" : "仍要关闭窗口"}</button>}
-        {!pendingCommandId && <button className="danger-button" type="button" onClick={() => void discardAndClose()}>丢弃草稿并关闭</button>}
+        {pendingCommandId && <Button variant="danger"
+          data-testid="pending-close-anyway" onClick={() => void closeWithPending()}>{hasDraftChanges ? "丢弃草稿并仍要关闭窗口" : "仍要关闭窗口"}</Button>}
+        {!pendingCommandId && <Button variant="danger" onClick={() => void discardAndClose()}>丢弃草稿并关闭</Button>}
       </div>
     </AppDialog>
   </div>;

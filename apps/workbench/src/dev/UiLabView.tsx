@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, Info, Plus, Search, ShieldAlert, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Copy, Info, Plus, Search, ShieldAlert, Trash2 } from "lucide-react";
 import tokenDocument from "../../../../docs/frontend/design-tokens.json";
 import { cssVariableName } from "../lib/tokens";
 import {
-  Alert, Badge, Button, Checkbox, Dialog, EmptyState, FormField, IconButton, Input, PageHeader,
-  Radio, Select, Skeleton, Spinner, Switch, Textarea
+  Alert, Badge, Button, Card, Checkbox, Combobox, ContextMenu, Density, Dialog, Drawer, EmptyState, FormField, IconButton, Input,
+  Menu, MenuItem, MenuSeparator, PageHeader, Popover, Radio, ResizableHandle, ScrollArea, Select, Separator, Skeleton,
+  Snackbar, Spinner, Switch, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeaderCell,
+  TableRow, Tabs, Textarea, Toast, Tooltip
 } from "../ui";
 import "./UiLab.css";
 
@@ -48,6 +50,13 @@ export default function UiLabView() {
   const [dialogOpen, setDialogOpen] = useState<"none" | "dialog" | "drawer" | "lg">("none");
   const [previewWidth, setPreviewWidth] = useState<number | null>(1024);
   const [switchOn, setSwitchOn] = useState(true);
+  const [tabValue, setTabValue] = useState("all");
+  const [modelValue, setModelValue] = useState<string | null>("sonnet");
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [menuPick, setMenuPick] = useState<string | null>(null);
+  const [contextPick, setContextPick] = useState<string | null>(null);
+  const [panelWidth, setPanelWidth] = useState(240);
+  const [toastSeq, setToastSeq] = useState(0);
 
   useEffect(() => {
     const root = getComputedStyle(document.documentElement);
@@ -77,6 +86,8 @@ export default function UiLabView() {
       <a className="text-link" href="#lab-general">通用</a>
       <a className="text-link" href="#lab-controls">控件</a>
       <a className="text-link" href="#lab-feedback">状态与反馈</a>
+      <a className="text-link" href="#lab-interactive">交互</a>
+      <a className="text-link" href="#lab-containers">容器</a>
       <a className="text-link" href="#lab-overlay">浮层</a>
       <a className="text-link" href="#lab-structure">页面结构</a>
       <a className="text-link" href="#lab-tokens">Design Tokens</a>
@@ -107,6 +118,12 @@ export default function UiLabView() {
         <Button variant="primary" busy>保存中</Button>
         <Button variant="secondary" icon={Plus}>带图标</Button>
         <Button variant="secondary" icon={Search}>搜索</Button>
+      </div>
+      <div className="ui-lab-row" style={{ alignItems: "flex-start" }}>
+        <span className="ui-lab-label">密度</span>
+        <Density mode="comfortable" style={{ display: "inline-block" }}><Button variant="primary">工作台档</Button></Density>
+        <Density mode="compact" style={{ display: "inline-block" }}><Button variant="primary">页面档</Button></Density>
+        <span className="ui-lab-sub">同一个 Button：comfortable 48px / 16px 正文，compact 34px / 13px 正文。密度只重绑尺寸变量，不换组件。</span>
       </div>
       <div className="ui-lab-row">
         <span className="ui-lab-label">整行</span>
@@ -234,9 +251,8 @@ export default function UiLabView() {
         <span className="ui-lab-sub">打开后按 Tab 检查焦点循环，按 Esc 关闭并检查焦点是否回到按钮上。</span>
       </div>
       <Dialog
-        open={dialogOpen !== "none"}
-        title={dialogOpen === "drawer" ? "检查器" : "确认删除"}
-        variant={dialogOpen === "drawer" ? "drawer" : "dialog"}
+        open={dialogOpen === "dialog" || dialogOpen === "lg"}
+        title="确认删除"
         size={dialogOpen === "lg" ? "lg" : undefined}
         subtitle={dialogOpen === "lg" ? "这一档用于需要并排比较内容的场景" : undefined}
         onClose={() => setDialogOpen("none")}
@@ -249,6 +265,17 @@ export default function UiLabView() {
           <Button variant="danger" onClick={() => setDialogOpen("none")}>删除</Button>
         </div>
       </Dialog>
+      <Drawer
+        open={dialogOpen === "drawer"}
+        title="检查器"
+        subtitle="抽屉是 Dialog 的命名出口，共用焦点陷阱与 Esc"
+        onClose={() => setDialogOpen("none")}
+      >
+        <p className="ui-lab-sub">抽屉与对话框的行为完全一致（AppDialog）；差异只在语义命名与面板宽度。</p>
+        <div className="ui-lab-row" style={{ marginBlockStart: "var(--relay-space-4)", justifyContent: "flex-end" }}>
+          <Button variant="secondary" onClick={() => setDialogOpen("none")}>关闭</Button>
+        </div>
+      </Drawer>
     </section>
 
     <section className="ui-lab-section" id="lab-structure" aria-labelledby="lab-structure-h">
@@ -266,6 +293,176 @@ export default function UiLabView() {
       </div>
     </section>
 
+
+    <section className="ui-lab-section" id="lab-interactive" aria-labelledby="lab-interactive-h">
+      <h2 id="lab-interactive-h">交互组件</h2>
+      <p>菜单与弹出层复用 <code>lib/popoverMenu</code> 的关闭语义：点外面收起、Esc 收起、同一时刻只留一个浮层。切换条在链接形态下用 <code>aria-current</code>，不假扮 tab。</p>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">菜单</span>
+        <Menu label="更多操作" trigger={<span aria-hidden="true">⋯</span>}>
+          <MenuItem icon={Plus} onSelect={() => setMenuPick("新建")}>新建</MenuItem>
+          <MenuItem icon={Search} onSelect={() => setMenuPick("筛选")}>筛选</MenuItem>
+          <MenuSeparator />
+          <MenuItem danger icon={Trash2} onSelect={() => setMenuPick("删除")}>删除</MenuItem>
+        </Menu>
+        <span className="ui-lab-sub">{menuPick === null ? "未选择" : `已选择：${menuPick}（菜单已收起，焦点回到触发器）`}</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">右键菜单</span>
+        <ContextMenu
+          label="示例行操作"
+          items={[
+            { key: "copy", label: "复制标题", icon: Copy, onSelect: () => setContextPick("复制标题") },
+            { separator: true },
+            { key: "delete", label: "删除", danger: true, icon: Trash2, onSelect: () => setContextPick("删除") }
+          ]}
+        >
+          <div className="ui-frame" style={{ padding: "var(--relay-space-3)", minWidth: "12rem" }}>在这个区域点右键</div>
+        </ContextMenu>
+        <span className="ui-lab-sub">{contextPick === null ? "未选择" : `已选择：${contextPick}（Esc 或点外面也会收起）`}；打开后方向键可移动。</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">轻提示</span>
+        <Tooltip label="悬停 250ms 或键盘聚焦时出现；Esc 收起">
+          <Button variant="secondary" size="sm">悬停或 Tab 到我</Button>
+        </Tooltip>
+        <span className="ui-lab-sub">气泡用 fixed 定位，不会被卡片或表格的 overflow 裁掉。</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">可拖拽面板</span>
+        <div className="ui-frame" style={{ display: "flex", width: "22rem", height: "6rem", alignItems: "stretch", overflow: "hidden" }}>
+          <div style={{ flex: "1 1 auto", padding: "var(--relay-space-3)" }}>主内容</div>
+          <ResizableHandle
+            label="调整示例面板宽度"
+            testId="ui-lab-resize"
+            value={panelWidth}
+            min={120}
+            max={260}
+            step={16}
+            direction={-1}
+            valueText={(value) => value === null ? "默认宽度" : `${value} 像素`}
+            onChange={(next) => { if (next !== null) setPanelWidth(next); }}
+          />
+          <div style={{ width: panelWidth, flex: "none", padding: "var(--relay-space-3)" }}>面板 {panelWidth}px</div>
+        </div>
+        <span className="ui-lab-sub">向左拖放宽；方向键各调一档；双击复位。手柄逻辑与侧栏、工作详情面板同源。</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">弹出层</span>
+        <Popover
+          open={popoverOpen}
+          onClose={() => setPopoverOpen(false)}
+          label="筛选条件"
+          trigger={<Button variant="secondary" aria-expanded={popoverOpen} aria-haspopup="dialog" onClick={() => setPopoverOpen((open) => !open)}>筛选</Button>}
+        >
+          <div style={{ display: "grid", gap: "var(--relay-space-3)", minWidth: "14rem" }}>
+            <FormField label="状态" htmlFor="lab-popover-state">
+              <Select id="lab-popover-state" defaultValue="all"><option value="all">全部</option><option value="done">已完成</option></Select>
+            </FormField>
+            <Button variant="primary" size="sm" onClick={() => setPopoverOpen(false)}>应用</Button>
+          </div>
+        </Popover>
+        <span className="ui-lab-sub">打开后点外面或按 Esc 收起；Esc 不冒泡到外层对话框。</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">可搜索单选</span>
+        <div style={{ width: "16rem" }}>
+          <Combobox
+            label="模型"
+            value={modelValue}
+            onChange={setModelValue}
+            options={[
+              { value: "sonnet", label: "Claude Sonnet", description: "通用写作与代码" },
+              { value: "gpt5", label: "GPT-5", description: "长上下文" },
+              { value: "local", label: "本机模型", description: "不联网" }
+            ]}
+          />
+        </div>
+        <span className="ui-lab-sub">当前值：{modelValue ?? "未选择"}；输入筛选，方向键移动，Enter 选择。</span>
+      </div>
+
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">切换条</span>
+        <Tabs
+          label="任务范围"
+          value={tabValue}
+          onChange={setTabValue}
+          items={[
+            { key: "all", label: "全部", badge: 12 },
+            { key: "inbox", label: "收件箱", badge: 3 },
+            { key: "attention", label: "人工待处理" }
+          ]}
+        />
+      </div>
+      <div className="ui-lab-row">
+        <span className="ui-lab-label">链接形态</span>
+        <Tabs
+          label="目标范围"
+          value="active"
+          items={[
+            { key: "active", label: "进行中", href: "/goals" },
+            { key: "archived", label: "已归档", href: "/goals?scope=archived" }
+          ]}
+        />
+      </div>
+    </section>
+
+    <section className="ui-lab-section" id="lab-containers" aria-labelledby="lab-containers-h">
+      <h2 id="lab-containers-h">容器</h2>
+      <p>卡片只有一种外观：1px 分隔线 + 容器圆角 + 纸面底色 + 无投影。需要更强层级时用间距和标题层级，不叠第二层边框。</p>
+      <div style={{ display: "grid", gap: "var(--relay-space-4)", gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}>
+        <Card title="上下文长度" description="工作区级事实，修改即时生效" actions={<Button variant="text" size="sm">设置</Button>} footer="当前修订 v12">
+          <p className="ui-lab-sub">正文区放内容；页脚放修订号这类附属事实。</p>
+        </Card>
+        <Card title="紧凑档" dense footer="dense">
+          <p className="ui-lab-sub">列表行容器用 dense，内边距收一档。</p>
+        </Card>
+      </div>
+      <div style={{ marginBlockStart: "var(--relay-space-4)" }}>
+        <Separator />
+        <Table caption="最近任务" dense stickyHead>
+          <TableHead><TableRow>
+            <TableHeaderCell>任务</TableHeaderCell>
+            <TableHeaderCell>状态</TableHeaderCell>
+            <TableHeaderCell align="end">修订</TableHeaderCell>
+          </TableRow></TableHead>
+          <TableBody>
+            <TableRow><TableCell>整理第三章证据链</TableCell><TableCell><Badge tone="success">已完成</Badge></TableCell><TableCell align="end">v4</TableCell></TableRow>
+            <TableRow selected><TableCell>补写验收条件</TableCell><TableCell><Badge tone="warning">待确认</Badge></TableCell><TableCell align="end">v2</TableCell></TableRow>
+            <TableRow><TableCell>清理临时脚本</TableCell><TableCell><Badge tone="neutral">可开始</Badge></TableCell><TableCell align="end">v1</TableCell></TableRow>
+          </TableBody>
+        </Table>
+        <div style={{ marginBlockStart: "var(--relay-space-4)" }}>
+          <Table><TableHead><TableRow><TableHeaderCell>空态</TableHeaderCell></TableRow></TableHead>
+            <TableBody><TableEmpty colSpan={1}>这个范围没有任务；先建一个项目，再拆出第一步。</TableEmpty></TableBody>
+          </Table>
+        </div>
+        <ScrollArea label="滚动区示例" maxHeight="6rem" className="ui-frame" >
+          <p className="ui-lab-sub">滚动区可被 Tab 聚焦，键盘用户能滚动。超出高度后只在需要时出现滚动条。</p>
+          <p className="ui-lab-sub">第二行用于撑出滚动。</p>
+          <p className="ui-lab-sub">第三行。</p>
+          <p className="ui-lab-sub">第四行。</p>
+        </ScrollArea>
+      </div>
+    </section>
+
+    <section className="ui-lab-section" id="lab-feedback-queue" aria-labelledby="lab-feedback-queue-h">
+      <h2 id="lab-feedback-queue-h">反馈队列</h2>
+      <p>Toast / Snackbar 复用既有反馈宿主（<code>FeedbackHost</code> 挂在页壳里，按语气排队、自动消退）。这里不另建一套计时。</p>
+      <div className="ui-lab-row">
+        <Button variant="secondary" onClick={() => setToastSeq((value) => value + 1)}>触发 Toast</Button>
+        <span className="ui-lab-sub">点击后右下角出现成功回执；同一时刻只排一条，重复触发会替换文本。</span>
+      </div>
+      {toastSeq > 0 ? <Toast key={toastSeq} testId="ui-lab-toast">示例回执：设置已保存</Toast> : null}
+      {toastSeq > 1 ? <Snackbar key={`snack-${toastSeq}`} tone="neutral"
+        action={{ label: "撤销", onSelect: () => setToastSeq(0) }}>这条是 Snackbar 形态，带一个动作</Snackbar> : null}
+    </section>
     <section className="ui-lab-section" id="lab-tokens" aria-labelledby="lab-tokens-h">
       <h2 id="lab-tokens-h">Design Tokens</h2>
       <p>下面每一项都是浏览器实际计算出来的值（插值后），与 <code>docs/frontend/design-tokens.json</code> 一一对应。页面只应引用变量名，不要抄这里的值。</p>
@@ -307,6 +504,12 @@ export default function UiLabView() {
           <tr><td><code>FormField</code></td><td><code>label</code> · <code>hint</code> · <code>error</code> · <code>required</code> · <code>htmlFor</code> · <code>layout</code> stack | row | grid</td><td>有 error 时不再显示 hint，并用 role="alert" 播报。</td></tr>
           <tr><td><code>Switch</code></td><td><code>checked</code> · <code>onChange</code> · <code>label</code> · <code>description</code> · <code>disabled</code></td><td>role="switch"，受控；不发命令，只报告用户意图。</td></tr>
           <tr><td><code>Badge</code></td><td><code>tone</code> neutral | success | warning | danger · <code>icon</code> · <code>title</code></td><td>与任务状态芯片共用 .status-chip，不再出现第二种标签。</td></tr>
+          <tr><td><code>ContextMenu</code></td><td><code>label</code> · <code>items</code>（动作或分隔线）· <code>disabled</code></td><td>右键打开并夹进视口；焦点到第一项，Esc/选中归还焦点，禁用时保留原生菜单。</td></tr>
+          <tr><td><code>Tooltip</code></td><td><code>label</code> · <code>placement</code> · <code>delay</code> · <code>disabled</code></td><td>悬停延迟、聚焦立即；触发元素必须透传 aria-describedby 与焦点事件。</td></tr>
+          <tr><td><code>ResizableHandle</code></td><td><code>label</code> · <code>value</code> · <code>min/max/step</code> · <code>direction</code></td><td>唯一拖拽实现；布局仍由页面网格轨道持有，不新增容器。</td></tr>
+          <tr><td><code>Tabs</code></td><td><code>items</code> · <code>value</code> · <code>onChange</code> · <code>label</code></td><td>有 href 时渲染链接 + aria-current；否则 tablist + roving tabindex + 方向键/Home/End。</td></tr>
+          <tr><td><code>Table</code></td><td><code>dense</code> · <code>stickyHead</code> · <code>caption</code></td><td>表头/行/空态共用一套；空态必须走 TableEmpty 的 colSpan。</td></tr>
+          <tr><td><code>Card</code></td><td><code>title</code> · <code>description</code> · <code>actions</code> · <code>footer</code> · <code>dense</code></td><td>单一容器外观：1px 分隔线 + 容器圆角 + 无投影。</td></tr>
           <tr><td><code>Alert</code></td><td><code>tone</code> info | success | warning | danger · <code>title</code> · <code>actions</code></td><td>danger 用 role="alert"，其余 status。</td></tr>
         </tbody>
       </table>

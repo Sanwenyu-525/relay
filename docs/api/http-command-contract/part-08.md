@@ -403,6 +403,26 @@ Breaking Change: **Yes（语义）**——上下文档位从「工作区默认�
   分项之和与 Provider 总量**不强行相等**：总量是 Provider 的分词结果，分项是本地估算。
 - 存储：`model_calls.context_usage`（JSONB，随 STARTED 行一起提交），只存分类与数值，
   不存提示词、文件正文、工具输出、路径或凭据。迁移前的行为 `NULL`。
+- `compaction`（0162）：自动压缩策略与当前读数，字段分三组。
+  ①**窗口与阈值**：`target_window_tokens`（会话档位／产品目标 1M）、`model_window_tokens`
+  +`window_source`（`MODEL_CATALOG` 真实目录窗口／`SESSION_TIER` 未知时按档位估算）、
+  `effective_window_tokens`、`output_reserve_tokens`、`protocol_overhead_tokens`、
+  `safety_reserve_tokens`、`safe_input_tokens`（硬上限）、`post_compaction_target_tokens`；
+  `requested_threshold_tokens`（用户保存值或默认 350K）、`effective_threshold_tokens`
+  （= min(请求值, 安全输入 × 0.9)）、`threshold_clamped`（生效值被窗口收敛）。达到阈值
+  **不是**达到窗口上限，界面必须分开展示。
+  ②**当前读数**：`context_tokens` + `context_source`（`PROVIDER_USAGE` = 最近一次已结算
+  PRIMARY 调用的真实 `input_tokens` + 之后新增消息的估算增量；`ESTIMATED` = 没有可用基线
+  时的整份估算）、`distance_tokens`（到生效阈值的距离，已超过为负）。
+  ③**请求状态**：`active{request_id,status,trigger}` 与
+  `last_result{request_id,reason,trigger,status,error_code,through_seq,tokens_before,
+  tokens_after,budget_unmet,safe_input_tokens,at}`。`trigger` 取 `MANUAL`／`THRESHOLD`（到量）／
+  `OVERFLOW`（触及安全输入上限，不受开关影响）；旧请求行没有该元数据时按 `reason` 推回
+  （AUTO→THRESHOLD，MANUAL→MANUAL）。`tokens_after` 是压缩发布后重新量到的规模，**只在
+  COMPLETED 行非空**；`budget_unmet` 是服务端复核结论（`true` = 压后仍不低于
+  `safe_input_tokens`，下一轮还要继续整理或明确中止），没有可核对读数时为 `null`；
+  `safe_input_tokens` 是这次压缩**判定时冻结**的硬上限（与 `budget_unmet` 同一口径，
+  换模型后不会跟着变）。前端不按 `tokens_after` 与阈值自行推断。
 
 **运行时的预算来源**
 
@@ -685,3 +705,19 @@ Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调�
 **优先级统一。** 会话显式选择 > 工作区聊天默认 > 进程默认；本机「上次使用的模型」不再参与发送，也不在新建会话时提交 `SelectSessionModel`。模型选择器新增「跟随工作区默认」条目，复用 `ClearSessionModelSelection`；芯片在没有显式选择时显示「跟随默认」，打开后写出解析到的默认来源（聊天默认连接声明的型号，未设置时为进程默认）。
 
 **证据。** 真实 PG18.6：`model-settings-03` **7/7**（协议持久化与指纹、改协议后旧快照 `ASSIST_MODEL_CONFIG_CHANGED`、停用验证零外呼零账本、跨工作区验证隔离、优先级与清除后回聊天默认、探针不落账本不落凭据）；既有 `model-connections` **7/7**、`chat-model-connection` **9/9**、`model-verify` **8/8**、`model-verify-target` **4/4**、`run-model-connection` **4/4**、`session-model-selection` **11/11**、`model-call-budget` **5/5**、`run-model-freeze*` **10/10**、`assist-free-model-routing` **3/3**。单元：`anthropic-messages-model-port` **15/15**、`model-verify-protocol` **3/3**、`model-port-config` 增补 3 项。前端：`modelConnectionsSettings` **18/18**、`modelSelector` **16/16**、`newConversationEntry` **17/17**、`assistantModeSwitch` **50/50**（受影响 spec 串行运行）。规则归 [ADR-036](../../decisions/ADR-036-multi-provider-model-connections.md)、[工作台 §27.5](../../frontend/workbench-design/part-09.md#275-免费模型分组与模型选择)。
+
+### 10.136 开发者诊断只读入口（2026-11-12 源码实现）
+
+**边界。** 与业务路由同前缀 `/api/v1/workspaces/{workspace_id}`、同一 Bearer 作用域；workspace 段只复用来源校验，日志是进程级的，不按 workspace 过滤。全部只读并带 `Cache-Control: no-store`：不写日志、不触发业务动作、不开放任意路径读取。
+
+**`GET /diagnostics/logs`。** 查询参数：`file`（固定白名单名，含 `.1…99` 轮转；缺省扫描全部受管文件）、`min_level`（`fatal|error|warn|info|debug|trace`，默认 `info`）、`process`（逗号分隔 `api|worker|supervisor|desktop|supervisor-host`）、`keyword`、`event`（支持 `*` 通配）、`since`/`until`（ISO-8601）、`any_id` 与 `request_id`/`command_id`/`session_id`/`message_id`/`model_call_id`/`project_id`/`task_id`/`run_id`/`operation_id`/`invocation_id`/`worker_id`、`limit`（1–200，默认 100）、`cursor`。返回 `{records, next_cursor, matched_count, scanned_bytes, truncated, inventory}`。单文件只读尾部 2 MiB、单请求扫描上限 8 MiB；扫描窗口截断时 `truncated=true`，超长行标记 `truncated` 但仍保留有界前缀。坏文件名、路径分隔符、未知进程、非法级别或时间在进入文件系统前以 422 `VALIDATION_FAILED` 拒绝。
+
+**`GET /diagnostics/logs/export`。** 筛选条件同上，`limit` 上限 1000、文本上限 2 MiB；返回 `text/plain` 附件，服务端对旧记录按当前规则再次脱敏，超限以 `X-Diagnostics-Truncated: true` 声明，记录数以 `X-Diagnostics-Records` 返回。
+
+**`GET /diagnostics/runtime`。** 返回 `{generated_at, api, database, worker, supervisor, log_directory, last_error}`。`api` 是当前进程事实；`database` 由注入探针得出，连接失败为 `down`、未提供探针为 `unknown`；Worker/Supervisor 以日志最后事件与 `process.kill(pid, 0)` 联合推断，证据不足或权限拒绝为 `unknown`，不冒充运行中；`last_error` 只取可核实的一条。
+
+**安全。** 白名单只允许五种基础文件名及编号轮转（`desktop.log` 另有 `.old.log`）；读取器再做 realpath 包含校验与 lstat 拒符号链接，不跟随目录外链接、不列出目录、不读取任意文件。响应与导出不包含请求体、query、header、Prompt、模型回复正文或凭据；写入端已脱敏，读取/导出再清洗旧记录，避免历史明文回流。
+
+**桌面宿主。** 「打开日志目录」与「导出诊断」由 Tauri 命令承担：只打开 `<data_root>/logs`（不存在时创建），导出文件名清洗后写入用户选择位置，单文件上限 4 MiB；浏览器模式没有宿主能力，只展示路径或走浏览器下载。
+
+**证据。** 功能验收表 DEVELOPER-DIAGNOSTICS-20261112 行：API 诊断相关 **30 项 29 通过 / 1 跳过**（`diagnostics-api` 11、`runtime-log` 15、`model-call-correlation` 4；跳过为 Windows 符号链接用例）、前端 **26/26**、Playwright **1/1**、A–E 受控脚本 **4/4**、宿主命令 Rust 单测 **2/2**（测试 exe 需嵌入 manifest，见该行限制）；真实桌面窗口内打开目录/另存对话框未验。

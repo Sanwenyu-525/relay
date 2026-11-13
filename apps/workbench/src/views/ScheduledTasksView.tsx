@@ -8,6 +8,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import "./ScheduledTasksView.css";
+import { Button } from "../ui";
 
 const statusLabels: Record<RelayScheduledTaskStatus, string> = {
   ENABLED: "启用中", PAUSED: "已暂停", DISABLED: "已停用", EXPIRED: "已到期",
@@ -177,7 +178,7 @@ export default function ScheduledTasksView() {
       <PageHeader testId="scheduled-tasks-head" title="定时任务" overline="Scheduled Tasks"
         lede="到点自动创建并启动任务：按天或按周重复，每次到点新建一个任务并交给 AI 执行；上一轮没有验收时本轮不会启动。"
         actions={<><Link className="primary-button" to="/scheduled-tasks?view=create" data-testid="scheduled-tasks-create">新建定时任务</Link>
-          <button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>刷新</button></>} />
+          <Button variant="secondary" onClick={() => void load()} disabled={loading}>刷新</Button></>} />
       {items.length > 0 && <ul className="pv-stats" aria-label="定时任务统计" data-testid="scheduled-tasks-stats">
         <li className="pv-stat"><span>定时任务</span><strong>{items.length}</strong><span>当前已加载条目</span></li>
         <li className="pv-stat"><span>启用中</span><strong>{items.filter((task) => task.status === "ENABLED").length}</strong><span>到点即创建任务（应用运行期间）</span></li>
@@ -205,10 +206,10 @@ export default function ScheduledTasksView() {
             先查询回执；在确认之前不要重复提交，其它操作也已禁用。</p>
           {pendingNote && <p>{pendingNote}</p>}
           <div className="form-actions">
-            <button className="secondary-button" type="button" disabled={busyId !== null}
-              onClick={() => void checkReceipt()}>核对原命令回执</button>
-            {mayRetry && <button className="secondary-button" type="button" disabled={busyId !== null}
-              onClick={() => void retryOriginal()}>按原 ID 重试同一变更</button>}
+            <Button variant="secondary" disabled={busyId !== null}
+              onClick={() => void checkReceipt()}>核对原命令回执</Button>
+            {mayRetry && <Button variant="secondary" disabled={busyId !== null}
+              onClick={() => void retryOriginal()}>按原 ID 重试同一变更</Button>}
           </div>
         </div>
       </div>}
@@ -233,12 +234,12 @@ export default function ScheduledTasksView() {
             <td data-label="已执行 / 上限" className="scheduled-col-num scheduled-cell-num">{task.runsStarted} / {task.maxRuns}</td>
             <td data-label="状态"><span className={`status-chip status-chip--${statusTones[task.status]}`}>{statusLabels[task.status]}</span></td>
             <td data-label="操作" className="scheduled-task-actions scheduled-col-actions">
-              {task.status === "ENABLED" && <button className="text-button" type="button" disabled={frozen}
-                onClick={() => void changeStatus(task, "PAUSED")}>暂停</button>}
-              {task.status === "PAUSED" && <button className="text-button" type="button" disabled={frozen}
-                onClick={() => void changeStatus(task, "ENABLED")}>继续</button>}
-              {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="text-button" type="button" disabled={frozen}
-                onClick={() => void changeStatus(task, "DISABLED")}>停用</button>}
+              {task.status === "ENABLED" && <Button variant="text" disabled={frozen}
+                onClick={() => void changeStatus(task, "PAUSED")}>暂停</Button>}
+              {task.status === "PAUSED" && <Button variant="text" disabled={frozen}
+                onClick={() => void changeStatus(task, "ENABLED")}>继续</Button>}
+              {task.status !== "DISABLED" && task.status !== "EXPIRED" && <Button variant="text" disabled={frozen}
+                onClick={() => void changeStatus(task, "DISABLED")}>停用</Button>}
             </td>
           </tr>)}</tbody>
         </table>

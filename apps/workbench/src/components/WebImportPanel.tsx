@@ -8,6 +8,7 @@ import {
 } from "../api/relayClient";
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
+import { Button } from "../ui";
 
 interface PendingImport {
   readonly commandId: string;
@@ -258,7 +259,7 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
   return <section className="surface-panel knowledge-import" aria-label="网页导入" data-testid="web-import-panel">
     <h2>导入公共网页</h2>
     <p className="helper-text">选择本项目的 WEB_FETCH 连接，提交后由后台经 Gateway 抓取；排队回执不代表导入成功。</p>
-    {projectWriteBlockedReason && <p className="disabled-reason" data-testid="web-import-project-write-blocked">{projectWriteBlockedReason} <button type="button" className="text-button" onClick={() => setProjectReload((value) => value + 1)}>重读项目状态</button></p>}
+    {projectWriteBlockedReason && <p className="disabled-reason" data-testid="web-import-project-write-blocked">{projectWriteBlockedReason} <Button variant="text" onClick={() => setProjectReload((value) => value + 1)}>重读项目状态</Button></p>}
     {loadingConnections && <p role="status">正在读取可用连接…</p>}
     {connectionError && <p className="action-error" role="alert">{connectionError}</p>}
     {!loadingConnections && !connectionError && connections.length === 0 &&
@@ -273,26 +274,26 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
       <label className="field"><span className="field-label">公共网页 URL</span>
         <input data-testid="web-import-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)}
           maxLength={2048} required disabled={pending !== null || submitting} placeholder="https://example.org/article" /></label>
-      <div className="knowledge-actions"><button type="submit" className="primary-button" data-testid="web-import-submit"
-        disabled={projectWriteBlockedReason !== null || connectionId === "" || pending !== null || submitting}>{submitting ? "正在提交…" : "提交导入"}</button></div>
+      <div className="knowledge-actions"><Button variant="primary" type="submit" data-testid="web-import-submit"
+        disabled={projectWriteBlockedReason !== null || connectionId === "" || pending !== null || submitting}>{submitting ? "正在提交…" : "提交导入"}</Button></div>
     </form>
     {actionError && <p className="action-error" role="alert">{actionError}</p>}
     {pending && <div className="knowledge-import-receipt" data-testid="web-import-pending">
       <p>提交结果待核对 · 原 command_id：<code>{pending.commandId}</code></p>
-      <div className="knowledge-actions"><button type="button" className="secondary-button" disabled={submitting}
-        data-testid="web-import-check-receipt" onClick={() => { void checkReceipt(); }}>查询原命令回执</button>
-        <button type="button" className="secondary-button" disabled={submitting || !mayRetry}
-          data-testid="web-import-retry" onClick={() => { if (mayRetry) void sendImport(pending); }}>用原 ID 重试</button></div>
+      <div className="knowledge-actions"><Button variant="secondary" disabled={submitting}
+        data-testid="web-import-check-receipt" onClick={() => { void checkReceipt(); }}>查询原命令回执</Button>
+        <Button variant="secondary" disabled={submitting || !mayRetry}
+          data-testid="web-import-retry" onClick={() => { if (mayRetry) void sendImport(pending); }}>用原 ID 重试</Button></div>
     </div>}
     <form className="knowledge-import-restore" onSubmit={restoreJob}>
       <label className="field"><span className="field-label">按 Job ID 恢复查询</span>
         <input data-testid="web-import-job-id" value={jobIdInput} onChange={(event) => setJobIdInput(event.target.value)}
           placeholder="导入 Job ID" /></label>
-      <button type="submit" className="secondary-button" disabled={reading || !jobIdInput.trim()} data-testid="web-import-restore">查询 Job</button>
+      <Button variant="secondary" type="submit" disabled={reading || !jobIdInput.trim()} data-testid="web-import-restore">查询 Job</Button>
     </form>
     {reading && <p role="status">正在核对导入状态…</p>}
     {readError && <p className="action-error" role="alert">{readError} {currentJobId &&
-      <button type="button" className="text-button" onClick={() => { void readJob(currentJobId); }}>重新读取</button>}</p>}
+      <Button variant="text" onClick={() => { void readJob(currentJobId); }}>重新读取</Button>}</p>}
     {job && <div className="knowledge-import-status" data-testid="web-import-status">
       <p><strong>{statusText[job.status]}</strong> · {job.status}</p>
       <p className="helper-text">Job ID：<code>{job.id}</code> · 修订 v{job.revision}</p>
@@ -310,7 +311,7 @@ export default function WebImportPanel({ client, projectId, onOpenKnowledge }: {
         <p>Knowledge 版本 ID：<code>{job.knowledgeVersionId ?? "服务端未返回"}</code></p>
         {result && <div data-testid="web-import-result"><p><strong>{result.knowledge.title}</strong> · WEB_PAGE v{result.version.version}</p>
           <p className="knowledge-body">{result.version.excerpt ?? "正文摘录未返回，可在资料详情中核对版本与来源。"}</p>
-          <button type="button" className="secondary-button" onClick={() => onOpenKnowledge(result.knowledge.id)}>查看 Knowledge 详情</button></div>}
+          <Button variant="secondary" onClick={() => onOpenKnowledge(result.knowledge.id)}>查看 Knowledge 详情</Button></div>}
       </>}
     </div>}
   </section>;

@@ -62,6 +62,25 @@ export class AssistMemoryRepository {
     return (await sql<{ at: Date }>`select now() as at`.execute(this.db)).rows[0]!.at;
   }
 
+  /**
+   * 0162：压缩前缀之后仍会进入下一轮的消息正文规模。
+   *
+   * 与 `history()` 的过滤条件逐字一致（终态、排除被插话消费的 CANCELLED 占位），
+   * 只回聚合而不是正文：调用方要的是「还有多少内容」，不是内容本身。
+   * 口径是 UTF-8 字节，换算由调用方统一用 `estimateTokens`，避免两套换算分叉。
+   */
+  async contentBytesSince(sessionId: string, afterSeq: bigint): Promise<{
+    readonly bytes: number; readonly count: number }> {
+    const row = (await sql<{ bytes: string; count: string }>`select
+        coalesce(sum(octet_length(content)), 0)::text as bytes,
+        count(*)::text as count
+      from assist_messages where session_id = ${sessionId} and seq > ${afterSeq}
+        and status in ('COMPLETED', 'FAILED', 'CANCELLED')
+        and not (role = 'ASSISTANT' and status = 'CANCELLED' and error_code is not distinct from 'STEERED')
+      `.execute(this.db)).rows[0];
+    return { bytes: Number(row?.bytes ?? 0), count: Number(row?.count ?? 0) };
+  }
+
   /** A withdrawal inside an already summarized prefix invalidates that checkpoint. */
   async withdrawnAfter(sessionId: string, throughSeq: bigint, since: Date): Promise<boolean> {
     return (await sql<{ id: string }>`select id from assist_messages where session_id = ${sessionId}
@@ -156,6 +175,24 @@ export class AssistMemoryRepository {
     return (await sql<{ id: string }>`update assist_memory_requests set status = ${status},
       error_code = ${errorCode}, checkpoint_id = ${checkpointId}, lease_until = null, updated_at = now()
       where id = ${id} and status = 'RUNNING' and worker_id = ${workerId}
+        and claim_epoch = ${epoch} returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 压缩完成后补记「压完还剩多少 tokens」（0162）。
+   *
+   * 它不是业务事实：压缩是否成功、摘要是否发布由 `settle` + checkpoint 决定，写入失败
+   * 也不能把一次已发布成功的压缩改判为失败。因此这是**已结算行上的派生元数据更新**，
+   * 只允许写自己这次认领并已 COMPLETED 的行；`tokens_after` 与判定读数同在
+   * `model_snapshot.memory_compaction`，读侧用 `readCompactionAudit` 统一解释。
+   */
+  async recordTokensAfter(id: string, workerId: string, epoch: bigint,
+    tokensAfter: number): Promise<boolean> {
+    const value = Math.max(0, Math.floor(tokensAfter));
+    return (await sql<{ id: string }>`update assist_memory_requests
+      set model_snapshot = jsonb_set(model_snapshot, '{memory_compaction,tokens_after}',
+        to_jsonb(${value}::integer), true), updated_at = now()
+      where id = ${id} and status = 'COMPLETED' and worker_id = ${workerId}
         and claim_epoch = ${epoch} returning id`.execute(this.db)).rows.length === 1;
   }
 

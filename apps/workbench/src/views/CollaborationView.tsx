@@ -43,6 +43,7 @@ import { readCollaborationLayoutPreferences, saveCollaborationLayoutPreferences,
   type CollaborationLayoutMode } from "../lib/collaborationLayoutPreferences";
 import { readStoredInspectorWidth, saveInspectorWidth } from "../lib/inspectorWidthPreferences";
 import { desktopPreviewBridge, type PreviewBridge } from "../lib/previewBridge";
+import { Button } from "../ui";
 import "./CollaborationView.css";
 
 const cleanNavigation: AssistNavigationState = { dirty: false, unsaved: false, pending: null };
@@ -1003,7 +1004,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     {directoryPending && directorySlow && <section className="collab-binding collab-directory-slow"
       data-testid="collab-directory-slow" data-status="PENDING" role="status">
       <p className="helper-text">目录打开比预期久。可以继续等待；也可以取消，回到这条新对话后再从目录细条重新打开。</p>
-      <div className="form-actions"><button className="secondary-button" type="button"
+      <div className="form-actions"><Button variant="secondary"
         data-testid="collab-directory-slow-cancel"
         onClick={() => {
           // 取消对目录续记同样生效（2026-10-25）：这条新对话不再自动沿用最近目录。显式 `?dir=`
@@ -1015,7 +1016,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
           }
           const next = new URLSearchParams(search);
           if (next.has("dir")) { next.delete("dir"); setSearch(next); }
-        }}>取消并回到新对话</button></div>
+        }}>取消并回到新对话</Button></div>
     </section>}
   </>;
 
@@ -1468,30 +1469,30 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     <AlertTriangle size={14} aria-hidden="true" />
     <span>未确认操作 {visibleRecoveryEntries.length}</span>
     {recoveryChecking && <span className="collab-recovery-chip__pulse" aria-hidden="true" />}
-  </button>}{task !== null && <button type="button"
-    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
+  </button>}{task !== null && <Button variant="secondary"
+    className="secondary-button--compact collab-toolbar-icon-button"
     data-testid="collab-open-task-view" title="任务视图" aria-label="任务视图"
-    onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></button>}{
+    onClick={() => setWorkbenchView("task")}><LayoutGrid size={18} aria-hidden="true" /></Button>}{
     /* 普通会话也能打开工具面板：网页预览不需要项目或任务，文件/变更由面板按资格说明。
        面板展开后收起入口只剩面板头部那颗键，收起时焦点回到本键。
        2026-10-24 新增本键时排在「工作详情」之前：2026-10-17 指令要求详情键固定在最后。 */
-    task === null && !conversationToolsOpen && <button type="button"
-    className="secondary-button secondary-button--compact collab-toolbar-icon-button"
+    task === null && !conversationToolsOpen && <Button variant="secondary"
+    className="secondary-button--compact collab-toolbar-icon-button"
     data-testid="collab-conversation-tools-toggle" ref={conversationToolsToggleRef}
     title="工具面板（文件、变更与网页）" aria-label="工具面板（文件、变更与网页）"
     aria-expanded={conversationToolsOpen} aria-controls="collab-conversation-tools"
-    onClick={openConversationTools}><Wrench size={18} aria-hidden="true" /></button>}{
+    onClick={openConversationTools}><Wrench size={18} aria-hidden="true" /></Button>}{
     /* 面板弹出后，收起入口只剩面板头部那颗同图标键（2026-10-23 用户截图指令「抽屉弹出的
        时候这里的按钮可以删除了」）：顶栏这颗与它重复，打开时整颗不渲染；收起后由
        close*Inspector 的 rAF 把焦点交还本键，键盘路径不变。 */
-    !conversationInspectorVisible && <button type="button"
-    className="secondary-button secondary-button--compact collab-inspector-toggle-btn collab-toolbar-icon-button"
+    !conversationInspectorVisible && <Button variant="secondary"
+    className="secondary-button--compact collab-inspector-toggle-btn collab-toolbar-icon-button"
     data-testid="collab-conversation-inspector-toggle" ref={conversationInspectorToggleRef}
     title={conversationInspectorLabel} aria-label={conversationInspectorLabel}
     aria-expanded={conversationInspectorVisible} aria-controls={task === null ? "collab-conversation-inspector" : `collab-inspector-${task.id}`}
     onClick={() => { if (task === null) setConversationInspectorOpen((open) => !open); else setInspectorOpen((open) => !open); }}>
     <PanelRightOpen size={18} aria-hidden="true" />
-  </button>}</>;
+  </Button>}</>;
   /**
    * 「+」里的目录入口已撤出（2026-10-19 用户指认「选择目录之类的都是过度设计」）：
    * 目录的常驻 Owner 就是本页目录细条，滚入视野并触发细条自带的「更换目录」弹层
@@ -1563,10 +1564,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         {entry.error === null ? null : <span>{entry.error}</span>}
       </details>
       <div className="collab-recovery-row__actions">
-        <button className="secondary-button secondary-button--compact" type="button"
+        <Button variant="secondary" className="secondary-button--compact"
           disabled={checkingId !== null || autoChecking}
           data-testid={`collab-recovery-${record.commandId}`} onClick={() => void checkRecovery(record)}>
-          {checkingId === record.commandId ? "正在查询" : "查询原命令回执"}</button>
+          {checkingId === record.commandId ? "正在查询" : "查询原命令回执"}</Button>
       </div>
     </div>;
   }
@@ -1601,16 +1602,15 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
         <PageHeader title={task.title} testId="collab-page-head" titleHref={`/tasks/${task.id}`}
           status={<span className="status-chip">{taskStatusLabels[task.status] ?? task.status}</span>}
           actions={<>
-            {reviews.length > 0 && <button className="secondary-button secondary-button--compact" type="button" data-testid="collab-open-judgment"
+            {reviews.length > 0 && <Button variant="secondary" className="secondary-button--compact" data-testid="collab-open-judgment"
               onClick={() => {
                 setDevToolsOpen(false); revealSidePanel("DOCUMENT");
                 window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
-              }}>查看待处理 {reviews.length}</button>}
+              }}>查看待处理 {reviews.length}</Button>}
             {/* 与会话顶栏同一颗开关（2026-10-23 用户截图指令）：面板弹出后收起入口只剩面板
                 头部那颗同图标键，页头这颗打开时不渲染；收起后由 closeInspector 的 rAF 交还焦点。 */}
-            {!inspectorOpen && <button
-              type="button"
-              className="secondary-button secondary-button--compact collab-inspector-toggle-btn"
+            {!inspectorOpen && <Button variant="secondary"
+              className="secondary-button--compact collab-inspector-toggle-btn"
               data-testid="collab-inspector-toggle"
               ref={inspectorToggleRef}
               title={inspectorToggleLabel(inspectorOpen)}
@@ -1623,7 +1623,7 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               }}
             >
               <PanelRightOpen size={18} aria-hidden="true" />
-            </button>}
+            </Button>}
           </>}
           more={<>
             {/* COLLAB-DELEGATE-RECOVERY-20261106：已有 Run 仍挂载原恢复 Owner，不提供第二次委托。 */}
@@ -1631,12 +1631,12 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               projectWriteBlockedReason={projectWriteBlockedReason} onDelegated={refreshFacts} />}
             <div className="collab-layout-modes" role="group" aria-label="协作工作区布局">
               {([["split", "双栏"], ["chat", "对话"], ["result", "成果"]] as const).map(([mode, label]) =>
-                <button key={mode} className="secondary-button" type="button" data-testid={`collab-layout-${mode}`}
+                <Button variant="secondary" key={mode} data-testid={`collab-layout-${mode}`}
                 aria-pressed={layout.mode === mode} onClick={() => {
                   setSidePanelRevealed(workbenchView === "chat" && mode !== "chat");
                   if (workbenchView === "chat" && mode !== "chat") setInspectorOpen(false);
                   setLayoutMode(mode);
-                }}>{label}</button>)}
+                }}>{label}</Button>)}
             </div>
             {/* Run 控制只有一个 Owner：需要人工介入时移进页头常驻，否则留在这个默认收起的展开区。 */}
             {!runNeedsAttention && <details className="collab-facts-disclosure">
@@ -1647,13 +1647,13 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
               <p className="helper-text">控制提交回执表示 PENDING；等待安全点期间，Run 与任务执行者仍以重新查询的事实为准。</p>
             </details>}
             {/* 工具面板不再要求项目：网页预览在无项目任务里也能用，文件/变更由面板按资格说明。 */}
-            <button className="secondary-button secondary-button--compact collab-tools-toggle" type="button"
+            <Button variant="secondary" className="secondary-button--compact collab-tools-toggle"
               data-testid="collab-devtools-toggle" aria-expanded={devToolsOpen}
               onClick={() => {
                 setDevToolsOpen((open) => !open);
                 if (!devToolsOpen) revealSidePanel(sideTab);
               }}>
-              {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</button>
+              {devToolsOpen ? "收起工具面板" : "文件与运行工具"}</Button>
             <ModelConnectionStrip client={client} compact />
           </>}
         >
@@ -1772,9 +1772,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
                   两拍渲染的都是同一张首条输入器，不再经历「旧会话 → 整页核对 → 输入器」。 */}
               {entryPending ? <p className="helper-text" role="status">正在核对原会话归属…</p>
                 : entryError ? <div role="alert" className="page-state page-state--error" data-testid="collab-session-entry-error">
-                  <p>会话暂不可读取：{entryError}</p><button type="button" className="secondary-button" onClick={() => {
+                  <p>会话暂不可读取：{entryError}</p><Button variant="secondary" onClick={() => {
                     setSessionEntry(null); setSessionEntryReload((value) => value + 1);
-                  }}>重新读取</button>
+                  }}>重新读取</Button>
                 </div> : !projectScopeActive
                 ? <AssistView key={`unassigned:${newConversationKey ?? ""}:${sessionKeySegment}`}
                   sessionContextEpoch={sessionContextEpoch}
@@ -1962,9 +1962,9 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
           : "这条命令已发给服务端，结果还没有确认。现在切换会丢失这条命令的核对入口，之后无法确认它是否已生效，容易造成重复提交。请留在当前工作区查询回执收口。"}</p>
       <p className="dialog-command-id">原命令 ID <code className="hash-code">{transition?.commandId ?? ""}</code></p>
       <div className="form-actions">
-        <button className="primary-button" type="button" onClick={() => setTransition(null)}>留在当前工作区</button>
-        {transitionRecovers && <button className="secondary-button" type="button" data-testid="collab-pending-switch"
-          onClick={keepPendingAndProceed}>切换并保留待核对</button>}
+        <Button variant="primary" onClick={() => setTransition(null)}>留在当前工作区</Button>
+        {transitionRecovers && <Button variant="secondary" data-testid="collab-pending-switch"
+          onClick={keepPendingAndProceed}>切换并保留待核对</Button>}
       </div>
     </AppDialog>
 
@@ -1973,10 +1973,10 @@ const currentStep = run?.steps.find((step) => step.id === run.currentStepId);
     <AppDialog open={unsavedTransition !== null} title="有内容离开后无法恢复" onClose={() => setUnsavedTransition(null)}>
       <p>输入器里还有离页不会保留的内容（如未发送的附件或首条草稿）。可以丢弃后继续切换，或留下继续编辑。</p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" data-testid="collab-unsaved-keep"
-          onClick={() => setUnsavedTransition(null)}>保留并继续编辑</button>
-        <button className="danger-button" type="button" data-testid="collab-unsaved-discard"
-          onClick={discardUnsavedAndProceed}>丢弃并继续</button>
+        <Button variant="secondary" data-testid="collab-unsaved-keep"
+          onClick={() => setUnsavedTransition(null)}>保留并继续编辑</Button>
+        <Button variant="danger" data-testid="collab-unsaved-discard"
+          onClick={discardUnsavedAndProceed}>丢弃并继续</Button>
       </div>
     </AppDialog>
   </section>;

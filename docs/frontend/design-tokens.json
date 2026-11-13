@@ -572,7 +572,8 @@
     "layout.inspector.toolsWidth": {
       "$type": "dimension",
       "$value": "clamp(18rem, 19%, 20rem)",
-      "$description": "普通会话右侧「工具面板」（文件/变更/网页/终端/运行记录/轨迹）的默认列宽。2026-10-28 新增：它与工作详情面板共用同一套几何（贴右、可拖动、窄容器收抽屉），但内容以只读工具条与短空态为主，不需要工作详情那么宽——默认上限由 22rem 收到 20rem、百分比由 20% 收到 19%，把宽度先还给聊天阅读列。下限仍是 18rem（288px），与 InspectorResizeHandle 的拖拽下限一致，避免第一次拖动时宽度跳变；用户拖过之后的 --relay-inspector-user-width 仍然优先于本值。"},
+      "$description": "普通会话右侧「工具面板」（文件/变更/网页/终端/运行记录/轨迹）的默认列宽。2026-10-28 新增：它与工作详情面板共用同一套几何（贴右、可拖动、窄容器收抽屉），但内容以只读工具条与短空态为主，不需要工作详情那么宽——默认上限由 22rem 收到 20rem、百分比由 20% 收到 19%，把宽度先还给聊天阅读列。下限仍是 18rem（288px），与 InspectorResizeHandle 的拖拽下限一致，避免第一次拖动时宽度跳变；用户拖过之后的 --relay-inspector-user-width 仍然优先于本值。"
+    },
     "layout.inspector.wideWidth": {
       "$type": "dimension",
       "$value": "clamp(30rem, 34%, 40rem)",
@@ -846,7 +847,6 @@
       "$value": "1100ms",
       "$description": "会话行「三个圆点」状态图标的一轮起伏时长（2026-10-30 新增，用户指定约 1.1s）。与 motion.loop.spin(1s) 分开：spin 是匀速机械旋转，thinking 是一次起伏后短暂停住再来的呼吸节拍，两个值接近但曲线的用法不同（spin 用 linear，thinking 用 motion.easing.loop）。三个点各错峰 140ms，合计 280ms 铺开，落在一轮 1.1s 的前 660ms 内完成起伏、余下时间静止——这样一列里有多条在跑时，视线不会被持续运动抓住。关动效时由 CSS 停掉动画，圆点留在基线上，形状仍可辨认。"
     },
-    
     "shadow.surface": {
       "$type": "shadow",
       "$value": "none"
@@ -860,6 +860,16 @@
       "$type": "shadow",
       "$value": "0 14px 44px rgb(32 61 40 / 0.13)",
       "$description": "仅浮层/菜单；普通列表、侧栏和文档区域无阴影。2026-10-14 由偏中性的投影换成 V4.2 原型的冷绿投影。"
+    },
+    "color.palette.violetAccent": {
+      "$type": "color",
+      "$value": "#5F3DC4",
+      "$description": "2026-11-12 UI-UNIFY-02 新增：功能建议快捷入口的紫调强调。此前在 AssistView.css 里以 :root 局部定义 --relay-color-accent-violet，属于绕过 token 源的第二套变量；现在登记为色板值，语义由 color.accent.violet 承担。取值沿用 2026-10-23 用户确认的降饱和紫（#7C5CFF→#5F3DC4），与琥珀/墨绿同档柔和度。"
+    },
+    "color.accent.violet": {
+      "$type": "color",
+      "$value": "{color.palette.violetAccent}",
+      "$description": "2026-11-12 UI-UNIFY-02 新增：功能建议（实现功能 / 补充测试）图标强调色。只着图标，不用于正文或状态编码。"
     }
   },
   "contrastChecks": [

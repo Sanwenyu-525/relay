@@ -3,6 +3,7 @@ import { ChevronDown, Copy, Play } from "lucide-react";
 
 import type { RelayAssistPlan, RelayPlanView } from "../api/relayClient";
 import "./GoalPlanCards.css";
+import { Button } from "../ui";
 
 /**
  * 会话内计划卡（工作台 §44.1、0127）。
@@ -88,8 +89,8 @@ export default function PlanCard({ view, busy, error, onExecute, onCopy, onDismi
         <span className="goal-plan-badge goal-plan-badge--neutral" data-testid="plan-card-version-status">
           {plan.status === "CURRENT" ? "当前版本" : "已被更新版取代"}</span>
       </p>
-      <button className="text-button goal-plan-card-dismiss" type="button" data-testid="plan-card-dismiss"
-        onClick={onDismiss} title="收起这张卡片；计划本身仍保存在会话里">收起卡片</button>
+      <Button variant="text" className="goal-plan-card-dismiss" data-testid="plan-card-dismiss"
+        onClick={onDismiss} title="收起这张卡片；计划本身仍保存在会话里">收起卡片</Button>
     </header>
     <p className="goal-plan-objective" data-testid="plan-card-goal" title={plan.goal}>{plan.goal}</p>
     {preview.length > 0
@@ -111,24 +112,24 @@ export default function PlanCard({ view, busy, error, onExecute, onCopy, onDismi
             ? ` 等 ${plan.verification.length} 项` : ""}</span>
         : <span className="goal-plan-detail">尚未指定验证标准</span>}
     </p>
-    {hiddenSteps > 0 && !expanded && <button className="text-button goal-plan-more" type="button"
+    {hiddenSteps > 0 && !expanded && <Button variant="text" className="goal-plan-more"
       data-testid="plan-card-more-steps" aria-expanded="false" aria-controls={detailsId}
-      onClick={() => setExpanded(true)}>查看全部 {plan.steps.length} 步</button>}
+      onClick={() => setExpanded(true)}>查看全部 {plan.steps.length} 步</Button>}
     {error !== null && <p className="action-error" role="alert" data-testid="plan-card-error">{error}</p>}
     <div className="goal-plan-actions">
-      <button className="primary-button" type="button" data-testid="plan-card-execute"
+      <Button variant="primary" data-testid="plan-card-execute"
         data-busy={busy ? "true" : undefined} disabled={busy}
         onClick={() => onExecute(plan.planId, plan.version)}>
-        <Play aria-hidden="true" />按此计划执行</button>
-      <button className="secondary-button" type="button" data-testid="plan-card-toggle"
+        <Play aria-hidden="true" />按此计划执行</Button>
+      <Button variant="secondary" data-testid="plan-card-toggle"
         aria-expanded={expanded ? "true" : "false"} aria-controls={detailsId}
         onClick={() => setExpanded((value) => !value)}>
         <ChevronDown aria-hidden="true" data-expanded={expanded ? "true" : undefined} />
-        {expanded ? "收起详情" : "展开详情"}</button>
-      <button className="secondary-button" type="button" data-testid="plan-card-copy"
+        {expanded ? "收起详情" : "展开详情"}</Button>
+      <Button variant="secondary" data-testid="plan-card-copy"
         disabled={busy} title="复制这一版的 Markdown 到剪贴板"
         onClick={() => onCopy(planMarkdown(view, plan.version), plan.version)}>
-        <Copy aria-hidden="true" />复制计划</button>
+        <Copy aria-hidden="true" />复制计划</Button>
     </div>
     {expanded && <div className="goal-plan-detail-panel" id={detailsId} data-testid="plan-card-details">
       <div className="goal-plan-group">

@@ -5,6 +5,7 @@ import { createCommandId, RelayApiError, RelayTransportError, type RelayApiClien
   type RelayClosePartialFileWriteInput, type RelayFileWriteChangeSet,
   type RelayFileWriteDispositionPreview, type RelayFileWriteFrozenDiff } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 const blockingLabels: Record<string, string> = {
   ACTION_NOT_UNKNOWN: "原动作或调用已不是待核对状态",
@@ -203,22 +204,21 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
   }
 
   return <div data-testid={`file-write-disposition-${operationId}`}>
-    <button className="secondary-button" type="button" disabled={loading || submitting}
-      onClick={() => setReload((value) => value + 1)}>刷新逐文件证据</button>
-    <button className="secondary-button" type="button" disabled={diffLoading}
+    <Button variant="secondary" disabled={loading || submitting}
+      onClick={() => setReload((value) => value + 1)}>刷新逐文件证据</Button>
+    <Button variant="secondary" disabled={diffLoading}
       data-testid="file-write-diff-open" onClick={() => void showFrozenDiff()}>
       {diffOpen && frozenDiff ? "收起冻结计划差异" : "查看冻结计划差异"}
-    </button>
+    </Button>
     {diffLoading && <p className="helper-text" role="status">正在读取冻结计划文本差异。</p>}
     {diffError && <p className="action-error" role="alert">文本差异读取失败：{diffError}</p>}
     {diffOpen && frozenDiff && <FileWriteFrozenDiffPanel diff={frozenDiff} ledgers={ledgers} />}
     {loading && <p className="helper-text" role="status">正在读取原账本与当前文件摘要。</p>}
     {error && <p className="action-error" role="alert">{error}</p>}
     {message && <p className="receipt-message" role="status">{message}</p>}
-    {pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.commandId} <button className="secondary-button" type="button"
-      disabled={submitting} onClick={() => void checkReceipt()}>查询原命令回执</button>{mayRetry && <button
-        className="secondary-button" type="button" data-testid="file-write-dispose-retry" disabled={submitting}
-        onClick={() => void sendCommand(pendingCommand, true)}>用原 ID 和载荷重试</button>}</p>}
+    {pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.commandId} <Button variant="secondary"
+      disabled={submitting} onClick={() => void checkReceipt()}>查询原命令回执</Button>{mayRetry && <Button variant="secondary" data-testid="file-write-dispose-retry" disabled={submitting}
+        onClick={() => void sendCommand(pendingCommand, true)}>用原 ID 和载荷重试</Button>}</p>}
     {!loading && ledgers.map((ledger) => <div key={ledger.id} data-testid="file-write-ledger">
       <p><strong>逐文件账本：{enumText(statusLabels, ledger.status)}</strong> · change_set_id：{ledger.id} · 原 invocation_id：{ledger.invocationId}</p>
       <ul className="run-list">{ledger.files.map((file) => <li key={file.relativePath}>
@@ -251,10 +251,10 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
               </li>)}</ul></>}
           </li>)}</ul>
           {preview.blockingReasons.length > 0 && <p className="disabled-reason">处置受阻：{preview.blockingReasons.map((reason) => `${blockingLabels[reason] ?? reason}（${reason}）`).join("、")}</p>}
-          {preview.canDispose && !pendingCommand && <button className="danger-button" type="button"
+          {preview.canDispose && !pendingCommand && <Button variant="danger"
             data-testid="file-write-dispose-open" disabled={loading || submitting}
             onClick={() => setConfirming(true)}>{preview.observationMode === "NO_RECEIPT"
-              ? "保留当前目标与候选残留并结束旧 Run" : "保留当前文件并结束旧 Run"}</button>}</>}
+              ? "保留当前目标与候选残留并结束旧 Run" : "保留当前文件并结束旧 Run"}</Button>}</>}
     </div>}
     <AppDialog open={confirming && preview?.canDispose === true} title={preview?.observationMode === "NO_RECEIPT"
       ? "确认人工结清无回执文件写入" : "确认人工结清部分文件写入"}
@@ -264,11 +264,11 @@ export default function FileWriteDispositionPanel({ client, operationId, runId, 
         ? "原调用没有执行回执。你将保留当前目标与列出的候选残留，不自动修复文件；仅结束旧 Run、将任务交还人工。候选文件不能归因于原调用。"
         : "将保留当前文件内容，把原 FILE_WRITE 动作人工结清，并将旧 Run 记为失败；任务回到待执行。不能据此认定原动作已完成全部文件。"}</p>
       <p>原 operation_id：{operationId}<br />原 invocation_id：{preview?.invocationId}<br />当前观察 sha256：{preview?.observationSha256}</p>
-      <div className="run-actions"><button className="secondary-button" type="button" data-testid="file-write-dispose-cancel"
-        onClick={() => setConfirming(false)}>返回核对</button>
-        <button className="danger-button" type="button" data-testid="file-write-dispose-confirm"
+      <div className="run-actions"><Button variant="secondary" data-testid="file-write-dispose-cancel"
+        onClick={() => setConfirming(false)}>返回核对</Button>
+        <Button variant="danger" data-testid="file-write-dispose-confirm"
           disabled={submitting || loading || !preview?.canDispose || !preview.invocationId || !preview.observationSha256}
-          onClick={() => void submit()}>确认保留当前文件并结束旧 Run</button></div>
+          onClick={() => void submit()}>确认保留当前文件并结束旧 Run</Button></div>
     </AppDialog>
   </div>;
 }

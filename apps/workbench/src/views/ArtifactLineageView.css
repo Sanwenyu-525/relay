@@ -6,16 +6,17 @@
   margin-top: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid #dfe9df;
-  border-radius: 13px;
-  box-shadow: 0 3px 15px #22553506;
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-panel);
+  /* 卡片只用分隔线分层：shadow.surface = none，与全站卡片同一条规则。 */
+  box-shadow: var(--relay-shadow-surface);
 }
 .lineage-page .lineage-empty > h2 {
   margin: 0;
   padding: 14px 17px;
-  border-bottom: 1px solid #edf1ec;
-  font-size: 13px;
-  color: #294635;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  font-size: var(--relay-font-size-pageBase);
+  color: var(--relay-color-text-primary);
 }
 .lineage-page .lineage-empty-body { padding: 14px 17px; }
 .lineage-page .lineage-empty-body .warning-callout { margin: 0; }

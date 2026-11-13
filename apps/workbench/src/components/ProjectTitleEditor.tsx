@@ -6,6 +6,7 @@ import { RelayContractError } from "../api/core/errors";
 import { describeLiveError } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
+import { Button } from "../ui";
 
 /**
  * Project 展示标题编辑：只改 title，不触碰 Project Type、State、Task、Goal 关系与目录。
@@ -198,9 +199,9 @@ export default function ProjectTitleEditor({ client, project, archived, readOnly
   }
 
   return <div data-testid="project-title-editor">
-    {!editing ? <button className="text-button" type="button" data-testid="project-rename-open"
+    {!editing ? <Button variant="text" data-testid="project-rename-open"
       disabled={archived || readOnly || busy || pending !== null} onClick={() => { updateTitle(project.title); setEditing(true); }}>
-      修改项目标题</button>
+      修改项目标题</Button>
       : <form className="stack" onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <label className="field"><span className="field-label">项目标题</span>
           <input ref={titleInputRef} name="project-title" data-testid="project-title-input" maxLength={200}
@@ -214,10 +215,10 @@ export default function ProjectTitleEditor({ client, project, archived, readOnly
           项目已归档；本地标题草稿保留为只读文本，不能提交。
         </p>}
         <div className="form-actions">
-          <button className="primary-button" type="submit" data-testid="project-rename-submit"
-            disabled={busy || pending !== null || archived || readOnly}>{busy ? "正在保存" : "保存标题"}</button>
-          <button className="secondary-button" type="button" data-testid="project-rename-cancel"
-            disabled={busy} onClick={discardDraft}>{archived ? "丢弃本地草稿" : "取消并丢弃草稿"}</button>
+          <Button variant="primary" type="submit" data-testid="project-rename-submit"
+            disabled={busy || pending !== null || archived || readOnly}>{busy ? "正在保存" : "保存标题"}</Button>
+          <Button variant="secondary" data-testid="project-rename-cancel"
+            disabled={busy} onClick={discardDraft}>{archived ? "丢弃本地草稿" : "取消并丢弃草稿"}</Button>
         </div>
       </form>}
     {archived && <p className="disabled-reason">项目已归档：只能阅读历史，恢复归档后才能改名。</p>}
@@ -227,11 +228,11 @@ export default function ProjectTitleEditor({ client, project, archived, readOnly
       <strong>改名命令待核对</strong>
       <p>原 command ID：{pending.commandId} · Project {pending.projectId} · 基于 v{pending.expectedRevision}。</p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" data-testid="project-rename-check-receipt"
-          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" data-testid="project-rename-retry"
+        <Button variant="secondary" data-testid="project-rename-check-receipt"
+          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" data-testid="project-rename-retry"
           disabled={busy} onClick={() => { const record = pendingRef.current; if (record) void send(record); }}>
-          用原 ID 与原标题重试</button>}
+          用原 ID 与原标题重试</Button>}
       </div>
     </div>}
   </div>;

@@ -1,12 +1,28 @@
 import { sql } from 'kysely';
 
-import type { AssistMessageAttachmentMetaRow, AssistMessageAttachmentRow,
+import type { AssistGenerationRoundRow, AssistMessageAttachmentMetaRow,
+  AssistMessageAttachmentRow,
   AssistMessagePreviewRow, AssistMessageRow, AssistMessageStatus, ModelCallRow,
   AssistProposalRow, AssistSessionRow, AssistSessionStatus,
   AssistSessionTitleSource, AssistTitleGenerationSummary, ConversationMode }
   from '../infrastructure/database-schema.js';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { JsonObject } from '../infrastructure/json.js';
+
+/** 0163：过期生成的接续判定结果（四档都按真实账本分类，不猜）。 */
+export interface ExpiredGenerationRecovery {
+  /** 同一消息身份已重排，`generationAttempt` 是新的生成次数。 */
+  readonly requeued: readonly { readonly messageId: string;
+    readonly generationAttempt: number }[];
+  /** 用户停止意图优先：已收口 CANCELLED，不自动恢复。 */
+  readonly cancelled: readonly string[];
+  /** 有未核对的外部动作：FAILED + RECOVERY_BLOCKED_UNRESOLVED_TOOL。 */
+  readonly blocked: readonly string[];
+  /** 已达生成次数上界：FAILED + RECOVERY_EXHAUSTED。 */
+  readonly exhausted: readonly string[];
+  /** 委派结果消息沿用既有收敛（FAILED/LEASE_LOST，由委派恢复核对接手）。 */
+  readonly delegationFailed: readonly string[];
+}
 
 export interface AssistSessionContext {
   readonly session_id: string;
@@ -265,6 +281,27 @@ export class AssistRepository {
       where m.session_id = ${sessionId} and c.kind = 'ASSIST' and c.status <> 'STARTED'
         and c.purpose = 'PRIMARY'
         and (c.usage_input_tokens is not null or c.usage_output_tokens is not null)
+      order by c.settled_at desc nulls last, c.started_at desc, c.id desc
+      limit 1`.execute(this.db)).rows[0];
+  }
+
+  /**
+   * 0162：上下文规模估算的**真实基线**。
+   *
+   * 返回最近一次已结算 PRIMARY 调用的 `input_tokens`、它所属消息的 `seq` 与结算时刻：
+   * 那一次调用真实送进 Provider 的量已经包含 system、工具声明与当时的历史；
+   * 之后新增的消息只需要补一个增量。`settled_at` 用来识别「这份基线是否早于当前压缩
+   * 摘要」——早于摘要的基线描述的是压缩前的窗口，不能继续当作压缩后的读数。
+   * 没有可用调用时返回 undefined，由调用方退回归一化估算，不把「没测过」当成 0。
+   */
+  async latestPrimaryUsageBaseline(sessionId: string): Promise<{
+    readonly input_tokens: number; readonly seq: bigint;
+    readonly settled_at: Date | null } | undefined> {
+    return (await sql<{ input_tokens: number; seq: bigint; settled_at: Date | null }>`
+      select c.usage_input_tokens as input_tokens, m.seq as seq, c.settled_at as settled_at
+      from model_calls c join assist_messages m on m.id = c.assist_message_id
+      where m.session_id = ${sessionId} and c.kind = 'ASSIST' and c.status <> 'STARTED'
+        and c.purpose = 'PRIMARY' and c.usage_input_tokens is not null
       order by c.settled_at desc nulls last, c.started_at desc, c.id desc
       limit 1`.execute(this.db)).rows[0];
   }
@@ -731,6 +768,9 @@ export class AssistRepository {
     const attachments = await sql<{ id: string }>`delete from assist_message_attachments
       where session_id = ${sessionId} returning id`.execute(this.db);
     await sql`delete from assist_message_previews where message_id in (
+      select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
+    // 0163：生成的逐回合检查点也是本会话自己的执行史，随消息一起清理。
+    await sql`delete from assist_generation_rounds where message_id in (
       select id from assist_messages where session_id = ${sessionId})`.execute(this.db);
     await sql`delete from session_tool_calls where session_id = ${sessionId}`.execute(this.db);
     await sql`delete from assist_proposals where session_id = ${sessionId}`.execute(this.db);
@@ -1289,7 +1329,12 @@ export class AssistRepository {
       === true;
   }
 
-  /** 租约过期仍处于 RUNNING 的消息按 LEASE_LOST 收敛；Worker 崩溃不悬挂生成状态。 */
+  /**
+   * 租约过期仍处于 RUNNING 的消息按 LEASE_LOST 强制收敛。
+   *
+   * 低层原语：只用于「确定不接续」的调用方与受控测试。生成 tick 走
+   * `recoverExpiredGenerations`——它先做恢复判定，只有不安全或到上界才落 FAILED。
+   */
   async failExpiredLeases(olderThan: Date): Promise<readonly string[]> {
     return (await sql<{ id: string }>`with failed as (
       update assist_messages set status = 'FAILED', error_code = 'LEASE_LOST',
@@ -1302,6 +1347,143 @@ export class AssistRepository {
       delete from assist_message_previews where message_id in (select id from failed)
     ) select id from failed`
       .execute(this.db)).rows.map((row) => row.id);
+  }
+
+  /**
+   * 0163：租约过期生成的持久接续判定（Worker 崩溃／宿主停机后的唯一收敛入口）。
+   *
+   * 意外中断不再一律等于业务失败。逐条消息按真实账本判成四档：
+   *   * `REQUEUE`   —— 没有任何未核对的外部动作：同一消息身份回到 PENDING，`generation_attempt`
+   *     递增；下一次领取从持久检查点继续。根会话才接续，子会话结果消息归委派恢复核对。
+   *   * `CANCELLED` —— 用户停止意图已持久化：不自动恢复（停止优先）。
+   *   * `BLOCKED`   —— 存在 UNKNOWN 动作或未结算的**有副作用**工具请求：不重排，落 FAILED +
+   *     `RECOVERY_BLOCKED_UNRESOLVED_TOOL`，等人工核对。只读工具的重放没有外部副作用，
+   *     因此不阻塞。
+   *   * `EXHAUSTED` —— 已达生成次数上界：落 FAILED + `RECOVERY_EXHAUSTED`，避免无限重启。
+   *
+   * 判定与状态推进在同一条语句里完成；租约与状态仍是 CAS 条件，两个恢复者不会双重递增。
+   * 委派结果消息（PENDING + 尝试 RUNNING）沿用既有收敛：它由委派恢复核对接手，不重排。
+   */
+  async recoverExpiredGenerations(input: {
+    readonly olderThan: Date;
+    readonly maxAttempts: number;
+    /** 只读工具词表：这些工具的未结算请求可以安全重放（没有外部副作用）。 */
+    readonly readOnlyTools: readonly string[];
+  }): Promise<ExpiredGenerationRecovery> {
+    const tools = [...input.readOnlyTools];
+    const row = (await sql<{
+      requeued: { message_id: string; generation_attempt: number }[];
+      cancelled: string[]; blocked: string[]; exhausted: string[];
+      delegation_failed: string[];
+    }>`with expired as (
+      select m.id, m.generation_attempt, m.cancel_requested,
+        exists (select 1 from assist_delegation_attempts a
+          where a.result_message_id = m.id and a.status = 'RUNNING') as running_delegation,
+        exists (select 1 from session_tool_calls t
+          where t.message_id = m.id and (t.status = 'UNKNOWN'
+            or (t.status = 'REQUESTED' and not (t.tool_name = any(${tools}::text[]))))) as unsafe_tool
+      from assist_messages m
+      join assist_sessions s on s.id = m.session_id
+      where m.status = 'RUNNING' and m.updated_at < ${input.olderThan}
+        and s.parent_session_id is null
+      for update of m skip locked
+    ), decided as (
+      select id, generation_attempt,
+        case
+          when cancel_requested then 'CANCELLED'
+          when running_delegation then 'DEFERRED'
+          when unsafe_tool then 'BLOCKED'
+          when generation_attempt >= ${input.maxAttempts} then 'EXHAUSTED'
+          else 'REQUEUE'
+        end as verdict
+      from expired
+    ), requeued as (
+      update assist_messages m set status = 'PENDING', content = null, error_code = null,
+        provider_error_kind = null, worker_id = null, claimed_at = null, settled_at = null,
+        steer_requested = false, generation_attempt = m.generation_attempt + 1,
+        interrupted_at = now(), interruption_reason = 'LEASE_LOST', updated_at = now()
+      where m.id in (select id from decided where verdict = 'REQUEUE')
+      returning m.id, m.generation_attempt
+    ), cancelled as (
+      update assist_messages m set status = 'CANCELLED', worker_id = null, claimed_at = null,
+        settled_at = now(), updated_at = now()
+      where m.id in (select id from decided where verdict = 'CANCELLED') returning m.id
+    ), blocked as (
+      update assist_messages m set status = 'FAILED',
+        error_code = 'RECOVERY_BLOCKED_UNRESOLVED_TOOL', worker_id = null, claimed_at = null,
+        settled_at = now(), interrupted_at = now(),
+        interruption_reason = 'RECOVERY_BLOCKED_UNRESOLVED_TOOL', updated_at = now()
+      where m.id in (select id from decided where verdict = 'BLOCKED') returning m.id
+    ), exhausted as (
+      update assist_messages m set status = 'FAILED', error_code = 'RECOVERY_EXHAUSTED',
+        worker_id = null, claimed_at = null, settled_at = now(), interrupted_at = now(),
+        interruption_reason = 'RECOVERY_EXHAUSTED', updated_at = now()
+      where m.id in (select id from decided where verdict = 'EXHAUSTED') returning m.id
+    ), delegation_failed as (
+      update assist_messages m set status = 'FAILED', error_code = 'LEASE_LOST',
+        worker_id = null, settled_at = now(), updated_at = now()
+      where m.status = 'PENDING' and m.updated_at < ${input.olderThan}
+        and exists (select 1 from assist_delegation_attempts a
+          where a.result_message_id = m.id and a.status = 'RUNNING')
+      returning m.id
+    ), cleared as (
+      delete from assist_message_previews where message_id in (
+        select id from requeued union all select id from cancelled union all
+        select id from blocked union all select id from exhausted union all
+        select id from delegation_failed)
+    )
+    select
+      (select coalesce(json_agg(json_build_object('message_id', id,
+        'generation_attempt', generation_attempt)), '[]'::json) from requeued) as requeued,
+      (select coalesce(json_agg(id), '[]'::json) from cancelled) as cancelled,
+      (select coalesce(json_agg(id), '[]'::json) from blocked) as blocked,
+      (select coalesce(json_agg(id), '[]'::json) from exhausted) as exhausted,
+      (select coalesce(json_agg(id), '[]'::json) from delegation_failed) as delegation_failed`
+      .execute(this.db)).rows[0];
+    return {
+      requeued: (row?.requeued ?? []).map((item) => ({ messageId: item.message_id,
+        generationAttempt: Number(item.generation_attempt) })),
+      cancelled: row?.cancelled ?? [],
+      blocked: row?.blocked ?? [],
+      exhausted: row?.exhausted ?? [],
+      delegationFailed: row?.delegation_failed ?? [],
+    };
+  }
+
+  /** 0163：读取一条消息的逐回合检查点，按轮次升序。 */
+  async listGenerationRounds(messageId: string): Promise<readonly AssistGenerationRoundRow[]> {
+    return (await sql<AssistGenerationRoundRow>`select * from assist_generation_rounds
+      where message_id = ${messageId} order by round`.execute(this.db)).rows;
+  }
+
+  /**
+   * 0163：登记一个**已完成的工具回合**（模型已返回完整工具请求，派发之前）。
+   *
+   * 唯一键 `(message_id, round)` 保护重放：恢复时跳过已有轮次，不覆盖原始请求。
+   */
+  async insertGenerationRound(input: { id: string; messageId: string; attempt: number;
+    round: number; assistantTurn: JsonObject }): Promise<boolean> {
+    return (await sql<{ id: string }>`insert into assist_generation_rounds
+      (id, message_id, attempt, round, assistant_turn)
+      values (${input.id}, ${input.messageId}, ${input.attempt}, ${input.round},
+        ${JSON.stringify(input.assistantTurn)}::jsonb)
+      on conflict (message_id, round) do nothing returning id`.execute(this.db)).rows.length === 1;
+  }
+
+  /**
+   * 0163：追加一个工具结果正文（逐次追加，崩溃时允许部分结果）。
+   *
+   * `usage`/`provider_request_id` 按回合记录，恢复后仍能说明这一轮真实消耗了多少。
+   */
+  async appendGenerationRoundResult(input: { messageId: string; round: number;
+    result: JsonObject; usage: JsonObject | null;
+    providerRequestId: string | null }): Promise<boolean> {
+    return (await sql<{ id: string }>`update assist_generation_rounds
+      set tool_results = tool_results || ${JSON.stringify([input.result])}::jsonb,
+        usage = ${input.usage === null ? null : JSON.stringify(input.usage)}::jsonb,
+        provider_request_id = ${input.providerRequestId}, updated_at = now()
+      where message_id = ${input.messageId} and round = ${input.round}
+      returning id`.execute(this.db)).rows.length === 1;
   }
 
   async insertProposal(input: { id: string; workspaceId: string; sessionId: string;

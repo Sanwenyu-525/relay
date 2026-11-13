@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayApiClient } from "../src/api/relayClient";
 import type { RelaySessionContextUsage } from "../src/api/dtos/assist";
+import { contextCompactionFixture } from "./contextUsageFixture";
 import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
 
@@ -41,13 +42,14 @@ function usage(overrides: Partial<RelaySessionContextUsage> = {}): RelaySessionC
           { key: "SYSTEM", tokens: 3_607, bytes: 10_821 },
           { key: "FILE_READS", tokens: 2_000, bytes: 6_000 }],
         estimatedTotalTokens: 10_607, coveredBytes: 31_821, imageParts: 0 } },
+    compaction: contextCompactionFixture(),
     ...overrides };
 }
 
 async function mount(data: RelaySessionContextUsage | null, handlers: {
   readonly onSaved?: () => void; readonly onReload?: () => void } = {}) {
   const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
-    usage={data} loading={false} error={null}
+    sessionRevision="7" usage={data} loading={false} error={null}
     onReload={handlers.onReload ?? (() => {})} onSaved={handlers.onSaved ?? (() => {})} />);
   unmount = mounted.unmount;
   await flush();
@@ -282,7 +284,8 @@ describe("上下文用量浮层", () => {
   it("读取失败时显示原因与重读入口，不拿旧值顶替", async () => {
     const onReload = vi.fn();
     const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
-      usage={null} loading={false} error="网络不可用" onReload={onReload} onSaved={() => {}} />);
+      sessionRevision="7" usage={null} loading={false} error="网络不可用"
+      onReload={onReload} onSaved={() => {}} />);
     unmount = mounted.unmount;
     await flush();
     expect(mounted.wrapper.get('[data-testid="context-usage-error"]').text()).toContain("网络不可用");
@@ -296,7 +299,8 @@ describe("上下文用量浮层", () => {
     const fetchMock = vi.fn(async () => json({ items: [] }));
     vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={null}
-      usage={null} loading={false} error={null} onReload={() => {}} onSaved={() => {}}
+      sessionRevision={null} usage={null} loading={false} error={null}
+      onReload={() => {}} onSaved={() => {}}
       draftTier={262144}
       onDraftTierChange={onDraftTierChange as (tier: 262144 | 524288 | 1048576) => void} />);
     unmount = mounted.unmount;

@@ -6,6 +6,7 @@ import CommandPalette from "./CommandPalette";
 import { FeedbackHost } from "./Feedback";
 import RecentWorkRail from "./RecentWorkRail";
 import SidebarResizeHandle, { clampSidebarWidth } from "./SidebarResizeHandle";
+import { IconButton } from "../ui";
 import { dialogCount } from "../lib/dialogStack";
 import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { useRelayConnection } from "../lib/relayConnection";
@@ -233,13 +234,11 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
           <p className="context-rail-brand">Relay<span className="context-rail-brand-tag">工作空间</span></p>
           <div className="context-rail-head-actions">
             {/* 收起/折叠近期工作栏（原型 toggle-side）：外壳单入口，收起后本按钮仍在，作为再展开的把手。 */}
-            <button className="icon-button context-rail-collapse" type="button" aria-expanded={!contextCollapsed}
+            <IconButton className="context-rail-collapse" icon={contextCollapsed ? PanelLeft : PanelLeftClose}
+              aria-expanded={!contextCollapsed}
               data-testid="context-rail-collapse"
-              aria-label={contextCollapsed ? "展开近期工作栏" : "收起近期工作栏"}
-              title={contextCollapsed ? "展开近期工作栏" : "收起近期工作栏"}
-              onClick={toggleContextCollapsed}>
-              {contextCollapsed ? <PanelLeft aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
-            </button>
+              label={contextCollapsed ? "展开近期工作栏" : "收起近期工作栏"}
+              onClick={toggleContextCollapsed} />
           </div>
         </div>
         {/* 新对话仍由协作页持有会话草稿与目录入口，这里只回到那条既有路径，不新建第二套会话状态。
@@ -254,7 +253,7 @@ export default function AppShell({ children, desktopStatus, commandOpen, onComma
       <div className="app-content">
         {/* 标题带承担窗口、状态与常用操作；应用顶栏只剩窄屏导航入口与面包屑。 */}
         <header className="app-topbar">
-          <button className="mobile-menu-button icon-button" type="button" aria-label="打开导航" onClick={() => setNavigationOpen(true)}><Menu aria-hidden="true" /></button>
+          <IconButton className="mobile-menu-button" icon={Menu} label="打开导航" onClick={() => setNavigationOpen(true)} />
           {breadcrumb.length > 0 && <nav className="breadcrumbs" aria-label="面包屑">{breadcrumb.map((item, index) => <span key={`${index}-${item.label}`} className="breadcrumb-item">
             {index > 0 && <span className="breadcrumb-separator" aria-hidden="true">/</span>}{item.to
               ? <Link className="text-link" to={item.to}>{item.label}</Link>

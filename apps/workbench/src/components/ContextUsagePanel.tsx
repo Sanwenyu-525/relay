@@ -3,10 +3,11 @@ import { Database, FileText, MessagesSquare, MoreHorizontal, Settings, Wrench,
   type LucideIcon } from "lucide-react";
 import { createCommandId, RelayTransportError, type RelayApiClient } from "../api/relayClient";
 import type { DecimalRevision } from "../types";
-import type { RelayContextBudgetTokens, RelayContextUsageCategory,
+import type { RelayCompactionTrigger, RelayContextBudgetTokens, RelayContextUsageCategory,
   RelayContextUsageBreakdown, RelaySessionContextUsage } from "../api/dtos/assist";
 import { describeLiveError } from "../lib/liveErrors";
 import "./ContextUsagePanel.css";
+import { Button } from "../ui";
 
 /**
  * 上下文用量浮层（0145 / 2026-10-30 用户指令）。
@@ -66,6 +67,18 @@ const CATEGORY_META: Readonly<Record<RelayContextUsageCategory,
 const CATEGORY_ORDER: readonly RelayContextUsageCategory[] = ["HISTORY", "SYSTEM", "TOOLS",
   "FILE_READS", "MEMORY", "OTHER"];
 
+// CONTEXT-COMPACTION-0162：压缩为什么发生 / 最近一次的终态。
+const TRIGGER_LABELS: Readonly<Record<RelayCompactionTrigger, string>> = {
+  MANUAL: "手动压缩",
+  THRESHOLD: "达到阈值",
+  OVERFLOW: "溢出保护",
+};
+const RESULT_LABELS: Readonly<Record<"COMPLETED" | "FAILED" | "CANCELLED", string>> = {
+  COMPLETED: "已完成",
+  FAILED: "失败（原文与已有摘要保留）",
+  CANCELLED: "已取消",
+};
+
 /**
  * 一条「已发出、结果待核对」的档位写命令（P0，2026-10-30 复审）。
  *
@@ -79,12 +92,17 @@ type Pending = { readonly sessionId: string; readonly commandId: string;
 /** 一条会话自己的显示态：只有 sessionId 与当前会话一致时才参与渲染。 */
 type Scoped<T> = { readonly sessionId: string; readonly value: T };
 
-export default function ContextUsagePanel({ client, sessionId, usage, loading, error, onReload,
-  onSaved, draftTier, onDraftTierChange, inheritedTier = null, inheritState = "none",
-  onRetryInherit }: {
+export default function ContextUsagePanel({ client, sessionId, sessionRevision, usage, loading,
+  error, onReload, onSaved, draftTier, onDraftTierChange, inheritedTier = null,
+  inheritState = "none", onRetryInherit }: {
   readonly client: RelayApiClient | null;
   /** 当前会话；null = 还没有会话（首条输入器），此时档位先落在新会话草稿作用域。 */
   readonly sessionId: string | null;
+  /**
+   * CONTEXT-COMPACTION-0162：会话修订，手动压缩按它做 CAS 基线。
+   * null = 这一屏还没读到会话（首条输入器），手动压缩不可用。
+   */
+  readonly sessionRevision: DecimalRevision | null;
   /** 服务端投影；null = 还没读到（loading 或失败）。 */
   readonly usage: RelaySessionContextUsage | null;
   readonly loading: boolean;
@@ -136,6 +154,11 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   const [pendingBySession, setPendingBySession] = useState<readonly Pending[]>([]);
   const [checkingSessions, setCheckingSessions] = useState<readonly string[]>([]);
   const [notice, setNotice] = useState<Scoped<string> | null>(null);
+  /** CONTEXT-COMPACTION-0162：手动压缩的在途/回执/错误态，按会话登记，切会话不串台。 */
+  const [compactBusy, setCompactBusy] = useState(false);
+  const [compactNotice, setCompactNotice] = useState<Scoped<string> | null>(null);
+  const [compactError, setCompactError] = useState<Scoped<string> | null>(null);
+  const [pollTicks, setPollTicks] = useState(0);
   /*
    * 下面这些都是**按会话存放的显示态**：写入时登记它属于哪条会话，渲染时只取当前会话那一份。
    * A 会话的迟到响应最多更新 A 的那一份，永远改不到 B 这一屏（P0-6）。
@@ -402,6 +425,52 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
   }
 
   const lastCall = usage?.lastCall ?? null;
+  const compaction = usage?.compaction ?? null;
+  const compactionActive = compaction?.active ?? null;
+  const compactNoticeFor = compactNotice !== null && compactNotice.sessionId === sessionId
+    ? compactNotice.value : null;
+  const compactErrorFor = compactError !== null && compactError.sessionId === sessionId
+    ? compactError.value : null;
+
+  /*
+   * 压缩在后台 Worker 里跑：受理之后只能靠重读投影观察状态。
+   * 只在「确有在途压缩」时轮询，最多 60 次（约两分钟）；终态一到就停，
+   * 不因为浮层开着就无限读接口。
+   */
+  useEffect(() => {
+    if (compactionActive === null || pollTicks >= 60) return;
+    const timer = window.setTimeout(() => {
+      setPollTicks((value) => value + 1);
+      onReload();
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [compactionActive, pollTicks, onReload]);
+  // 终态一到就清零：下一次压缩（可能是几轮之后）仍有完整的两分钟轮询预算。
+  useEffect(() => { if (compactionActive === null) setPollTicks(0); }, [compactionActive]);
+  useEffect(() => { setPollTicks(0); }, [sessionId]);
+
+  /**
+   * 手动压缩：与 `/compact` 走同一个 Owner（`RequestMemoryCompaction`）。
+   * 202 只表示受理；这里不宣称已经压完，状态由 `compaction.active` / `last_result` 读回。
+   */
+  const compactNow = useCallback(async (): Promise<void> => {
+    if (client === null || sessionId === null || sessionRevision === null || compactBusy) return;
+    const origin = sessionId;
+    setCompactBusy(true); setCompactError(null); setCompactNotice(null);
+    try {
+      const accepted = await client.requestSessionMemoryCompaction({ sessionId: origin,
+        commandId: createCommandId(), expectedRevision: sessionRevision });
+      if (disposed.current) return;
+      setCompactNotice({ sessionId: origin,
+        value: `已受理压缩请求（${accepted.status}）；完成状态会自动刷新。` });
+      setPollTicks(0);
+      onReload();
+    } catch (caught) {
+      if (disposed.current) return;
+      setCompactError({ sessionId: origin, value: describeLiveError(caught).message });
+    } finally { if (!disposed.current) setCompactBusy(false); }
+  }, [client, compactBusy, onReload, sessionId, sessionRevision]);
+
   const inputTokens = lastCall?.inputTokens ?? null;
   // 2026-11-11 用户指令：占比直接按**当前档位**解释，圆环与浮层共用一个分母。
   // 那次调用冻结的预算仍保留在 `reserved` 里，只在两者不同时作为差异说明出现。
@@ -426,8 +495,8 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
     <div className="context-usage-scroll">
       {error !== null && <div className="action-error" role="alert" data-testid="context-usage-error">
         <p>上下文用量读取失败：{error}</p>
-        <button className="secondary-button" type="button" disabled={loading}
-          onClick={onReload}>重新读取</button>
+        <Button variant="secondary" disabled={loading}
+          onClick={onReload}>重新读取</Button>
       </div>}
 
       {usage !== null && <>
@@ -515,6 +584,137 @@ export default function ContextUsagePanel({ client, sessionId, usage, loading, e
               </div>
             </>}
         </section>
+
+        {/* CONTEXT-COMPACTION-0162：自动压缩。读序与用户的问题一致：现在有多少 →
+            模型装得下多少 → 什么时候先整理 → 离它还有多远 → 上一次结果。
+            模型窗口与压缩阈值分开写，达到阈值不会被读成达到窗口上限。 */}
+        {compaction !== null && <section className="context-usage-section"
+          aria-labelledby={`${name}-compaction`} data-testid="context-compaction">
+          <div className="context-usage-heading-row">
+            <h3 className="context-usage-section-title" id={`${name}-compaction`}>自动压缩</h3>
+            <span className="context-usage-tag" data-state={compaction.enabled ? "on" : "off"}
+              data-testid="context-compaction-state">
+              {compaction.enabled ? "已开启" : "已关闭"}
+            </span>
+          </div>
+          <div className="context-compaction-headline">
+            <p className="context-compaction-figure">
+              <span data-testid="context-compaction-current">
+                {compaction.contextTokens.toLocaleString()}</span>
+              <span className="context-compaction-sep"> / </span>
+              <span data-testid="context-compaction-threshold">
+                {compaction.effectiveThresholdTokens.toLocaleString()}</span>
+              <span className="agent-chat-context-meter-unit"> tokens</span>
+            </p>
+            <span className="context-usage-estimate" data-testid="context-compaction-source">
+              {compaction.contextSource === "PROVIDER_USAGE" ? "真实基线 + 估算增量" : "估算"}
+            </span>
+          </div>
+          {/* 进度按「实际可用窗口」画，阈值在轨道上单独标一枚刻度：两条线不是同一个数。 */}
+          <span className="context-compaction-track" aria-hidden="true">
+            <span className="context-compaction-fill"
+              data-over={compaction.distanceTokens <= 0 ? "true" : undefined}
+              style={{ width: `${Math.min(1, compaction.contextTokens
+                / Math.max(1, compaction.effectiveWindowTokens)) * 100}%` }} />
+            <span className="context-compaction-marker" style={{ left: `${Math.min(1,
+              compaction.effectiveThresholdTokens
+                / Math.max(1, compaction.effectiveWindowTokens)) * 100}%` }} />
+          </span>
+          <p className="context-usage-note" data-testid="context-compaction-distance">
+            {compaction.distanceTokens > 0
+              ? `距离自动压缩还有 ${compaction.distanceTokens.toLocaleString()} tokens。`
+              : `已超过自动压缩阈值 ${Math.abs(compaction.distanceTokens).toLocaleString()} tokens；`
+                + "下一次请求前会先整理。"}
+          </p>
+          <ul className="context-usage-list">
+            <li className="context-usage-row" data-testid="context-compaction-window-row">
+              <span className="context-usage-row-label">模型上下文窗口</span>
+              <span className="context-usage-row-value">
+                {compaction.modelWindowTokens === null
+                  ? `未知（按档位 ${compaction.targetWindowTokens.toLocaleString()} 估算）`
+                  : compaction.modelWindowTokens.toLocaleString()}
+                {compaction.modelWindowTokens !== null &&
+                  <span className="context-usage-row-unit"> tokens</span>}
+              </span>
+            </li>
+            <li className="context-usage-row" data-testid="context-compaction-target-row">
+              <span className="context-usage-row-label">会话档位（目标窗口）</span>
+              <span className="context-usage-row-value">{compaction.targetWindowTokens.toLocaleString()}
+                <span className="context-usage-row-unit"> tokens</span></span>
+            </li>
+            <li className="context-usage-row" data-testid="context-compaction-threshold-row">
+              <span className="context-usage-row-label">生效压缩阈值</span>
+              <span className="context-usage-row-value">{compaction.effectiveThresholdTokens.toLocaleString()}
+                <span className="context-usage-row-unit"> tokens</span></span>
+            </li>
+            <li className="context-usage-row" data-testid="context-compaction-post-target-row">
+              <span className="context-usage-row-label">压缩后目标</span>
+              <span className="context-usage-row-value">
+                约 {compaction.postCompactionTargetTokens.toLocaleString()}
+                <span className="context-usage-row-unit"> tokens</span></span>
+            </li>
+          </ul>
+          {/* 保存值与生效值不一致时必须说清原因：不静默使用无效配置。 */}
+          {compaction.thresholdClamped && <p className="context-usage-note"
+            data-testid="context-compaction-clamped">
+            保存的阈值 {compaction.requestedThresholdTokens.toLocaleString()} tokens 高于当前模型的安全上限，
+            已按 {compaction.effectiveThresholdTokens.toLocaleString()} tokens 生效
+            （为输出、工具与安全余量预留 {compaction.outputReserveTokens.toLocaleString()} /{" "}
+            {compaction.protocolOverheadTokens.toLocaleString()} /{" "}
+            {compaction.safetyReserveTokens.toLocaleString()} tokens）。
+          </p>}
+          {compaction.thresholdTokens === null && !compaction.thresholdClamped &&
+            <p className="context-usage-note" data-testid="context-compaction-default-note">
+              阈值使用默认值 {compaction.defaultThresholdTokens.toLocaleString()} tokens；
+              推荐区间 {compaction.recommended.min.toLocaleString()}–
+              {compaction.recommended.max.toLocaleString()} tokens（仅提示）。
+            </p>}
+          {!compaction.enabled && <p className="context-usage-note"
+            data-testid="context-compaction-disabled-note">
+            普通自动压缩已关闭；请求装不下时仍会执行溢出保护压缩，不会直接把超预算请求发出去。
+          </p>}
+          {compactionActive !== null && <p className="context-compaction-active" role="status"
+            data-testid="context-compaction-active" data-status={compactionActive.status}>
+            {compactionActive.status === "RUNNING" ? "正在压缩上下文…" : "压缩请求已排队…"}
+            （{TRIGGER_LABELS[compactionActive.trigger]}）
+          </p>}
+          {compaction.lastResult !== null && <p className="context-usage-note"
+            data-testid="context-compaction-last-result" data-status={compaction.lastResult.status}>
+            最近一次压缩：{RESULT_LABELS[compaction.lastResult.status]}
+            {" · "}{TRIGGER_LABELS[compaction.lastResult.trigger]}
+            {compaction.lastResult.tokensBefore !== null &&
+              ` · 压缩前 ${compaction.lastResult.tokensBefore.toLocaleString()} tokens`}
+            {compaction.lastResult.tokensAfter !== null &&
+              ` → 压缩后 ${compaction.lastResult.tokensAfter.toLocaleString()} tokens`}
+            {compaction.lastResult.tokensBefore !== null && compaction.lastResult.tokensAfter !== null &&
+              `（减少 ${Math.max(0, compaction.lastResult.tokensBefore
+                - compaction.lastResult.tokensAfter).toLocaleString()}）`}
+            {compaction.lastResult.errorCode !== null &&
+              ` · ${compaction.lastResult.errorCode}`}
+            {" · "}{new Date(compaction.lastResult.at).toLocaleString()}
+          </p>}
+          {/* 压缩成功不等于预算够了：压完仍高于安全输入上限时，下一轮要么继续整理剩余
+              原文，要么在无法安全容纳时明确中止。这里说明它，而不是让读者以为已经解决。 */}
+          {compaction.lastResult?.budgetUnmet === true && <p className="context-usage-note"
+            data-testid="context-compaction-budget-unmet">
+            压缩后仍有 {compaction.lastResult.tokensAfter?.toLocaleString()} tokens，
+            高于安全输入上限 {(compaction.lastResult.safeInputTokens
+              ?? compaction.safeInputTokens).toLocaleString()} tokens
+            （按这次压缩判定时的窗口）；下一轮会继续整理剩余历史，
+            无法安全容纳时会明确中止并说明。
+          </p>}
+          <div className="context-usage-actions">
+            <Button variant="secondary" data-testid="context-compaction-now"
+              disabled={client === null || sessionId === null || sessionRevision === null
+                || compactBusy || compactionActive !== null}
+              onClick={() => void compactNow()}>
+              {compactBusy ? "正在提交…" : "立即压缩上下文"}</Button>
+          </div>
+          {compactNoticeFor !== null && <p className="context-usage-note" role="status"
+            data-testid="context-compaction-notice">{compactNoticeFor}</p>}
+          {compactErrorFor !== null && <p className="action-error" role="alert"
+            data-testid="context-compaction-error">{compactErrorFor}</p>}
+        </section>}
 
         <section className="context-usage-section" aria-labelledby={`${name}-breakdown`}>
           <h3 className="context-usage-section-title" id={`${name}-breakdown`}>

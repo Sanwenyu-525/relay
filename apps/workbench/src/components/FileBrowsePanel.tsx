@@ -5,6 +5,7 @@ import { createCommandId, managedFileReadOutcomeFrom, RelayApiError, RelayTransp
   type RelayGatewayConnection, type RelayManagedFileReadInput, type RelayManagedFileReadResponse,
   type RelayManagedResource } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 /**
  * 人工受管目录浏览与文件读取（HTTP §10.112，迁移 0134）。
@@ -361,16 +362,16 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
         return <li key={entry.path} className="file-browse-item">
           {isDir
             ? <span className="file-browse-row" style={{ paddingLeft: depth * 14 }}>
-                <button type="button" className="text-button file-browse-toggle"
+                <Button variant="text" className="file-browse-toggle"
                   data-testid={`file-browse-dir-${childPath}`}
-                  onClick={() => toggleDir(childPath)}>{isExpanded ? "▾" : "▸"} {entry.path}</button>
-                <button type="button" className="text-button file-browse-refresh"
+                  onClick={() => toggleDir(childPath)}>{isExpanded ? "▾" : "▸"} {entry.path}</Button>
+                <Button variant="text" className="file-browse-refresh"
                   data-testid={`file-browse-refresh-${childPath}`}
                   disabled={busy || Boolean(currentPending)}
-                  onClick={() => void runCommand("LIST_DIRECTORY", { kind: "LISTING", dirPath: childPath })}>刷新</button>
+                  onClick={() => void runCommand("LIST_DIRECTORY", { kind: "LISTING", dirPath: childPath })}>刷新</Button>
               </span>
             : entry.kind === "file"
-              ? <button type="button" className="text-button file-browse-file"
+              ? <Button variant="text" className="file-browse-file"
                 style={{ paddingLeft: depth * 14 + 18 }}
                 data-testid={`file-browse-file-${childPath}`}
                 disabled={busy || Boolean(currentPending)}
@@ -379,7 +380,7 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
                   sha256: null, truncated: false, error: null });
                   void runCommand("READ_FILE", { kind: "PREVIEW", filePath: childPath }); }}>
                 {entry.path}{entry.size === null ? "" : ` · ${entry.size} B`}
-              </button>
+              </Button>
               : <span className="file-browse-row helper-text" style={{ paddingLeft: depth * 14 + 18 }}>{entry.path} · 其他类型</span>}
           {isDir && isExpanded && renderDir(childPath, depth + 1)}
         </li>;
@@ -428,11 +429,11 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
         {readConnectionId === "" ? "；读文件需要 FILE_READ 连接，当前项目没有配置，只能浏览不能打开正文。" : "；读文件用 FILE_READ 连接。"}</p>
     </div>}
     {!blocked && <div className="git-read-actions">
-      <button type="button" className="secondary-button" data-testid="file-browse-open-root"
+      <Button variant="secondary" data-testid="file-browse-open-root"
         disabled={Boolean(currentPending) || busy}
         onClick={() => { setExpanded((current) => new Set(current).add(""));
           void runCommand("LIST_DIRECTORY", { kind: "LISTING", dirPath: "" }); }}>
-        {listings[""]?.status === "done" ? "重新读取根目录" : "读取根目录"}</button>
+        {listings[""]?.status === "done" ? "重新读取根目录" : "读取根目录"}</Button>
     </div>}
     {!blocked && currentPending && <div className="warning-callout" role="status" data-testid="file-browse-pending">
       <p>{busy ? "正在读取或核对原命令…" : currentPending.phase === "WAITING_APPROVAL"
@@ -447,13 +448,13 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
       {currentPending.operationId !== null && <p>原 operation_id：{currentPending.operationId}
         {currentPending.reviewId !== null && ` · 原 Review ${currentPending.reviewId}`}</p>}
       <div className="git-read-actions">
-        <button className="secondary-button" type="button" data-testid="file-browse-check-receipt" disabled={busy}
-          onClick={() => void reconcile()}>核对原命令回执</button>
+        <Button variant="secondary" data-testid="file-browse-check-receipt" disabled={busy}
+          onClick={() => void reconcile()}>核对原命令回执</Button>
         {currentPending.reviewId && <Link className="text-link" data-testid="file-browse-review"
           to={`/reviews?id=${encodeURIComponent(currentPending.reviewId)}`}>打开原 Review</Link>}
         {currentPending.phase === "WAITING_APPROVAL" && currentPending.reason === "ACTION_APPROVAL_REQUIRED" &&
-          <button className="secondary-button" type="button" data-testid="file-browse-continue" disabled={busy || Boolean(blocked)}
-            onClick={() => void reconcile(true)}>批准后沿原命令继续读取</button>}
+          <Button variant="secondary" data-testid="file-browse-continue" disabled={busy || Boolean(blocked)}
+            onClick={() => void reconcile(true)}>批准后沿原命令继续读取</Button>}
       </div>
     </div>}
     {!blocked && expanded.has("") && renderDir("", 0)}

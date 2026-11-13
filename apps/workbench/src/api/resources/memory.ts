@@ -35,11 +35,14 @@ export async function getMemorySettings(http: RelayHttp): Promise<RelayMemorySet
 export async function saveMemorySettings(http: RelayHttp, input: {
   commandId: string; expectedRevision: DecimalRevision;
   recallEnabled: boolean; automaticCompaction: boolean; autoCapture: boolean;
+  /** 0162：`null` = 恢复产品默认 350K；数字 = 保存该阈值。 */
+  compactionThresholdTokens: number | null;
 }): Promise<RelayMemorySettings> {
   const body = await http.request(http.workspacePath("/memory-settings"), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
       recall_enabled: input.recallEnabled, automatic_compaction: input.automaticCompaction,
-      auto_capture: input.autoCapture }) }, 200);
+      auto_capture: input.autoCapture,
+      compaction_threshold_tokens: input.compactionThresholdTokens }) }, 200);
   try {
     const envelope = commandEnvelopeFrom(body);
     if (envelope.commandId !== input.commandId) throw new Error("command mismatch");

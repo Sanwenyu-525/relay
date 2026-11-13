@@ -9,6 +9,7 @@ import { phaseLabel, phaseOptionsByProjectType, taskStatusLabels } from "../lib/
 import { describeLiveError } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
+import { Button } from "../ui";
 
 /**
  * Project State 的人工管理入口：阶段、下一步、风险、阻塞与解除。
@@ -222,11 +223,11 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
       <p>原 command ID：{pending.command.commandId} · {pending.command.action} · 基于 v{pending.command.expectedRevision}。
         核对前不会发出第二条 State 命令。</p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" data-testid="project-state-check-receipt"
-          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" data-testid="project-state-retry"
+        <Button variant="secondary" data-testid="project-state-check-receipt"
+          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" data-testid="project-state-retry"
           disabled={busy} onClick={() => { const record = pendingRef.current; if (record) void send(record); }}>
-          用原 ID 与原载荷重试</button>}
+          用原 ID 与原载荷重试</Button>}
       </div>
     </div>}
 
@@ -238,10 +239,10 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
           {phaseOptions.map((phase) => <option key={phase} value={phase}>{phaseLabel(phase)} · {phase}</option>)}
         </select>
         <small className="helper-text">只列出 {projectType} 项目类型允许的阶段。</small>
-        <button className="secondary-button" type="button" data-testid="state-phase-submit"
+        <Button variant="secondary" data-testid="state-phase-submit"
           disabled={busy || archived || pending !== null || phaseKey === state.phaseKey}
           onClick={() => start({ projectId, commandId: createCommandId(),
-            expectedRevision: state.revision, action: "SET_PHASE", phaseKey })}>保存阶段</button>
+            expectedRevision: state.revision, action: "SET_PHASE", phaseKey })}>保存阶段</Button>
       </label>
 
       <label className="field"><span className="field-label">下一步 Task</span>
@@ -255,11 +256,11 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
             {task.title} · {taskStatusLabels[task.status] ?? task.status}</option>)}
         </select>
         <small className="helper-text">只引用本项目已加载的任务；设为下一步不代表该 Task 已获得执行资格。</small>
-        <button className="secondary-button" type="button" data-testid="state-next-action-submit"
+        <Button variant="secondary" data-testid="state-next-action-submit"
           disabled={busy || archived || pending !== null || nextActionId === (state.nextActionTaskId ?? "")}
           onClick={() => start({ projectId, commandId: createCommandId(),
             expectedRevision: state.revision, action: "SET_NEXT_ACTION",
-            nextActionTaskId: nextActionId === "" ? null : nextActionId })}>保存下一步</button>
+            nextActionTaskId: nextActionId === "" ? null : nextActionId })}>保存下一步</Button>
       </label>
     </div>
 
@@ -272,8 +273,8 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
             <strong>{risk.statement}</strong>
             <small>确认引用 {risk.confirmationRef} · 来源 {risk.sourceRef} · {risk.resolvedAt === null ? "未解除" : `解除于 ${new Date(risk.resolvedAt).toLocaleString("zh-CN")}`}</small>
           </li>)}</ul>}
-        {!showRiskForm ? <button className="text-button" type="button" data-testid="state-risk-open"
-          disabled={busy || archived || pending !== null} onClick={() => setShowRiskForm(true)}>登记已确认风险</button>
+        {!showRiskForm ? <Button variant="text" data-testid="state-risk-open"
+          disabled={busy || archived || pending !== null} onClick={() => setShowRiskForm(true)}>登记已确认风险</Button>
           : <form className="stack" onSubmit={(event) => { event.preventDefault();
             if (riskStatement.trim() === "") { setError("风险说明不能为空。"); return; }
             if (riskSource.trim() === "" || riskConfirmation.trim() === "") {
@@ -296,10 +297,10 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
                 value={riskConfirmation} disabled={busy || archived || pending !== null}
                 onChange={(event) => setRiskConfirmation(event.target.value)} /></label>
             <div className="form-actions">
-              <button className="primary-button" type="submit" data-testid="state-risk-submit"
-                disabled={busy || archived || pending !== null}>保存风险</button>
-              <button className="secondary-button" type="button" data-testid="state-risk-cancel"
-                disabled={busy} onClick={() => setShowRiskForm(false)}>取消</button>
+              <Button variant="primary" type="submit" data-testid="state-risk-submit"
+                disabled={busy || archived || pending !== null}>保存风险</Button>
+              <Button variant="secondary" data-testid="state-risk-cancel"
+                disabled={busy} onClick={() => setShowRiskForm(false)}>取消</Button>
             </div>
           </form>}
       </div>
@@ -312,19 +313,19 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
             .map((blocker) => <li key={blocker.blockerId} data-testid={`state-blocker-${blocker.blockerId}`}>
               <strong>{blocker.reason}</strong>
               <small>{blocker.targetKind} {blocker.targetId} · 来源 {blocker.sourceRef}</small>
-              <button className="text-button" type="button" data-testid={`state-blocker-resolve-${blocker.blockerId}`}
+              <Button variant="text" data-testid={`state-blocker-resolve-${blocker.blockerId}`}
                 disabled={busy || archived || pending !== null}
                 onClick={() => start({ projectId, commandId: createCommandId(),
                   expectedRevision: state.revision, action: "RESOLVE_BLOCKER",
-                  blockerId: blocker.blockerId })}>解除阻塞</button>
+                  blockerId: blocker.blockerId })}>解除阻塞</Button>
             </li>)}</ul>}
         {state.blockers.some((blocker) => blocker.resolvedAt !== null) && <details className="tech-details">
           <summary>已解除历史</summary>
           <ul className="run-list">{state.blockers.filter((blocker) => blocker.resolvedAt !== null)
             .map((blocker) => <li key={blocker.blockerId}>{blocker.reason} · 解除于 {new Date(blocker.resolvedAt!).toLocaleString("zh-CN")}</li>)}
           </ul></details>}
-        {!showBlockerForm ? <button className="text-button" type="button" data-testid="state-blocker-open"
-          disabled={busy || archived || pending !== null} onClick={() => setShowBlockerForm(true)}>登记阻塞</button>
+        {!showBlockerForm ? <Button variant="text" data-testid="state-blocker-open"
+          disabled={busy || archived || pending !== null} onClick={() => setShowBlockerForm(true)}>登记阻塞</Button>
           : <form className="stack" onSubmit={(event) => { event.preventDefault();
             if (blockerTargetId === "") { setError("请选择阻塞目标。"); return; }
             if (blockerReason.trim() === "") { setError("阻塞原因不能为空。"); return; }
@@ -362,10 +363,10 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
                 value={blockerSource} disabled={busy || archived || pending !== null}
                 onChange={(event) => setBlockerSource(event.target.value)} /></label>
             <div className="form-actions">
-              <button className="primary-button" type="submit" data-testid="state-blocker-submit"
-                disabled={busy || archived || pending !== null || blockerTargetId === ""}>保存阻塞</button>
-              <button className="secondary-button" type="button" data-testid="state-blocker-cancel"
-                disabled={busy} onClick={() => setShowBlockerForm(false)}>取消</button>
+              <Button variant="primary" type="submit" data-testid="state-blocker-submit"
+                disabled={busy || archived || pending !== null || blockerTargetId === ""}>保存阻塞</Button>
+              <Button variant="secondary" data-testid="state-blocker-cancel"
+                disabled={busy} onClick={() => setShowBlockerForm(false)}>取消</Button>
             </div>
           </form>}
       </div>
@@ -373,8 +374,8 @@ export default function ProjectStatePanel({ client, projectId, projectType, stat
 
     <p className="helper-text"><Info aria-hidden="true" />
       State v{state.revision} · 依赖版本以服务端组合视图为准；选择产物版本仍走独立的 SELECT_ARTIFACT_VERSION 入口。
-      <button className="text-button" type="button" data-testid="project-state-reread"
-        disabled={busy} onClick={onChanged}><RotateCcw aria-hidden="true" />重新读取 State</button>
+      <Button variant="text" data-testid="project-state-reread"
+        disabled={busy} onClick={onChanged}><RotateCcw aria-hidden="true" />重新读取 State</Button>
     </p>
   </section>;
 }

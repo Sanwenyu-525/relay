@@ -6,6 +6,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import PageHeader from "./PageHeader";
 import SafeMarkdown from "./SafeMarkdown";
+import { Button } from "../ui";
 
 interface Props {
   readonly client: RelayApiClient;
@@ -103,8 +104,8 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
           {typeof sourceUri === "string" && /^https?:\/\//iu.test(sourceUri)
             && <a className="secondary-button" href={sourceUri} target="_blank" rel="noopener noreferrer"
               data-testid="knowledge-open-source">打开当前原件</a>}
-          {onNewVersion && <button type="button" className="primary-button knowledge-reader__edit" data-testid="knowledge-new-version"
-            disabled={newVersionDisabled} onClick={onNewVersion}>编辑为新版本</button>}
+          {onNewVersion && <Button variant="primary" className="knowledge-reader__edit" data-testid="knowledge-new-version"
+            disabled={newVersionDisabled} onClick={onNewVersion}>编辑为新版本</Button>}
         </>} />
       <div className="knowledge-reader__toolbar">
         <label className="field" htmlFor="knowledge-reader-version"><span className="visually-hidden">阅读版本</span>
@@ -128,8 +129,7 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
     </aside>}
     <div className="knowledge-reader__main">
       {loading && <p role="status">正在读取 v{version} 的确切正文…</p>}
-      {error && <p className="action-error" role="alert">v{version} 正文读取失败：{error} <button type="button"
-        className="text-button" onClick={() => setRetry((value) => value + 1)}>重试读取</button></p>}
+      {error && <p className="action-error" role="alert">v{version} 正文读取失败：{error} <Button variant="text" onClick={() => setRetry((value) => value + 1)}>重试读取</Button></p>}
       {content && <>
         {content.contentStatus === "FULL" && <>
           {/* 2026-10-24 用户指令：正文芯片已显示「全文」，状态行不再复述；网页快照的
@@ -163,8 +163,8 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
         <p>历史引用始终指向原版本；编辑会保存为新版本，不会更新已有引用。</p>
       </section>
       <details className="knowledge-history"><summary>不可变资料版本 · {versions.length}</summary><ol>{versions.map((item) =>
-        <li key={item.id}><button type="button" className="text-button" onClick={() => setVersion(item.version)}
-          aria-current={item.version === version ? "true" : undefined}>v{item.version} · {sourceLabels[item.sourceKind] ?? item.sourceKind}</button>
+        <li key={item.id}><Button variant="text" onClick={() => setVersion(item.version)}
+          aria-current={item.version === version ? "true" : undefined}>v{item.version} · {sourceLabels[item.sourceKind] ?? item.sourceKind}</Button>
           <p>{item.excerpt ?? "该版本引用受管产物，无内联摘录。"}</p></li>)}</ol></details>
       <p className="helper-text">阅读不会将正文发送给 AI；使用范围由现有选源与权限决定。</p>
     </aside>

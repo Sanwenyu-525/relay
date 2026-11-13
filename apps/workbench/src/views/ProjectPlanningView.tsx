@@ -11,6 +11,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./ProjectPlanningView.css";
+import { Button } from "../ui";
 
 type PlanningIntent =
   | { readonly kind: "PROPOSE_PLAN"; readonly input: { commandId: string; projectId: string; title: string;
@@ -427,7 +428,7 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
       <div className="pv-card-h"><strong>暂时无法读取项目计划</strong></div>
       <div className="pv-card-b">
         <p>{error}</p>
-        <button className="secondary-button" type="button" onClick={() => void refreshPlans(false)}>重新读取</button>
+        <Button variant="secondary" onClick={() => void refreshPlans(false)}>重新读取</Button>
       </div>
     </section>
   </PlanningStatePage>;
@@ -437,9 +438,9 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
     <ProjectNav projectId={projectId} active="planning" />
     {pending && <section className="surface-panel planning-pending" aria-label="计划命令待核对" data-testid="planning-pending-command">
       <h2>命令结果待核对</h2><p>原 command ID：<code>{pending.input.commandId}</code>。请求载荷已保存在本机此工作区，不会自动换 ID 重发。</p>
-      <button className="secondary-button" type="button" disabled={submitting} onClick={() => void recoverPending()}>查询原命令回执</button>
-      {pendingAbsent && <button className="secondary-button" type="button" disabled={submitting}
-        onClick={() => void sendStored(pending)}>用原 ID 与原载荷重试</button>}
+      <Button variant="secondary" disabled={submitting} onClick={() => void recoverPending()}>查询原命令回执</Button>
+      {pendingAbsent && <Button variant="secondary" disabled={submitting}
+        onClick={() => void sendStored(pending)}>用原 ID 与原载荷重试</Button>}
     </section>}
     {error && <p className="action-error" role="alert">刷新失败：{error}；已保留本地已读计划。</p>}
     {notice && <p className="receipt-message" role="status">{notice}</p>}
@@ -459,7 +460,7 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
       <h3>选择任务与主线</h3>
       <p className="helper-text">已加载 {loadedTasks.length} 项{taskPages.nextCursor === null ? "，任务列表已到末页。" : "，仍有后续页。"}</p>
       {taskPages.error && <div className="action-error" role="alert">已保留已加载任务与原游标：{taskPages.error}
-        <button className="text-button" type="button" disabled={taskPages.loading || taskPages.loadingMore} onClick={taskPages.retry}>重试任务读取</button></div>}
+        <Button variant="text" disabled={taskPages.loading || taskPages.loadingMore} onClick={taskPages.retry}>重试任务读取</Button></div>}
       {taskPages.items.map((task) => <TaskChoice key={task.id} task={task} selected={selectedTaskIds.includes(task.id)}
         mainline={mainlineTaskIds.includes(task.id)} disabled={pending !== null}
         onSelect={() => toggleId(setSelectedTaskIds, selectedTaskIds, task.id)}
@@ -477,24 +478,24 @@ function LiveProjectPlanning({ client, projectId }: { readonly client: RelayApiC
             elapsedMs, executionMs, waitingMs, reviewMs, humanMs, sourceNote } });
         }} />)}
       {taskPages.loading && loadedTasks.length === 0 && <p role="status">正在读取项目任务…</p>}
-      {taskPages.nextCursor !== null && <button className="secondary-button" type="button" disabled={taskPages.loading || taskPages.loadingMore}
-        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多任务"}</button>}
+      {taskPages.nextCursor !== null && <Button variant="secondary" disabled={taskPages.loading || taskPages.loadingMore}
+        onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取后续任务…" : "加载更多任务"}</Button>}
       {estimateError && <p className="action-error" role="alert">部分估时暂时无法读取：{estimateError}</p>}
       <h3>关联目标</h3>
       {goals.length === 0 ? <p className="helper-text">项目没有已关联目标；可以只按任务安排。</p> : goals.map((goal) => <label className="planning-check" key={goal.goalId}>
         <input type="checkbox" checked={goalIds.includes(goal.goalId)} disabled={pending !== null}
           onChange={() => toggleId(setGoalIds, goalIds, goal.goalId)} />
         <span>{goal.title}<small>{goal.status} · 目标修订 v{goal.revision}</small></span></label>)}
-      <button className="primary-button" type="button" data-testid="period-plan-propose" disabled={submitting || pending !== null ||
+      <Button variant="primary" data-testid="period-plan-propose" disabled={submitting || pending !== null ||
         title.trim() === "" || selectedTaskIds.length === 0 || !planInputValid}
         onClick={() => void send({ kind: "PROPOSE_PLAN", input: { commandId: createCommandId(), projectId,
           title: title.trim(), availableMs, diagnosticMs,
           taskIds: selectedTaskIds, mainlineTaskIds: mainlineTaskIds.filter((id) => selectedTaskIds.includes(id)), goalIds } })}>
-        生成计划候选</button>
+        生成计划候选</Button>
     </section>
 
     <section className="surface-panel planning-history" aria-label="计划历史">
-      <div className="planning-section-head"><h2>计划与历史</h2><button className="text-button" type="button" onClick={() => void refreshPlans()}>重新读取</button></div>
+      <div className="planning-section-head"><h2>计划与历史</h2><Button variant="text" onClick={() => void refreshPlans()}>重新读取</Button></div>
       {plans.length === 0 ? <p className="helper-text">还没有计划记录。</p> : <label className="field"><span className="field-label">选择计划版本</span>
         <select value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
           {plans.map((plan) => <option key={plan.planId} value={plan.planId}>{plan.title} · 修订 v{plan.revision} · {plan.expired ? "已过窗口" : "窗口有效"}</option>)}
@@ -560,10 +561,10 @@ function TaskChoice({ task, selected, mainline, disabled, onSelect, onMainline, 
           onChange={(event) => onDraftChange({ ...draft, humanMinutes: event.target.value })} /></label>
         <label>来源说明<input value={draft.sourceNote} maxLength={4000} disabled={disabled}
           onChange={(event) => onDraftChange({ ...draft, sourceNote: event.target.value })} /></label>
-        <button type="button" className="secondary-button" disabled={disabled || elapsedMs === null ||
+        <Button variant="secondary" disabled={disabled || elapsedMs === null ||
           (draft.executionMinutes.trim() !== "" && executionMs === null) || (draft.waitingMinutes.trim() !== "" && waitingMs === null) ||
           (draft.reviewMinutes.trim() !== "" && reviewMs === null) || (draft.humanMinutes.trim() !== "" && humanMs === null) || draft.sourceNote.trim() === ""}
-          onClick={() => onRecordEstimate(elapsedMs!, executionMs, waitingMs, reviewMs, humanMs, draft.sourceNote.trim())}>保存用户声明估时</button>
+          onClick={() => onRecordEstimate(elapsedMs!, executionMs, waitingMs, reviewMs, humanMs, draft.sourceNote.trim())}>保存用户声明估时</Button>
         <small>使用 Task v{taskRevision} 和最近估时修订 v{latest?.revision ?? "0"}；录入后会读回历史与当前适用状态。</small>
       </details>
     </div>
@@ -605,10 +606,10 @@ function PlanDetail({ plan, simulations, selectedSimulation, simulationId, setSi
       {item.resolutionReason && <p className="helper-text">处理理由：{item.resolutionReason}</p>}
       {item.createdTaskId && <p><Link to={`/tasks/${encodeURIComponent(item.createdTaskId)}`}>查看已创建任务</Link></p>}
       {item.status === "CANDIDATE" && <div className="planning-item-actions">
-        {item.kind !== "DEFERRED" && <button className="secondary-button" type="button" disabled={submitting || reason.trim() === ""}
-          onClick={() => onResolve(item.id, "ACCEPT")}>接受此项</button>}
-        <button className="text-button" type="button" disabled={submitting || reason.trim() === ""}
-          onClick={() => onResolve(item.id, "REJECT")}>拒绝此项</button></div>}
+        {item.kind !== "DEFERRED" && <Button variant="secondary" disabled={submitting || reason.trim() === ""}
+          onClick={() => onResolve(item.id, "ACCEPT")}>接受此项</Button>}
+        <Button variant="text" disabled={submitting || reason.trim() === ""}
+          onClick={() => onResolve(item.id, "REJECT")}>拒绝此项</Button></div>}
     </li>)}</ul>
     {plan.items.some((item) => item.status === "CANDIDATE") && <label className="field">
       <span className="field-label">逐项处理理由</span><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={4000}
@@ -634,8 +635,8 @@ function PlanDetail({ plan, simulations, selectedSimulation, simulationId, setSi
           <span className="helper-text">{task.elapsed_ms === null ? "未知估时" : `估时 ${formatMinutes(Number(task.elapsed_ms))}`}</span>
         </div>;
       })}
-      <button className="secondary-button" type="button" disabled={!scopeReady || submitting || keepTaskIds.length === 0 || deferTaskIds.length === 0}
-        onClick={onProposeScope}>生成 ALL / SHRINK / DEFER 推演</button>
+      <Button variant="secondary" disabled={!scopeReady || submitting || keepTaskIds.length === 0 || deferTaskIds.length === 0}
+        onClick={onProposeScope}>生成 ALL / SHRINK / DEFER 推演</Button>
       {simulations.length > 0 && <label className="field"><span className="field-label">既有推演</span><select value={simulationId} onChange={(event) => setSimulationId(event.target.value)}>
         {simulations.map((simulation) => <option key={simulation.simulationId} value={simulation.simulationId}>{simulation.status === "SELECTED" ? "已选定" : "待选择"} · v{simulation.revision}</option>)}
       </select></label>}
@@ -663,8 +664,8 @@ function ScopeOptions({ simulation, submitting, reason, setReason, onSelect }: {
         {option.consequences.map((consequence, index) => <p key={index}>影响：{String(consequence.title ?? consequence.task_id)} · {String(consequence.reason)}
           {Array.isArray(consequence.affected_dependent_task_ids) && consequence.affected_dependent_task_ids.length > 0
             ? ` · 受影响后续：${consequence.affected_dependent_task_ids.join(", ")}` : ""}</p>)}
-        <button className="secondary-button" type="button" disabled={stale || simulation.status !== "PROPOSED" || submitting || reason.trim() === ""}
-          onClick={() => onSelect(kind)}>选择为新计划候选</button>
+        <Button variant="secondary" disabled={stale || simulation.status !== "PROPOSED" || submitting || reason.trim() === ""}
+          onClick={() => onSelect(kind)}>选择为新计划候选</Button>
       </section>;
     })}</div>
     {simulation.status === "PROPOSED" && <label className="field"><span className="field-label">选择理由</span>

@@ -5,6 +5,7 @@ import { usePathTooltip } from "../lib/pathTooltip";
 
 import { RelayApiError, RelayTransportError, type RelayApiClient } from "../api/relayClient";
 import "./ComposerDraftAssist.css";
+import { Button } from "../ui";
 
 /**
  * 输入框自动分点与手动润色（工作台 §30，视觉对齐 `GPT页面原型/Relay_Composer_Assist_Prototype.html`）。
@@ -440,10 +441,10 @@ export function ComposerDraftBar({ assist, value, inlinePolish = false }: {
         </div>
       </div>
       <div className="composer-draft-panel-actions">
-        <button type="button" className="primary-button primary-button--compact"
-          onClick={assist.adoptOutline} data-testid="composer-draft-adopt">采用分点</button>
-        <button type="button" className="secondary-button secondary-button--compact"
-          onClick={closePanel} data-testid="composer-draft-cancel">取消</button>
+        <Button variant="primary" className="primary-button--compact"
+          onClick={assist.adoptOutline} data-testid="composer-draft-adopt">采用分点</Button>
+        <Button variant="secondary" className="secondary-button--compact"
+          onClick={closePanel} data-testid="composer-draft-cancel">取消</Button>
       </div>
     </div>}
   </div>;

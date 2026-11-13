@@ -9,6 +9,7 @@ import SafeMarkdown from "../components/SafeMarkdown";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import "./CompletionRecordView.css";
+import { Button } from "../ui";
 
 // COMPLETION-ACCEPTED-READER-20261106：按需只读凭据绑定的版本，不查询或替换为最新版。
 function AcceptedArtifactContent({ client, versionId }: { client: RelayApiClient; versionId: string }) {
@@ -88,7 +89,7 @@ export default function CompletionRecordView() {
         <Link className="secondary-button" to="/tasks">返回任务列表</Link>
       </div>
     </section> : <>
-      <button className="secondary-button" type="button" onClick={() => { setLoaded(null); setFailure(null); setReload((value) => value + 1); }}>重读凭据</button>
+      <Button variant="secondary" onClick={() => { setLoaded(null); setFailure(null); setReload((value) => value + 1); }}>重读凭据</Button>
       {!evidence && !error && <p role="status">正在读取完成凭据…</p>}
       {error && <p className="action-error" role="alert">{error}</p>}
       {evidence && <>

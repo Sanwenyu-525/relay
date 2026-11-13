@@ -28,7 +28,7 @@
 .pv-page .project-scope-bar .skill-tab {
   min-height: 38px;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--relay-font-size-pageBase);
 }
 
 .pv-page .project-scope-bar .project-workbench-entry {

@@ -7,6 +7,7 @@ import { taskStatusLabels } from "../lib/labels";
 import { useDetailsMenu } from "../lib/popoverMenu";
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import "./ComposerTargetPicker.css";
+import { Button } from "../ui";
 
 /**
  * 输入器工具行上的「选择任务 / 选择项目」芯片（2026-10-18，工作台 §32.11）。
@@ -119,8 +120,8 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
       {client === null ? <p className="composer-target-line">连接本机 API 后才能列出{needLabel}。</p>
         : projectsError !== null ? <div className="composer-target-line composer-target-line--error" role="alert">
           <span>{needLabel}清单读取失败：{projectsError}</span>
-          <button type="button" className="text-button" data-testid="composer-target-retry"
-            onClick={retryProjects}>重试</button>
+          <Button variant="text" data-testid="composer-target-retry"
+            onClick={retryProjects}>重试</Button>
         </div>
         : visibleProjects === null ? <p className="composer-target-line">正在读取{needLabel}…</p>
         : visibleProjects.length === 0 ? <p className="composer-target-line">
@@ -130,14 +131,14 @@ export default function ComposerTargetPicker({ client, need, disabled = false, o
         <p className="composer-target-head">任务{selectedProject === null ? "" : ` · ${selectedProject.title}`}</p>
         {taskPages.error !== null && <div className="composer-target-line composer-target-line--error" role="alert">
           <span>任务清单读取失败：{taskPages.error}</span>
-          <button type="button" className="text-button" onClick={taskPages.retry}>重试</button>
+          <Button variant="text" onClick={taskPages.retry}>重试</Button>
         </div>}
         {taskPages.items.length > 0 && <>
           {taskRows}
           {taskPages.nextCursor !== null && <p className="composer-target-line">
             已读取 {taskPages.items.length} 项，可能还有后续任务。
-            <button type="button" className="text-button" disabled={taskPages.loadingMore}
-              onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取…" : "加载更多任务"}</button>
+            <Button variant="text" disabled={taskPages.loadingMore}
+              onClick={taskPages.loadMore}>{taskPages.loadingMore ? "正在读取…" : "加载更多任务"}</Button>
           </p>}
         </>}
         {taskPages.loading && taskPages.items.length === 0 && <p className="composer-target-line" role="status">正在读取任务…</p>}

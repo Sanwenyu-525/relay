@@ -4,6 +4,7 @@ import { createCommandId, RelayTransportError, type RelayApiClient,
 import type { DecimalRevision } from "../types";
 import { describeLiveError } from "../lib/liveErrors";
 import "./ContextBudgetCard.css";
+import { Button } from "../ui";
 
 /**
  * 工作区级上下文长度（0135 / 2026-10-24 用户指令「上下文需要三档 256/512/1024，设置页与
@@ -144,7 +145,7 @@ export default function ContextBudgetCard({ client, compact = false, onSaved }: 
     {loading && projection === null && <p role="status" data-testid="context-budget-loading">正在读取上下文长度…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="context-budget-error">
       <p>上下文长度读取失败：{error}</p>
-      <button className="secondary-button" type="button" disabled={loading} onClick={() => void read()}>重新读取</button>
+      <Button variant="secondary" disabled={loading} onClick={() => void read()}>重新读取</Button>
     </div>}
 
     {projection !== null && <>
@@ -161,21 +162,21 @@ export default function ContextBudgetCard({ client, compact = false, onSaved }: 
       </div>
       {!compact && <p className="helper-text" data-testid="context-budget-revision">当前修订 v{projection.revision}</p>}
       <div className="context-budget-actions">
-        <button className="primary-button" type="button" data-testid="context-budget-save"
+        <Button variant="primary" data-testid="context-budget-save"
           disabled={saving || !dirty} onClick={() => void save({ commandId: createCommandId(),
-            expectedRevision: projection.revision, budget: draft })}>{saving ? "正在保存" : "保存上下文长度"}</button>
-        <button className="secondary-button" type="button" data-testid="context-budget-reload"
-          disabled={saving || loading} onClick={() => void read()}>重新读取</button>
+            expectedRevision: projection.revision, budget: draft })}>{saving ? "正在保存" : "保存上下文长度"}</Button>
+        <Button variant="secondary" data-testid="context-budget-reload"
+          disabled={saving || loading} onClick={() => void read()}>重新读取</Button>
       </div>
       {conflict !== null && <div className="action-error" role="alert" data-testid="context-budget-conflict">
         <p>保存冲突：{conflict}</p>
         <p className="helper-text">已重新读取最新修订，你的选择仍保留。请核对后再保存一次，或丢弃改动。</p>
         <div className="context-budget-actions">
-          <button className="secondary-button" type="button" data-testid="context-budget-conflict-save"
+          <Button variant="secondary" data-testid="context-budget-conflict-save"
             disabled={saving} onClick={() => void save({ commandId: createCommandId(),
-              expectedRevision: projection.revision, budget: draft })}>按最新修订保存</button>
-          <button className="secondary-button" type="button" data-testid="context-budget-conflict-discard"
-            disabled={saving} onClick={() => void read()}>丢弃改动并重读</button>
+              expectedRevision: projection.revision, budget: draft })}>按最新修订保存</Button>
+          <Button variant="secondary" data-testid="context-budget-conflict-discard"
+            disabled={saving} onClick={() => void read()}>丢弃改动并重读</Button>
         </div>
       </div>}
       {notice !== null && <p className="receipt-message" role="status" data-testid="context-budget-notice">{notice}</p>}
@@ -183,10 +184,10 @@ export default function ContextBudgetCard({ client, compact = false, onSaved }: 
         <p>保存结果待核对：{pending.reason}</p>
         <p className="helper-text">原 command_id：{pending.commandId}。先查回执；查不到时只能用同一命令与同一档位重试，不换新 ID。</p>
         <div className="context-budget-actions">
-          <button className="secondary-button" type="button" data-testid="context-budget-receipt"
-            disabled={checking} onClick={() => void checkReceipt()}>{checking ? "正在查询" : "查询原命令回执"}</button>
-          <button className="secondary-button" type="button" data-testid="context-budget-retry"
-            disabled={saving || checking} onClick={() => void save(pending)}>按原命令重试</button>
+          <Button variant="secondary" data-testid="context-budget-receipt"
+            disabled={checking} onClick={() => void checkReceipt()}>{checking ? "正在查询" : "查询原命令回执"}</Button>
+          <Button variant="secondary" data-testid="context-budget-retry"
+            disabled={saving || checking} onClick={() => void save(pending)}>按原命令重试</Button>
         </div>
       </div>}
     </>}

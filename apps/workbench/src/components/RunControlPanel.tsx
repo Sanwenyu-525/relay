@@ -5,6 +5,7 @@ import { createCommandId, RelayApiError, RelayTransportError,
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { executorLabels, taskStatusLabels } from "../lib/labels";
 import { liveClient } from "../lib/relayConnection";
+import { Button } from "../ui";
 
 export const controlLabels: Record<RelayControlType, string> = {
   PAUSE: "请求暂停 Run", CANCEL: "请求停止 Run", HANDOFF: "请求交接给人工", CANCEL_TASK: "请求取消任务"
@@ -305,19 +306,19 @@ export default function RunControlPanel({ state, onReload, compact, taskHref, on
   </p>;
   const commandIdLine = pendingCommand && <p className="helper-text">原 command_id：{pendingCommand.id}</p>;
   const controlButtons = pendingCommand && pendingCommand.confirmedRevision === undefined
-    ? <button className="secondary-button" type="button" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</button>
+    ? <Button variant="secondary" data-testid="run-check-receipt" disabled={submitting} onClick={() => void checkReceipt()}>核对原命令回执</Button>
     : <>
       {run.status === "PAUSED"
-        ? <button className="primary-button" type="button" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</button>
-        : <button className="secondary-button" type="button" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</button>}
-      <button className="secondary-button" type="button" data-testid="run-control-CANCEL" disabled={!canControl} onClick={() => void submitControl("CANCEL")}>{controlLabels.CANCEL}</button>
-      <button className="secondary-button" type="button" data-testid="run-control-HANDOFF" disabled={!canControl} onClick={() => void submitControl("HANDOFF")}>{controlLabels.HANDOFF}</button>
-      <button className="danger-button" type="button" data-testid="run-control-CANCEL_TASK" disabled={!canControl} onClick={() => void submitControl("CANCEL_TASK")}>{controlLabels.CANCEL_TASK}</button>
+        ? <Button variant="primary" data-testid="run-resume" disabled={!canControl} onClick={() => void resume()}>恢复 Run</Button>
+        : <Button variant="secondary" data-testid="run-control-PAUSE" disabled={!canControl} onClick={() => void submitControl("PAUSE")}>{controlLabels.PAUSE}</Button>}
+      <Button variant="secondary" data-testid="run-control-CANCEL" disabled={!canControl} onClick={() => void submitControl("CANCEL")}>{controlLabels.CANCEL}</Button>
+      <Button variant="secondary" data-testid="run-control-HANDOFF" disabled={!canControl} onClick={() => void submitControl("HANDOFF")}>{controlLabels.HANDOFF}</Button>
+      <Button variant="danger" data-testid="run-control-CANCEL_TASK" disabled={!canControl} onClick={() => void submitControl("CANCEL_TASK")}>{controlLabels.CANCEL_TASK}</Button>
     </>;
   const actionsRow = (showControls: boolean) =>
     <div className="run-actions">
       {pendingCommand && pendingCommand.confirmedRevision === undefined ? controlButtons : showControls ? controlButtons : null}
-      <button className="secondary-button" type="button" data-testid="run-refresh" disabled={refreshing || submitting} onClick={() => void reload()}>刷新状态</button>
+      <Button variant="secondary" data-testid="run-refresh" disabled={refreshing || submitting} onClick={() => void reload()}>刷新状态</Button>
     </div>;
   const resumeNote = <p className="helper-text" data-testid="run-control-resume-note">
     恢复 Run 时服务端会重新检查契约、权限与资源占用；这里按钮可用不等于已经确认安全，也不等于已获得新授权。

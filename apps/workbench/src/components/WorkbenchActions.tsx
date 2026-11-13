@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Plus, Search } from "lucide-react";
+import { IconButton } from "../ui";
 
 export default function WorkbenchActions({ onSearch }: { onSearch: () => void }) {
   const location = useLocation();
@@ -26,13 +27,13 @@ export default function WorkbenchActions({ onSearch }: { onSearch: () => void })
   const createTaskPath = project ? `/tasks?view=create&project=${encodeURIComponent(decodeURIComponent(project[1]!))}` : "/tasks?view=create";
 
   return <div className="workbench-actions" aria-label="常用操作">
-    <button className="icon-button" type="button" aria-label="后退" title="后退" data-testid="titlebar-back"
-      disabled={routeHistory.index === 0} onClick={() => void navigate(-1)}><ArrowLeft aria-hidden="true" /></button>
-    <button className="icon-button" type="button" aria-label="前进" title="前进" data-testid="titlebar-forward"
-      disabled={routeHistory.index >= routeHistory.keys.length - 1} onClick={() => void navigate(1)}><ArrowRight aria-hidden="true" /></button>
-    <button className="icon-button" type="button" aria-label="搜索资料，快捷键 Ctrl+K" title="搜索资料 · Ctrl+K"
-      data-testid="titlebar-search" onClick={onSearch}><Search aria-hidden="true" /></button>
-    <button className="icon-button" type="button" aria-label="新建任务" title="新建任务" data-testid="titlebar-create-task"
-      onClick={() => void navigate(createTaskPath)}><Plus aria-hidden="true" /></button>
+    <IconButton icon={ArrowLeft} label="后退" title="后退" data-testid="titlebar-back"
+      disabled={routeHistory.index === 0} onClick={() => void navigate(-1)} />
+    <IconButton icon={ArrowRight} label="前进" title="前进" data-testid="titlebar-forward"
+      disabled={routeHistory.index >= routeHistory.keys.length - 1} onClick={() => void navigate(1)} />
+    <IconButton icon={Search} label="搜索资料，快捷键 Ctrl+K" title="搜索资料 · Ctrl+K"
+      data-testid="titlebar-search" onClick={onSearch} />
+    <IconButton icon={Plus} label="新建任务" title="新建任务" data-testid="titlebar-create-task"
+      onClick={() => void navigate(createTaskPath)} />
   </div>;
 }

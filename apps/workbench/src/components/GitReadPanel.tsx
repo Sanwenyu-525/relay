@@ -4,6 +4,7 @@ import { createCommandId, managedGitReadOutcomeFrom, RelayApiError, RelayTranspo
   type RelayApiClient, type RelayGatewayConnection, type RelayGitReadAction, type RelayManagedResource,
   type RelayManagedGitReadInput, type RelayManagedGitReadResponse } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 type PendingRead = {
   readonly input: RelayManagedGitReadInput;
@@ -279,11 +280,11 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
     </div>
     {pathError(inputPath) && <p className="action-error" role="alert">{pathError(inputPath)}</p>}
     <div className="git-read-actions">
-      <button type="button" className="secondary-button" data-testid="git-read-status"
-        disabled={Boolean(blocked) || Boolean(currentPending) || currentBusy} onClick={() => void start("GIT_STATUS")}>读取状态</button>
-      <button type="button" className="secondary-button" data-testid="git-read-diff"
+      <Button variant="secondary" data-testid="git-read-status"
+        disabled={Boolean(blocked) || Boolean(currentPending) || currentBusy} onClick={() => void start("GIT_STATUS")}>读取状态</Button>
+      <Button variant="secondary" data-testid="git-read-diff"
         disabled={Boolean(blocked) || Boolean(currentPending) || currentBusy || Boolean(pathError(inputPath))}
-        onClick={() => void start("GIT_DIFF")}>读取差异</button>
+        onClick={() => void start("GIT_DIFF")}>读取差异</Button>
     </div>
     {currentPending && <div className="warning-callout" role="status" data-testid="git-read-pending">
       <p>{currentBusy ? "正在读取或核对原命令…" : currentPending.phase === "WAITING_APPROVAL" ? "等待动作批准，尚未读取 Git。"
@@ -294,13 +295,13 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
       {currentPending.operationId !== null && <p>原 operation_id：{currentPending.operationId}
         {currentPending.reviewId !== null && ` · 原 Review ${currentPending.reviewId}`}</p>}
       <div className="git-read-actions">
-        <button className="secondary-button" type="button" data-testid="git-read-check-receipt" disabled={currentBusy}
-          onClick={() => void reconcile()}>核对原命令回执</button>
+        <Button variant="secondary" data-testid="git-read-check-receipt" disabled={currentBusy}
+          onClick={() => void reconcile()}>核对原命令回执</Button>
         {currentPending.reviewId && <Link className="text-link" data-testid="git-read-review"
           to={`/reviews?id=${encodeURIComponent(currentPending.reviewId)}`}>打开原 Review</Link>}
         {currentPending.phase === "WAITING_APPROVAL" && currentPending.reason === "ACTION_APPROVAL_REQUIRED" &&
-          <button className="secondary-button" type="button" data-testid="git-read-continue" disabled={currentBusy || Boolean(blocked)}
-            onClick={() => void reconcile(true)}>批准后沿原命令继续读取</button>}
+          <Button variant="secondary" data-testid="git-read-continue" disabled={currentBusy || Boolean(blocked)}
+            onClick={() => void reconcile(true)}>批准后沿原命令继续读取</Button>}
       </div>
     </div>}
     {error && <p className="action-error" role="alert" data-testid="git-read-error">{error}</p>}
@@ -333,9 +334,9 @@ export default function GitReadPanel({ client, projectId, resources, resourceLoa
     {/* 2026-10-24 用户指令：能力边界收成开发注记；权限受阻与提示注入警告不是开发注记，保留上屏。 */}
     <p className="helper-text">读取差异需要 GIT_DIFF 策略；差异正文是 Git 数据，不构成操作指令。</p>
     <p className="helper-text" aria-label="开发注记">本轮只放行受管资源上的状态与差异读取；GIT_LOG 未接人工入口，暂存、提交、推送、检出、重置、清理与自动解决冲突均无入口。</p>
-    <button className="secondary-button" type="button" data-testid="git-read-reload-connections"
+    <Button variant="secondary" data-testid="git-read-reload-connections"
       disabled={connectionLoading || currentBusy} onClick={() => void loadConnections()}>
       重新读取可用连接
-    </button>
+    </Button>
   </section>;
 }

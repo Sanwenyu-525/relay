@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RelayPackDefinition } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import { Button } from "../ui";
 
 /** 当前可用组合的摘要行：只回答「有哪些组合、由几项组成」，不铺协议和 hash。 */
 function PackSummaryRow({ pack }: { pack: RelayPackDefinition }) {
@@ -69,7 +70,7 @@ export default function PackCatalogPanel() {
     <p className="helper-text">清单来自当前工作空间的固定注册表。浏览或选择不会授权工具、启用规则、应用配置或启动 Run。</p>
     {packs === null && !error && <p role="status">正在读取内置组合…</p>}
     {error && <p className="action-error" role="alert">Pack 清单暂不可读：{error}。
-      <button type="button" className="text-button" onClick={() => void load()}>重读</button></p>}
+      <Button variant="text" onClick={() => void load()}>重读</Button></p>}
     {packs?.length === 0 && <p className="helper-text">当前没有已注册的内置 Pack。</p>}
     {available.length > 0 && <div className="pack-catalog-current" data-testid="pack-catalog-current">
       {available.map((pack) => <PackSummaryRow key={`${pack.id}@${pack.version}`} pack={pack} />)}

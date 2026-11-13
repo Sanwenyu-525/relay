@@ -1,4 +1,5 @@
 import AppDialog from "./AppDialog";
+import { Button } from "../ui";
 
 /**
  * 未决命令的承载：正文只留一行状态，完整原因、原 command_id 与两个恢复出口放进弹窗。
@@ -16,7 +17,7 @@ export function UnresolvedCommandStrip({ testId, label, busy, onOpen, className 
 }) {
   return <div className={className} data-testid={testId} data-state="unresolved">
     <span className="helper-text" role="status">{label}</span>
-    <button type="button" className="text-button" disabled={busy} onClick={onOpen}>查看核对</button>
+    <Button variant="text" disabled={busy} onClick={onOpen}>查看核对</Button>
   </div>;
 }
 
@@ -46,11 +47,11 @@ export function UnresolvedCommandDialog({ open, title, summary, commandId, detai
       {reason !== null && <p className="action-error" role="alert"
         data-testid={`${testId}-reason`}>{reason}</p>}
       <div className="dialog-actions">
-        <button className="secondary-button" type="button" onClick={onClose}>稍后处理</button>
-        <button className="secondary-button" type="button" data-testid={`${testId}-retry`}
-          disabled={busy} onClick={onRetry}>{busy ? "正在重试" : retryLabel}</button>
-        <button className="primary-button" type="button" data-testid={`${testId}-receipt`}
-          disabled={busy} onClick={onCheck}>{busy ? "正在查询" : checkLabel}</button>
+        <Button variant="secondary" onClick={onClose}>稍后处理</Button>
+        <Button variant="secondary" data-testid={`${testId}-retry`}
+          disabled={busy} onClick={onRetry}>{busy ? "正在重试" : retryLabel}</Button>
+        <Button variant="primary" data-testid={`${testId}-receipt`}
+          disabled={busy} onClick={onCheck}>{busy ? "正在查询" : checkLabel}</Button>
       </div>
       <details className="unresolved-command-details">
         <summary>技术详情</summary>

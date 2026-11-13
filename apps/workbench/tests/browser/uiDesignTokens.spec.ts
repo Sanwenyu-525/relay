@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { shadowMatchesToken } from "../uiShadowAssert";
 
 /**
  * Token 收敛守卫（UI-UNIFY-01，2026-11-12）。
@@ -92,7 +93,7 @@ test("卡片只用分隔线分层：投影来自 shadow.surface，边框来自 b
     return { boxShadow: computed.boxShadow, borderColor: computed.borderTopColor };
   });
 
-  expect(style.boxShadow).toBe(surfaceShadow === "none" ? "none" : style.boxShadow);
+  expect(shadowMatchesToken(style.boxShadow, surfaceShadow), "卡片投影应等于 shadow.surface token").toBe(true);
   expect(style.borderColor).toBe(hexToRgb(separator));
 });
 

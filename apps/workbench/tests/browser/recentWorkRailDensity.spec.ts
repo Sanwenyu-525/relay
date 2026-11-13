@@ -1126,7 +1126,7 @@ test.describe("近期工作栏窄列几何", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
     // 焦点仍在触发行上，描述引用撤干净，没有触发打开、没有路由变化。
-    expect(await page.evaluate((target) => document.activeElement?.getAttribute("data-testid"), sessionId))
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
       .toBe(`recent-work-${sessionId}`);
     expect(await row.getAttribute("aria-describedby")).toBeNull();
     await page.screenshot({ path: "results/rail-row-summary-keyboard-closed.png" });
@@ -1137,19 +1137,32 @@ test.describe("近期工作栏窄列几何", () => {
     await page.waitForTimeout(300);
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
 
-    // Tab 到下一行：上一张卡随 blur 收起，下一行按自己的聚焦出卡。
-    const nextSession = "66666666-6666-4666-8666-666666666663";
+    // Tab 离开本行：摘要随 blur 收起。实测 Tab 序是「行按钮 → 本行 ⋯ 触发器 →
+    // 下一分组标题」，不是下一行按钮——所以这里只锁「离开即收起」与真实落点。
     await page.keyboard.press("Tab");
-    await expect(page.getByTestId("recent-work-summary")).toHaveCount(1);
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
     expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid")))
-      .toBe(`recent-work-${nextSession}`);
+      .toBe(`recent-work-menu-${sessionId}`);
     // Shift+Tab 回到原行：下一次真正重新进入仍可打开。
     await page.keyboard.press("Shift+Tab");
     await expect(card).toBeVisible();
+    // 左栏自己的方向键漫游到下一行：上一张卡收起，下一行按聚焦出卡，标题跟着换。
+    await page.keyboard.press("ArrowDown");
+    const focusedTestId = await page.evaluate(
+      () => document.activeElement?.getAttribute("data-testid") ?? "");
+    expect(focusedTestId.startsWith("recent-work-")).toBe(true);
+    expect(focusedTestId).not.toBe(`recent-work-${sessionId}`);
+    await expect(page.getByTestId("recent-work-summary")).toHaveCount(1);
+    const focusedTitle = await page.evaluate((target) =>
+      document.querySelector(`[data-testid="${target}"] .recent-work-title`)?.textContent ?? "", focusedTestId);
+    await expect(page.getByTestId("recent-work-summary-title")).toHaveText(focusedTitle);
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
 
     // 操作菜单打开时摘要让位；Esc 先关菜单，摘要保持收起（菜单自己处理 Esc）。
+    // ⋯ 触发器只在行悬停/聚焦时显形：先悬停（摘要随悬停出现），再点 ⋯。
+    await row.hover();
+    await expect(card).toBeVisible();
     await page.locator(`.recent-work-row:has([data-testid="recent-work-${sessionId}"])`)
       .getByTestId(`recent-work-menu-${sessionId}`).click();
     const panel = page.getByTestId(`recent-work-panel-${sessionId}`);
@@ -1160,13 +1173,21 @@ test.describe("近期工作栏窄列几何", () => {
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
 
     // 滚动收起：摘要开着时滚动列表，卡片立刻收起、不留在旧坐标上。
+    // 本组种子内容不足一屏（scrollHeight < 容器高），先临时压容器高度让它真的可滚，
+    // 否则 scrollTop 赋值是空操作、不会产生 scroll 事件。
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await row.focus();
     await expect(card).toBeVisible();
-    await page.evaluate(() => {
+    const scrolled = await page.evaluate(async () => {
       const scroller = document.querySelector<HTMLElement>(".recent-work-scroll");
-      if (scroller !== null) scroller.scrollTop += 40;
+      if (scroller === null) return -1;
+      scroller.style.maxHeight = "120px";
+      await new Promise(requestAnimationFrame);
+      const before = scroller.scrollTop;
+      scroller.scrollTop = before + 40;
+      return scroller.scrollTop - before;
     });
+    expect(scrolled, "滚动真的发生了").toBeGreaterThan(0);
     await expect(page.getByTestId("recent-work-summary")).toHaveCount(0);
   });
 

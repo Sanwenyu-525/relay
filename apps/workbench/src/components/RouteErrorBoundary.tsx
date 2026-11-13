@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, useLocation, useRouteError } from "react-router-dom";
 import { reportFrontendError } from "../lib/frontendDiagnostics";
+import { Button } from "../ui";
 
 /**
  * 路由级兜底错误页（router.tsx 根路由的 errorElement）。
@@ -24,8 +25,8 @@ export default function RouteErrorBoundary() {
     <p className="action-error" data-testid="route-error-summary">{summary}</p>
     <p className="helper-text">这一页停止渲染是前端问题；服务端保存的项目、任务与会话不受影响。刷新页面会重新加载最新代码。</p>
     <div className="form-actions">
-      <button type="button" className="primary-button" data-testid="route-error-reload"
-        onClick={() => window.location.reload()}>刷新页面</button>
+      <Button variant="primary" data-testid="route-error-reload"
+        onClick={() => window.location.reload()}>刷新页面</Button>
       <Link className="secondary-button" to="/projects">返回工作台</Link>
     </div>
     {import.meta.env.DEV && error instanceof Error && error.stack &&

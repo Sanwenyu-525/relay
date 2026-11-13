@@ -4,6 +4,7 @@ import AppDialog from "./AppDialog";
 import { createCommandId, type RelayApiClient, type RelayAssistSession } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { usePathTooltip } from "../lib/pathTooltip";
+import { Button } from "../ui";
 import {
   deleteSessionAndVerify,
   verifyDeleteReceipt,
@@ -167,8 +168,8 @@ export default function WorkspaceClearSessions({ client, onCleared }: {
           <>
             <p data-testid="workspace-clear-empty">「会话（按目录）」下没有可清空的讨论。</p>
             <div className="dialog-actions">
-              <button className="primary-button" type="button" data-testid="workspace-clear-done"
-                onClick={resetDialog}>知道了</button>
+              <Button variant="primary" data-testid="workspace-clear-done"
+                onClick={resetDialog}>知道了</Button>
             </div>
           </>
         )}
@@ -176,9 +177,9 @@ export default function WorkspaceClearSessions({ client, onCleared }: {
           <>
             <p role="alert" data-testid="workspace-clear-error">{errorText}</p>
             <div className="dialog-actions">
-              <button className="secondary-button" type="button" onClick={resetDialog}>取消</button>
-              <button className="primary-button" type="button" data-testid="workspace-clear-retry"
-                onClick={() => void readTargets()}>重试读取</button>
+              <Button variant="secondary" onClick={resetDialog}>取消</Button>
+              <Button variant="primary" data-testid="workspace-clear-retry"
+                onClick={() => void readTargets()}>重试读取</Button>
             </div>
           </>
         )}
@@ -191,10 +192,10 @@ export default function WorkspaceClearSessions({ client, onCleared }: {
               引用的会话会被服务端拒绝并保留。
             </p>
             <div className="dialog-actions">
-              <button className="secondary-button" type="button" data-testid="workspace-clear-cancel"
-                onClick={resetDialog}>取消</button>
-              <button className="danger-button" type="button" data-testid="workspace-clear-confirm"
-                onClick={() => void run()}>清空 {targets.length} 条会话</button>
+              <Button variant="secondary" data-testid="workspace-clear-cancel"
+                onClick={resetDialog}>取消</Button>
+              <Button variant="danger" data-testid="workspace-clear-confirm"
+                onClick={() => void run()}>清空 {targets.length} 条会话</Button>
             </div>
           </>
         )}
@@ -230,10 +231,10 @@ export default function WorkspaceClearSessions({ client, onCleared }: {
                 {unresolved.map((item) => item.outcome.state === "unresolved" && (
                   <li key={item.session.id}>
                     <span>{item.session.title}</span>：这次删除是否生效还没有确定。
-                    <button className="text-button" type="button"
+                    <Button variant="text"
                       data-testid={`workspace-clear-recheck-${item.session.id}`}
                       disabled={rechecking !== null} aria-busy={rechecking === item.outcome.commandId || undefined}
-                      onClick={() => void recheck(item)}>核对回执</button>
+                      onClick={() => void recheck(item)}>核对回执</Button>
                   </li>
                 ))}
               </ul>
@@ -248,10 +249,10 @@ export default function WorkspaceClearSessions({ client, onCleared }: {
               </details>
             )}
             <div className="dialog-actions">
-              <button className="secondary-button" type="button" data-testid="workspace-clear-reread"
-                onClick={() => void readTargets()}>重新读取</button>
-              <button className="primary-button" type="button" data-testid="workspace-clear-done"
-                onClick={resetDialog}>完成</button>
+              <Button variant="secondary" data-testid="workspace-clear-reread"
+                onClick={() => void readTargets()}>重新读取</Button>
+              <Button variant="primary" data-testid="workspace-clear-done"
+                onClick={resetDialog}>完成</Button>
             </div>
           </>
         )}

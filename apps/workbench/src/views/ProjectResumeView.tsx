@@ -17,6 +17,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectType } from "../types";
 import type { ProjectSnapshot, ResumeProgressItem, ResumeSuggestion, SourceReference } from "../types";
 import "./ProjectResumeView.css";
+import { Button } from "../ui";
 
 const resumeSourceIds = ["project-state-v4", "task-list-v1", "literature-review-v3", "acceptance-v2", "review-record-v1"];
 
@@ -90,7 +91,7 @@ function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiCli
     factsReadable={!loading && !error && snapshot !== null}
     captureBlockedReason={loading ? "正在重新读取项目事实，暂不保存新接续点。" : error || !snapshot ? "项目事实尚未读取确认，暂不保存新接续点。" : null} /></section>;
   if (loading) return <><section className="page-state" role="status"><p className="eyebrow">继续这个项目</p><h1>正在读取当前项目事实</h1><p>只读查询不会开始或恢复执行。</p></section>{continuation}</>;
-  if (error || !snapshot) return <><section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法读取当前事实</h1><p>{error ?? "项目事实不可用。"}</p><button className="secondary-button" type="button" onClick={() => setReload((value) => value + 1)}>重新读取</button></section>{continuation}</>;
+  if (error || !snapshot) return <><section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法读取当前事实</h1><p>{error ?? "项目事实不可用。"}</p><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>重新读取</Button></section>{continuation}</>;
   const { project, state, goals, tasks, nextAction, reviews, decisions, selectedArtifacts } = snapshot;
   const type = project.projectType in projectTypeLabels
     ? projectTypeLabels[project.projectType as ProjectType] : project.projectType;
@@ -102,7 +103,7 @@ function LiveProjectResumeView({ id, client }: { id: string; client: RelayApiCli
     <p className="metadata-row">本次查询于 <time dateTime={snapshot.queriedAt}>{new Date(snapshot.queriedAt).toLocaleString("zh-CN")}</time> 完成；各来源可能在查询期间变化，非原子项目快照。</p>
     <p className="helper-text">这是现时只读查询；未选择接续点时不显示变化对比、进度判断或模型建议，也不会启动 Task 或 Run。</p>
     </details>
-    <button className="secondary-button" type="button" data-testid="project-resume-refresh" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新当前事实</button>
+    <Button variant="secondary" data-testid="project-resume-refresh" onClick={() => setReload((value) => value + 1)}><RotateCcw aria-hidden="true" />刷新当前事实</Button>
     <section className="resume-section"><h2>项目目标</h2><p className="helper-text">项目标题来自 Project；以下仅列已关联的 Goal，不把标题解释为已确认目标。</p>
       {goals === null ? <p className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</p>
         : goals.length ? <ul className="run-list">{goals.map((goal) => <li key={goal.goalId}>{goal.title} · {goal.status} · Goal v{goal.revision}<small>来源 Goal {goal.goalId}，由 Project Goal 关系查询确认。</small></li>)}</ul>
@@ -180,7 +181,7 @@ function FixtureProjectResumeView() {
     else showSource(target.sourceId);
   }
   if (loading) return <section className="page-state" aria-live="polite"><p className="eyebrow">继续这个项目</p><h1>正在读取项目上下文</h1><p>读取只读摘要不会开始或恢复执行，也不会改变当前执行者。</p></section>;
-  if (error && !project) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法显示恢复摘要</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (error && !project) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">继续这个项目</p><h1>暂时无法显示恢复摘要</h1><p>{error}</p><Button variant="secondary" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   if (!project || !resume) return <section className="page-state"><p className="eyebrow">继续这个项目</p><h1>尚未提供项目恢复摘要示例</h1><p>这个路由对象没有对应的 Skill fixture，页面不会回退读取其他项目的历史或下一步。</p></section>;
   return <section className="skill-page"><div className="page-layout"><div className="page-primary"><PageHeader testId="project-resume-page-head" title="从这里，接着往前。" meta={project.name}>
     <p className="metadata-row">只读摘要 <span aria-hidden="true">·</span> 更新于 {resume.updatedAt}</p>
@@ -188,5 +189,5 @@ function FixtureProjectResumeView() {
     <section className="resume-section" aria-labelledby="progress-heading"><h2 id="progress-heading">当前进展</h2><div className="progress-list">{resume.progress.map((item) => { const Icon = item.state === "completed" ? CheckCircle2 : item.state === "review" ? CircleEllipsis : Circle; return <div key={item.id} className={`progress-row progress-row--${item.state}`}><Icon aria-hidden="true" /><strong>{item.state === "completed" ? "已完成" : item.state === "review" ? "待你判断" : "可开始"}</strong><span>{item.label}</span><button className="inline-link" type="button" onClick={() => openTarget(item.target)}>{item.action}<ChevronRight aria-hidden="true" /></button></div>; })}</div></section>
     <section className="resume-section" aria-labelledby="risk-heading"><h2 id="risk-heading">需要留意</h2>{resume.risks.map((risk) => <div key={risk.text} className="warning-callout" role="status"><TriangleAlert aria-hidden="true" /><p>{risk.text}</p><button className="inline-link" type="button" onClick={() => showSource(risk.sourceId)}>查看来源<ChevronRight aria-hidden="true" /></button></div>)}</section>
     <section className="resume-section" aria-labelledby="next-heading"><h2 id="next-heading">建议的下一步</h2><div className="suggestion-list">{resume.suggestions.map((suggestion, index) => <button key={suggestion.id} className="resume-suggestion" type="button" onClick={() => openTarget(suggestion.target)}><span className="suggestion-index">{String(index + 1).padStart(2, "0")}</span><strong>{suggestion.text}</strong><small>{suggestion.basis}</small><ChevronRight aria-hidden="true" /></button>)}</div><p className="helper-text">以上为建议，尚未执行；摘要不会开始或恢复执行。</p></section>
-  </div><ResponsiveRail label="查看项目上下文" title="找回项目上下文"><div className="rail-content"><h2>找回项目上下文</h2><div className="summary-card summary-card--source-list">{railSources.map((source) => <button key={source.id} className="source-button source-button--row" type="button" onClick={() => showSource(source.id)}><FileText aria-hidden="true" /><span className="source-button-copy"><strong>{source.title} {source.version}</strong><small>{source.availability === "available" ? "查看来源" : "来源不可用"}</small></span><ChevronRight aria-hidden="true" /></button>)}</div><hr />{!resume.hasBaseline && <p className="helper-text">本次没有可用的上次查看基线，不展示变化对比。</p>}<button className="primary-button primary-button--wide" type="button" onClick={() => showSource("literature-review-v3")}>查看待审产物</button><button className="secondary-button secondary-button--wide" type="button" disabled={refreshing} onClick={() => void refreshSummary()}><RotateCcw aria-hidden="true" />{refreshing ? "正在刷新摘要" : "刷新摘要"}</button>{/* 2026-10-24 用户指令：安全声明只保留一处（主列建议区），导轨不再重复。 */}</div></ResponsiveRail></div><SourceDetailDialog open={sourceOpen} onClose={() => setSourceOpen(false)} source={selectedSource} /></section>;
+  </div><ResponsiveRail label="查看项目上下文" title="找回项目上下文"><div className="rail-content"><h2>找回项目上下文</h2><div className="summary-card summary-card--source-list">{railSources.map((source) => <button key={source.id} className="source-button source-button--row" type="button" onClick={() => showSource(source.id)}><FileText aria-hidden="true" /><span className="source-button-copy"><strong>{source.title} {source.version}</strong><small>{source.availability === "available" ? "查看来源" : "来源不可用"}</small></span><ChevronRight aria-hidden="true" /></button>)}</div><hr />{!resume.hasBaseline && <p className="helper-text">本次没有可用的上次查看基线，不展示变化对比。</p>}<Button variant="primary" className="primary-button--wide" onClick={() => showSource("literature-review-v3")}>查看待审产物</Button><Button variant="secondary" className="secondary-button--wide" disabled={refreshing} onClick={() => void refreshSummary()}><RotateCcw aria-hidden="true" />{refreshing ? "正在刷新摘要" : "刷新摘要"}</Button>{/* 2026-10-24 用户指令：安全声明只保留一处（主列建议区），导轨不再重复。 */}</div></ResponsiveRail></div><SourceDetailDialog open={sourceOpen} onClose={() => setSourceOpen(false)} source={selectedSource} /></section>;
 }

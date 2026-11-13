@@ -10,6 +10,7 @@ import { executorLabels, interactionModeLabels, taskStatusLabels, taskStatusTone
 import { describeLiveError } from "../lib/liveErrors";
 import "./InboxView.css";
 import type { InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
+import { Button } from "../ui";
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
 const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
@@ -59,8 +60,8 @@ function InboxHead({ onCreate, onCreateLightweight }: { onCreate: () => void; on
       <p className="inbox-lede">未归属项目的人工任务先集中在这里；需要你做决定的事项在「待处理」。</p>
     </div>
     <div className="inbox-head-actions">
-      <button className="secondary-button" type="button" onClick={onCreateLightweight}><Plus aria-hidden="true" />轻量起步</button>
-      <button className="primary-button" type="button" onClick={onCreate}><Plus aria-hidden="true" />新建任务</button>
+      <Button variant="secondary" onClick={onCreateLightweight}><Plus aria-hidden="true" />轻量起步</Button>
+      <Button variant="primary" onClick={onCreate}><Plus aria-hidden="true" />新建任务</Button>
     </div>
   </header>;
 }
@@ -123,11 +124,11 @@ function InboxEmptyState({ hasFilters, onClearFilters, onCreate }: {
   if (hasFilters) return <EmptyState size="compact" icon={SearchX} title="当前筛选没有匹配的任务"
     description="清除筛选后可以看到收件箱里的全部任务；筛选只作用于当前范围，不代表没有别的人工事项。"
     testId="inbox-no-match"
-    actions={<button className="secondary-button" type="button" onClick={onClearFilters}>清除筛选</button>} />;
+    actions={<Button variant="secondary" onClick={onClearFilters}>清除筛选</Button>} />;
   return <EmptyState size="compact" icon={Inbox} title="收件箱里没有任务"
     description="收件箱只收未归属项目的人工任务。把任务挂到项目下，它就不再出现在这里；也可以直接在这里新建一条。"
     testId="inbox-empty"
-    actions={<button className="primary-button" type="button" onClick={onCreate}>新建任务</button>} />;
+    actions={<Button variant="primary" onClick={onCreate}>新建任务</Button>} />;
 }
 
 /** 当前生效筛选摘要：与任务页同一套 chips 语言，写在页面私有 CSS 里（不抽全局组件）。 */
@@ -144,7 +145,7 @@ function InboxFilterSummary({ filters, onClear }: {
         <button className="active-filter-remove" type="button" aria-label={`移除筛选：${filter.label}`} onClick={filter.onRemove}><X aria-hidden="true" /></button>
       </li>)}
     </ul>
-    <button className="text-button" type="button" onClick={onClear}>清除筛选</button>
+    <Button variant="text" onClick={onClear}>清除筛选</Button>
   </div>;
 }
 
@@ -202,7 +203,7 @@ function FixtureInboxBoard() {
   const openCreate = () => navigate("/tasks?view=create&tab=inbox");
   const openLightweight = () => navigate("/tasks?view=create&light=1&tab=inbox");
   if (loading) return <section className="page-state pv-page" aria-live="polite"><p className="eyebrow">Task Inbox</p><h1>正在读取收件箱任务</h1><p>示例数据正在加载，页面尚未提交任何变更。</p></section>;
-  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Task Inbox</p><h1>暂时无法显示收件箱</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><p className="eyebrow">Task Inbox</p><h1>暂时无法显示收件箱</h1><p>{error}</p><Button variant="secondary" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   const rows = tasks.map(fixtureRow);
   // 生效筛选摘要（fixture）：项目筛选停用且不产生生效条件，chips 只列状态、模式与搜索。
   const activeFilters = [
@@ -302,11 +303,11 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
       <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索已加载任务" /></label>
       <label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label>
       <label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label>
-      <button className="secondary-button" type="button" data-testid="inbox-refresh" disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新收件箱</button>
+      <Button variant="secondary" data-testid="inbox-refresh" disabled={loading || loadingMore} onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />刷新收件箱</Button>
     </div>
     <InboxFilterSummary filters={activeFilters} onClear={clearFilters} />
     {loading ? <div className="page-state" aria-live="polite"><p>正在从本机服务读取收件箱任务…</p></div> :
-      error ? <div className="page-state page-state--error" role="alert"><p>{error}</p><button className="secondary-button" type="button" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</button></div> : <>
+      error ? <div className="page-state page-state--error" role="alert"><p>{error}</p><Button variant="secondary" onClick={() => void loadPage(null)}><RotateCcw aria-hidden="true" />重新读取</Button></div> : <>
         <InboxTaskCard count={visible.length}>
           {visible.length === 0
             ? items.length === 0
@@ -315,12 +316,12 @@ function LiveInboxBoard({ client }: { client: RelayApiClient }) {
               : <EmptyState size="compact" icon={SearchX} title="已加载任务里没有匹配项"
                 description={`已加载 ${items.length} 项，当前筛选显示 0 项。状态、模式与标题筛选只作用于已加载范围，后续页可能仍有匹配任务。`}
                 testId="inbox-live-no-match"
-                actions={hasFilters ? <button className="secondary-button" type="button" onClick={clearFilters}>清除筛选</button> : undefined} />
+                actions={hasFilters ? <Button variant="secondary" onClick={clearFilters}>清除筛选</Button> : undefined} />
             : visible.map((task) => <InboxTaskRow key={task.id} task={task} />)}
         </InboxTaskCard>
         <div className="inbox-card-foot">
           <p className="list-count-note" data-testid="inbox-count">已加载 {items.length} 项 · 当前筛选显示 {visible.length} 项{nextCursor ? " · 仍有后续页" : " · 已到列表末页"}。筛选只作用于已加载任务。</p>
-          {nextCursor && <button className="secondary-button" type="button" data-testid="inbox-load-more" disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</button>}
+          {nextCursor && <Button variant="secondary" data-testid="inbox-load-more" disabled={loadingMore} onClick={() => void loadPage(nextCursor)}>{loadingMore ? "正在加载" : "加载更多"}</Button>}
         </div>
       </>}
     <p className="list-footer-note"><Info aria-hidden="true" />完成依据来自产物、验收与提交。</p>

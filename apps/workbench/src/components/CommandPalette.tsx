@@ -5,6 +5,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import AppDialog from "./AppDialog";
 import "./CommandPalette.css";
+import { Button } from "../ui";
 
 const informationTypes = ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"] as const;
 
@@ -185,7 +186,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
             <small>来源：{item.sourceRef} · {item.projectId ? `项目 ${item.projectId}` : "工作空间"}</small>
           </button></li>)}</ul>}
         {query.trim() && !searching && !searchError && results.length === 0 && <p className="helper-text">当前搜索范围没有匹配资料。</p>}
-        {nextCursor && <button className="secondary-button" type="button" disabled={searching} onClick={() => { void loadMore(); }}>继续加载搜索结果</button>}
+        {nextCursor && <Button variant="secondary" disabled={searching} onClick={() => { void loadMore(); }}>继续加载搜索结果</Button>}
       </>}
       <div className="command-palette-actions"><h3>前往</h3>
         <button type="button" onClick={() => go("/projects?view=create")}>新建项目 <small>打开已有真实创建表单</small></button>
@@ -206,7 +207,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       </div>
       <form className="command-palette-project" onSubmit={(event) => { void openKnownProject(event); }}>
         <label className="field"><span className="field-label">用明确已知的 Project ID 打开</span><input value={knownProjectId} onChange={(event) => setKnownProjectId(event.target.value)} placeholder="Project UUID" data-testid="command-project-id" /></label>
-        <button className="secondary-button" type="submit" disabled={client === null || !knownProjectId.trim() || openingProject}>核对并打开项目</button>
+        <Button variant="secondary" type="submit" disabled={client === null || !knownProjectId.trim() || openingProject}>核对并打开项目</Button>
         {projectError && <p className="action-error" role="alert">{projectError}</p>}
         <p className="field-hint">这里仍以明确已知的 Project ID 用 GET /projects/:id 核对；项目列表可在“项目”页查看。</p>
       </form>

@@ -8,6 +8,7 @@ import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGua
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import "./ScheduledTasksView.css";
+import { Button } from "../ui";
 
 type FieldErrors = Partial<Record<"project" | "title" | "taskTitle" | "objective" | "criteria" | "repeat"
   | "firstDate" | "localTime" | "timezone" | "maxRuns" | "expiresAt" | "reason", string>>;
@@ -348,7 +349,7 @@ export default function CreateScheduledTaskView() {
     <PageHeader testId="scheduled-task-create-head" title="编辑定时任务" overline="Edit Schedule" meta="读取失败" lede="这条定时任务当前无法读取，先核对后再修改。" />
     <p className="action-error" role="alert">{loadError}</p>
     <div className="form-actions">
-      <button className="secondary-button" type="button" onClick={() => setReloadToken((token) => token + 1)}>重新读取</button>
+      <Button variant="secondary" onClick={() => setReloadToken((token) => token + 1)}>重新读取</Button>
       <Link className="secondary-button" to={`/scheduled-tasks/${editId}`}>返回详情</Link>
     </div>
   </div></div>;
@@ -466,11 +467,11 @@ export default function CreateScheduledTaskView() {
             授权在创建时一次性确认：到点只按这份授权准入，不会扩大权限。执行范围（可读资料、可用工具）在每次触发时按当时状态冻结，
             依据失效则这一次不执行，并进入待处理。</p>
           <div className="form-actions">
-            <button className="primary-button" type="submit" disabled={locked} data-testid="scheduled-task-submit">
-              {pending ? "结果待核对" : submitting ? (editing ? "正在保存" : "正在创建") : editing ? "保存修改" : "创建定时任务"}</button>
-            <button className="secondary-button" type="button" disabled={locked}
+            <Button variant="primary" type="submit" disabled={locked} data-testid="scheduled-task-submit">
+              {pending ? "结果待核对" : submitting ? (editing ? "正在保存" : "正在创建") : editing ? "保存修改" : "创建定时任务"}</Button>
+            <Button variant="secondary" disabled={locked}
               onClick={() => navigate(editing ? `/scheduled-tasks/${editId}` : "/scheduled-tasks")}>
-              {editing ? "返回详情（不保存）" : "返回列表"}</button>
+              {editing ? "返回详情（不保存）" : "返回列表"}</Button>
           </div>
         </div>
       </section>
@@ -480,10 +481,10 @@ export default function CreateScheduledTaskView() {
           <p>{editing ? "修改" : "创建"}结果未确认，表单已锁定。原 command_id：<code>{pending.intent.commandId}</code>。
             先查询回执；在确认未生效之前不要重复提交。</p>
           <div className="form-actions">
-            <button className="secondary-button" type="button" disabled={submitting}
-              onClick={() => void checkReceipt()} data-testid="scheduled-task-check-receipt">查询原命令回执</button>
-            {mayRetry && <button className="secondary-button" type="button" disabled={submitting}
-              onClick={() => void retryOriginal()} data-testid="scheduled-task-retry-original">按原 ID 和原内容重试</button>}
+            <Button variant="secondary" disabled={submitting}
+              onClick={() => void checkReceipt()} data-testid="scheduled-task-check-receipt">查询原命令回执</Button>
+            {mayRetry && <Button variant="secondary" disabled={submitting}
+              onClick={() => void retryOriginal()} data-testid="scheduled-task-retry-original">按原 ID 和原内容重试</Button>}
           </div>
         </div>
       </div>}

@@ -5,6 +5,7 @@ import type { RelaySessionTodoItem, RelaySessionTodoSnapshot } from "../api/reso
 import type { RelayApiClient } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./SessionTodoList.css";
+import { Button } from "../ui";
 
 /**
  * 会话待办清单（ADR-038，2026-10-30）。
@@ -181,10 +182,10 @@ function SessionTodoListContent({ client, sessionId, active = false, refreshKey 
     <div className="session-todos-body" aria-busy={loading}>
       {error !== null && <div className="session-todos-error" role="alert">
         <p>待办读取失败：{error}{snapshot !== null ? " 当前显示上次读取的版本。" : ""}</p>
-        <button className="text-button" type="button" disabled={loading}
+        <Button variant="text" disabled={loading}
           data-testid="session-todo-retry" onClick={() => setRetry((value) => value + 1)}>
           {loading ? "正在重试" : "重试读取"}
-        </button>
+        </Button>
       </div>}
       {snapshot !== null && <ul className="session-todos-list">
         {items.map((item) => <li key={item.id} className="session-todos-item"

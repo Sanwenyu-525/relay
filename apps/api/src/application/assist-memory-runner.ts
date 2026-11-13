@@ -17,6 +17,8 @@ import { readAdmission } from './maintenance-admission.js';
 import { recheckAssistSources } from './assist-source-content.js';
 import { AssistMemoryUnavailable, checkpointAvailable, historicalReplyAvailable, resolveMemoryContextLimits,
   memoryHistoryFingerprint, memoryCompactionTurn, prepareMemoryCompaction, MEMORY_BATCH_MESSAGES } from './assist-memory.js';
+import { measureSessionContextTokens, readCompactionAudit } from './assist-context-policy.js';
+import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
 import { assessMemorySummary } from './assist-memory-quality.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
@@ -129,6 +131,20 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     return r.assistMemory.claim(options.workerId, options.leaseMs);
   });
   if (job === undefined) return undefined;
+  /*
+   * 0162：压缩的生命周期事实写进统一运行日志。
+   *
+   * 只记录身份、触发方式、窗口与 token 读数——不记摘要正文、历史内容或凭据。
+   * `tokens_before` 来自请求行里冻结的判定读数；`tokens_after` 在发布后重新量一次，
+   * 让「压完还剩多少」有可核对的数据，而不是靠摘要长度猜。
+   */
+  const logger = getRuntimeLogger('context-compaction');
+  const audit = readCompactionAudit(job);
+  const startedAt = Date.now();
+  logger.info('context_compaction_started', { request_id: job.id, session_id: job.session_id,
+    reason: job.reason, trigger: audit.trigger, model: audit.model,
+    tokens_before: audit.tokensBefore,
+    threshold_tokens: audit.thresholdTokens, window_tokens: audit.windowTokens });
   const controller = new AbortController();
   const shutdown = () => controller.abort();
   options.signal?.addEventListener('abort', shutdown, { once: true });
@@ -291,6 +307,48 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
       return true;
     });
     if (!committed) throw new AssistMemoryUnavailable('MEMORY_PUBLICATION_REJECTED');
+    // 发布后重新量一次：Token 数必须由「压缩后的窗口」重新算，不能沿用压缩前的读数。
+    // 读不出来就记 null，不改写这次压缩的成功结论。
+    let tokensAfter: number | null = null;
+    try {
+      tokensAfter = (await measureSessionContextTokens(createRepositories(db), session)).tokens;
+    } catch (error) {
+      logger.warn('context_token_measurement_failed', { request_id: job.id,
+        session_id: job.session_id, error });
+    }
+    /*
+     * 0162：把「压完还剩多少」写回请求行的派生元数据，界面才能给出压缩前后的对照，
+     * 而不是只有一个「已完成」。写入失败只记 warn——压缩已经提交，读数回填不是业务事实；
+     * 但也不能静默：日志要留下这次回填没有成立。
+     */
+    if (tokensAfter !== null) {
+      try {
+        await repository.recordTokensAfter(job.id, options.workerId, job.claim_epoch, tokensAfter);
+      } catch (error) {
+        logger.warn('context_compaction_measurement_not_recorded', { request_id: job.id,
+          session_id: job.session_id, error });
+      }
+    }
+    logger.info('context_compaction_completed', { request_id: job.id, session_id: job.session_id,
+      trigger: audit.trigger, model: audit.model ?? (job.model_snapshot.mock === true ? 'mock' : null),
+      tokens_before: audit.tokensBefore, tokens_after: tokensAfter,
+      tokens_saved: audit.tokensBefore === null || tokensAfter === null
+        ? null : audit.tokensBefore - tokensAfter,
+      threshold_tokens: audit.thresholdTokens,
+      post_compaction_target_tokens: audit.postCompactionTargetTokens,
+      duration_ms: Date.now() - startedAt, success: true });
+    /*
+     * 「压缩后预算校验」：压缩成功 != 预算一定够了。一批只整理已完成的旧轮次，剩余原文
+     * 仍可能高于安全输入上限（单条巨大输入尤其如此）。这里把它作为独立事件记下来，
+     * 下一步由调用方决定：还有候选就继续下一批，没有候选时按溢出保护明确中止并提示用户。
+     */
+    if (tokensAfter !== null && audit.safeInputTokens !== null &&
+        tokensAfter >= audit.safeInputTokens) {
+      logger.warn('context_compaction_budget_unmet', { request_id: job.id,
+        session_id: job.session_id, trigger: audit.trigger, model: audit.model,
+        tokens_after: tokensAfter, safe_input_tokens: audit.safeInputTokens,
+        threshold_tokens: audit.thresholdTokens, over_budget_tokens: tokensAfter - audit.safeInputTokens });
+    }
     return { requestId: job.id, status: 'COMPLETED', errorCode: null };
   } catch (error) {
     if (options.signal?.aborted || lost && !(await repository.request(job.id))?.cancel_requested) {
@@ -301,6 +359,12 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     const code = error instanceof AssistMemoryUnavailable ? error.code : 'MEMORY_COMPACTION_FAILED';
     await repository.settle(job.id, options.workerId, job.claim_epoch,
       cancelled ? 'CANCELLED' : 'FAILED', cancelled ? null : code);
+    const failureFields = { request_id: job.id, session_id: job.session_id,
+      trigger: audit.trigger, model: audit.model, tokens_before: audit.tokensBefore,
+      error_code: cancelled ? null : code, duration_ms: Date.now() - startedAt,
+      success: false };
+    if (cancelled) logger.info('context_compaction_cancelled', failureFields);
+    else logger.error('context_compaction_failed', failureFields);
     return { requestId: job.id, status: cancelled ? 'CANCELLED' : 'FAILED', errorCode: cancelled ? null : code };
   } finally {
     clearInterval(timer);

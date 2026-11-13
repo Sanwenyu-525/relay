@@ -11,6 +11,7 @@ import { readInitialBlueprintIntent, saveInitialBlueprintIntent } from "../lib/i
 import { projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import type { ProjectType } from "../types";
+import { Button } from "../ui";
 
 const maxTextBytes = 262144;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -326,21 +327,21 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
             disabled={fileLocked} onChange={(event) => void selectFile(event)} />
           <Upload aria-hidden="true" /><strong>{selectedFile?.name ?? "点击选择 .md / .txt 文件"}</strong>
           <small>非空 UTF-8 文本，最多 256 KiB；不会自动发送给模型</small></label>
-        {flow.file && !locked && <button className="text-button" type="button"
-          onClick={() => save({ ...flowRef.current, file: null })}>取消导入</button>}
+        {flow.file && !locked && <Button variant="text"
+          onClick={() => save({ ...flowRef.current, file: null })}>取消导入</Button>}
         {importError && <span className="field-error" role="alert"><Info aria-hidden="true" />{importError}</span>}
       </div>
-      {!flow.projectId && <div className="form-actions"><button className="primary-button" type="submit"
+      {!flow.projectId && <div className="form-actions"><Button variant="primary" type="submit"
         data-testid="project-create-submit" disabled={locked || readingFile || Boolean(storageError)}>
-        {submitting ? "正在创建" : "创建项目"}</button>
-        <button className="secondary-button" type="button" disabled={submitting || Boolean(flow.projectCommand)}
-          onClick={() => { if (clearFlow()) onCancel(); }}>取消创建并返回列表</button></div>}
+        {submitting ? "正在创建" : "创建项目"}</Button>
+        <Button variant="secondary" disabled={submitting || Boolean(flow.projectCommand)}
+          onClick={() => { if (clearFlow()) onCancel(); }}>取消创建并返回列表</Button></div>}
       {flow.projectCommand && !flow.projectId && <div className="warning-callout" data-testid="project-create-pending">
         <p>原 CreateProject command_id：{flow.projectCommand.id}。名称与类型载荷已冻结，项目目标和资料仍保留。</p>
-        <button className="secondary-button" type="button" disabled={submitting}
-          onClick={() => void run((request) => projectReceipt(flow.projectCommand!, request))}>查询项目回执</button>
-        {mayRetryProject && <button className="secondary-button" type="button" disabled={submitting}
-          onClick={() => void run((request) => createProject(flow.projectCommand!, request))}>以原 ID 重试创建</button>}
+        <Button variant="secondary" disabled={submitting}
+          onClick={() => void run((request) => projectReceipt(flow.projectCommand!, request))}>查询项目回执</Button>
+        {mayRetryProject && <Button variant="secondary" disabled={submitting}
+          onClick={() => void run((request) => createProject(flow.projectCommand!, request))}>以原 ID 重试创建</Button>}
       </div>}
     </form>
     {storageError && <p className="action-error" role="alert">{storageError}</p>}
@@ -349,32 +350,32 @@ export default function LiveCreateProjectFlow({ client, onCancel }: {
       <h2>项目已创建</h2><p>Project ID：{flow.projectId}。创建命令只保存名称与类型；后续资料导入失败不会撤销项目。</p>
       {flow.goal.trim() && goalReady ? <p>待预览蓝图意图已暂存；前往蓝图页后需明确生成候选并核对 Diff，尚未成为 Goal。</p> :
         flow.goal.trim() ? <p>项目目标暂存失败。请留在此页并重试暂存，避免离开后丢失待预览意图。
-          <button className="text-button" type="button" onClick={() => {
+          <Button variant="text" onClick={() => {
             if (flow.projectId && saveInitialBlueprintIntent(client, flow.projectId, flow.goal.trim())) {
               setStorageError(null); setFlow({ ...flowRef.current });
             }
-          }}>重试暂存项目目标</button></p> :
+          }}>重试暂存项目目标</Button></p> :
         <p>未填写蓝图意图，可直接开始任务。</p>}
       {flow.knowledgeResult ? <p>初始资料「{flow.knowledgeResult.fileName}」已登记为 Knowledge {flow.knowledgeResult.id} v{flow.knowledgeResult.version}。
         <Link className="inline-link" to={`/projects/${flow.projectId}/knowledge?item=${flow.knowledgeResult.id}`}>查看资料</Link></p> :
         flow.knowledgeCommand ? <div className="warning-callout" data-testid="project-knowledge-pending">
           <p>初始资料命令 {flow.knowledgeCommand.id} 待核对；SHA-256 {flow.knowledgeCommand.file.sha256}。项目不会重复创建。</p>
-          <button className="secondary-button" type="button" disabled={submitting}
-            onClick={() => void run((request) => knowledgeReceipt(flow.knowledgeCommand!, request))}>查询资料回执</button>
-          {mayRetryKnowledge && <button className="secondary-button" type="button" disabled={submitting}
-            onClick={() => void run((request) => importKnowledge(flow.knowledgeCommand!, request))}>以原 ID 重试导入</button>}
-        </div> : flow.file ? <p>初始资料「{flow.file.name}」尚未登记。<button className="text-button" type="button"
+          <Button variant="secondary" disabled={submitting}
+            onClick={() => void run((request) => knowledgeReceipt(flow.knowledgeCommand!, request))}>查询资料回执</Button>
+          {mayRetryKnowledge && <Button variant="secondary" disabled={submitting}
+            onClick={() => void run((request) => importKnowledge(flow.knowledgeCommand!, request))}>以原 ID 重试导入</Button>}
+        </div> : flow.file ? <p>初始资料「{flow.file.name}」尚未登记。<Button variant="text"
           disabled={submitting} onClick={() => {
             const command: KnowledgeCommand = { id: createCommandId(), projectId: flow.projectId!, file: flow.file! };
             if (save({ ...flowRef.current, knowledgeCommand: command })) void run((request) => importKnowledge(command, request));
-          }}>重新发起资料导入</button></p> : <p>本次没有选择初始资料。</p>}
+          }}>重新发起资料导入</Button></p> : <p>本次没有选择初始资料。</p>}
       <div className="form-actions">{goalReady ? <Link className="primary-button" to={`/projects/${flow.projectId}?skill=blueprint`}>
         {flow.goal.trim() ? "预览蓝图意图" : "打开项目蓝图"}</Link> :
-        <button className="primary-button" type="button" disabled>暂存项目目标后打开蓝图</button>}
+        <Button variant="primary" disabled>暂存项目目标后打开蓝图</Button>}
         <Link className="secondary-button" to={`/projects/${flow.projectId}/tasks`}>打开项目任务</Link>
-        {!flow.knowledgeCommand && goalReady && <button className="secondary-button" type="button" onClick={() => {
+        {!flow.knowledgeCommand && goalReady && <Button variant="secondary" onClick={() => {
           if (clearFlow()) { setError(null); setImportError(null); }
-        }}>结束本次引导并新建项目</button>}</div>
+        }}>结束本次引导并新建项目</Button>}</div>
     </section>}
     <PackCatalogPanel />
   </div><ResponsiveRail label="查看创建说明" title="从最少的信息开始"><div className="rail-content">

@@ -22,6 +22,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectType, TaskStatus } from "../types";
 import "./ProjectWorkbenchView.css";
+import { Button } from "../ui";
 
 type WorkbenchKind = "general" | "thesis" | "development";
 const kinds: readonly { kind: WorkbenchKind; label: string }[] = [
@@ -269,7 +270,7 @@ export default function ProjectWorkbenchView() {
 
   if (kind === null) return <section className="page-state pv-page"><h1>没有这个工作台</h1><p>当前只提供通用、论文和开发三种内置视图。</p><Link className="text-link" to={`/projects/${id}/workbench/general`}>打开通用工作台</Link></section>;
   if (loading || (snapshot !== null && (snapshot.projectId !== id || snapshot.client !== client))) return <section className="page-state pv-page" aria-live="polite"><h1>正在读取项目工作台</h1><p>{client ? "正在读取本机 API 的项目事实。" : "正在读取示例数据。"}</p></section>;
-  if (error) return <section className="page-state page-state--error pv-page" role="alert"><h1>暂时无法读取项目工作台</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (error) return <section className="page-state page-state--error pv-page" role="alert"><h1>暂时无法读取项目工作台</h1><p>{error}</p><Button variant="secondary" onClick={() => setReloadKey((value) => value + 1)}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   if (!snapshot) return <section className="page-state pv-page"><h1>没有这个项目</h1><p>当前数据来源中没有该项目，页面不会自行创建项目或复制其他项目资料。</p><Link className="text-link" to="/projects">返回项目入口</Link></section>;
 
   const focusedTaskId = selectedTaskId ?? snapshot.nextAction?.id ?? snapshot.tasks[0]?.id ?? null;
@@ -307,7 +308,7 @@ export default function ProjectWorkbenchView() {
   const taskPager = <div className="workbench-page-note">
     {snapshot.source === "live" && <p className="helper-text">当前已读取 {snapshot.tasks.length} 条；{snapshot.nextCursor ? "还有后续页，当前列表并非项目全量。" : "服务端未返回下一页游标。"}</p>}
     {pageError && <p className="action-error" role="alert">{pageError}</p>}
-    {snapshot.nextCursor && <button className="secondary-button" type="button" disabled={pageLoading} onClick={() => void loadMore()}>{pageLoading ? "正在读取下一页" : "继续加载任务"}</button>}
+    {snapshot.nextCursor && <Button variant="secondary" disabled={pageLoading} onClick={() => void loadMore()}>{pageLoading ? "正在读取下一页" : "继续加载任务"}</Button>}
   </div>;
   const taskDirectory = <section className="workbench-section" aria-labelledby="workbench-tasks"><h2 id="workbench-tasks">项目任务</h2>
     {snapshot.tasks.length === 0 ? <p>{snapshot.nextCursor ? "本页暂无任务，可继续读取。" : "当前项目没有任务。"}</p> :
@@ -366,7 +367,7 @@ export default function ProjectWorkbenchView() {
       <details className="workbench-detail-section"><summary>选择项目任务 · {snapshot.tasks.length}{snapshot.nextCursor ? " · 还有后续页" : ""}</summary>{taskDirectory}</details>
       {client && focusedTaskId ? <>
         <details className="workbench-detail-section"><summary>任务目标、验收与执行概览</summary><WorkbenchTaskFacts key={`${id}:${focusedTaskId}:${reloadKey}`} client={client} projectId={id} taskId={focusedTaskId} /></details>
-        {selectedReadingKey !== null && reading ? <><div className="workbench-reading-label"><span>正在阅读：{reading.target.title} · v{reading.target.version}</span><button className="text-button" type="button" onClick={() => setSelectedReadingKey(null)}>回到任务产物</button></div><WorkbenchDocumentReader key={`${id}:general:${reloadKey}`} client={client} projectId={id} target={reading.target} /></>
+        {selectedReadingKey !== null && reading ? <><div className="workbench-reading-label"><span>正在阅读：{reading.target.title} · v{reading.target.version}</span><Button variant="text" onClick={() => setSelectedReadingKey(null)}>回到任务产物</Button></div><WorkbenchDocumentReader key={`${id}:general:${reloadKey}`} client={client} projectId={id} target={reading.target} /></>
           : <ArtifactReaderPanel key={`${id}:${focusedTaskId}:${reloadKey}:reader`} client={client} taskId={focusedTaskId} projectId={id}
             selectedVersionId={snapshot.artifacts.find((artifact) => artifact.taskId === focusedTaskId)?.id ?? null} draft={null} />}
       </> : snapshot.source === "live" ? <p>当前项目没有可供阅读的任务，可到项目任务页创建或选择。</p> : <>

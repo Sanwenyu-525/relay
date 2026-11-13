@@ -894,7 +894,7 @@ test('desktop supervised Assist child observes a persisted running cancellation'
   }
 });
 
-test('desktop EOF during Assist generation leaves no false user cancellation and expires its claim', async () => {
+test('desktop EOF during Assist generation leaves no false user cancellation and requeues its claim', async () => {
   const session = await createAssistSession(app.db, { workspaceId,
     commandId: randomUUID(), title: 'Desktop Assist shutdown' });
   const requested = await requestAssistMessage(app.db, { workspaceId,
@@ -921,28 +921,35 @@ test('desktop EOF during Assist generation leaves no false user cancellation and
     assert.deepEqual(running, { status: 'RUNNING', cancel_requested: false });
     await sql`update assist_messages set updated_at = now() - interval '1 second'
       where id = ${messageId}`.execute(app.db);
-    const recovery = startDesktopSupervisor({ frame: desktopFrame(), once: true, env });
-    try {
-      assert.equal(await withTimeout(recovery.closed, 15_000, 'desktop Assist lease sweep'), 0,
-        recovery.readOutput());
-      const failed = (await sql<{ status: string; error_code: string | null }>`
-        select status, error_code from assist_messages where id = ${messageId}
-      `.execute(app.db)).rows[0];
-      assert.deepEqual(failed, { status: 'FAILED', error_code: 'LEASE_LOST' });
-      const calls = (await sql<{ count: bigint }>`select count(*) as count from model_calls
-        where assist_message_id = ${messageId}`.execute(app.db)).rows[0];
-      // 租约清扫与恢复**不得产生第二次模型调用**——这是这条用例真正要锁的安全性质。
-      //
-      // 这里不能断言「恰好一次」：`recordModelInvocation` 的保证是「begin 行在调用
-      // Provider 之前提交」，而不是「消息一旦被领取就一定留下调用行」。EOF 与 Worker
-      // 领取之间存在调度窗口，Worker 在跨过该边界之前被杀是合法结果，此时调用行本来
-      // 就不该存在——凭一条不存在的行反推「模型被调用过」会把调度时序当成产品契约。
-      // 上两条断言已经锁住本用例声明的两项行为：没有伪造用户取消，claim 以 LEASE_LOST 收敛。
-      assert.ok(calls?.count === 0n || calls?.count === 1n,
-        `恢复后不得出现第二次模型调用：${String(calls?.count)}`);
-    } finally {
-      recovery.child.kill('SIGKILL');
-    }
+    // 桌面重启后 Supervisor 的 ASSIST 车道判据必须看见这条过期领取——自动接续不依赖前端。
+    const { createRepositories } = await import('../../src/application/unit-of-work.js');
+    assert.equal(await createRepositories(app.db).assist
+      .hasRunnableGeneration(new Date(Date.now() - 150)), true);
+    // 0163：租约过期不再把这条回复判成业务失败。用可控端口驱动恢复 tick，验证同一消息
+    // 身份被重排并接续完成——Fake 端口按用户原文里的 FAKE_ASSIST_ABORT 一直等待中止信号，
+    // 用它跑恢复会按设计挂住整轮，因此这里只替换模型端口，不改变恢复路径本身。
+    const { runAssistGenerationTick } = await import('../../src/application/assist-runner.js');
+    const { FakeModelPort } = await import('../../src/workflow/fake-model-port.js');
+    const resumePort = new FakeModelPort();
+    resumePort.assist = async () => ({ kind: 'CONTENT', content: '重启后继续完成',
+      providerRequestId: 'desktop-recovery',
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null,
+        cacheCreationTokens: null } });
+    const outcome = await runAssistGenerationTick(app.db, { workerId: 'desktop-recovery',
+      storage: new ManagedContentStore(api.dataRoot), modelPort: resumePort, leaseMs: 150 });
+    assert.equal(outcome?.messageId, messageId);
+    assert.equal(outcome?.status, 'COMPLETED');
+    const resumed = (await sql<{ status: string; error_code: string | null;
+      cancel_requested: boolean; generation_attempt: number }>`
+      select status, error_code, cancel_requested, generation_attempt
+      from assist_messages where id = ${messageId}`.execute(app.db)).rows[0];
+    assert.deepEqual(resumed, { status: 'COMPLETED', error_code: null,
+      cancel_requested: false, generation_attempt: 2 });
+    // 恢复不新增第二条助手回复：中断与重启只推进同一条消息。
+    const replies = (await sql<{ count: bigint }>`select count(*)::bigint as count
+      from assist_messages where session_id = ${session.result.session_id}
+        and role = 'ASSISTANT'`.execute(app.db)).rows[0];
+    assert.equal(replies?.count, 1n);
   } finally {
     first.child.kill('SIGKILL');
   }

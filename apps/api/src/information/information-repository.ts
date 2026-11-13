@@ -29,19 +29,28 @@ export class InformationRepository {
   }
 
   /**
-   * 整行写入三个开关（0125 起含 `auto_capture`）。
+   * 整行写入三个开关与压缩阈值（0125 起含 `auto_capture`；0162 起含阈值）。
    *
    * `autoCapture` 缺省视为开启：这是 0125 之前旧调用方的语义；生产入口一律显式传值，
    * 避免「只改一个开关把另一个写成默认」。
+   *
+   * `compactionThresholdTokens` 是**已解析**的值：`null` 表示「回到产品默认 350K」，
+   * 不是「未提供」。应用层负责把「旧客户端没带这个字段」解析成当前已保存的值
+   * （见 `memory-settings.ts`），仓库只负责把这个确切值写进去。直接调用本方法的
+   * 测试与旧路径保持 0162 之前的行为（写入 NULL）。
    */
   async setMemorySettings(workspaceId: string, recallEnabled: boolean,
-    automaticCompaction: boolean, autoCapture = true): Promise<MemorySettingsRow> {
+    automaticCompaction: boolean, autoCapture = true,
+    compactionThresholdTokens: number | null = null): Promise<MemorySettingsRow> {
     return (await sql<MemorySettingsRow>`insert into workspace_memory_settings
-      (workspace_id, recall_enabled, automatic_compaction, auto_capture, revision)
-      values (${workspaceId}, ${recallEnabled}, ${automaticCompaction}, ${autoCapture}, 1)
+      (workspace_id, recall_enabled, automatic_compaction, auto_capture,
+        compaction_threshold_tokens, revision)
+      values (${workspaceId}, ${recallEnabled}, ${automaticCompaction}, ${autoCapture},
+        ${compactionThresholdTokens}, 1)
       on conflict (workspace_id) do update set recall_enabled = excluded.recall_enabled,
         automatic_compaction = excluded.automatic_compaction,
         auto_capture = excluded.auto_capture,
+        compaction_threshold_tokens = excluded.compaction_threshold_tokens,
         revision = workspace_memory_settings.revision + 1, updated_at = now()
       returning *`.execute(this.db)).rows[0]!;
   }

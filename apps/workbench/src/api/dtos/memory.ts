@@ -15,6 +15,15 @@ export interface RelayMemorySettings {
   readonly automaticCompaction: boolean;
   /** 0125：结算后自动提取长期记忆（ADR-030）。旧服务端不返回时按开启处理。 */
   readonly autoCapture: boolean;
+  /**
+   * 0162：自动压缩阈值（tokens）。`null` = 使用产品默认，不是「关闭」；
+   * 关闭普通自动压缩走 `automaticCompaction`，溢出保护不受它影响。
+   */
+  readonly compactionThresholdTokens: number | null;
+  /** 产品默认阈值；由服务端给出，界面不抄常量。 */
+  readonly compactionThresholdDefaultTokens: number;
+  /** 推荐区间（仅提示，不强制）。 */
+  readonly compactionThresholdRecommended: { readonly min: number; readonly max: number };
 }
 
 /** 长期记忆的不可变保存来源；手工创建的记忆没有来源，这里就是空数组。 */

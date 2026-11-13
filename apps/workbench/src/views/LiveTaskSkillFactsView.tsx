@@ -8,6 +8,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import AssistView, { type AssistNavigationState } from "./AssistView";
 import "./LiveTaskSkillFactsView.css";
+import { Button } from "../ui";
 
 export default function LiveTaskSkillFactsView({ client, kind }: {
   client: RelayApiClient; kind: "definition" | "verification";
@@ -93,7 +94,7 @@ export default function LiveTaskSkillFactsView({ client, kind }: {
     {task && factsReadable && <p className="metadata-row">任务状态：{taskStatusLabels[task.status]} ·
       执行模式：{interactionModeLabels[task.mode]} · 当前执行者：{executorLabels[task.executor]} ·
       Task v{task.revision} / 验收 v{task.acceptance.acceptanceRevision}</p>}
-    <button className="secondary-button" type="button" data-testid="task-skill-refresh" disabled={loading || traceLoading || assistNavigation.dirty || assistNavigation.pending !== null} onClick={() => setReload((value) => value + 1)}>刷新当前事实</button>
+    <Button variant="secondary" data-testid="task-skill-refresh" disabled={loading || traceLoading || assistNavigation.dirty || assistNavigation.pending !== null} onClick={() => setReload((value) => value + 1)}>刷新当前事实</Button>
     {(assistNavigation.dirty || assistNavigation.pending !== null) && <p className="helper-text">建议区有未发送输入或待核对命令，请先发送、清空输入或核对原命令回执，再刷新当前事实。</p>}
     {loading && <p role="status">正在读取任务与验收事实…</p>}
     {error && <p className="action-error" role="alert">{error}</p>}

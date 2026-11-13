@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayAssistSkillOutput, RelayTaskDetail } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 type Criterion = { readonly statement: string; readonly required: boolean; readonly method: string };
 
@@ -120,7 +121,7 @@ export default function TaskDefinitionDiff({ client, output, projectId }: {
         <li key={index}>{describeCriterion(item)}</li>)}</ul></>}
       <p className="helper-text">此处仅按条件文字、必需性和方法逐字段比较；当前条件未重复不表示将被删除，建议条件未匹配不表示最终新增。实际合并结果须以后端 Task Owner 的预览为准；此处没有接受入口。</p>
     </>}
-    <button className="secondary-button" type="button" disabled={loading || !baselineValid}
-      onClick={() => { setTask(null); setError(null); setReload((value) => value + 1); }}>重新读取当前 Task</button>
+    <Button variant="secondary" disabled={loading || !baselineValid}
+      onClick={() => { setTask(null); setError(null); setReload((value) => value + 1); }}>重新读取当前 Task</Button>
   </section>;
 }

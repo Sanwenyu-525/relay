@@ -17,6 +17,7 @@ import { handleTabListKeyDown } from "../lib/tabNavigation";
 import type { PreviewBridge } from "../lib/previewBridge";
 import type { RelayApiClient, RelayArtifactLineage, RelayReview, RelayRun, RelayRunDraftPreview, RelayTaskDetail } from "../api/relayClient";
 import "./WorkspaceReading.css";
+import { Button } from "../ui";
 
 export type WorkspaceSideTab = "DOCUMENT" | "CHECK" | "HISTORY";
 
@@ -99,11 +100,11 @@ const judgment = openReview === null
     </div>
     {!toolsVisible && tab !== "DOCUMENT" && openReview && <div className="collab-review-shortcut" data-testid="collab-review-shortcut">
       <p><Scale aria-hidden="true" /><strong>待判断：{reviewReasonText(openReview.reason)}</strong></p>
-      <button className="secondary-button" type="button" aria-controls={`${tabId}-panel-DOCUMENT`}
+      <Button variant="secondary" aria-controls={`${tabId}-panel-DOCUMENT`}
         onClick={() => {
           onTabChange("DOCUMENT");
           window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-testid="collab-judgment"]')?.focus());
-        }}>查看依据与判断</button>
+        }}>查看依据与判断</Button>
     </div>}
 
     <div className="collab-side-body" role="tabpanel" id={`${tabId}-panel-DOCUMENT`} aria-labelledby={`${tabId}-tab-DOCUMENT`}

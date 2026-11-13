@@ -1,6 +1,6 @@
 import type { DecimalRevision } from "../../types";
 import { RelayContractError } from "../core/errors";
-import { array, boolean, decimal, nullableString, object, string } from "../core/primitives";
+import { array, boolean, decimal, integer, nullableString, object, string } from "../core/primitives";
 import type { RelayCompactAccepted, RelayMemoryCompactionRequest,
   RelayMemoryCreatedFromMessage, RelayMemoryProvenance,
   RelayMemoryProvenanceSource, RelayMemorySettings, RelayMemorySourceRef, RelayMessageMemoryUse,
@@ -43,7 +43,22 @@ export function memorySettingsFrom(value: unknown): RelayMemorySettings {
     automaticCompaction: boolean(row, "automatic_compaction", "memory settings"),
     // 0125 新增字段：旧服务端不返回时按开启处理——那时的服务端本来就没有自动捕获，
     // 显示「关闭」会让用户以为这项已经停用。
-    autoCapture: row.auto_capture === undefined ? true : boolean(row, "auto_capture", "memory settings") };
+    autoCapture: row.auto_capture === undefined ? true : boolean(row, "auto_capture", "memory settings"),
+    // 0162：旧服务端不返回阈值时按「使用默认」读，不把 350K 写进用户设置；
+    // 默认值与推荐区间同样回退到产品口径，避免旧服务端让设置页读失败。
+    compactionThresholdTokens: row.compaction_threshold_tokens === null
+      || row.compaction_threshold_tokens === undefined
+      ? null : integer(row, "compaction_threshold_tokens", "memory settings"),
+    compactionThresholdDefaultTokens: row.compaction_threshold_default_tokens === undefined
+      ? 350_000 : integer(row, "compaction_threshold_default_tokens", "memory settings"),
+    compactionThresholdRecommended: compactionRecommendedFrom(row.compaction_threshold_recommended) };
+}
+
+function compactionRecommendedFrom(value: unknown): { readonly min: number; readonly max: number } {
+  if (value === null || value === undefined) return { min: 256_000, max: 400_000 };
+  const row = object(value, "memory settings.compaction_threshold_recommended");
+  return { min: integer(row, "min", "memory settings.compaction_threshold_recommended"),
+    max: integer(row, "max", "memory settings.compaction_threshold_recommended") };
 }
 
 /**

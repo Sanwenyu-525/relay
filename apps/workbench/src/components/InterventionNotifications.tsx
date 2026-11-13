@@ -6,6 +6,7 @@ import { type RelayApiClient, type RelayInterventionItem } from "../api/relayCli
 import { interventionReasonText } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { syncTaskbarBadge } from "../lib/taskbarBadge";
+import { IconButton } from "../ui";
 import { deliverProjectReminderNotifications } from "../lib/projectReminderNotifications";
 import { useDetailsMenu } from "../lib/popoverMenu";
 
@@ -133,10 +134,8 @@ export default function InterventionNotifications({ client }:
         {/* 2026-10-24 用户指令：已允许这一正常态不再宣告；denied/unsupported/default 是
             受阻或可行动状态，仍如实显示。 */}
         {permission !== "granted" && <p>{permissionLabel}</p>}
-        {permission === "default" && <button type="button" className="icon-button"
-          aria-label="开启 Windows 通知" title="开启 Windows 通知" onClick={() => void enableNotifications()}>
-          <BellRing aria-hidden="true" />
-        </button>}
+        {permission === "default" && <IconButton icon={BellRing} label="开启 Windows 通知"
+          onClick={() => void enableNotifications()} />}
       </div>}
       {error && <p className="action-error" role="status">人工介入状态暂不可刷新：{error}</p>}
     </div>

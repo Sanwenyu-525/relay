@@ -4,6 +4,7 @@ import { Check, ChevronDown } from "lucide-react";
 import type { RelayAssistantProfile, RelayConversationMode } from "../api/relayClient";
 import { useDetailsMenu } from "../lib/popoverMenu";
 import AppDialog from "./AppDialog";
+import { Button } from "../ui";
 
 /**
  * 会话模式单选框与人设助手（工作台 §25、ADR-018）。
@@ -234,9 +235,9 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
         <ChevronDown aria-hidden="true" className="agent-chat-chip-chevron" /></button>
       {/* 一个可用助手都没有时，新建是这条档唯一的出路：入口就地摆在 chip 旁边，
           点开仍是同一个弹窗，只是表单已经展开、焦点落在名字上。 */}
-      {createIsWayOut && <button className="text-button agent-chat-assistant-create-entry" type="button"
+      {createIsWayOut && <Button variant="text" className="agent-chat-assistant-create-entry"
         data-testid="assist-assistant-create-entry" disabled={disabled}
-        onClick={() => { setOpenToCreate(true); setCreateOpen(true); setConfigOpen(true); }}>新建助手</button>}
+        onClick={() => { setOpenToCreate(true); setCreateOpen(true); setConfigOpen(true); }}>新建助手</Button>}
       <AppDialog open={configOpen} title="人设助手" subtitle="选择或新建这次对话使用的人设身份"
         initialFocusSelector={openToCreate ? '[data-testid="assist-assistant-name"]'
           : '[data-testid="assist-assistant-picker"]'} onClose={() => setConfigOpen(false)}>
@@ -255,12 +256,12 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
             data-testid="assist-assistant-list-loading">正在读取助手清单，读取完成后才能发送。</p>}
           {profilesError !== null && <p className="action-error" role="alert"
             data-testid="assist-assistant-list-error">助手清单暂不可读：{profilesError}。可以先新建助手，或
-            <button className="text-button" type="button" data-testid="assist-assistant-list-reload"
-              disabled={profilesLoading} onClick={onReloadProfiles}>重新读取助手清单</button>。</p>}
+            <Button variant="text" data-testid="assist-assistant-list-reload"
+              disabled={profilesLoading} onClick={onReloadProfiles}>重新读取助手清单</Button>。</p>}
           {profilesError === null && !profilesLoading && active.length === 0 && <p className="helper-text"
             data-testid="assist-assistant-list-empty">当前没有可用助手。新建助手后即可继续，或
-            <button className="text-button" type="button" data-testid="assist-assistant-list-reload"
-              onClick={onReloadProfiles}>重新读取助手清单</button>。</p>}
+            <Button variant="text" data-testid="assist-assistant-list-reload"
+              onClick={onReloadProfiles}>重新读取助手清单</Button>。</p>}
           <label className="agent-chat-mode-option">
             <input type="checkbox" checked={!remember} data-testid="assist-remember-toggle"
               disabled={disabled} onChange={(event) => onChangeRemember(!event.target.checked)} />
@@ -284,8 +285,8 @@ export function ConversationModeSwitch({ mode, assistantProfileId, profiles, pro
                   onChange={(event) => setDraft({ ...draft, readRoots: event.target.value })} />
                 <span className="helper-text">留空即整个受管根。只能缩小范围，不能靠这里扩大授权。</span></label>
               <div className="form-actions">
-                <button className="secondary-button" type="submit" data-testid="assist-assistant-save"
-                  disabled={creating}>{creating ? "正在新建" : "保存助手"}</button></div>
+                <Button variant="secondary" type="submit" data-testid="assist-assistant-save"
+                  disabled={creating}>{creating ? "正在新建" : "保存助手"}</Button></div>
               {error !== null && <p className="action-error" role="alert" data-testid="assist-assistant-error">{error}</p>}
             </form>
           </details>

@@ -10,6 +10,7 @@ import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import { describeRepeat, formatInZone } from "./ScheduledTasksView";
 import "./ScheduledTasksView.css";
+import { Button } from "../ui";
 
 /** 结果未知时冻结的那一条命令：状态变更与时段处理共用同一个待核对位。 */
 type FrozenCommand = { readonly kind: "status"; readonly input: RelayScheduledTaskStatusInput }
@@ -198,7 +199,7 @@ export default function ScheduledTaskDetailView() {
       : <p className="pv-warning" role="status" data-testid="scheduled-task-detail-offline">{error}</p>)}
     <div className="form-actions">
       <Link className="secondary-button" to="/scheduled-tasks">返回列表</Link>
-      <button className="secondary-button" type="button" onClick={() => void load()} data-testid="scheduled-task-detail-reread">重新读取</button>
+      <Button variant="secondary" onClick={() => void load()} data-testid="scheduled-task-detail-reread">重新读取</Button>
     </div>
   </div></div>;
 
@@ -215,18 +216,18 @@ export default function ScheduledTaskDetailView() {
     <PageHeader testId="scheduled-task-detail-head" title={task.title} overline="Schedule Details" meta={`定时任务 · ${describeRepeat(task)}`}
       lede={`每次触发新建一个任务并交给 AI 执行；当前时区 ${task.timezone}，本地时刻 ${task.localTime}。`} />
     <div className="form-actions">
-      <button className="secondary-button" type="button" onClick={() => void load()} disabled={frozen}>刷新</button>
+      <Button variant="secondary" onClick={() => void load()} disabled={frozen}>刷新</Button>
       <Link className="secondary-button" to={`/scheduled-tasks/${task.scheduledTaskId}/edit`}
         aria-disabled={frozen} onClick={frozen ? (event) => event.preventDefault() : undefined}
         data-testid="scheduled-task-edit-entry">编辑</Link>
-      {task.status === "ENABLED" && <button className="secondary-button" type="button" disabled={frozen}
-        onClick={() => void changeStatus("PAUSED")}>暂停</button>}
-      {(task.status === "PAUSED" || task.status === "EXPIRED") && <button className="secondary-button" type="button" disabled={frozen}
+      {task.status === "ENABLED" && <Button variant="secondary" disabled={frozen}
+        onClick={() => void changeStatus("PAUSED")}>暂停</Button>}
+      {(task.status === "PAUSED" || task.status === "EXPIRED") && <Button variant="secondary" disabled={frozen}
         data-testid="scheduled-task-resume"
-        onClick={() => void changeStatus("ENABLED")}>继续</button>}
-      {task.status !== "DISABLED" && task.status !== "EXPIRED" && <button className="secondary-button" type="button" disabled={frozen}
-        onClick={() => void changeStatus("DISABLED")}>停用</button>}
-      <button className="text-button" type="button" onClick={() => navigate("/scheduled-tasks")}>返回列表</button>
+        onClick={() => void changeStatus("ENABLED")}>继续</Button>}
+      {task.status !== "DISABLED" && task.status !== "EXPIRED" && <Button variant="secondary" disabled={frozen}
+        onClick={() => void changeStatus("DISABLED")}>停用</Button>}
+      <Button variant="text" onClick={() => navigate("/scheduled-tasks")}>返回列表</Button>
     </div>
     {task.status === "EXPIRED" && <p className="warning-callout" role="alert">
       <Info aria-hidden="true" />
@@ -242,10 +243,10 @@ export default function ScheduledTaskDetailView() {
           先查询回执；在确认之前不要重复提交，同页其它操作也已禁用。</p>
         {pendingNote && <p>{pendingNote}</p>}
         <div className="form-actions">
-          <button className="secondary-button" type="button" disabled={busy}
-            onClick={() => void checkReceipt()}>核对原命令回执</button>
-          {mayRetry && <button className="secondary-button" type="button" disabled={busy}
-            onClick={() => void retryOriginal()}>按原 ID 重试同一命令</button>}
+          <Button variant="secondary" disabled={busy}
+            onClick={() => void checkReceipt()}>核对原命令回执</Button>
+          {mayRetry && <Button variant="secondary" disabled={busy}
+            onClick={() => void retryOriginal()}>按原 ID 重试同一命令</Button>}
         </div>
       </div>
     </div>}
@@ -273,10 +274,10 @@ export default function ScheduledTaskDetailView() {
         <span className="data-cell"><strong>{formatInZone(occurrence.dueAt, occurrence.timezone)}</strong>
           <small>{describeReason(occurrence.reason)}</small></span>
         <span className="scheduled-task-actions">
-          <button className="text-button" type="button" disabled={frozen} data-testid={`scheduled-task-retry-${occurrence.occurrenceId}`}
-            onClick={() => void resolveOccurrence(occurrence, "RETRY")}>补跑一次</button>
-          <button className="text-button" type="button" disabled={frozen} data-testid={`scheduled-task-dismiss-${occurrence.occurrenceId}`}
-            onClick={() => void resolveOccurrence(occurrence, "DISMISS")}>忽略</button>
+          <Button variant="text" disabled={frozen} data-testid={`scheduled-task-retry-${occurrence.occurrenceId}`}
+            onClick={() => void resolveOccurrence(occurrence, "RETRY")}>补跑一次</Button>
+          <Button variant="text" disabled={frozen} data-testid={`scheduled-task-dismiss-${occurrence.occurrenceId}`}
+            onClick={() => void resolveOccurrence(occurrence, "DISMISS")}>忽略</Button>
         </span>
       </li>)}</ul>
     </section>}

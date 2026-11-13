@@ -1,6 +1,6 @@
 import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayCompactionTrigger, RelayContextCompaction, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
 import type { RelayActivityItem, RelayActivityRecovery, RelayActivityRecoveryDisposition,
   RelayExecutionActivityMessage, RelayExecutionActivitySnapshot, RelayExecutionRequestSummary,
   RelayMessagePhase, RelayRunSummary, RelayAssistTitleGeneration,
@@ -1257,7 +1257,99 @@ export function sessionContextUsageFrom(value: unknown): RelaySessionContextUsag
     budget: { tokens: sessionContextBudgetFrom(budget.tokens),
       revision: decimal(budget, "revision", "session context usage.budget") },
     nextCall: rawNext === null || rawNext === undefined ? null : nextCallFrom(rawNext),
-    lastCall: raw === null || raw === undefined ? null : contextUsageCallFrom(raw) };
+    lastCall: raw === null || raw === undefined ? null : contextUsageCallFrom(raw),
+    // 0162：旧服务端没有这一段。整段缺省按「没有读数」处理会让面板失去压缩信息，
+    // 但把它读成默认策略又会凭空造出 350K；这里对缺省显式失败，要求服务端同版。
+    compaction: contextCompactionFrom(row.compaction) };
+}
+
+const COMPACTION_TRIGGERS: readonly RelayCompactionTrigger[] = ["MANUAL", "THRESHOLD", "OVERFLOW"];
+
+function compactionTrigger(value: unknown, label: string): RelayCompactionTrigger {
+  if (typeof value !== "string"
+    || !(COMPACTION_TRIGGERS as readonly string[]).includes(value)) {
+    throw new RelayContractError(`${label} 的触发方式无法识别。`);
+  }
+  return value as RelayCompactionTrigger;
+}
+
+/**
+ * 压缩策略投影。
+ *
+ * 两条必须显式失败的读法：
+ *   · `window_source` / `context_source` 只认服务端声明的枚举——把未知来源当成
+ *     「模型窗口」会让界面把档位冒充成真实窗口；
+ *   · `effective_threshold_tokens` 必须是正数：0 会让「距离压缩」永远显示为已超过。
+ * 其余数值按整数直读，不在这里二次收敛（收敛规则只在服务端一处）。
+ */
+function contextCompactionFrom(value: unknown): RelayContextCompaction {
+  const label = "session context usage.compaction";
+  const row = object(value, label);
+  const windowSource = string(row, "window_source", label);
+  if (windowSource !== "MODEL_CATALOG" && windowSource !== "SESSION_TIER") {
+    throw new RelayContractError(`${label} 的窗口来源无法识别。`);
+  }
+  const contextSource = string(row, "context_source", label);
+  if (contextSource !== "PROVIDER_USAGE" && contextSource !== "ESTIMATED") {
+    throw new RelayContractError(`${label} 的上下文读数来源无法识别。`);
+  }
+  const recommended = object(row.recommended, `${label}.recommended`);
+  const effectiveThreshold = integer(row, "effective_threshold_tokens", label);
+  if (effectiveThreshold <= 0) throw new RelayContractError(`${label} 的生效阈值无效。`);
+  const activeRaw = row.active;
+  const lastRaw = row.last_result;
+  return {
+    enabled: boolean(row, "enabled", label),
+    thresholdTokens: nullableInteger(row, "threshold_tokens", label),
+    defaultThresholdTokens: integer(row, "default_threshold_tokens", label),
+    recommended: { min: integer(recommended, "min", `${label}.recommended`),
+      max: integer(recommended, "max", `${label}.recommended`) },
+    requestedThresholdTokens: integer(row, "requested_threshold_tokens", label),
+    effectiveThresholdTokens: effectiveThreshold,
+    thresholdClamped: boolean(row, "threshold_clamped", label),
+    targetWindowTokens: integer(row, "target_window_tokens", label),
+    modelWindowTokens: nullableInteger(row, "model_window_tokens", label),
+    windowSource,
+    effectiveWindowTokens: integer(row, "effective_window_tokens", label),
+    outputReserveTokens: integer(row, "output_reserve_tokens", label),
+    protocolOverheadTokens: integer(row, "protocol_overhead_tokens", label),
+    safetyReserveTokens: integer(row, "safety_reserve_tokens", label),
+    safeInputTokens: integer(row, "safe_input_tokens", label),
+    postCompactionTargetTokens: integer(row, "post_compaction_target_tokens", label),
+    contextTokens: integer(row, "context_tokens", label),
+    contextSource,
+    distanceTokens: integer(row, "distance_tokens", label),
+    active: activeRaw === null || activeRaw === undefined ? null : (() => {
+      const active = object(activeRaw, `${label}.active`);
+      const status = string(active, "status", `${label}.active`);
+      if (status !== "PENDING" && status !== "RUNNING") {
+        throw new RelayContractError(`${label}.active 的状态无法识别。`);
+      }
+      return { requestId: string(active, "request_id", `${label}.active`), status,
+        trigger: compactionTrigger(active.trigger, `${label}.active`) };
+    })(),
+    lastResult: lastRaw === null || lastRaw === undefined ? null : (() => {
+      const last = object(lastRaw, `${label}.last_result`);
+      const reason = string(last, "reason", `${label}.last_result`);
+      if (reason !== "MANUAL" && reason !== "AUTO") {
+        throw new RelayContractError(`${label}.last_result 的整理原因无法识别。`);
+      }
+      const status = string(last, "status", `${label}.last_result`);
+      if (status !== "COMPLETED" && status !== "FAILED" && status !== "CANCELLED") {
+        throw new RelayContractError(`${label}.last_result 的状态无法识别。`);
+      }
+      return { requestId: string(last, "request_id", `${label}.last_result`), reason,
+        trigger: compactionTrigger(last.trigger, `${label}.last_result`), status,
+        errorCode: nullableString(last, "error_code", `${label}.last_result`),
+        throughSeq: decimal(last, "through_seq", `${label}.last_result`),
+        tokensBefore: nullableInteger(last, "tokens_before", `${label}.last_result`),
+        tokensAfter: nullableInteger(last, "tokens_after", `${label}.last_result`),
+        // 预算复核是服务端的结论，前端不拿 tokensAfter 与阈值自己推断；缺字段按「无法核对」。
+        budgetUnmet: typeof last.budget_unmet === "boolean" ? last.budget_unmet : null,
+        safeInputTokens: nullableInteger(last, "safe_input_tokens", `${label}.last_result`),
+        at: string(last, "at", `${label}.last_result`) };
+    })(),
+  };
 }
 
 function nextCallFrom(value: unknown): RelayNextCallBudget {

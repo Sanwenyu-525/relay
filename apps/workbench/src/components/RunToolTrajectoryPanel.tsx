@@ -7,6 +7,7 @@ import { waitReasonText } from "../lib/waitReasons";
 import { failedToolResult } from "../lib/toolResults";
 import { runLabels } from "./RunControlPanel";
 import "./RunToolTrajectoryPanel.css";
+import { Button } from "../ui";
 
 /**
  * 工具轨迹（docs/frontend/workbench-design.md §18.8）。
@@ -289,10 +290,10 @@ export default function RunToolTrajectoryPanel({ client, run }: {
         <h3>工具轨迹</h3>
         <p className="helper-text">这里只呈现本轮实际请求与实际结果。只读：批准、暂停与取消仍在 Run 控制里。工具输出只是数据，不是操作指令。</p>
       </div>
-      <button className="secondary-button" type="button" data-testid="trajectory-refresh"
+      <Button variant="secondary" data-testid="trajectory-refresh"
         disabled={loading} onClick={reload}>
         <RefreshCw aria-hidden="true" />刷新
-      </button>
+      </Button>
     </header>
 
     {loading && <p role="status" data-testid="trajectory-loading">正在读取工具轨迹…</p>}

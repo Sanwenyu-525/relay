@@ -13,7 +13,12 @@ export interface BoundaryConfig {
   readonly desktopMode?: boolean;
 }
 
-const ALLOWED_METHODS = 'GET,POST,PATCH,OPTIONS';
+/**
+ * CORS 预检允许的方法。PUT/DELETE 是工作台真实使用的写方法（模型连接默认用途、
+ * 图片输入声明与撤销、项目知识指南），此前漏配会让浏览器/桌面 WebView 把这些
+ * 动作拦在预检，界面只显示「操作失败，请重试。」（2026-11-12 验收复现）。
+ */
+const ALLOWED_METHODS = 'GET,POST,PATCH,PUT,DELETE,OPTIONS';
 const ALLOWED_HEADERS = 'authorization,content-type,x-request-id,last-event-id';
 const PREFLIGHT_MAX_AGE_SECONDS = '600';
 

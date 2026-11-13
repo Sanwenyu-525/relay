@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import type { RelayApiClient, RelayTaskDetail, RelayTaskSkillProposal } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 export default function TaskContractProposalPreview({ client, proposal, taskId, projectId,
   disabled, acceptSupported, onAccept, actionHost }: {
@@ -42,13 +43,13 @@ export default function TaskContractProposalPreview({ client, proposal, taskId, 
     {!acceptSupported && proposal.status === "PENDING" &&
       <p className="helper-text">当前注册表或冻结来源未确认此版本可接受；提案只读，不能确认。</p>}
     {!humanOwned && proposal.status === "PENDING" && <p className="disabled-reason">当前由 AI 持有执行权，请先在运行页请求人工接手，再确认验收变更。</p>}
-    {proposal.status === "PENDING" && current && acceptSupported && !confirming && <button className="primary-button" type="button"
-      disabled={disabled || !humanOwned} onClick={() => setConfirming(true)}>查看确认操作</button>}
+    {proposal.status === "PENDING" && current && acceptSupported && !confirming && <Button variant="primary"
+      disabled={disabled || !humanOwned} onClick={() => setConfirming(true)}>查看确认操作</Button>}
     {proposal.status === "PENDING" && current && acceptSupported && confirming && <div className="form-actions">
       <p>确认接受以上服务端合并结果，并写入新的 Task 验收版本？</p>
-      <button className="primary-button" type="button" data-testid="task-skill-accept" disabled={disabled || !humanOwned}
-        onClick={() => { if (humanOwned) onAccept(proposal); }}>确认接受验收变更</button>
-      <button className="secondary-button" type="button" disabled={disabled} onClick={() => setConfirming(false)}>取消</button>
+      <Button variant="primary" data-testid="task-skill-accept" disabled={disabled || !humanOwned}
+        onClick={() => { if (humanOwned) onAccept(proposal); }}>确认接受验收变更</Button>
+      <Button variant="secondary" disabled={disabled} onClick={() => setConfirming(false)}>取消</Button>
     </div>}
     <p className="helper-text">接受将创建新的 Task 验收版本。当前 CheckPlan 准入预览需在接受后重新读取；此提案不是 Run 冻结计划或检查结果。</p>
   </section> : null;
@@ -84,8 +85,8 @@ export default function TaskContractProposalPreview({ client, proposal, taskId, 
       <details className="proposal-source"><summary>核对目标、来源与内容摘要</summary><p className="helper-text">目标 Task <Link className="inline-link" to={`/tasks/${taskId}`}>{taskId}</Link> ·
         基于 Task v{proposal.baseRevision} / 验收 v{proposal.baseAcceptanceRevision} ·
         服务端合并摘要 {proposal.payloadHash} · Skill {proposal.skillSha256} · 输出 {proposal.skillOutputSha256}</p></details>
-      {targetMatches && proposal.payloadAvailable && <button className="secondary-button" type="button"
-        disabled={loading} onClick={() => void load()}>重读当前版本</button>}
+      {targetMatches && proposal.payloadAvailable && <Button variant="secondary"
+        disabled={loading} onClick={() => void load()}>重读当前版本</Button>}
     </div>
     {actionHost ? createPortal(actions, actionHost) : actions}
   </article>;

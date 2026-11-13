@@ -5,6 +5,7 @@ import { RelayApiError } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import { runLabels } from "./RunControlPanel";
 import { useDisplayPreferences } from "../lib/displayPreferences";
+import { Button } from "../ui";
 
 /** TASK-RUN-HISTORY-20261106：分页历史只读，当前执行权仍来自 Task。 */
 export default function TaskRunHistory({ client, taskId, currentRunId }: {
@@ -61,7 +62,7 @@ export default function TaskRunHistory({ client, taskId, currentRunId }: {
     {error !== null && <><p className="action-error" role="alert">执行历史读取失败：{error}</p>
       <button className="text-link" type="button" disabled={loading} onClick={() => void load(failedCursor)}>重试读取执行历史</button></>}
     {!loading && error === null && items.length === 0 && <p className="helper-text">该任务尚无 AI 执行记录。</p>}
-    {cursor !== null && error === null && <button className="secondary-button" type="button" disabled={loading}
-      onClick={() => void load(cursor)}>加载更早的执行记录</button>}
+    {cursor !== null && error === null && <Button variant="secondary" disabled={loading}
+      onClick={() => void load(cursor)}>加载更早的执行记录</Button>}
   </section>;
 }

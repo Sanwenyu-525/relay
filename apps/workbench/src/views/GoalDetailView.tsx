@@ -16,6 +16,7 @@ import { goalStatusLabels, phaseLabel, projectTypeLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./GoalDetailView.css";
+import { Button } from "../ui";
 
 /**
  * 正式 Goal 详情：Goal 自身事实、关联 Project、解除影响清单与只读工作上下文。
@@ -474,18 +475,18 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         <p>{error ?? "目标事实不可用。"}</p>
         {receipt && <div className="receipt-message" role="status" data-testid="goal-detail-receipt">{receipt}</div>}
         {actionError && <div className="action-error" role="alert" data-testid="goal-detail-error">{actionError}</div>}
-        <button className="secondary-button" type="button" onClick={reloadFacts}>
-          <RotateCcw aria-hidden="true" />重新读取</button>
+        <Button variant="secondary" onClick={reloadFacts}>
+          <RotateCcw aria-hidden="true" />重新读取</Button>
       </div>
     </section>
     {pending && <div className="warning-callout" data-testid="goal-detail-pending">
       <strong>Goal 命令待核对</strong>
       <p>原 command ID：{pending.commandId} · 类型 {commandTypeOf(pending)} · 基于 v{pending.expectedRevision}。核对前不会发出第二条命令。</p>
       <div className="form-actions">
-        <button className="secondary-button" type="button" data-testid="goal-detail-check-receipt"
-          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
-        {mayRetry && <button className="secondary-button" type="button" data-testid="goal-detail-retry"
-          disabled={busy} onClick={() => { setBusy(true); void send(pending); }}>用原 ID 与原载荷重试</button>}
+        <Button variant="secondary" data-testid="goal-detail-check-receipt"
+          disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</Button>
+        {mayRetry && <Button variant="secondary" data-testid="goal-detail-retry"
+          disabled={busy} onClick={() => { setBusy(true); void send(pending); }}>用原 ID 与原载荷重试</Button>}
       </div>
     </div>}
     {draftDirtyRef.current && <section className="resume-section" data-testid="goal-edit-local-draft">
@@ -495,10 +496,10 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         <input value={title} disabled readOnly data-testid="goal-edit-local-title" /></label>
       <label className="field"><span className="field-label">说明草稿</span>
         <textarea value={description} disabled readOnly data-testid="goal-edit-local-description" /></label>
-      <button className="secondary-button" type="button" onClick={() => {
+      <Button variant="secondary" onClick={() => {
         draftBaselineRef.current = { title: "", description: "" };
         setDraft({ title: "", description: "" }); setConflictFacts(null);
-      }}>丢弃本地草稿</button>
+      }}>丢弃本地草稿</Button>
     </section>}
   </div>;
 
@@ -535,10 +536,10 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
         <strong>Goal 命令待核对</strong>
         <p>原 command ID：{pending.commandId} · 类型 {commandTypeOf(pending)} · 基于 v{pending.expectedRevision}。核对前不会发出第二条命令。</p>
         <div className="form-actions">
-          <button className="secondary-button" type="button" data-testid="goal-detail-check-receipt"
-            disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</button>
-          {mayRetry && <button className="secondary-button" type="button" data-testid="goal-detail-retry"
-            disabled={busy} onClick={() => { setBusy(true); void send(pending); }}>用原 ID 与原载荷重试</button>}
+          <Button variant="secondary" data-testid="goal-detail-check-receipt"
+            disabled={busy} onClick={() => void checkReceipt(pending)}>查询原命令回执</Button>
+          {mayRetry && <Button variant="secondary" data-testid="goal-detail-retry"
+            disabled={busy} onClick={() => { setBusy(true); void send(pending); }}>用原 ID 与原载荷重试</Button>}
         </div>
       </div>}
 
@@ -566,12 +567,12 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
               或用「还原为当前事实」放弃草稿。</p>
           </div>}
           <div className="form-actions">
-            <button className="primary-button" type="submit" data-testid="goal-edit-submit"
-              disabled={busy || goalPending || archived}>{busy ? "正在保存" : "保存目标修订"}</button>
-            <button className="secondary-button" type="button" data-testid="goal-edit-reset"
+            <Button variant="primary" type="submit" data-testid="goal-edit-submit"
+              disabled={busy || goalPending || archived}>{busy ? "正在保存" : "保存目标修订"}</Button>
+            <Button variant="secondary" data-testid="goal-edit-reset"
               disabled={busy || goalPending}
               onClick={() => { consumeDraft({ title: goal.title, description: goal.description }); setActionError(null); }}>
-              {archived ? "丢弃本地草稿" : "还原为当前事实"}</button>
+              {archived ? "丢弃本地草稿" : "还原为当前事实"}</Button>
           </div>
         </form>
       </section>}
@@ -579,16 +580,16 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
       {!archived && <section className="resume-section" data-testid="goal-archive-section">
         <h2>归档目标</h2>
         <p className="helper-text">归档保留 Goal ID、项目关联、Task 显式对齐与会话历史；只停止编辑和新增关联。</p>
-        {!confirmArchive ? <button className="secondary-button" type="button" data-testid="goal-archive-open"
-          disabled={busy || goalPending} onClick={() => setConfirmArchive(true)}>归档这个目标</button>
+        {!confirmArchive ? <Button variant="secondary" data-testid="goal-archive-open"
+          disabled={busy || goalPending} onClick={() => setConfirmArchive(true)}>归档这个目标</Button>
           : <div className="warning-callout" data-testid="goal-archive-confirm">
             <strong>确认归档？</strong>
             <p>归档后可读原关系与历史，但不能恢复为 ACTIVE，也不能再新增关联。</p>
             <div className="form-actions">
-              <button className="primary-button" type="button" data-testid="goal-archive-submit"
-                disabled={busy || goalPending} onClick={submitArchive}>确认归档</button>
-              <button className="secondary-button" type="button" data-testid="goal-archive-cancel"
-                disabled={busy} onClick={() => setConfirmArchive(false)}>取消</button>
+              <Button variant="primary" data-testid="goal-archive-submit"
+                disabled={busy || goalPending} onClick={submitArchive}>确认归档</Button>
+              <Button variant="secondary" data-testid="goal-archive-cancel"
+                disabled={busy} onClick={() => setConfirmArchive(false)}>取消</Button>
             </div>
           </div>}
       </section>}
@@ -603,9 +604,9 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
             {" "}· {project.archiveStatus === "ARCHIVED" ? "已归档项目" : "进行中"} · Project v{project.projectRevision}
             <small>关联于 {new Date(project.linkedAt).toLocaleString("zh-CN")}</small>
             <div className="form-actions">
-              <button className="text-button" type="button" data-testid={`goal-unlink-open-${project.projectId}`}
+              <Button variant="text" data-testid={`goal-unlink-open-${project.projectId}`}
                 disabled={busy || unlinkBusy || goalPending} onClick={() => void prepareUnlink(project)}>
-                解除关联并查看影响</button>
+                解除关联并查看影响</Button>
             </div>
             {unlinkTarget?.project.projectId === project.projectId && <div className="warning-callout"
               data-testid={`goal-unlink-confirm-${project.projectId}`}>
@@ -618,10 +619,10 @@ function LiveGoalDetail({ id, client }: { id: string; client: RelayApiClient }) 
               </ul>}
               {unlinkTarget.impactedTaskIds.length === 0 && <p className="helper-text">当前没有 Task 显式对齐这个 Goal。</p>}
               <div className="form-actions">
-                <button className="primary-button" type="button" data-testid={`goal-unlink-submit-${project.projectId}`}
-                  disabled={busy || goalPending} onClick={confirmUnlink}>确认解除</button>
-                <button className="secondary-button" type="button" data-testid={`goal-unlink-cancel-${project.projectId}`}
-                  disabled={busy} onClick={() => setUnlinkTarget(null)}>取消</button>
+                <Button variant="primary" data-testid={`goal-unlink-submit-${project.projectId}`}
+                  disabled={busy || goalPending} onClick={confirmUnlink}>确认解除</Button>
+                <Button variant="secondary" data-testid={`goal-unlink-cancel-${project.projectId}`}
+                  disabled={busy} onClick={() => setUnlinkTarget(null)}>取消</Button>
               </div>
             </div>}
           </li>)}</ul>}

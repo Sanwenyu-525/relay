@@ -1551,8 +1551,9 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
     color-mix(in srgb, var(--relay-color-bg-subtle) 78%, transparent) 62%);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  mask-image: linear-gradient(to right, transparent, #000 62%);
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 62%);
+  /* 遮罩用 black 作为 alpha 模板，不是设计色值；不引用 token 以免把遮罩与主题色耦合。 */
+  mask-image: linear-gradient(to right, transparent, black 62%);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 62%);
   pointer-events: none;
 }
 /* 展开面板是浮层（工作台 §28.9、设计系统 §9.14）：这一列在滚动容器（.recent-work-scroll，

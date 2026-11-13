@@ -50,7 +50,7 @@
   /* 投影挂在 SVG 上而不是气泡 div：drop-shadow 沿整条闭合轮廓（含尾巴）连续绘制，
      不存在矩形阴影与尾巴阴影分离。值沿用 2026-10-24 定下的规格 0 2px 6px / 12%：
      偏移小、模糊紧，尾巴根部两侧不会积出「腋下暗角」。 */
-  filter: drop-shadow(0 2px 6px rgb(31 45 61 / 0.12));
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--relay-color-text-primary) 12%, transparent));
 }
 
 .path-tooltip-outline-path {

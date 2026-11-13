@@ -4,6 +4,7 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import { useDisplayPreferences } from "../lib/displayPreferences";
 import type { RelayApiClient, RelayViewKind } from "../api/relayClient";
+import { Button } from "../ui";
 
 /** 项目工作台入口只读取默认配置；浏览其他 kind 由显式路由完成。 */
 export default function ProjectWorkbenchEntry() {
@@ -38,8 +39,8 @@ export default function ProjectWorkbenchEntry() {
   }
   return <section className="page-state" aria-live="polite">
     <h1>{error ? "暂时无法打开项目工作台" : "正在读取默认工作台"}</h1>
-    {error ? <><p role="alert">{error}</p><button className="secondary-button" type="button"
-      onClick={() => setReload((value) => value + 1)}>重新读取默认配置</button>
+    {error ? <><p role="alert">{error}</p><Button variant="secondary"
+      onClick={() => setReload((value) => value + 1)}>重新读取默认配置</Button>
       <Link className="text-link" to={`/projects/${id}`}>返回项目页</Link></> :
       <p>{client ? "正在读取服务端保存的默认视图。" : "正在打开示例工作台。"}</p>}
   </section>;

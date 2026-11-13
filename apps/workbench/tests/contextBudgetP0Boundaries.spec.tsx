@@ -3,6 +3,7 @@ import { RelayApiClient } from "../src/api/relayClient";
 import type { RelaySessionContextUsage } from "../src/api/dtos/assist";
 import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
+import { contextCompactionFixture } from "./contextUsageFixture";
 
 /**
  * 0145 复审的三处 P0 边界（2026-10-30）。
@@ -30,13 +31,15 @@ function json(body: unknown, status = 200): Response {
 function usage(tokens: 262_144 | 524_288 | 1_048_576 = 524_288): RelaySessionContextUsage {
   return { sessionId, budget: { tokens, revision: "3" },
     nextCall: { reservationTokens: tokens, contextBudgetTokens: tokens,
-      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null };
+      providerWindowTokens: null, windowSource: "UNKNOWN" }, lastCall: null,
+    compaction: contextCompactionFixture({ targetWindowTokens: tokens,
+      effectiveWindowTokens: tokens }) };
 }
 
 async function mountPanel(data: RelaySessionContextUsage | null, handlers: {
   readonly onSaved?: () => void; readonly onReload?: () => void } = {}) {
   const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
-    usage={data} loading={false} error={null}
+    sessionRevision="7" usage={data} loading={false} error={null}
     onReload={handlers.onReload ?? (() => {})} onSaved={handlers.onSaved ?? (() => {})} />);
   unmount = mounted.unmount;
   await flush();
@@ -50,7 +53,8 @@ async function mountBlank(props: {
   readonly inheritState: "none" | "loading" | "ready" | "failed";
   readonly onRetryInherit?: () => void }) {
   const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={null}
-    usage={null} loading={false} error={null} onReload={() => {}} onSaved={() => {}}
+    sessionRevision={null} usage={null} loading={false} error={null}
+    onReload={() => {}} onSaved={() => {}}
     draftTier={props.draftTier} onDraftTierChange={() => {}}
     inheritedTier={props.inheritedTier} inheritState={props.inheritState}
     {...(props.onRetryInherit === undefined ? {} : { onRetryInherit: props.onRetryInherit })} />);

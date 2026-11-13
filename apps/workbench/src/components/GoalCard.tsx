@@ -4,6 +4,7 @@ import { Check, ChevronDown, Pause, Play, Target, Trash2 } from "lucide-react";
 import type { RelayGoalStatus, RelayGoalView } from "../api/relayClient";
 import AppDialog from "./AppDialog";
 import "./GoalPlanCards.css";
+import { Button } from "../ui";
 
 /**
  * 输入框上方的目标单行状态条（工作台 §44.2、0127；2026-10-25 收成单行，参照 Codex）。
@@ -189,10 +190,10 @@ export default function GoalCard({ view, busy, error, onPause, onCancel, onResum
       <p>取消后这个目标不再继续推进，已经发生的修改与外部操作不会回滚，也无法恢复。
         想暂时停下、之后接着推进，请先选「暂停」。</p>
       <div className="dialog-actions">
-        <button className="secondary-button" type="button" data-testid="goal-card-cancel-dismiss"
-          disabled={busy} onClick={() => setConfirmingCancel(false)}>再想想</button>
-        <button className="danger-button" type="button" data-testid="goal-card-cancel-confirm-button"
-          disabled={busy} onClick={() => { setConfirmingCancel(false); onCancel(); }}>确认取消目标</button>
+        <Button variant="secondary" data-testid="goal-card-cancel-dismiss"
+          disabled={busy} onClick={() => setConfirmingCancel(false)}>再想想</Button>
+        <Button variant="danger" data-testid="goal-card-cancel-confirm-button"
+          disabled={busy} onClick={() => { setConfirmingCancel(false); onCancel(); }}>确认取消目标</Button>
       </div>
     </AppDialog>
   </section>;

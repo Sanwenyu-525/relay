@@ -269,7 +269,15 @@ export async function executeClaimedRunGraph(db: DbExecutor, input: {
       const completedCriteria = !exactReview && snapshot.values.reviewKind === 'CRITERION'
         && snapshot.values.operationId === '' && await validCompletedCriteriaResume(db,
           input.claim, snapshot.values.reviewId);
-      if (!exactReview && !completedCriteria) {
+      // 2026-11-13 D3 验收复现：先接受首个条件（检查点绑定项），再退回同批另一条件时，
+      // 决策落在兄弟 Review 上而检查点仍绑首项——此前该 RESUME 被判无效并让 worker 抛出
+      // 未处理错误退出、Run 永久停在 RETRYING。退回决策本身已把 Run 转 RETRYING 并重置
+      // 修正步骤；这里允许同批（同会话/同产物/同验收版本）的退回唤醒检查点，由图的
+      // resume 分支按决策载荷进入修正轮。
+      const returnedCriteria = !exactReview && !completedCriteria
+        && snapshot.values.reviewKind === 'CRITERION' && snapshot.values.operationId === ''
+        && await validCriteriaReturnResume(db, input.claim, snapshot.values.reviewId);
+      if (!exactReview && !completedCriteria && !returnedCriteria) {
         if (await isPriorReviewDecision(db, input.claim, snapshot.values.reviewId)) {
           return { settlement: 'DONE', holdForRecovery: false };
         }
@@ -390,6 +398,35 @@ async function validCompletedCriteriaResume(db: DbExecutor, claim: ClaimedRunCom
         and v.acceptance_revision::text = r.target->>'acceptance_revision'
         and target.artifact_version_id::text = r.target->>'artifact_version_id'
         and encode(target.content_hash, 'hex') = r.target->>'content_hash') as exists
+  `.execute(db);
+  return rows.rows[0]?.exists === true;
+}
+
+/**
+ * 同批条件组的「退回」唤醒（2026-11-13 D3 验收）：检查点绑定首项条件，而 REQUEST_CHANGES
+ * 可以落在同批任一条件上。只认可同一验证会话、同一产物版本/内容摘要/验收版本的
+ * CRITERION 退回决策，避免跨批次或旧版本的决定唤醒当前检查点。
+ */
+async function validCriteriaReturnResume(db: DbExecutor, claim: ClaimedRunCommand,
+  interruptedReviewId: string): Promise<boolean> {
+  if (claim.reviewDecisionId === null) return false;
+  const rows = await sql<{ exists: boolean }>`
+    select exists(select 1 from run_commands c
+      join review_decisions d on d.id = c.review_decision_id
+      join review_requests r on r.id = d.review_id
+      join review_requests waiting on waiting.id = ${interruptedReviewId}
+      where c.id = ${claim.commandId} and c.run_id = ${claim.runId}
+        and c.review_decision_id = ${claim.reviewDecisionId}
+        and r.run_id = c.run_id and waiting.run_id = c.run_id
+        and r.kind = 'CRITERION' and waiting.kind = 'CRITERION'
+        and r.status = 'DECIDED' and waiting.status = 'DECIDED'
+        and d.decision = 'REQUEST_CHANGES'
+        and d.target_hash = r.target_hash
+        and r.target->>'session_id' = waiting.target->>'session_id'
+        and r.target->>'artifact_version_id' = waiting.target->>'artifact_version_id'
+        and r.target->>'content_hash' = waiting.target->>'content_hash'
+        and r.target->>'acceptance_revision' = waiting.target->>'acceptance_revision'
+    ) as exists
   `.execute(db);
   return rows.rows[0]?.exists === true;
 }

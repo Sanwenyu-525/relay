@@ -430,3 +430,45 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 - `node scripts/check-ui-conventions.mjs`：存量基线 `scripts/ui-conventions-baseline.json`（78 个 CSS 文件、366 处裸色值）。只阻止**新增**：组件层零容忍、`--pv-*` 只许出现在兼容层、`protoPage.css` 必须 0、产物不得含开发路由。存量下降后可 `--update-baseline` 收紧。
 - 浏览器侧：`tests/browser/uiDesignTokens.spec.ts`（按钮档位、列宽、卡片分层、焦点画法，全部拿 token 计算值比对）、`tests/browser/uiLab.spec.ts`（Playground 渲染、对话框焦点、容器宽度、token 无空值、错误态边框）。
 - 组件侧：`tests/uiPrimitives.spec.tsx`（变体到类名映射、aria 接线、busy 与禁用耦合）。
+
+## §9.36 组件层补全、全站接入与视觉回归（UI-UNIFY-02，2026-11-12）
+
+§9.35 建立了组件层与单色板；本节把「有组件」推进到「全站实际使用、可自动验收」。迁移状态与未完成项见 [`ui-migration-2026-11-12.md`](../ui-migration-2026-11-12.md) §6。
+
+### 组件矩阵与唯一实现
+
+| 语义 | 出口 | 实现来源 | 关键契约 |
+|---|---|---|---|
+| 按钮 / 图标按钮 | `Button` / `IconButton` | `src/ui/Button.tsx`、`IconButton.tsx` | 变体四档；`IconButton.label` 必填（同时是 aria-label 与 title） |
+| DropdownMenu | `Menu` / `DropdownMenu`（同一实现的语义别名） | `Disclosure.tsx` + `lib/popoverMenu` | details 原生开合；打开后焦点进首项；↑/↓/Home/End；Esc 收起并回触发器；Tab 离开即收起 |
+| ContextMenu | `ContextMenu` | `ContextMenu.tsx` | 右键坐标 fixed 定位并夹进视口；焦点进首项；Esc/选中归还打开前焦点；禁用时保留原生菜单 |
+| Popover | `Popover` | `Disclosure.tsx` | 受控开合；点外面/Esc 关闭；`aria-expanded` 由调用方触发器声明 |
+| Tooltip | `Tooltip` | `Tooltip.tsx` | 悬停延迟、键盘聚焦立即；Esc 收起；portal + fixed，不被 overflow 裁切；`aria-describedby` 只在打开时挂 |
+| Tabs | `Tabs` | `Tabs.tsx` | 链接形态用 `aria-current`；选择形态 `tablist` + roving tabindex + 方向键/Home/End |
+| Toast / Snackbar | `Toast` / `Snackbar` / `FeedbackHost` | `components/Feedback.tsx` | 复用既有反馈队列（按语气排队、自动消退），不建第二套计时 |
+| Card / Separator / ScrollArea | `Card` / `Separator` / `ScrollArea` | `Surface.tsx` | 卡片单一外观（1px 分隔线、无投影）；滚动区可 Tab 聚焦并带 `role="region"` |
+| Table | `Table*` | `Table.tsx` | 统一表头/行/空态/滚动；空态用 `TableEmpty` 的 colSpan |
+| Dialog / Drawer | `Dialog` / `Drawer` | `components/AppDialog.tsx` | 焦点陷阱、Tab 循环、Esc、遮罩点击与焦点归还同源 |
+| Combobox | `Combobox` | `Combobox.tsx` | WAI-ARIA 1.2 combobox + listbox；输入是筛选词，不点选不改值 |
+| 可拖拽布局 | `ResizableHandle` / `useResizeDrag` | `ResizableHandle.tsx` | 侧栏与工作详情面板共用；指针捕获、钳制、方向键、双击复位；布局轨道仍由页面持有 |
+
+不引入 Radix：§9.35 的理由仍然成立，且 `lib/popoverMenu` 的关闭语义已有真实缺陷修复记录。新增组件只补语义，不重画既有 `.primary-button` / `.field` / `.status-chip`。
+
+### 密度：由页面角色显式决定
+
+- `.pv-page`（项目/任务/今日/收件箱/动态/资料/定时任务等）**就是 compact 作用域**：在容器上重绑 `--relay-control-height`、`--relay-control-height-prominent`、`--relay-font-size-body`、`--relay-font-size-meta` 四个变量。组件只读变量，页面不再逐类目覆写控件高与字号。
+- `/agent` 等工作台保持 comfortable（40/48px 控件、16px 正文），不在任何页面里覆写。
+- 同页内需要另一档时用 `<Density mode="compact|comfortable">`，它只重绑同一组变量。`tests/browser/uiDensity.spec.ts` 量三件事：pv 页 `min-height=34px`、工作台图标键 40px、`Density` 两档 48/34 且组件类名不变。
+- 页面档标题阶梯（22/17px）与工作台（28/24px）仍是两个比例链，未合并；剩余 30 处 px 字号已登记在基线里，合并须单独做视觉验收。
+
+### 视觉回归
+
+- `playwright.visual.config.ts` + `tests/visual/uiVisual.spec.ts`：固定 1440×960、Asia/Shanghai、浅色、减少动效、Date 固定；覆盖 Agent 空白态、项目/任务/今日/待处理/设置、1024 窄窗、125% 内容缩放、滚动场景，以及 Playground 七个分区、Dialog、Drawer、DropdownMenu、Popover、ContextMenu、Tooltip、Tabs 键盘焦点、Toast。
+- 页面在内部滚动容器里，`fullPage` 只截一屏；基线改为对页面容器/小节做元素截图。
+- 更新基线只能通过 `npm run test:visual:update`，且必须在迁移记录里写原因；日常验收跑 `npm run test:visual`，不允许无条件刷新快照。
+
+### 守卫与自动执行
+
+- 新增规则：本地 `--relay-*` 只能由 token 派生（var/color-mix/calc/min/max/clamp）；新样式文件必须有调用方、不得新增全局选择器与 `!important`；新页面出现原生 button/input/select/textarea 且没有 `../ui` 导入即失败。
+- `EXEMPT_FILES` 登记三个不属工作台设计系统的文件：Tauri 透明 Overlay（自带霓虹色板）与两个 DEV 实验室。豁免必须写理由，并明确不参与计数。
+- 自动执行：`tests/uiConventions.spec.ts` 让默认 Vitest 套件执行守卫；`apps/workbench/package.json` 的 `build` 先跑守卫再 `tsc`/`vite build`。仓库没有 CI 工作流，构建入口就是本机事实上的门。

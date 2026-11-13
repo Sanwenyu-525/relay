@@ -3,6 +3,7 @@ import { RelayApiError, type RelayApiClient, type RelaySubagentSupplement } from
 import { subagentSupplementResultFrom } from "../api/resources/subagentSupplements";
 import { describeLiveError } from "../lib/liveErrors";
 import "./SessionDelegations.css";
+import { Button } from "../ui";
 
 type Client = Pick<RelayApiClient, "workspaceId" | "getSubagentSupplements" | "supplementSubagent">
   & Partial<Pick<RelayApiClient, "getCommandReceipt">>;
@@ -105,7 +106,7 @@ function SupplementContent({ client, sessionId, child = false, refreshKey = "", 
     <details open={child || undefined}>
       <summary>子任务补充{items.length > 0 ? ` · ${items.length} 条` : ""}</summary>
       {readError !== null && <p role="alert">补充记录读取失败：{readError}
-        <button type="button" className="text-button" onClick={() => setReload((value) => value + 1)}>重试读取</button></p>}
+        <Button variant="text" onClick={() => setReload((value) => value + 1)}>重试读取</Button></p>}
       <ul className="session-delegations-list">
         {items.map((item) => <li className="session-delegations-item" key={item.id} data-testid="subagent-supplement">
           <p className="session-delegations-result">{item.content}</p>
@@ -125,15 +126,15 @@ function SupplementContent({ client, sessionId, child = false, refreshKey = "", 
         }} /></label>
       <p className="helper-text">补充会同步主会话。运行中的子任务在下一轮读取；已结束的子任务不会自动重跑。</p>
       {error !== null && <p role="alert">{error}</p>}
-      {pending === null ? <button type="button" className="secondary-button"
+      {pending === null ? <Button variant="secondary"
         data-testid="subagent-supplement-send" disabled={busy || draft.trim() === ""}
-        onClick={() => void send()}>发送补充</button>
+        onClick={() => void send()}>发送补充</Button>
         : <div aria-live="polite"><p>{busy ? "正在核对补充…" : "补充结果待核对，请保留原请求。"}</p>
-          <button type="button" className="secondary-button" data-testid="subagent-supplement-check"
-            disabled={busy || client.getCommandReceipt === undefined} onClick={() => void checkReceipt()}>核对原请求</button>
-          {missingReceipt && <button type="button" className="secondary-button"
+          <Button variant="secondary" data-testid="subagent-supplement-check"
+            disabled={busy || client.getCommandReceipt === undefined} onClick={() => void checkReceipt()}>核对原请求</Button>
+          {missingReceipt && <Button variant="secondary"
             data-testid="subagent-supplement-retry" disabled={busy}
-            onClick={() => void send(pending)}>按原请求重试</button>}</div>}
+            onClick={() => void send(pending)}>按原请求重试</Button>}</div>}
     </div>}
   </section>;
 }

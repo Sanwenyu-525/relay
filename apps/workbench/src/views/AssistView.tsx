@@ -17,6 +17,8 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelaySessionContextUsage, type RelayContextBudgetTokens, type RelayTokenUsage,
   type RelayWorkspaceDefaultDirectory, type RequiredContextAudit } from "../api/relayClient";
 import type { RelayModelConnection } from "../api/dtos/information";
+// CONTEXT-COMPACTION-0162：手动压缩的 CAS 基线类型（会话整行修订）。
+import type { DecimalRevision } from "../types";
 import { formatTokenUsageDetail, formatTokenUsageLine, legacyTokenUsage,
   tokenUsageTotal } from "../lib/tokenCount";
 import { generationStageView } from "../lib/generationStage";
@@ -96,6 +98,7 @@ import { chatControlFromText } from "../lib/chatControls";
 import { chatSessionResultFrom, type RelayChatSessionResult } from "../api/resources/chatControls";
 import type { RelayChatCommand } from "../api/resources/chatControls";
 import { RelayTransportError } from "../api/core/errors";
+import { Button, IconButton } from "../ui";
 import "./AssistView.css";
 
 export type AssistTarget = { readonly kind: "PROJECT" | "TASK"; readonly id: string; readonly title: string;
@@ -1814,7 +1817,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
 
   if (connection.mode !== "live") return <section className="page-state" data-testid="assist-fixture-gap"><p className="eyebrow">Assist</p><h1>示例模式没有真实会话</h1><p>连接本机 API 后才能读取项目或任务会话；示例模式不生成模型回复或提案。</p></section>;
   // 种子目标只替首帧占位，不替服务端宣布核对通过：真读失败仍落到可重试的错误页。
-  if (!workspaceLevel && error && (provisionalTarget || target?.id !== id || target.kind !== kind)) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">Assist</p><h1>暂时无法读取对话工作对象</h1><p>{error}</p><button className="secondary-button" type="button" onClick={() => void loadTarget()}><RotateCcw aria-hidden="true" />重新读取</button></section>;
+  if (!workspaceLevel && error && (provisionalTarget || target?.id !== id || target.kind !== kind)) return <section className="page-state page-state--error" role="alert"><p className="eyebrow">Assist</p><h1>暂时无法读取对话工作对象</h1><p>{error}</p><Button variant="secondary" onClick={() => void loadTarget()}><RotateCcw aria-hidden="true" />重新读取</Button></section>;
   // 工作空间级模式没有 target 可核对，不能因此停在占位页 —— 那正是没选目录时用户看到的东西。
   if (!workspaceLevel && (target?.id !== id || target.kind !== kind)) return <section className="page-state" aria-live="polite"><p className="eyebrow">Assist</p><h1>正在核对对话作用域与会话</h1></section>;
   if (!client || (!workspaceLevel && !target)) return null;
@@ -2325,7 +2328,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
           }}
           disabled={firstBusy || creating || scopedPendingFirst !== null} />
       </div>
-      <button className="primary-button agent-chat-send" type="submit" data-testid="assist-first-send"
+      <Button variant="primary" className="agent-chat-send" type="submit" data-testid="assist-first-send"
         data-busy={firstBusy || creating || scopedPendingFirst !== null ? "true" : undefined}
         aria-label={firstBusy || creating ? "正在发送首条消息" : "发送消息"}
         title={firstBusy || creating ? "正在发送首条消息"
@@ -2336,7 +2339,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         disabled={first.draft.trim() === "" && stagedFirst.items.length === 0 || firstBusy || creating ||
           firstAttaching || firstSkillScopeMissing || creationPending ||
           projectWriteBlockedReason !== null || firstAssistantBlockedReason !== null}>
-        <ArrowUp aria-hidden="true" /></button></div>
+        <ArrowUp aria-hidden="true" /></Button></div>
     </div>
     {/* 目录细条在输入卡**下方**（2026-11-01 用户指令「放到输入框下面」）：它仍是
         「发送前」的事实，但不再占住卡上那一行；槽位由协作页注入，位置只由本视图决定。 */}
@@ -2424,13 +2427,13 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
         event.preventDefault(); event.stopPropagation();
         setSessionSwitcherOpen(false); sessionSwitcherTriggerRef.current?.focus();
       }}>
-        <button type="button" className="secondary-button secondary-button--compact collab-toolbar-icon-button collab-session-switcher-trigger"
+        <Button variant="secondary" className="secondary-button--compact collab-toolbar-icon-button collab-session-switcher-trigger"
           ref={sessionSwitcherTriggerRef} data-testid="collab-session-switcher" aria-label="切换讨论" title="切换讨论"
           aria-haspopup="true" aria-expanded={sessionSwitcherOpen} aria-controls="collab-session-switcher-panel"
           disabled={sessionChangeBlocked}
           onClick={() => setSessionSwitcherOpen((open) => !open)}>
           <MessageSquareText size={18} aria-hidden="true" />
-        </button>
+        </Button>
         {sessionSwitcherOpen && <div className="collab-session-switcher-panel" id="collab-session-switcher-panel"
           data-testid="collab-session-switcher-panel"
           role="menu" aria-label="当前作用域的讨论"
@@ -2594,7 +2597,7 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
       onCheck={() => void checkCreateReceipt()}
       onRetry={() => { if (pendingCreate !== null) void createSession(pendingCreate); }}
       onClose={() => setCreatePendingDialogOpen(false)} />
-    {externalReadBlockedReason && selectedRefs.length > 0 && <button className="secondary-button" type="button" disabled={sessionNavigation.pending !== null} onClick={() => setSelectedRefs([])}>清空本次资料选择</button>}
+    {externalReadBlockedReason && selectedRefs.length > 0 && <Button variant="secondary" disabled={sessionNavigation.pending !== null} onClick={() => setSelectedRefs([])}>清空本次资料选择</Button>}
     {session && <>{!externalReadBlockedReason && !standalone && !embedded && sourcePicker}
       <AssistSessionPanel key={`${connection.epoch}:${session.id}`} client={client} session={session} target={target} sources={selectedRefs}
         standalone={standalone} embedded={embedded} onNavigationStateChange={reportSessionNavigation}
@@ -3882,11 +3885,13 @@ const MIN_PANEL_HEIGHT_PX = 168;
  * 档位改成会话级，浮层里不再有「跟随应用默认」。读数未知时轨道虚线、不画弧，
  * 与「真的 0%」分开。
  */
-function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSaved }: {
+function ContextMeter({ usage, loading, error, sessionId, sessionRevision, client, onReload, onSaved }: {
   readonly usage: RelaySessionContextUsage | null;
   readonly loading: boolean;
   readonly error: string | null;
   readonly sessionId: string;
+  /** CONTEXT-COMPACTION-0162：手动压缩的 CAS 基线（会话整行修订）。 */
+  readonly sessionRevision: DecimalRevision;
   readonly client: RelayApiClient | null;
   readonly onReload: () => void;
   readonly onSaved: () => void;
@@ -4108,7 +4113,8 @@ function ContextMeter({ usage, loading, error, sessionId, client, onReload, onSa
             {infoTooltipNode}
           </>}
         </div>
-        <ContextUsagePanel client={client} sessionId={sessionId} usage={usage} loading={loading}
+        <ContextUsagePanel client={client} sessionId={sessionId}
+          sessionRevision={sessionRevision} usage={usage} loading={loading}
           error={error} onReload={onReload} onSaved={onSaved} />
       </div>, document.body)}
       {tooltipNode}
@@ -4415,24 +4421,20 @@ export function AssistMessageRow({ client, target, message, activity, activityRe
           随页脚收起，悬停或聚焦才出现（页面原型 V5.0 的悬停操作）。
           复制是纯客户端剪贴板动作，与助手回复的复制同一语义；失败只还原按钮，不发成功回执。 */}
       {canRecall && <span className="assist-recall-button-wrap" {...recallTooltipHandlers}>
-        <button className="icon-button" type="button"
+        <IconButton icon={RotateCcw}
           data-testid={`assist-recall-action-${message.id}`}
-          aria-label={recallBusy ? "正在回退文件" : "回退文件"}
+          label={recallBusy ? "正在回退文件" : "回退文件"}
           aria-busy={recallBusy || undefined}
           disabled={recallBusy || recallDisabledReason !== null}
-          onClick={onRecall}>
-          <RotateCcw aria-hidden="true" />
-        </button>
+          onClick={onRecall} />
       </span>}
       {message.content !== null && message.content !== "" &&
-        <button className="icon-button agent-message-copy" type="button"
+        <IconButton className="agent-message-copy" icon={Copy}
           data-testid={`assist-copy-user-${message.id}`}
-          aria-label={copyDone === message.id ? "已复制这条消息" : "复制这条消息"}
+          label={copyDone === message.id ? "已复制这条消息" : "复制这条消息"}
           title={copyDone === message.id ? "已复制" : "复制这条消息"}
           onClick={() => void navigator.clipboard?.writeText(message.content ?? "").then(
-            () => setCopyDone(message.id), () => setCopyDone(null))}>
-          <Copy aria-hidden="true" />
-        </button>}
+            () => setCopyDone(message.id), () => setCopyDone(null))} />}
       {recallTooltipNode}
     </div>}
     {recallError !== null && <p className="action-error" role="alert"
@@ -4586,14 +4588,12 @@ export function AssistMessageRow({ client, target, message, activity, activityRe
       {/* 复制键在左（2026-10-16 用户指令）：键是行首第一项，左缘与正文左缘对齐。 */}
       {/* 纯客户端剪贴板动作：不新增命令、不落库、不假装是已保存的反馈。只有图标，
           可读名称与完成状态都放在 aria-label / title 上。 */}
-      <button className="icon-button agent-message-copy" type="button"
+      <IconButton className="agent-message-copy" icon={Copy}
         data-testid={`assist-copy-${message.id}`}
-        aria-label={copyDone === message.id ? "已复制这条回复" : "复制这条回复"}
+        label={copyDone === message.id ? "已复制这条回复" : "复制这条回复"}
         title={copyDone === message.id ? "已复制" : "复制这条回复"}
         onClick={() => void navigator.clipboard?.writeText(message.content ?? "").then(
-          () => setCopyDone(message.id), () => setCopyDone(null))}>
-        <Copy aria-hidden="true" />
-      </button>
+          () => setCopyDone(message.id), () => setCopyDone(null))} />
       {/* 2026-10-31 UI-08：用量是每条完成回复都要读的一行事实，直接常显在页脚，不再折叠。
           AGENT_LIVE_TOKEN_USAGE：完成态改读账本汇总（本轮 PRIMARY 调用，含工具续轮的累计），
           不再只报「最后一次调用的上下文大小」；未上报保持「未上报」，不伪造为 0。 */}
@@ -4838,11 +4838,11 @@ function StateMaintenanceReceipt({ entry, onRetry, onWithdraw, onToggleUndoConfi
         <input type="text" value={answer} data-testid="state-maintenance-decision-input"
           placeholder="用一句话回答这个问题" aria-label="回答这个待决定"
           onChange={(event) => setAnswer(event.target.value)} />
-        <button className="secondary-button" type="button"
+        <Button variant="secondary"
           data-testid="state-maintenance-decision-accept" disabled={entry.applying ||
             answer.trim() === ""}
           onClick={() => onAnswerDecision("ACCEPT", answer)}>
-          {entry.applying ? "正在提交…" : "按这个决定继续"}</button>
+          {entry.applying ? "正在提交…" : "按这个决定继续"}</Button>
         <button className="text-link" type="button"
           data-testid="state-maintenance-decision-decline" disabled={entry.applying ||
             answer.trim() === ""}
@@ -4942,18 +4942,18 @@ function StateMaintenanceReceipt({ entry, onRetry, onWithdraw, onToggleUndoConfi
         </label>)}
       {entry.undoPlanError !== null && <p className="action-error" role="alert"
         data-testid="state-maintenance-undo-plan-error">{entry.undoPlanError}</p>}
-      <button className="secondary-button" type="button"
+      <Button variant="secondary"
         data-testid="state-maintenance-withdraw-scope" disabled={entry.withdrawing ||
           entry.undoScope.length === 0}
-        onClick={onWithdrawScoped}>{entry.withdrawing ? "正在撤回…" : "按所选范围撤回"}</button>
+        onClick={onWithdrawScoped}>{entry.withdrawing ? "正在撤回…" : "按所选范围撤回"}</Button>
       {!entry.withdrawing && <button className="text-link" type="button"
         data-testid="state-maintenance-undo-plan-cancel" onClick={onCancelUndoPlan}>先不撤回</button>}
     </div>}
     {/* 两步撤回：第一步只展开清单，第二次点击确认才真正 POST；确认后按钮进入「正在撤回…」，
         直到结果落地——响应丢失时由 withdrawError 行接管，不在途与结果之间留空档。 */}
     {canWithdraw && entry.undoPlan === null && !entry.confirmingUndo && !entry.withdrawing &&
-      <button className="secondary-button" type="button" data-testid="state-maintenance-withdraw"
-        onClick={onToggleUndoConfirm}>撤回本次调整</button>}
+      <Button variant="secondary" data-testid="state-maintenance-withdraw"
+        onClick={onToggleUndoConfirm}>撤回本次调整</Button>}
     {canWithdraw && entry.undoPlan === null && (entry.confirmingUndo || entry.withdrawing) && <div className="state-maintenance-confirm"
       data-testid="state-maintenance-undo-confirm">
       <p>{undoCount > 0 ? `将撤回：${undoCount} 条变更（${changes
@@ -4961,8 +4961,8 @@ function StateMaintenanceReceipt({ entry, onRetry, onWithdraw, onToggleUndoConfi
         .map((change) => stateMaintenanceChangeKindLabel(change.changeKind)).join("、")}）`
         : "将撤回：本次已生效的全部变更。"}</p>
       <p className="helper-text">已推进的部分可能撤回失败并逐条显示；补偿按原变更的逆序执行。</p>
-      <button className="secondary-button" type="button" data-testid="state-maintenance-withdraw-confirm"
-        disabled={entry.withdrawing} onClick={onWithdraw}>{entry.withdrawing ? "正在撤回…" : "确认撤回"}</button>
+      <Button variant="secondary" data-testid="state-maintenance-withdraw-confirm"
+        disabled={entry.withdrawing} onClick={onWithdraw}>{entry.withdrawing ? "正在撤回…" : "确认撤回"}</Button>
       {!entry.withdrawing && <button className="text-link" type="button"
         data-testid="state-maintenance-undo-cancel" onClick={onToggleUndoConfirm}>先不撤回</button>}
     </div>}
@@ -7047,7 +7047,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               : <><p className="helper-text">预期产物</p><ul className="assist-proposal-outputs">{Object.entries(proposal.payload.expectedOutputs).map(([key, value]) =>
                 <li key={key} className="assist-proposal-output-chip" title={`${key}: ${expectedOutputRawText(value)}`}>{expectedOutputKeyLabels[key] ?? key}：{expectedOutputValueText(key, value)}</li>)}</ul></>}</>}
           <details className="tech-details chat-disclosure"><summary><span className="chat-disclosure-chevron" aria-hidden="true"><ChevronRight /></span>核对工作对象与内容摘要</summary><p className="helper-text">工作对象 {proposalTargetTypeText(proposal.targetType)} · {proposal.targetId} · 基于修订 v{proposal.baseRevision} · 内容摘要 {proposal.payloadHash}</p></details>
-          {proposal.status === "PENDING" && <button className="primary-button" type="button" disabled={busy || pending !== null || writeBlockedReason !== null} onClick={() => void runAction({ kind: "accept", id: proposal.id, commandId: createCommandId() })}>接受此提案</button>}
+          {proposal.status === "PENDING" && <Button variant="primary" disabled={busy || pending !== null || writeBlockedReason !== null} onClick={() => void runAction({ kind: "accept", id: proposal.id, commandId: createCommandId() })}>接受此提案</Button>}
         </details>
       </article>;
     })}
@@ -7412,13 +7412,13 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           {/* 插话待生效：意图已受理、生成方还没走到下一次模型请求。它不是完成态。 */}
           {item.steerRequested && !item.cancelRequested &&
             <span className="helper-text" data-testid={`assist-queue-steer-pending-${index + 1}`}>插话待生效</span>}
-          {steerable && !item.steerRequested && <button className="text-button" type="button"
+          {steerable && !item.steerRequested && <Button variant="text"
             data-testid={`assist-queue-steer-${index + 1}`}
             disabled={busy || pending !== null || writeBlockedReason !== null}
-            onClick={() => void steerQueued([item])}>插话</button>}
-          {!item.cancelRequested && <button className="text-button" type="button"
+            onClick={() => void steerQueued([item])}>插话</Button>}
+          {!item.cancelRequested && <Button variant="text"
             data-testid={`assist-queue-cancel-${index + 1}`} disabled={busy || pending !== null || writeBlockedReason !== null}
-            onClick={() => void runAction({ kind: "cancel", id: item.id, commandId: createCommandId() })}>取消这条</button>}
+            onClick={() => void runAction({ kind: "cancel", id: item.id, commandId: createCommandId() })}>取消这条</Button>}
           {item.cancelRequested && <span className="helper-text">取消中</span>}
         </li>;
       })}</ol>
@@ -7436,8 +7436,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
   return <section className={standalone ? "surface-panel agent-chat-conversation" : "surface-panel"} data-testid="assist-session"
     onKeyDown={onPanelKeyDown}>
     {!externalReadBlockedReason && embedded && proposalPanel}
-    {!externalReadBlockedReason && <div className={standalone ? "agent-chat-conversation-heading" : embedded ? "embedded-assist-session-heading" : undefined}><div>{!embedded && <h2>{standalone ? "对话" : "消息与提案"}</h2>}{standalone || embedded ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.status} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><button className="secondary-button" type="button" data-testid="assist-refresh" onClick={() => { void refresh(); /* 刷新同时覆盖计划/目标投影（#122）：投影读取失败后，页内刷新就是恢复入口之一。 */ setProjectionReload((value) => value + 1); }}>{standalone ? "刷新" : "刷新消息与提案"}</button></div>}
-    {!externalReadBlockedReason && projectionReadError !== null && <div className="warning-callout" role="alert" data-testid="goal-projection-read-error"><p>{projectionReadError}读取恢复前不显示目标状态行，也不宣称这个会话没有目标。</p><button className="secondary-button" type="button" data-testid="goal-projection-retry" onClick={() => setProjectionReload((value) => value + 1)}>重试读取目标状态</button></div>}
+    {!externalReadBlockedReason && <div className={standalone ? "agent-chat-conversation-heading" : embedded ? "embedded-assist-session-heading" : undefined}><div>{!embedded && <h2>{standalone ? "对话" : "消息与提案"}</h2>}{standalone || embedded ? <details><summary>会话信息</summary><p className="helper-text">{session.title} · {session.status} · {session.id}</p></details> : <p className="helper-text">会话 {session.id} · {session.status}。生成与取消均以服务端状态为准。</p>}</div><Button variant="secondary" data-testid="assist-refresh" onClick={() => { void refresh(); /* 刷新同时覆盖计划/目标投影（#122）：投影读取失败后，页内刷新就是恢复入口之一。 */ setProjectionReload((value) => value + 1); }}>{standalone ? "刷新" : "刷新消息与提案"}</Button></div>}
+    {!externalReadBlockedReason && projectionReadError !== null && <div className="warning-callout" role="alert" data-testid="goal-projection-read-error"><p>{projectionReadError}读取恢复前不显示目标状态行，也不宣称这个会话没有目标。</p><Button variant="secondary" data-testid="goal-projection-retry" onClick={() => setProjectionReload((value) => value + 1)}>重试读取目标状态</Button></div>}
     {/* SESSION-DELEGATIONS-UI-ANCHOR：真实委派的紧凑只读入口，不从模型正文推断协作状态。 */}
     {!externalReadBlockedReason && parentSessionId === null && <SessionDelegations client={client}
       sessionId={session.id} onOpenSession={onOpenSession}
@@ -7450,19 +7450,19 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       {standalone && <ChatTimelineNav sessionId={session.id} messages={messages ?? []}
         getScrollOwner={getTranscriptOwner} />}
       {/* 只有图标，没有可见文字：可读名称与状态都在 aria-label / title 上。 */}
-    {standalone && !atLatest && <button className="icon-button agent-chat-latest" type="button" data-testid="assist-latest"
-      aria-label="回到最新消息" title="回到最新消息"
+    {standalone && !atLatest && <IconButton className="agent-chat-latest" icon={ArrowDown} data-testid="assist-latest"
+      label="回到最新消息"
       onClick={() => {
         const element = transcriptRef.current;
         followLatest.current = true; setAtLatest(true);
         if (element) { element.scrollTop = element.scrollHeight; element.focus({ preventScroll: true }); }
-      }}><ArrowDown aria-hidden="true" /></button>}
+      }} />}
     </div>)}
 
     {!externalReadBlockedReason && parentSessionId !== null && <p className="helper-text"
       data-testid="session-delegation-readonly">只读子任务记录，可追加补充；执行与重新委派由主会话协调。
-      {onOpenSession !== undefined && <button className="text-button" type="button"
-        data-testid="session-delegation-parent" onClick={() => onOpenSession(parentSessionId)}>返回主会话</button>}</p>}
+      {onOpenSession !== undefined && <Button variant="text"
+        data-testid="session-delegation-parent" onClick={() => onOpenSession(parentSessionId)}>返回主会话</Button>}</p>}
     {/* SUBAGENT-SUPPLEMENTS-ANCHOR：补充只写原来源，不启动普通子会话生成。 */}
     {!externalReadBlockedReason && parentSessionId !== null && <SubagentSupplements client={client} sessionId={session.id}
       child={parentSessionId !== null && session.status === "ACTIVE"}
@@ -7573,7 +7573,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
       {/* 发送键与停止键分开挂载（key）：二者同位置同类型，复用 DOM 会让浏览器从
           发送键的禁用灰用 120ms 过渡到停止键的主色，读起来又是一次闪变（DEV-0110）。 */}
       {!standalone && (stoppableMessage !== null || stopPending
-        ? <button key="stop" className="primary-button" data-testid="assist-stop" type="button"
+        ? <Button variant="primary" key="stop" data-testid="assist-stop"
           data-state={stopPending ? "stopping" : "stoppable"}
           data-busy={!stopPending && (busy || pending !== null) ? "true" : undefined}
           aria-label={stopPending ? "正在停止生成" : "停止生成"} aria-keyshortcuts="Escape Escape"
@@ -7581,13 +7581,13 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
           disabled={stopPending || busy || pending !== null || writeBlockedReason !== null}
           onClick={() => { if (stoppableMessage !== null)
             void runAction({ kind: "cancel", id: stoppableMessage.id, commandId: createCommandId() }); }}
-        >{stopPending ? "正在停止生成" : "停止生成"}</button>
-        : <button key="send" className="primary-button" data-testid="assist-send" type="submit"
+        >{stopPending ? "正在停止生成" : "停止生成"}</Button>
+        : <Button variant="primary" key="send" data-testid="assist-send" type="submit"
           data-busy={busy || pending !== null ? "true" : undefined}
           title={sendBlockedReason ?? sendLabel}
           disabled={(!draft.trim() && stagedSession.items.length === 0) || pending !== null || busy ||
             uploadingAttachments || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
-            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? `正在提交 · ${sendLabel}` : sendLabel}</button>)}
+            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}>{busy ? `正在提交 · ${sendLabel}` : sendLabel}</Button>)}
     </form>
       {standalone && <div className="agent-chat-composer-actions">
         <div className="agent-chat-composer-tools">
@@ -7669,7 +7669,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               2026-11-01 用户指令「会话欢迎页就不需要上下文圆圈」只针对**首条输入器**
               （还没有会话、没有真实用量可读的欢迎页）；已建会话的空态仍保留圆环与档位入口。 */}
           <ContextMeter usage={contextUsage} loading={contextUsageLoading} error={contextUsageError}
-            sessionId={session.id} client={client}
+            sessionId={session.id} sessionRevision={session.revision} client={client}
             onReload={() => setContextUsageRevision((revision) => revision + 1)}
             onSaved={() => setContextUsageRevision((revision) => revision + 1)} />
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
@@ -7693,8 +7693,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         </div>
         {/* 主按钮二态：位置与配色不动，只在有 RUNNING 回复时把字形换成停止方块。
             形状参考 deepseek-harness InputBar 的 rect x=3 y=3 10×10 rx=3，与圆角键同心。 */}
-        {stoppableMessage !== null || stopPending ? <button key="stop" className="primary-button agent-chat-send"
-          data-testid="assist-stop" type="button" data-state={stopPending ? "stopping" : "stoppable"}
+        {stoppableMessage !== null || stopPending ? <Button variant="primary" key="stop" className="agent-chat-send"
+          data-testid="assist-stop" data-state={stopPending ? "stopping" : "stoppable"}
           data-busy={!stopPending && (busy || pending !== null) ? "true" : undefined}
           aria-label={stopPending ? "正在停止生成" : "停止生成"} aria-keyshortcuts="Escape Escape"
           title={stopPending ? "正在停止，等待生成安全结束" : "停止生成 · 连按两次 Esc"}
@@ -7703,12 +7703,12 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
             void runAction({ kind: "cancel", id: stoppableMessage.id, commandId: createCommandId() }); }}>
           <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
             <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" /></svg>
-        </button> : <button key="send" className="primary-button agent-chat-send" data-testid="assist-send" type="submit" form={composerFormId}
+        </Button> : <Button variant="primary" key="send" className="agent-chat-send" data-testid="assist-send" type="submit" form={composerFormId}
           data-busy={busy || pending !== null ? "true" : undefined}
           aria-label={busy ? `正在提交 · ${sendLabel}` : sendLabel} title={sendBlockedReason ?? sendLabel}
           disabled={(!draft.trim() && stagedSession.items.length === 0) || pending !== null || busy ||
             uploadingAttachments || writeBlockedReason !== null || Boolean(selectedSkillKey && !selectedSkill) ||
-            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><ArrowUp aria-hidden="true" /></button>}
+            Boolean(selectedSkill && (!selectedSkill.callSupported || selectedSkill.missingCapabilities.length > 0))}><ArrowUp aria-hidden="true" /></Button>}
       </div>}
       {!standalone && !readonlyMode && sendOptionsExpanded}
     </div>}

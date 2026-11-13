@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 import type { RelayApiClient, RelayModelPortStatus } from "../api/relayClient";
 import type { RelayDefaultModelConnection, RelayModelConnection } from "../api/dtos/information";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 interface UsageSnapshot {
   readonly connections: readonly RelayModelConnection[];
@@ -69,8 +70,8 @@ export function CurrentModelUsageCard({ client, status, refreshToken = 0 }: {
     {loading && <p role="status">正在读取当前模型使用情况…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="current-model-usage-error">
       <p>读取失败：{error}</p>
-      <button className="secondary-button" type="button" onClick={read}>
-        <RotateCcw aria-hidden="true" />重新读取</button>
+      <Button variant="secondary" onClick={read}>
+        <RotateCcw aria-hidden="true" />重新读取</Button>
     </div>}
     {snapshot !== null && <dl className="settings-usage-list">
       <div className="settings-usage-row" data-testid="current-model-chat-default">

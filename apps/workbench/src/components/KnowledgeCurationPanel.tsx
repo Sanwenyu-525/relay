@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createCommandId, RelayApiError, type RelayApiClient,
   type RelayKnowledgeCurationCandidate } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 interface Props {
   readonly client: RelayApiClient;
@@ -128,8 +129,8 @@ export default function KnowledgeCurationPanel({ client, artifactId, artifactVer
           {candidate.status === "PROPOSED" && <div className="knowledge-curation__actions">
             <button type="button" disabled={busy}
               onClick={() => void decide(candidate, true)}>接受为知识</button>
-            <button type="button" className="secondary-button" disabled={busy}
-              onClick={() => void decide(candidate, false)}>拒绝</button>
+            <Button variant="secondary" disabled={busy}
+              onClick={() => void decide(candidate, false)}>拒绝</Button>
           </div>}
         </li>)}</ul>}
       <p className="helper-text">候选按创建时间倒序，最多显示 20 条。归属项目 {projectId}。</p>

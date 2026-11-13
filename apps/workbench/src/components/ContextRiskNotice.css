@@ -220,9 +220,9 @@
 
 /* 发送前确认条（2026-10-30）：复用同一条紧凑单行与同一列间距，不新造视觉语言。
    2026-11-03：「无法完成风险检查」提示已移除，.context-risk-unavailable 不再有引用。 */
-.context-risk-gate .context-risk-mark { color: var(--color-warning, #b45309); }
+.context-risk-gate .context-risk-mark { color: var(--relay-color-status-warning-text); }
 .context-risk-gate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 6px 8px; border: 1px solid var(--border-strong, rgba(0, 0, 0, 0.16)); border-radius: 8px; }
-.context-risk-gate[data-severity="SEVERE"] { border-color: var(--color-danger, #b91c1c); }
-.context-risk-gate-text { margin: 0; font-size: 12px; line-height: 1.5; }
-.context-risk-check-failed { margin: 0; font-size: 12px; color: var(--text-muted, #6b7280); }
+  padding: var(--relay-space-1) var(--relay-space-2); border: var(--relay-border-width) solid var(--relay-color-border-subtle); border-radius: var(--relay-radius-control); }
+.context-risk-gate[data-severity="SEVERE"] { border-color: var(--relay-color-status-danger-text); }
+.context-risk-gate-text { margin: 0; font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-ui); }
+.context-risk-check-failed { margin: 0; font-size: var(--relay-font-size-caption); color: var(--relay-color-text-muted); }

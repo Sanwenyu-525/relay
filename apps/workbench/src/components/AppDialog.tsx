@@ -2,6 +2,9 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { isTopDialog, popDialog, pushDialog } from "../lib/dialogStack";
+// 直接取组件而不是 ../ui 桶文件：AppDialog 自身被 ui/index.ts 再导出，走桶文件会形成
+// 「AppDialog → ui/index → AppDialog」的循环，改为直接入口后依赖方向单向。
+import IconButton from "../ui/IconButton";
 
 export interface AppDialogProps {
   open: boolean;
@@ -93,7 +96,7 @@ export default function AppDialog({ open, title, variant = "dialog", size, subti
             <h2>{title}</h2>
             {subtitle ? <p className="dialog-header-sub">{subtitle}</p> : null}
           </div>
-          <button className="icon-button" type="button" aria-label="关闭面板" onClick={() => { if (isTopDialog(token.current)) closeRef.current(); }}><X aria-hidden="true" /></button>
+          <IconButton icon={X} label="关闭面板" onClick={() => { if (isTopDialog(token.current)) closeRef.current(); }} />
         </header>
         <div className="dialog-content">{children}</div>
       </section>

@@ -46,6 +46,15 @@
      这里只留颜色变量，形状由全局 :focus-visible 决定。 */
   --pv-focus-ring: var(--relay-color-focus-ring);
 
+  /* 密度契约（UI-UNIFY-02）：页面角色决定密度，pv 页面 = compact。
+     组件只读这四个变量；页面不再逐类目覆写控件高与字号，因此「同一个 Button/Input
+     放进 pv 页面」会得到 34px 控件与 13px 正文，而不是工作台档的 40px/16px。
+     工作台（/agent 等）保持 comfortable，不在任何页面里覆写。 */
+  --relay-control-height: var(--relay-control-height-page);
+  --relay-control-height-prominent: var(--relay-control-height-page);
+  --relay-font-size-body: var(--relay-font-size-pageBase);
+  --relay-font-size-meta: var(--relay-font-size-caption);
+
   width: min(var(--relay-layout-page-maxWidth), 100%);
   margin: 0 auto;
   padding: var(--relay-space-6) var(--relay-layout-page-gutter) var(--relay-space-16);

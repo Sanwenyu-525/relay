@@ -6,6 +6,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import PageHeader from "../components/PageHeader";
 import "./ActivityView.css";
 import { activityActorLabels as actorLabels, activityEventLabel as eventTypeLabel, activityEventSummary as eventSummary, activityRefLabels as refLabels, activityRefLinkLabels as refLinkLabels, activityRefTarget as refTarget, activityEventCategory as eventCategory, activityCategoryMeta as categoryMeta, type ActivityEventCategory } from "../lib/labels";
+import { Button } from "../ui";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MANUAL_PROJECT_OPTION = "__manual__";
@@ -86,7 +87,7 @@ function ActivityEventRow({ item, selected, onSelect }: { item: RelayActivityIte
         <span className="activity-actor-label">{actorLabels[item.actorKind]}</span>
         <span className={`status-chip status-chip--${meta.tone}`}>{meta.chip}</span>
       </div>
-      <button className="text-button" type="button" data-testid={`activity-basis-${item.id}`} aria-pressed={selected} onClick={onSelect}>查看依据</button>
+      <Button variant="text" data-testid={`activity-basis-${item.id}`} aria-pressed={selected} onClick={onSelect}>查看依据</Button>
     </div>
     <p className="activity-summary">{eventSummary(item)}</p>
     <div className="activity-refs">{item.entityRefs.length ? <ul>{item.entityRefs.map((ref) => {
@@ -307,15 +308,15 @@ export default function ActivityView() {
         <label>Run ID<input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="可选 UUID" /></label>
         <label>起始时间（本机时区，包含）<input type="datetime-local" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label>结束时间（本机时区，不包含）<input type="datetime-local" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <button className="primary-button" type="submit">应用筛选</button>
-        <button className="secondary-button" type="button" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新当前范围</button>
+        <Button variant="primary" type="submit">应用筛选</Button>
+        <Button variant="secondary" disabled={loading} onClick={() => setReload((value) => value + 1)}>刷新当前范围</Button>
         {formError && <p className="action-error" role="alert">{formError}</p>}
       </form>
       </details>
       <div className="activity-toolbar">
         <nav className="activity-categories" aria-label="按事件类别筛选（仅已加载项）">
-          {categoryFilters.map((option) => <button key={option.value} type="button" className="text-button"
-            aria-pressed={categoryFilter === option.value} onClick={() => setCategoryFilter(option.value)}>{option.label}</button>)}
+          {categoryFilters.map((option) => <Button variant="text" key={option.value}
+            aria-pressed={categoryFilter === option.value} onClick={() => setCategoryFilter(option.value)}>{option.label}</Button>)}
         </nav>
         <span className="activity-toolbar-label">执行方</span>
         <div className="segmented" role="group" aria-label="按执行方筛选（仅已加载项）">
@@ -342,7 +343,7 @@ export default function ActivityView() {
             <div className="activity-foot">
               <p className="helper-text">当前已读取 {items.length} 条{nextCursor ? "；还有后续页" : "；本次查询没有后续游标"}。不把本页数量当作历史总数。</p>
               {moreError && <p className="action-error" role="alert">续页失败：{moreError}；已保留前面加载的结果。</p>}
-              {nextCursor && <button className="secondary-button" type="button" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取后续页" : "继续加载"}</button>}
+              {nextCursor && <Button variant="secondary" disabled={loadingMore} onClick={() => { void loadMore(); }}>{loadingMore ? "正在读取后续页" : "继续加载"}</Button>}
             </div>
           </>}
         </div>

@@ -6,6 +6,7 @@ import { createCommandId, type RelayApiClient, type RelayArtifact,
   type RelayArtifactLineage, type RelayCombinationCheck,
   type RelayImpactCandidateGroup, type RelayImpactGroupSelection } from "../api/relayClient";
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 type RecoveryKey = "checkId" | "candidateId" | "groupId" | "groupSelectionId" | "combinationId";
 type RecoveryIds = Partial<Record<RecoveryKey, string>>;
@@ -287,7 +288,7 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
     <p className="helper-text">只在点击后分析旧来源与当前来源的差异；明确引用不等于必须修改。AI 推测单独列出，未登记或间接下游不在本轮范围。</p>
     {error && <p className="action-error" role="alert">{error}</p>}
     {notice && <p className="receipt-message" role="status">{notice}</p>}
-    <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshEvidence()}>刷新产物与影响状态</button>
+    <Button variant="secondary" disabled={busy} onClick={() => void refreshEvidence()}>刷新产物与影响状态</Button>
     {pendingCommand && <p className="warning-callout" data-testid="artifact-impact-pending">原 command_id {pendingCommand} 的结果仍待核对；刷新当前事实不会解除或替换该命令。</p>}
     {!current ? <p className="helper-text">只能以该产物的最新版本为变化后的来源进行检查。</p>
       : <><label className="field"><span className="field-label">变化前来源版本</span><select value={beforeId} onChange={(event) => setBeforeId(event.target.value)}>
@@ -302,8 +303,8 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
               ? [...old, edge.childArtifactVersionId!] : old.filter((id) => id !== edge.childArtifactVersionId))} />
             允许模型分析直接引用版本 v{edge.childVersionNumber} · {edge.childArtifactVersionId}</label>)}
         {uses?.hasMore && <p className="warning-callout">登记直接引用超过当前页面范围；本轮不会分析未列出的目标版本。</p>}
-        <button className="primary-button" type="button" disabled={!beforeId || busy || pendingCommand !== null}
-          onClick={() => void startCheck()}>检查影响</button></>}
+        <Button variant="primary" disabled={!beforeId || busy || pendingCommand !== null}
+          onClick={() => void startCheck()}>检查影响</Button></>}
     {check && <div data-testid="artifact-impact-result"><p>分析状态：{check.status}{check.errorCode ? ` · ${check.errorCode}` : ""}{check.stale ? " · 来源基线已变化，请重查" : ""}</p>
       <h3>明确引用 · {check.directTargets.length}</h3>
       {check.directTargets.length ? <ul>{check.directTargets.map((target) => {
@@ -316,8 +317,8 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
             onChange={(event) => setConfirmed((old) => event.target.checked ? [...old, target.targetVersionId]
               : old.filter((id) => id !== target.targetVersionId))} />确认将此推测纳入本次处理范围</label>}
           {check.status === "COMPLETED" && !check.stale && target.availability === "AVAILABLE" &&
-            <button className="secondary-button" type="button" disabled={busy || pendingCommand !== null || (!!reason && !confirmed.includes(target.targetVersionId))}
-              onClick={() => void startCandidate(target.targetVersionId, target.targetArtifactId, !!reason)}>为此目标版本生成修改候选</button>}</li>;
+            <Button variant="secondary" disabled={busy || pendingCommand !== null || (!!reason && !confirmed.includes(target.targetVersionId))}
+              onClick={() => void startCandidate(target.targetVersionId, target.targetArtifactId, !!reason)}>为此目标版本生成修改候选</Button>}</li>;
       })}</ul> : <p className="helper-text">没有已登记直接引用；这不代表没有影响。</p>}
       <h3>AI 推测可能相关 · {check.possiblyRelated.length}</h3>
       <p className="helper-text">仅在上述明确引用中展示推测与依据；推测本身不是确定事实或授权。</p>
@@ -347,9 +348,9 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
             <option key={id} value={id}>{id}</option>)}
         </select>
       </label>)}
-      <button className="secondary-button" type="button"
+      <Button variant="secondary"
         disabled={busy || pendingCommand !== null || groupTargets.length === 0}
-        onClick={() => void createGroup()}>保存候选组（{groupTargets.length}）</button>
+        onClick={() => void createGroup()}>保存候选组（{groupTargets.length}）</Button>
       <h3>未分析范围</h3><ul>{check.unanalysedScope.map((item) => <li key={item}>{item}</li>)}</ul>
     </div>}
     {group && <div data-testid="impact-candidate-group"><h3>候选组</h3>
@@ -377,16 +378,16 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
           onChange={(event) => setSelectedGroupCandidates((old) => event.target.checked
             ? [...old, item.candidateId!] : old.filter((id) => id !== item.candidateId))} />
         选择候选 {item.candidateId} · 目标 {item.targetVersionId}</label>)}
-      <button className="secondary-button" type="button" disabled={busy || pendingCommand !== null || selectedGroupCandidates.length === 0}
-        onClick={() => void createGroupSelection()}>保存依赖选择与顺序</button>
+      <Button variant="secondary" disabled={busy || pendingCommand !== null || selectedGroupCandidates.length === 0}
+        onClick={() => void createGroupSelection()}>保存依赖选择与顺序</Button>
       {groupSelection && <ol data-testid="impact-group-selection">{groupSelection.items.map((item) => <li key={item.candidateId}>
         候选 {item.candidateId} · {item.canApply ? "前置与基线可用" : item.reason ?? "当前不可应用"}
         {item.appliedVersionId ? ` · 已应用 ${item.appliedVersionId}${item.appliedIsCurrent ? "（当前）" : "（已过期）"}`
-          : item.canApply && <button className="secondary-button" type="button" disabled={busy || pendingCommand !== null}
-            onClick={() => void applyGroupSelectionItem(item.candidateId)}>应用此项</button>}
+          : item.canApply && <Button variant="secondary" disabled={busy || pendingCommand !== null}
+            onClick={() => void applyGroupSelectionItem(item.candidateId)}>应用此项</Button>}
       </li>)}</ol>}
-      <button className="secondary-button" type="button" disabled={busy || pendingCommand !== null}
-        onClick={() => void createCombinationCheck()}>保存组合检查单（来源 + 已应用项）</button>
+      <Button variant="secondary" disabled={busy || pendingCommand !== null}
+        onClick={() => void createCombinationCheck()}>保存组合检查单（来源 + 已应用项）</Button>
       <p className="helper-text">组合检查单只记录这组确切版本当时的覆盖；跨 Task 的集合不能保存，单项 PASS 不会相加。</p>
     </div>}
     {combination && <div data-testid="impact-combination-check"><h3>组合检查单</h3>
@@ -404,8 +405,8 @@ export default function ArtifactImpactCheckPanel({ client, lineage }:
       <p>目标版本：<Link to={`/artifact-versions/${candidate.targetVersionId}/lineage`}>{candidate.targetVersionId}</Link></p>
       {candidate.markdown && <pre className="lineage-content">{candidate.markdown}</pre>}
       {candidate.appliedVersionId ? <p>已应用为版本 {candidate.appliedVersionId}</p>
-        : candidate.status === "COMPLETED" && !candidate.stale && <button className="primary-button" type="button"
-          disabled={busy || pendingCommand !== null} onClick={() => void applyCandidate()}>审查后应用为新版本</button>}
+        : candidate.status === "COMPLETED" && !candidate.stale && <Button variant="primary"
+          disabled={busy || pendingCommand !== null} onClick={() => void applyCandidate()}>审查后应用为新版本</Button>}
     </div>}
   </section>;
 }

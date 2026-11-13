@@ -5,6 +5,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayWriteRea
 import { describeLiveError } from "../lib/liveErrors";
 import { useDetailsMenu } from "../lib/popoverMenu";
 import "./WritePermissionControl.css";
+import { Button } from "../ui";
 
 /**
  * 对话页输入器上的「本目录写入档位」入口（工作台 §18.1、tool-adapters §1.2）。
@@ -488,9 +489,9 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
         data-testid="write-permission-reason">
         <p className="helper-text">{hint}</p>
         {/* 服务端答了、但当前状态不属于可调整那一类：唯一能做的事就是再看一次。 */}
-        {readiness !== null && !prereqOk && <button className="secondary-button" type="button"
+        {readiness !== null && !prereqOk && <Button variant="secondary"
           data-testid="write-permission-recheck-tier" disabled={checking}
-          onClick={() => void load()}>{checking ? "正在核对" : "重新核对"}</button>}
+          onClick={() => void load()}>{checking ? "正在核对" : "重新核对"}</Button>}
       </div>}
       {activePending !== null && uncertain && <div className="agent-chat-permission-pending" data-testid="write-permission-pending">
         {/* 2026-10-20（P1-4）：用户看到的是「保存有没有成功」，不是命令协议。
@@ -499,10 +500,10 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
         <p className="helper-text" data-testid="write-permission-pending-text">
           {submitting ? "正在核对是否保存成功…" : "保存结果还没确认"}</p>
         <div className="agent-chat-permission-pending-actions">
-          <button className="secondary-button" type="button" data-testid="write-permission-receipt" disabled={submitting}
-            onClick={activePending.recheck}>{submitting ? "正在核对" : "重新核对"}</button>
-          {mayRetry && <button className="secondary-button" type="button" data-testid="write-permission-retry" disabled={submitting}
-            onClick={activePending.retry}>{submitting ? "正在重试" : "重试保存"}</button>}
+          <Button variant="secondary" data-testid="write-permission-receipt" disabled={submitting}
+            onClick={activePending.recheck}>{submitting ? "正在核对" : "重新核对"}</Button>
+          {mayRetry && <Button variant="secondary" data-testid="write-permission-retry" disabled={submitting}
+            onClick={activePending.retry}>{submitting ? "正在重试" : "重试保存"}</Button>}
         </div>
         <details className="tech-details" data-testid="write-permission-diagnostics">
           <summary>诊断信息</summary>
@@ -515,8 +516,8 @@ export default function WritePermissionControl({ client, projectId, resourceId, 
       {/* 读取失败（含首次读取）的页内恢复出口：写命令在途／结果未核对的错误走上面
           那块待核对流程（有它自己的「重新核对」），这里只服务没有在途命令的失败。 */}
       {actionError !== null && pending === null && pendingDefault === null &&
-        <button className="secondary-button" type="button" data-testid="write-permission-recheck-tier"
-          disabled={checking} onClick={() => void recheckRead()}>{checking ? "正在核对" : "重新核对"}</button>}
+        <Button variant="secondary" data-testid="write-permission-recheck-tier"
+          disabled={checking} onClick={() => void recheckRead()}>{checking ? "正在核对" : "重新核对"}</Button>}
       {/* 菜单底部只留「结果和点的那一行不一致」这一种说明（2026-10-22 用户指令）：
           设置成功时不再回显一句文字，芯片上重读回来的档位名就是那次确认。 */}
       {confirmed !== null && <p className="helper-text" data-testid="write-permission-confirmed">{confirmed}</p>}

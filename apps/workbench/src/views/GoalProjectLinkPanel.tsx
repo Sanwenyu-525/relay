@@ -6,6 +6,7 @@ import { createCommandId, projectGoalLinkFrom, RelayApiError, type RelayApiClien
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { clearPendingCommand, hasDurablePendingCommand, readPendingCommand, reservePendingCommand } from "../lib/pendingCommandStorage";
 import { describeLiveError } from "../lib/liveErrors";
+import { Button } from "../ui";
 
 /**
  * Goal↔Project 关联入口（工作台 §18.7、总纲 §0.8、LC-02）。
@@ -306,8 +307,8 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
       它不会建立任务、改变 Project State，也不会替你决定下一步。</p>
     <div className="form-actions">
       <Link className="primary-button" data-testid="goal-link-open-project" to={`/projects/${link.projectId}`}>打开项目</Link>
-      <button className="secondary-button" type="button" data-testid="goal-link-another"
-        onClick={() => { setLink(null); setSelectedId(""); }}>再关联一个项目</button>
+      <Button variant="secondary" data-testid="goal-link-another"
+        onClick={() => { setLink(null); setSelectedId(""); }}>再关联一个项目</Button>
     </div>
   </section>;
 
@@ -316,8 +317,8 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     <p className="helper-text">关联是独立命令，单独确认。Goal 可以先存在而不属于任何项目；
       只有你在这里选定后，Project 才会把这个目标计入自己的范围。</p>
     {projects === null ? <p className="warning-callout" data-testid="goal-link-projects-failed">
-      项目列表本次读取失败，不能据此关联。<button className="secondary-button" type="button"
-        data-testid="goal-link-reload" onClick={() => void load()}>重新读取</button></p> : <>
+      项目列表本次读取失败，不能据此关联。<Button variant="secondary"
+        data-testid="goal-link-reload" onClick={() => void load()}>重新读取</Button></p> : <>
       <label className="field"><span className="field-label">选择项目</span>
         <select name="goal-link-project" data-testid="goal-link-project" value={selectedId} disabled={busy}
           onChange={(event) => setSelectedId(event.target.value)}>
@@ -327,14 +328,14 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
         </select>
         <small className="helper-text">只列进行中的项目；已归档项目不在这里关联。</small></label>
       <div className="form-actions">
-        <button className="primary-button" type="button" data-testid="goal-link-submit"
-          disabled={busy || selectedId === ""} onClick={() => void submit()}>{busy ? "正在关联" : "确认关联"}</button>
-        <button className="secondary-button" type="button" data-testid="goal-link-refresh"
-          disabled={busy} onClick={() => void load()}>刷新项目列表</button>
+        <Button variant="primary" data-testid="goal-link-submit"
+          disabled={busy || selectedId === ""} onClick={() => void submit()}>{busy ? "正在关联" : "确认关联"}</Button>
+        <Button variant="secondary" data-testid="goal-link-refresh"
+          disabled={busy} onClick={() => void load()}>刷新项目列表</Button>
       </div>
       {nextCursor !== null && <div className="form-actions">
-        <button className="secondary-button" type="button" data-testid="goal-link-more" disabled={loadingMore}
-          onClick={() => void loadMore()}>{loadingMore ? "正在读取后续项目" : "加载更多项目"}</button>
+        <Button variant="secondary" data-testid="goal-link-more" disabled={loadingMore}
+          onClick={() => void loadMore()}>{loadingMore ? "正在读取后续项目" : "加载更多项目"}</Button>
         <small className="helper-text">还有未读的进行中项目；逐页读取，不自动拉全量。</small>
       </div>}
       {moreError && <p className="action-error" role="alert" data-testid="goal-link-more-error">{moreError}</p>}
@@ -349,10 +350,10 @@ export default function GoalProjectLinkPanel({ client, goalId, goalTitle, onLink
     {pending !== null && <div className="warning-callout" data-testid="goal-link-pending">
       <strong>关联命令待核对</strong>
       <p>原 command ID：{pending.commandId} · Project {pending.projectId} · 基于修订 v{pending.expectedRevision}。核对前不会发出第二条关联命令。</p>
-      <button className="secondary-button" type="button" data-testid="goal-link-receipt" disabled={busy}
-        onClick={() => { const request = scope.current; setBusy(true); void checkReceipt(pending, request); }}>查询原命令回执</button>
-      {mayRetry && <button className="secondary-button" type="button" data-testid="goal-link-retry" disabled={busy}
-        onClick={() => { const request = ++scope.current; setBusy(true); void send(pending, request); }}>用原 ID 和原修订重试</button>}
+      <Button variant="secondary" data-testid="goal-link-receipt" disabled={busy}
+        onClick={() => { const request = scope.current; setBusy(true); void checkReceipt(pending, request); }}>查询原命令回执</Button>
+      {mayRetry && <Button variant="secondary" data-testid="goal-link-retry" disabled={busy}
+        onClick={() => { const request = ++scope.current; setBusy(true); void send(pending, request); }}>用原 ID 和原修订重试</Button>}
     </div>}
   </section>;
 }

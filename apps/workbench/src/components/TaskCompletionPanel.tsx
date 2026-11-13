@@ -5,6 +5,7 @@ import { describeLiveError, needsReceiptCheck, type LiveActionError } from "../l
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
 import { liveClient } from "../lib/relayConnection";
 import type { DecimalRevision, TaskStatus } from "../types";
+import { Button } from "../ui";
 
 const wrongReceipt = (commandType: string, action: string): LiveActionError => ({
   kind: "unknown", message: `回执的命令类型是 ${commandType}，不是本次${action}；请核对 command ID。`, fieldErrors: []
@@ -542,26 +543,26 @@ export default function TaskCompletionPanel({ live, target, onRefresh, compact }
       <p className="helper-text" data-testid="completion-artifact-summary">{taskStatus === "DONE" ? "本轮实际接受的产物版本：" : "将随完成提交的产物版本："}{displayedAcceptedArtifactVersionIds.length
         ? displayedAcceptedArtifactVersionIds.map((id) => acceptedVersionDescription(id)).join("；")
         : "无（该任务未声明产物要求时允许为空集合）"}</p>
-      <div className="form-actions"><button className="primary-button" type="button" data-testid="task-complete" disabled={!canComplete} onClick={() => void completeTask()}>
-        <Check aria-hidden="true" />{completing ? "正在提交" : "完成本轮"}</button></div>
+      <div className="form-actions"><Button variant="primary" data-testid="task-complete" disabled={!canComplete} onClick={() => void completeTask()}>
+        <Check aria-hidden="true" />{completing ? "正在提交" : "完成本轮"}</Button></div>
       {!done && !allowedActions.includes("COMPLETE") && <p className="disabled-reason" data-testid="task-complete-reason"><Info aria-hidden="true" />服务端未投影 COMPLETE：只有进行中的人工任务可以完成。</p>}
       {done && <p className="disabled-reason" data-testid="task-complete-done"><Info aria-hidden="true" />该任务当前已完成；需要再次编辑请先重开。</p>}
       {receipt && <p className="receipt-message" role="status" data-testid="task-complete-receipt">{receipt}</p>}
       {failure && <p className="action-error" role="alert">{failure.message}</p>}
       {currentPendingComplete && <p className="helper-text" data-testid="task-complete-pending">上一次完成提交（原 command_id：{currentPendingComplete.commandId}）结果未核实。再次点击「完成本轮」会按原命令 ID 与原内容原样重发；表单中的新修改不会进入原命令。</p>}
-      {currentPendingComplete && <button className="secondary-button" type="button" data-testid="task-complete-receipt-query" disabled={completing} onClick={() => void lookupCompleteReceipt()}>查询本次完成回执</button>}
+      {currentPendingComplete && <Button variant="secondary" data-testid="task-complete-receipt-query" disabled={completing} onClick={() => void lookupCompleteReceipt()}>查询本次完成回执</Button>}
     </section>
     {(done || allowedActions.includes("REOPEN") || reopenReceipt) && <section className={compact ? "collaboration-completion" : "surface-panel"} data-testid="task-reopen">
       <h2>重开任务</h2>
       <p className="helper-text">重开会建立新的验收版本并回到可开始；旧完成凭据与历史版本都保留，不会被删除或改写。</p>
       <label className="field"><span className="field-label">重开原因<span className="field-required" aria-hidden="true">*</span></span>
         <input value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} name="reopen-reason" /></label>
-      <div className="form-actions"><button className="secondary-button" type="button" data-testid="task-reopen-submit" disabled={!canReopen} onClick={() => void reopenTask()}>
-        <RotateCcw aria-hidden="true" />{reopening ? "正在重开" : "重开任务"}</button></div>
+      <div className="form-actions"><Button variant="secondary" data-testid="task-reopen-submit" disabled={!canReopen} onClick={() => void reopenTask()}>
+        <RotateCcw aria-hidden="true" />{reopening ? "正在重开" : "重开任务"}</Button></div>
       {reopenReceipt && <p className="receipt-message" role="status" data-testid="task-reopen-receipt">{reopenReceipt}</p>}
       {reopenFailure && <p className="action-error" role="alert">{reopenFailure.message}</p>}
       {currentPendingReopen && <p className="helper-text" data-testid="task-reopen-pending">上一次重开提交（原 command_id：{currentPendingReopen.commandId}）结果未核实。再次点击「重开任务」会按原命令 ID 与原原因原样重发；输入框中的新原因不会进入原命令。</p>}
-      {currentPendingReopen && <button className="secondary-button" type="button" data-testid="task-reopen-receipt-query" disabled={reopening} onClick={() => void lookupReopenReceipt()}>查询本次重开回执</button>}
+      {currentPendingReopen && <Button variant="secondary" data-testid="task-reopen-receipt-query" disabled={reopening} onClick={() => void lookupReopenReceipt()}>查询本次重开回执</Button>}
     </section>}
   </>;
 }

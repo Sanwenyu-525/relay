@@ -10,7 +10,8 @@ import {
   registerClientDiagnosticsRoutes, resetClientDiagnosticsRateLimitForTest,
 } from '../../src/api/client-diagnostics-api.js';
 import { createServer } from '../../src/api/server.js';
-import { configureRuntimeLog, resetRuntimeLog } from '../../src/infrastructure/runtime-log.js';
+import { configureRuntimeLog, flushRuntimeLogSuppressions, resetRuntimeLog }
+  from '../../src/infrastructure/runtime-log.js';
 
 const TOKEN = 'a'.repeat(48);
 const PREFIX = '/api/v1/workspaces/:workspace_id';
@@ -123,9 +124,15 @@ test('重复诊断由日志去重收敛，仍返回 204', async () => {
       assert.equal(response.statusCode, 204);
     }
     const records = readRecords(directory);
-    // 运行日志对 warn/error 已有 5 条/10 秒的上限，第 6 条落成 log_suppressed 汇总。
+    // 服务端先按 MAX_PER_KEY=10 限频，到达运行日志的 10 条再做 5 条/10 秒去重。
+    flushRuntimeLogSuppressions();
+    const afterFlush = readRecords(directory);
+    const summaries = afterFlush.filter((record) => record.event === 'log_suppressed');
     assert.equal(records.filter((record) => record.event === 'frontend_error').length, 5);
-    assert.equal(records.filter((record) => record.event === 'log_suppressed').length, 1);
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0]?.total_count, 10);
+    assert.equal(summaries[0]?.emitted_count, 5);
+    assert.equal(summaries[0]?.suppressed_count, 5);
   } finally {
     await app.close();
     resetRuntimeLog();
