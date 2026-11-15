@@ -141,6 +141,16 @@
   gap: var(--relay-space-2);
 }
 
+/* Tabs 迁移：计数改为共享组件的 .ui-tabs__badge，仍保持旧 .subnav-count 的继承字号与选中色。 */
+.projects-toolbar .subnav .ui-tabs__badge {
+  font-size: inherit;
+  color: var(--relay-color-text-muted);
+}
+.projects-toolbar .subnav .ui-tabs__item.is-active .ui-tabs__badge {
+  color: var(--relay-color-selection-text);
+}
+.projects-toolbar .subnav .ui-tabs__item { gap: var(--relay-space-2); }
+
 /* 页签计数沿用既有 subnav 的「进行中 (3)」写法，只把数字换成等宽字形便于对齐。 */
 .subnav-count {
   color: var(--relay-color-text-muted);

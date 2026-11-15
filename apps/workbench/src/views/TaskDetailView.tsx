@@ -15,10 +15,10 @@ import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { acceptanceSourceLabels, criterionMethodLabel, executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
-import { handleTabListKeyDown } from "../lib/tabNavigation";
+
 import type { DecimalRevision, ExecutorKind, FixtureError, InteractionMode, TaskStatus } from "../types";
 import "./TaskDetailView.css";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
 
 interface TaskDetailResult {
   readonly source: "fixture" | "live";
@@ -228,7 +228,11 @@ export default function TaskDetailView() {
       overline="Task Detail" meta={headerMeta} actions={headerActions}>{headerIdentity}</PageHeader>;
   const taskReadError = error && <div className="warning-callout" role="alert" data-testid="task-refresh-error"><p>刷新任务事实失败：{error} 草稿与原命令反馈仍保留，核对成功前不能提交新的命令。</p><Button variant="secondary" data-testid="task-refresh-retry" onClick={() => void load()}><RotateCcw aria-hidden="true" />重新读取任务</Button></div>;
   // 页签行右侧的辅助文字入口：路由与准入逻辑不变，只移动呈现位置。
-  const taskTabRow = <div className="task-detail-tabrow" data-testid="task-detail-tabrow"><nav className="skill-tabs" role="tablist" aria-label="任务详情页签" onKeyDown={handleTabListKeyDown}>{tabs.map((item) => <button key={item.key} className={`skill-tab${tab === item.key ? " skill-tab--active" : ""}`} type="button" role="tab" id={`task-detail-tab-${item.key}`} aria-controls="task-detail-content" aria-selected={tab === item.key} tabIndex={tab === item.key ? 0 : -1} data-testid={`task-detail-tab-${item.key}`} onClick={() => { setTab(item.key); if (item.key === "artifacts") setArtifactVisited(true); }}>{item.label}</button>)}</nav><div className="task-detail-quick-links"><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=definition`}>{aiHolds ? "只读查看任务定义" : "完善定义"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=verification`}>{aiHolds ? "只读查看验收方案" : "验收方案"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=assist`}>AI 讨论</Link></div></div>;
+  const taskTabRow = <div className="task-detail-tabrow" data-testid="task-detail-tabrow"><Tabs label="任务详情页签" variant="page" className="skill-tabs" value={tab}
+    onChange={(key) => { setTab(key as "overview" | "artifacts" | "runs"); if (key === "artifacts") setArtifactVisited(true); }}
+    items={tabs.map((item) => ({ key: item.key, label: item.label, className: "skill-tab",
+      id: `task-detail-tab-${item.key}`, ariaControls: "task-detail-content",
+      testId: `task-detail-tab-${item.key}` }))} /><div className="task-detail-quick-links"><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=definition`}>{aiHolds ? "只读查看任务定义" : "完善定义"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=verification`}>{aiHolds ? "只读查看验收方案" : "验收方案"}</Link><Link className="task-detail-quick-link" to={`/tasks/${result.task.id}?skill=assist`}>AI 讨论</Link></div></div>;
   const objectiveSection = <section className="task-detail-section" aria-labelledby="task-objective-heading"><div className="task-detail-section-heading"><h2 id="task-objective-heading">任务目标</h2></div>{result.objective ? <p className="task-detail-objective">{result.objective}</p> : <p className="helper-text">当前响应未提供任务目标。</p>}</section>;
   // 验收条件区块跨页签常驻（隐藏），保证补充条件草稿与未决命令 Owner 在切换页签后仍然保留。
   const criteriaSection = <section className="task-detail-section task-detail-criteria" hidden={tab !== "overview"} aria-labelledby="task-criteria-heading" data-testid="task-detail-criteria">

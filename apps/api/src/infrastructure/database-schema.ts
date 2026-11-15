@@ -971,9 +971,32 @@ export interface KnowledgeVersionRow {
  */
 export type MemorySourceKind = 'MANUAL' | 'USER_STATEMENT' | 'MODEL_OBSERVATION' | 'UNKNOWN';
 
+/** 0164：长期记忆的语义分层。旧行没有类型信息，统一 UNKNOWN。 */
+export type MemoryType = 'USER_PREFERENCE' | 'PROJECT_FACT' | 'EXPERIENCE' | 'EPISODIC' | 'UNKNOWN';
+export type MemoryScope = 'WORKSPACE' | 'PROJECT' | 'TASK' | 'AGENT';
+export type MemoryVerification = 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
+
 export interface MemoryRootRow extends InformationRootRow {
   readonly origin: 'HUMAN_CONFIRMED' | 'AUTO_CAPTURE';
   readonly source_kind: MemorySourceKind;
+  readonly memory_type: MemoryType;
+  readonly scope: MemoryScope;
+  readonly task_id: string | null;
+  readonly agent_id: string | null;
+  readonly memory_key: string | null;
+  readonly importance: number;
+  readonly confidence: number;
+  readonly verification: MemoryVerification;
+  readonly verified_at: Date | null;
+  readonly last_accessed_at: Date | null;
+  readonly stale_at: Date | null;
+  readonly pinned: boolean;
+  readonly supersedes_id: string | null;
+  readonly superseded_by_id: string | null;
+  readonly content_hash: string | null;
+  readonly search_title_tokens: string;
+  readonly search_body_tokens: string;
+  readonly retired_reason: string | null;
 }
 
 export type MemoryItemRow = MemoryRootRow;
@@ -988,8 +1011,51 @@ export interface MemorySettingsRow {
    * 关闭普通自动压缩走 `automatic_compaction`。生效值还要按模型真实窗口收敛。
    */
   readonly compaction_threshold_tokens: number | null;
+  /** 0164：固定记忆每轮常驻预算（tokens）。 */
+  readonly core_token_budget: number;
+  /** 0164：单次自动召回预算（tokens）。 */
+  readonly retrieval_token_budget: number;
+  /** 0164：单次自动召回候选上限。 */
+  readonly retrieval_top_k: number;
+  /** 0164：LITERAL / HYBRID；HYBRID 无可用语义端口时降级为 LITERAL。 */
+  readonly retrieval_mode: 'LITERAL' | 'HYBRID';
+  /** 0164：是否允许低频自动整理。 */
+  readonly auto_consolidate: boolean;
+  readonly consolidation_interval_hours: number;
+  readonly memory_stale_after_days: number;
+  readonly embedding_provider: 'disabled' | 'openai-compatible';
+  readonly remote_embedding_allowed: boolean;
+  readonly include_stale_in_recall: boolean;
   readonly revision: bigint;
   readonly updated_at: Date;
+}
+
+export interface MemoryRecallEventRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string | null;
+  readonly session_id: string | null;
+  readonly query_sha256: string;
+  readonly query_excerpt: string;
+  readonly mode: string;
+  readonly candidates: number;
+  readonly selected: number;
+  readonly tokens: number;
+  readonly latency_ms: number;
+  readonly degraded: string | null;
+  readonly created_at: Date;
+}
+
+export interface MemoryMaintenanceRunRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly trigger: 'MANUAL' | 'AUTO' | 'CLI';
+  readonly status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  readonly stats: JsonObject;
+  readonly error: string | null;
+  readonly started_at: Date;
+  readonly finished_at: Date | null;
+  readonly created_at: Date;
 }
 
 export interface MemoryMessageSourceRow {
@@ -2056,6 +2122,11 @@ export interface ModelCapabilityDeclarationRow {
   readonly provider: string;
   readonly source_model_id: string;
   readonly image_input: boolean;
+  /**
+   * 0165：已核对的模型上下文窗口（tokens）；NULL = 未声明。
+   * 这是模型能力元数据，不是用户的自动压缩阈值——普通用户不在这里配置窗口。
+   */
+  readonly context_window_tokens: number | null;
   readonly note: string | null;
   readonly declared_at: Date;
   readonly updated_at: Date;
@@ -2121,6 +2192,8 @@ export interface RelayDatabaseSchema {
   workspace_memory_settings: MemorySettingsRow;
   memory_message_sources: MemoryMessageSourceRow;
   memory_versions: MemoryVersionRow;
+  memory_recall_events: MemoryRecallEventRow;
+  memory_maintenance_runs: MemoryMaintenanceRunRow;
   decisions: DecisionRow;
   decision_versions: DecisionVersionRow;
   rules: RuleRow;

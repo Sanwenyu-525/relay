@@ -1,6 +1,6 @@
 import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, nullableInteger, nullableString, object, string, stringArray } from "../core/primitives";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryRevision, RelayMemoryStats, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
 
 export function interventionFrom(value: unknown): RelayInterventionItem {
   const row = object(value, "intervention");
@@ -140,8 +140,50 @@ export function knowledgeVersionFrom(value: unknown): RelayKnowledgeVersion {
 function memoryEffectiveStatus(row: Record<string, unknown>, name: string): RelayMemoryEffectiveStatus | null {
   const value = row.effective_status;
   if (value === undefined) return null;
-  if (value === "ACTIVE" || value === "EXPIRED" || value === "RETIRED") return value;
+  if (value === "ACTIVE" || value === "EXPIRED" || value === "RETIRED" ||
+      value === "SUPERSEDED" || value === "STALE") return value;
   throw new RelayContractError(`${name}.effective_status 响应格式无效。`);
+}
+
+/** 0164 字段在旧服务端不存在：缺失用保守默认，存在但类型不对则显式失败。 */
+function optionalInteger(row: Record<string, unknown>, key: string, fallback: number): number {
+  const value = row[key];
+  return value === undefined || value === null ? fallback : integer(row, key, "memory");
+}
+
+/** 旧服务端没有这些可空字段：缺失读 null，存在但不是字符串则按契约错误处理。 */
+function optionalNullableString(row: Record<string, unknown>, key: string, name: string): string | null {
+  if (row[key] === undefined) return null;
+  return nullableString(row, key, name);
+}
+
+function optionalBoolean(row: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = row[key];
+  return value === undefined || value === null ? fallback : boolean(row, key, "memory");
+}
+
+function memoryType(row: Record<string, unknown>): RelayMemory["memoryType"] {  const value = row.memory_type;
+  if (value === undefined || value === null) return "UNKNOWN";
+  if (value === "USER_PREFERENCE" || value === "PROJECT_FACT" || value === "EXPERIENCE" ||
+      value === "EPISODIC" || value === "UNKNOWN") return value;
+  throw new RelayContractError("memory.memory_type 包含未知取值。");
+}
+
+function memoryScope(row: Record<string, unknown>): RelayMemory["scope"] {
+  const value = row.scope;
+  if (value === undefined || value === null) {
+    // 旧服务端只有 project_id：有项目就是项目作用域，否则是工作空间。
+    return typeof row.project_id === "string" ? "PROJECT" : "WORKSPACE";
+  }
+  if (value === "WORKSPACE" || value === "PROJECT" || value === "TASK" || value === "AGENT") return value;
+  throw new RelayContractError("memory.scope 包含未知取值。");
+}
+
+function memoryVerification(row: Record<string, unknown>): RelayMemory["verification"] {
+  const value = row.verification;
+  if (value === undefined || value === null) return "UNVERIFIED";
+  if (value === "VERIFIED" || value === "UNVERIFIED" || value === "FAILED") return value;
+  throw new RelayContractError("memory.verification 包含未知取值。");
 }
 
 /** 0125 的 origin：缺字段按人工确认读——旧数据没有「自动记住」这个概念。 */
@@ -174,8 +216,60 @@ export function memoryFrom(value: unknown): RelayMemory {
     revision: decimal(row, "revision", "memory"), currentVersion: decimal(row, "current_version", "memory"),
     text: string(row, "text", "memory"), confirmedBy: string(row, "confirmed_by", "memory"),
     confirmedAt: string(row, "confirmed_at", "memory"), expiresAt: nullableString(row, "expires_at", "memory"),
-    createdAt: string(row, "created_at", "memory"), updatedAt: string(row, "updated_at", "memory")
+    createdAt: string(row, "created_at", "memory"), updatedAt: string(row, "updated_at", "memory"),
+    memoryType: memoryType(row), scope: memoryScope(row),
+    taskId: optionalNullableString(row, "task_id", "memory"),
+    memoryKey: optionalNullableString(row, "memory_key", "memory"),
+    importance: optionalInteger(row, "importance", 3),
+    confidence: optionalInteger(row, "confidence", 50),
+    verification: memoryVerification(row),
+    verifiedAt: optionalNullableString(row, "verified_at", "memory"),
+    lastAccessedAt: optionalNullableString(row, "last_accessed_at", "memory"),
+    staleAt: optionalNullableString(row, "stale_at", "memory"),
+    pinned: optionalBoolean(row, "pinned", false),
+    supersedesId: optionalNullableString(row, "supersedes_id", "memory"),
+    supersededById: optionalNullableString(row, "superseded_by_id", "memory"),
+    retiredReason: optionalNullableString(row, "retired_reason", "memory")
   };
+}
+
+export function memoryMaintenanceRunFrom(value: unknown): RelayMemoryMaintenanceRun {
+  const row = object(value, "memory maintenance run");
+  const trigger = string(row, "trigger", "memory maintenance run");
+  if (trigger !== "WORKER" && trigger !== "MANUAL") {
+    throw new RelayContractError("memory maintenance run.trigger 包含未知取值。");
+  }
+  const stats = object(row.stats, "memory maintenance run.stats");
+  return { id: string(row, "id", "memory maintenance run"), trigger,
+    status: string(row, "status", "memory maintenance run"),
+    stats: Object.fromEntries(Object.entries(stats).map(([key, value]) => [key, String(value)])),
+    error: nullableString(row, "error", "memory maintenance run"),
+    startedAt: string(row, "started_at", "memory maintenance run"),
+    finishedAt: nullableString(row, "finished_at", "memory maintenance run") };
+}
+
+export function memoryStatsFrom(value: unknown): RelayMemoryStats {
+  const row = object(value, "memory stats");
+  const index = object(row.index_health, "memory stats.index_health");
+  const recall = object(row.recall, "memory stats.recall");
+  const maintenance = object(row.maintenance, "memory stats.maintenance");
+  const types = array(row, "types", "memory stats").map((entry) => {
+    const item = object(entry, "memory type count");
+    return { memoryType: memoryType(item), count: integer(item, "count", "memory type count") };
+  });
+  return { total: integer(row, "total", "memory stats"),
+    active: integer(row, "active", "memory stats"), superseded: integer(row, "superseded", "memory stats"),
+    retired: integer(row, "retired", "memory stats"), expired: integer(row, "expired", "memory stats"),
+    stale: integer(row, "stale", "memory stats"), pinned: integer(row, "pinned", "memory stats"),
+    storageBytes: integer(row, "storage_bytes", "memory stats"),
+    indexHealth: { ftsIndexPresent: boolean(index, "fts_index_present", "memory stats.index_health"),
+      unindexed: integer(index, "unindexed", "memory stats.index_health") },
+    recall: { last24h: integer(recall, "last_24h", "memory stats.recall"),
+      avgLatencyMs: integer(recall, "avg_latency_ms", "memory stats.recall"),
+      lastAt: nullableString(recall, "last_at", "memory stats.recall") },
+    maintenance: { lastAt: nullableString(maintenance, "last_at", "memory stats.maintenance"),
+      runs: array(maintenance, "runs", "memory stats.maintenance").map(memoryMaintenanceRunFrom) },
+    types };
 }
 
 /** 历史修订不可变：故意不读 effective_status，不把当前动态状态安到某一条旧版本上。 */

@@ -1,8 +1,9 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Card, Combobox, Menu, MenuItem, Popover, Separator, Table, TableBody, TableEmpty, TableHead, TableHeaderCell, TableRow, Tabs } from "../src/ui";
+import { Card, Combobox, IconButton, Menu, MenuItem, Popover, Separator, Table, TableBody, TableEmpty, TableHead, TableHeaderCell, TableRow, Tabs } from "../src/ui";
+import { resolveNavigationKey } from "../src/ui/Tabs";
 import { Pencil, Trash2 } from "lucide-react";
 
 /**
@@ -27,6 +28,41 @@ function press(element: Element | Document, key: string) {
   act(() => {
     element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
   });
+}
+
+/** 键盘事件的可选状态在 jsdom 里是只读的，测试里显式覆写才能覆盖 IME 分支。 */
+function pressWith(element: Element, key: string, init: { isComposing?: boolean; keyCode?: number } = {}): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  if (init.isComposing !== undefined) Object.defineProperty(event, "isComposing", { value: init.isComposing });
+  if (init.keyCode !== undefined) Object.defineProperty(event, "keyCode", { value: init.keyCode });
+  act(() => { element.dispatchEvent(event); });
+  return event;
+}
+
+function typeInto(input: HTMLInputElement, value: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function focus(input: HTMLInputElement) {
+  act(() => { input.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+}
+
+function compose(element: Element, type: "compositionstart" | "compositionend") {
+  act(() => { element.dispatchEvent(new CompositionEvent(type, { bubbles: true })); });
+}
+
+function optionLabels(host: HTMLElement): string[] {
+  return Array.from(host.querySelectorAll("[role=\"option\"] .ui-combobox__option-label")).map((node) => node.textContent ?? "");
+}
+
+function activeOption(host: HTMLElement): string | null {
+  const input = host.querySelector<HTMLInputElement>("input")!;
+  const id = input.getAttribute("aria-activedescendant");
+  return id === null ? null : document.getElementById(id)?.textContent ?? null;
 }
 
 afterEach(() => {
@@ -145,6 +181,90 @@ describe("Tabs", () => {
     expect(links[0]?.getAttribute("aria-current")).toBe("page");
     expect(links[1]?.getAttribute("aria-current")).toBeNull();
   });
+
+  it("导航形态省略 value：先精确路径，再子路由，查询参数项优先于“全部”", () => {
+    const items = [
+      { key: "all", label: "全部", href: "/tasks" },
+      { key: "inbox", label: "收件箱", href: "/tasks?tab=inbox" },
+      { key: "detail", label: "详情", href: "/tasks/123" }
+    ];
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "" })).toBe("all");
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "?tab=inbox" })).toBe("inbox");
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "?tab=inbox&foo=1" })).toBe("inbox");
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "?foo=1" })).toBe("all");
+    expect(resolveNavigationKey(items, { pathname: "/tasks/123", search: "" })).toBe("detail");
+    expect(resolveNavigationKey(items, { pathname: "/tasks/123/runs", search: "" })).toBe("detail");
+  });
+
+  it("导航形态：显式 value 优先，但禁用项不会成为 aria-current", () => {
+    const items = [
+      { key: "all", label: "全部", href: "/tasks" },
+      { key: "inbox", label: "收件箱", href: "/tasks?tab=inbox", disabled: true }
+    ];
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "" }, "inbox")).toBeNull();
+    expect(resolveNavigationKey(items, { pathname: "/tasks", search: "" }, "all")).toBe("all");
+  });
+
+  it("禁用导航项不渲染 Link、不进入 Tab 顺序、不响应 Enter", () => {
+    const host = mount(<MemoryRouter><Tabs
+      label="危险区"
+      items={[
+        { key: "safe", label: "安全", href: "/safe" },
+        { key: "locked", label: "已锁定", href: "/locked", disabled: true, testId: "locked-tab" }
+      ]}
+    /></MemoryRouter>);
+    const locked = host.querySelector<HTMLElement>('[data-testid="locked-tab"]')!;
+    expect(locked.tagName).toBe("SPAN");
+    expect(locked.getAttribute("role")).toBe("link");
+    expect(locked.getAttribute("aria-disabled")).toBe("true");
+    expect(locked.tabIndex).toBe(-1);
+    expect(locked.closest("a")).toBeNull();
+    const notNavigated = pressWith(locked, "Enter");
+    expect(notNavigated.defaultPrevented).toBe(false);
+    expect(host.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  it("选择形态：跳过 disabled、Home/End、roving tabindex 与非法 value 退化", () => {
+    const onChange = vi.fn();
+    const host = mount(<Tabs
+      label="范围"
+      value="missing"
+      onChange={onChange}
+      items={[
+        { key: "a", label: "甲" },
+        { key: "b", label: "乙", disabled: true },
+        { key: "c", label: "丙" }
+      ]}
+    />);
+    const tabs = Array.from(host.querySelectorAll<HTMLButtonElement>("[role=\"tab\"]"));
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["false", "false", "false"]);
+
+    press(tabs[0]!, "ArrowRight");
+    expect(onChange).toHaveBeenLastCalledWith("c");
+    press(tabs[2]!, "ArrowRight");
+    expect(onChange).toHaveBeenLastCalledWith("a");
+    press(tabs[0]!, "End");
+    expect(onChange).toHaveBeenLastCalledWith("c");
+    press(tabs[2]!, "Home");
+    expect(onChange).toHaveBeenLastCalledWith("a");
+  });
+
+  it("选择形态与导航形态在组词期间都不消费方向键", () => {
+    const onChange = vi.fn();
+    const host = mount(<Tabs label="范围" value="all" onChange={onChange}
+      items={[{ key: "all", label: "全部" }, { key: "inbox", label: "收件箱" }]} />);
+    const tab = host.querySelector<HTMLButtonElement>("[role=\"tab\"]")!;
+    const event = pressWith(tab, "ArrowRight", { isComposing: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("空 items 安全：不渲染 tab，也不抛错", () => {
+    const host = mount(<Tabs label="空" items={[]} />);
+    expect(host.querySelectorAll("[role=\"tab\"]")).toHaveLength(0);
+    expect(host.querySelector("[role=\"tablist\"]")?.getAttribute("aria-label")).toBe("空");
+  });
 });
 
 describe("Combobox", () => {
@@ -191,6 +311,129 @@ describe("Combobox", () => {
     expect(input.getAttribute("aria-expanded")).toBe("false");
     expect(outer).not.toHaveBeenCalled();
   });
+
+  it("中文组合输入期间 Enter/Escape/方向键都不消费", () => {
+    const onChange = vi.fn();
+    const host = mount(<Combobox label="模型" value={null} onChange={onChange} options={[
+      { value: "a", label: "甲" }, { value: "b", label: "乙" }
+    ]} />);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    const before = activeOption(host);
+    compose(input, "compositionstart");
+
+    const enter = pressWith(input, "Enter", { isComposing: true });
+    const escape = pressWith(input, "Escape", { isComposing: true });
+    const arrow = pressWith(input, "ArrowDown", { isComposing: true });
+    expect(enter.defaultPrevented).toBe(false);
+    expect(escape.defaultPrevented).toBe(false);
+    expect(arrow.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    expect(activeOption(host)).toBe(before);
+  });
+
+  it("keyCode 229 的旧浏览器路径同样不消费", () => {
+    const onChange = vi.fn();
+    const host = mount(<Combobox label="模型" value={null} onChange={onChange} options={[{ value: "a", label: "甲" }]} />);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    const enter = pressWith(input, "Enter", { keyCode: 229 });
+    expect(enter.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("compositionend 后同一轮 Enter 不选择，下一轮 Enter 才选择", async () => {
+    const onChange = vi.fn();
+    const host = mount(<Combobox label="模型" value={null} onChange={onChange} options={[{ value: "a", label: "甲" }]} />);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    compose(input, "compositionstart");
+    compose(input, "compositionend");
+    // 浏览器可能先发 compositionend 再发 keydown，此时 isComposing 已经是 false。
+    pressWith(input, "Enter", { isComposing: false });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pressWith(input, "Enter", { isComposing: false });
+    expect(onChange).toHaveBeenCalledWith("a");
+  });
+
+  it("方向键跳过 disabled，筛选后高亮回退到第一个可用项", () => {
+    const onChange = vi.fn();
+    function StatefulCombobox() {
+      const [value, setValue] = useState<string | null>(null);
+      return <Combobox label="模型" value={value} onChange={(next) => { onChange(next); setValue(next); }} options={[
+        { value: "a", label: "Alpha" },
+        { value: "b", label: "Beta", disabled: true },
+        { value: "c", label: "Gamma" }
+      ]} />;
+    }
+    const host = mount(<StatefulCombobox />);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    expect(activeOption(host)).toBe("Alpha");
+    press(input, "ArrowDown");
+    expect(activeOption(host)).toBe("Gamma");
+    press(input, "Enter");
+    expect(onChange).toHaveBeenCalledWith("c");
+
+    onChange.mockClear();
+    focus(input);
+    typeInto(input, "gamma");
+    expect(optionLabels(host)).toEqual(["Gamma"]);
+    expect(activeOption(host)).toBe("Gamma");
+    press(input, "Enter");
+    expect(onChange).toHaveBeenLastCalledWith("c");
+    expect(input.value).toBe("Gamma");
+  });
+
+  it("全部 disabled 时没有高亮，Enter 不下沉为表单提交", () => {
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const host = mount(<form onSubmit={onSubmit}><Combobox label="模型" value={null} onChange={onChange} options={[
+      { value: "a", label: "甲", disabled: true }, { value: "b", label: "乙", disabled: true }
+    ]} /></form>);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    expect(activeOption(host)).toBeNull();
+    const enter = pressWith(input, "Enter");
+    expect(enter.defaultPrevented).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("受控 value 在关闭态同步显示 label；切到 disabled 时强制收起", () => {
+    const render = (value: string | null, disabled = false) => <Combobox label="模型" value={value} onChange={() => undefined}
+      disabled={disabled} options={[{ value: "a", label: "甲" }, { value: "b", label: "乙" }]} />;
+    const host = mount(render("a"));
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    expect(input.value).toBe("甲");
+    act(() => { root?.render(render("b")); });
+    expect(input.value).toBe("乙");
+    focus(input);
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    act(() => { root?.render(render("b", true)); });
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.disabled).toBe(true);
+  });
+
+  it("鼠标选择与键盘选择的结果一致", () => {
+    const onChange = vi.fn();
+    const host = mount(<Combobox label="模型" value={null} onChange={onChange} options={[{ value: "a", label: "甲" }, { value: "b", label: "乙" }]} />);
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    focus(input);
+    act(() => {
+      host.querySelectorAll<HTMLElement>("[role=\"option\"]")[1]!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    expect(onChange).toHaveBeenLastCalledWith("b");
+    onChange.mockClear();
+    focus(input);
+    press(input, "ArrowDown");
+    press(input, "Enter");
+    expect(onChange).toHaveBeenLastCalledWith("b");
+  });
 });
 
 describe("Table / Card / Separator", () => {
@@ -217,5 +460,18 @@ describe("Table / Card / Separator", () => {
     expect(cards[0]?.querySelector(".ui-card__footer")?.textContent).toBe("v1");
     expect(cards[1]?.querySelector(".ui-card__head")).toBeNull();
     expect(host.querySelector("hr")?.getAttribute("aria-orientation")).toBe("horizontal");
+  });
+
+  it("图标按钮：默认用 label 作原生提示，title=false 时交给 Tooltip 且保留 aria-label", () => {
+    const host = mount(<>
+      <IconButton icon={Pencil} label="编辑" data-testid="default-title" />
+      <IconButton icon={Trash2} label="删除" title={false} data-testid="no-title" />
+    </>);
+    const withTitle = host.querySelector<HTMLButtonElement>('[data-testid="default-title"]')!;
+    const noTitle = host.querySelector<HTMLButtonElement>('[data-testid="no-title"]')!;
+    expect(withTitle.getAttribute("aria-label")).toBe("编辑");
+    expect(withTitle.getAttribute("title")).toBe("编辑");
+    expect(noTitle.getAttribute("aria-label")).toBe("删除");
+    expect(noTitle.hasAttribute("title")).toBe(false);
   });
 });

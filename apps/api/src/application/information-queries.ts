@@ -53,7 +53,16 @@ function memoryDto(row: MemoryStateRow): Record<string, unknown> {
     expires_at: row.expires_at?.toISOString() ?? null, effective_status: row.effective_status,
     // 0125 承诺过的 origin 与 DEV-0042 的来源类别：界面据此区分「人工确认」「自动记住」
     // 以及「自动记住里哪一条是用户原话、哪一条只是模型叙述」。
-    origin: row.origin, source_kind: row.source_kind };
+    origin: row.origin, source_kind: row.source_kind,
+    // 0164：分层、作用域、验证/固定与替代关系。管理页与召回解释都从这里读，
+    // 不按 title 文本猜类型；旧行是 UNKNOWN。
+    memory_type: row.memory_type, scope: row.scope, task_id: row.task_id,
+    memory_key: row.memory_key, importance: row.importance, confidence: row.confidence,
+    verification: row.verification, verified_at: row.verified_at?.toISOString() ?? null,
+    last_accessed_at: row.last_accessed_at?.toISOString() ?? null,
+    stale_at: row.stale_at?.toISOString() ?? null, pinned: row.pinned,
+    supersedes_id: row.supersedes_id, superseded_by_id: row.superseded_by_id,
+    retired_reason: row.retired_reason };
 }
 
 async function dto(db: DbExecutor, kind: Exclude<Kind, 'memory'>, row: Root): Promise<Record<string, unknown>> {
@@ -84,14 +93,18 @@ async function requireProjectFilter(db: DbExecutor, workspaceId: string,
 }
 
 export async function listInformation(db: DbExecutor, kind: Kind, workspaceId: string,
-  projectId?: string, effectiveStatus: MemoryEffectiveStatus | 'ALL' = 'ALL'): Promise<readonly Record<string, unknown>[]> {
+  projectId?: string, effectiveStatus: MemoryEffectiveStatus | 'ALL' = 'ALL',
+  filters: { readonly memoryType?: string; readonly origin?: string; readonly query?: string;
+    readonly limit?: number } = {}): Promise<readonly Record<string, unknown>[]> {
   const repo = createRepositories(db).information;
   await requireProjectFilter(db, workspaceId, projectId);
   if (kind === 'memory') {
-    if (!['ALL', 'ACTIVE', 'EXPIRED', 'RETIRED'].includes(effectiveStatus)) {
-      throw validationFailed([{ field: 'effective_status', message: 'expected ALL, ACTIVE, EXPIRED, or RETIRED' }]);
+    if (!['ALL', 'ACTIVE', 'EXPIRED', 'RETIRED', 'SUPERSEDED', 'STALE'].includes(effectiveStatus)) {
+      throw validationFailed([{ field: 'effective_status',
+        message: 'expected ALL, ACTIVE, EXPIRED, RETIRED, SUPERSEDED, or STALE' }]);
     }
-    return (await repo.listMemoryStates(workspaceId, { projectId, effectiveStatus })).map(memoryDto);
+    return (await repo.listMemoryStates(workspaceId, { projectId, effectiveStatus,
+      ...filters })).map(memoryDto);
   }
   const rows = await repo.listRoots<Root>(kind, workspaceId, projectId);
   return Promise.all(rows.map((row) => dto(db, kind, row)));

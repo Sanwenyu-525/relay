@@ -65,11 +65,11 @@ const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MIN_MAX_OUTPUT_TOKENS = 256;
 const MAX_MAX_OUTPUT_TOKENS = 65_536;
-const DEFAULT_MAX_CALL_TOKENS = 65_536;
+const DEFAULT_MAX_CALL_TOKENS = 1_048_576;
 const MIN_MAX_CALL_TOKENS = 1_024;
 const MAX_MAX_CALL_TOKENS = 1_048_576;
 const DEFAULT_MAX_SCOPE_CALLS = 32;
-const DEFAULT_MAX_SCOPE_TOKENS = 262_144;
+const DEFAULT_MAX_SCOPE_TOKENS = 1_048_576;
 export const OPENROUTER_CHAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
 /**
@@ -109,7 +109,7 @@ export function readModelPortConfig(env: NodeJS.ProcessEnv): ModelPortConfig | u
     'RELAY_MODEL_MAX_CALL_TOKENS', issues);
   const maxScopeCalls = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_CALLS,
     DEFAULT_MAX_SCOPE_CALLS, 1, 256, 'RELAY_MODEL_MAX_SCOPE_CALLS', issues);
-  // 2026-10-24：scope 预算必须盖住单次预算（三档含 1M），未显式配置时按「至少等于单次预算」取默认。
+  // scope 预算必须盖住单次预算（0165 默认目标 1M），未显式配置时按「至少等于单次预算」取默认。
   const maxScopeTokens = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_TOKENS,
     Math.max(DEFAULT_MAX_SCOPE_TOKENS, maxCallTokens), MIN_MAX_CALL_TOKENS, 2_000_000,
     'RELAY_MODEL_MAX_SCOPE_TOKENS', issues);
@@ -171,7 +171,7 @@ export function readDeclaredImageInput(env: NodeJS.ProcessEnv): boolean {
     'RELAY_MODEL_MAX_CALL_TOKENS', issues);
   const maxScopeCalls = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_CALLS,
     DEFAULT_MAX_SCOPE_CALLS, 1, 256, 'RELAY_MODEL_MAX_SCOPE_CALLS', issues);
-  // 2026-10-24：scope 预算必须盖住单次预算（三档含 1M），未显式配置时按「至少等于单次预算」取默认。
+  // scope 预算必须盖住单次预算（0165 默认目标 1M），未显式配置时按「至少等于单次预算」取默认。
   const maxScopeTokens = readBoundedInteger(env.RELAY_MODEL_MAX_SCOPE_TOKENS,
     Math.max(DEFAULT_MAX_SCOPE_TOKENS, maxCallTokens), MIN_MAX_CALL_TOKENS, 2_000_000,
     'RELAY_MODEL_MAX_SCOPE_TOKENS', issues);

@@ -14,12 +14,14 @@ export interface TableProps {
   readonly dense?: boolean;
   /** 表头在滚动容器内吸附。 */
   readonly stickyHead?: boolean;
+  /** 外层描边与圆角；嵌在已有 surface-panel 里时传 false，避免双层边框。 */
+  readonly framed?: boolean;
   readonly className?: string;
   readonly testId?: string;
 }
 
-export function Table({ children, caption, dense = false, stickyHead = false, className, testId }: TableProps) {
-  return <div className="ui-table-wrap">
+export function Table({ children, caption, dense = false, stickyHead = false, framed = true, className, testId }: TableProps) {
+  return <div className={cn("ui-table-wrap", !framed && "ui-table-wrap--bare")}>
     <table
       className={cn("ui-table", dense && "ui-table--dense", stickyHead && "ui-table--sticky", className)}
       data-testid={testId}
@@ -38,12 +40,13 @@ export function TableBody({ children }: { readonly children: ReactNode }) {
   return <tbody className="ui-table__body">{children}</tbody>;
 }
 
-export function TableRow({ children, selected = false, className }: {
+export function TableRow({ children, selected = false, className, testId }: {
   readonly children: ReactNode;
   readonly selected?: boolean;
   readonly className?: string;
+  readonly testId?: string;
 }) {
-  return <tr className={cn("ui-table__row", selected && "is-selected", className)} aria-selected={selected || undefined}>{children}</tr>;
+  return <tr className={cn("ui-table__row", selected && "is-selected", className)} aria-selected={selected || undefined} data-testid={testId}>{children}</tr>;
 }
 
 export function TableHeaderCell({ children, align, className, ...rest }: Omit<ThHTMLAttributes<HTMLTableCellElement>, "align"> & { readonly align?: "start" | "end" | "center" }) {

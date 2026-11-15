@@ -8,7 +8,7 @@ import { resolveVerificationState, verificationLabels, verifyErrorCategoryLabels
   type ModelVerificationStateKind } from "../lib/modelVerification";
 import PackCatalogPanel from "../components/PackCatalogPanel";
 import MemorySettingsCard from "../components/MemorySettingsCard";
-import ContextBudgetCard from "../components/ContextBudgetCard";
+import MemoryAdvancedSettingsCard from "../components/MemoryAdvancedSettingsCard";
 import { CurrentModelUsageCard } from "../components/CurrentModelUsageCard";
 import { ModelConnectionsCard } from "../components/ModelConnectionsCard";
 import DeveloperDiagnosticsPanel from "../components/DeveloperDiagnosticsPanel";
@@ -983,8 +983,8 @@ export default function SettingsView({ initialGroup = "basic" }: {
                 verification={verification} verifying={verifying} onVerify={onVerify} />
               <ModelConnectionsCard client={client}
                 onDefaultsChanged={() => { setDefaultsRevision((current) => current + 1); }} />
-              <ContextBudgetCard client={client} />
               <MemorySettingsCard client={client} />
+              <MemoryAdvancedSettingsCard client={client} />
               <ModelAdvancedDiagnostics client={client} status={status} verification={verification}
                 verifying={verifying} onSaved={refresh} />
               </>}

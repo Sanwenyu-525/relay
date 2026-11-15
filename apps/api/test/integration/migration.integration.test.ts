@@ -247,6 +247,10 @@ const ALL_MIGRATIONS = [
   // 中断事实与逐回合检查点。清单必须同步，否则真实库上会因多两条而失败。
   '0162_context_compaction_threshold',
   '0163_assist_generation_continuation',
+  // 0164 记忆系统 v2、0165 模型上下文窗口容量、0166 记忆 actor 来源。
+  '0164_memory_system_v2',
+  '0165_model_context_window_capacity',
+  '0166_memory_actor_sources',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {
@@ -995,6 +999,122 @@ test('0150 backfills scope_seq from the opening user message and keeps history r
     assert.equal(String(snapshot?.scope_seq ?? ''), '7', '快照的轮次顺序回填自开启消息的 seq');
     assert.equal(String(event?.scope_seq ?? ''), '7', '事件的轮次顺序同样回填');
     assert.equal(event?.request_digest, null, '历史事件保持无摘要，由重放比较兜底');
+  } finally {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+    await database.drop();
+  }
+});
+
+test('0165 只提升旧默认连接预算、新增模型窗口列且不删除旧会话档位', async () => {
+  const database = await createTemporaryDatabase('model_context_window_legacy');
+  const directory = await createMigrationDirectoryFixture((files) => {
+    for (const name of files.keys()) if (name >= '0165_') files.delete(name);
+  });
+  const app = openDatabase(database.appUrl, 'relay-api-test-model-context-window-legacy');
+  try {
+    await runMigrations({ connectionString: database.migrationUrl, directory });
+    const workspaceId = randomUUID();
+    const legacySessionId = randomUUID();
+    const untouchedConnectionId = randomUUID();
+    const legacyConnectionId = randomUUID();
+    const mixedConnectionId = randomUUID();
+    await app.db.transaction().execute(async (trx) => {
+      await sql`insert into workspaces (id, name) values (${workspaceId}, 'Window legacy')`.execute(trx);
+      // 0143 出厂默认：两列都是旧默认的旧连接应被抬到 1M 目标上界。
+      await sql`insert into model_connections (id, workspace_id, name, provider_kind,
+          default_model, max_call_tokens, max_scope_tokens, credential_ref)
+        values (${legacyConnectionId}, ${workspaceId}, 'legacy-default',
+          'openai-compatible', 'gpt-4.1-mini', 65536, 262144, 'credential_legacy')`.execute(trx);
+      // 只改过作用域列：用户显式调过的值不能静默回退或放大。
+      await sql`insert into model_connections (id, workspace_id, name, provider_kind,
+          default_model, max_call_tokens, max_scope_tokens, credential_ref)
+        values (${mixedConnectionId}, ${workspaceId}, 'mixed-budget',
+          'openai-compatible', 'gpt-4.1-mini', 65536, 524288, 'credential_mixed')`.execute(trx);
+      // 与旧默认无关的显式小预算：同样保持原值。
+      await sql`insert into model_connections (id, workspace_id, name, provider_kind,
+          default_model, max_call_tokens, max_scope_tokens, credential_ref)
+        values (${untouchedConnectionId}, ${workspaceId}, 'small-budget',
+          'openai-compatible', 'gpt-4.1-mini', 32768, 65536, 'credential_small')`.execute(trx);
+      await sql`insert into assist_sessions (id, workspace_id, project_id, task_id, title,
+          conversation_mode, chat_mode, context_budget_tokens, context_budget_revision)
+        values (${legacySessionId}, ${workspaceId}, null, null, 'Legacy tier', 'AGENT',
+          'CHAT', 524288, 3)`.execute(trx);
+      await sql`insert into model_capability_declarations (provider, source_model_id,
+          image_input, note)
+        values ('openai-compatible', 'legacy/model', true, '旧能力声明')`.execute(trx);
+    });
+
+    const applied = await runMigrations({ connectionString: database.migrationUrl,
+      directory: MIGRATIONS_DIRECTORY });
+    assert.ok(applied.applied.includes('0165_model_context_window_capacity'));
+
+    const connections = (await sql<{ id: string; max_call_tokens: number;
+      max_scope_tokens: number }>`select id, max_call_tokens, max_scope_tokens
+        from model_connections order by name`.execute(app.db)).rows;
+    const legacy = connections.find((row) => row.id === legacyConnectionId);
+    const mixed = connections.find((row) => row.id === mixedConnectionId);
+    const untouched = connections.find((row) => row.id === untouchedConnectionId);
+    // 1048576 是连接硬上限的二进制出厂上界；真正的产品目标 1,000,000 由
+    // `MODEL_CONTEXT_TARGET_TOKENS` 在解析时取 min，不靠这条 DB 默认值表达。
+    assert.equal(legacy?.max_call_tokens, 1_048_576, '旧双默认连接的单次上限抬到目标上界');
+    assert.equal(legacy?.max_scope_tokens, 1_048_576, '旧双默认连接的作用域上限同步抬高');
+    assert.equal(mixed?.max_call_tokens, 65_536, '用户改过作用域列时不回填单次列');
+    assert.equal(mixed?.max_scope_tokens, 524_288, '用户改过作用域列时保持原值');
+    assert.equal(untouched?.max_call_tokens, 32_768, '非旧默认组合保持原值');
+    assert.equal(untouched?.max_scope_tokens, 65_536, '非旧默认组合保持原值');
+
+    const session = (await sql<{ context_budget_tokens: number;
+      context_budget_revision: string }>`select context_budget_tokens, context_budget_revision
+        from assist_sessions where id = ${legacySessionId}`.execute(app.db)).rows[0];
+    assert.equal(session?.context_budget_tokens, 524_288, '旧会话档位数据保留，不被转成压缩阈值');
+    assert.equal(String(session?.context_budget_revision), '3', '旧档位修订保持可读');
+
+    const declaration = (await sql<{ context_window_tokens: number | null }>
+      `select context_window_tokens from model_capability_declarations
+        where provider = 'openai-compatible' and source_model_id = 'legacy/model'`
+      .execute(app.db)).rows[0];
+    assert.equal(declaration?.context_window_tokens, null, '历史能力声明新增列为 NULL');
+
+    const defaultRows = (await sql<{ column_name: string; column_default: string | null }>
+      `select column_name, column_default from information_schema.columns
+        where table_name = 'model_connections'
+          and column_name in ('max_call_tokens', 'max_scope_tokens')
+        order by column_name`.execute(app.db)).rows;
+    assert.match(defaultRows[0]?.column_default ?? '', /1048576/u);
+    assert.match(defaultRows[1]?.column_default ?? '', /1048576/u);
+
+    // 新列是能力元数据：合法声明可写；明显单位错误由 CHECK 拒绝。
+    await sql`update model_capability_declarations set context_window_tokens = 200000
+      where provider = 'openai-compatible' and source_model_id = 'legacy/model'`.execute(app.db);
+    await assert.rejects(() => sql`update model_capability_declarations
+      set context_window_tokens = 12000
+      where provider = 'openai-compatible' and source_model_id = 'legacy/model'`.execute(app.db),
+      (error: unknown) => (error as { code?: string }).code === '23514');
+    const valid = (await sql<{ context_window_tokens: number }>
+      `select context_window_tokens from model_capability_declarations
+        where provider = 'openai-compatible' and source_model_id = 'legacy/model'`
+      .execute(app.db)).rows[0];
+    assert.equal(valid?.context_window_tokens, 200_000, '合法窗口声明保留');
+
+    const comments = (await sql<{ table_name: string; column_name: string;
+      comment: string | null }>`select c.relname as table_name, a.attname as column_name,
+        col_description(c.oid, a.attnum) as comment
+        from pg_class c join pg_attribute a on a.attrelid = c.oid
+        where c.relname in ('assist_sessions', 'workspace_default_directories',
+          'model_capability_declarations', 'model_connections')
+          and a.attname in ('context_budget_tokens', 'context_budget_revision',
+            'context_window_tokens', 'max_call_tokens', 'max_scope_tokens')
+          and col_description(c.oid, a.attnum) is not null
+        order by c.relname, a.attnum`.execute(app.db)).rows;
+    const byColumn = new Map(comments.map((row) => [`${row.table_name}.${row.column_name}`,
+      row.comment ?? '']));
+    assert.match(byColumn.get('assist_sessions.context_budget_tokens') ?? '', /LEGACY（0165）/u);
+    assert.match(byColumn.get('assist_sessions.context_budget_revision') ?? '', /LEGACY（0165）/u);
+    assert.match(byColumn.get('workspace_default_directories.context_budget_tokens') ?? '',
+      /LEGACY（0165）/u);
+    assert.match(byColumn.get('model_capability_declarations.context_window_tokens') ?? '',
+      /不是用户的压缩阈值/u);
   } finally {
     await app.close();
     await rm(directory, { recursive: true, force: true });

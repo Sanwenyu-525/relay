@@ -14,7 +14,7 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelayChatMode, type RelayGoalView, type RelayPlanView,
   type RelayTaskSkillProposal, type RelayUndoPlan,
   type RelayWorkingDirectory, type RelayWorkingDirectorySource,
-  type RelaySessionContextUsage, type RelayContextBudgetTokens, type RelayTokenUsage,
+  type RelaySessionContextUsage, type RelayTokenUsage,
   type RelayWorkspaceDefaultDirectory, type RequiredContextAudit } from "../api/relayClient";
 import type { RelayModelConnection } from "../api/dtos/information";
 // CONTEXT-COMPACTION-0162：手动压缩的 CAS 基线类型（会话整行修订）。
@@ -395,18 +395,12 @@ type PendingCreate = { readonly commandId: string; readonly projectId: string | 
    * 进载荷而不是每次发送时现读：创建响应丢失后按原命令重试，继承的仍是当时那一条。
    */
   readonly sourceSessionId?: string | null;
-  /**
-   * 0145：用户在首条消息之前明确选的档位。
-   * 同样进载荷：创建响应丢失后按原命令重试，写进去的仍是同一档，
-   * 不会出现「重试时按别的档位建出会话」。
-   */
-  readonly contextBudgetTokens?: RelayContextBudgetTokens | null };
+};
 
 /** 建会话载荷：助手档的助手 id 允许显式 null（表示「还没选助手」）。 */
 type CreateSessionInput = { commandId: string; projectId: string | null; taskId: string | null;
   title: string; conversationMode?: RelayConversationMode; chatMode?: RelayChatMode;
-  assistantProfileId?: string | null; sourceSessionId?: string | null;
-  contextBudgetTokens?: RelayContextBudgetTokens | null };
+  assistantProfileId?: string | null; sourceSessionId?: string | null };
 /**
  * 首条消息过程的唯一 Owner。命令身份、在途阶段与已完成解释必须比任何一次
  * AssistView 挂载都活得久：建会话成功后协作页会按会话 key 重新挂载它，
@@ -3880,12 +3874,11 @@ const MIN_PANEL_HEIGHT_PX = 168;
  * 独占（useMenuExclusive）、点外即收、Esc 收起还焦点、焦点进入浮层。
  *
  * 2026-10-30（第三轮，0145）：浮层正文整体交给 `ContextUsagePanel`——
- * 用量摘要 / 上下文构成 / 会话档位三段各自有来源；分子取最近一次调用的真实读数，
- * 分母取当前会话档位（2026-11-11 用户指令），圆环与浮层共用同一份投影（`usage`）。
- * 档位改成会话级，浮层里不再有「跟随应用默认」。读数未知时轨道虚线、不画弧，
- * 与「真的 0%」分开。
+ * 用量摘要 / 压缩策略 / 上下文构成各自有来源；分子取最近一次调用的真实读数，
+ * 分母取当前模型的可用窗口（2026-11-15，0165），圆环与浮层共用同一份投影（`usage`）。
+ * 会话档位入口已取消；读数未知时轨道虚线、不画弧，与「真的 0%」分开。
  */
-function ContextMeter({ usage, loading, error, sessionId, sessionRevision, client, onReload, onSaved }: {
+function ContextMeter({ usage, loading, error, sessionId, sessionRevision, client, onReload }: {
   readonly usage: RelaySessionContextUsage | null;
   readonly loading: boolean;
   readonly error: string | null;
@@ -3894,13 +3887,12 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
   readonly sessionRevision: DecimalRevision;
   readonly client: RelayApiClient | null;
   readonly onReload: () => void;
-  readonly onSaved: () => void;
 }) {
   const lastCall = usage?.lastCall ?? null;
   const inputTokens = lastCall?.inputTokens ?? null;
-  // 2026-11-11 用户指令：占比直接按**当前会话档位**解释，与浮层、三档单选共用一个分母。
+  // 0165：占比直接按**当前模型可用窗口**解释，与浮层共用一个分母。
   // 那次调用冻结的预算不再参与圆环计算，只在浮层里作为差异说明保留。
-  const limit = usage?.budget.tokens ?? null;
+  const limit = usage?.compaction.effectiveWindowTokens ?? null;
   const ratio = inputTokens !== null && limit !== null && limit > 0 ? inputTokens / limit : null;
   const percent = ratio === null ? null : formatRatioPercent(ratio);
   const high = ratio !== null && ratio >= 0.8;
@@ -3909,9 +3901,9 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
   const inputText = inputTokens === null ? null : inputTokens.toLocaleString();
   const meterText = lastCall === null ? "尚无模型调用"
     : inputTokens === null ? "上下文用量未上报"
-      : ratio === null ? `上下文 ${inputText} tokens · 预算未知`
+      : ratio === null ? `上下文 ${inputText} tokens · 窗口未知`
         : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
-          + (over ? " · 已超出当前档位" : "");
+          + (over ? " · 已超出当前模型可用窗口" : "");
   const cacheRead = lastCall?.cacheReadTokens ?? null;
   const hitRate = inputTokens !== null && cacheRead !== null && inputTokens > 0 &&
     cacheRead <= inputTokens ? cacheRead / inputTokens : null;
@@ -4053,7 +4045,7 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
   // 标题旁的小信息图标：口径说明只留这一句，悬停/聚焦即浮出，不占浮层正文。
   const { tooltipHandlers: infoHandlers, tooltipNode: infoTooltipNode,
     dismissTooltip: dismissInfoTooltip } = usePathTooltip(
-    () => (open ? "总用量取最近一次模型调用的真实读数，占比相对当前会话档位；分项按请求文本估算，不是 Provider 的分词结果。" : null),
+    () => (open ? "总用量取最近一次模型调用的真实读数，占比相对当前模型可用窗口；分项按请求文本估算，不是 Provider 的分词结果。" : null),
     "context-meter-info-tooltip");
   // 浮层关掉后信息图标的锚点已经不在文档里，已浮出的提示要一并收掉。
   useEffect(() => {
@@ -4115,7 +4107,7 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
         </div>
         <ContextUsagePanel client={client} sessionId={sessionId}
           sessionRevision={sessionRevision} usage={usage} loading={loading}
-          error={error} onReload={onReload} onSaved={onSaved} />
+          error={error} onReload={onReload} />
       </div>, document.body)}
       {tooltipNode}
     </div>
@@ -7670,8 +7662,7 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               （还没有会话、没有真实用量可读的欢迎页）；已建会话的空态仍保留圆环与档位入口。 */}
           <ContextMeter usage={contextUsage} loading={contextUsageLoading} error={contextUsageError}
             sessionId={session.id} sessionRevision={session.revision} client={client}
-            onReload={() => setContextUsageRevision((revision) => revision + 1)}
-            onSaved={() => setContextUsageRevision((revision) => revision + 1)} />
+            onReload={() => setContextUsageRevision((revision) => revision + 1)} />
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
             sessionId={session.id}
             selectedModel={selectedModel} selectedConnectionId={selectedConnectionId}

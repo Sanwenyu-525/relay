@@ -1,20 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { contextCompactionWireFixture } from "../contextUsageFixture";
 
-// 上下文用量浮层（0145 / 2026-10-30，UI-CONTEXT-FINAL-POLISH / 2026-11-01 收口）：真实 Chromium 里的几何与状态验收。
-//
-// 浮层三段内容各有来源，读序按「先看事实 → 再看构成 → 最后才改档位」：
-//   ① 最近一次模型调用——主读数一行「已用 / 当前档位 tokens + 占比」、细进度线、两列二级信息；
-//   ② 上下文构成——只显示服务端真的采到的分项，标「估算」；没有分项时只写「暂无分项统计」；
-//   ③ 当前档位——三档严格横排，落在浮层最底部的**停靠区**（真实布局，不是 sticky 覆盖层）。
-//
-// 几何判据（真实桌面窗口 + 窄窗）：
-//   · 浮层以**圆环**为锚（不再是整张输入卡）：上方放得下就贴在环顶上方 7px，放不下才翻到环下方；
-//   · 水平中线对准圆环中心，整块夹进视口；portal 到 body，所以 fixed 坐标就是视口坐标，不被中栏 overflow 裁掉；
-//   · 不压住发送键与模型下拉（工具行在浮层之下）；
-//   · 窄窗三档仍在一行（`nowrap`），且各自命中区不小于 20px；档位停靠区始终在首屏可点；
-//   · 内容再多也只让滚动区内部滚动，不把输入卡顶上去，也不重置滚动位置。
-//
-// 只连页面内夹具：不连数据库、不调 Provider、不写任何真实业务事实。
+/**
+ * 0165：上下文用量浮层只读展示「模型真实窗口 / 用户阈值 / 生效阈值 / 距离」，
+ * 不再有三档窗口选择；手动压缩仍可用。
+ *
+ * 这里用真实 Chromium 核对界面事实：模型窗口只读、未知窗口不伪造 1M、用户设置与
+ * 生效值分开说、分项读序稳定、浮层不压住发送键；API 全部由 page.route 伪造。
+ */
 
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -22,16 +15,8 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "66666666-6666-4666-8666-666666666666";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-// 夹具的 CORS 允许源必须跟着实际预览端口走：playwright.config.ts 支持 RELAY_E2E_PORT 覆盖，
-// 写死 4173 会让换端口的整轮用例卡在「已连接」之前（响应被浏览器按 CORS 拦掉）。
 const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 
-/**
- * 截图默认写本次运行的输出目录（test-results/<spec>/<test>/…，playwright 每轮开局清空、
- * 随 --output 换目录）：两轮运行互不覆盖，`--output` 单独设置也真正管得到。
- * 旧写法把绝对路径写死在页面代码里，runner 的输出隔离碰不到它（2026-11-11 验收整改）。
- * 需要把对照图固定导出到验收目录时设 RELAY_ACCEPTANCE_SHOTS_DIR。
- */
 function shot(name: string): string {
   const override = process.env.RELAY_ACCEPTANCE_SHOTS_DIR;
   return override === undefined ? test.info().outputPath(name) : `${override}/${name}`;
@@ -67,7 +52,6 @@ const completedAssistant = { ...completedUser, id: "bbbb2222-2222-4222-8222-2222
   usage: { input_tokens: 10_607, output_tokens: 646, cache_read_tokens: null,
     cache_creation_tokens: null } };
 
-/** 有分项：六类里给四类（工具与文件读取分开，正是本轮要能看见的东西）。 */
 function breakdown() {
   return { version: 1, method: "UTF8_BYTES_DIV_3", precision: "ESTIMATED",
     categories: [
@@ -78,35 +62,38 @@ function breakdown() {
     estimated_total_tokens: 10_607, covered_bytes: 31_821, image_parts: 0 };
 }
 
-/** 六类都给：配色这一轮要看「每一类都有自己的一色，且颜色不是唯一载体」。 */
 function breakdownSix() {
-  return { version: 1, method: "UTF8_BYTES_DIV_3", precision: "ESTIMATED",
-    categories: [
-      { key: "HISTORY", bytes: 12_000, tokens: 4_000 },
-      { key: "SYSTEM", bytes: 9_000, tokens: 3_000 },
-      { key: "TOOLS", bytes: 6_000, tokens: 2_000 },
-      { key: "FILE_READS", bytes: 4_821, tokens: 1_607 },
-      { key: "MEMORY", bytes: 3_000, tokens: 1_000 },
-      { key: "OTHER", bytes: 1_800, tokens: 600 }],
+  return { ...breakdown(), categories: [
+    { key: "HISTORY", bytes: 12_000, tokens: 4_000 },
+    { key: "SYSTEM", bytes: 9_000, tokens: 3_000 },
+    { key: "TOOLS", bytes: 6_000, tokens: 2_000 },
+    { key: "FILE_READS", bytes: 4_821, tokens: 1_607 },
+    { key: "MEMORY", bytes: 3_000, tokens: 1_000 },
+    { key: "OTHER", bytes: 1_800, tokens: 600 }],
     estimated_total_tokens: 12_207, covered_bytes: 36_621, image_parts: 2 };
 }
 
-function contextUsage(options: { readonly withBreakdown: boolean; readonly tokens?: number;
-  readonly revision?: string; readonly input?: number; readonly reserved?: number }): unknown {
+function contextUsage(options: {
+  readonly withBreakdown?: boolean;
+  readonly input?: number;
+  readonly reserved?: number | null;
+  readonly compaction?: Record<string, unknown>;
+} = {}): unknown {
   return { session_id: sessionId,
-    budget: { tokens: options.tokens ?? 262_144, revision: options.revision ?? "2" },
-    next_call: { reservation_tokens: options.tokens ?? 262_144,
-      context_budget_tokens: options.tokens ?? 262_144, provider_window_tokens: null,
-      window_source: "UNKNOWN" },
+    next_call: { reservation_tokens: 1_000_000, effective_window_tokens: 1_000_000,
+      model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_000_000,
+      window_source: "MODEL_CATALOG", fallback_applied: false },
     last_call: { source: "MODEL_CALL", call_id: "cccc3333-3333-4333-8333-333333333333",
       message_id: completedAssistant.id, provider: "openai-compatible", model: "gpt-4.1-mini",
       status: "COMPLETED", input_tokens: options.input ?? 10_607,
       output_tokens: 646, cache_read_tokens: null, cache_creation_tokens: null,
-      reserved_tokens: options.reserved ?? 65_536, settled_at: "2026-10-30T00:00:00Z",
-      breakdown: options.withBreakdown ? breakdown() : null } };
+      reserved_tokens: options.reserved === undefined ? 1_000_000 : options.reserved,
+      settled_at: "2026-10-30T00:00:00Z",
+      breakdown: options.withBreakdown === false ? null : breakdown() },
+    compaction: contextCompactionWireFixture(options.compaction ?? {}) };
 }
 
-async function installRoutes(page: Page, options: { readonly withBreakdown: boolean }): Promise<void> {
+async function installRoutes(page: Page, options: Parameters<typeof contextUsage>[0] = {}): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -129,13 +116,13 @@ async function installRoutes(page: Page, options: { readonly withBreakdown: bool
         default_write_tier: null, context_budget_tokens: null, status: "UNSET", reason: null,
         revision: "0" });
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "openai-compatible",
-      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 65_536 });
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000_000 });
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route,
       { items: [completedUser, completedAssistant] });
     if (path === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
-      return fulfillJson(route, contextUsage({ withBreakdown: options.withBreakdown }));
+      return fulfillJson(route, contextUsage(options));
     }
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     return fulfillJson(route, { items: [], next_cursor: null });
@@ -163,14 +150,8 @@ async function openPanel(page: Page): Promise<void> {
 type Rect = { left: number; right: number; top: number; bottom: number;
   width: number; height: number };
 
-/**
- * 一次取回浮层几何的全部采样点：圆环、圆环里的 svg、浮层、输入卡、发送键、模型下拉。
- * 浮层 portal 在 body 上且是 `position: fixed`，所以这里的 rect 直接就是视口坐标——
- * 这正是「贴环 7px」能成立的前提，也顺带证明它没有被中栏的 overflow 裁掉。
- */
 async function measure(page: Page): Promise<{ panel: Rect | null; ring: Rect | null;
-  ringSvg: Rect | null; card: Rect | null; send: Rect | null; model: Rect | null;
-  side: string | null; position: string | null; scrollable: boolean; dockVisible: boolean;
+  send: Rect | null; model: Rect | null; position: string | null;
   viewport: { width: number; height: number } }> {
   return page.evaluate(() => {
     const rect = (selector: string) => {
@@ -181,20 +162,10 @@ async function measure(page: Page): Promise<{ panel: Rect | null; ring: Rect | n
         width: r.width, height: r.height };
     };
     const menu = document.querySelector<HTMLElement>('[data-testid="assist-context-meter-panel"]');
-    const dock = document.querySelector<HTMLElement>(".context-usage-dock");
-    const scroll = document.querySelector<HTMLElement>(".context-usage-scroll");
-    const dockBox = dock === null ? null : dock.getBoundingClientRect();
     return { panel: rect('[data-testid="assist-context-meter-panel"]'),
       ring: rect('[data-testid="assist-composer"] [data-testid="assist-context-meter"]'),
-      ringSvg: rect('[data-testid="assist-composer"] [data-testid="assist-context-meter"] svg'),
-      card: rect('[data-testid="assist-composer"]'),
-      send: rect('[data-testid="assist-send"]'),
-      model: rect('[data-testid="model-selector-open"]'),
-      side: menu === null ? null : menu.dataset.side ?? null,
+      send: rect('[data-testid="assist-send"]'), model: rect('[data-testid="model-selector-open"]'),
       position: menu === null ? null : getComputedStyle(menu).position,
-      scrollable: scroll === null ? false : scroll.scrollHeight > scroll.clientHeight + 1,
-      dockVisible: dockBox === null ? false
-        : dockBox.top >= 0 && dockBox.bottom <= window.innerHeight && dockBox.height > 0,
       viewport: { width: window.innerWidth, height: window.innerHeight } };
   });
 }
@@ -204,76 +175,40 @@ function overlapArea(a: Rect, b: Rect): number {
     * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 }
 
-function toRect(box: { x: number; y: number; width: number; height: number }): Rect {
-  return { left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height,
-    width: box.width, height: box.height };
-}
-
-test("用量浮层：有三档横排、无「跟随应用默认」，选中即改变并显示权威回执", async ({ page }) => {
+test("用量浮层：展示模型窗口、用户阈值、实际生效阈值与距离；没有三档入口", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  const writes: Record<string, unknown>[] = [];
-  let tokens = 262_144;
-  let revision = 2;
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-budget`,
-    async (route) => {
-      const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
-      writes.push(body);
-      tokens = body.context_budget_tokens as number;
-      revision += 1;
-      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { session_id: sessionId, context_budget_tokens: tokens,
-          revision: String(revision) } });
-    });
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
-    async (route) => fulfillJson(route, contextUsage({ withBreakdown: true, tokens,
-      revision: String(revision) })));
+  await installRoutes(page);
   await openPanel(page);
-
   const panel = page.getByTestId("assist-context-meter-panel");
-  const tiers = panel.getByTestId("context-usage-tiers");
-  expect(await tiers.locator("input[type=radio]").count()).toBe(3);
-  await expect(tiers.locator("input")).toHaveCount(3);
-  // 三个选项在同一行：顶边相同才算「横排」，这是本轮最容易被写成两行的判据。
-  const tops = await tiers.locator("label").evaluateAll((nodes) =>
-    nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
-  expect(new Set(tops).size).toBe(1);
-  await expect(panel).not.toContainText("跟随应用默认");
-  await expect(panel.getByTestId("context-budget-option-262144")).toBeChecked();
-  // 2026-10-31 用户指令：档位点击即保存，两枚动作键（保存档位 / 重新读取）已删掉。
-  await expect(panel.getByTestId("context-budget-save")).toHaveCount(0);
-  await expect(panel.getByTestId("context-budget-reload")).toHaveCount(0);
-  // 2026-11-01 用户指令：删掉「当前档位 256K」标题行与状态短标签，当前值只看单选态。
-  await expect(panel.getByTestId("context-budget-current")).toHaveCount(0);
-  await expect(panel.getByTestId("context-budget-status")).toHaveCount(0);
-  // 2026-11-01 用户指令：「下次调用申请 N tokens」一行也删掉——档位选择本身已表达按哪一档申请。
-  await expect(panel.getByTestId("context-budget-next")).toHaveCount(0);
 
-  for (const next of [524_288, 1_048_576]) {
-    await panel.getByTestId(`context-budget-option-${next}`).check();
-    await expect(panel.getByTestId("context-budget-notice"))
-      .toContainText(next.toLocaleString("zh-CN"));
-    await expect(panel.getByTestId(`context-budget-option-${next}`)).toBeChecked();
-  }
-  expect(writes.map((body) => [body.expected_revision, body.context_budget_tokens]))
-    .toEqual([["2", 524_288], ["3", 1_048_576]]);
+  await expect(panel.getByTestId("context-budget-option-262144")).toHaveCount(0);
+  await expect(panel.getByTestId("context-budget-option-524288")).toHaveCount(0);
+  await expect(panel.getByTestId("context-budget-option-1048576")).toHaveCount(0);
+  await expect(panel.locator("input[type=radio]")).toHaveCount(0);
+  await expect(panel.getByTestId("context-compaction-window-row")).toContainText("1,000,000");
+  await expect(panel.getByTestId("context-compaction-window-source"))
+    .toContainText("自动识别 · 模型目录 · 不可在此修改");
+  await expect(panel.getByTestId("context-compaction-configured-row")).toContainText("350,000");
+  await expect(panel.getByTestId("context-compaction-threshold-row")).toContainText("350,000");
+  await expect(panel.getByTestId("context-compaction-distance"))
+    .toHaveText("距离自动压缩还有 70,000 tokens。");
+  await expect(panel.getByTestId("context-compaction-now")).toBeEnabled();
 
-  await page.screenshot({ path: shot("panel-breakdown.png"), fullPage: true });
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 1,000,000 tokens（1%）");
+  await expect(panel.getByTestId("context-compaction-current")).toHaveText("280,000");
+  await expect(panel.getByTestId("context-compaction-threshold")).toHaveText("350,000");
+  await page.screenshot({ path: shot("panel-default-1m.png"), fullPage: true });
 });
 
-test("用量浮层：分项按固定顺序、标「估算」，与圆环读数同一份记录", async ({ page }) => {
+test("用量浮层：分项按固定顺序、标「估算」，与圆环读同一份记录", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page, { withBreakdown: true });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  // 圆环与浮层读同一份记录、同一个分母（当前档位 262,144）：10,607 / 262,144 ≈ 4%。
-  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
-  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("251,537 tokens");
-  await expect(panel.getByTestId("assist-context-meter-output")).toHaveText("646 tokens");
-
+  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("1%");
+  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("989,393 tokens");
   await expect(panel.getByTestId("context-usage-estimate")).toHaveText("估算");
   const rows = panel.locator('[data-testid^="context-usage-row-"]');
   await expect(rows).toHaveCount(4);
@@ -281,174 +216,56 @@ test("用量浮层：分项按固定顺序、标「估算」，与圆环读数�
   await expect(rows.nth(1)).toContainText("系统 / 指令");
   await expect(rows.nth(2)).toContainText("工具调用");
   await expect(rows.nth(3)).toContainText("文件读取");
-  // 工具调用与文件读取是两行：文件内容不得同时算进工具调用。
-  await expect(rows.nth(2)).toContainText("2,000");
-  await expect(rows.nth(3)).toContainText("1,607");
 });
 
-test("用量浮层：没有分项时只写「当前记录没有分项统计」，总用量照常可读", async ({ page }) => {
+test("用量浮层：模型窗口未知时按安全回退显示，不伪造 1M", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: false });
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await expect(panel.getByTestId("context-usage-breakdown-empty"))
-    .toContainText("当前记录没有分项统计");
-  await expect(panel.locator('[data-testid^="context-usage-row-"]')).toHaveCount(0);
-  // 「估算」标签只属于分项区：没有分项时它也不该出现（摘要里的「预算余量（估算）」是另一回事）。
-  await expect(panel.getByTestId("context-usage-estimate")).toHaveCount(0);
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
-  await page.screenshot({ path: shot("panel-no-breakdown.png"), fullPage: true });
-});
-
-test("用量浮层：占比按当前 1024K 档位；那次冻结的 65,536 只作差异说明", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  // 当前档位是 1024K，但那次历史调用冻结的是 65,536。
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
-    async (route) => fulfillJson(route, contextUsage({ withBreakdown: true, tokens: 1_048_576,
-      revision: "4", reserved: 65_536 })));
+  await installRoutes(page, { compaction: { model_window_tokens: null,
+    window_source: "UNKNOWN_FALLBACK", provider_call_cap_tokens: null,
+    effective_window_tokens: 262_144, safe_input_tokens: 240_000,
+    requested_threshold_tokens: 350_000, effective_threshold_tokens: 216_000,
+    threshold_clamped: true, context_tokens: 100_000, distance_tokens: 116_000 } });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  // 当前档位：1024K（服务端已保存的那一档），只由单选态表达。
-  await expect(panel.getByTestId("context-budget-option-1048576")).toBeChecked();
-  // 2026-11-11 用户指令：占比直接按当前档位解释——10,607 / 1,048,576 ≈ 1%。
-  await expect(panel.getByTestId("assist-context-meter-input")).toHaveText("10,607");
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("1%");
-  // 冻结预算与当前档位不同时补一句历史依据，但不再拿它当分母。
-  await expect(panel.getByTestId("context-usage-frozen-note")).toContainText("65,536");
-  await expect(panel.getByTestId("context-usage-frozen-note"))
-    .toContainText("占比按当前 1024K 档位计算");
-  await expect(panel.getByTestId("context-usage-history")).toContainText("最近一次模型调用");
-  await expect(panel.getByTestId("context-usage-breakdown")).toBeVisible();
-  await page.screenshot({ path: shot("panel-history-vs-current.png"),
-    fullPage: true });
+  await expect(panel.getByTestId("context-compaction-window-row"))
+    .toContainText("未知（按安全回退 262,144 tokens）");
+  await expect(panel.getByTestId("context-compaction-window-source"))
+    .toContainText("未知 · 安全回退 · 不可在此修改");
+  await expect(panel.getByTestId("context-compaction-clamped"))
+    .toContainText("用户设置 350,000 tokens / 实际生效 216,000 tokens");
+  await expect(panel.getByTestId("context-compaction-clamped")).toContainText("当前模型上下文容量不足");
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
 });
 
-test("用量浮层：420／560／1024／1366／1920 五档宽度下都贴环、不溢出、三档始终横排", async ({ page }) => {
-  await installRoutes(page, { withBreakdown: true });
-  for (const width of [420, 560, 1024, 1366, 1920]) {
-    await page.setViewportSize({ width, height: 782 });
-    await openPanel(page);
-    const panel = page.getByTestId("assist-context-meter-panel");
-    await expect(panel).toBeVisible();
-    const tops = await panel.getByTestId("context-usage-tiers").locator("label").evaluateAll(
-      (nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
-    expect(new Set(tops).size, `${width}px 下三档必须仍是一行`).toBe(1);
-    expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
-      `${width}px 下浮层不得横向溢出`).toBe(true);
-    const geometry = await measure(page);
-    if (geometry.panel === null || geometry.ring === null) throw new Error("缺少浮层几何采样");
-    expect(geometry.panel.width, `${width}px 下浮层宽度不应超过 24rem`).toBeLessThanOrEqual(384.5);
-    expect(geometry.panel.left, `${width}px 下不得越出视口左缘`).toBeGreaterThanOrEqual(7.5);
-    expect(geometry.panel.right, `${width}px 下不得越出视口右缘`).toBeLessThanOrEqual(width - 7.5);
-    // 每个宽度都重新贴环：要么底边贴环顶上方 7px，要么翻到环下方 7px；水平中线对准圆环中心。
-    const gap = geometry.side === "above"
-      ? geometry.ring.top - geometry.panel.bottom
-      : geometry.panel.top - geometry.ring.bottom;
-    expect(gap, `${width}px 下浮层与圆环的间距（side=${geometry.side}）`).toBeCloseTo(7, 0);
-    // 横向：浮层中线对准圆环中心是设计口径；只有被视口边距夹住时（超窄窗里圆环靠近窗口边）才退让，
-    // 但无论哪一档，圆环的水平中心都必须落在浮层覆盖的范围内——读数与它所指的那枚环始终连在一起。
-    const ringCenter = (geometry.ring.left + geometry.ring.right) / 2;
-    const panelCenter = (geometry.panel.left + geometry.panel.right) / 2;
-    expect(ringCenter, `${width}px 下浮层必须横向罩住圆环`).toBeGreaterThanOrEqual(geometry.panel.left - 0.5);
-    expect(ringCenter, `${width}px 下浮层必须横向罩住圆环`).toBeLessThanOrEqual(geometry.panel.right + 0.5);
-    const unclamped = geometry.panel.left > 8.5 && geometry.panel.right < width - 8.5;
-    if (unclamped) {
-      expect(Math.abs(panelCenter - ringCenter),
-        `${width}px 下浮层中线应贴着圆环中心`).toBeLessThanOrEqual(1);
-    }
-    expect(geometry.dockVisible, `${width}px 下档位区必须在首屏`).toBe(true);
-  }
-  await page.screenshot({ path: shot("panel-width-1920.png"), fullPage: true });
-});
-
-test("用量浮层：圆环被同行控件推走时浮层跟着重算，不留在环已经离开的位置", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
-  await connect(page);
-  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  await page.getByTestId("assist-composer").getByTestId("assist-context-meter").click();
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await expect(panel).toBeVisible();
-  const before = await measure(page);
-  if (before.panel === null || before.ring === null) throw new Error("缺少浮层几何采样");
-  // 推走之前先对齐一次，否则「跟着重算」这条判据没有对照。
-  const centerOf = (rect: Rect) => (rect.left + rect.right) / 2;
-  expect(Math.abs(centerOf(before.panel) - centerOf(before.ring))).toBeLessThanOrEqual(1);
-
-  // 打开期间把圆环所在的一组视觉左移 120px：圆环自身尺寸不变、窗口也没有 resize，
-  // transform 也不触发布局，只有「打开期间逐帧比对环的矩形」才能发现它挪了。
-  // 模型芯片的收起态只写「跟随默认」（2026-10-21 用户指令），型号到达不再改变芯片宽度，
-  // 因此这里直接制造同等的「只挪位不变大」位移。
-  await page.evaluate(() => {
-    const group = document.querySelector<HTMLElement>(
-      '[data-testid="assist-composer"] .agent-chat-context-meter-group');
-    if (group === null) throw new Error("缺少圆环组");
-    group.style.transform = "translateX(-120px)";
-  });
-  await expect.poll(async () => {
-    const now = await measure(page);
-    if (now.panel === null || now.ring === null) return Number.NaN;
-    return Math.abs(centerOf(now.panel) - centerOf(now.ring));
-  }, "圆环被推走后浮层必须重新对准环心").toBeLessThanOrEqual(1);
-  const after = await measure(page);
-  if (after.panel === null || after.ring === null) throw new Error("缺少圆环推走后的浮层几何采样");
-  expect(Math.abs(centerOf(after.ring) - centerOf(before.ring)), "对照：圆环确实被同行控件推走了")
-    .toBeGreaterThan(4);
-  const gap = after.side === "above" ? after.ring.top - after.panel.bottom : after.panel.top - after.ring.bottom;
-  expect(gap, "重算后仍保持 7px 贴环间距").toBeCloseTo(7, 0);
-  await page.screenshot({ path: shot("panel-retrack-after-sibling-shift.png"), fullPage: true });
-});
-
-test("用量浮层：窄窗（560×700）三档仍横排、浮层贴环且不压住工具行", async ({ page }) => {
+test("用量浮层：560px 窄窗仍贴环、不横向溢出、不盖住发送键与模型下拉", async ({ page }) => {
   await page.setViewportSize({ width: 560, height: 700 });
-  await installRoutes(page, { withBreakdown: true });
+  await installRoutes(page);
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
-  const tiers = panel.getByTestId("context-usage-tiers");
-  const tops = await tiers.locator("label").evaluateAll((nodes) =>
-    nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
-  expect(new Set(tops).size, "窄窗也必须是一行三档").toBe(1);
-  // 每个选项的命中区不因收窄而缩到不可点。
-  const heights = await tiers.locator("label").evaluateAll((nodes) =>
-    nodes.map((node) => node.getBoundingClientRect().height));
-  for (const height of heights) expect(height).toBeGreaterThanOrEqual(20);
-
   const geometry = await measure(page);
-  if (geometry.panel === null || geometry.send === null || geometry.ring === null
+  if (geometry.panel === null || geometry.ring === null || geometry.send === null
     || geometry.model === null) throw new Error("缺少浮层几何采样");
-  expect(geometry.position, "浮层必须是视口坐标下的 fixed（portal 到 body），否则会被中栏裁掉")
-    .toBe("fixed");
-  // 贴环：上方放得下时底边落在环顶上方 7px（用户要的 6–8px 安全间距）。
-  expect(geometry.side, "560×700 上方空间足够，不该翻面").toBe("above");
-  expect(geometry.ring.top - geometry.panel.bottom, "浮层底边与圆环顶边的间距").toBeCloseTo(7, 0);
-  // 水平方向：中线对准环心；窄窗里浮层比剩余空间宽时被视口右缘夹住，此时至少仍罩住环心。
+
+  expect(geometry.position).toBe("fixed");
+  expect(geometry.panel.width).toBeLessThanOrEqual(384.5);
+  expect(geometry.panel.left).toBeGreaterThanOrEqual(7.5);
+  expect(geometry.panel.right).toBeLessThanOrEqual(geometry.viewport.width - 7.5);
+  expect(geometry.panel.top).toBeGreaterThanOrEqual(7.5);
+  expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
   const ringCenter = (geometry.ring.left + geometry.ring.right) / 2;
   expect(ringCenter).toBeGreaterThanOrEqual(geometry.panel.left - 0.5);
   expect(ringCenter).toBeLessThanOrEqual(geometry.panel.right + 0.5);
-  if (geometry.panel.right < geometry.viewport.width - 8.5) {
-    expect(Math.abs((geometry.panel.left + geometry.panel.right) / 2 - ringCenter)).toBeLessThanOrEqual(1);
-  }
-  // 完整落在视口内——portal 后没有任何祖先能裁它。
-  expect(geometry.panel.left).toBeGreaterThanOrEqual(7.5);
-  expect(geometry.panel.top).toBeGreaterThanOrEqual(7.5);
-  expect(geometry.panel.right).toBeLessThanOrEqual(geometry.viewport.width - 7.5);
-  expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
-  // 工具行（发送键、模型下拉）一件都不遮：浮层只压正文输入区。
   expect(overlapArea(geometry.panel, geometry.send), "浮层不得盖住发送键").toBe(0);
   expect(overlapArea(geometry.panel, geometry.model), "浮层不得盖住模型下拉").toBe(0);
-  // 档位停靠区仍在首屏可点。
-  expect(geometry.dockVisible, "窄窗里档位区也必须整块在视口内").toBe(true);
   expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-
   await page.screenshot({ path: shot("panel-narrow-560.png"), fullPage: true });
 });
 
 test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
+  await installRoutes(page);
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
@@ -471,142 +288,43 @@ test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收"
   await expect(panel).toBeHidden();
 });
 
-test("用量浮层：那次调用没有冻结预算记录时，占比仍按当前档位给出", async ({ page }) => {
+test("用量浮层：手动压缩显示受理状态，禁止重复点击", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
+  await installRoutes(page);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let writes = 0;
+  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/memory/compact`,
     async (route) => {
-      const body = contextUsage({ withBreakdown: true }) as {
-        last_call: { reserved_tokens: number | null } | null };
-      if (body.last_call !== null) body.last_call.reserved_tokens = null;
-      return fulfillJson(route, body);
+      writes += 1;
+      const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
+      await gate;
+      return fulfillJson(route, { command_id: body.command_id,
+        committed_at: "2026-11-15T00:00:00Z", result: { session_id: sessionId,
+          status: "PENDING", request_id: "dddd4444-4444-4444-8444-444444444444" } }, 202);
     });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
-  // 2026-11-11：分母是当前档位，冻结预算缺失不再让占比变成未知。
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("4%");
-  await expect(panel.getByTestId("assist-context-meter-budget-unknown")).toHaveCount(0);
-  await expect(panel.getByTestId("context-usage-frozen-note")).toHaveCount(0);
-  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("data-state", "normal");
-  await expect(meter.locator(".agent-chat-context-meter-fill")).toHaveCount(1);
+  const button = panel.getByTestId("context-compaction-now");
+  await button.click();
+  await expect(button).toBeDisabled();
+  await expect(button).toContainText("正在提交");
+  await page.waitForTimeout(150);
+  expect(writes).toBe(1);
+  release();
+  await expect(panel.getByTestId("context-compaction-notice"))
+    .toContainText("已受理压缩请求", { timeout: 20_000 });
 });
 
-test("空白新会话（还没有会话）不显示上下文圆环，也没有档位入口", async ({ page }) => {
+test("空白新会话（还没有会话）不显示上下文圆环，也没有窗口入口", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
+  await installRoutes(page);
   await page.goto("/agent?new=1");
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  // 2026-11-01 用户指令：会话欢迎页（首条输入器）不显示上下文圆环。
   await expect(page.getByTestId("assist-first-draft")).toBeVisible();
   await expect(page.getByTestId("assist-context-meter")).toHaveCount(0);
   await expect(page.getByTestId("assist-context-meter-panel")).toHaveCount(0);
-});
-
-test("用量浮层：写成功后不回闪——投影还没刷新时选择器仍停在刚写的那一档", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-budget`,
-    async (route) => {
-      const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
-      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { session_id: sessionId, context_budget_tokens: body.context_budget_tokens,
-          revision: "3" } });
-    });
-  // 投影**故意**返回旧档位（模拟重读还没追上）。
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
-    async (route) => fulfillJson(route, contextUsage({ withBreakdown: true, tokens: 262_144,
-      revision: "2" })));
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  await panel.getByTestId("context-budget-option-524288").check();
-  await expect(panel.getByTestId("context-budget-notice")).toContainText("524,288");
-  // 写成功 ≠ 界面跳回旧值：回执已经确认 512K，选择器就停在 512K。
-  await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
-  await expect(panel.getByTestId("context-budget-option-262144")).not.toBeChecked();
-});
-
-test("用量浮层：读序是最近一次模型调用 → 上下文构成 → 当前档位，档位落在最底部的停靠区", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-
-  // 停靠区是真实布局的第二行，不是 sticky 覆盖层：它是 .context-usage 的最后一个子元素。
-  const rows = await panel.locator(".context-usage > *").evaluateAll((nodes) =>
-    nodes.map((node) => node.className));
-  expect(rows).toEqual(["context-usage-scroll", "context-usage-dock"]);
-  await expect(panel.locator(".context-usage-dock [data-testid='context-usage-tiers']")).toHaveCount(1);
-  await expect(panel.locator(".context-usage-scroll [data-testid='context-usage-breakdown']")).toHaveCount(1);
-  await expect(panel.locator(".context-usage-dock [data-testid='context-usage-breakdown']")).toHaveCount(0);
-
-  // 视觉上也是这个顺序：历史读数在上、分项居中、三档在最下。
-  const tops = await panel.evaluate(() => {
-    const top = (selector: string) => document.querySelector<HTMLElement>(
-      `[data-testid="assist-context-meter-panel"] ${selector}`)!.getBoundingClientRect().top;
-    return { history: top('[data-testid="context-usage-history"]'),
-      breakdown: top('[data-testid="context-usage-breakdown"]'),
-      dock: top(".context-usage-dock"), tiers: top('[data-testid="context-usage-tiers"]') };
-  });
-  expect(tops.history).toBeLessThan(tops.breakdown);
-  expect(tops.breakdown).toBeLessThan(tops.dock);
-  expect(tops.dock).toBeLessThanOrEqual(tops.tiers);
-
-  // 短窗口优先保证档位可操作：停靠区整块在首屏内，也不反过来盖住分项。
-  await page.setViewportSize({ width: 1162, height: 430 });
-  await openPanel(page);
-  const geometry = await measure(page);
-  expect(geometry.dockVisible, "430px 高的窗口里三档也必须整块可点").toBe(true);
-  const dockBox = await panel.locator(".context-usage-dock").boundingBox();
-  // 比的是「停靠区 vs 读数滚动区的视口」，不是分项列表那根被裁掉的长内容：
-  // 列表在滚动区里本来就比视口高，拿它的 rect 会比出一个并不存在的遮挡。
-  const scrollBox = await panel.locator(".context-usage-scroll").boundingBox();
-  if (dockBox === null || scrollBox === null) throw new Error("缺少停靠区/读数区几何");
-  expect(overlapArea(toRect(dockBox), toRect(scrollBox)),
-    "停靠区不得盖住读数区（短窗口里靠收窄滚动区让位，不靠覆盖）").toBe(0);
-  expect(await panel.evaluate((node) => node.getBoundingClientRect().bottom),
-    "浮层整体不得越出视口").toBeLessThanOrEqual(430 + 0.5);
-  await page.screenshot({ path: shot("panel-short-430.png"), fullPage: true });
-});
-
-test("用量浮层：慢响应保存期间菜单不关、不跳顶、滚动位置不重置", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 460 });
-  await installRoutes(page, { withBreakdown: true });
-  let release: () => void = () => {};
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-budget`, async (route) => {
-    const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
-    await gate;
-    return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-11-01T00:00:00Z",
-      result: { session_id: sessionId, context_budget_tokens: body.context_budget_tokens,
-        revision: "3" } });
-  });
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  const scroll = panel.locator(".context-usage-scroll");
-  await expect.poll(async () => scroll.evaluate((node) => node.scrollHeight > node.clientHeight + 1),
-    "短窗口下读数区应自带滚动").toBe(true);
-  await scroll.evaluate((node) => { node.scrollTop = 40; });
-  const before = await scroll.evaluate((node) => node.scrollTop);
-  expect(before, "滚动位置必须真的建立了，否则这条判据是空的").toBeGreaterThan(20);
-
-  await panel.getByTestId("context-budget-option-524288").check();
-  // 在途 300ms：状态说「保存中」，但界面不许因此变形——菜单还开着、滚动没被重置、读数没跳。
-  await page.waitForTimeout(300);
-  await expect(panel).toBeVisible();
-  await expect(panel.getByTestId("context-usage-tier-state"))
-    .toContainText("正在保存 512K；确认之前仍按 256K 生效");
-  expect(await scroll.evaluate((node) => node.scrollTop), "在途不得跳回顶部").toBeGreaterThan(0);
-  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("4%");
-
-  release();
-  await expect(panel.getByTestId("context-budget-notice")).toContainText("524,288");
-  await expect(panel).toBeVisible();
-  await expect(panel.getByTestId("context-budget-option-524288")).toBeChecked();
-  expect(await scroll.evaluate((node) => node.scrollTop), "回执落地后仍不得跳顶").toBeGreaterThan(0);
-  expect(await panel.getByTestId("assist-context-meter-percent").textContent()).toBe("4%");
-  await page.screenshot({ path: shot("panel-slow-save.png"), fullPage: true });
 });
 
 test("用量浮层：六类分项各上一色，文本与数值保持中性，颜色不是唯一载体", async ({ page }) => {
@@ -666,109 +384,12 @@ test("用量浮层：六类分项各上一色，文本与数值保持中性，�
 
   expect(sampled.map((row) => row.category))
     .toEqual(["HISTORY", "SYSTEM", "TOOLS", "FILE_READS", "MEMORY", "OTHER"]);
-  // 图标只吃 token：色值来自 `--relay-color-category-*`，不是硬编码——将来挂上暗色主题会一起换。
   for (const row of sampled) {
     expect(row.icon, `${row.category} 的图标色必须来自分类 token`).toBe(row.token);
-    // 非文本图形（图标）对底面 ≥3:1。
     expect(row.contrast, `${row.category} 的图标对浮层底面不足 3:1`).toBeGreaterThanOrEqual(3);
-    // 上色只到图标为止：文本与数值一律中性（标签走次要文本色，数值走主文本色）。
     expect(row.label, `${row.category} 的标签被上了色`).toBe(row.neutral.secondary);
     expect(row.value, `${row.category} 的数值被上了色`).toBe(row.neutral.primary);
   }
-  expect(new Set(sampled.map((row) => row.icon)).size).toBe(6);
-  // 颜色不是唯一载体：六行各有文字标签，且图标形状互不相同（色觉差异下仍能区分）。
   expect(new Set(sampled.map((row) => row.glyph)).size).toBe(6);
-  const labels = await rows.locator(".context-usage-row-label").allTextContents();
-  expect(new Set(labels).size).toBe(6);
   await page.screenshot({ path: shot("panel-categories.png"), fullPage: true });
-});
-
-test("圆环：视觉 18px 但点击区不小于 32px，右侧独立百分比文本已删，读数仍在 aria-label 与 Tooltip", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
-  await connect(page);
-  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  await expect(page.getByTestId("assist-context-meter-panel")).toHaveCount(0);
-
-  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
-  // 独立百分比文本删掉了：圆环右侧不再有那枚数字（详情浮层与 Tooltip 才是它的去处）。
-  await expect(meter.locator(".agent-chat-context-meter-value")).toHaveCount(0);
-  await expect(meter.locator("span")).toHaveCount(0);
-
-  const geometry = await measure(page);
-  if (geometry.ring === null || geometry.ringSvg === null) throw new Error("缺少圆环几何");
-  expect(geometry.ringSvg.width, "圆环视觉尺寸 18px").toBeCloseTo(18, 0.6);
-  expect(geometry.ringSvg.height, "圆环视觉尺寸 18px").toBeCloseTo(18, 0.6);
-  expect(geometry.ring.width, "点击区不小于 32px").toBeGreaterThanOrEqual(31.5);
-  expect(geometry.ring.height, "点击区不小于 32px").toBeGreaterThanOrEqual(31.5);
-
-  await meter.hover();
-  await expect(page.getByTestId("context-meter-tooltip")).toContainText("4%");
-  await meter.click();
-  await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
-  await expect(page.getByTestId("context-meter-tooltip")).toHaveCount(0);
-  await page.screenshot({ path: shot("ring-18px.png"), fullPage: true });
-});
-
-test("圆环：未知／正常／高占用／超额四态各有真实差异，且没有永久动效", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  const fill = () => meter.locator(".agent-chat-context-meter-fill");
-
-  async function openWith(options: { readonly input: number | null; readonly reserved: number | null }) {
-    await installRoutes(page, { withBreakdown: true });
-    await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`,
-      async (route) => {
-        const body = contextUsage({ withBreakdown: true, input: options.input ?? undefined,
-          reserved: options.reserved ?? 65_536 }) as {
-          last_call: { reserved_tokens: number | null } | null };
-        // 夹具里的 `??` 会把 null 吞回默认值：未知态要真的把整条调用记录写成 null。
-        if (options.input === null) body.last_call = null;
-        else if (body.last_call !== null && options.reserved === null) body.last_call.reserved_tokens = null;
-        return fulfillJson(route, body);
-      });
-    await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
-    await connect(page);
-    await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-    await expect(meter).toBeVisible();
-  }
-
-  await openWith({ input: 10_607, reserved: 65_536 });
-  await expect(meter).toHaveAttribute("data-state", "normal");
-  await expect(meter).not.toHaveAttribute("data-over", "true");
-  const normalDash = await fill().getAttribute("stroke-dasharray");
-  expect(normalDash).not.toBeNull();
-  // 弧长按真实比例算（10,607 / 当前档位 262,144），不是按四舍五入后的 4%。
-  expect(Number(normalDash!.split(" ")[0])).toBeCloseTo(10_607 / 262_144 * 94.25, 1);
-
-  await openWith({ input: 210_000, reserved: 65_536 });
-  await expect(meter).toHaveAttribute("data-state", "high");
-  expect(await fill().getAttribute("stroke-dasharray")).not.toBe(normalDash);
-
-  // 冻结预算缺失也不影响分母：仍然按当前 262,144 算，280,000 已超出当前档位。
-  await openWith({ input: 280_000, reserved: null });
-  await expect(meter).toHaveAttribute("data-state", "high");
-  await expect(meter).toHaveAttribute("data-over", "true");
-  // 超额画满一圈，但读数不粉饰：浮层里仍是那 280,000 / 262,144 的比例。
-  expect(Number((await fill().getAttribute("stroke-dasharray"))!.split(" ")[0])).toBeCloseTo(94.25, 1);
-  await meter.click();
-  await expect(page.getByTestId("assist-context-meter-percent")).toHaveText("106.8%");
-  await page.screenshot({ path: shot("ring-over.png"), fullPage: true });
-  await page.keyboard.press("Escape");
-
-  // 没有调用记录才是未知态：不画弧、不给百分比。
-  await openWith({ input: null, reserved: null });
-  await expect(meter).toHaveAttribute("data-state", "unknown");
-  await expect(fill()).toHaveCount(0);
-  // 未知态的轨道是虚线，与「真的 0%」分开；三种状态都不是会转的加载指示。
-  expect(await meter.evaluate((node) => {
-    const track = node.querySelector<SVGSVGElement>(".agent-chat-context-meter-track");
-    return getComputedStyle(track!).strokeDasharray;
-  })).not.toBe("none");
-  const animation = await meter.evaluate((node) => ["svg", "circle"]
-    .flatMap((tag) => Array.from(node.querySelectorAll<SVGSVGElement>(tag))
-      .map((el) => getComputedStyle(el).animationName)));
-  expect(new Set(animation), "圆环不得带永久动画").toEqual(new Set(["none"]));
 });

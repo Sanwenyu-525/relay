@@ -105,6 +105,21 @@ test.describe("页面级基线", () => {
     await page.waitForTimeout(200);
     await expect(page).toHaveScreenshot("activity-scrolled.png");
   });
+
+  test("生产页 Tooltip：新建任务按钮说明", async ({ page }) => {
+    await open(page, "/tasks");
+    const create = page.getByTestId("titlebar-create-task");
+    await create.focus();
+    await expect(page.getByRole("tooltip")).toBeVisible();
+    await expect(page).toHaveScreenshot("tasks-tooltip.png");
+  });
+
+  test("浏览器内容缩放 150%", async ({ page }) => {
+    await open(page, "/tasks");
+    await expect(page.getByTestId("tasks-tab-all")).toBeVisible();
+    await page.evaluate(() => { document.documentElement.style.zoom = "1.5"; });
+    await expect(page).toHaveScreenshot("tasks-zoom-150.png");
+  });
 });
 
 test.describe("组件与状态基线（/__dev/ui）", () => {

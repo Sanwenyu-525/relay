@@ -100,12 +100,14 @@ type MemoryEffectiveFilter = RelayMemoryEffectiveStatus | "ALL";
 const memoryFilterOptions: readonly { readonly value: MemoryEffectiveFilter; readonly label: string }[] = [
   { value: "ALL", label: "全部" },
   { value: "ACTIVE", label: "有效" },
+  { value: "STALE", label: "可能过时" },
+  { value: "SUPERSEDED", label: "已被替代" },
   { value: "EXPIRED", label: "已过期" },
   { value: "RETIRED", label: "已停用" }
 ];
 
 const memoryEffectiveLabels: Record<RelayMemoryEffectiveStatus, string> = {
-  ACTIVE: "有效", EXPIRED: "已过期", RETIRED: "已停用"
+  ACTIVE: "有效", EXPIRED: "已过期", RETIRED: "已停用", SUPERSEDED: "已被替代", STALE: "可能过时"
 };
 
 /**
@@ -426,7 +428,7 @@ export default function KnowledgeView() {
   }, [formOpen]);
 
   function rowTarget(row: InformationRow): WriteTarget | null {
-    if ("scope" in row) {
+    if ("scopeId" in row) {
       if (row.scope === "TASK") return { kind: "TASK", id: row.scopeId, expectedProjectId: row.projectId };
       if (row.scope === "PROJECT") return { kind: "PROJECT", id: row.scopeId };
       return null;
@@ -1403,7 +1405,7 @@ export default function KnowledgeView() {
             <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
             {/* 持久状态与有效状态各用其职责：停用/恢复看 status，展示与筛选看 effective_status。 */}
             {selectedMemory && <p className="helper-text" data-testid="memory-effective-status">持久状态 {selectedMemory.status} · 有效状态 {memoryStatusText(selectedMemory)} · {selectedMemory.expiresAt === null ? "无到期时间" : `到期 ${selectedMemory.expiresAt}`}</p>}
-            <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scope" in selected
+            <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scopeId" in selected
               ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
               : selected.projectId ? `项目 ${selected.projectId}` : "工作空间"}</p>
             {selectedRule && selectedRuleSpec && <><p className="knowledge-rule-facts" data-testid="knowledge-rule-facts">{enumText(ruleStrengthLabels, selectedRule.strength)} · {enumText(ruleScopeLabels, selectedRule.scope)} / {selectedRule.scopeId} · {enumText(ruleApplicabilityLabels, selectedRule.applicability)}</p>

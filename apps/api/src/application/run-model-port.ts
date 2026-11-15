@@ -17,8 +17,8 @@ import { buildFreePriceGuard } from '../workflow/free-call-guard.js';
 import { compareCredentialIdentity, readCredentialFingerprint } from
   '../workflow/credential-identity.js';
 import { createOpenRouterCatalogSource } from '../workflow/openrouter-catalog-source.js';
-import { parseAssistModelSnapshot, planAssistModelBudget, snapshotIdentityBudget,
-  type ParsedAssistModelSnapshot } from './assist-model-snapshot.js';
+import { parseAssistModelSnapshot, planAssistModelBudget, planLegacyAssistModelBudget,
+  snapshotIdentityBudget, type ParsedAssistModelSnapshot } from './assist-model-snapshot.js';
 import { syncModelCatalog } from './model-catalog-sync.js';
 import { createRepositories } from './unit-of-work.js';
 import { connectionConfigFingerprint, connectionCredentials, modelPortConfigFromConnection,
@@ -354,12 +354,26 @@ function credentialMismatch(contract: ExecutionContractRow | undefined,
  */
 function budgetDiffers(budget: ParsedAssistModelSnapshot['budget'],
   config: ModelPortConfig, providerWindow: number | null): RunModelAdmission | undefined {
-  const expected = planAssistModelBudget(config, budget.contextBudgetTokens, providerWindow);
+  /*
+   * 0165：升级前冻结的快照没有 `budget_basis`，必须继续按旧公式（会话档位 + 当时窗口）
+   * 复核；新快照按「模型窗口 + 服务商硬上限」复核。不能统一成新公式：那会把还没执行
+   * 完的在途 Run 全部误判成 MODEL_CONFIG_CHANGED。
+   */
+  const expected = budget.budgetBasis === 'LEGACY_SESSION_TIER'
+    ? planLegacyAssistModelBudget(config, budget.contextBudgetTokens, providerWindow)
+    : planAssistModelBudget(config, {
+      modelWindowTokens: budget.modelContextWindowTokens,
+      ...(budget.providerCallCapTokens === null ? {}
+        : { providerCallCapTokens: budget.providerCallCapTokens }),
+      ...(budget.contextWindowSource === null ? {}
+        : { windowSource: budget.contextWindowSource }),
+    });
   if (budget.callReservationTokens === expected.callReservationTokens &&
       budget.scopeCallLimit === expected.scopeCallLimit &&
       budget.scopeTokenLimit === expected.scopeTokenLimit) return undefined;
   return stopped('MODEL_CONFIG_CHANGED', { reason: 'MODEL_CONFIG_CHANGED',
-    provider: config.provider, model: config.model, scope: 'BUDGET' });
+    provider: config.provider, model: config.model, scope: 'BUDGET',
+    budget_basis: budget.budgetBasis });
 }
 
 function frozenEvidence(provider: string, model: string, configFingerprint: string): JsonObject {

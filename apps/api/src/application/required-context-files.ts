@@ -6,9 +6,10 @@ import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { GatewayCapability } from '../infrastructure/database-schema.js';
 import { RELAY_AGENT_CORE_PROMPT } from '../workflow/agent-system-prompt.js';
-import { readModelPortConfig } from '../workflow/model-port-config.js';
 import { targetMatches } from './gateway-actions.js';
 import { createRepositories } from './unit-of-work.js';
+import { readSessionModelCapacity, readModelContextCapacityByModel,
+  type ModelContextCapacity } from './model-context-window.js';
 
 /**
  * 项目必读文件体积审计（2026-10-30）。
@@ -16,8 +17,8 @@ import { createRepositories } from './unit-of-work.js';
  * 目的只有一个：在**一次高风险必读文件加载造成上下文压力之前**把风险说出来——哪个文件、
  * 多大、占有效输入预算几成、为什么危险、怎么降。它不新开一套预算体系：
  *
- *   · 预算口径与执行链一致——单次调用预算取工作区档位（0135），且不得大于 Provider
- *     声明的物理窗口，与 `planAssistModelBudget()` 同一判据；
+ *   · 预算口径与执行链一致——模型真实窗口由目录/高级能力声明/部署配置解析；读不到时
+ *     按 256K 安全回退，并显式标记 `WINDOW_UNKNOWN`，绝不假定 1M；
  *   · Token 口径与 `context-builder` / `openai-compatible-model-port` 一致——
  *     UTF-8 字节数 ÷ 3，方法名 `ESTIMATED_UTF8_BYTES_DIV_3` 原样沿用，不换算法；
  *   · 权限口径与 `resolveSessionReadTools()` 一致——没有覆盖该目录的 ACTIVE
@@ -218,12 +219,12 @@ export interface RequiredContextFile {
 }
 
 export interface RequiredContextBudget {
-  /** Provider 声明的物理窗口；未知必须是 null，不假定 256K/512K/无限。 */
+  /** 模型真实窗口的已知值；未知必须是 null，不假定 256K/512K/1M/无限。 */
   readonly provider_window_tokens: number | null;
   readonly provider_window_known: boolean;
-  /** Relay-Agent 配置的单次调用预算（工作区档位优先）。 */
+  /** Relay-Agent 本次调用实际可用的窗口：min(1M 目标, 模型窗口/安全回退, 服务商硬上限)。 */
   readonly call_budget_tokens: number;
-  readonly call_budget_source: 'SESSION' | 'WORKSPACE_TIER' | 'APPLICATION_DEFAULT';
+  readonly call_budget_source: 'MODEL_CONTEXT_WINDOW' | 'UNKNOWN_FALLBACK';
   /** 有效输入预算 = min(窗口, 调用预算) − 预留；不可计算时为 null。 */
   readonly effective_input_tokens: number | null;
   readonly effective_basis: 'PROVIDER_WINDOW' | 'CALL_BUDGET' | 'UNAVAILABLE';
@@ -736,7 +737,7 @@ const SUGGESTIONS = {
     '细节移到 docs/ 下的专题文档，等 Agent 真的需要时再按需读取。',
   MOVE_REFERENCE: '把参考资料移出入口文件——研究笔记、完整日志、历史快照、生成产物不必每次随规则注入。',
   DEDUPLICATE: '同一条规则只在一处维护：入口与专题文档重复的段落删掉一侧，避免重复计费。',
-  TRIM_WINDOW: '把工作区上下文档位调到与模型实际窗口一致：档位高于 Provider 窗口只会让读数失真。',
+  WINDOW_CONFLICT: '调用预算被报告为大于模型窗口，说明容量投影口径不一致；请检查高级能力声明与连接的单次上限，而不是让用户改上下文窗口。',
 } as const;
 
 /* ---------------------------------------------------------------- 主流程 */
@@ -753,6 +754,10 @@ export interface RequiredContextAuditInput {
   /** 跳过遍历缓存，重新遍历一次（发送前与手动刷新用）。 */
   readonly refresh?: boolean;
   /** 新会话首条消息尚无会话行时，用户已选的上下文档位（不传则按会话/工作区默认）。 */
+  /**
+   * @deprecated 0165：旧前端的草稿档位。保留字段只为旧调用方不报错；审计已按模型容量
+   * 报数，不再把用户档位当成任何分母。
+   */
   readonly budgetTokens?: number | null;
   /** 历史上下文预留（实测 input tokens）；不传则按会话上一次调用自动取。 */
   readonly historyTokens?: number | null;
@@ -776,7 +781,7 @@ async function findFileReadConnection(repositories: ReturnType<typeof createRepo
 }
 
 const EMPTY_BUDGET_INPUT: BudgetInput = { providerWindow: null, callBudget: 1,
-  callBudgetSource: 'APPLICATION_DEFAULT', outputReserve: 0 };
+  callBudgetSource: 'UNKNOWN_FALLBACK', outputReserve: 0 };
 
 /**
  * 审计入口：给一个受管目录，回答「哪些必读文件会进上下文、占多少、危不危险」。
@@ -822,24 +827,31 @@ export async function auditRequiredContext(db: DbExecutor,
   catch { return refuse('SCAN_UNAVAILABLE', '目录已不存在或无法核对真实路径。', 'unresolved'); }
 
   const env = input.env ?? process.env;
-  const config = readModelPortConfig(env);
-  // 首条消息在建会话前就要预警：用户明确选的档位由调用方传入，已有会话仍读会话行。
-  const selectedTier = typeof input.budgetTokens === 'number' && input.budgetTokens > 0
-    ? input.budgetTokens : null;
-  const budget = selectedTier === null
-    ? await readCallBudget(repositories, input.workspaceId, input.sessionId ?? null)
-    : { tokens: selectedTier, source: 'SESSION' as const };
+  /*
+   * 0165：审计的分母与执行链/压缩策略共用同一份「模型容量」读数，不再读会话档位。
+   *
+   * `input.budgetTokens`（旧前端的草稿档位）保留在入参里只为不 breaking 旧调用方，
+   * **不参与**预算：普通用户已经不能在上下文窗口上做选择，审计也不能再按它报数。
+   */
+  const selection = input.sessionId == null || input.sessionId === ''
+    ? undefined : await repositories.modelSelection.readForSession(input.sessionId);
+  const capacity: ModelContextCapacity = selection !== undefined
+    ? await readSessionModelCapacity(repositories, input.workspaceId, selection, env)
+    : input.model != null && input.model.trim() !== ''
+      ? await readModelContextCapacityByModel(repositories, input.model, env)
+      : await readSessionModelCapacity(repositories, input.workspaceId, undefined, env);
   // P1-A 历史压力：显式传入优先；否则取该会话上一次调用的实测 input tokens。
   // 读不到就是「未知 → 按 0 预留」，不拿估计值冒充实测。
   const historyTokens = typeof input.historyTokens === 'number' && input.historyTokens > 0
     ? input.historyTokens
     : await readHistoryTokens(repositories, input.sessionId ?? null);
   const budgetInput: BudgetInput = {
-    providerWindow: await readProviderWindow(repositories, input.model ?? null),
+    providerWindow: capacity.modelWindowTokens,
     historyTokens,
-    callBudget: (budget.tokens ?? config?.maxCallTokens ?? 0) || 1,
-    callBudgetSource: budget.source,
-    outputReserve: config?.maxOutputTokens ?? 0,
+    callBudget: capacity.effectiveWindowTokens,
+    callBudgetSource: capacity.windowSource === 'UNKNOWN_FALLBACK'
+      ? 'UNKNOWN_FALLBACK' : 'MODEL_CONTEXT_WINDOW',
+    outputReserve: capacity.outputReserveTokens ?? 0,
   };
 
   let scanned: RequiredContextScan;
@@ -976,48 +988,19 @@ export function assessRequiredContextFiles(
     if (applicable.length > 1) suggestions.push({ code: 'DEDUPLICATE', text: SUGGESTIONS.DEDUPLICATE });
     if (budget.provider_window_tokens !== null &&
         budget.call_budget_tokens > budget.provider_window_tokens) {
-      suggestions.push({ code: 'TRIM_WINDOW', text: SUGGESTIONS.TRIM_WINDOW });
+      // 理论上不可达：call_budget 已经是 min(目标, 窗口, 服务商上限)。保留分支是为了
+      // 在投影口径被改坏时给出显式建议，而不是静默显示一个自相矛盾的比例。
+      suggestions.push({ code: 'WINDOW_CONFLICT', text: SUGGESTIONS.WINDOW_CONFLICT });
     }
   }
   return { files, budget, severity, reasons, suggestions };
 }
 
 /**
- * 单次调用预算：会话档位 → 工作区默认档位 → 应用配置默认。
- *
- * 与执行链的优先级**必须一致**（0145 起档位是会话行的事实，工作区行只是新会话的默认）：
- * 有会话却按工作区默认报数，会出现「同一个会话里预警说 43%、圆环说 78%」这种自相矛盾。
+ * 单次调用预算的旧读法已删除（0165）：审计现在与执行链/压缩策略共用
+ * `readSessionModelCapacity` / `readModelContextCapacityByModel`，不再读会话档位。
+ * 保留这段说明是为了让后来者知道：这里曾经按 256K/512K/1M 报数，那套口径已废弃。
  */
-async function readCallBudget(repositories: ReturnType<typeof createRepositories>,
-  workspaceId: string, sessionId: string | null): Promise<{
-  readonly tokens: number | null;
-  readonly source: RequiredContextBudget['call_budget_source'] }> {
-  if (sessionId !== null && sessionId !== '') {
-    const session = await repositories.assist.readSession(sessionId);
-    if (session?.workspace_id === workspaceId) {
-      return { tokens: session.context_budget_tokens, source: 'SESSION' };
-    }
-  }
-  const configured = await repositories.workspaces.readDefaultDirectory(workspaceId);
-  const workspaceTier = configured?.context_budget_tokens ?? null;
-  return { tokens: workspaceTier,
-    source: workspaceTier === null ? 'APPLICATION_DEFAULT' : 'WORKSPACE_TIER' };
-}
-
-/** Provider 声明的物理窗口。未知一律 null——不假定 256K、512K 或无限。 */
-async function readProviderWindow(repositories: ReturnType<typeof createRepositories>,
-  model: string | null): Promise<number | null> {
-  if (model === null || model.trim() === '') return null;
-  try {
-    // 按实际使用的模型 id 查目录（不限免费项）：只查免费目录会把非免费 / 自建连接的窗口
-    // 一律读成未知，从而把「估算限制」当成事实。
-    const entry = await repositories.modelCatalog.readEntryBySourceModelId(model);
-    return entry?.context_window ?? null;
-  } catch {
-    // 目录读不到 ≠ 窗口无限；保持未知。
-    return null;
-  }
-}
 
 function percentText(ratio: number): string {
   const percent = ratio * 100;

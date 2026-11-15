@@ -329,8 +329,11 @@
 
 .task-detail-tech code { overflow-wrap: anywhere; }
 
-/* V5.28 任务详情：页签与阅读区沿用 pv 层级，避免旧 reading/rowTitle 档漏入。 */
-.pv-page.task-detail-page .skill-tab { font-size: var(--relay-font-size-caption); }
+/* V5.28 任务详情：页签与阅读区沿用 pv 层级，避免旧 reading/rowTitle 档漏入。
+   UI-UNIFY-03：Tabs 项同时带 .ui-tabs__item；用更高的组合选择器压住共享组件的
+   page 变体字号，保证迁移前后都是 caption 档。 */
+.pv-page.task-detail-page .skill-tab,
+.pv-page.task-detail-page .task-detail-tabrow .skill-tabs .ui-tabs__item { font-size: var(--relay-font-size-caption); }
 
 /* 主区不再叠一层 relay 内边距：pv 页的 30px 已给足页面留白，标题左缘因此与收件箱、
    任务列表统一到同一条边（336.4），右栏卡片右缘回到内容右缘（1398）。 */

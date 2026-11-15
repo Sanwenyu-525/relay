@@ -21,7 +21,7 @@ import { takeCreationFlash } from "../lib/navigationFlash";
 import { useRelayConnection } from "../lib/relayConnection";
 import type { DecimalRevision, ProjectSummary, ProjectType } from "../types";
 import "./ProjectsView.css";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message.trim() : fallback;
@@ -246,15 +246,15 @@ function ProjectsToolbar({ scope, counts, search, onSearch, view, onView, search
   readonly tools?: ReactNode;
 }) {
   return <div className="projects-toolbar">
-    <nav className="subnav" aria-label="项目范围">
-      {scopeTabs.map((tab) => {
-        const count = counts[tab.scope];
-        return <Link key={tab.scope} className={`subnav-item${scope === tab.scope ? " subnav-item--active" : ""}`}
-          to={tab.to} data-testid={tab.testId} aria-current={scope === tab.scope ? "page" : undefined}>
-          {tab.label}{count === null ? null : <> <span className="subnav-count">({count})</span></>}
-        </Link>;
-      })}
-    </nav>
+    <Tabs label="项目范围" variant="page" className="subnav" value={scope}
+      items={scopeTabs.map((tab) => ({
+        key: tab.scope,
+        label: tab.label,
+        href: tab.to,
+        testId: tab.testId,
+        className: "subnav-item",
+        badge: counts[tab.scope] === null ? undefined : <span className="subnav-count">({counts[tab.scope]})</span>
+      }))} />
     <div className="projects-tools">
       {tools}
       <label className="search-field"><Search aria-hidden="true" />

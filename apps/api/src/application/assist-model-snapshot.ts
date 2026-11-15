@@ -7,6 +7,8 @@ import { computeModelConfigFingerprint, protocolOf, readModelPortConfig,
   '../workflow/model-port-config.js';
 import { readCredentialFingerprint } from '../workflow/credential-identity.js';
 import { readModelCatalogConfig } from '../workflow/model-catalog-config.js';
+import { readSessionModelCapacity, resolveEffectiveModelWindow,
+  type ModelContextWindowSource } from './model-context-window.js';
 import type { ModelCallBudget } from
   '../workflow/openai-compatible-model-port.js';
 import type { AssistModelPort } from '../workflow/fake-model-port.js';
@@ -15,74 +17,112 @@ const MAX_FREE_MODEL_ATTEMPTS = 3;
 const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
 
 /**
- * 作用域预算要盖住几笔同时在途预留（2026-11-10）。
+ * 作用域上限至少盖住一笔单次预留（2026-11-10，0165 修订）。
  *
- * 作用域闸门（model-call-repository.ts）对已结算调用按真实用量、对在途调用按整笔
- * `budget_reserved_tokens` 计费。实测最小重叠是「上一轮回复结束后仍在途的 TITLE／
- * MEMORY_CAPTURE 辅助调用」与「用户紧接着发的下一条消息」：两笔预留相加就等于旧公式的
- * 两倍下限，再叠上任何已结算用量就被判 MODEL_BUDGET_EXHAUSTED（2026-11-10 14:42:49
- * 会话 f7caca02：已结算 10397 + 在途 262144 + 新预留 262144 = 534685 > 524288）。
- *
- * 所以按「同时两笔在途 + 一笔已结算余量」给作用域下限，256K 档从 512K 提到 768K；
- * 上限仍是硬限制，仍随 max_scope_tokens 只有更高时取更高。
+ * 闸门对已结算调用按真实用量、对在途调用按整笔 `budget_reserved_tokens` 计费。
+ * 旧实现把下限抬到 `reservation * 3`，在 1M 目标下会得到 3M，反而突破连接/部署
+ * 配置的 `max_scope_tokens`（DB 上限 2M）。0165 起默认 `max_scope_tokens` 已是 1M，
+ * 足够覆盖旧的「两笔 256K 在途」实测形态；超过配置上限的并发由队列/预算耗尽处理，
+ * 不靠篡改配置值放行。
  */
-const SCOPE_CONCURRENT_RESERVATIONS = 2;
 
 /**
- * 单次调用预算的三个数（P1-A）。
+ * 单次调用预算的三个数（P1-A / 0165）。
  *
- * 0145：档位是**会话级**的（`assist_sessions.context_budget_tokens`），由调用方读出来
- * 传进来；Run / 委派这类没有对话会话的消费者仍传工作区默认（见 `readWorkspaceContextBudget`）。
- * 三个数讲的都是同一次外呼的预算，不管档位从哪来：
+ * 0165 起预算不再读会话档位：模型窗口是能力参数，由 `model-context-window.ts` 解析，
+ * 这里只把它收敛成**一次外呼的预算**：
  *   · `callReservationTokens`：这一次调用申请多少预算（写进 model_calls 的预留列）；
- *   · Provider 实际窗口：候选模型自己声明的 `context_window`。档位高于它时**按窗口截断**，
- *     不能声称要用一个 Provider 根本装不下的预算；
- *   · 输出预留：`maxOutputTokens` 由模型端口配置决定，不随档位变化；
- *   · 作用域上限：`scopeTokenLimit` 至少要盖住单次预留，否则 1M 档会把自己卡死在第一次调用。
+ *   · 模型真实窗口：已知窗口 / 安全回退（256K）；产品目标 1M 是上限，不是模型能力；
+ *   · 服务商硬上限：连接/进程配置的 `maxCallTokens`，例如只接受 64K 请求的端点；
+ *   · 输出预留：`maxOutputTokens` 由模型端口配置决定，不随窗口变化；
+ *   · 作用域上限：`scopeTokenLimit` 至少要盖住单次预留，否则大窗口会把自己卡死在第一次调用。
  *
- * `minimum_context_window`（候选资格门槛）**不**随档位走：它是「这个进程至少要什么样的
- * 模型」，让工作区档位去改它会把换档变成静默的模型淘汰。
- *
- * Run 准入也用同一函数重算「当前配置 + 冻结档位」下的预期三个数，
- * 而不是拿冻结预算直接和进程默认值比较（那样每次选了档位都会误判成配置变化）。
+ * `minimum_context_window`（候选资格门槛）**不**随窗口走：它是「这个进程至少要什么样的
+ * 模型」，让用户压缩阈值去改它会把换阈值变成静默的模型淘汰。
  */
 export function planAssistModelBudget(config: { readonly maxCallTokens: number;
+  readonly maxScopeCalls: number; readonly maxScopeTokens: number },
+  capacity: { readonly modelWindowTokens: number | null;
+    readonly providerCallCapTokens?: number | null;
+    readonly windowSource?: ModelContextWindowSource }) {
+  return planResolvedAssistModelBudget(config, {
+    modelWindowTokens: capacity.modelWindowTokens,
+    ...(capacity.providerCallCapTokens === null || capacity.providerCallCapTokens === undefined ? {}
+      : { providerCallCapTokens: capacity.providerCallCapTokens }),
+    ...(capacity.windowSource === undefined ? {} : { windowSource: capacity.windowSource }),
+  });
+}
+
+/**
+ * 新口径的预算：`reservation = min(1M 目标, 模型窗口/安全回退, 服务商硬上限)`。
+ *
+ * `contextBudgetTokens` 保留在返回值里，只是为了让旧执行端/快照读取器能拿到一个
+ * 数字；它的语义已经从「用户档位」变成「这次外呼实际申请的容量」。
+ */
+function planResolvedAssistModelBudget(config: { readonly maxCallTokens: number;
+  readonly maxScopeCalls: number; readonly maxScopeTokens: number },
+  capacity: { readonly modelWindowTokens: number | null;
+    readonly providerCallCapTokens?: number | null;
+    readonly windowSource?: ModelContextWindowSource }) {
+  const resolved = resolveEffectiveModelWindow({
+    modelWindowTokens: capacity.modelWindowTokens,
+    ...(capacity.providerCallCapTokens === undefined ? {}
+      : { providerCallCapTokens: capacity.providerCallCapTokens }),
+  });
+  const reservation = resolved.windowTokens;
+  // 配置上限就是上限：只保证一笔单次预留能进入闸门，不再用 3 倍预留抬高它。
+  const scopeTokenLimit = Math.max(reservation, config.maxScopeTokens);
+  return { callReservationTokens: reservation, scopeCallLimit: config.maxScopeCalls,
+    scopeTokenLimit,
+    contextBudgetTokens: reservation,
+    modelContextWindowTokens: capacity.modelWindowTokens,
+    providerCallCapTokens: capacity.providerCallCapTokens ?? null,
+    contextWindowSource: capacity.modelWindowTokens === null ? 'UNKNOWN_FALLBACK' as const
+      : capacity.windowSource ?? 'MODEL_CATALOG' as const,
+    budgetBasis: 'MODEL_CONTEXT_WINDOW' as const,
+    fallbackApplied: resolved.fallbackApplied };
+}
+
+/**
+ * 旧快照的预算复核口径（0145–0164）：冻结时按会话档位，仍按当时真实窗口截断。
+ *
+ * 只给**升级前已冻结**的在途消息/Run 用。新请求一律走 `planAssistModelBudget`；
+ * 这里保留旧公式，是为了不让一次安全的预算收紧把在途任务误判成「配置已变」。
+ */
+export function planLegacyAssistModelBudget(config: { readonly maxCallTokens: number;
   readonly maxScopeCalls: number; readonly maxScopeTokens: number },
   contextTokens: number | null, providerWindow: number | null) {
   const requested = contextTokens ?? config.maxCallTokens;
   const reservation = providerWindow === null ? requested : Math.min(requested, providerWindow);
-  // 选中档位时作用域要留出「两笔同时在途的预留 + 一笔已结算余量」：闸门对已结算调用按
-  // 真实用量计费、对在途调用按整笔预留计费；旧公式只留两倍预留，任何已结算用量都会把余量吃干（见 SCOPE_CONCURRENT_RESERVATIONS）。
-  const scopeFloor = contextTokens === null ? reservation
-    : reservation * (1 + SCOPE_CONCURRENT_RESERVATIONS);
+  const scopeTokenLimit = Math.max(reservation, config.maxScopeTokens);
   return { callReservationTokens: reservation, scopeCallLimit: config.maxScopeCalls,
-    scopeTokenLimit: Math.max(config.maxScopeTokens, scopeFloor),
-    contextBudgetTokens: contextTokens };
+    scopeTokenLimit,
+    contextBudgetTokens: contextTokens,
+    modelContextWindowTokens: providerWindow,
+    providerCallCapTokens: null,
+    contextWindowSource: providerWindow === null ? 'UNKNOWN_FALLBACK' as const
+      : 'MODEL_CATALOG' as const,
+    budgetBasis: 'LEGACY_SESSION_TIER' as const,
+    fallbackApplied: providerWindow === null };
 }
 
 /**
- * 0145：模型调用使用的档位。
- *
- * 有会话就是会话自己的档位（这就是「每个会话独立保存」在运行时的那一端）；
- * 没有会话的消费者（Run 执行、委派、连接验证）读工作区默认——那是它们的合法默认，
- * 不因为聊天改成会话级就被抹掉。
+ * 冻结前的容量读数：真实模型优先，读不到时安全回退，绝不把「用户选过 1M」当成
+ * 「模型支持 1M」。兼容旧调用点（第三个参数传数字时按旧档位处理）。
  */
-async function readContextBudget(repositories: Repositories,
-  scope: AssistBudgetScope | undefined): Promise<number | null> {
-  if (scope === undefined) return null;
-  if (scope.sessionId !== undefined && scope.sessionId !== null) {
-    const session = await repositories.assist.readSession(scope.sessionId);
-    if (session?.workspace_id === scope.workspaceId) return session.context_budget_tokens;
-  }
-  const configured = await repositories.workspaces.readDefaultDirectory(scope.workspaceId);
-  return configured?.context_budget_tokens ?? null;
+async function resolveBudgetCapacity(repositories: Repositories,
+  scope: AssistBudgetScope | undefined, env: NodeJS.ProcessEnv):
+Promise<{ readonly modelWindowTokens: number | null;
+  readonly providerCallCapTokens: number | null;
+  readonly windowSource: ModelContextWindowSource }> {
+  const selection = scope?.sessionId === undefined || scope.sessionId === null
+    ? undefined : await repositories.modelSelection.readForSession(scope.sessionId);
+  const capacity = await readSessionModelCapacity(repositories, scope?.workspaceId ?? '',
+    selection, env);
+  return { modelWindowTokens: capacity.modelWindowTokens,
+    providerCallCapTokens: capacity.providerCallCapTokens,
+    windowSource: capacity.windowSource };
 }
-
-/**
- * 同一档位读法的公开入口：按连接冻结聊天计划时（`model-connection-runtime`）必须用
- * 完全相同的口径，否则连接路径与进程默认路径会算出不同的预算，冻结即失真。
- */
-export const readAssistContextBudget = readContextBudget;
 
 /** 预算来源的作用域：有会话按会话，没有会话按工作区。 */
 export interface AssistBudgetScope {
@@ -97,14 +137,14 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
   requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
   scope?: AssistBudgetScope):
   Promise<FrozenAssistModelPlan | undefined> {
-  const contextBudget = await readContextBudget(repositories, scope);
   if (selection === undefined) {
     const config = readModelPortConfig(env);
     if (config === undefined) return undefined;
+    const capacity = await resolveBudgetCapacity(repositories, scope, env);
     return withCredential(frozen([candidateSnapshot({ provider: 'openai-compatible',
       model: config.model, configFingerprint: computeModelConfigFingerprint(config) },
     false, null)], config, 1, requirements,
-    planAssistModelBudget(config, contextBudget, null)), config);
+    planAssistModelBudget(config, capacity)), config);
   }
   if (selection.connection === 'default') {
     const config = readModelPortConfig(env);
@@ -112,10 +152,11 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
         computeModelConfigFingerprint(config) !== selection.config_fingerprint) {
       throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
     }
+    const capacity = await resolveBudgetCapacity(repositories, scope, env);
     const candidate = candidateSnapshot({ provider: 'openai-compatible', model: config.model,
       configFingerprint: selection.config_fingerprint }, false, null);
     return withCredential(frozen([candidate], config, 1, requirements,
-      planAssistModelBudget(config, contextBudget, null)), config);
+      planAssistModelBudget(config, capacity)), config);
   }
 
   const sync = await repositories.modelCatalog.readSyncState();
@@ -148,11 +189,14 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
       source: 'openrouter', snapshotSeq: sync.snapshot_seq.toString(),
       sourceModelId: entry.source_model_id });
   });
-  // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。档位高于它时按
-  // 窗口截断——不是把模型淘汰掉（资格门槛仍是进程默认），而是不申请它装不下的预算。
+  // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。窗口高于产品
+  // 目标时按 1M 截断，低于它时按窗口截断——不是把模型淘汰掉（资格门槛仍是进程默认），
+  // 而是不申请它装不下的预算。
   return withCredential(frozen(candidates, selectedConfig,
     Math.min(MAX_FREE_MODEL_ATTEMPTS, candidates.length), requirements,
-    planAssistModelBudget(selectedConfig, contextBudget, selected.context_window)), selectedConfig);
+    planAssistModelBudget(selectedConfig, { modelWindowTokens: selected.context_window,
+      providerCallCapTokens: selectedConfig.maxCallTokens, windowSource: 'MODEL_CATALOG' })),
+  selectedConfig);
 }
 
 /**
@@ -166,14 +210,16 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
  */
 export function freezeSingleCandidatePlan(config: ModelPortConfig,
   requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
-  workspaceTokens: number | null): FrozenAssistModelPlan {
+  capacity: { readonly modelWindowTokens: number | null;
+    readonly providerCallCapTokens?: number | null;
+    readonly windowSource?: ModelContextWindowSource }): FrozenAssistModelPlan {
   // 协议随配置一起冻结：执行端据此选择同一种协议的端口，且配置指纹已经把协议算进去，
   // 因此改协议后旧快照必然失配（不会被重新解释成另一种协议）。
   const candidate = candidateSnapshot({ provider: config.provider, model: config.model,
     protocol: protocolOf(config),
     configFingerprint: computeModelConfigFingerprint(config) }, false, null);
   return withCredential(frozen([candidate], config, 1, requirements,
-    planAssistModelBudget(config, workspaceTokens, null)), config);
+    planAssistModelBudget(config, capacity)), config);
 }
 
 /**
@@ -224,10 +270,19 @@ export interface ParsedAssistModelSnapshot {
   readonly budget: { readonly callReservationTokens: number;
     readonly scopeCallLimit: number; readonly scopeTokenLimit: number;
     /**
-     * 0145：冻结时用的是哪个档位（会话档位；没有会话的消费者是工作区默认）。
-     * null = 冻结时读不到档位，按进程默认。
+     * 0165：这次外呼实际申请的容量。新快照 = 按模型窗口收敛后的可用窗口；
+     * 0145–0164 的旧快照 = 当时的会话档位（保留旧语义给在途消息）。
      */
-    readonly contextBudgetTokens: number | null };
+    readonly contextBudgetTokens: number | null;
+    /** 模型真实窗口的已知值；旧快照没有这个键，读作 null（未知）。 */
+    readonly modelContextWindowTokens: number | null;
+    /** 服务商/连接的单次硬上限；旧快照没有这个键。 */
+    readonly providerCallCapTokens: number | null;
+    /** 窗口读数来源；旧快照没有这个键，读作 null（不冒充已识别）。 */
+    readonly contextWindowSource: ModelContextWindowSource | null;
+    /** 预算口径。缺键的旧快照一律 LEGACY_SESSION_TIER。 */
+    readonly budgetBasis: 'MODEL_CONTEXT_WINDOW' | 'LEGACY_SESSION_TIER';
+    readonly fallbackApplied: boolean };
   readonly maxAttempts: number;
 }
 
@@ -334,6 +389,31 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
   if (frozenBudget !== undefined && frozenBudget !== null && !positiveSafeInteger(frozenBudget)) {
     throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
   }
+  // 0165：预算口径。缺键 = 0145–0164 的旧快照，按当时的「会话档位」语义继续复核；
+  // 新快照必须显式写 `MODEL_CONTEXT_WINDOW`，不能让升级中的在途消息被两套公式互相误判。
+  const budgetBasis = budgetObject.budget_basis === undefined
+    ? 'LEGACY_SESSION_TIER' as const
+    : budgetObject.budget_basis === 'MODEL_CONTEXT_WINDOW' ? 'MODEL_CONTEXT_WINDOW' as const
+      : budgetObject.budget_basis === 'LEGACY_SESSION_TIER' ? 'LEGACY_SESSION_TIER' as const
+        : null;
+  if (budgetBasis === null) throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  const modelWindow = budgetObject.model_context_window_tokens;
+  if (modelWindow !== undefined && modelWindow !== null && !positiveSafeInteger(modelWindow)) {
+    throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  }
+  const providerCap = budgetObject.provider_call_cap_tokens;
+  if (providerCap !== undefined && providerCap !== null && !positiveSafeInteger(providerCap)) {
+    throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  }
+  const windowSource = budgetObject.context_window_source;
+  if (windowSource !== undefined && (typeof windowSource !== 'string' ||
+      !CONTEXT_WINDOW_SOURCES.includes(windowSource))) {
+    throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  }
+  const fallbackApplied = budgetObject.fallback_applied;
+  if (fallbackApplied !== undefined && typeof fallbackApplied !== 'boolean') {
+    throw new Error('ASSIST_MODEL_SNAPSHOT_INVALID');
+  }
   return { version: 1, policyVersion,
     requirements: { requiresTools: requirementObject.tools as boolean,
       requiresJsonOutput: requirementObject.response_format as boolean,
@@ -342,9 +422,18 @@ export function parseAssistModelSnapshot(value: JsonObject): ParsedAssistModelSn
     budget: { callReservationTokens: budgetObject.call_reservation_tokens as number,
       scopeCallLimit: budgetObject.scope_call_limit as number,
       scopeTokenLimit: budgetObject.scope_token_limit as number,
-      contextBudgetTokens: typeof frozenBudget === 'number' ? frozenBudget : null },
+      contextBudgetTokens: typeof frozenBudget === 'number' ? frozenBudget : null,
+      modelContextWindowTokens: typeof modelWindow === 'number' ? modelWindow : null,
+      providerCallCapTokens: typeof providerCap === 'number' ? providerCap : null,
+      contextWindowSource: typeof windowSource === 'string'
+        ? windowSource as ModelContextWindowSource : null,
+      budgetBasis,
+      fallbackApplied: typeof fallbackApplied === 'boolean' ? fallbackApplied : false },
     maxAttempts };
 }
+
+const CONTEXT_WINDOW_SOURCES: readonly string[] = ['MODEL_CATALOG',
+  'CAPABILITY_DECLARATION', 'MODEL_CONFIG', 'UNKNOWN_FALLBACK'];
 
 function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === 'number' && value > 0;
@@ -401,7 +490,12 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
     readonly maxScopeTokens: number }, maxAttempts: number,
   requirements: { readonly requiresTools: boolean; readonly requiresJsonOutput: boolean },
   plan: { readonly callReservationTokens: number; readonly scopeCallLimit: number;
-    readonly scopeTokenLimit: number; readonly contextBudgetTokens: number | null }) {
+    readonly scopeTokenLimit: number; readonly contextBudgetTokens: number | null;
+    readonly modelContextWindowTokens: number | null;
+    readonly providerCallCapTokens: number | null;
+    readonly contextWindowSource: ModelContextWindowSource;
+    readonly budgetBasis: 'MODEL_CONTEXT_WINDOW' | 'LEGACY_SESSION_TIER';
+    readonly fallbackApplied: boolean }) {
   const snapshot: JsonObject = {
     version: 1, policy_version: FREE_MODEL_POLICY_VERSION,
     requirements: { tools: requirements.requiresTools,
@@ -420,9 +514,15 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
     })),
     budget: { call_reservation_tokens: plan.callReservationTokens,
       scope_call_limit: plan.scopeCallLimit, scope_token_limit: plan.scopeTokenLimit,
-      // 0145：这次调用用的是哪个档位（会话档位；没有会话的消费者是工作区默认）。
-      // 它只解释「这个预留数从哪来」，不是新的闸门，也不改任何权限。
-      context_budget_tokens: plan.contextBudgetTokens },
+      // 0165：这次外呼实际申请的容量（旧字段名保留，语义已从「会话档位」变成
+      // 「按模型窗口收敛后的可用窗口」）。新增字段解释这个数从哪来、是否用了安全回退。
+      context_budget_tokens: plan.contextBudgetTokens,
+      model_context_window_tokens: plan.modelContextWindowTokens,
+      provider_call_cap_tokens: plan.providerCallCapTokens,
+      context_window_source: plan.contextWindowSource,
+      // 缺这个键的旧快照一律按 LEGACY 处理：升级前冻结的在途消息不能因新口径被误杀。
+      budget_basis: plan.budgetBasis,
+      fallback_applied: plan.fallbackApplied },
     max_attempts: maxAttempts,
   };
   return { snapshot, attemptState: { revision: '1', current_candidate_index: 0,

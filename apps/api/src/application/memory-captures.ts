@@ -7,6 +7,8 @@ import { runIdempotentCommand } from './command.js';
 import { invalidTransition, resourceNotFound, revisionConflict } from './domain-error.js';
 import { requireRevision } from './revisions.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
+import { createMemoryRecord } from './memory-write.js';
+import { parseMemoryType } from './memory-model.js';
 import { sql } from 'kysely';
 
 /**
@@ -54,7 +56,7 @@ export const MEMORY_AUTO_CAPTURE_MAX_ITEMS = 3;
  *      `evidenceMessageId` 是逐字引文实际所在的消息（用户原话或助手回复）。此前两者
  *      混用同一个助手消息 id，导致引自用户原话的条目指不回它真正的那句话。
  */
-export async function recordAutoCapture(r: Repositories, input: {
+export async function recordAutoCapture(db: DbExecutor, r: Repositories, input: {
   workspaceId: string; projectId: string | null; sessionId: string;
   /** 触发本轮提取的助手消息（去重指纹的轮次身份）。 */
   triggerMessageId: string;
@@ -65,6 +67,9 @@ export async function recordAutoCapture(r: Repositories, input: {
   title: string; text: string; reason: string | null;
   /** DEV-0042：来源类别（USER_STATEMENT / MODEL_OBSERVATION）与它对应的原消息逐字片段。 */
   sourceKind: MemorySourceKind; sourceQuote: string;
+  /** 0164：模型提取声明的类型/键/重要性；非法值按 UNKNOWN/忽略处理，不猜。 */
+  memoryType?: string; memoryKey?: string | null; importance?: number;
+  verification?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
 }): Promise<{ memoryId: string; captureId: string } | null> {
   const title = input.title.trim();
   const text = input.text.trim();
@@ -92,29 +97,35 @@ export async function recordAutoCapture(r: Repositories, input: {
 
   await r.memoryCaptures.lockSource(`${input.sessionId}:${input.triggerMessageId}:${normalizedSha256}`);
   if (await r.memoryCaptures.hasCaptured(input.sessionId, input.triggerMessageId, normalizedSha256)) return null;
-  if (await r.memoryCaptures.hasMemoryWithText(input.workspaceId, input.projectId, title, text)) return null;
   if (await r.memoryCaptures.countToday(input.sessionId) >= MEMORY_AUTO_CAPTURE_DAILY_LIMIT) return null;
 
-  const memoryId = randomUUID();
+  const memoryType = parseMemoryType(input.memoryType);
+  const outcome = await createMemoryRecord(db, r, {
+    workspaceId: input.workspaceId, projectId: input.projectId, taskId: null,
+    memoryType, memoryKey: input.memoryKey ?? null, title, text,
+    origin: 'AUTO_CAPTURE', sourceKind: input.sourceKind,
+    importance: input.importance ?? 3,
+    verification: input.verification ?? 'UNVERIFIED',
+    commandId: null, actorRef: 'auto-capture', force: false, suppressActivity: true,
+    source: { sessionId: input.sessionId, messageId: input.evidenceMessageId,
+      contentSha256: sourceSha256 },
+  });
+  // 重复/冲突/敏感内容都不再写第二条；返回 null 表示本轮没有产生新的长期记忆。
+  if (outcome.kind !== 'CREATED' && outcome.kind !== 'SUPERSEDED') return null;
+  const memoryId = outcome.memoryId;
   const captureId = randomUUID();
-  await r.information.insertMemoryRoot(memoryId, input.workspaceId, input.projectId, title,
-    input.sourceKind, 'AUTO_CAPTURE');
-  await r.information.insertMemoryVersion({ id: randomUUID(), memoryId, version: 1n,
-    title, text, confirmedBy: 'auto-capture', expiresAt: null });
-  await r.information.insertMemoryMessageSource({ memoryId, sessionId: input.sessionId,
-    messageId: input.evidenceMessageId, contentSha256: sourceSha256 });
   const capture = await r.memoryCaptures.insert({ id: captureId, workspaceId: input.workspaceId,
     projectId: input.projectId, sessionId: input.sessionId, messageId: input.triggerMessageId,
     sourceSha256, normalizedSha256, memoryId, sourceQuote: input.sourceQuote });
   // 唯一键冲突说明并发方已经写过：它写的那条才是事实，本事务不能留下第二份 Memory。
   if (capture === undefined) throw new Error('AUTO_CAPTURE_CONFLICT');
-  await r.workspaces.bumpContextRevision(input.workspaceId);
   await r.activities.insertActivityRecord({ id: randomUUID(), workspaceId: input.workspaceId,
     actorKind: 'AI', actorRef: 'auto-capture', commandId: null,
     projectId: input.projectId, taskId: null, eventType: 'MEMORY_AUTO_CAPTURED',
     factRefs: { memory_id: memoryId, capture_id: captureId, session_id: input.sessionId,
       message_id: input.triggerMessageId, evidence_message_id: input.evidenceMessageId,
-      source_kind: input.sourceKind, version: '1',
+      source_kind: input.sourceKind, memory_type: memoryType, version: '1',
+      ...(outcome.kind === 'SUPERSEDED' ? { superseded_id: outcome.replacedId } : {}),
       ...(input.reason === null ? {} : { reason: input.reason }) } });
   return { memoryId, captureId };
 }

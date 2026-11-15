@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import test, { after, before, beforeEach } from 'node:test';
 import { sql } from 'kysely';
-import { createAssistSession, requestAssistMessage, setSessionContextBudget }
+import { createAssistSession, requestAssistMessage }
   from '../../src/application/assist-commands.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { runAssistMemoryTick } from '../../src/application/assist-memory-runner.js';
@@ -17,7 +17,11 @@ import { readMemorySettings, setMemorySettings } from '../../src/application/mem
 import { createRepositories, withTransaction } from '../../src/application/unit-of-work.js';
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
-import { FakeModelPort, type AssistRequest } from '../../src/workflow/fake-model-port.js';
+import { FakeModelPort, type AssistModelPort, type AssistRequest }
+  from '../../src/workflow/fake-model-port.js';
+import { computeModelConfigFingerprint, readModelPortConfig }
+  from '../../src/workflow/model-port-config.js';
+import { readCredentialFingerprint } from '../../src/workflow/credential-identity.js';
 import type { JsonValue } from '../../src/infrastructure/json.js';
 import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase }
   from './integration-support.js';
@@ -69,7 +73,23 @@ beforeEach(async () => {
 
 const MIB = 1_048_576;
 
-async function fixture(rounds = 9, tier = 262_144) {
+/**
+ * 0165 起预算来自模型能力，不再来自会话档位。集成套件直接调用应用层，没有 API/部署
+ * 配置，所以这里显式声明一个 1M 的进程默认模型，让「1M 模型 + 默认 350K 阈值」可测。
+ * FakeModelPort 仍是唯一外呼端口，不会真的访问网络。
+ */
+function useMillionTokenModel(): void {
+  process.env.RELAY_MODEL_PROVIDER = 'openai-compatible';
+  process.env.RELAY_MODEL_API_KEY = 'integration-fake-key';
+  process.env.RELAY_MODEL_NAME = 'integration-fake-model';
+  process.env.RELAY_MODEL_MAX_OUTPUT_TOKENS = '8192';
+  process.env.RELAY_MODEL_MAX_CALL_TOKENS = String(MIB);
+  process.env.RELAY_MODEL_MAX_SCOPE_TOKENS = '2000000';
+  process.env.RELAY_MODEL_CONTEXT_WINDOW = '1000000';
+}
+
+async function fixture(rounds = 9) {
+  useMillionTokenModel();
   const workspaceId = randomUUID();
   await withTransaction(app.db, async (r) => {
     await r.workspaces.insertWorkspace({ id: workspaceId, name: 'context-compaction' });
@@ -78,8 +98,6 @@ async function fixture(rounds = 9, tier = 262_144) {
   const made = await createAssistSession(app.db, { workspaceId, projectId: null,
     commandId: randomUUID(), title: 'context-compaction' });
   const sessionId = made.result.session_id;
-  await setSessionContextBudget(app.db, { workspaceId, sessionId, commandId: randomUUID(),
-    expectedRevision: '0', budgetTokens: tier });
   await withTransaction(app.db, async (r) => {
     for (let i = 1; i <= rounds * 2; i++) {
       await r.assist.insertMessage({ id: randomUUID(), sessionId, seq: BigInt(i),
@@ -100,6 +118,26 @@ function structuredSummary(marker: string): string {
 }
 
 /**
+ * 0165 后消息会冻结一个带真实模型身份的候选，`runAssistGenerationTick` 会逐字段比对
+ * 端口身份。FakeModelPort 的固定身份是 `fake/fake-model-v1`，与「部署配置里的 1M 模型」
+ * 不匹配，所以这里给离线替身套一层与配置一致的只读身份；外呼仍是同一个 Fake 实现。
+ */
+function configuredFakePort(model: FakeModelPort): AssistModelPort {
+  const config = readModelPortConfig(process.env);
+  if (config === undefined) throw new Error('test model config missing');
+  const port: AssistModelPort & { withBudget: (budget: {
+    callReservationTokens: number; scopeCallLimit: number; scopeTokenLimit: number })
+    => AssistModelPort } = {
+    identity: { provider: config.provider, model: config.model,
+      configFingerprint: computeModelConfigFingerprint(config),
+      credentialFingerprint: readCredentialFingerprint(config) },
+    assist: (input) => model.assist(input),
+    withBudget: (budget) => ({ ...port, identity: { ...port.identity, budget } }),
+  };
+  return port;
+}
+
+/**
  * 模型替身：PRIMARY 上报一个确定的输入量，压缩请求返回结构化摘要。
  * `usage.inputTokens` 就是被测的「真实基线」，不是按正文长度估出来的。
  */
@@ -117,7 +155,8 @@ function port(primaryInputTokens: number, options: {
     return { kind: 'CONTENT', content: '收到，继续。', providerRequestId: randomUUID(),
       usage: { inputTokens: primaryInputTokens, outputTokens: 10 } };
   };
-  return { model, inputs, options: { workerId: randomUUID(), leaseMs: 60_000, storage, modelPort: model } };
+  return { model, inputs, options: { workerId: randomUUID(), leaseMs: 60_000, storage,
+    modelPort: configuredFakePort(model) } };
 }
 
 /**
@@ -149,11 +188,13 @@ function compactionMeta(request: { readonly model_snapshot: Record<string, JsonV
 }
 
 test('低于生效阈值时不触发自动压缩，消息照常完成', async () => {
-  const f = await fixture(9, MIB);
+  const f = await fixture(9);
   // 1M 档位、1M 目标窗口：默认阈值 350K。
   const first = port(100_000);
-  await send(f, '第一轮');
-  assert.equal((await runAssistGenerationTick(app.db, first.options))?.status, 'COMPLETED');
+  const sent = await send(f, '第一轮');
+  assert.ok(sent.result.assistant_message_id, JSON.stringify(sent));
+  const firstTick = await runAssistGenerationTick(app.db, first.options);
+  assert.equal(firstTick?.status, 'COMPLETED', JSON.stringify(firstTick));
 
   const second = port(100_000);
   await send(f, '第二轮');
@@ -163,7 +204,7 @@ test('低于生效阈值时不触发自动压缩，消息照常完成', async ()
 });
 
 test('达到 350K 自动压缩：原消息重排队、压缩完成后继续执行', async () => {
-  const f = await fixture(9, MIB);
+  const f = await fixture(9);
   const first = port(350_000);
   await send(f, '第一轮');
   assert.equal((await runAssistGenerationTick(app.db, first.options))?.status, 'COMPLETED');
@@ -197,7 +238,7 @@ test('达到 350K 自动压缩：原消息重排队、压缩完成后继续执�
 });
 
 test('用户把阈值调到 200K 后按 200K 判定（低于它不压，高于它压）', async () => {
-  const below = await fixture(9, MIB);
+  const below = await fixture(9);
   await setMemorySettings(app.db, { workspaceId: below.workspaceId, commandId: randomUUID(),
     expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false,
     compactionThresholdTokens: 200_000 });
@@ -210,7 +251,7 @@ test('用户把阈值调到 200K 后按 200K 判定（低于它不压，高于�
   assert.equal(primaryCalls(second).length, 1);
   assert.equal((await requests(below.sessionId)).length, 0);
 
-  const above = await fixture(9, MIB);
+  const above = await fixture(9);
   await setMemorySettings(app.db, { workspaceId: above.workspaceId, commandId: randomUUID(),
     expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false,
     compactionThresholdTokens: 200_000 });
@@ -226,27 +267,28 @@ test('用户把阈值调到 200K 后按 200K 判定（低于它不压，高于�
 });
 
 test('关闭普通自动压缩：到阈值不压，触及安全上限仍触发溢出保护', async () => {
-  const f = await fixture(9);
-  // 默认 256K 档位：安全输入上限 232652，生效阈值 209386（上限的 90%）。
+  const f = await fixture();
+  // 1M 模型：安全输入上限 933,616，生效阈值 350,000。关闭自动压缩后 350K 不触发，
+  // 940K 虽然仍在 1M 之内，但已越过安全输入上限，必须进入溢出保护。
   await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
     expectedRevision: '0', recallEnabled: true, automaticCompaction: false, autoCapture: false });
 
-  const below = port(220_000);
+  const below = port(400_000);
   await send(f, '第一轮');
   assert.equal((await runAssistGenerationTick(app.db, below.options))?.status, 'COMPLETED');
-  const safe = port(220_000);
+  const safe = port(400_000);
   await send(f, '高于阈值但仍在安全上限内');
   assert.equal((await runAssistGenerationTick(app.db, safe.options))?.status, 'COMPLETED');
   assert.equal(primaryCalls(safe).length, 1, '用户关闭自动压缩后，到阈值不应擅自整理');
   assert.equal((await requests(f.sessionId)).length, 0);
 
-  const over = await fixture(9);
+  const over = await fixture();
   await setMemorySettings(app.db, { workspaceId: over.workspaceId, commandId: randomUUID(),
     expectedRevision: '0', recallEnabled: true, automaticCompaction: false, autoCapture: false });
-  const baseline = port(240_000);
+  const baseline = port(940_000);
   await send(over, '第一轮');
   assert.equal((await runAssistGenerationTick(app.db, baseline.options))?.status, 'COMPLETED');
-  const overflow = port(240_000);
+  const overflow = port(940_000);
   await send(over, '超过安全上限');
   assert.equal((await runAssistGenerationTick(app.db, overflow.options))?.status, 'DISCARDED');
   const [request] = await requests(over.sessionId);
@@ -288,10 +330,10 @@ test('用量投影把模型窗口、生效阈值、距离与最近一次结果�
   assert.equal(projection.compaction.threshold_tokens, 200_000);
   assert.equal(projection.compaction.effective_threshold_tokens, 200_000);
   assert.equal(projection.compaction.threshold_clamped, false);
-  assert.equal(projection.compaction.window_source, 'SESSION_TIER',
-    '没有模型目录条目时不得冒充真实窗口');
-  assert.equal(projection.compaction.model_window_tokens, null);
-  assert.equal(projection.compaction.target_window_tokens, 262_144);
+  assert.equal(projection.compaction.window_source, 'MODEL_CONFIG',
+    '部署配置声明的 1M 窗口应标记为 MODEL_CONFIG');
+  assert.equal(projection.compaction.model_window_tokens, 1_000_000);
+  assert.equal(projection.compaction.target_window_tokens, 1_000_000);
   // 基线 180000 + 之后新增消息（估算增量），距离阈值约 2 万。
   assert.equal(projection.compaction.context_source, 'PROVIDER_USAGE');
   assert.ok(projection.compaction.context_tokens >= 180_000);
@@ -324,7 +366,7 @@ test('用量投影把模型窗口、生效阈值、距离与最近一次结果�
 });
 
 test('压缩失败保留原始消息与旧窗口，下一轮仍可继续', async () => {
-  const f = await fixture(9, MIB);
+  const f = await fixture(9);
   const first = port(350_000);
   await send(f, '第一轮');
   assert.equal((await runAssistGenerationTick(app.db, first.options))?.status, 'COMPLETED');
@@ -346,7 +388,7 @@ test('压缩失败保留原始消息与旧窗口，下一轮仍可继续', async
 });
 
 test('压缩后 Token 数仍高于阈值时不会无限压缩：同一边界只压一次', async () => {
-  const f = await fixture(9, MIB);
+  const f = await fixture(9);
   const first = port(350_000);
   await send(f, '第一轮');
   assert.equal((await runAssistGenerationTick(app.db, first.options))?.status, 'COMPLETED');
@@ -369,7 +411,7 @@ test('压缩后 Token 数仍高于阈值时不会无限压缩：同一边界只�
 });
 
 test('压缩完成但压后仍超预算：投影给出 unmet，无法容纳时明确中止且原文不丢', async () => {
-  // 默认 256K 档位：安全输入上限 232,652 tokens。把本批压缩**覆盖不到**的最后 8 条
+  // 1M 模型：安全输入上限 933,616 tokens。把本批压缩**覆盖不到**的最后 8 条
   // 换成大正文，模拟「单条巨大输入」——整理只能压旧轮次，剩余的近期原文仍装不下。
   const f = await fixture(9);
   const first = port(350_000);
@@ -379,7 +421,9 @@ test('压缩完成但压后仍超预算：投影给出 unmet，无法容纳时�
   // 但整理完剩余的近期原文依旧装不下——这正是「压完还不够」的真实形态。
   await send(f, '触发压缩');
   // 保留窗口（最近 8 条）换成大正文；只有 COMPLETED 行可以带正文（PENDING 必须为 NULL）。
-  const big = '上下文压力原文。'.repeat(4600); // 每条约 110KB
+  // 当前轮 assistant 仍是 PENDING，因此实际被替换的是 7 条已完成行；每条约 14.4 万 tokens，
+  // 合计约 100.8 万，明确高于 1M 模型的安全输入上限 933,616。
+  const big = '上下文压力原文。'.repeat(18_000); // 每条约 144K tokens，七条约 100.8 万
   await sql`update assist_messages set content = ${big}
     where session_id = ${f.sessionId} and seq > 14 and status = 'COMPLETED'`.execute(app.db);
   assert.equal((await runAssistGenerationTick(app.db, port(350_000).options))?.status, 'DISCARDED');

@@ -10,7 +10,7 @@ import { executorLabels, interactionModeLabels, taskStatusLabels, taskStatusTone
 import { describeLiveError } from "../lib/liveErrors";
 import "./InboxView.css";
 import type { InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
 const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
@@ -67,12 +67,14 @@ function InboxHead({ onCreate, onCreateLightweight }: { onCreate: () => void; on
 }
 
 /** 范围页签：全部 / 收件箱 / 人工待处理是三个不同范围，不是同页 Tab，因此沿用路由链接。 */
+const inboxScopeTabs = [
+  { key: "all", label: "全部", href: "/tasks", testId: "tasks-tab-all", className: "subnav-item" },
+  { key: "inbox", label: "收件箱", href: "/tasks?tab=inbox", testId: "tasks-tab-inbox", className: "subnav-item" },
+  { key: "attention", label: "人工待处理", href: "/tasks?tab=attention", className: "subnav-item" }
+] as const;
+
 function InboxScopeNav() {
-  return <nav className="subnav" aria-label="任务范围">
-    <Link className="subnav-item" to="/tasks" data-testid="tasks-tab-all">全部</Link>
-    <Link className="subnav-item subnav-item--active" to="/tasks?tab=inbox" data-testid="tasks-tab-inbox" aria-current="page">收件箱</Link>
-    <Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link>
-  </nav>;
+  return <Tabs label="任务范围" variant="page" className="subnav" items={inboxScopeTabs} />;
 }
 
 function InboxStats({ rows, basis }: { rows: readonly InboxTaskRow[]; basis: string }) {

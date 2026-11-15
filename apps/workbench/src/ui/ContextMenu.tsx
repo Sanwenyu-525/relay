@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
+import { closeSiblingOverlays, isTopOverlay, registerOverlay } from "../lib/overlayStack";
 import { cn } from "./cn";
 
 /**
@@ -42,6 +43,7 @@ export default function ContextMenu({ label, items, children, disabled = false, 
   const menu = useRef<HTMLDivElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const focusBeforePointer = useRef<HTMLElement | null>(null);
+  const layer = useRef(Symbol("contextMenu"));
 
   const close = useCallback((restore = true) => {
     setPoint(null);
@@ -82,6 +84,8 @@ export default function ContextMenu({ label, items, children, disabled = false, 
 
   useEffect(() => {
     if (point === null) return;
+    const unregister = registerOverlay(layer.current, "popup", () => close(), menu.current);
+    closeSiblingOverlays(layer.current, "popup", menu.current);
     const items = () => Array.from(menu.current?.querySelectorAll<HTMLButtonElement>("[role=\"menuitem\"]:not(:disabled)") ?? []);
     items()[0]?.focus({ preventScroll: true });
 
@@ -92,8 +96,19 @@ export default function ContextMenu({ label, items, children, disabled = false, 
     const onKeyDown = (event: KeyboardEvent) => {
       // 组词期间的按键属于输入法（与 Menu/Tabs 同一口径）。
       if (event.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape") { event.preventDefault(); close(); return; }
-      if (event.key === "Tab") { close(false); return; }
+      if (event.key === "Escape") {
+        // 一次 Esc 只关栈顶：右键菜单开在对话框里时，先关菜单，对话框留到下一次。
+        if (!isTopOverlay(layer.current)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        return;
+      }
+      if (event.key === "Tab") {
+        // Tab 是离开菜单：先把焦点还给打开前的元素，再让浏览器执行默认 Tab 前进。
+        close();
+        return;
+      }
       // Enter/Space 显式落到当前项：WebView2 与读屏的合成点击并不总等价于原生按钮默认行为，
       // preventDefault 后手动 click 也不会双重触发。
       if ((event.key === "Enter" || event.key === " ") && document.activeElement instanceof HTMLButtonElement && menu.current?.contains(document.activeElement)) {
@@ -114,6 +129,7 @@ export default function ContextMenu({ label, items, children, disabled = false, 
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
+      unregister();
     };
   }, [point, close]);
 

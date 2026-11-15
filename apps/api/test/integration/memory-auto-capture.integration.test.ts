@@ -229,7 +229,7 @@ test('关闭自动捕获后不再写入：预检与写入事务两道闸门都�
   const repositories = createRepositories(app.db);
   const session = await repositories.assist.readSession(f.sessionId);
   assert.ok(session);
-  const direct = await withTransaction(app.db, (r) => recordAutoCapture(r, {
+  const direct = await withTransaction(app.db, (r) => recordAutoCapture(app.db, r, {
     workspaceId: f.workspaceId, projectId: f.projectId, sessionId: f.sessionId,
     triggerMessageId: turn.assistantMessageId, evidenceMessageId: turn.userMessageId,
     evidenceText: USER_TEXT, title: '直写尝试', text: '不该落库的一条。', reason: null,
@@ -352,7 +352,7 @@ const EMPTY_EXTRACTION = JSON.stringify({ memories: [] });
 /** 绕过提取预检，直接走写入事务：验证「当前事实」闸门本身。 */
 async function directWrite(f: { workspaceId: string; projectId: string; sessionId: string },
   turn: { assistantMessageId: string; userMessageId: string }) {
-  return withTransaction(app.db, (r) => recordAutoCapture(r, {
+  return withTransaction(app.db, (r) => recordAutoCapture(app.db, r, {
     workspaceId: f.workspaceId, projectId: f.projectId, sessionId: f.sessionId,
     triggerMessageId: turn.assistantMessageId, evidenceMessageId: turn.userMessageId,
     evidenceText: USER_TEXT, title: '迟到的一条', text: '不该落库的一条。', reason: null,

@@ -19,7 +19,7 @@ import { useRelayConnection } from "../lib/relayConnection";
 import type { ProjectSnapshot, ProjectSummary, SourceReference } from "../types";
 import type { ProjectType } from "../types";
 import "./ProjectSkillView.css";
-import { Button } from "../ui";
+import { Button, Separator, Tabs } from "../ui";
 
 const tabs = [["overview", "总览"], ["blueprint", "蓝图预览"], ["resume", "继续项目"], ["assist", "Assist"]] as const;
 type TabKey = typeof tabs[number][0];
@@ -37,7 +37,8 @@ export default function ProjectSkillView() {
   }
   // 项目内页签与三个跨页入口合成一条 scope 行：页签占左、入口贴右缘。
   // 原实现为「入口行 → 页签行」两段竖排，页头之上多出一整行 54px 悬空按钮。
-  return <div className="skill-shell pv-page"><div className="project-scope-bar"><nav className="skill-tabs" aria-label="项目内页面">{tabs.map(([key, label]) => <Link key={key} className={`skill-tab${active === key ? " skill-tab--active" : ""}`} to={href(key)} aria-current={active === key ? "page" : undefined}>{label}</Link>)}</nav>{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link><Link className="secondary-button" to={`/projects/${projectId}/planning`}>下一段工作</Link><Link className="secondary-button" to={`/projects/${projectId}/task-chains`}>有限任务链</Link></div>}</div>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
+  return <div className="skill-shell pv-page"><div className="project-scope-bar"><Tabs label="项目内页面" variant="page" className="skill-tabs" value={active}
+    items={tabs.map(([key, label]) => ({ key, label, href: href(key), className: "skill-tab" }))} />{projectId && <div className="project-workbench-entry"><Link className="secondary-button" to={`/projects/${projectId}/workbench`}>打开项目工作台</Link><Link className="secondary-button" to={`/projects/${projectId}/planning`}>下一段工作</Link><Link className="secondary-button" to={`/projects/${projectId}/task-chains`}>有限任务链</Link></div>}</div>{active === "overview" ? <ProjectOverview /> : active === "blueprint" ? <BlueprintView /> : <ProjectResumeView />}</div>;
 }
 
 /** UI-02 项目总览：只按真实 State revision / phase / Next Action 呈现，来源不可用不以摘要当真相。 */
@@ -330,7 +331,7 @@ function FixtureProjectOverview() {
       <Link className="secondary-button secondary-button--wide" to={`/projects/${id}/tasks`}>查看项目任务</Link>
       <p className="disabled-reason"><CircleDashed aria-hidden="true" />示例数据：不会在此开始、恢复或改写执行。</p></>
       : <p className="helper-text">示例项目当前没有指定下一步。</p>}
-    <hr />
+    <Separator />
     <h2>需要你的判断</h2>
     {summary.pendingReviewCount > 0 ? <p><Link className="inline-link" to="/reviews">{summary.pendingReviewCount} 项待审</Link></p>
       : <p className="helper-text">没有待判断项。</p>}

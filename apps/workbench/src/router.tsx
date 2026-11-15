@@ -7,6 +7,7 @@ import CollaborationView from "./views/CollaborationView";
 import ArtifactLineageView from "./views/ArtifactLineageView";
 import CompletionRecordView from "./views/CompletionRecordView";
 import KnowledgeView from "./views/KnowledgeView";
+import MemoryView from "./views/MemoryView";
 import ConnectionsView, { ProjectConnectionsView } from "./views/ConnectionsView";
 import ProjectSkillView from "./views/ProjectSkillView";
 import ProjectTasksView from "./views/ProjectTasksView";
@@ -95,6 +96,7 @@ export const workbenchRoutes: RouteObject[] = [{
     { path: "scheduled-tasks/:id/edit", element: <CreateScheduledTaskView /> },
     { path: "reviews", element: <ReviewsView /> },
     { path: "knowledge", element: <KnowledgeView /> },
+    { path: "memory", element: <MemoryView /> },
     { path: "connections", element: <ConnectionsView /> },
     { path: "settings", element: <SettingsView /> },
     { path: "settings/diagnostics", element: <SettingsView initialGroup="diagnostics" /> },

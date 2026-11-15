@@ -1,0 +1,109 @@
+name: UI Quality
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/workbench/**"
+      - "scripts/check-ui-conventions.mjs"
+      - "scripts/check-ui-conventions.test.mjs"
+      - "scripts/lib/ui-conventions-ast.mjs"
+      - "scripts/ui-conventions-baseline.json"
+      - "docs/frontend/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ui-quality.yml"
+  pull_request:
+    paths:
+      - "apps/workbench/**"
+      - "scripts/check-ui-conventions.mjs"
+      - "scripts/check-ui-conventions.test.mjs"
+      - "scripts/lib/ui-conventions-ast.mjs"
+      - "scripts/ui-conventions-baseline.json"
+      - "docs/frontend/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ui-quality.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ui-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-quality:
+    name: UI quality gate
+    # 视觉快照由 Windows 生成（快照名带 -win32），像素断言只在同平台运行。
+    # 若未来接入 Linux runner，必须重新生成 Linux 基线并单独命名，不能复用 win32 快照。
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/workbench/pnpm-lock.yaml
+
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install workbench dependencies
+        run: pnpm --dir apps/workbench install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/workbench exec playwright install chromium
+
+      - name: UI conventions (AST guard + baseline)
+        run: node scripts/check-ui-conventions.mjs
+
+      - name: Guard self-tests
+        run: node --test scripts/check-ui-conventions.test.mjs
+
+      - name: Typecheck
+        run: pnpm --dir apps/workbench run typecheck
+
+      - name: Build
+        run: pnpm --dir apps/workbench run build
+
+      - name: Vitest
+        env:
+          CI: "1"
+        run: pnpm --dir apps/workbench exec vitest run --maxWorkers=2
+
+      - name: Playwright browser tests
+        env:
+          CI: "1"
+        run: pnpm --dir apps/workbench exec playwright test
+
+      - name: Visual regression (Windows pixel baseline)
+        env:
+          CI: "1"
+        run: pnpm --dir apps/workbench run test:visual
+
+      - name: Upload failure screenshots and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-quality-failure-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            apps/workbench/test-results/**
+            apps/workbench/playwright-report/**
+            tmp/ui-ci/**

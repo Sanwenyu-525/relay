@@ -51,7 +51,30 @@ export function memorySettingsFrom(value: unknown): RelayMemorySettings {
       ? null : integer(row, "compaction_threshold_tokens", "memory settings"),
     compactionThresholdDefaultTokens: row.compaction_threshold_default_tokens === undefined
       ? 350_000 : integer(row, "compaction_threshold_default_tokens", "memory settings"),
-    compactionThresholdRecommended: compactionRecommendedFrom(row.compaction_threshold_recommended) };
+    compactionThresholdRecommended: compactionRecommendedFrom(row.compaction_threshold_recommended),
+    ...(row.core_token_budget === undefined ? {}
+      : { coreTokenBudget: integer(row, "core_token_budget", "memory settings") }),
+    ...(row.retrieval_token_budget === undefined ? {}
+      : { retrievalTokenBudget: integer(row, "retrieval_token_budget", "memory settings") }),
+    ...(row.retrieval_top_k === undefined ? {}
+      : { retrievalTopK: integer(row, "retrieval_top_k", "memory settings") }),
+    ...(row.retrieval_mode === undefined ? {} : {
+      retrievalMode: enumeration(row, "retrieval_mode", "memory settings",
+        ["LITERAL", "HYBRID"] as const) }),
+    ...(row.auto_consolidate === undefined ? {}
+      : { autoConsolidate: boolean(row, "auto_consolidate", "memory settings") }),
+    ...(row.consolidation_interval_hours === undefined ? {}
+      : { consolidationIntervalHours: integer(row, "consolidation_interval_hours", "memory settings") }),
+    ...(row.memory_stale_after_days === undefined ? {}
+      : { memoryStaleAfterDays: integer(row, "memory_stale_after_days", "memory settings") }),
+    ...(row.embedding_provider === undefined ? {} : {
+      embeddingProvider: enumeration(row, "embedding_provider", "memory settings",
+        ["disabled", "openai-compatible"] as const) }),
+    ...(row.remote_embedding_allowed === undefined ? {}
+      : { remoteEmbeddingAllowed: boolean(row, "remote_embedding_allowed", "memory settings") }),
+    ...(row.include_stale_in_recall === undefined ? {}
+      : { includeStaleInRecall: boolean(row, "include_stale_in_recall", "memory settings") })
+  };
 }
 
 function compactionRecommendedFrom(value: unknown): { readonly min: number; readonly max: number } {

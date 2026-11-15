@@ -243,9 +243,14 @@ export interface RelayKnowledgeVersionContent extends Omit<RelayKnowledgeVersion
  *
  * 它是投影而不是可写状态：EXPIRED 不能当作命令状态提交，续期必须走 AddMemoryRevision。
  */
-export type RelayMemoryEffectiveStatus = "ACTIVE" | "EXPIRED" | "RETIRED";
+export type RelayMemoryEffectiveStatus = "ACTIVE" | "EXPIRED" | "RETIRED" | "SUPERSEDED" | "STALE";
 
 export type RelayMemoryOrigin = "HUMAN_CONFIRMED" | "AUTO_CAPTURE";
+
+/** 0164：长期记忆的语义分层。旧服务端缺字段时按 UNKNOWN 读，不猜成项目事实。 */
+export type RelayMemoryType = "USER_PREFERENCE" | "PROJECT_FACT" | "EXPERIENCE" | "EPISODIC" | "UNKNOWN";
+export type RelayMemoryScope = "WORKSPACE" | "PROJECT" | "TASK" | "AGENT";
+export type RelayMemoryVerification = "VERIFIED" | "UNVERIFIED" | "FAILED";
 
 /** DEV-0042：记忆条目的来源类别——内容来自谁的哪一段。旧服务端缺字段时按 UNKNOWN 读。 */
 export type RelayMemorySourceKind = "MANUAL" | "USER_STATEMENT" | "MODEL_OBSERVATION" | "UNKNOWN";
@@ -276,6 +281,48 @@ export interface RelayMemory {
   readonly expiresAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** 0164：类型/作用域/验证/固定/替代关系。旧服务端缺字段时给保守默认。 */
+  readonly memoryType: RelayMemoryType;
+  readonly scope: RelayMemoryScope;
+  readonly taskId: string | null;
+  readonly memoryKey: string | null;
+  readonly importance: number;
+  readonly confidence: number;
+  readonly verification: RelayMemoryVerification;
+  readonly verifiedAt: string | null;
+  readonly lastAccessedAt: string | null;
+  readonly staleAt: string | null;
+  readonly pinned: boolean;
+  readonly supersedesId: string | null;
+  readonly supersededById: string | null;
+  readonly retiredReason: string | null;
+}
+
+export interface RelayMemoryMaintenanceRun {
+  readonly id: string;
+  readonly trigger: "WORKER" | "MANUAL";
+  readonly status: string;
+  readonly stats: Readonly<Record<string, string>>;
+  readonly error: string | null;
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+}
+
+/** 0164：管理页统计；全部来自服务端聚合与运行记录，不生成演示数字。 */
+export interface RelayMemoryStats {
+  readonly total: number;
+  readonly active: number;
+  readonly superseded: number;
+  readonly retired: number;
+  readonly expired: number;
+  readonly stale: number;
+  readonly pinned: number;
+  readonly storageBytes: number;
+  readonly indexHealth: { readonly ftsIndexPresent: boolean; readonly unindexed: number };
+  readonly recall: { readonly last24h: number; readonly avgLatencyMs: number; readonly lastAt: string | null };
+  readonly maintenance: { readonly lastAt: string | null;
+    readonly runs: readonly RelayMemoryMaintenanceRun[] };
+  readonly types: readonly { readonly memoryType: RelayMemoryType; readonly count: number }[];
 }
 
 /** 历史修订保留当时的内容与有效期，不附加动态有效状态，也不随当前时间重新判定。 */

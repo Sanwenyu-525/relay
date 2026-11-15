@@ -1,18 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { flush, mountWorkbench } from "./mountApp";
+import { contextCompactionWireFixture } from "./contextUsageFixture";
 
 /**
- * 会话级上下文档位的**导航链路**继承（0145 / 2026-10-30 复审整改）。
+ * 会话导航链路的来源身份（0145 / 0165）。
  *
- * 这一组用例刻意不直接调后端用例：它从界面出发——
- *   A=512K → 点「新建会话」→ 空白输入器 → 发首条 → 建出来的 B 必须是 512K；
- *   B 改成 1024K → A 不受影响；
- *   B 上发 `/new` → 建出来的 C 必须是 1024K；
- *   A、B、C 各自重新打开后仍读自己的档位。
- *
- * 夹具是一台**有状态**的假服务器：它按真实规则继承档位（显式值 > 来源会话 > 256K），
- * 因此断言的是「界面走完导航后，服务端事实是什么」，而不是「界面把某个参数传对了」。
+ * 0165 之后，新会话不再继承「上下文档位」这个用户窗口配置；这里保住的是更基础的恢复语义：
+ *   · A → 点「新建会话」→ 首条消息建出的 B 仍带 A 作为来源会话；
+ *   · 首条之前不显示上下文圆环，也不发送任何显式窗口/档位；
+ *   · B 的上下文浮层按模型真实容量报数，没有三档单选；
+ *   · B 上发 `/new` 仍以 B 为来源建出 C。
  */
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -24,26 +22,29 @@ const sessionA = "aaaa1111-1111-4111-8111-111111111111";
 const sessionB = "bbbb2222-2222-4222-8222-222222222222";
 const sessionC = "cccc3333-3333-4333-8333-333333333333";
 
-interface FakeSession {
-  readonly id: string;
-  readonly title: string;
-  readonly tier: number;
-  readonly revision: number;
-  readonly budgetRevision: number;
-}
+interface FakeSession { readonly id: string; readonly title: string;
+  readonly revision: number }
 
 function response(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body } as Response;
 }
 
-/** 一台按真实规则工作的假服务器：档位继承、档位 CAS、创建回执都在这里。 */
+function fakeSessionDto(item: FakeSession) {
+  return { id: item.id, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
+    title: item.title, status: "ACTIVE", revision: String(item.revision),
+    pinned_at: null, unread_at: null, last_message_at: null, has_messages: false,
+    run_state: null, conversation_mode: "AGENT", chat_mode: "CHAT",
+    assistant_profile_id: null, assistant_profile_revision: null, assistant_role: null,
+    remember: true, working_resource_id: null, forked_from_session_id: null,
+    created_at: "2026-10-30T00:00:00Z", updated_at: "2026-10-30T00:00:00Z" };
+}
+
 function fakeServer() {
   const sessions = new Map<string, FakeSession>([
-    [sessionA, { id: sessionA, title: "A 会话", tier: 524_288, revision: 1, budgetRevision: 1 }],
+    [sessionA, { id: sessionA, title: "A 会话", revision: 1 }],
   ]);
   const created: { readonly sourceSessionId: string | null;
     readonly explicitTier: number | null }[] = [];
-  const budgetWrites: { readonly sessionId: string; readonly tier: number }[] = [];
   let nextId = 1;
   const route = async (input: string, init?: RequestInit): Promise<Response> => {
     const path = new URL(String(input)).pathname;
@@ -63,43 +64,25 @@ function fakeServer() {
       return response({ items: [...sessions.values()].map((item) => fakeSessionDto(item)) });
     }
     if (path === `${prefix}/assist-sessions` && method === "POST") {
-      // 真实继承规则：显式档位 > 来源会话 > 256K。
       const source = typeof body.source_session_id === "string" ? body.source_session_id : null;
       const explicit = typeof body.context_budget_tokens === "number" ? body.context_budget_tokens : null;
       created.push({ sourceSessionId: source, explicitTier: explicit });
-      const tier = explicit ?? (source === null ? 262_144 : sessions.get(source)?.tier ?? 262_144);
       const id = nextId === 1 ? sessionB : sessionC;
       nextId += 1;
-      const created0: FakeSession = { id, title: String(body.title ?? "新讨论"), tier,
-        revision: 1, budgetRevision: 1 };
-      sessions.set(id, created0);
+      const row: FakeSession = { id, title: String(body.title ?? "新讨论"), revision: 1 };
+      sessions.set(id, row);
       return response({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { ...fakeSessionDto(created0), session_id: id, id } }, 201);
-    }
-    const budgetMatch = /\/assist-sessions\/([^/]+)\/context-budget$/u.exec(path);
-    if (budgetMatch !== null && method === "POST") {
-      const id = budgetMatch[1]!;
-      const target = sessions.get(id);
-      if (target === undefined) return response({ code: "RESOURCE_NOT_FOUND" }, 404);
-      if (String(body.expected_revision) !== String(target.budgetRevision)) {
-        return response({ code: "REVISION_CONFLICT", detail: "档位已变化。",
-          conflict: { expected_revision: String(body.expected_revision),
-            actual_revision: String(target.budgetRevision) } }, 409);
-      }
-      const tier = Number(body.context_budget_tokens);
-      sessions.set(id, { ...target, tier, budgetRevision: target.budgetRevision + 1 });
-      budgetWrites.push({ sessionId: id, tier });
-      return response({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { session_id: id, context_budget_tokens: tier,
-          revision: String(target.budgetRevision + 1) } });
+        result: { ...fakeSessionDto(row), session_id: id, id } }, 201);
     }
     const usageMatch = /\/assist-sessions\/([^/]+)\/context-usage$/u.exec(path);
     if (usageMatch !== null) {
       const target = sessions.get(usageMatch[1]!);
       if (target === undefined) return response({ code: "RESOURCE_NOT_FOUND" }, 404);
       return response({ session_id: target.id,
-        budget: { tokens: target.tier, revision: String(target.budgetRevision) },
-        last_call: null });
+        next_call: { reservation_tokens: 1_000_000, effective_window_tokens: 1_000_000,
+          model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_000_000,
+          window_source: "MODEL_CATALOG", fallback_applied: false },
+        last_call: null, compaction: contextCompactionWireFixture() });
     }
     const sessionMatch = /\/assist-sessions\/([^/]+)$/u.exec(path);
     if (sessionMatch !== null) {
@@ -117,15 +100,11 @@ function fakeServer() {
     }
     if (/\/assist-sessions\/[^/]+\/tool-calls$/u.test(path)) return response({ items: [] });
     if (/\/assist-sessions\/[^/]+\/chat-commands$/u.test(path) && method === "POST") {
-      // `/new`：以当前会话为来源建一条新会话，档位随之继承。
-      const source = sessions.get(sessionB);
-      const id = sessionC;
-      const created0: FakeSession = { id, title: "C 会话", tier: source?.tier ?? 262_144,
-        revision: 1, budgetRevision: 1 };
-      sessions.set(id, created0);
+      const row: FakeSession = { id: sessionC, title: "C 会话", revision: 1 };
+      sessions.set(sessionC, row);
       return response({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
         result: { kind: "NEW_SESSION", system: "new", source_session_id: sessionB,
-          session_id: id, project_id: projectId, task_id: taskId, conversation_mode: "AGENT",
+          session_id: sessionC, project_id: projectId, task_id: taskId, conversation_mode: "AGENT",
           assistant_profile_id: null, assistant_profile_revision: null, revision: "1" } }, 202);
     }
     if (path === `${prefix}/skill-definitions`) return response({ items: [] });
@@ -133,156 +112,75 @@ function fakeServer() {
       canonical_root: null, display_name: null, write_tier: null, default_write_tier: null,
       context_budget_tokens: null, status: "UNSET", reason: null, revision: "0" });
     if (path === `${prefix}/model-port`) return response({ provider: "openai-compatible",
-      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 262_144 });
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000_000 });
     if (path === `${prefix}/projects`) return response({ items: [{ id: projectId, title: "测试项目",
       project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null }] });
     if (path === `${prefix}/search`) return response({ items: [], next_cursor: null });
     if (path === `${prefix}/tasks`) return response({ items: [], next_cursor: null });
-    if (path.startsWith(`${prefix}/assist-sessions/`) && path.endsWith("/messages")) {
-      return response({ items: [] });
-    }
     return response({ items: [], next_cursor: null });
   };
-  return { route, sessions, created, budgetWrites };
-}
-
-function fakeSessionDto(item: FakeSession) {
-  return { id: item.id, workspace_id: workspaceId, project_id: projectId, task_id: taskId,
-    title: item.title, status: "ACTIVE", revision: String(item.revision),
-    pinned_at: null, unread_at: null, last_message_at: null, has_messages: false,
-    run_state: null, conversation_mode: "AGENT", chat_mode: "CHAT",
-    assistant_profile_id: null, assistant_profile_revision: null, assistant_role: null,
-    remember: true, working_resource_id: null, forked_from_session_id: null,
-    created_at: "2026-10-30T00:00:00Z", updated_at: "2026-10-30T00:00:00Z" };
+  return { route, sessions, created };
 }
 
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
-describe("会话上下文档位的导航链路继承", () => {
-  it("A=512K → 点新建 → 建出的 B=512K；改 B 不动 A；/new 建出的 C 继承 B", async () => {
+describe("会话导航链路的来源身份", () => {
+  it("A → 新建 → 首条建出 B；B 的浮层按 1M 模型窗口报数，没有档位单选；/new 建出 C", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
-    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => server.route(input, init));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => server.route(input, init)));
 
     let view = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
-    // A 的档位是 512K（夹具事实）。
-    expect(server.sessions.get(sessionA)?.tier).toBe(524_288);
-
-    // 点左栏「新对话」：界面进入空白首条输入器（URL 带 source_session=来源会话）。
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
     await flush();
     expect(view.router.currentRoute.value.query.source_session).toBe(sessionA);
     expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
 
-    // 发送首条：建会话命令必须带上跳转前的来源会话 A。
     await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("新建一段讨论");
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
     await flush();
 
     const create = server.created.at(-1);
     expect(create?.sourceSessionId, "建会话必须带上跳转前所在会话").toBe(sessionA);
-    expect(server.sessions.get(sessionB)?.tier, "B 继承 A 的 512K").toBe(524_288);
+    expect(create?.explicitTier, "首条不再发送显式窗口/档位").toBeNull();
+    expect(server.sessions.has(sessionB), "B 已建出").toBe(true);
 
-    // 切到 B，把 B 改成 1024K：点档位就是一次写（2026-10-31 用户指令删掉保存按钮）。
     await view.router.push(`/agent?work=${taskId}&session=${sessionB}`);
     await flush();
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
-    await view.layer.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    expect(server.budgetWrites.at(-1)).toEqual({ sessionId: sessionB, tier: 1_048_576 });
-    expect(server.sessions.get(sessionA)?.tier, "改 B 不能改 A").toBe(524_288);
-    expect(server.sessions.get(sessionB)?.tier).toBe(1_048_576);
+    expect(view.layer.findAll('[data-testid^="context-budget-option-"]')).toHaveLength(0);
+    expect(view.layer.get('[data-testid="context-compaction-window-row"]').text())
+      .toContain("1,000,000");
+    expect(view.layer.get('[data-testid="context-compaction-window-source"]').text())
+      .toContain("自动识别 · 模型目录");
 
-    // B 上发 /new：新建的 C 继承 B 的 1024K。
-    await view.router.push(`/agent?work=${taskId}&session=${sessionB}`);
-    await flush();
-    // Close the usage popover first: it keeps focus inside itself.
+    // 收起浮层，再从 B 发 `/new`：C 仍以 B 为来源。
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
     await view.wrapper.get('[data-testid="assist-draft"]').setValue("/new");
     await view.wrapper.get('[data-testid="assist-send"]').trigger("click");
     await flush();
-    expect(server.sessions.get(sessionC)?.tier, "C 继承 B 的 1024K").toBe(1_048_576);
-    expect(server.sessions.get(sessionA)?.tier, "A 仍是自己那一档").toBe(524_288);
-
-    // C 自己改档：改 C 不影响 A、B（三条会话各存各的）。
-    view.unmount();
-    view = await mountWorkbench(`/agent?session=${sessionC}`);
-    await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-    await flush();
-    await view.layer.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    expect(server.budgetWrites.at(-1)).toEqual({ sessionId: sessionC, tier: 262_144 });
-    expect(server.sessions.get(sessionC)?.tier, "C 改成 256K").toBe(262_144);
-    expect(server.sessions.get(sessionB)?.tier, "B 不受 C 影响").toBe(1_048_576);
-    expect(server.sessions.get(sessionA)?.tier, "A 不受 C 影响").toBe(524_288);
-
-    // 重新打开 A、B、C：各自读回自己的档位（界面读的是服务端投影，不是界面里的缓存）。
-    for (const [id, expected] of [[sessionA, 524_288], [sessionB, 1_048_576],
-      [sessionC, 262_144]] as const) {
-      // Reopen means a fresh mount of the workspace (the ?session= deep link is a
-      // one-shot seed, so a remount is what "reopen this session" looks like).
-      view.unmount();
-      const reopened = await mountWorkbench(`/agent?session=${id}`);
-      await reopened.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
-      await flush();
-      const checked = reopened.layer.findAll('[data-testid^="context-budget-option-"]')
-        .filter((item) => (item.element as HTMLInputElement).checked)
-        .map((item) => item.attributes("data-testid"));
-      expect(checked, `重新打开 ${id} 应读回自己的档位`).toEqual([
-        `context-budget-option-${expected}`]);
-      reopened.unmount();
-    }
-    view = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
+    expect(server.sessions.has(sessionC), "C 已建出").toBe(true);
     view.unmount();
   }, 15_000);
 
-  it("首条消息之前不显示上下文圆环：建会话不再带显式档位，只按来源继承", async () => {
+  it("首条消息之前不显示上下文圆环，也不发送任何显式档位", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
-    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => server.route(input, init));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => server.route(input, init)));
 
     const view = await mountWorkbench(`/agent?work=${taskId}&session=${sessionA}`);
     await view.wrapper.get('[data-testid="context-new-conversation"]').trigger("click");
     await flush();
-    // 2026-11-01 用户指令：会话欢迎页（首条输入器）不显示上下文圆环，也没有档位预选。
     expect(view.wrapper.find('[data-testid="assist-context-meter"]').exists()).toBe(false);
+    expect(view.wrapper.findAll('[data-testid^="context-budget-option-"]')).toHaveLength(0);
 
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按来源档位跑");
+    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("按来源身份跑");
     await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
     await flush();
-    expect(server.created.at(-1)?.explicitTier, "首条之前不再有显式档位").toBeNull();
-    expect(server.sessions.get(sessionB)?.tier, "B 继承 A 的 512K").toBe(524_288);
-    expect(server.sessions.get(sessionA)?.tier, "来源会话不被改写").toBe(524_288);
-    view.unmount();
-  });
-
-  it("欢迎页不再读取本机旧档位草稿：旧值不改变来源继承", async () => {
-    activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
-    const server = fakeServer();
-    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => server.route(input, init));
-    vi.stubGlobal("fetch", fetchMock);
-
-    // 旧版本可能在本机留下档位草稿；新行为不再读取它，也不显示圆环。
-    const legacyKey = `relay.workbench.contextBudgetDraft:1:${workspaceId}:first:${workspaceId}:legacy`;
-    window.localStorage.setItem(legacyKey, JSON.stringify({ tokens: 1_048_576 }));
-    const view = await mountWorkbench(`/agent?new=legacy&work=${taskId}&source_session=${sessionA}`);
-    await flush();
-    expect(view.wrapper.find('[data-testid="assist-context-meter"]').exists(),
-      "首条输入器不显示上下文圆环").toBe(false);
-    expect(view.wrapper.get('[data-testid="assist-first-draft"]').exists()).toBe(true);
-
-    await view.wrapper.get('[data-testid="assist-first-draft"]').setValue("旧草稿不生效");
-    await view.wrapper.get('[data-testid="assist-first-send"]').trigger("click");
-    await flush();
+    expect(server.created.at(-1)?.explicitTier).toBeNull();
     expect(server.created.at(-1)?.sourceSessionId).toBe(sessionA);
-    expect(server.created.at(-1)?.explicitTier, "不再传显式档位").toBeNull();
-    expect(server.sessions.get(sessionB)?.tier, "按来源继承 512K").toBe(524_288);
-    expect(server.sessions.get(sessionA)?.tier, "来源会话不被改写").toBe(524_288);
     view.unmount();
-    window.localStorage.removeItem(legacyKey);
   });
 });

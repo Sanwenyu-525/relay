@@ -7,16 +7,18 @@ import "./MemorySettingsCard.css";
 import { Button, FormField, Input } from "../ui";
 
 /**
- * Workspace 级记忆设置（工作台 §40 / HTTP §10.99）。
+ * Workspace 级记忆与上下文压缩设置（工作台 §40 / HTTP §10.99）。
  *
- * 三个开关互相独立：关掉「自动整理」仍然可以手动整理；关掉「自动使用记忆」之后，
+ * 0165：普通用户只在这里配置「自动上下文压缩」与压缩阈值；模型上下文窗口由系统
+ * 自动识别（目录 / 高级能力声明 / 部署配置），本卡片不提供任何窗口编辑入口。
+ *
+ * 三个开关互相独立：关掉「自动压缩」仍然可以手动压缩；关掉「自动使用记忆」之后，
  * 历史里依赖自动召回来源的旧摘要与旧答复也不会被匿名复用（那条约束由服务端判定，
  * 界面只如实说明，不自己再算一遍）。
  *
- * CONTEXT-COMPACTION-0162：多一个压缩阈值——它决定「历史涨到多少 tokens 时自动整理」，
- * 存空 = 使用产品默认（服务端给出默认值，界面不抄常量）。推荐区间只是提示，不强制；
- * 保存值高于当前模型安全上限时服务端仍会保存，但生效时按真实窗口收敛，并在会话的
- * 上下文面板里明说。
+ * 压缩阈值决定「历史涨到多少 tokens 时自动压缩」，存空 = 使用产品默认（服务端给出
+ * 默认值，界面不抄常量）。推荐区间只是提示，不强制；保存值高于当前模型安全上限时
+ * 服务端仍会保存，但生效时按真实窗口收敛，并在会话的上下文面板里明说。
  *
  * 保存必须同时提交全部字段：服务端按整行 CAS 写入，只带想改的那一个会把它写成默认值。
  */
@@ -120,7 +122,7 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
       setThresholdText(saved.compactionThresholdTokens === null
         ? "" : String(saved.compactionThresholdTokens));
       setNotice(`已保存（修订 v${saved.revision}）：自动使用记忆${saved.recallEnabled ? "已开启" : "已关闭"}，`
-        + `自动整理${saved.automaticCompaction ? "已开启" : "已关闭"}，`
+        + `自动上下文压缩${saved.automaticCompaction ? "已开启" : "已关闭"}，`
         + `自动记住${saved.autoCapture ? "已开启" : "已关闭"}，`
         + `压缩阈值${saved.compactionThresholdTokens === null
           ? `使用默认 ${saved.compactionThresholdDefaultTokens.toLocaleString()}`
@@ -171,14 +173,14 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
 
   if (client === null) {
     return <section className="surface-panel settings-card" data-testid="memory-settings">
-      <h2>长期与短期记忆</h2>
+      <h2>上下文压缩与记忆</h2>
       <p className="helper-text">示例数据预览下没有可读写的记忆设置。</p>
     </section>;
   }
 
   return <section className="surface-panel settings-card" data-testid="memory-settings">
-    <h2>长期与短期记忆</h2>
-    <p className="helper-text">按工作空间生效，只影响后续对话。</p>
+    <h2>上下文压缩与记忆</h2>
+    <p className="helper-text">按工作空间生效，只影响后续对话。模型上下文窗口由系统自动识别，不在这里配置。</p>
 
     {loading && settings === null && <p role="status" data-testid="memory-settings-loading">正在读取记忆设置…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="memory-settings-error">
@@ -204,8 +206,8 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
               setDraft({ ...draft, automaticCompaction: event.target.checked }); setNotice(null);
             }} />
           <span>
-            <strong>自动整理会话历史</strong>
-            <span className="helper-text">较早历史压成摘要并保留最近原文；关闭后到阈值不再整理，但请求装不下时仍会执行溢出保护压缩。</span>
+            <strong>自动上下文压缩</strong>
+            <span className="helper-text">历史达到下方阈值时压成摘要并保留最近原文；关闭后普通阈值不再触发，但请求装不下时仍会执行溢出保护压缩。</span>
           </span>
         </label>
         <label className="memory-settings-switch">
@@ -225,7 +227,8 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
       <FormField label="自动压缩阈值（tokens）" htmlFor="memory-settings-threshold"
         hint={`默认 ${settings.compactionThresholdDefaultTokens.toLocaleString()}；推荐 `
           + `${settings.compactionThresholdRecommended.min.toLocaleString()}–`
-          + `${settings.compactionThresholdRecommended.max.toLocaleString()}（仅作提示，可按模型调整）。`
+          + `${settings.compactionThresholdRecommended.max.toLocaleString()}（仅作提示，不是硬性限制，可自由自定义）。`
+          + "超过当前模型安全容量时，保存值不变，实际生效值会自动收敛并在会话上下文面板中说明。"
           + "留空即使用默认阈值。"}
         error={thresholdError ?? undefined} testId="memory-settings-threshold-field">
         <Input id="memory-settings-threshold" data-testid="memory-settings-threshold"

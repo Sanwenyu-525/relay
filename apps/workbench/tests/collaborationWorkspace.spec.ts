@@ -116,7 +116,23 @@ interface Routes {
 export function contextUsageProjection(usage: { input_tokens: number | null;
   output_tokens: number | null; cache_read_tokens: number | null;
   cache_creation_tokens: number | null }, reserved: number | null): unknown {
+  // 0162 起 `compaction` 是必读投影（缺省显式失败，见 sessionContextUsageFrom）；
+  // 旧夹具没有这一段，会让整份上下文用量读成 unknown。这里补一份与 256K 档一致的
+  // 默认压缩策略，仅作为服务端投影的夹具，不改变任何界面断言。
+  const contextTokens = usage.input_tokens ?? 0;
   return { session_id: sessionId, budget: { tokens: 262_144, revision: "0" },
+    compaction: {
+      enabled: true, threshold_tokens: 180_000, default_threshold_tokens: 180_000,
+      recommended: { min: 120_000, max: 240_000 }, requested_threshold_tokens: 180_000,
+      effective_threshold_tokens: 180_000, threshold_clamped: false,
+      target_window_tokens: 262_144, model_window_tokens: null, window_source: "MODEL_CONFIG",
+      provider_call_cap_tokens: null, fallback_applied: false,
+      effective_window_tokens: 262_144, output_reserve_tokens: 8_192,
+      protocol_overhead_tokens: 1_024, safety_reserve_tokens: 2_048,
+      safe_input_tokens: 250_880, post_compaction_target_tokens: 131_072,
+      context_tokens: contextTokens, context_source: "PROVIDER_USAGE",
+      distance_tokens: 180_000 - contextTokens, active: null, last_result: null
+    },
     last_call: usage.input_tokens === null ? null : {
       source: "MODEL_CALL", call_id: "call-usage", message_id: "assistant-usage",
       provider: "openai-compatible", model: "gpt-4.1-mini", status: "COMPLETED",
@@ -1123,7 +1139,7 @@ describe("协作工作区主路径", () => {
       // 2026-11-11：口径是「最近一次调用的真实读数 + 相对当前会话档位」——
       // 分母既不是工作区配置，也不是那次调用冻结的预算；分项也不是 Provider 的分词结果。
       expect(infoTip?.textContent).toContain("总用量取最近一次模型调用的真实读数");
-      expect(infoTip?.textContent).toContain("占比相对当前会话档位");
+      expect(infoTip?.textContent).toContain("占比相对当前模型可用窗口");
       expect(infoTip?.textContent).toContain("不是 Provider 的分词结果");
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
@@ -1575,7 +1591,10 @@ describe("协作工作区主路径", () => {
     expect(view.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeDefined();
     expect(view.wrapper.get('[data-testid="review-project-archive-reason"]').text()).toContain(reason);
     await view.wrapper.get('[data-testid="review-decision-ACCEPT"]').trigger("click");
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    // 只核对「决定」写入：API 5xx 会触发客户端诊断上报（POST /client-diagnostics），
+    // 那是可观测性通道，不是 Review 业务写入，不能把它算成越权提交。
+    expect(fetchMock.mock.calls.filter(([input, init]) => init?.method === "POST"
+      && new URL(String(input)).pathname.endsWith("/decisions"))).toHaveLength(0);
     view.unmount();
   });
 
@@ -1605,7 +1624,9 @@ describe("协作工作区主路径", () => {
     await view.wrapper.get('[data-testid="run-refresh"]').trigger("click"); await flush(80);
     expect(view.wrapper.get('[data-testid="review-decision-ACCEPT"]').attributes("disabled")).toBeUndefined();
     expect(view.wrapper.find('[data-testid="review-project-archive-reason"]').exists()).toBe(false);
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    // 诊断上报不算业务写入；这里只证明没有再次提交 Review 决定。
+    expect(fetchMock.mock.calls.filter(([input, init]) => init?.method === "POST"
+      && new URL(String(input)).pathname.endsWith("/decisions"))).toHaveLength(0);
     view.unmount();
   });
 

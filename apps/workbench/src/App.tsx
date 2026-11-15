@@ -209,7 +209,7 @@ export default function App() {
             原命令 ID <code className="hash-code">{commandId}</code></p>)}
           {hasDraftChanges && <p>本页还有未提交草稿：离开前必须明确丢弃；待核对命令仍按原 ID 保留。</p>}
         </>
-        : <p>即将离开的页面还有未保存的修改。你可以继续编辑，或丢弃草稿后离开。</p>}
+        : <p>即将离开的页面还有未保存的修改；丢弃后无法恢复。你可以继续编辑，或丢弃草稿后离开。</p>}
       <div className="dialog-actions">
         <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
           data-testid="keep-editing"
@@ -240,7 +240,7 @@ export default function App() {
           {pendingCommandIds.map((commandId) => <p className="dialog-command-id" key={commandId}>
             原命令 ID <code className="hash-code">{commandId}</code></p>)}
         </>
-        : <p>窗口里还有未保存的修改。你可以继续编辑，或丢弃草稿后关闭窗口。</p>}
+        : <p>窗口里还有未保存的修改；丢弃后无法恢复。你可以继续编辑，或丢弃草稿后关闭窗口。</p>}
       <div className="dialog-actions">
         <button className={pendingCommandId ? "primary-button" : "secondary-button"} type="button"
           onClick={() => setCloseDialogOpen(false)}>

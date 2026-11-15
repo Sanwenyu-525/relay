@@ -290,6 +290,56 @@
 验证与未闭合项见[统一验收表](../../testing/overall-acceptance-2026-09-28.md#当前功能验收表)
 「上下文自动压缩阈值」行；真实 Provider 的窗口声明、真实 Windows/WebView2 与安装态未验。
 
+> **0165 替换说明（2026-11-15）**：本节把「会话档位」当作有效窗口的旧口径已经退场。
+> 下面的 40.3 是当前口径；40.2 保留为 0162 的历史记录，不再作为实现依据。
+
+### 40.3 模型上下文窗口与自动压缩阈值解耦（2026-11-15 CONTEXT-WINDOW-0165，实施者自检）
+
+**产品语义。** 模型窗口是**能力参数**，压缩阈值是**用户偏好**，两者不再共用同一个数：
+
+- `modelWindowTokens`：模型真实能力，来自模型目录、高级能力声明 `context_window_tokens`、
+  部署配置 `RELAY_MODEL_CONTEXT_WINDOW`；都没有时按 `262,144` 安全回退并标
+  `UNKNOWN_FALLBACK`。未知窗口**不**显示成 1M，也不让用户把它写成 1M。
+- `compactionThresholdTokens`：用户设置，默认 `350,000`，推荐 `256,000–400,000` 只作提示；
+  模型窗口变大不会把用户阈值自动抬到 800K/900K。
+- `effectiveCompactionThreshold`：真正触发自动压缩的值，由系统按当前模型安全预算收敛。
+
+**容量与阈值公式（十进制 1M，不是 1,048,576）：**
+
+```text
+目标容量 target = 1,000,000
+有效窗口 effectiveWindow = min(target, 模型窗口/262,144 安全回退, 服务商单次上限)
+安全输入 safeInput = effectiveWindow − 输出预留 − 协议/工具预留(8,192)
+                    − ceil(effectiveWindow × 5%)
+生效阈值 effectiveThreshold = min(用户阈值或 350,000, floor(safeInput × 0.9))
+压缩后目标 = min(100,000, floor(effectiveThreshold / 2))
+```
+
+`effectiveThreshold` 低于用户保存值时，界面必须同时显示「用户设置 / 实际生效 / 原因」，
+不把保存值偷偷改写；服务商单次上限与安全输入上限都参与，避免只扣历史消息而忽略系统
+指令、工具定义、协议开销与输出预留。
+
+**设置页。** `SettingsView` 删除 `ContextBudgetCard`（旧三档 256K/512K/1024K 与 CAS 保存
+整份删除）。普通用户只看到 `MemorySettingsCard` 的「自动上下文压缩」开关与「自动压缩阈值
+（tokens）」：数字输入、空值=默认 350K、恢复默认、推荐区间提示；输入只做本地「明显不是
+数字」的拦截，精确合法范围由服务端 `422` 给出。模型窗口不提供编辑入口。
+
+**上下文浮层。** `ContextUsagePanel` 去掉三档单选与保存状态机，改为只读展示：
+模型窗口与来源（“自动识别 · 模型目录 / 高级能力声明 / 部署配置 / 未知 · 安全回退 ·
+不可在此修改”）、用户设置阈值、实际生效阈值、当前上下文、距离自动压缩、最近一次压缩
+结果。圆环与浮层共用 `compaction.effective_window_tokens` 作分母，不再用历史冻结预算或
+旧会话档位；窗口未知时不给虚假百分比。没有会话时显示最小空态并禁用「立即压缩」。
+手动压缩保留，受理态与完成态分开；压缩中的按钮禁用，不把 202 受理说成完成。
+
+**兼容边界。** 旧 `assist_sessions.context_budget_tokens/context_budget_revision`、
+`workspace_default_directories.context_budget_tokens`、旧 `/context-budget` 与
+`createAssistSession.contextBudgetTokens` 仍保留可读写，但执行、压缩与审计不再读取；
+迁移 0165 给它们加 LEGACY 注释，不删除数据，也不把旧档位值无条件转成压缩阈值。模型能力
+声明迁移 0165 只新增 `context_window_tokens`（16K–4M CHECK）并保留原图片声明。
+
+**验证。** 本行证据归统一验收表「上下文窗口与压缩阈值解耦」行；真实 Provider 的窗口/
+分词器、真实 Windows/WebView2 与安装态仍未验。
+
 ## 41. 日常操作减负：工具状态与高级配置分层（2026-10-20 已实施，实机未验）
 
 用户诉求是「普通 Agent 操作不该要求我理解并逐项配置底层能力、连接、受管资源和策略」。本轮只做「把日常层与高级层分开、把缺口说清楚」，不新增第二套授权机制，也不删任何已确认能力。

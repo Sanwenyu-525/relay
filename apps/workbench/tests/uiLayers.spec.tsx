@@ -1,6 +1,8 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import AppDialog from "../src/components/AppDialog";
+import { Combobox, Popover } from "../src/ui";
 import ResizableHandle from "../src/ui/ResizableHandle";
 import ContextMenu from "../src/ui/ContextMenu";
 import Tooltip from "../src/ui/Tooltip";
@@ -22,9 +24,20 @@ function mount(node: React.ReactNode): HTMLDivElement {
   return container;
 }
 
-function press(element: Element | Document, key: string) {
+function press(element: Element | Document, key: string, init: { isComposing?: boolean; keyCode?: number } = {}) {
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  if (init.isComposing !== undefined) Object.defineProperty(event, "isComposing", { value: init.isComposing });
+  if (init.keyCode !== undefined) Object.defineProperty(event, "keyCode", { value: init.keyCode });
   act(() => {
-    element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    element.dispatchEvent(event);
+  });
+  return event;
+}
+
+/** Dialog/Tooltip 的打开后焦点与关闭后还焦点都排在 rAF；测试要等这一帧落定再断言。 */
+async function settleFrame() {
+  await act(async () => {
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); });
   });
 }
 
@@ -158,6 +171,121 @@ describe("Tooltip", () => {
 
     act(() => { trigger.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })); });
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+});
+
+describe("嵌套浮层", () => {
+  it("Popover 内的 Combobox 打开列表时，容器 Popover 不被同组独占关闭", async () => {
+    const popoverClose = vi.fn();
+    function PopoverWithCombobox() {
+      const [open, setOpen] = useState(false);
+      return <Popover open={open} label="外层筛选" onClose={() => { popoverClose(); setOpen(false); }}
+        trigger={<button type="button" aria-expanded={open} onClick={() => setOpen(true)}>打开筛选</button>}>
+        <Combobox label="内层模型" value={null} onChange={() => undefined} options={[{ value: "a", label: "甲" }]} />
+      </Popover>;
+    }
+    mount(<PopoverWithCombobox />);
+    const trigger = document.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    act(() => { trigger.focus(); });
+    act(() => { trigger.click(); });
+    await settleFrame();
+    expect(document.querySelector('[aria-label="外层筛选"][role="dialog"]')).not.toBeNull();
+
+    const combo = document.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    act(() => { combo.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    expect(combo.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector('[aria-label="外层筛选"][role="dialog"]')).not.toBeNull();
+    expect(popoverClose).not.toHaveBeenCalled();
+  });
+
+  it("Dialog 内的 Popover：一次 Esc 只关 Popover，外层对话框不消失", async () => {
+    const outerClose = vi.fn();
+    const popoverClose = vi.fn();
+    function DialogWithPopover() {
+      const [open, setOpen] = useState(false);
+      return <AppDialog open title="外层确认" onClose={outerClose}>
+        <p>外层正文</p>
+        <Popover open={open} label="筛选" onClose={() => { popoverClose(); setOpen(false); }}
+          trigger={<button type="button" aria-expanded={open} onClick={() => setOpen(true)}>筛选</button>}>
+          <button type="button">面板内动作</button>
+        </Popover>
+      </AppDialog>;
+    }
+    mount(<DialogWithPopover />);
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await settleFrame();
+    act(() => { trigger.focus(); });
+    act(() => { trigger.click(); });
+    await settleFrame();
+    expect(document.querySelector('[aria-label="筛选"][role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="外层确认"][role="dialog"]')).not.toBeNull();
+
+    press(document, "Escape");
+    expect(popoverClose).toHaveBeenCalledTimes(1);
+    expect(outerClose).not.toHaveBeenCalled();
+    expect(document.querySelector('[aria-label="筛选"][role="dialog"]')).toBeNull();
+    expect(document.querySelector('[aria-label="外层确认"][role="dialog"]')).not.toBeNull();
+    // 关闭后焦点回到触发器，而不是落到 body。
+    await settleFrame();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("Dialog 内的 Tooltip：Esc 先收提醒，不关闭对话框", async () => {
+    const onClose = vi.fn();
+    mount(<AppDialog open title="检查器" onClose={onClose}>
+      <Tooltip label="保存到本机"><button type="button">保存</button></Tooltip>
+    </AppDialog>);
+    const tooltipTrigger = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "保存")!;
+    await settleFrame();
+    act(() => { tooltipTrigger.focus(); });
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    press(document, "Escape");
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector("[role=\"dialog\"]")).not.toBeNull();
+    expect(tooltipTrigger).toBe(document.activeElement);
+  });
+
+  it("Dialog 内的 Combobox：Esc 只关列表；组合输入期间连列表也不关", async () => {
+    const onClose = vi.fn();
+    const onChange = vi.fn();
+    mount(<AppDialog open title="选择模型" onClose={onClose}>
+      <Combobox label="模型" value={null} onChange={onChange} options={[{ value: "a", label: "甲" }]} />
+    </AppDialog>);
+    const input = document.querySelector<HTMLInputElement>("[role=\"combobox\"]")!;
+    await settleFrame();
+    act(() => { input.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+
+    act(() => { input.dispatchEvent(new Event("compositionstart", { bubbles: true })); });
+    press(input, "Escape", { isComposing: true });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => { input.dispatchEvent(new Event("compositionend", { bubbles: true })); });
+    press(input, "Escape");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector("[role=\"dialog\"]")).not.toBeNull();
+  });
+
+  it("多层 Dialog 逐层关闭：先内后外，每次只处理栈顶", () => {
+    function NestedDialogs() {
+      const [outer, setOuter] = useState(true);
+      const [inner, setInner] = useState(true);
+      return <>
+        <AppDialog open={outer} title="外层" onClose={() => setOuter(false)}><p>外层正文</p></AppDialog>
+        <AppDialog open={inner} title="内层" onClose={() => setInner(false)}><p>内层正文</p></AppDialog>
+      </>;
+    }
+    mount(<NestedDialogs />);
+    expect(document.querySelector('[aria-label="内层"][role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="外层"][role="dialog"]')).not.toBeNull();
+    press(document, "Escape");
+    expect(document.querySelector('[aria-label="内层"][role="dialog"]')).toBeNull();
+    expect(document.querySelector('[aria-label="外层"][role="dialog"]')).not.toBeNull();
+    press(document, "Escape");
+    expect(document.querySelector('[aria-label="外层"][role="dialog"]')).toBeNull();
   });
 });
 

@@ -6,14 +6,13 @@ import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
 
 /**
- * 上下文用量浮层（0145 / 2026-10-30 复审整改）。
+ * 上下文用量浮层（0165）。
  *
- * 这一轮的口径变化：
- *   · **选中即改变**——点档位立刻写服务端，没有「保存 / 重新读取」两枚按钮；
- *   · 没有会话时（首条消息之前）也能选，档位先落在新会话草稿作用域；
- *   · 占比直接按**当前档位**解释（2026-11-11 用户指令），圆环与浮层共用一个分母；
- *     那次调用冻结的预算只在两者不同时作为差异说明保留；
- *   · 分项没有就写「暂无分项统计」，总用量照常可读。
+ * 本次重构后的口径：
+ *   · 会话三档窗口入口已取消；普通用户只在设置页配置压缩阈值；
+ *   · 圆环与浮层共用「实际可用窗口」作分母（min(1M, 模型窗口/安全回退, 服务商上限)）；
+ *   · 模型窗口只读展示并标出来源；未知时显示安全回退，不伪造 1M；
+ *   · 用户保存阈值与生效阈值分开显示，收敛时不静默改写用户设置。
  */
 
 const baseUrl = "http://127.0.0.1:8787";
@@ -24,14 +23,11 @@ let unmount: (() => void) | null = null;
 
 afterEach(() => { unmount?.(); unmount = null; vi.unstubAllGlobals(); });
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-}
-
 function usage(overrides: Partial<RelaySessionContextUsage> = {}): RelaySessionContextUsage {
-  return { sessionId, budget: { tokens: 524288, revision: "3" },
-    nextCall: { reservationTokens: 524288, contextBudgetTokens: 524288,
-      providerWindowTokens: null, windowSource: "UNKNOWN" },
+  return { sessionId,
+    nextCall: { reservationTokens: 1_000_000, effectiveWindowTokens: 1_000_000,
+      modelWindowTokens: 1_000_000, providerCallCapTokens: 1_000_000,
+      windowSource: "MODEL_CATALOG", fallbackApplied: false },
     lastCall: { source: "MODEL_CALL", callId: "33333333-3333-4333-8333-333333333333",
       messageId: null, provider: "openai-compatible", model: "fixture-model",
       status: "COMPLETED", inputTokens: 10_607, outputTokens: 646,
@@ -47,166 +43,83 @@ function usage(overrides: Partial<RelaySessionContextUsage> = {}): RelaySessionC
 }
 
 async function mount(data: RelaySessionContextUsage | null, handlers: {
-  readonly onSaved?: () => void; readonly onReload?: () => void } = {}) {
+  readonly onReload?: () => void } = {}) {
   const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
     sessionRevision="7" usage={data} loading={false} error={null}
-    onReload={handlers.onReload ?? (() => {})} onSaved={handlers.onSaved ?? (() => {})} />);
+    onReload={handlers.onReload ?? (() => {})} />);
   unmount = mounted.unmount;
   await flush();
   return mounted.wrapper;
 }
 
-function stubSequence(handlers: readonly ((url: string, init: RequestInit) => Response)[]) {
-  let index = 0;
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const handler = handlers[Math.min(index, handlers.length - 1)]!;
-    index += 1;
-    return handler(String(input), init ?? {});
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
 describe("上下文用量浮层", () => {
-  it("三档严格一行且没有「跟随应用默认」；选中态来自服务端档位", async () => {
-    const wrapper = await mount(usage({ budget: { tokens: 1_048_576, revision: "4" } }));
-    const group = wrapper.get('[data-testid="context-usage-tiers"]');
-    expect(group.findAll("input[type=radio]")).toHaveLength(3);
-    expect(wrapper.text()).toContain("256K");
-    expect(wrapper.text()).toContain("512K");
-    expect(wrapper.text()).toContain("1024K");
-    expect(wrapper.text()).not.toContain("跟随应用默认");
-    expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
-      .toBe(true);
-    // 2026-11-01 用户指令：删掉「当前档位 256K」标题行——当前值只看单选态，不再重复一遍。
+  it("不再有会话窗口档位入口；模型窗口只读展示并标出来源", async () => {
+    const wrapper = await mount(usage());
+    expect(wrapper.findAll("input[type=radio]")).toHaveLength(0);
     expect(wrapper.text()).not.toContain("当前档位");
+    expect(wrapper.text()).not.toContain("跟随应用默认");
+    expect(wrapper.find('[data-testid="context-usage-tiers"]').exists()).toBe(false);
+    const row = wrapper.get('[data-testid="context-compaction-window-row"]').text();
+    expect(row).toContain("1,000,000");
+    expect(row).toContain("自动识别 · 模型目录");
+    expect(row).toContain("不可在此修改");
   });
 
-  it("档位就是写入口：没有「保存 / 重新读取」两枚按钮，未点之前只显示服务端已保存的单选态", async () => {
+  it("用户设置阈值与生效阈值分两行；默认 350K 只作为默认值说明", async () => {
     const wrapper = await mount(usage());
-    expect(wrapper.find('[data-testid="context-budget-save"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="context-budget-reload"]').exists()).toBe(false);
-    expect(wrapper.find(".context-usage-tier-actions").exists()).toBe(false);
-    // 正常状态不再常驻说明行：三档的单选态已经说完了。
-    expect(wrapper.get('[data-testid="context-usage-tier-state"]').text()).toBe("");
-    expect((wrapper.get('[data-testid="context-budget-option-524288"]').element as HTMLInputElement).checked)
-      .toBe(true);
+    expect(wrapper.get('[data-testid="context-compaction-configured-row"]').text())
+      .toContain("350,000");
+    expect(wrapper.get('[data-testid="context-compaction-threshold-row"]').text())
+      .toContain("350,000");
+    expect(wrapper.get('[data-testid="context-compaction-default-note"]').text())
+      .toContain("默认值 350,000");
+    expect(wrapper.get('[data-testid="context-compaction-default-note"]').text())
+      .toContain("256,000–400,000");
   });
 
-  it("点档位立刻写服务端：带该会话的档位修订与所选档位，成功后回执确认", async () => {
-    const onSaved = vi.fn();
-    const fetchMock = stubSequence([(_url, init) => {
-      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      expect(body).toMatchObject({ expected_revision: "3", context_budget_tokens: 1048576 });
-      return json({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { session_id: sessionId, context_budget_tokens: 1048576, revision: "4" } });
-    }]);
-    const wrapper = await mount(usage(), { onSaved });
-    await wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    // 点下去就是一次写，不需要第二枚「保存」按钮。
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(wrapper.get('[data-testid="context-budget-notice"]').text()).toContain("1,048,576");
-    expect(onSaved).toHaveBeenCalledTimes(1);
-  });
-
-  it("连点两档只发出一条写：第二条不生成新命令", async () => {
-    const fetchMock = stubSequence([(_url, init) => {
-      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      return json({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-        result: { session_id: sessionId, context_budget_tokens: body.context_budget_tokens,
-          revision: "4" } });
-    }]);
+  it("圆环分母是实际可用窗口，不是旧会话档位或模型宣传数", async () => {
     const wrapper = await mount(usage());
-    const first = wrapper.get('[data-testid="context-budget-option-262144"]')
-      .element as HTMLInputElement;
-    const second = wrapper.get('[data-testid="context-budget-option-1048576"]')
-      .element as HTMLInputElement;
-    // 两次点击落在同一帧：闸门必须是同步可见的 ref，不能只看渲染后的 disabled。
-    first.click();
-    second.click();
-    await flush();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("占比按当前档位解释：冻结预算不同时只作差异说明，不改分母", async () => {
-    const wrapper = await mount(usage({
-      budget: { tokens: 1_048_576, revision: "4" },
-      nextCall: { reservationTokens: 1_048_576, contextBudgetTokens: 1_048_576,
-        providerWindowTokens: null, windowSource: "UNKNOWN" },
-    }));
-    // 10,607 / 1,048,576 ≈ 1.01%，按当前 1024K 档位取整为 1%，不按那次冻结的 65,536。
+    expect(wrapper.get('[data-testid="assist-context-meter-input"]').text()).toBe("10,607");
+    expect(wrapper.get('[data-testid="assist-context-meter-window"]').text()).toBe("1,000,000");
+    // 10,607 / 1,000,000 ≈ 1.06%，取整 1%。
     expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("1%");
-    expect((wrapper.get('[data-testid="context-budget-option-1048576"]').element as HTMLInputElement).checked)
-      .toBe(true);
-    expect(wrapper.find('[data-testid="context-usage-history"]').exists()).toBe(true);
-    // 冻结预算与当前档位不同时补一句历史依据，但占比仍按当前档位。
+    expect(wrapper.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("989,393");
     const note = wrapper.get('[data-testid="context-usage-frozen-note"]').text();
     expect(note).toContain("这次调用当时冻结 65,536 tokens");
-    expect(note).toContain("占比按当前 1024K 档位计算");
+    expect(note).toContain("当前模型可用窗口 1,000,000 tokens");
   });
 
-  it("冻结预算与档位一致时不补差异说明", async () => {
-    const wrapper = await mount(usage({
-      budget: { tokens: 524288, revision: "3" },
-      lastCall: { ...usage().lastCall!, reservedTokens: 524288 },
-    }));
+  it("冻结预算与当前窗口一致时不补差异说明", async () => {
+    const wrapper = await mount(usage({ lastCall: { ...usage().lastCall!, reservedTokens: 1_000_000 } }));
     expect(wrapper.find('[data-testid="context-usage-frozen-note"]').exists()).toBe(false);
   });
 
-  it("分项估算合计与 Provider 实报不同时写明两边口径", async () => {
+  it("模型窗口未知时显示安全回退，不伪造 1M", async () => {
     const wrapper = await mount(usage({
-      lastCall: { ...usage().lastCall!, inputTokens: 5_549,
-        breakdown: { ...usage().lastCall!.breakdown!, estimatedTotalTokens: 7_452 } },
+      compaction: contextCompactionFixture({ modelWindowTokens: null,
+        windowSource: "UNKNOWN_FALLBACK", fallbackApplied: true,
+        effectiveWindowTokens: 262_144, safeInputTokens: 232_652 }),
+      nextCall: { reservationTokens: 262_144, effectiveWindowTokens: 262_144,
+        modelWindowTokens: null, providerCallCapTokens: null,
+        windowSource: "UNKNOWN_FALLBACK", fallbackApplied: true },
     }));
-    const note = wrapper.get('[data-testid="context-usage-estimate-note"]').text();
-    expect(note).toContain("分项合计约 7,452");
-    expect(note).toContain("Provider 本次实报输入 5,549");
+    const row = wrapper.get('[data-testid="context-compaction-window-row"]').text();
+    expect(row).toContain("未知（按安全回退 262,144 tokens）");
+    expect(wrapper.get('[data-testid="context-compaction-window-source"]').text())
+      .toContain("未知 · 安全回退");
+    expect(wrapper.get('[data-testid="assist-context-meter-window"]').text()).toBe("262,144");
   });
 
-  it("估算合计与实报一致时不重复解释", async () => {
-    const wrapper = await mount(usage());
-    expect(wrapper.find('[data-testid="context-usage-estimate-note"]').exists()).toBe(false);
-  });
-
-  it("档位区只留三档：不再渲染「当前档位」标题行与「下次调用申请」行", async () => {
-    const wrapper = await mount(usage());
-    expect(wrapper.text()).not.toContain("当前档位");
-    expect(wrapper.text()).not.toContain("下次调用申请");
-    expect(wrapper.find('[data-testid="context-budget-current"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="context-budget-next"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="context-usage-tiers"]').findAll("input[type=radio]")).toHaveLength(3);
-  });
-
-  it("读序是最近一次模型调用 → 上下文构成 → 上下文档位，档位排在菜单最底部的停靠区", async () => {
-    const wrapper = await mount(usage());
-    const order = ["context-usage-history", "context-usage-breakdown", "context-budget-inline"]
-      .map((id) => wrapper.get(`[data-testid="${id}"]`).element as HTMLElement);
-    for (let i = 1; i < order.length; i += 1) {
-      // compareDocumentPosition 的 FOLLOWING 位为真：DOM 顺序就是用户要的阅读顺序。
-      expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING)
-        .toBeTruthy();
-    }
-    // 停靠区是布局的参与者而不是覆盖层：档位区在滚动区之后，自己那一段里没有分项与错误提示。
-    const dock = wrapper.get(".context-usage-dock").element as HTMLElement;
-    const scroll = wrapper.get(".context-usage-scroll").element as HTMLElement;
-    expect(dock.contains(wrapper.get('[data-testid="context-usage-tiers"]').element as Node)).toBe(true);
-    expect(dock.contains(wrapper.get('[data-testid="context-usage-breakdown"]').element as Node)).toBe(false);
-    expect(scroll.contains(dock)).toBe(false);
-  });
-
-  it("占比按当前档位解释；冻结预算缺失也给百分比，不再出现「预算未知」", async () => {
-    const wrapper = await mount(usage());
-    expect(wrapper.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
-    expect(wrapper.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("513,681");
-    expect(wrapper.get('[data-testid="assist-context-meter-output"]').text()).toContain("646");
-
-    unmount?.(); unmount = null;
-    const legacy = await mount(usage({ lastCall: { ...usage().lastCall!, reservedTokens: null } }));
-    // 旧数据没有冻结预算，但当前档位始终存在：占比按当前档位照常给出。
-    expect(legacy.find('[data-testid="assist-context-meter-budget-unknown"]').exists()).toBe(false);
-    expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
-    expect(legacy.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("513,681");
+  it("用户阈值高于安全上限时显示「用户设置 / 实际生效 / 原因」", async () => {
+    const wrapper = await mount(usage({ compaction: contextCompactionFixture({
+      thresholdClamped: true, thresholdTokens: 500_000, requestedThresholdTokens: 500_000,
+      effectiveThresholdTokens: 209_386, modelWindowTokens: 262_144,
+      effectiveWindowTokens: 262_144, safeInputTokens: 232_652, distanceTokens: -70_614 }) }));
+    const clamped = wrapper.get('[data-testid="context-compaction-clamped"]').text();
+    expect(clamped).toContain("用户设置 500,000 tokens");
+    expect(clamped).toContain("实际生效 209,386 tokens");
+    expect(clamped).toContain("当前模型上下文容量不足");
+    expect(wrapper.get('[data-testid="context-compaction-threshold"]').text()).toBe("209,386");
   });
 
   it("分项按固定顺序渲染并标注估算；没有分项时只写「暂无分项统计」", async () => {
@@ -219,73 +132,26 @@ describe("上下文用量浮层", () => {
     expect(rows[0]!.text()).toContain("5,000");
 
     unmount?.(); unmount = null;
-    const legacy = await mount(usage({ lastCall: { ...usage().lastCall!, breakdown: null } }));
-    expect(legacy.get('[data-testid="context-usage-breakdown-empty"]').text())
+    const empty = await mount(usage({ lastCall: { ...usage().lastCall!, breakdown: null } }));
+    expect(empty.get('[data-testid="context-usage-breakdown-empty"]').text())
       .toContain("当前记录没有分项统计");
-    expect(legacy.findAll('[data-testid^="context-usage-row-"]')).toHaveLength(0);
-    // 旧数据没有分项，但总用量照常可读（分母是当前 512K 档位）。
-    expect(legacy.get('[data-testid="assist-context-meter-percent"]').text()).toBe("2%");
+    expect(empty.findAll('[data-testid^="context-usage-row-"]')).toHaveLength(0);
+    expect(empty.get('[data-testid="assist-context-meter-percent"]').text()).toBe("1%");
   });
 
-  it("409 冲突不覆盖别人写入的值：重读最新档位并说明", async () => {
-    const onReload = vi.fn();
-    stubSequence([
-      () => json({ code: "REVISION_CONFLICT", detail: "档位已变化。",
-        conflict: { expected_revision: "3", actual_revision: "7" } }, 409),
-    ]);
-    const wrapper = await mount(usage(), { onReload });
-    await wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    expect(wrapper.get('[data-testid="context-budget-conflict"]').text()).toContain("档位已被其他操作改动");
-    expect(onReload).toHaveBeenCalledTimes(1);
-  });
-
-  it("传输失败保留原 command_id 与载荷，可按原命令查回执", async () => {
-    const saved: Record<string, unknown>[] = [];
-    stubSequence([
-      () => { throw new TypeError("Failed to fetch"); },
-      (url, init) => {
-        if (url.includes("/commands/")) {
-          // 回执查询：按原 command_id 返回同一份结果。
-          const commandId = url.slice(url.lastIndexOf("/") + 1);
-          return json({ command_id: commandId, command_type: "SetSessionContextBudget",
-            committed_at: "2026-10-30T00:00:00Z",
-            result: { session_id: sessionId, context_budget_tokens: 262144, revision: "4" } });
-        }
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        saved.push(body);
-        return json({ command_id: body.command_id, committed_at: "2026-10-30T00:00:00Z",
-          result: { session_id: sessionId, context_budget_tokens: body.context_budget_tokens,
-            revision: "4" } });
-      },
-    ]);
-    const wrapper = await mount(usage());
-    await wrapper.get('[data-testid="context-budget-option-262144"]').setValue(true);
-    await flush();
-    const pending = wrapper.get('[data-testid="context-budget-pending"]').text();
-    expect(pending).toContain("保存结果待核对");
-    expect(pending).toContain("原 command_id：");
-    await wrapper.get('[data-testid="context-budget-receipt"]').trigger("click");
-    await flush();
-    expect(wrapper.get('[data-testid="context-budget-notice"]').text()).toContain("已核对");
-    // 回执核对不产生新的写请求：档位没有被改第二次。
-    expect(saved).toHaveLength(0);
-  });
-
-  it("没有模型调用时只说明，不画 0% 也不编分项", async () => {
+  it("没有模型调用时只说明，不画 0% 也不编分项；手动压缩仍可用", async () => {
     const wrapper = await mount(usage({ lastCall: null }));
     expect(wrapper.get('[data-testid="assist-context-meter-empty"]').text()).toContain("尚无模型调用");
     expect(wrapper.find('[data-testid="assist-context-meter-percent"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="context-usage-breakdown"]').exists()).toBe(false);
-    // 档位选择仍然可用：空会话也要能先把档位定下来。
-    expect(wrapper.findAll("input[type=radio]")).toHaveLength(3);
+    expect(wrapper.get('[data-testid="context-compaction-now"]').attributes("disabled")).toBeUndefined();
   });
 
   it("读取失败时显示原因与重读入口，不拿旧值顶替", async () => {
     const onReload = vi.fn();
     const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
       sessionRevision="7" usage={null} loading={false} error="网络不可用"
-      onReload={onReload} onSaved={() => {}} />);
+      onReload={onReload} />);
     unmount = mounted.unmount;
     await flush();
     expect(mounted.wrapper.get('[data-testid="context-usage-error"]').text()).toContain("网络不可用");
@@ -294,24 +160,14 @@ describe("上下文用量浮层", () => {
     expect(mounted.wrapper.find('[data-testid="assist-context-meter-percent"]').exists()).toBe(false);
   });
 
-  it("还没有会话时：三档可选，选择落在新会话草稿作用域，不发任何写请求", async () => {
-    const onDraftTierChange = vi.fn();
-    const fetchMock = vi.fn(async () => json({ items: [] }));
-    vi.stubGlobal("fetch", fetchMock);
+  it("还没有会话时只显示读数，手动压缩不可用；没有档位可写", async () => {
     const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={null}
       sessionRevision={null} usage={null} loading={false} error={null}
-      onReload={() => {}} onSaved={() => {}}
-      draftTier={262144}
-      onDraftTierChange={onDraftTierChange as (tier: 262144 | 524288 | 1048576) => void} />);
+      onReload={() => {}} />);
     unmount = mounted.unmount;
     await flush();
-    expect(mounted.wrapper.findAll("input[type=radio]")).toHaveLength(3);
-    const checked = mounted.wrapper.get('[data-testid="context-budget-option-262144"]')
-      .element as HTMLInputElement;
-    expect(checked.checked).toBe(true);
-    await mounted.wrapper.get('[data-testid="context-budget-option-1048576"]').setValue(true);
-    await flush();
-    expect(onDraftTierChange).toHaveBeenCalledWith(1_048_576);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mounted.wrapper.findAll("input[type=radio]")).toHaveLength(0);
+    expect(mounted.wrapper.get('[data-testid="context-compaction-now"]')
+      .attributes("disabled")).toBeDefined();
   });
 });

@@ -31,7 +31,7 @@ function bytesFor(tokens: number): number {
 
 function budget(overrides: Partial<BudgetInput> = {}): BudgetInput {
   return { providerWindow: 256_000, callBudget: 256_000,
-    callBudgetSource: 'WORKSPACE_TIER', outputReserve: 8_192, ...overrides };
+    callBudgetSource: 'MODEL_CONTEXT_WINDOW', outputReserve: 8_192, ...overrides };
 }
 
 function file(path: string, tokens: number) {
@@ -77,14 +77,15 @@ test('单文件都不足 15% 但累计超阈值：按累计规则提醒', () => 
   assert.ok(assessed.reasons.some((reason) => reason.code === 'TOTAL_FILES_NOTICE'));
 });
 
-test('工作区选 512K 但 Provider 只支持 256K：按有效预算预警', () => {
+test('调用预算被误报为高于模型窗口：按有效预算预警并提示口径冲突', () => {
   const assessed = assessRequiredContextFiles([file('AGENTS.md', 180_000)],
     budget({ callBudget: 512_000 }));
   assert.equal(assessed.severity, 'SEVERE');
   assert.equal(assessed.budget.effective_basis, 'PROVIDER_WINDOW');
   assert.ok(assessed.budget.effective_input_tokens! < 256_000);
-  // 档位高于窗口时附带「调回档位」建议，但不改任何配置。
-  assert.ok(assessed.suggestions.some((suggestion) => suggestion.code === 'TRIM_WINDOW'));
+  // 理论上 call_budget 已按窗口收敛；这里是防回归——投影口径被改坏时必须显式提示，
+  // 而不是让用户去找一个已经取消的「上下文档位」设置。
+  assert.ok(assessed.suggestions.some((suggestion) => suggestion.code === 'WINDOW_CONFLICT'));
 });
 
 test('模型窗口未知：标记估算限制，不冒充精确读数', () => {

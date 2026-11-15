@@ -10,7 +10,7 @@ import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { liveClient, useRelayConnection } from "../lib/relayConnection";
 import { describeRepeat, formatInZone } from "./ScheduledTasksView";
 import "./ScheduledTasksView.css";
-import { Button } from "../ui";
+import { Button, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "../ui";
 
 /** 结果未知时冻结的那一条命令：状态变更与时段处理共用同一个待核对位。 */
 type FrozenCommand = { readonly kind: "status"; readonly input: RelayScheduledTaskStatusInput }
@@ -284,16 +284,16 @@ export default function ScheduledTaskDetailView() {
 
     <section className="surface-panel" aria-label="触发历史" data-testid="scheduled-task-occurrences">
       <h2>触发历史</h2>
-      {task.occurrences.length === 0 ? <p>还没有触发记录。</p> : <table className="data-table">
-        <thead><tr><th scope="col">时段</th><th scope="col">结果</th><th scope="col">任务 / 执行</th><th scope="col">说明</th></tr></thead>
-        <tbody>{task.occurrences.map((occurrence) => <tr key={occurrence.occurrenceId} data-testid={`scheduled-task-occurrence-${occurrence.occurrenceId}`}>
-          <td>{formatInZone(occurrence.dueAt, occurrence.timezone)}{occurrence.missed && <small>应用关闭期间错过</small>}</td>
-          <td>{occurrenceLabels[occurrence.status]}</td>
-          <td>{occurrence.taskId === null ? "—" : <Link className="text-link" to={`/tasks/${occurrence.taskId}`}>{occurrence.taskId.slice(0, 8)}</Link>}
-            {occurrence.runId !== null && <> · <Link className="text-link" to={`/runs/${occurrence.runId}`}>执行 {occurrence.runId.slice(0, 8)}</Link></>}</td>
-          <td>{describeReason(occurrence.reason)}</td>
-        </tr>)}</tbody>
-      </table>}
+      {task.occurrences.length === 0 ? <p>还没有触发记录。</p> : <Table framed={false} className="data-table">
+        <TableHead><TableRow><TableHeaderCell>时段</TableHeaderCell><TableHeaderCell>结果</TableHeaderCell><TableHeaderCell>任务 / 执行</TableHeaderCell><TableHeaderCell>说明</TableHeaderCell></TableRow></TableHead>
+        <TableBody>{task.occurrences.map((occurrence) => <TableRow key={occurrence.occurrenceId} className="scheduled-occurrence-row" testId={`scheduled-task-occurrence-${occurrence.occurrenceId}`}>
+          <TableCell>{formatInZone(occurrence.dueAt, occurrence.timezone)}{occurrence.missed && <small>应用关闭期间错过</small>}</TableCell>
+          <TableCell>{occurrenceLabels[occurrence.status]}</TableCell>
+          <TableCell>{occurrence.taskId === null ? "—" : <Link className="text-link" to={`/tasks/${occurrence.taskId}`}>{occurrence.taskId.slice(0, 8)}</Link>}
+            {occurrence.runId !== null && <> · <Link className="text-link" to={`/runs/${occurrence.runId}`}>执行 {occurrence.runId.slice(0, 8)}</Link></>}</TableCell>
+          <TableCell>{describeReason(occurrence.reason)}</TableCell>
+        </TableRow>)}</TableBody>
+      </Table>}
     </section>
   </div></div>;
 }

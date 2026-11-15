@@ -6,11 +6,11 @@ import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
 
 /**
- * 自动压缩区（0162）的界面口径。
+ * 自动压缩区（0162 / 0165）的界面口径。
  *
  * 这一区只回答三件不同的事，不能混成一句：
  *   · 模型真实上下文窗口有多大（读不到就写未知，不按 1M 冒充）；
- *   · 自动压缩阈值生效在哪个数（保存值高于安全上限时收敛并明说）；
+ *   · 用户设置的压缩阈值与实际生效阈值分别是多少（保存值高于安全上限时收敛并明说）；
  *   · 距离下次压缩还有多少（达到阈值不是达到窗口上限）。
  * 手动压缩的 202 也只是受理，完成状态必须从服务端读回。
  */
@@ -24,16 +24,17 @@ let unmount: (() => void) | null = null;
 afterEach(() => { unmount?.(); unmount = null; vi.unstubAllGlobals(); });
 
 function usage(compaction: Partial<RelayContextCompaction> = {}): RelaySessionContextUsage {
-  return { sessionId, budget: { tokens: 524288, revision: "3" },
-    nextCall: { reservationTokens: 524288, contextBudgetTokens: 524288,
-      providerWindowTokens: null, windowSource: "UNKNOWN" },
+  return { sessionId,
+    nextCall: { reservationTokens: 1_000_000, effectiveWindowTokens: 1_000_000,
+      modelWindowTokens: 1_000_000, providerCallCapTokens: 1_000_000,
+      windowSource: "MODEL_CATALOG", fallbackApplied: false },
     lastCall: null, compaction: contextCompactionFixture(compaction) };
 }
 
 async function mount(data: RelaySessionContextUsage) {
   const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
     sessionRevision="7" usage={data} loading={false} error={null}
-    onReload={() => {}} onSaved={() => {}} />);
+    onReload={() => {}} />);
   unmount = mounted.unmount;
   await flush();
   return mounted.wrapper;
@@ -48,16 +49,30 @@ function optional(wrapper: Awaited<ReturnType<typeof mount>>, testId: string): b
 }
 
 describe("自动压缩区", () => {
-  it("模型窗口、会话档位与生效阈值分三行；距离按生效阈值算", async () => {
+  it("模型窗口、用户阈值与生效阈值分开；距离按生效阈值算", async () => {
     const wrapper = await mount(usage());
     expect(text(wrapper, "context-compaction-current")).toBe("280,000");
     expect(text(wrapper, "context-compaction-threshold")).toBe("350,000");
-    // 窗口行给真实窗口，档位另给一行：两枚数字不同，不能被读成同一个上限。
-    expect(text(wrapper, "context-compaction-window-row")).toContain("1,048,576");
-    expect(text(wrapper, "context-compaction-target-row")).toContain("524,288");
+    // 模型窗口与用户设置是两个数字，不能被读成同一个上限。
+    expect(text(wrapper, "context-compaction-window-row")).toContain("1,000,000");
+    expect(text(wrapper, "context-compaction-window-source")).toContain("自动识别 · 模型目录");
+    expect(text(wrapper, "context-compaction-configured-row")).toContain("350,000");
     expect(text(wrapper, "context-compaction-threshold-row")).toContain("350,000");
     expect(text(wrapper, "context-compaction-distance")).toContain("70,000");
     expect(wrapper.get('[data-testid="context-compaction-state"]').text()).toBe("已开启");
+  });
+
+  it("模型窗口来源与未知回退分开标注，不把安全回退写成自动识别", async () => {
+    const known = await mount(usage({ windowSource: "CAPABILITY_DECLARATION",
+      providerCallCapTokens: null }));
+    expect(text(known, "context-compaction-window-source")).toContain("高级能力声明");
+    unmount?.(); unmount = null;
+    const unknown = await mount(usage({ modelWindowTokens: null, windowSource: "UNKNOWN_FALLBACK",
+      fallbackApplied: true, effectiveWindowTokens: 262_144, safeInputTokens: 232_652,
+      providerCallCapTokens: null }));
+    expect(text(unknown, "context-compaction-window-row"))
+      .toContain("未知（按安全回退 262,144 tokens）");
+    expect(text(unknown, "context-compaction-window-source")).toContain("未知 · 安全回退");
   });
 
   it("读数来源分开标注：真实基线 + 估算增量与整份估算不是同一个口径", async () => {

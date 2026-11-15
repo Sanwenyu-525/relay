@@ -424,6 +424,9 @@ fn validate_desktop_config_keys(config: &str) -> Result<(), String> {
             "RELAY_MODEL_BASE_URL" | "RELAY_MODEL_TIMEOUT_MS" |
             "RELAY_MODEL_MAX_OUTPUT_TOKENS" | "RELAY_MODEL_MAX_CALL_TOKENS" |
             "RELAY_MODEL_MAX_SCOPE_CALLS" | "RELAY_MODEL_MAX_SCOPE_TOKENS" |
+            // 0165：部署侧声明「这个端点/模型真实支持多大窗口」。它不是普通用户的压缩
+            // 设置；目录与高级能力声明都缺这条信息时才会用到。
+            "RELAY_MODEL_CONTEXT_WINDOW" |
             // 2026-10-19: 目录里没有该模型时，运维用它显式声明「该模型接受图片输入」。
             // 不放进白名单的话，桌面版用户既无法发送图片、也拿不到「加上这一行」的出路：
             // 宿主会先以 unsupported setting 拒绝启动。

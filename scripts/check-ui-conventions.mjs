@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { analyzeViewSource, compareViewControls, listViewFiles, shouldCheckView } from "./lib/ui-conventions-ast.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcRoot = path.join(repoRoot, "apps", "workbench", "src");
@@ -184,20 +185,25 @@ for (const file of cssFiles) {
   if (text.includes("!important")) violations.push(`${key} 使用了 !important；新样式不允许靠优先级压过共享组件`);
 }
 
-// 规则 6：新页面必须从共享组件层取件。
-const viewFiles = walk(path.join(srcRoot, "views"), (name) => name.endsWith(".tsx"));
+// 规则 6：新页面必须走共享组件；用 TypeScript AST 判断原生控件，而不是只看见一行 import。
+// 基线登记过的存量页面只允许减少原生控件；新文件零容忍（file/hidden 例外自动放行）。
+const viewFiles = listViewFiles(srcRoot).filter((file) => shouldCheckView(rel(file)));
 const knownViews = new Set(baselineForPrimitives.views ?? []);
-const NATIVE_CONTROL = /<(button|input|select|textarea)\b/;
+const nativeControlCounts = {};
+const viewViolations = [];
 for (const file of viewFiles) {
   const key = rel(file);
-  if (knownViews.has(key)) continue;
-  const text = fs.readFileSync(file, "utf8");
-  const control = NATIVE_CONTROL.exec(text);
-  if (control === null) continue;
-  if (!/from "\.\.\/ui"/.test(text)) {
-    violations.push(`${key} 是新页面且直接写原生 <${control[1]}>，没有从 ../ui 取共享组件`);
-  }
+  const analysis = analyzeViewSource(fs.readFileSync(file, "utf8"), key);
+  nativeControlCounts[key] = analysis.controls.length;
+  const result = compareViewControls({
+    relativeFile: key,
+    controls: analysis.controls,
+    baselineCount: baselineForPrimitives.nativeControls?.[key] ?? 0,
+    isKnownView: knownViews.has(key)
+  });
+  viewViolations.push(...result.violations);
 }
+violations.push(...viewViolations);
 
 // 规则 7：与基线比对，只阻止新增。
 let baseline = { files: {} };
@@ -213,9 +219,10 @@ if (process.argv.includes("--update-baseline")) {
     fontPxTotal: fontTotal,
     files: counts,
     fontPx: fontPxCounts,
+    nativeControls: nativeControlCounts,
     views: viewFiles.map(rel).sort()
   }, null, 2) + "\n", "utf8");
-  console.log(`baseline 已刷新：${Object.keys(counts).length} 个 CSS 文件，合计 ${total} 处裸色值 / ${fontTotal} 处 px 字号，登记 ${viewFiles.length} 个页面`);
+  console.log(`baseline 已刷新：${Object.keys(counts).length} 个 CSS 文件，合计 ${total} 处裸色值 / ${fontTotal} 处 px 字号，登记 ${viewFiles.length} 个页面、${Object.values(nativeControlCounts).reduce((sum, value) => sum + value, 0)} 个存量原生控件`);
   process.exit(0);
 }
 

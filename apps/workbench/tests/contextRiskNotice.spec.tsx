@@ -42,9 +42,9 @@ function audit(overrides: Partial<RequiredContextAudit> = {}): RequiredContextAu
     files: [{ path: "AGENTS.md", category: "TASK_REQUIRED", scope: "ROOT",
       reason: "项目规则入口", bytes: 540_000, estimatedTokens: 180_000,
       modifiedAt: "2026-10-30T03:59:00.000Z", share: 0.78, severity: "SEVERE" }],
-    budget: { providerWindowTokens: 256_000, providerWindowKnown: true,
-      callBudgetTokens: 256_000, callBudgetSource: "WORKSPACE_TIER",
-      effectiveInputTokens: 231_000, effectiveBasis: "PROVIDER_WINDOW",
+    budget: { providerWindowTokens: 1_000_000, providerWindowKnown: true,
+      callBudgetTokens: 1_000_000, callBudgetSource: "MODEL_CONTEXT_WINDOW",
+      effectiveInputTokens: 933_616, effectiveBasis: "PROVIDER_WINDOW",
       reserves: { outputTokens: 8_192, systemPromptTokens: 2_000,
         toolDefinitionTokens: 4_096, historyTokens: 0 },
       estimatedTotalInputTokens: 194_288, requiredTotalTokens: 180_000,
@@ -111,9 +111,9 @@ describe("浮层里的读数与操作", () => {
     const panel = wrapper.get('[data-testid="context-risk-panel"]');
     expect(panel.text()).toContain("AGENTS.md");
     expect(panel.text()).toContain("78%");
-    expect(wrapper.get('[data-testid="context-risk-effective-input"]').text()).toContain("231,000");
-    expect(wrapper.get('[data-testid="context-risk-window"]').text()).toContain("256,000");
-    expect(wrapper.get('[data-testid="context-risk-call-budget"]').text()).toContain("工作区默认档位");
+    expect(wrapper.get('[data-testid="context-risk-effective-input"]').text()).toContain("933,616");
+    expect(wrapper.get('[data-testid="context-risk-window"]').text()).toContain("1,000,000");
+    expect(wrapper.get('[data-testid="context-risk-call-budget"]').text()).toContain("模型上下文窗口");
     expect(panel.text()).toContain("预计加载量（发送前推算）");
     expect(wrapper.get('[data-testid="context-risk-suggestions"]').text()).toContain("拆成两段");
   });

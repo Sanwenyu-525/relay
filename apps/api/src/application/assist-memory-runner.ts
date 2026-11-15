@@ -104,7 +104,7 @@ export async function prepareAutomaticMemory(db: DbExecutor, sessionId: string, 
     const checkpoint = state?.checkpoint_id == null ? undefined : await r.assistMemory.checkpoint(state.checkpoint_id);
     const invalid = checkpoint !== undefined && !await checkpointAvailable(r, options.storage, session, checkpoint);
     const id = await prepareMemoryCompaction(r, session, 'AUTO', options.modelEnv ?? process.env, invalid,
-      modelSnapshot, projectedInputBytes, modelConnectionId);
+      modelSnapshot, projectedInputBytes, modelConnectionId, options.modelPort.identity.model);
     return id !== null;
   });
 }
@@ -144,7 +144,12 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
   logger.info('context_compaction_started', { request_id: job.id, session_id: job.session_id,
     reason: job.reason, trigger: audit.trigger, model: audit.model,
     tokens_before: audit.tokensBefore,
-    threshold_tokens: audit.thresholdTokens, window_tokens: audit.windowTokens });
+    threshold_tokens: audit.effectiveThresholdTokens ?? audit.thresholdTokens,
+    configured_threshold_tokens: audit.configuredThresholdTokens,
+    model_context_window_tokens: audit.modelContextWindowTokens,
+    window_tokens: audit.windowTokens,
+    provider_call_cap_tokens: audit.providerCallCapTokens,
+    fallback_applied: audit.fallbackApplied });
   const controller = new AbortController();
   const shutdown = () => controller.abort();
   options.signal?.addEventListener('abort', shutdown, { once: true });
@@ -334,7 +339,10 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
       tokens_before: audit.tokensBefore, tokens_after: tokensAfter,
       tokens_saved: audit.tokensBefore === null || tokensAfter === null
         ? null : audit.tokensBefore - tokensAfter,
-      threshold_tokens: audit.thresholdTokens,
+      threshold_tokens: audit.effectiveThresholdTokens ?? audit.thresholdTokens,
+      configured_threshold_tokens: audit.configuredThresholdTokens,
+      model_context_window_tokens: audit.modelContextWindowTokens,
+      effective_threshold_tokens: audit.effectiveThresholdTokens,
       post_compaction_target_tokens: audit.postCompactionTargetTokens,
       duration_ms: Date.now() - startedAt, success: true });
     /*
@@ -361,6 +369,9 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
       cancelled ? 'CANCELLED' : 'FAILED', cancelled ? null : code);
     const failureFields = { request_id: job.id, session_id: job.session_id,
       trigger: audit.trigger, model: audit.model, tokens_before: audit.tokensBefore,
+      configured_threshold_tokens: audit.configuredThresholdTokens,
+      effective_threshold_tokens: audit.effectiveThresholdTokens,
+      model_context_window_tokens: audit.modelContextWindowTokens,
       error_code: cancelled ? null : code, duration_ms: Date.now() - startedAt,
       success: false };
     if (cancelled) logger.info('context_compaction_cancelled', failureFields);

@@ -26,6 +26,7 @@ import { runMemberWakeupTick } from '../application/member-wakeup.js';
 import { planExecutionAdmission, executionConcurrencyGateEnabled }
   from '../application/execution-concurrency.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
+import { runMemoryConsolidationTick } from '../application/memory-consolidation.js';
 import { runOneCommand } from './run-command.js';
 import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
 
@@ -293,6 +294,16 @@ async function main(): Promise<void> {
           if (webImport.prepared + webImport.dispatched > 0) {
             process.stdout.write(`${JSON.stringify({ type: 'worker_web_import_tick',
               ...webImport })}\n`);
+          }
+          // 0164：低频、确定性记忆整理（去重/替代/陈旧标记/索引回填）。每拍最多一个到期
+          // 工作区；没有到期项时返回 null，不产生空转日志；失败只记录，不影响主执行。
+          if (process.env.RELAY_MEMORY_AUTO_CONSOLIDATION !== 'false') {
+            const memoryMaintenance = await runMemoryConsolidationTick(database.executor);
+            if (memoryMaintenance !== null) {
+              process.stdout.write(`${JSON.stringify({ type: 'worker_memory_consolidation',
+                workspace_id: memoryMaintenance.workspaceId,
+                ...memoryMaintenance.stats })}\n`);
+            }
           }
           // 2026-10-20：已就绪的会话执行候选由服务端推进，不再等前端页面来喊这一声。
           // 页面关闭、刷新错过时机或另一台设备发起的请求都能继续；重复或迟到扫描只重放

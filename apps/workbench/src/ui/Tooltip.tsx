@@ -1,6 +1,7 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState,
   type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { registerOverlay, isTopOverlay } from "../lib/overlayStack";
 import { cn } from "./cn";
 
 /**
@@ -39,6 +40,7 @@ export default function Tooltip({ label, children, placement = "top", delay = 25
   const trigger = useRef<HTMLElement | null>(null);
   const bubble = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layer = useRef(Symbol("tooltip"));
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
 
@@ -86,17 +88,30 @@ export default function Tooltip({ label, children, placement = "top", delay = 25
     };
   }, [open, hide, reposition]);
 
+  /**
+   * Tooltip 登记为最轻的一层：它后打开就压在对话框/菜单之上，Esc 先收起它，
+   * 外层 Dialog 不会跟着消失（UI-UNIFY-03 嵌套关闭契约）。
+   * 悬停出现时焦点可能仍在对话框里，但 Tooltip 的语义是「临时提示」，
+   * 因此不做焦点归属判断，只按打开顺序参与层级栈。
+   */
   useEffect(() => {
-    if (!open) return;
+    if (!open || disabled) return;
+    const unregister = registerOverlay(layer.current, "tooltip", hide);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       if (event.key !== "Escape") return;
+      // 只有最上层响应：菜单/对话框开在 Tooltip 之上时，这次 Esc 归它们。
+      if (!isTopOverlay(layer.current)) return;
       event.preventDefault();
+      event.stopPropagation();
       hide();
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, hide]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      unregister();
+    };
+  }, [open, disabled, hide]);
 
   if (!isValidElement<TriggerProps>(children)) return children;
   const child = children as ReactElement<TriggerProps>;

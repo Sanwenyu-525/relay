@@ -70,9 +70,23 @@ test("Tabs：roving tabindex，方向键切换选中项并移动焦点，Home/En
   await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(tabs.nth(1)).toBeFocused();
   await page.keyboard.press("End");
-  await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
+  const lastEnabled = page.getByRole("tab", { name: "人工待处理" });
+  await expect(lastEnabled).toHaveAttribute("aria-selected", "true");
+  await expect(lastEnabled).toBeFocused();
+  await expect(tabs.last()).toHaveAttribute("tabindex", "-1");
   await page.keyboard.press("Home");
   await expect(tabs.first()).toHaveAttribute("aria-selected", "true");
+});
+
+test("Tabs：disabled 项不可聚焦、点击不改变选中项", async ({ page }) => {
+  await openLab(page);
+  await page.locator("#lab-interactive").scrollIntoViewIfNeeded();
+  const disabled = page.getByRole("tab", { name: "已停用" });
+  await expect(disabled).toBeDisabled();
+  await expect(disabled).toHaveAttribute("tabindex", "-1");
+  await disabled.click({ force: true });
+  const all = page.getByRole("tab", { name: /全部/ });
+  await expect(all).toHaveAttribute("aria-selected", "true");
 });
 
 test("Combobox：输入筛选、方向键 + Enter 选择、Esc 只关列表", async ({ page }) => {
@@ -127,4 +141,93 @@ test("Toast：反馈进入 live region，可被读屏播报", async ({ page }) =
     return region === null ? null : { live: region.getAttribute("aria-live"), role: region.getAttribute("role") };
   });
   expect(live, "Toast 必须挂在 aria-live/status/alert 容器里").not.toBeNull();
+});
+
+test("嵌套浮层：Dialog 内 Popover + Combobox，Esc 逐层关闭且不连带外层", async ({ page }) => {
+  await openLab(page);
+  await page.getByRole("button", { name: "打开对话框" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认删除" });
+  await expect(dialog).toBeVisible();
+
+  await page.getByTestId("lab-dialog-popover-trigger").click();
+  const popover = page.getByRole("dialog", { name: "对话框内筛选" });
+  await expect(popover).toBeVisible();
+  const combo = page.getByTestId("lab-dialog-combobox").getByRole("combobox");
+  await combo.click();
+  await expect(combo).toHaveAttribute("aria-expanded", "true");
+
+  // 第一次 Esc：只关 Combobox 列表，Popover 与 Dialog 都在。
+  await page.keyboard.press("Escape");
+  await expect(combo).toHaveAttribute("aria-expanded", "false");
+  await expect(popover).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(combo).toBeFocused();
+
+  // 第二次 Esc：只关 Popover，Dialog 仍在。
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("lab-dialog-popover-trigger")).toBeFocused();
+
+  // 第三次 Esc：才关闭 Dialog。
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("嵌套浮层：Dialog 内 Tooltip，Esc 先收提醒再关对话框", async ({ page }) => {
+  await openLab(page);
+  await page.getByRole("button", { name: "打开对话框" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认删除" });
+  await page.getByTestId("lab-dialog-tooltip").focus();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("多层 Dialog：Esc 只关栈顶，内层关闭后外层仍可操作", async ({ page }) => {
+  await openLab(page);
+  await page.getByRole("button", { name: "打开对话框" }).click();
+  const outer = page.getByRole("dialog", { name: "确认删除" });
+  await expect(outer).toBeVisible();
+  await page.getByTestId("lab-dialog-open-nested").click();
+  const inner = page.getByRole("dialog", { name: "第二层确认" });
+  await expect(inner).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(inner).toBeHidden();
+  await expect(outer).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(outer).toBeHidden();
+});
+
+test("真实 Chromium IME：组合输入期间 Enter/Escape 不选择、不关列表", async ({ page }) => {
+  await openLab(page);
+  await page.locator("#lab-interactive").scrollIntoViewIfNeeded();
+  const input = page.getByRole("combobox", { name: "模型" });
+  await input.click();
+  await input.fill("g");
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "g", selectionStart: 1, selectionEnd: 1 });
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await cdp.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+  // CDP 的 composition 事件仍不等价于 Windows 输入法；这里证明 Chromium 的 isComposing 路径，
+  // 真实微软拼音/搜狗仍按人工矩阵验收。
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+});
+
+test("生产工具条：Tooltip 接管提示，不叠加原生 title", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto("/tasks");
+  const create = page.getByTestId("titlebar-create-task");
+  await expect(create).toBeVisible();
+  await expect(create).not.toHaveAttribute("title");
+  await create.hover();
+  await expect(page.getByRole("tooltip")).toBeVisible();
 });

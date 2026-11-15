@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
 import { clearActiveConversation, publishActiveConversation } from "../src/lib/activeConversation";
 import { flush, mountWorkbench } from "./mountApp";
+import { contextCompactionWireFixture } from "./contextUsageFixture";
 
 /**
  * 新会话上下文档位继承的**负向反例**（2026-10-31 收口整改的 P2 项）。
@@ -134,7 +135,10 @@ function fakeServer(options: { readonly sessions?: readonly FakeSession[] } = {}
       const target = sessions.get(usageMatch[1]!);
       if (target === undefined) return response({ code: "RESOURCE_NOT_FOUND" }, 404);
       return response({ session_id: target.id,
-        budget: { tokens: target.tier, revision: "1" }, last_call: null });
+        next_call: { reservation_tokens: 1_000_000, effective_window_tokens: 1_000_000,
+          model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_000_000,
+          window_source: "MODEL_CATALOG", fallback_applied: false },
+        last_call: null, compaction: contextCompactionWireFixture() });
     }
     const sessionMatch = /\/assist-sessions\/([^/]+)$/u.exec(path);
     if (sessionMatch !== null) {

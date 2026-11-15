@@ -1,54 +1,53 @@
 import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import { createRepositories, type Repositories } from './unit-of-work.js';
+import { createRepositories } from './unit-of-work.js';
 import { readContextUsageSnapshot, type ContextUsageSnapshot } from './assist-context-usage.js';
-import { planAssistModelBudget } from './assist-model-snapshot.js';
-import { readModelPortConfig, readOpenRouterModelPortConfig } from
-  '../workflow/model-port-config.js';
 import type { AssistContextUsageCallRow } from '../assist/assist-repository.js';
-import type { AssistSessionRow, SessionModelSelectionRow } from '../infrastructure/database-schema.js';
 import { resourceNotFound } from './domain-error.js';
 import { COMPACTION_THRESHOLD_RECOMMENDED, DEFAULT_COMPACTION_THRESHOLD_TOKENS,
   measureSessionContextTokens, planContextCompaction, readCompactionAudit, readSessionModelCapacity,
-  type CompactionTrigger } from './assist-context-policy.js';
+  type CompactionTrigger, type ModelContextCapacity } from './assist-context-policy.js';
 
 /**
- * 上下文用量面板的只读投影（0145 / 0162）。
+ * 上下文用量面板的只读投影（0145 / 0162 / 0165）。
  *
- * 一次请求给全一个浮层需要的东西：会话当前档位、最近一次真实调用的实付用量、
- * 那次调用冻结的单次预算、（如果采到过）它自己的分项构成，以及**压缩策略**。
+ * 一次请求给全一个浮层需要的东西：最近一次真实调用的实付用量、那次调用冻结的
+ * 单次预算、（如果采到过）它自己的分项构成，以及**压缩策略**。
  *
  * 四件事刻意分开，因为它们回答四个不同的问题：
- *   * `budget`——这个会话**现在**按哪一档走（会话级事实，可随时改）；
+ *   * `next_call`——下一次真实调用会**申请**多少额度、按当前模型的哪个窗口；
  *   * `last_call.reserved_tokens`——历史那一次调用**当时**申请了多少额度，作为历史依据保留；
  *   * `last_call.input_tokens`——Provider 真的回了多少输入量。这是唯一可以直接相信的
  *     总量；分项是本地按请求文本估算的，两者口径不同，因此不强行相加相等；
  *   * `compaction`——现在有多少上下文、模型真实窗口多大、阈值生效在哪个数、离它还有多远。
  *     它把「模型窗口」与「压缩阈值」分开：达到阈值不是达到窗口上限。
  *
- * 前端占比的分母由产品口径决定：2026-11-11 用户指令改为**当前档位**（`budget.tokens`），
- * 圆环、浮层与三档单选共用同一个分母；`reserved_tokens` 只在两者不同时作为差异说明出现。
+ * 前端占比的分母由产品口径决定：2026-11-15 用户指令改为**实际生效窗口**
+ * （`compaction.effective_window_tokens`），圆环与浮层共用同一个分母；旧会话档位
+ * 不再出现在这个投影里，也不再作为任何分母。
  *
  * 不返回提示词、文件正文、工具输出或任何路径：面板只需要数值与来源分类。
  */
 
 export interface SessionContextUsageProjection {
   readonly session_id: string;
-  readonly budget: { readonly tokens: number; readonly revision: string };
   /**
-   * 下一次真实调用会**申请**多少预算（2026-10-31）。
+   * 下一次真实调用会**申请**多少预算。
    *
-   * 它与「当前档位」不是同一个数：冻结时还要按已知的 Provider 窗口截断。这里用与
-   * 冻结完全相同的 `planAssistModelBudget` 计算，前端不自己取 min，也不拿历史值冒充。
-   * 窗口未知时如实给出 `window_source: 'UNKNOWN'`——那表示「会按档位申请」，不表示
-   * Provider 一定装得下。模型选择不可用（配置读不到、目录里没有这个模型）时为 null。
+   * `reservation_tokens` 与「模型真实窗口」不是同一个数：冻结时按 min(1M 目标,
+   * 模型窗口/安全回退, 服务商硬上限) 收敛。这里用与冻结完全相同的口径计算，前端
+   * 不自己取 min，也不拿历史值冒充。模型窗口未知时 `model_window_tokens` 为 null，
+   * `window_source` 为 `UNKNOWN_FALLBACK`——不显示虚假的 1M。
    */
   readonly next_call: {
     readonly reservation_tokens: number;
-    readonly context_budget_tokens: number;
-    readonly provider_window_tokens: number | null;
-    readonly window_source: 'MODEL_CATALOG' | 'UNKNOWN';
+    readonly effective_window_tokens: number;
+    readonly model_window_tokens: number | null;
+    readonly provider_call_cap_tokens: number | null;
+    readonly window_source: 'MODEL_CATALOG' | 'CAPABILITY_DECLARATION'
+      | 'MODEL_CONFIG' | 'UNKNOWN_FALLBACK';
+    readonly fallback_applied: boolean;
   } | null;
   readonly last_call: {
     /** 这份读数属于哪一次调用；`MESSAGE` 表示退回消息行上的用量（旧数据没有调用行）。 */
@@ -69,7 +68,7 @@ export interface SessionContextUsageProjection {
     readonly breakdown: ContextUsageSnapshot | null;
   } | null;
   /**
-   * 0162：自动压缩策略与当前读数。
+   * 0162 / 0165：自动压缩策略与当前读数。
    *
    * `effective_threshold_tokens` 是**真正生效**的阈值：min(用户设置, 安全输入上限的 90%)，
    * 让自动压缩先于硬上限发生；`safe_input_tokens` 是硬上限本身。
@@ -84,9 +83,15 @@ export interface SessionContextUsageProjection {
     readonly requested_threshold_tokens: number;
     readonly effective_threshold_tokens: number;
     readonly threshold_clamped: boolean;
+    /** 产品目标容量（1M）；只说明「系统愿意申请到多大」，不是模型真实窗口。 */
     readonly target_window_tokens: number;
+    /** 模型真实窗口的已知值；null = 未知（界面显示安全回退，不显示 1M）。 */
     readonly model_window_tokens: number | null;
-    readonly window_source: 'MODEL_CATALOG' | 'SESSION_TIER';
+    readonly window_source: 'MODEL_CATALOG' | 'CAPABILITY_DECLARATION'
+      | 'MODEL_CONFIG' | 'UNKNOWN_FALLBACK';
+    readonly provider_call_cap_tokens: number | null;
+    readonly fallback_applied: boolean;
+    /** min(1M 目标, 模型窗口/安全回退, 服务商硬上限)：本会话的可用窗口。 */
     readonly effective_window_tokens: number;
     readonly output_reserve_tokens: number;
     readonly protocol_overhead_tokens: number;
@@ -120,15 +125,19 @@ export interface SessionContextUsageProjection {
 }
 
 export async function readSessionContextUsage(db: DbExecutor, workspaceId: string,
-  sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<SessionContextUsageProjection> {
+  sessionId: string, env: NodeJS.ProcessEnv = process.env,
+  modelHint?: string | null): Promise<SessionContextUsageProjection> {
   const r = createRepositories(db);
   const session = await r.assist.readSession(sessionId);
   if (session?.workspace_id !== workspaceId) throw resourceNotFound('Assist session');
   const selection = await r.modelSelection.readForSession(session.id);
   const settings = await r.information.readMemorySettings(session.workspace_id);
-  const capacity = await readSessionModelCapacity(r, session.workspace_id, selection, env);
-  const policy = planContextCompaction({ targetWindowTokens: session.context_budget_tokens,
+  const capacity = await readSessionModelCapacity(r, session.workspace_id, selection, env, modelHint);
+  const policy = planContextCompaction({
     modelWindowTokens: capacity.modelWindowTokens,
+    windowSource: capacity.windowSource,
+    ...(capacity.providerCallCapTokens === null ? {}
+      : { providerCallCapTokens: capacity.providerCallCapTokens }),
     ...(capacity.outputReserveTokens === null ? {}
       : { outputReserveTokens: capacity.outputReserveTokens }),
     userThresholdTokens: settings?.compaction_threshold_tokens ?? null });
@@ -141,9 +150,7 @@ export async function readSessionContextUsage(db: DbExecutor, workspaceId: strin
     request.status !== 'PENDING' && request.status !== 'RUNNING');
   const lastAudit = terminal === undefined ? null : readCompactionAudit(terminal);
   return { session_id: session.id,
-    budget: { tokens: session.context_budget_tokens,
-      revision: session.context_budget_revision.toString() },
-    next_call: await readNextCallBudget(r, session, selection, env),
+    next_call: nextCallBudget(capacity),
     last_call: lastCall,
     compaction: {
       enabled: settings?.automatic_compaction !== false,
@@ -157,6 +164,8 @@ export async function readSessionContextUsage(db: DbExecutor, workspaceId: strin
       target_window_tokens: policy.targetWindowTokens,
       model_window_tokens: policy.modelWindowTokens,
       window_source: policy.windowSource,
+      provider_call_cap_tokens: policy.providerCallCapTokens,
+      fallback_applied: policy.fallbackApplied,
       effective_window_tokens: policy.effectiveWindowTokens,
       output_reserve_tokens: policy.outputReserveTokens,
       protocol_overhead_tokens: policy.protocolOverheadTokens,
@@ -185,30 +194,22 @@ export async function readSessionContextUsage(db: DbExecutor, workspaceId: strin
 }
 
 /**
- * 下一次调用的申请预算。
+ * 下一次调用的申请预算：与冻结同一口径，只做只读重算。
  *
- * 只读，不触发目录同步：下次调用真能不能成立由冻结那一刻决定，这里只回答「按现在的
- * 档位与已知窗口，会申请多少」。读不到配置或模型目录里没有这一条时返回 null——不拿
- * 档位冒充一个可执行的结果。
+ * 窗口未知时给出安全回退并标记 `UNKNOWN_FALLBACK`，不拿 1M 冒充；连模型身份都
+ * 读不到时返回 null——那表示「现在无法回答下一次调用会用什么模型」。
  */
-async function readNextCallBudget(r: Repositories, session: AssistSessionRow,
-  selection: SessionModelSelectionRow | undefined,
-  env: NodeJS.ProcessEnv): Promise<SessionContextUsageProjection['next_call']> {
-  const tokens = session.context_budget_tokens;
-  const base = (reservation: number, window: number | null) => ({
-    reservation_tokens: reservation, context_budget_tokens: tokens,
-    provider_window_tokens: window,
-    window_source: window === null ? 'UNKNOWN' as const : 'MODEL_CATALOG' as const });
-  if (selection === undefined || selection.connection === 'default') {
-    const config = readModelPortConfig(env);
-    if (config === undefined) return null;
-    return base(planAssistModelBudget(config, tokens, null).callReservationTokens, null);
-  }
-  const entry = await r.modelCatalog.readEntryBySourceModelId(selection.model);
-  if (entry === undefined) return null;
-  const config = readOpenRouterModelPortConfig(env, selection.model);
-  return base(planAssistModelBudget(config, tokens, entry.context_window).callReservationTokens,
-    entry.context_window);
+function nextCallBudget(capacity: ModelContextCapacity):
+SessionContextUsageProjection['next_call'] {
+  if (capacity.model === null) return null;
+  return {
+    reservation_tokens: capacity.effectiveWindowTokens,
+    effective_window_tokens: capacity.effectiveWindowTokens,
+    model_window_tokens: capacity.modelWindowTokens,
+    provider_call_cap_tokens: capacity.providerCallCapTokens,
+    window_source: capacity.windowSource,
+    fallback_applied: capacity.fallbackApplied,
+  };
 }
 
 function callProjection(row: AssistContextUsageCallRow): SessionContextUsageProjection['last_call'] {

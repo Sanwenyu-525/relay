@@ -20,6 +20,7 @@
     "feature-map:check": "node scripts/feature-map.mjs --check",
     "test:feature-map": "node --test scripts/feature-map.test.mjs",
     "test:log-query": "node --test scripts/log-query.test.mjs",
-    "log:query": "node scripts/log-query.mjs"
+    "log:query": "node scripts/log-query.mjs",
+    "ci:ui:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-ui-local.ps1"
   }
 }

@@ -8,8 +8,9 @@ import { createModelPort, type RuntimeModelPort } from '../workflow/model-port-f
 import { compareCredentialIdentity, readCredentialFingerprint } from '../workflow/credential-identity.js';
 import { WorkspaceDefaultModelConnectionRepository } from '../model/model-connection-repository.js';
 import { computeModelConfigFingerprint, type ModelPortConfig } from '../workflow/model-port-config.js';
-import { freezeAssistModelSnapshot, freezeSingleCandidatePlan, readAssistContextBudget,
+import { freezeAssistModelSnapshot, freezeSingleCandidatePlan,
   type FrozenAssistModelPlan } from './assist-model-snapshot.js';
+import { readConnectionModelCapacity } from './model-context-window.js';
 import { DomainError } from './domain-error.js';
 import type { Repositories } from './unit-of-work.js';
 
@@ -127,19 +128,12 @@ export async function freezeWorkspaceConnectionPlan(repositories: Repositories, 
     });
   }
   const config = modelPortConfigFromConnection(connection, apiKey);
-  const workspaceTokens = await readWorkspaceContextBudget(repositories, input.workspaceId);
+  const capacity = await readConnectionModelCapacity(repositories, connection);
   return {
-    plan: freezeSingleCandidatePlan(config, input.requirements, workspaceTokens),
+    plan: freezeSingleCandidatePlan(config, input.requirements, capacity),
     connectionId: connection.id,
     credentialVersion: connection.credential_version,
   };
-}
-
-/** 工作区上下文预算档位：与 `freezeAssistModelSnapshot` 同一读法，保证预算口径一致。 */
-async function readWorkspaceContextBudget(repositories: Repositories,
-  workspaceId: string): Promise<number | null> {
-  const configured = await repositories.workspaces.readDefaultDirectory(workspaceId);
-  return configured?.context_budget_tokens ?? null;
 }
 
 /** 进程默认凭据存储（测试可注入替代）。 */
@@ -248,8 +242,8 @@ export async function freezeChatModelSnapshot(repositories: Repositories,
       retryable: false, retryAction: 'REFRESH_AND_REDECIDE' });
   }
   const config = modelPortConfigFromConnection(row, apiKey);
-  const workspaceTokens = await readAssistContextBudget(repositories, scope);
-  const plan = freezeSingleCandidatePlan(config, requirements, workspaceTokens);
+  const capacity = await readConnectionModelCapacity(repositories, row);
+  const plan = freezeSingleCandidatePlan(config, requirements, capacity);
   return { ...plan, connectionId: row.id };
 }
 

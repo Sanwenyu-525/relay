@@ -53,6 +53,9 @@ export default function UiLabView() {
   const [tabValue, setTabValue] = useState("all");
   const [modelValue, setModelValue] = useState<string | null>("sonnet");
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dialogPopoverOpen, setDialogPopoverOpen] = useState(false);
+  const [dialogModel, setDialogModel] = useState<string | null>(null);
+  const [nestedDialogOpen, setNestedDialogOpen] = useState(false);
   const [menuPick, setMenuPick] = useState<string | null>(null);
   const [contextPick, setContextPick] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(240);
@@ -260,9 +263,30 @@ export default function UiLabView() {
         <FormField label="删除原因" htmlFor="lab-dialog-reason" hint="会记录在活动里">
           <Input id="lab-dialog-reason" placeholder="例如：重复任务" />
         </FormField>
+        <div className="ui-lab-row" style={{ marginBlockStart: "var(--relay-space-4)", alignItems: "flex-start", flexWrap: "wrap" }}>
+          <Popover open={dialogPopoverOpen} onClose={() => setDialogPopoverOpen(false)} label="对话框内筛选"
+            testId="lab-dialog-popover"
+            trigger={<Button variant="secondary" data-testid="lab-dialog-popover-trigger" aria-expanded={dialogPopoverOpen}
+              onClick={() => setDialogPopoverOpen((value) => !value)}>对话框内筛选</Button>}>
+            <div style={{ display: "grid", gap: "var(--relay-space-3)", minWidth: "16rem" }}>
+              <Combobox label="对话框内模型" value={dialogModel} onChange={setDialogModel} testId="lab-dialog-combobox"
+                options={[{ value: "sonnet", label: "Claude Sonnet" }, { value: "gpt5", label: "GPT-5" }, { value: "locked", label: "已停用模型", disabled: true }]} />
+              <span className="ui-lab-sub">Popover 里再开 Combobox：Esc 一次只关最上层，不连带关闭对话框。</span>
+            </div>
+          </Popover>
+          <Tooltip label="对话框内的轻提示"><Button variant="secondary" data-testid="lab-dialog-tooltip">对话框内提示</Button></Tooltip>
+          <Button variant="secondary" data-testid="lab-dialog-open-nested" onClick={() => setNestedDialogOpen(true)}>打开第二层对话框</Button>
+        </div>
         <div className="ui-lab-row" style={{ marginBlockStart: "var(--relay-space-4)", justifyContent: "flex-end" }}>
           <Button variant="secondary" onClick={() => setDialogOpen("none")}>取消</Button>
           <Button variant="danger" onClick={() => setDialogOpen("none")}>删除</Button>
+        </div>
+      </Dialog>
+      <Dialog open={nestedDialogOpen} title="第二层确认" subtitle="Esc 先关这一层，外层对话框仍保留"
+        onClose={() => setNestedDialogOpen(false)}>
+        <p className="ui-lab-sub">这是真实嵌套的第二个 AppDialog；它打开后压在上一层的浮层栈顶。</p>
+        <div className="ui-lab-row" style={{ justifyContent: "flex-end" }}>
+          <Button variant="secondary" data-testid="lab-dialog-close-nested" onClick={() => setNestedDialogOpen(false)}>关闭第二层</Button>
         </div>
       </Dialog>
       <Drawer
@@ -303,6 +327,7 @@ export default function UiLabView() {
         <Menu label="更多操作" trigger={<span aria-hidden="true">⋯</span>}>
           <MenuItem icon={Plus} onSelect={() => setMenuPick("新建")}>新建</MenuItem>
           <MenuItem icon={Search} onSelect={() => setMenuPick("筛选")}>筛选</MenuItem>
+          <MenuItem icon={Plus} disabled onSelect={() => setMenuPick("归档")}>归档（不可用）</MenuItem>
           <MenuSeparator />
           <MenuItem danger icon={Trash2} onSelect={() => setMenuPick("删除")}>删除</MenuItem>
         </Menu>
@@ -396,7 +421,8 @@ export default function UiLabView() {
           items={[
             { key: "all", label: "全部", badge: 12 },
             { key: "inbox", label: "收件箱", badge: 3 },
-            { key: "attention", label: "人工待处理" }
+            { key: "attention", label: "人工待处理" },
+            { key: "disabled", label: "已停用", disabled: true }
           ]}
         />
       </div>

@@ -1,16 +1,25 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 /**
- * 0135 / P1-A：设置页的上下文长度三档在真实 Chromium 里可读可存。
+ * 0165：普通用户在设置页只配置「自动上下文压缩」和「压缩阈值」。
  *
- * API 全部由 page.route 伪造；这里核对的是界面事实与发出的命令：
- * 初始档位来自投影、保存带读回的修订与所选档位、成功后按回执与重读更新。
+ * 旧的三档「上下文档位」卡片已经删除；模型上下文窗口由服务端自动识别，在设置页
+ * 只读显示，不存在编辑入口。这里用真实 Chromium 核对：
+ *   · 默认阈值来自服务端（350,000），不是界面硬编码；
+ *   · 自定义 400,000 能保存，回执与修订一起更新；
+ *   · 「恢复默认」保存为 null，不把 350,000 写进用户设置；
+ *   · 非法输入在本地被挡住，不发出请求。
  */
 
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
+
+function shot(name: string): string {
+  const override = process.env.RELAY_ACCEPTANCE_SHOTS_DIR;
+  return override === undefined ? test.info().outputPath(name) : `${override}/${name}`;
+}
 
 function cors(): Record<string, string> {
   return { "access-control-allow-origin": origin,
@@ -21,40 +30,51 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   await route.fulfill({ status, contentType: "application/json", headers: cors(), body: JSON.stringify(body) });
 }
 
-function projection(tokens: number | null, revision: string): unknown {
-  return { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
-    default_write_tier: null, context_budget_tokens: tokens, status: "UNSET", reason: null, revision };
+type MemoryState = {
+  revision: number;
+  threshold: number | null;
+  automaticCompaction: boolean;
+};
+
+function memorySettings(state: MemoryState): unknown {
+  return { workspace_id: workspaceId, revision: String(state.revision),
+    recall_enabled: true, automatic_compaction: state.automaticCompaction, auto_capture: true,
+    compaction_threshold_tokens: state.threshold,
+    compaction_threshold_default_tokens: 350_000,
+    compaction_threshold_recommended: { min: 256_000, max: 400_000 } };
 }
 
 type Write = { path: string; body: Record<string, unknown> };
 
-async function installRoutes(page: Page, writes: Write[],
-  state: { tokens: number | null; revision: string }): Promise<void> {
+async function installRoutes(page: Page, writes: Write[], state: MemoryState): Promise<void> {
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method();
     if (method === "OPTIONS") { await route.fulfill({ status: 204, headers: cors() }); return; }
     if (path === "/health/ready") return fulfillJson(route, { status: "ready" });
-    if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "fake",
-      configured: false, model: null, base_url: null, max_call_tokens: 65_536 });
+    if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "openai-compatible",
+      configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000_000 });
     if (path === `${prefix}/model-port/verification`) return fulfillJson(route,
       { current_config_fingerprint: null, last: null, matches_current_config: false,
         worker_startup_validation: "NOT_CONFIGURED" });
-    if (path === `${prefix}/memory-settings`) return fulfillJson(route, { workspace_id: workspaceId,
-      revision: "0", recall_enabled: true, automatic_compaction: true, auto_capture: true });
-    if (path === `${prefix}/context-budget` && method === "POST") {
+    if (path === `${prefix}/memory-settings` && method === "GET") {
+      return fulfillJson(route, memorySettings(state));
+    }
+    if (path === `${prefix}/memory-settings` && method === "POST") {
       const body = JSON.parse(String(request.postData())) as Record<string, unknown>;
       writes.push({ path, body });
-      state.tokens = typeof body.context_budget_tokens === "number" ? body.context_budget_tokens : null;
-      state.revision = String(Number(state.revision) + 1);
-      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-10-24T00:00:00Z",
-        result: { workspace_id: workspaceId, context_budget_tokens: state.tokens,
-          revision: state.revision } });
+      state.threshold = typeof body.compaction_threshold_tokens === "number"
+        ? body.compaction_threshold_tokens : null;
+      state.automaticCompaction = body.automatic_compaction === true;
+      state.revision += 1;
+      return fulfillJson(route, { command_id: body.command_id, committed_at: "2026-11-15T00:00:00Z",
+        result: memorySettings(state) });
     }
-    if (path === `${prefix}/default-working-directory` && method === "GET") {
-      return fulfillJson(route, projection(state.tokens, state.revision));
-    }
+    if (path === `${prefix}/default-working-directory`) return fulfillJson(route,
+      { resource_id: null, canonical_root: null, display_name: null, write_tier: null,
+        default_write_tier: null, context_budget_tokens: null, status: "UNSET", reason: null,
+        revision: "0" });
     return fulfillJson(route, { items: [], next_cursor: null });
   });
 }
@@ -69,33 +89,63 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-test("上下文档位从投影读出，保存提交同一修订与所选档位", async ({ page }) => {
-  const writes: Write[] = [];
-  const state = { tokens: 262_144 as number | null, revision: "4" };
-  await installRoutes(page, writes, state);
+async function openModelSettings(page: Page): Promise<void> {
   await page.goto("/settings", { waitUntil: "domcontentloaded" });
   await connect(page);
   await page.getByTestId("settings-group-model").click();
+  await expect(page.getByTestId("memory-settings")).toBeVisible({ timeout: 20_000 });
+}
 
-  const card = page.getByTestId("context-budget");
-  await expect(card).toBeVisible({ timeout: 20_000 });
-  await expect(card.getByTestId("context-budget-option-262144")).toBeChecked();
-  await expect(card).toContainText("256K");
-  await expect(card).toContainText("512K");
-  await expect(card).toContainText("1024K");
-  await expect(card.getByTestId("context-budget-revision")).toContainText("v4");
+test("压缩阈值默认 350K、可自定义 400K、可恢复默认；没有模型窗口编辑入口", async ({ page }) => {
+  const writes: Write[] = [];
+  const state: MemoryState = { revision: 4, threshold: null, automaticCompaction: true };
+  await installRoutes(page, writes, state);
+  await openModelSettings(page);
 
-  await card.getByTestId("context-budget-option-524288").check();
-  await card.getByTestId("context-budget-save").click();
-  await expect(card.getByTestId("context-budget-notice")).toContainText("524,288", { timeout: 20_000 });
-  await expect(card.getByTestId("context-budget-revision")).toContainText("v5");
-  await expect(card.getByTestId("context-budget-option-524288")).toBeChecked();
-  expect(writes.map((write) => write.body)).toEqual([
-    { command_id: writes[0]!.body.command_id, expected_revision: "4", context_budget_tokens: 524_288 }]);
-  await card.getByTestId("context-budget-option-1048576").check();
-  await card.getByTestId("context-budget-save").click();
-  await expect(card.getByTestId("context-budget-option-1048576")).toBeChecked();
-  await expect(card.getByTestId("context-budget-revision")).toContainText("v6");
-  expect(writes[1]?.body).toMatchObject({ expected_revision: "5", context_budget_tokens: 1_048_576 });
-  await page.screenshot({ path: "output/context-compression-20261030/settings-1024k.png", fullPage: true });
+  const card = page.getByTestId("memory-settings");
+  const threshold = card.getByTestId("memory-settings-threshold");
+  await expect(threshold).toHaveValue("");
+  await expect(threshold).toHaveAttribute("placeholder", "350,000（默认）");
+  await expect(card).toContainText("自动上下文压缩");
+  await expect(card).toContainText("默认 350,000");
+  await expect(card).toContainText("推荐 256,000–400,000");
+  // 旧入口必须彻底消失：设置页没有三档卡片，也没有窗口编辑字段。
+  await expect(page.getByTestId("context-budget")).toHaveCount(0);
+  await expect(card.getByTestId("context-window")).toHaveCount(0);
+  await expect(card.getByTestId("context-window-input")).toHaveCount(0);
+
+  await threshold.fill("400000");
+  await card.getByTestId("memory-settings-save").click();
+  await expect(card.getByTestId("memory-settings-notice"))
+    .toContainText("400,000", { timeout: 20_000 });
+  await expect(card.getByTestId("memory-settings-revision")).toContainText("v5");
+  expect(writes[0]?.body).toMatchObject({ expected_revision: "4",
+    recall_enabled: true, automatic_compaction: true, auto_capture: true,
+    compaction_threshold_tokens: 400_000 });
+
+  await card.getByTestId("memory-settings-threshold-default").click();
+  await expect(threshold).toHaveValue("");
+  await card.getByTestId("memory-settings-save").click();
+  await expect(card.getByTestId("memory-settings-notice"))
+    .toContainText("默认 350,000", { timeout: 20_000 });
+  await expect(card.getByTestId("memory-settings-revision")).toContainText("v6");
+  expect(writes[1]?.body).toMatchObject({ expected_revision: "5",
+    compaction_threshold_tokens: null });
+
+  await page.screenshot({ path: shot("settings-compaction-threshold.png"), fullPage: true });
+});
+
+test("非法阈值文本在本地报错并禁用保存，不发出请求", async ({ page }) => {
+  const writes: Write[] = [];
+  const state: MemoryState = { revision: 2, threshold: 350_000, automaticCompaction: true };
+  await installRoutes(page, writes, state);
+  await openModelSettings(page);
+
+  const card = page.getByTestId("memory-settings");
+  const threshold = card.getByTestId("memory-settings-threshold");
+  await threshold.fill("abc");
+  await expect(card.getByTestId("memory-settings-threshold-field"))
+    .toContainText("请填正整数 tokens");
+  await expect(card.getByTestId("memory-settings-save")).toBeDisabled();
+  expect(writes).toHaveLength(0);
 });

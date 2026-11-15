@@ -25,7 +25,8 @@
 }
 
 /* 页签文字与页内标题同一条左缘（.page-primary 的 32px 内缩），点区靠行高维持。 */
-.pv-page .project-scope-bar .skill-tab {
+.pv-page .project-scope-bar .skill-tab,
+.pv-page .project-scope-bar .skill-tabs .ui-tabs__item {
   min-height: 38px;
   padding: 0;
   font-size: var(--relay-font-size-pageBase);

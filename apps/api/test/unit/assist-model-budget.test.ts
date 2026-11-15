@@ -3,35 +3,52 @@ import test from 'node:test';
 
 import { planAssistModelBudget } from '../../src/application/assist-model-snapshot.js';
 
-const config = { maxCallTokens: 8_192, maxScopeCalls: 32, maxScopeTokens: 262_144 };
+const config = { maxCallTokens: 1_048_576, maxScopeCalls: 32, maxScopeTokens: 1_048_576 };
 
-test('256K 档：作用域下限要盖住两笔在途预留加一笔已结算余量', () => {
-  const plan = planAssistModelBudget(config, 262_144, 262_144);
+test('256K 模型：作用域按配置上限放行，至少覆盖一笔单次预留', () => {
+  const plan = planAssistModelBudget(config, { modelWindowTokens: 262_144 });
   assert.equal(plan.callReservationTokens, 262_144);
-  assert.equal(plan.scopeTokenLimit, 786_432);
+  assert.equal(plan.scopeTokenLimit, 1_048_576);
 });
 
 test('回归：上一轮 TITLE 辅助调用在途时，下一条消息的预留必须放行', () => {
-  const plan = planAssistModelBudget(config, 262_144, 262_144);
+  const plan = planAssistModelBudget(config, { modelWindowTokens: 262_144 });
   const settled = 10_397;
   const needed = settled + plan.callReservationTokens * 2;
   assert.ok(needed > 524_288, '这组实测数字必须越过旧下限，用例才有回归意义');
   assert.ok(needed <= plan.scopeTokenLimit, '旧公式 524288 在这里会把用户下一条消息判成预算耗尽');
 });
 
-test('未选档位时保持原口径：作用域取进程默认，不被单次预留撑大', () => {
-  const plan = planAssistModelBudget(config, null, null);
-  assert.equal(plan.callReservationTokens, 8_192);
-  assert.equal(plan.scopeTokenLimit, 262_144);
+test('窗口未知：按 256K 安全回退，不假定 1M', () => {
+  const plan = planAssistModelBudget(config, { modelWindowTokens: null });
+  assert.equal(plan.callReservationTokens, 262_144);
+  assert.equal(plan.contextBudgetTokens, 262_144);
+  assert.equal(plan.contextWindowSource, 'UNKNOWN_FALLBACK');
+  assert.equal(plan.fallbackApplied, true);
 });
 
-test('Provider 窗口小于档位时按窗口截断，下限随之缩小', () => {
-  const plan = planAssistModelBudget(config, 262_144, 131_072);
+test('Provider 窗口小于配置时按窗口截断，作用域仍不低配单次预留', () => {
+  const plan = planAssistModelBudget(config, { modelWindowTokens: 131_072 });
   assert.equal(plan.callReservationTokens, 131_072);
-  assert.equal(plan.scopeTokenLimit, 393_216);
+  assert.equal(plan.scopeTokenLimit, 1_048_576);
+});
+
+test('1M 目标不会把作用域抬到 3M，配置仍是硬上限', () => {
+  const plan = planAssistModelBudget({ maxCallTokens: 1_000_000,
+    maxScopeCalls: 32, maxScopeTokens: 1_000_000 }, { modelWindowTokens: 1_000_000 });
+  assert.equal(plan.callReservationTokens, 1_000_000);
+  assert.equal(plan.scopeTokenLimit, 1_000_000);
+});
+
+test('服务商单次硬上限低于模型窗口时以硬上限为准', () => {
+  const plan = planAssistModelBudget({ ...config, maxScopeTokens: 1_048_576 },
+    { modelWindowTokens: 1_000_000, providerCallCapTokens: 65_536 });
+  assert.equal(plan.callReservationTokens, 65_536);
+  assert.equal(plan.scopeTokenLimit, 1_048_576);
 });
 
 test('连接自带的更大作用域上限仍然生效', () => {
-  const plan = planAssistModelBudget({ ...config, maxScopeTokens: 1_048_576 }, 262_144, 262_144);
-  assert.equal(plan.scopeTokenLimit, 1_048_576);
+  const plan = planAssistModelBudget({ ...config, maxScopeTokens: 2_000_000 },
+    { modelWindowTokens: 262_144 });
+  assert.equal(plan.scopeTokenLimit, 2_000_000);
 });

@@ -4047,8 +4047,11 @@ html[data-motion="off"] .feedback-card {
 }
 
 .page-primary > .subnav .subnav-item,
+.page-primary > .subnav .ui-tabs__item,
 .subnav-row .subnav-item,
-.task-detail-page .skill-tab {
+.subnav-row .ui-tabs__item,
+.task-detail-page .skill-tab,
+.task-detail-page .skill-tabs .ui-tabs__item {
   font-size: var(--relay-font-size-reading);
 }
 

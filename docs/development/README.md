@@ -14,7 +14,12 @@
 | M07 备份恢复 | [打开](m07-backup-recovery.md) | 维护/恢复的重要根因 |
 | 后端启动边界 | [打开](backend-startup-boundaries.md) | IPv6 主机名与编译目录定位故障根因 |
 | Agent 生成生命周期 | [打开](agent-generation-lifecycle.md) | 消息领取串行、宿主停止与异步心跳清理 |
+| 上下文窗口与压缩阈值 | [打开](context-window-compaction-0165.md) | 0165 能力/偏好解耦、预算公式、迁移与测试证据 |
 | 长短期记忆 | [打开](memory-module.md) | 记忆模块工程边界 |
+| 长期记忆 V2 架构 | [打开](memory-system-v2.md) | 分层、作用域、存储、召回与系统边界 |
+| 长期记忆生命周期 | [打开](memory-lifecycle.md) | 写入、替代、整理、过期与删除 |
+| 长期记忆配置 | [打开](memory-configuration.md) | 默认值、校验、隐私与开销 |
+| 长期记忆测试 | [打开](memory-testing.md) | 已覆盖、未覆盖与运行方法 |
 | 开发实施记录 | [打开](前端预览实施与验收.md) | 早期前端过程，不替代当前 Windows 证据 |
 | 验收入口 | [打开](../testing/README.md) | 当前结果与历史证据的分界 |
 

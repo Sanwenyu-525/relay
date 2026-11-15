@@ -382,25 +382,34 @@ class VerifyGate {
  */
 const CapabilityParamsSchema = Type.Object({
   workspace_id: UuidSchema,
-  // 只有真实连接才谈得上「这个模型能不能读图」；fake/invalid 不接受声明。
-  provider: Type.Literal('openai-compatible'),
+  // 0165：能力声明不再只服务图片输入。上下文窗口是「已核对的模型能力」，必须能跟着
+  // 真实协议（OpenAI 兼容 / Anthropic / OpenRouter）声明；fake/invalid 仍不接受。
+  provider: Type.Union([Type.Literal('openai-compatible'),
+    Type.Literal('anthropic-messages'), Type.Literal('openrouter')]),
   source_model_id: Type.String({ minLength: 1, maxLength: 200 }),
 }, { additionalProperties: false });
 const CapabilityBodySchema = Type.Object({
-  image_input: Type.Boolean(),
+  // 省略 = 保持原值：只声明上下文窗口时不能把已声明的图片能力清掉。
+  image_input: Type.Optional(Type.Boolean()),
   note: Type.Optional(Type.Union([Type.String({ maxLength: 500 }), Type.Null()])),
+  // 已核对的模型窗口；null = 撤销窗口声明。它**不是**普通用户的压缩阈值。
+  context_window_tokens: Type.Optional(Type.Union([
+    Type.Integer({ minimum: 16_384, maximum: 4_000_000 }), Type.Null()])),
 }, { additionalProperties: false });
 const CapabilityRowSchema = Type.Object({
   provider: Type.String(), source_model_id: Type.String(), image_input: Type.Boolean(),
   note: Type.Union([Type.String(), Type.Null()]),
+  context_window_tokens: Type.Union([Type.Integer(), Type.Null()]),
   declared_at: Type.String(), updated_at: Type.String(),
 }, { additionalProperties: false });
 
 function capabilityJson(row: { readonly provider: string; readonly source_model_id: string;
   readonly image_input: boolean; readonly note: string | null;
+  readonly context_window_tokens: number | null;
   readonly declared_at: Date; readonly updated_at: Date }) {
   return { provider: row.provider, source_model_id: row.source_model_id,
     image_input: row.image_input, note: row.note,
+    context_window_tokens: row.context_window_tokens,
     declared_at: row.declared_at.toISOString(), updated_at: row.updated_at.toISOString() };
 }
 
@@ -443,10 +452,14 @@ export function registerModelRoutes(app: FastifyInstance, dependencies: RouteDep
   }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; provider: string; source_model_id: string };
-      const body = request.body as { image_input: boolean; note?: string | null };
+      const body = request.body as { image_input?: boolean; note?: string | null;
+        context_window_tokens?: number | null };
       const row = await createRepositories(dependencies.database.executor).modelCapabilities
         .writeDeclaration({ provider: p.provider, sourceModelId: p.source_model_id,
-          imageInput: body.image_input, note: body.note ?? null });
+          ...(body.image_input === undefined ? {} : { imageInput: body.image_input }),
+          ...(body.note === undefined ? {} : { note: body.note }),
+          ...(body.context_window_tokens === undefined ? {}
+            : { contextWindowTokens: body.context_window_tokens }) });
       return capabilityJson(row);
     } catch (error) { return sendReadError(reply, error, request.id); }
   });

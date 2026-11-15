@@ -640,7 +640,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     expect(mounted.wrapper.get('[data-testid="task-complete"]').attributes("disabled")).toBeDefined();
     expect(mounted.wrapper.get('[data-testid="artifact-save"]').attributes("disabled")).toBeDefined();
     await mounted.wrapper.get('[data-testid="task-complete"]').trigger("click");
-    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "POST" && call.url === `${taskUrl}/artifacts`)).toHaveLength(1);
     taskReadable = true;
     await mounted.wrapper.get('[data-testid="task-refresh-retry"]').trigger("click"); await flush();
     expect(mounted.wrapper.find('[data-testid="task-refresh-error"]').exists()).toBe(false);
@@ -703,7 +703,7 @@ describe("产物与完成闭环（UI-11，live）", () => {
     expect(mounted.wrapper.text()).toContain("PRIVATE_TASK_TITLE");
     expect(mounted.wrapper.get('textarea[name="artifact-content"]').element).toHaveProperty("value", "用户 B");
     expect(mounted.wrapper.get('[data-testid="task-completion"]').element).toBe(completionElement);
-    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "POST" && call.url === `${taskUrl}/artifacts`)).toHaveLength(1);
   });
 
   it("两个 Artifact 各有 v1 时按 version ID 区分选择、当前选用与本轮接受", async () => {

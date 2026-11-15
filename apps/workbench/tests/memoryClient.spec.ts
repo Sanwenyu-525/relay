@@ -209,7 +209,8 @@ describe("会话短期窗口", () => {
     expect(memory.checkpoint?.sources).toEqual([
       { status: "AVAILABLE", kind: "MEMORY", rootId: memoryId, version: "2",
         sourceRef: `memory:${memoryId}:v2`, selection: null, selectionBasis: null,
-        origin: "HUMAN_CONFIRMED", sourceKind: "UNKNOWN" },
+        // 来源记录没有声明 origin 时读成「未标注」，不冒充人工确认。
+        origin: null, sourceKind: "UNKNOWN" },
       { status: "UNAVAILABLE", kind: null, rootId: null, version: null, sourceRef: null,
         selection: null, selectionBasis: null, origin: null, sourceKind: null }
     ]);

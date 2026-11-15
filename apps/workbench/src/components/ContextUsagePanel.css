@@ -1,18 +1,14 @@
-/* 上下文用量浮层的**新增**部分（0145 / 2026-10-30）。
+/* 上下文用量浮层的**新增**部分（0145 / 0162 / 0165）。
    摘要段沿用 `.agent-chat-context-meter-*`（定义在 AssistView.css，已是确认过的排版），
-   这里只补三段新内容：构成列表、三档横排、动作行与说明文字。不重复定义容器几何。
+   这里只补构成列表、压缩读数、动作行与说明文字。不重复定义容器几何。
 
    数值一律 tabular-nums：余量从 5 位变 4 位时不能把「tokens」带着左右跳。 */
 
-/* —— 两段容器（2026-11-01 用户指令：档位钉在菜单最底部，读数在上）——
-   上面是可滚动的读数区，下面是档位停靠区。分成两段 DOM 而不是给整块加 sticky：
-   停靠区是布局的参与者，它变高只会压缩上面的滚动区，不会遮住分项、错误提示或键盘焦点；
-   窗口极短、压缩到极限时由停靠区自己滚动，而三档排在它的第一屏，任何时候都点得到。
-   两行的最小值都写 0：不写的话浏览器会让轨道退到 min-content，读数区就顶穿浮层，
-   看起来又变成「整块一起滚」。 */
+/* —— 容器（0165）——
+   会话档位入口已取消，浮层不再需要「读数区 + 档位停靠区」两段结构；
+   整块就是一个滚动区，模型窗口只读展示，用户阈值在设置页配置。 */
 .context-usage {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
   min-height: 0;
 }
 .context-usage > * { min-width: 0; }
@@ -23,20 +19,8 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  /* 滚动条占位恒定：回执/冲突提示出现导致内容变高时，纵向滚动条不会临时挤掉 8px 宽度，
-     那一挤就是「点完档位整块左右跳一下」的另一半来源。 */
   scrollbar-gutter: stable;
   padding-bottom: var(--relay-space-3);
-}
-.context-usage-dock {
-  display: grid;
-  align-content: start;
-  gap: var(--relay-space-2);
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-top: var(--relay-space-3);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 
 /* —— 分区 —— */
@@ -132,6 +116,17 @@
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
 }
+/* 窗口来源 / 「不可在此修改」是同一行的属性说明：换行排在数值下面，
+   不挤占行宽，也不伪装成可点击的控件。 */
+.context-usage-row-aside {
+  display: block;
+  margin-top: 2px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+  font-weight: var(--relay-font-weight-regular);
+  line-height: var(--relay-font-lineHeight-body);
+  white-space: normal;
+}
 
 /* 分区标题行（「最近一次模型调用」+ 右侧「历史记录」标签）：标题与短标签同一行。 */
 .context-usage-heading-row {
@@ -148,62 +143,13 @@
   white-space: nowrap;
   cursor: help;
 }
-/* 状态行为空时不占高度：正常保存成功不需要在档位下再写一句「当前生效」。 */
-.context-usage-tier-state:empty { display: none; }
 
 /* 浮层里的摘要比圆环旁的同一套排版放大一档：16px 的「已用 / 预算」在这三层结构里
    只是正文，分不出主次。只作用于浮层，不动圆环自己的样式。 */
 .context-usage .agent-chat-context-meter-amount { font-size: var(--relay-font-size-reading); }
 .context-usage .agent-chat-context-meter-percent { font-size: var(--relay-font-size-reading); }
 
-/* —— 档位 ——
-   2026-11-01 用户指令：删掉「当前档位 256K」标题行与「下次调用申请」行，停靠区只留三档。
-   单选态本身就是当前值，再写一遍只是重复；状态与申请量改由下方状态行/错误块按需说明。
-   三个选项严格一行：radio 与文字同一个命中区（label），中间靠 gap 分开。
-   不做卡片、不做两行：这一段是「选一个数」，不是三段并列的介绍。 */
-.context-usage-tiers {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--relay-space-3);
-  padding: var(--relay-space-0-5) 0;
-}
-.context-usage-tier {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--relay-space-1);
-  min-width: 0;
-  color: var(--relay-color-text-secondary);
-  font-size: var(--relay-font-size-meta);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--relay-control-target-minimum);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.context-usage-tier input {
-  margin: 0;
-  flex: none;
-  accent-color: var(--relay-color-accent);
-  cursor: pointer;
-}
-.context-usage-tier input:disabled { cursor: not-allowed; }
-/* 选中态只改文字颜色与字重：不改字号、不加边框，避免一行三枚一起抖。 */
-.context-usage-tier:has(input:checked) {
-  color: var(--relay-color-text-primary);
-  font-weight: var(--relay-font-weight-semibold);
-}
-.context-usage-tier:has(input:disabled) { opacity: 0.7; cursor: not-allowed; }
-/* 三档之间的细分隔线（效果图口径）：让「一行三档」读成三个并列的选项，
-   而不是一串连在一起的数字。 */
-.context-usage-tier[data-divider="true"] {
-  padding-inline-start: var(--relay-space-3);
-  border-inline-start: var(--relay-border-width) solid var(--relay-color-border-separator);
-}
-
-/* 2026-10-31 用户指令：档位点击即保存，删掉「保存档位 / 重新读取」两枚动作键——
-   这一节只剩三档与状态行，不再有按钮行。 */
-
-/* —— 自动压缩（0162）——
+/* —— 自动压缩（0162 / 0165）——
    这一段要回答「现在多大、模型装得下多大、什么时候先整理、离它还有多远」。
    轨道按**实际可用窗口**画，阈值单独一枚刻度：两条线不是同一个数，
    把阈值画成轨道末端就是「达到阈值 = 达到窗口上限」的错误读法。 */

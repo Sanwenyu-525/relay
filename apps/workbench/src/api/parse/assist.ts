@@ -1250,12 +1250,9 @@ export function contextUsageBreakdownFrom(value: unknown): RelayContextUsageBrea
 
 export function sessionContextUsageFrom(value: unknown): RelaySessionContextUsage {
   const row = object(value, "session context usage");
-  const budget = object(row.budget, "session context usage.budget");
   const raw = row.last_call;
   const rawNext = row.next_call;
   return { sessionId: string(row, "session_id", "session context usage"),
-    budget: { tokens: sessionContextBudgetFrom(budget.tokens),
-      revision: decimal(budget, "revision", "session context usage.budget") },
     nextCall: rawNext === null || rawNext === undefined ? null : nextCallFrom(rawNext),
     lastCall: raw === null || raw === undefined ? null : contextUsageCallFrom(raw),
     // 0162：旧服务端没有这一段。整段缺省按「没有读数」处理会让面板失去压缩信息，
@@ -1286,7 +1283,8 @@ function contextCompactionFrom(value: unknown): RelayContextCompaction {
   const label = "session context usage.compaction";
   const row = object(value, label);
   const windowSource = string(row, "window_source", label);
-  if (windowSource !== "MODEL_CATALOG" && windowSource !== "SESSION_TIER") {
+  if (!["MODEL_CATALOG", "CAPABILITY_DECLARATION", "MODEL_CONFIG", "UNKNOWN_FALLBACK"]
+    .includes(windowSource)) {
     throw new RelayContractError(`${label} 的窗口来源无法识别。`);
   }
   const contextSource = string(row, "context_source", label);
@@ -1309,7 +1307,9 @@ function contextCompactionFrom(value: unknown): RelayContextCompaction {
     thresholdClamped: boolean(row, "threshold_clamped", label),
     targetWindowTokens: integer(row, "target_window_tokens", label),
     modelWindowTokens: nullableInteger(row, "model_window_tokens", label),
-    windowSource,
+    windowSource: windowSource as RelayContextCompaction["windowSource"],
+    providerCallCapTokens: nullableInteger(row, "provider_call_cap_tokens", label),
+    fallbackApplied: boolean(row, "fallback_applied", label),
     effectiveWindowTokens: integer(row, "effective_window_tokens", label),
     outputReserveTokens: integer(row, "output_reserve_tokens", label),
     protocolOverheadTokens: integer(row, "protocol_overhead_tokens", label),
@@ -1355,13 +1355,17 @@ function contextCompactionFrom(value: unknown): RelayContextCompaction {
 function nextCallFrom(value: unknown): RelayNextCallBudget {
   const row = object(value, "context usage next_call");
   const source = string(row, "window_source", "context usage next_call");
-  if (source !== "MODEL_CATALOG" && source !== "UNKNOWN") {
+  if (!["MODEL_CATALOG", "CAPABILITY_DECLARATION", "MODEL_CONFIG", "UNKNOWN_FALLBACK"]
+    .includes(source)) {
     throw new Error("context usage next_call.window_source 无法识别");
   }
   return { reservationTokens: integer(row, "reservation_tokens", "context usage next_call"),
-    contextBudgetTokens: sessionContextBudgetFrom(row.context_budget_tokens),
-    providerWindowTokens: nullableInteger(row, "provider_window_tokens", "context usage next_call"),
-    windowSource: source };
+    effectiveWindowTokens: integer(row, "effective_window_tokens", "context usage next_call"),
+    modelWindowTokens: nullableInteger(row, "model_window_tokens", "context usage next_call"),
+    providerCallCapTokens: nullableInteger(row, "provider_call_cap_tokens",
+      "context usage next_call"),
+    windowSource: source as RelayNextCallBudget["windowSource"],
+    fallbackApplied: boolean(row, "fallback_applied", "context usage next_call") };
 }
 
 function contextUsageCallFrom(value: unknown): RelayContextUsageCall {

@@ -219,12 +219,11 @@ export default function ContextRiskNotice({ client, workspaceId, resourceId, aud
             : `${formatTokens(audit.budget.effectiveInputTokens)} tokens`}</dd></div>
         <div><dt>Provider 窗口</dt><dd data-testid="context-risk-window">
           {audit.budget.providerWindowTokens === null
-            ? "未知（按调用预算估算）" : `${formatTokens(audit.budget.providerWindowTokens)} tokens`}</dd></div>
-        <div><dt>调用预算</dt><dd data-testid="context-risk-call-budget">
+            ? "未知（按安全回退窗口估算）" : `${formatTokens(audit.budget.providerWindowTokens)} tokens`}</dd></div>
+        <div><dt>实际可用窗口</dt><dd data-testid="context-risk-call-budget">
           {formatTokens(audit.budget.callBudgetTokens)} tokens
-          {audit.budget.callBudgetSource === "SESSION" ? "（本会话档位）"
-            : audit.budget.callBudgetSource === "WORKSPACE_TIER" ? "（工作区默认档位）"
-              : "（应用默认）"}</dd></div>
+          {audit.budget.callBudgetSource === "MODEL_CONTEXT_WINDOW" ? "（模型上下文窗口）"
+            : "（未知 · 安全回退）"}</dd></div>
         <div><dt>预留</dt><dd>输出 {formatTokens(audit.budget.reserves.outputTokens)} · 提示
           {" "}{formatTokens(audit.budget.reserves.systemPromptTokens)} · 工具
           {" "}{formatTokens(audit.budget.reserves.toolDefinitionTokens)}</dd></div>

@@ -145,7 +145,7 @@ async function requireWritableMemorySession(r: Repositories, session: AssistSess
 export async function prepareMemoryCompaction(r: Repositories, session: AssistSessionRow,
   reason: 'MANUAL' | 'AUTO', env: NodeJS.ProcessEnv, forceRebuild = false,
   modelSnapshot?: JsonObject | null, projectedInputBytes = 0,
-  modelConnectionId: string | null = null): Promise<string | null> {
+  modelConnectionId: string | null = null, modelHint: string | null = null): Promise<string | null> {
   const existing = await r.assistMemory.activeRequest(session.id);
   if (existing !== undefined) return existing.id;
   const settings = await r.information.readMemorySettings(session.workspace_id);
@@ -161,7 +161,8 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
    *
    * 手动压缩不看阈值：用户按下就是一次显式请求，有没有收益由候选轮次决定。
    */
-  const { policy, automaticCompaction, model } = await resolveSessionCompactionPolicy(r, session, env);
+  const { policy, automaticCompaction, model, capacity } =
+    await resolveSessionCompactionPolicy(r, session, env, modelHint);
   /*
    * Token 读数异常不能把整轮对话打死：它是判定依据，不是业务事实。读不到时退回
    * 「装配方给出的请求字节」，并在统一日志里留下一条可追的异常记录；真正的硬保护
@@ -228,10 +229,14 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
     session_id: session.id, reason, trigger, model,
     tokens_before: contextTokens, tokens_source: measured.source,
     threshold_tokens: policy.effectiveThresholdTokens,
-    requested_threshold_tokens: policy.requestedThresholdTokens,
+    configured_threshold_tokens: policy.requestedThresholdTokens,
+    effective_threshold_tokens: policy.effectiveThresholdTokens,
+    model_context_window_tokens: policy.modelWindowTokens,
+    provider_call_cap_tokens: policy.providerCallCapTokens,
     window_tokens: policy.modelWindowTokens,
     target_window_tokens: policy.targetWindowTokens,
     window_source: policy.windowSource,
+    fallback_applied: policy.fallbackApplied,
     automatic_compaction: automaticCompaction });
   if (policy.thresholdClamped) {
     // 不静默使用无效配置：保存值超过模型安全上限时记录下来，界面另有同口径提示。
@@ -253,13 +258,18 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
       ...(connectionId === null ? {} : { model_connection_id: connectionId }),
       memory_compaction: { after_seq: after.toString(),
         base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null,
-        // 0162：这次请求为什么发生，以及判定当时的读数。`reason` 只区分 MANUAL/AUTO
+        // 0162 / 0165：这次请求为什么发生，以及判定当时的读数。`reason` 只区分 MANUAL/AUTO
         // （0119 的 CHECK），溢出保护也走 AUTO，所以触发方式单独记一份；它是派生元数据，
         // 不是新的事实源，旧行没有这些键时由 `readCompactionAudit` 按 reason 推回。
         trigger, tokens_before: contextTokens,
         threshold_tokens: policy.effectiveThresholdTokens,
+        configured_threshold_tokens: policy.requestedThresholdTokens,
+        effective_threshold_tokens: policy.effectiveThresholdTokens,
         window_tokens: policy.modelWindowTokens,
+        model_context_window_tokens: policy.modelWindowTokens,
+        provider_call_cap_tokens: policy.providerCallCapTokens,
         window_source: policy.windowSource,
+        fallback_applied: policy.fallbackApplied,
         // 执行端在压缩完成后要复核「压完到底够不够」，因此把判定当时的两个边界一起冻结：
         // 安全输入上限（硬上限）与压缩后目标。它们只是这次请求的判定依据，不是新的事实源。
         safe_input_tokens: policy.safeInputTokens,

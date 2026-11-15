@@ -24,6 +24,18 @@ export interface RelayMemorySettings {
   readonly compactionThresholdDefaultTokens: number;
   /** 推荐区间（仅提示，不强制）。 */
   readonly compactionThresholdRecommended: { readonly min: number; readonly max: number };
+  // 0164：旧服务端不返回时保持 undefined，设置页用产品默认值展示；
+  // 不把默认值写进回执比较，避免旧测试桩整体不等。
+  readonly coreTokenBudget?: number;
+  readonly retrievalTokenBudget?: number;
+  readonly retrievalTopK?: number;
+  readonly retrievalMode?: "LITERAL" | "HYBRID";
+  readonly autoConsolidate?: boolean;
+  readonly consolidationIntervalHours?: number;
+  readonly memoryStaleAfterDays?: number;
+  readonly embeddingProvider?: "disabled" | "openai-compatible";
+  readonly remoteEmbeddingAllowed?: boolean;
+  readonly includeStaleInRecall?: boolean;
 }
 
 /** 长期记忆的不可变保存来源；手工创建的记忆没有来源，这里就是空数组。 */

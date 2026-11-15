@@ -394,6 +394,56 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 页面级导航条（Tabs variant="page"）。
+   与既有 .subnav / .skill-tabs 同一几何：24px 间隔、40px 项高、16px 正文、
+   选中态用底边而不是药丸底色。这样迁移到共享组件时像素不变，「切换条只有一套」
+   不等于「所有位置都长成面板内切换的样子」。 */
+.ui-tabs--page {
+  gap: var(--relay-space-6);
+  padding-block-end: 0;
+}
+
+.ui-tabs--page .ui-tabs__item {
+  min-height: var(--relay-control-height);
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: 0;
+  border-block-end: var(--relay-focus-width) solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-regular);
+}
+
+.ui-tabs--page .ui-tabs__item:hover:not(.is-disabled) {
+  background: none;
+  color: var(--relay-color-action-text);
+}
+
+.ui-tabs--page .ui-tabs__item:active:not(.is-disabled) {
+  background: var(--relay-color-selection-hover);
+}
+
+.ui-tabs--page .ui-tabs__item.is-active {
+  background: none;
+  border-color: transparent;
+  border-block-end-color: var(--relay-color-action-primary);
+  border-radius: 0;
+  color: var(--relay-color-selection-text);
+  font-weight: var(--relay-font-weight-medium);
+}
+
+.ui-tabs--page .ui-tabs__item.is-disabled {
+  color: var(--relay-color-disabled-text);
+  cursor: not-allowed;
+}
+
+.ui-tabs--page .ui-tabs__badge {
+  color: var(--relay-color-text-muted);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── 卡片 / 分隔线 / 滚动区（Surface.tsx） ──────────────────────────── */
 .ui-card {
   display: flex;
@@ -466,6 +516,17 @@
   overflow: auto;
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-control);
+}
+
+/* 嵌在已有 .surface-panel / 页面骨架里的表格不再套第二层描边。 */
+.ui-table-wrap--bare {
+  border: 0;
+  border-radius: 0;
+}
+
+.ui-table-wrap--bare .ui-table {
+  /* 页面骨架的 .pv-page .data-table 等既有规则继续负责宽度与内边距。 */
+  border: 0;
 }
 
 .ui-table {

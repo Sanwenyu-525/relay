@@ -33,8 +33,9 @@ export interface RequiredContextFileRisk {
 export interface RequiredContextBudget {
   readonly providerWindowTokens: number | null;
   readonly providerWindowKnown: boolean;
+  /** 实际可用窗口 = min(1M 目标, 模型窗口/安全回退, 服务商单次上限)。 */
   readonly callBudgetTokens: number;
-  readonly callBudgetSource: "SESSION" | "WORKSPACE_TIER" | "APPLICATION_DEFAULT";
+  readonly callBudgetSource: "MODEL_CONTEXT_WINDOW" | "UNKNOWN_FALLBACK";
   readonly effectiveInputTokens: number | null;
   readonly effectiveBasis: "PROVIDER_WINDOW" | "CALL_BUDGET" | "UNAVAILABLE";
   readonly reserves: { readonly outputTokens: number; readonly systemPromptTokens: number;
@@ -155,7 +156,7 @@ function parseBudget(value: unknown): RequiredContextBudget {
   const source = text(row, "call_budget_source", name);
   const basis = text(row, "effective_basis", name);
   const confidence = text(row, "confidence", name);
-  if (source !== "SESSION" && source !== "WORKSPACE_TIER" && source !== "APPLICATION_DEFAULT") {
+  if (source !== "MODEL_CONTEXT_WINDOW" && source !== "UNKNOWN_FALLBACK") {
     throw new RelayContractError(`${name}.call_budget_source 响应格式无效。`);
   }
   if (basis !== "PROVIDER_WINDOW" && basis !== "CALL_BUDGET" && basis !== "UNAVAILABLE") {
@@ -246,9 +247,9 @@ export interface RequiredContextAuditQuery {
   /** 按哪类 Agent 的规则入口枚举；省略即服务端默认（Relay 内置 Agent）。 */
   readonly agent?: string | null;
   readonly model?: string | null;
-  /** 会话 id：0145 起单次调用预算以会话档位为准，有会话就必须传。 */
+  /** 会话 id：0165 起预算按模型真实窗口解析，会话只定位上下文，不再决定窗口。 */
   readonly sessionId?: string | null;
-  /** 新会话首条消息尚无会话行时，用户已选的上下文档位（与建会话载荷同一个数）。 */
+  /** @deprecated LEGACY（0165）：服务端不再用它参与预算；保留仅为旧调用方类型兼容。 */
   readonly budgetTokens?: number | null;
   /** 跳过服务端的目录遍历缓存（发送前与手动刷新用）。 */
   readonly refresh?: boolean;

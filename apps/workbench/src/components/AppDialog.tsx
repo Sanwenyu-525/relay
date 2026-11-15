@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { isTopDialog, popDialog, pushDialog } from "../lib/dialogStack";
+import { isTopOverlay, registerOverlay } from "../lib/overlayStack";
 // 直接取组件而不是 ../ui 桶文件：AppDialog 自身被 ui/index.ts 再导出，走桶文件会形成
 // 「AppDialog → ui/index → AppDialog」的循环，改为直接入口后依赖方向单向。
 import IconButton from "../ui/IconButton";
@@ -29,6 +30,9 @@ export default function AppDialog({ open, title, variant = "dialog", size, subti
     if (!open) return;
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     pushDialog(token.current);
+    // 浮层层级栈：对话框是「层」，不是全局快捷键的所有者。菜单/Popover/Combobox/Tooltip
+    // 后打开时它们才是栈顶，Esc 与 Tab 都先归它们，避免一次按键关掉两层或抢回焦点。
+    const unregisterOverlay = registerOverlay(token.current, "dialog", () => closeRef.current());
     const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>(
       'button, a[href], input, textarea, select, summary, [tabindex]'
     ) ?? []).filter((item) => {
@@ -47,11 +51,16 @@ export default function AppDialog({ open, title, variant = "dialog", size, subti
     const onKeydown = (event: KeyboardEvent) => {
       if (!isTopDialog(token.current) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape") {
+        if (!isTopOverlay(token.current)) return;
         event.preventDefault();
+        event.stopPropagation();
         closeRef.current();
         return;
       }
       if (event.key !== "Tab") return;
+      // 上层还有菜单/弹出层时，Tab 归它处理（Menu 会收起并把焦点留给浏览器），
+      // 外层焦点陷阱不能把焦点抢回对话框。
+      if (!isTopOverlay(token.current)) return;
       const elements = focusable();
       if (elements.length === 0) {
         event.preventDefault();
@@ -78,6 +87,7 @@ export default function AppDialog({ open, title, variant = "dialog", size, subti
       cancelAnimationFrame(focusFrame);
       const wasTop = isTopDialog(token.current);
       popDialog(token.current);
+      unregisterOverlay();
       document.removeEventListener("keydown", onKeydown);
       if (wasTop && returnFocus?.isConnected) returnFocus.focus();
     };

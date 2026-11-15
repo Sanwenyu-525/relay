@@ -16,7 +16,14 @@ import { describeLiveError } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
 import "./TasksView.css";
 import type { ExecutorKind, InteractionMode, ProjectSummary, TaskStatus, TaskSummary } from "../types";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
+
+/** 三个范围是不同路由（不是同页面板）；导航形态由当前 URL 自动判定激活项。 */
+const taskScopeTabs = [
+  { key: "all", label: "全部", href: "/tasks", testId: "tasks-tab-all", className: "subnav-item" },
+  { key: "inbox", label: "收件箱", href: "/tasks?tab=inbox", testId: "tasks-tab-inbox", className: "subnav-item" },
+  { key: "attention", label: "人工待处理", href: "/tasks?tab=attention", className: "subnav-item" }
+] as const;
 
 const statusOptions = Object.keys(taskStatusLabels) as TaskStatus[];
 const modeOptions = Object.keys(interactionModeLabels) as InteractionMode[];
@@ -164,7 +171,7 @@ export default function TasksView() {
     <PageHeader testId="tasks-page-head" title="任务" overline="Tasks"
       actions={<><Button variant="primary" data-testid="task-create-open" onClick={openLightweight}><Plus aria-hidden="true" />新建任务</Button>
         <Button variant="secondary" data-testid="task-create-full" onClick={openCreate}>填写完整定义</Button></>} />
-    <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks" data-testid="tasks-tab-all" aria-current="page">全部</Link><Link className="subnav-item" to="/tasks?tab=inbox" data-testid="tasks-tab-inbox">收件箱</Link><Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
+    <Tabs label="任务范围" variant="page" className="subnav" items={taskScopeTabs} />
     <div className="list-toolbar list-toolbar--compact" data-testid="tasks-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">按任务名称搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search" placeholder="搜索任务" /></label><label className="filter-field">项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} name="task-filter-project"><option value="all">全部</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}<option value="inbox">未归属项目</option></select></label><label className="filter-field">状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} name="task-filter-status"><option value="all">全部</option>{statusOptions.map((status) => <option key={status} value={status}>{taskStatusLabels[status]}</option>)}</select></label><label className="filter-field">执行模式<select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as InteractionMode | "all")} name="task-filter-mode"><option value="all">全部</option>{modeOptions.map((item) => <option key={item} value={item}>{interactionModeLabels[item]}</option>)}</select></label></div>
     <ActiveFilterBar filters={activeFilters} onClear={clearFilters} />
     {refreshing && <p className="helper-text" role="status" data-testid="tasks-refreshing">正在按当前筛选更新列表，已显示的内容保持可见。</p>}
@@ -288,11 +295,7 @@ function LiveTaskListView({ client, onCreate, onCreateLightweight }: {
         lede="整个工作空间的任务；筛选只作用于已加载的页。"
         actions={<><Button variant="primary" data-testid="task-create-open" onClick={onCreateLightweight}><Plus aria-hidden="true" />新建任务</Button>
           <Button variant="secondary" data-testid="task-create-full" onClick={onCreate}>填写完整定义</Button></>} />
-      <nav className="subnav" aria-label="任务范围"><Link className="subnav-item subnav-item--active" to="/tasks"
-        data-testid="tasks-tab-all" aria-current="page">全部</Link>
-        <Link className="subnav-item" to="/tasks?tab=inbox"
-          data-testid="tasks-tab-inbox">收件箱</Link>
-        <Link className="subnav-item" to="/tasks?tab=attention">人工待处理</Link></nav>
+      <Tabs label="任务范围" variant="page" className="subnav" items={taskScopeTabs} />
       <div className="list-toolbar list-toolbar--compact" data-testid="tasks-toolbar">
         <label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">在已加载任务中按名称搜索</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" name="task-search"

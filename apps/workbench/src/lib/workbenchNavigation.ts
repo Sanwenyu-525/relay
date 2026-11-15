@@ -1,4 +1,4 @@
-import { Bell, BookOpen, CalendarClock, FlaskConical, FolderKanban, House, Inbox, LineChart, ListChecks, Settings } from "lucide-react";
+import { Bell, BookOpen, Brain, CalendarClock, FlaskConical, FolderKanban, House, Inbox, LineChart, ListChecks, Settings } from "lucide-react";
 
 /**
  * 工作台导航的唯一数据源（UI-NAV-01 双导航布局）。
@@ -34,7 +34,9 @@ export function primaryWorkbenchNavigation(options: { readonly pendingReviewCoun
     { label: "工作台", to: "/agent", icon: House, count: "" },
     { label: "项目", to: "/projects", icon: FolderKanban, count: "" },
     { label: "待处理", to: "/reviews", icon: Bell, count: options.pendingReviewCount },
-    { label: "资料", to: "/knowledge", icon: BookOpen, count: "" }
+    { label: "资料", to: "/knowledge", icon: BookOpen, count: "" },
+    // 0164：长期记忆是一等公民，不藏在「资料」页签或开发者设置里。
+    { label: "记忆", to: "/memory", icon: Brain, count: "" }
   ];
 }
 

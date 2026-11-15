@@ -120,7 +120,9 @@ interface AuditBody {
 
 async function readAudit(item: Fixture, query = ''): Promise<AuditBody> {
   const response = await api.get(auditPath(item, query));
-  assert.equal(response.status, 200, JSON.stringify(response.body));
+  if (response.status !== 200) {
+    throw new Error(`${JSON.stringify(response.body)}\n${api.running.readOutput().slice(-4000)}`);
+  }
   return response.body as AuditBody;
 }
 
@@ -219,7 +221,7 @@ test('项目显式声明的必读文档计入；声明里的越界路径被拒',
   assert.equal(audit.files[0]!.scope, 'DECLARED');
 });
 
-test('0145：有会话时按会话档位算分母，不按工作区默认', async () => {
+test('0165：会话旧档位不再改变分母；窗口未知时按安全回退 262K', async () => {
   const item = await fixture({ withFileRead: true, files: { 'AGENTS.md': 'a'.repeat(30 * 1024) } });
   const session = await createAssistSession(app.db, { workspaceId: item.workspaceId,
     projectId: item.projectId, title: '必读文件审计', commandId: randomUUID() });
@@ -227,12 +229,13 @@ test('0145：有会话时按会话档位算分母，不按工作区默认', asyn
   await setSessionContextBudget(app.db, { workspaceId: item.workspaceId, sessionId,
     commandId: randomUUID(), expectedRevision: '0', budgetTokens: 524_288 });
   const audit = await readAudit(item, `?agent=relay&session_id=${sessionId}&refresh=1`);
-  assert.equal(audit.budget.call_budget_tokens, 524_288);
-  assert.equal(audit.budget.call_budget_source, 'SESSION');
-  // 没有会话时回落到应用默认（本测试进程设了 262144）。
+  assert.equal(audit.budget.call_budget_tokens, 262_144,
+    '旧会话档位 524288 已不参与预算');
+  assert.equal(audit.budget.call_budget_source, 'UNKNOWN_FALLBACK');
+  // 有会话与无会话都走同一份模型能力读数，不再有「应用默认档位」分支。
   const fallback = await readAudit(item, '?agent=relay&refresh=1');
   assert.equal(fallback.budget.call_budget_tokens, 262_144);
-  assert.equal(fallback.budget.call_budget_source, 'APPLICATION_DEFAULT');
+  assert.equal(fallback.budget.call_budget_source, 'UNKNOWN_FALLBACK');
 });
 
 test('不同 Agent 的规则入口不同：同一目录换 Agent 得到不同清单', async () => {

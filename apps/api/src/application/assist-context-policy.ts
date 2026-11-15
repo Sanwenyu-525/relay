@@ -1,28 +1,31 @@
-import type { AssistSessionRow, SessionModelSelectionRow } from '../infrastructure/database-schema.js';
+import type { AssistSessionRow } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
-import { getRuntimeLogger } from '../infrastructure/runtime-log.js';
 import type { Repositories } from './unit-of-work.js';
 import { estimateTokens } from './assist-context-usage.js';
-import { readModelPortConfig, readOpenRouterModelPortConfig } from '../workflow/model-port-config.js';
-
+import {
+  MODEL_CONTEXT_TARGET_TOKENS, UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS,
+  readSessionModelCapacity, resolveEffectiveModelWindow,
+  type ModelContextCapacity, type ModelContextWindowSource,
+} from './model-context-window.js';
 /**
- * 上下文压缩策略（0162，2026-11-12）。
+ * 上下文压缩策略（0162 / 0165，2026-11-15）。
  *
  * 这一层只做**纯算术与读数**，不写库、不调模型、不改消息：
- *   · 产品目标窗口是 1M，但 1M 不是所有模型的真实能力。模型真实窗口优先；
- *     读不到时按会话自己的档位（`assist_sessions.context_budget_tokens`）估算，
- *     并如实标记 `window_source`——不假定、不虚报。
+ *   · 模型窗口是能力参数：来自目录 / 高级能力声明 / 部署配置；读不到时按
+ *     `UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS` 安全回退，并如实标记 `UNKNOWN_FALLBACK`。
+ *     **不再**读取 `assist_sessions.context_budget_tokens`——旧档位不是模型能力。
  *   · 自动压缩阈值是**用户可配置的 token 数**（默认 350K）。它必须给输出、工具/
  *     协议开销与安全预留让路，并且要早于硬上限发生（安全输入上限的 90%），因此
  *     生效值 = min(用户阈值, 安全输入上限 × 0.9)；收敛时由界面明说，不静默使用无效配置。
+ *   · 产品目标容量 1M 只是请求上限；模型真实窗口更小时按窗口收敛。
  *   · 推荐区间 256K–400K 只是提示，不参与任何判定。
  *
  * 判定与执行分开：这里给出「该不该压、按什么阈值压」，`assist-memory.ts` 负责
  * 幂等请求、重排队与并发闸门，`assist-memory-runner.ts` 负责真实外呼与发布。
  */
 
-/** 产品目标窗口（2026-11-12 用户口径）。它是默认档位的来源，不是所有模型的真实窗口。 */
-export const CONTEXT_WINDOW_TARGET_TOKENS = 1_000_000;
+/** 产品目标窗口（1M tokens）。它是请求上限，不是所有模型的真实窗口。 */
+export const CONTEXT_WINDOW_TARGET_TOKENS = MODEL_CONTEXT_TARGET_TOKENS;
 /** 默认自动压缩阈值。 */
 export const DEFAULT_COMPACTION_THRESHOLD_TOKENS = 350_000;
 /** 推荐区间：只用于界面提示，不强制。 */
@@ -54,27 +57,40 @@ export const COMPACTION_TRIGGER_MARGIN_RATIO = 0.9;
 /** 读不到模型配置时的输出预留（与会话档位解耦，保守取值）。 */
 export const DEFAULT_OUTPUT_RESERVE_TOKENS = 8_192;
 
-export type ContextWindowSource = 'MODEL_CATALOG' | 'SESSION_TIER';
+export type ContextWindowSource = ModelContextWindowSource;
 export type CompactionTrigger = 'MANUAL' | 'THRESHOLD' | 'OVERFLOW';
 
 export interface ContextCompactionPolicyInput {
-  /** 会话档位：这一次调用最多申请多少（256K / 512K / 1M）。 */
-  readonly targetWindowTokens: number;
-  /** Provider 声明的真实窗口；null = 未知（不当作无限）。 */
+  /** 模型真实窗口的已知值；null = 未知（按安全回退计算，不当作无限）。 */
   readonly modelWindowTokens: number | null;
+  /** 窗口读数来源；未知时由策略统一归一为 UNKNOWN_FALLBACK。 */
+  readonly windowSource?: ContextWindowSource;
+  /**
+   * 服务商/连接的单次硬上限（`max_call_tokens`）。它与模型窗口一起收敛可用容量；
+   * 省略/null = 没有额外上限。
+   */
+  readonly providerCallCapTokens?: number | null;
   /** 模型配置里的最大输出预留。 */
   readonly outputReserveTokens?: number;
   readonly protocolOverheadTokens?: number;
   readonly safetyReserveRatio?: number;
   /** 用户保存的阈值；null = 使用产品默认。 */
   readonly userThresholdTokens: number | null;
+  /** 产品目标容量；只给单测模拟「窗口大于 1M」用，生产不传。 */
+  readonly targetWindowTokens?: number;
 }
 
 export interface ContextCompactionPolicy {
+  /** 产品目标容量（1M）；不是模型真实窗口。 */
   readonly targetWindowTokens: number;
+  /** 模型真实窗口的已知值；null = 未知。 */
   readonly modelWindowTokens: number | null;
   readonly windowSource: ContextWindowSource;
-  /** min(档位, 真实窗口)：这次调用实际可用的窗口。 */
+  /** 服务商单次硬上限；null = 没有额外上限。 */
+  readonly providerCallCapTokens: number | null;
+  /** 是否使用了未知窗口的安全回退。 */
+  readonly fallbackApplied: boolean;
+  /** min(产品目标, 真实窗口/安全回退, 服务商硬上限)：这次调用实际可用的窗口。 */
   readonly effectiveWindowTokens: number;
   readonly outputReserveTokens: number;
   readonly protocolOverheadTokens: number;
@@ -96,8 +112,8 @@ export interface ContextCompactionPolicy {
  * 计算一次会话的压缩策略。
  *
  * 三条不可让步的口径：
- *   1. `effectiveWindow = min(档位, 真实窗口)`——档位高于 Provider 窗口时按窗口截断，
- *      与 `planAssistModelBudget` 的冻结口径一致；
+ *   1. `effectiveWindow = min(1M 目标, 真实窗口/安全回退, 服务商硬上限)`——真实窗口
+ *      更小时按窗口截断，与 `planAssistModelBudget` 的冻结口径一致；
  *   2. 安全输入上限必须先扣掉**输出预留**（端口的外呼前闸门是
  *      `estimatedInput + maxOutput <= callLimit`），再扣协议开销与安全预留；
  *   3. 生效阈值只能 ≤ 安全输入上限 × 0.9。用户把阈值设得比模型装得下的还大时，
@@ -109,12 +125,19 @@ export function planContextCompaction(input: ContextCompactionPolicyInput): Cont
   const protocolOverheadTokens = Math.max(0, Math.floor(input.protocolOverheadTokens ??
     CONTEXT_PROTOCOL_OVERHEAD_TOKENS));
   const safetyReserveRatio = clampRatio(input.safetyReserveRatio ?? CONTEXT_SAFETY_RESERVE_RATIO);
-  const targetWindowTokens = Math.max(1, Math.floor(input.targetWindowTokens));
-  const modelWindowTokens = input.modelWindowTokens === null ||
-    !Number.isFinite(input.modelWindowTokens) || input.modelWindowTokens <= 0
-    ? null : Math.floor(input.modelWindowTokens);
-  const effectiveWindowTokens = modelWindowTokens === null
-    ? targetWindowTokens : Math.min(targetWindowTokens, modelWindowTokens);
+  const targetWindowTokens = positiveInteger(input.targetWindowTokens) ?? MODEL_CONTEXT_TARGET_TOKENS;
+  const modelWindowTokens = positiveInteger(input.modelWindowTokens);
+  const providerCallCapTokens = positiveInteger(input.providerCallCapTokens);
+  const resolved = resolveEffectiveModelWindow({
+    modelWindowTokens,
+    ...(providerCallCapTokens === null ? {} : { providerCallCapTokens }),
+    targetWindowTokens,
+  });
+  const effectiveWindowTokens = resolved.windowTokens;
+  const windowSource: ContextWindowSource = modelWindowTokens === null
+    ? 'UNKNOWN_FALLBACK'
+    : input.windowSource === undefined || input.windowSource === 'UNKNOWN_FALLBACK'
+      ? 'MODEL_CATALOG' : input.windowSource;
   const safetyReserveTokens = Math.ceil(effectiveWindowTokens * safetyReserveRatio);
   // 上限至少留 1：极小窗口下也不能算出 0 或负数，否则任何请求都会被判「必须压缩」。
   const safeInputTokens = Math.max(1, effectiveWindowTokens - outputReserveTokens -
@@ -127,7 +150,9 @@ export function planContextCompaction(input: ContextCompactionPolicyInput): Cont
   return {
     targetWindowTokens,
     modelWindowTokens,
-    windowSource: modelWindowTokens === null ? 'SESSION_TIER' : 'MODEL_CATALOG',
+    windowSource,
+    providerCallCapTokens,
+    fallbackApplied: resolved.fallbackApplied,
     effectiveWindowTokens,
     outputReserveTokens,
     protocolOverheadTokens,
@@ -255,83 +280,40 @@ Promise<ContextTokenMeasurement> {
 }
 
 /**
- * 会话当前生效模型的真实容量读数。
+ * 模型容量读数的公开入口（0165 起由 `model-context-window.ts` 独占实现）。
  *
- * 只读、不冻结、不触发目录同步：它回答「按现在的选择，模型支持多大窗口、留多少输出」，
- * 真正能不能用仍由冻结快照与外呼前闸门决定。读不到配置/目录/连接时返回 null 字段，
- * 由策略退回到会话档位——不猜一个窗口出来。
- *
- * `workspaceId` 必须显式传入：注册连接的仓储按工作区隔离，而 `Repositories` 本身不带
- * 「当前工作区」。调用方本来就有会话行，工作区是会话的事实，不需要再查一次。
+ * 保留这里的再导出，是为了不把「谁读窗口」的知识散到每个调用方；压缩策略、用量投影
+ * 与发送前审计都从这里拿同一份读数。
  */
-export async function readSessionModelCapacity(r: Repositories, workspaceId: string,
-  selection: SessionModelSelectionRow | undefined, env: NodeJS.ProcessEnv): Promise<{
-  readonly model: string | null;
-  readonly modelWindowTokens: number | null;
-  readonly outputReserveTokens: number | null }> {
-  if (selection === undefined) {
-    const config = safePortConfig(() => readModelPortConfig(env));
-    if (config === undefined) return { model: null, modelWindowTokens: null,
-      outputReserveTokens: null };
-    return { model: config.model,
-      modelWindowTokens: await safeCatalogWindow(r, config.model),
-      outputReserveTokens: config.maxOutputTokens };
-  }
-  if (selection.connection === 'default') {
-    const config = safePortConfig(() => readModelPortConfig(env));
-    return { model: selection.model,
-      modelWindowTokens: await safeCatalogWindow(r, selection.model),
-      outputReserveTokens: config?.maxOutputTokens ?? null };
-  }
-  if (selection.connection === 'registered') {
-    const row = selection.connection_id === null ? undefined
-      : await r.modelConnections.read(workspaceId, selection.connection_id).catch(() => undefined);
-    return { model: selection.model,
-      modelWindowTokens: await safeCatalogWindow(r, selection.model),
-      outputReserveTokens: row?.max_output_tokens ?? null };
-  }
-  const config = safePortConfig(() => readOpenRouterModelPortConfig(env, selection.model));
-  return { model: selection.model,
-    modelWindowTokens: await safeCatalogWindow(r, selection.model),
-    outputReserveTokens: config?.maxOutputTokens ?? null };
-}
+export { readSessionModelCapacity, type ModelContextCapacity,
+  type ModelContextWindowSource } from './model-context-window.js';
+export { UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS } from './model-context-window.js';
 
 /**
  * 会话的策略 + 当前读数，供压缩判定与用量投影共用。
+ *
+ * `modelHint` 只服务没有选择行/进程配置的离线 Fixture 与压缩执行端：它不是用户设置，
+ * 也不改变「模型能力优先」的解析顺序。
  */
 export async function resolveSessionCompactionPolicy(r: Repositories, session: AssistSessionRow,
-  env: NodeJS.ProcessEnv): Promise<{ readonly policy: ContextCompactionPolicy;
-    readonly automaticCompaction: boolean; readonly model: string | null }> {
+  env: NodeJS.ProcessEnv, modelHint?: string | null): Promise<{
+    readonly policy: ContextCompactionPolicy;
+    readonly automaticCompaction: boolean; readonly model: string | null;
+    readonly capacity: ModelContextCapacity }> {
   const settings = await r.information.readMemorySettings(session.workspace_id);
   const selection = await r.modelSelection.readForSession(session.id);
-  const capacity = await readSessionModelCapacity(r, session.workspace_id, selection, env);
+  const capacity = await readSessionModelCapacity(r, session.workspace_id, selection, env, modelHint);
   const policy = planContextCompaction({
-    targetWindowTokens: session.context_budget_tokens,
     modelWindowTokens: capacity.modelWindowTokens,
+    windowSource: capacity.windowSource,
+    ...(capacity.providerCallCapTokens === null ? {}
+      : { providerCallCapTokens: capacity.providerCallCapTokens }),
     ...(capacity.outputReserveTokens === null ? {}
       : { outputReserveTokens: capacity.outputReserveTokens }),
     userThresholdTokens: settings?.compaction_threshold_tokens ?? null,
   });
   return { policy, automaticCompaction: settings?.automatic_compaction !== false,
-    model: capacity.model };
-}
-
-/** 目录窗口读不到就是未知；异常不升级成业务失败。 */
-async function safeCatalogWindow(r: Repositories, model: string | null): Promise<number | null> {
-  if (model === null || model.trim() === '') return null;
-  try {
-    const entry = await r.modelCatalog.readEntryBySourceModelId(model);
-    return entry?.context_window ?? null;
-  } catch (error) {
-    getRuntimeLogger('context-compaction').warn('context_window_lookup_failed', {
-      model, error });
-    return null;
-  }
-}
-
-function safePortConfig(read: () => { maxOutputTokens: number; model: string } | undefined):
-{ maxOutputTokens: number; model: string } | undefined {
-  try { return read(); } catch { return undefined; }
+    model: capacity.model, capacity };
 }
 
 function clampRatio(value: number): number {
@@ -351,6 +333,14 @@ export function readCompactionAudit(row: { readonly reason: 'MANUAL' | 'AUTO';
   readonly model_snapshot: JsonObject }): { readonly trigger: CompactionTrigger;
   readonly tokensBefore: number | null; readonly tokensAfter: number | null;
   readonly thresholdTokens: number | null; readonly windowTokens: number | null;
+  /** 用户保存的阈值（旧请求没有这个键，读作 null）。 */
+  readonly configuredThresholdTokens: number | null;
+  /** 判定时真正生效的阈值；旧请求退回 `thresholdTokens`。 */
+  readonly effectiveThresholdTokens: number | null;
+  /** 判定时的模型窗口与服务商上限（旧请求没有这两个键）。 */
+  readonly modelContextWindowTokens: number | null;
+  readonly providerCallCapTokens: number | null;
+  readonly fallbackApplied: boolean;
   /** 判定时冻结的安全输入上限与压缩后目标：完成后据此复核「预算是否真的够了」。 */
   readonly safeInputTokens: number | null; readonly postCompactionTargetTokens: number | null;
   /** 这次压缩用的是哪个模型（派生的可读元数据，不是新的业务事实或闸门）。 */
@@ -360,12 +350,18 @@ export function readCompactionAudit(row: { readonly reason: 'MANUAL' | 'AUTO';
   const trigger = object.trigger === 'OVERFLOW' || object.trigger === 'THRESHOLD' ||
     object.trigger === 'MANUAL'
     ? object.trigger : (row.reason === 'AUTO' ? 'THRESHOLD' : 'MANUAL');
+  const threshold = positiveInteger(object.threshold_tokens);
   return { trigger,
     tokensBefore: positiveInteger(object.tokens_before),
     // 压后规模允许为 0（例如只剩空摘要的窗口）；0 是读数，不是「没有读数」。
     tokensAfter: nonNegativeInteger(object.tokens_after),
-    thresholdTokens: positiveInteger(object.threshold_tokens),
+    thresholdTokens: threshold,
     windowTokens: positiveInteger(object.window_tokens),
+    configuredThresholdTokens: positiveInteger(object.configured_threshold_tokens),
+    effectiveThresholdTokens: positiveInteger(object.effective_threshold_tokens) ?? threshold,
+    modelContextWindowTokens: positiveInteger(object.model_context_window_tokens),
+    providerCallCapTokens: positiveInteger(object.provider_call_cap_tokens),
+    fallbackApplied: object.fallback_applied === true,
     safeInputTokens: positiveInteger(object.safe_input_tokens),
     postCompactionTargetTokens: positiveInteger(object.post_compaction_target_tokens),
     model: typeof object.model === 'string' && object.model.trim() !== ''

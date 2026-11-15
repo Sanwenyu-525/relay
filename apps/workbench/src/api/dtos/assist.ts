@@ -237,14 +237,17 @@ export interface RelayWorkspaceDefaultDirectory {
   readonly displayName: string | null;
   readonly writeTier: RelayWriteTier | null;
   readonly defaultWriteTier: RelayWriteTier | null;
-  /** 0135（2026-10-24）：工作区上下文长度档位（单次调用预算）；null＝还没选过。 */
+  /** LEGACY（0165）：旧工作区默认档位。保留读取只为兼容；新会话的预算按模型容量解析。 */
   readonly contextBudgetTokens: RelayContextBudgetTokens | null;
   readonly status: RelayWorkspaceDefaultDirectoryStatus;
   readonly reason: string | null;
   readonly revision: DecimalRevision;
 }
 
-/** 三档上下文长度：值就是单次调用预算（max_call_tokens）。 */
+/**
+ * LEGACY（0165）：旧三档上下文档位。类型保留给旧 HTTP 端点与历史回执，
+ * **不再**是用户可配置的上下文窗口，也不参与任何预算/压缩分母。
+ */
 export type RelayContextBudgetTokens = 262144 | 524288 | 1048576;
 
 /** 设置上下文长度档位的回执：只有工作区、档位与修订，没有任何目录或权限字段。 */
@@ -1145,24 +1148,28 @@ export interface RelayContextUsageCall {
   readonly breakdown: RelayContextUsageBreakdown | null;
 }
 
-/** 下一次调用会申请的预算（服务端用与冻结相同的函数算，不由前端取 min）。 */
+/** 下一次调用会申请的预算（服务端用与冻结相同的口径算，不由前端取 min）。 */
 export interface RelayNextCallBudget {
   readonly reservationTokens: number;
-  readonly contextBudgetTokens: RelayContextBudgetTokens;
-  /** 已知的 Provider 窗口；null = 窗口未知，此时 reservation 等于档位。 */
-  readonly providerWindowTokens: number | null;
-  readonly windowSource: "MODEL_CATALOG" | "UNKNOWN";
+  readonly effectiveWindowTokens: number;
+  /** 模型真实窗口的已知值；null = 未知（界面显示安全回退，不显示虚假的 1M）。 */
+  readonly modelWindowTokens: number | null;
+  /** 连接/服务商的单次硬上限；null = 没有额外上限。 */
+  readonly providerCallCapTokens: number | null;
+  readonly windowSource: "MODEL_CATALOG" | "CAPABILITY_DECLARATION" | "MODEL_CONFIG"
+    | "UNKNOWN_FALLBACK";
+  readonly fallbackApplied: boolean;
 }
 
 /** 一次压缩请求为什么发生：用户手动、达到阈值、还是关闭自动压缩后的溢出保护。 */
 export type RelayCompactionTrigger = "MANUAL" | "THRESHOLD" | "OVERFLOW";
 
 /**
- * 0162：自动压缩策略与当前读数。
+ * 0162 / 0165：自动压缩策略与当前读数。
  *
  * 口径分开表达，界面不能把「达到压缩阈值」画成「达到模型窗口上限」：
  *   · `modelWindowTokens` 是模型真实窗口（未知为 null，`windowSource` 说明读数来源）；
- *   · `targetWindowTokens` 是这个会话选的档位（1M 目标窗口只是最高一档）；
+ *   · `targetWindowTokens` 是产品目标容量（1M），不是会话档位、也不是模型真实能力；
  *   · `effectiveThresholdTokens` 才是真正生效的阈值，可能低于用户保存值（`thresholdClamped`）。
  * `contextSource` 标明当前上下文量是 Provider 真实上报为基线，还是整份估算。
  */
@@ -1175,9 +1182,13 @@ export interface RelayContextCompaction {
   readonly requestedThresholdTokens: number;
   readonly effectiveThresholdTokens: number;
   readonly thresholdClamped: boolean;
+  /** 产品目标容量（1M）；不是模型真实窗口，也不是用户设置。 */
   readonly targetWindowTokens: number;
   readonly modelWindowTokens: number | null;
-  readonly windowSource: "MODEL_CATALOG" | "SESSION_TIER";
+  readonly windowSource: "MODEL_CATALOG" | "CAPABILITY_DECLARATION" | "MODEL_CONFIG"
+    | "UNKNOWN_FALLBACK";
+  readonly providerCallCapTokens: number | null;
+  readonly fallbackApplied: boolean;
   readonly effectiveWindowTokens: number;
   readonly outputReserveTokens: number;
   readonly protocolOverheadTokens: number;
@@ -1207,10 +1218,9 @@ export interface RelayContextCompaction {
     readonly at: string } | null;
 }
 
-/** `GET /assist-sessions/:id/context-usage` 的投影：档位 + 下次预算 + 最近一次调用 + 压缩策略。 */
+/** `GET /assist-sessions/:id/context-usage` 的投影：下次预算 + 最近一次调用 + 压缩策略。 */
 export interface RelaySessionContextUsage {
   readonly sessionId: string;
-  readonly budget: { readonly tokens: RelayContextBudgetTokens; readonly revision: DecimalRevision };
   readonly nextCall: RelayNextCallBudget | null;
   readonly lastCall: RelayContextUsageCall | null;
   readonly compaction: RelayContextCompaction;

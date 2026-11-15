@@ -11,6 +11,7 @@ UI 变更先按 AGENTS 加载适用 skill；定位本次相关章节，不通读
 | Tokens | [打开](design-tokens.json) | UI 数值唯一来源 |
 | 已选页面参考 | [打开](mockups/2026-10-02/README.md) | 图片依据及其边界 |
 | 逐页开发输入 | [打开](page-development-prompts.md) | 历史输入，当前事实按交互与源码核对 |
+| UI-UNIFY-03 验收 | [打开](ui-unify-03-acceptance.md) | 本轮缺陷、生产接入、测试证据与未闭合项 |
 | 当前验收 | [打开](../testing/overall-acceptance-2026-09-28.md#当前功能验收表) | 浏览器、Windows、安装证据分别看 |
 
 查到相关章节后读取必要的公共规则与上下游约束；历史日期、Accepted 与测试通过均不能自动扩展到当前源码。

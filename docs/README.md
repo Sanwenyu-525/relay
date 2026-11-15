@@ -23,6 +23,7 @@
 | 测试场景、实际结果与证据限制 | [测试路由](testing/README.md) | 规格、当前验收和历史证据分开 |
 | 启动、配置、安装与本机工具 | [部署路由](deployment/README.md) | 工程使用与运维入口 |
 | 故障根因、历史开发经过 | [开发记录路由](development/README.md) | 设计原因与历史，不维护当前阶段 |
+| 长期记忆 V2 架构、生命周期、配置与测试 | [开发记录路由](development/README.md) | V2 分层/作用域/召回/整理/删除及证据边界 |
 | 成熟机制和上游证据 | [研究路由](research/README.md) | 来源、实验及其局限 |
 | 交给编码 Agent 的任务书 | [prompts](../prompts/README.md) | 执行输入，不能代替当前指令与事实源 |
 | 按功能找代码/规格/测试 | [功能地图](feature-map/README.md) | 资料关联，不能代替业务验收 |

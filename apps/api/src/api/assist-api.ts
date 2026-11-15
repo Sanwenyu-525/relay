@@ -430,13 +430,16 @@ const SessionContextBudgetResult = Type.Object({
   session_id: uuid, context_budget_tokens: Type.Number(), revision: rev }, strict);
 const SessionContextUsageResult = Type.Object({
   session_id: uuid,
-  budget: Type.Object({ tokens: Type.Number(), revision: rev }, strict),
-  // 0153：下一次调用会申请的预算（与冻结同一个函数算），窗口未知时 window_source=UNKNOWN。
+  // 0165：下一次调用会申请的预算与窗口来源；不再暴露旧会话档位（它不参与预算）。
   next_call: Type.Union([Type.Null(), Type.Object({
     reservation_tokens: Type.Number(),
-    context_budget_tokens: Type.Number(),
-    provider_window_tokens: Type.Union([Type.Number(), Type.Null()]),
-    window_source: Type.Union([Type.Literal('MODEL_CATALOG'), Type.Literal('UNKNOWN')]),
+    effective_window_tokens: Type.Number(),
+    model_window_tokens: Type.Union([Type.Number(), Type.Null()]),
+    provider_call_cap_tokens: Type.Union([Type.Number(), Type.Null()]),
+    window_source: Type.Union([Type.Literal('MODEL_CATALOG'),
+      Type.Literal('CAPABILITY_DECLARATION'), Type.Literal('MODEL_CONFIG'),
+      Type.Literal('UNKNOWN_FALLBACK')]),
+    fallback_applied: Type.Boolean(),
   }, strict)]),
   last_call: Type.Union([Type.Null(), Type.Object({
     source: Type.Union([Type.Literal('MODEL_CALL'), Type.Literal('MESSAGE')]),
@@ -470,7 +473,11 @@ const SessionContextUsageResult = Type.Object({
     threshold_clamped: Type.Boolean(),
     target_window_tokens: Type.Number(),
     model_window_tokens: Type.Union([Type.Number(), Type.Null()]),
-    window_source: Type.Union([Type.Literal('MODEL_CATALOG'), Type.Literal('SESSION_TIER')]),
+    window_source: Type.Union([Type.Literal('MODEL_CATALOG'),
+      Type.Literal('CAPABILITY_DECLARATION'), Type.Literal('MODEL_CONFIG'),
+      Type.Literal('UNKNOWN_FALLBACK')]),
+    provider_call_cap_tokens: Type.Union([Type.Number(), Type.Null()]),
+    fallback_applied: Type.Boolean(),
     effective_window_tokens: Type.Number(),
     output_reserve_tokens: Type.Number(),
     protocol_overhead_tokens: Type.Number(),

@@ -6,7 +6,13 @@ import { interventionReasonText, reviewKindLabels, reviewReasonText, taskStatusL
 import { controlLabels, runLabels } from "./RunControlPanel";
 import { reviewDecisionLabels } from "./ReviewDecisionPanel";
 import PageHeader from "./PageHeader";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
+
+const attentionScopeTabs = [
+  { key: "all", label: "全部任务", href: "/tasks", className: "subnav-item" },
+  { key: "inbox", label: "未归属任务收件箱", href: "/tasks?tab=inbox", className: "subnav-item" },
+  { key: "attention", label: "人工待处理", href: "/tasks?tab=attention", className: "subnav-item" }
+] as const;
 
 interface AttentionSnapshot {
   readonly queriedAt: string;
@@ -252,9 +258,7 @@ export default function AttentionQueue({ client }: { readonly client: RelayApiCl
       lede="按 Review、当前 Run 与 Task 的服务端事实分组。每组保留原读取顺序，分组不表示紧急程度或截止时间。"
       actions={<Button variant="secondary" data-testid="attention-refresh" style={{ flexShrink: 0 }} disabled={loading}
         onClick={() => void load()}>刷新事实</Button>} />
-    <nav className="subnav" aria-label="任务范围"><Link className="subnav-item" to="/tasks">全部任务</Link>
-      <Link className="subnav-item" to="/tasks?tab=inbox">未归属任务收件箱</Link>
-      <Link className="subnav-item subnav-item--active" to="/tasks?tab=attention" aria-current="page">人工待处理</Link></nav>
+    <Tabs label="任务范围" variant="page" className="subnav" items={attentionScopeTabs} />
     <p className="helper-text">只汇总已读取的开放 Review、任务及其当前 Run；处理仍回原入口核对版本。</p>
     {loading && <p className="loading-text" role="status">正在读取 Review、全部任务页及当前 Run，完成前不显示空队列结论…</p>}
     {snapshot && <>

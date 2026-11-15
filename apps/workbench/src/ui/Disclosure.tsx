@@ -113,7 +113,22 @@ export interface PopoverProps {
 
 export function Popover({ open, onClose, trigger, children, label, align = "start", className, testId }: PopoverProps) {
   const root = useRef<HTMLDivElement>(null);
-  useMenuDismiss(open, onClose, root);
+  /**
+   * 关闭时若焦点还在面板里（例如在面板内的输入框按了 Esc），先把焦点还给触发器。
+   * 不这样做时面板卸载后焦点会落到 body，键盘用户会丢失位置——UI-UNIFY-03 的
+   * 「Popover 关闭后焦点落到 body」缺陷即指此。
+   */
+  const close = () => {
+    const active = document.activeElement;
+    const triggerNode = root.current?.firstElementChild instanceof HTMLElement ? root.current.firstElementChild : null;
+    const focusInPanel = active instanceof HTMLElement
+      && root.current?.contains(active) === true
+      && active !== triggerNode
+      && triggerNode?.contains(active) !== true;
+    onClose();
+    if (focusInPanel) requestAnimationFrame(() => { if (triggerNode?.isConnected) triggerNode.focus({ preventScroll: true }); });
+  };
+  useMenuDismiss(open, close, root);
   return <div className={cn("ui-popover", className)} ref={root} data-testid={testId}>
     {trigger}
     {open ? <div className={cn("ui-popover__panel", align === "end" && "ui-popover__panel--end")} role="dialog" aria-label={label}>

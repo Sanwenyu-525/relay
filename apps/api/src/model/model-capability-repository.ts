@@ -30,14 +30,29 @@ export class ModelCapabilityRepository {
       order by provider, source_model_id`.execute(this.db)).rows;
   }
 
-  /** 覆盖写入：同 `(provider, model)` 再声明一次就是改口，不追加第二行。 */
+  /**
+   * 覆盖写入：同 `(provider, model)` 再声明一次就是改口，不追加第二行。
+   *
+   * 省略的字段保持原值（`undefined` = 不改），显式 `null` 才是清空：
+   *   · 只改上下文窗口时，不能把已有的 `image_input` / `note` 一并清掉；
+   *   · 只改图片能力时，也不能把已核对过的窗口丢掉。
+   * 这是「一个模型一条声明」的合并语义，不引入第二张表或修订历史。
+   */
   async writeDeclaration(input: { readonly provider: string; readonly sourceModelId: string;
-    readonly imageInput: boolean; readonly note: string | null }): Promise<ModelCapabilityDeclarationRow> {
+    readonly imageInput?: boolean; readonly note?: string | null;
+    readonly contextWindowTokens?: number | null }): Promise<ModelCapabilityDeclarationRow> {
+    const existing = await this.readDeclaration(input.provider, input.sourceModelId);
+    const imageInput = input.imageInput ?? existing?.image_input ?? false;
+    const note = input.note === undefined ? existing?.note ?? null : input.note;
+    const contextWindowTokens = input.contextWindowTokens === undefined
+      ? existing?.context_window_tokens ?? null : input.contextWindowTokens;
     return (await sql<ModelCapabilityDeclarationRow>`
-      insert into model_capability_declarations (provider, source_model_id, image_input, note)
-      values (${input.provider}, ${input.sourceModelId}, ${input.imageInput}, ${input.note})
+      insert into model_capability_declarations
+        (provider, source_model_id, image_input, note, context_window_tokens)
+      values (${input.provider}, ${input.sourceModelId}, ${imageInput}, ${note}, ${contextWindowTokens})
       on conflict (provider, source_model_id) do update
-        set image_input = excluded.image_input, note = excluded.note, updated_at = now()
+        set image_input = excluded.image_input, note = excluded.note,
+          context_window_tokens = excluded.context_window_tokens, updated_at = now()
       returning *`.execute(this.db)).rows[0]!;
   }
 

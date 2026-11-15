@@ -39,9 +39,12 @@ export interface ModelConnectionBudget {
 export const DEFAULT_MODEL_CONNECTION_BUDGET: ModelConnectionBudget = {
   timeoutMs: 30_000,
   maxOutputTokens: 8_192,
-  maxCallTokens: 65_536,
+  // 0165：默认目标容量 1M。它是「系统愿意为单次请求申请的上限」，不是模型真实窗口；
+  // 真实窗口更小时由 `model-context-window` 按窗口收敛，不会因为默认值就假装模型支持 1M。
+  maxCallTokens: 1_048_576,
   maxScopeCalls: 32,
-  maxScopeTokens: 262_144,
+  // 作用域必须 >= 单次调用（0143 CHECK）；同时要盖住两笔在途预留 + 已结算余量。
+  maxScopeTokens: 1_048_576,
 };
 
 /** 与迁移 0143 的 CHECK 完全一致：能在 API 通过的值，不会被执行端以「配置非法」拒绝。 */

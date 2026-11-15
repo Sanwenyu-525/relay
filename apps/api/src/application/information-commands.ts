@@ -17,6 +17,9 @@ import { prepareDecisionReviews } from './decision-reviews.js';
 import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { recheckAssistSources } from './assist-source-content.js';
 import { historicalReplyAvailable } from './assist-memory.js';
+import { createMemoryRecord, prepareMemoryCandidate } from './memory-write.js';
+import { computeMemoryConfidence, normalizeMemoryKey, normalizeMemoryText, parseMemoryType }
+  from './memory-model.js';
 
 type ScopeInput = { workspaceId: string; commandId: string };
 type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
@@ -271,15 +274,21 @@ export async function addKnowledgeVersionInTransaction(repositories: Repositorie
 
 export async function createMemory(db: DbExecutor, input: ScopeInput & {
   projectId: string | null; title: string; text: string; confirmed: boolean;
-  expiresAt?: string | null;
+  expiresAt?: string | null; memoryType?: string; memoryKey?: string | null;
+  importance?: number; pinned?: boolean; verification?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
+  taskId?: string | null;
 }) {
   const title = textValue(input.title, 'title');
   const body = contentValue(input.text, 'text');
   if (input.confirmed !== true) throw validationFailed([{ field: 'confirmed', message: 'explicit true required' }]);
   const expiresAt = parseExpiry(input.expiresAt);
   return runIdempotentCommand<Result>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
-    commandId: input.commandId, commandType: 'CreateMemory', target: { project_id: input.projectId },
-    body: { title, text: body, confirmed: true, expires_at: expiresAt?.toISOString() ?? null },
+    commandId: input.commandId, commandType: 'CreateMemory',
+    target: { project_id: input.projectId, task_id: input.taskId ?? null },
+    body: { title, text: body, confirmed: true, expires_at: expiresAt?.toISOString() ?? null,
+      memory_type: input.memoryType ?? 'UNKNOWN', memory_key: input.memoryKey ?? null,
+      importance: input.importance ?? 3, pinned: input.pinned ?? false,
+      verification: input.verification ?? null, task_id: input.taskId ?? null },
     execute: async (r) => {
       await ruleAuthority(r, input.workspaceId);
       // A concurrent first request can commit while authority is locked; returning its
@@ -289,11 +298,38 @@ export async function createMemory(db: DbExecutor, input: ScopeInput & {
       if (prior !== undefined) return prior.result_ref as Result;
       requireFutureExpiry(expiresAt);
       await projectScope(r, input.workspaceId, input.projectId);
-      const id = randomUUID();
-      await r.information.insertMemoryRoot(id, input.workspaceId, input.projectId, title);
-      await r.information.insertMemoryVersion({ id: randomUUID(), memoryId: id, version: 1n,
-        title, text: body, confirmedBy: LOCAL_ACTOR_REF, expiresAt });
-      await r.workspaces.bumpContextRevision(input.workspaceId);
+      if (input.taskId !== undefined && input.taskId !== null) {
+        const task = await r.tasks.readTask(input.taskId);
+        if (task?.workspace_id !== input.workspaceId || task.project_id !== input.projectId) {
+          throw resourceNotFound('Memory task scope');
+        }
+      }
+      const memoryType = parseMemoryType(input.memoryType);
+      if (input.memoryKey !== undefined && input.memoryKey !== null
+          && input.memoryKey.trim() !== '' && normalizeMemoryKey(input.memoryKey) === null) {
+        throw validationFailed([{ field: 'memory_key', message: '只能使用小写 slug（字母/数字/._:-）' }]);
+      }
+      const outcome = await createMemoryRecord(db, r, {
+        workspaceId: input.workspaceId, projectId: input.projectId, taskId: input.taskId ?? null,
+        memoryType, memoryKey: input.memoryKey ?? null, title, text: body,
+        origin: 'HUMAN_CONFIRMED', sourceKind: 'MANUAL', importance: input.importance ?? 3,
+        verification: input.verification ?? (memoryType === 'USER_PREFERENCE' ? 'VERIFIED' : 'UNVERIFIED'),
+        expiresAt, pinned: input.pinned ?? false,
+        commandId: input.commandId, actorRef: LOCAL_ACTOR_REF, force: true,
+      });
+      if (outcome.kind === 'REJECTED_SENSITIVE') {
+        throw validationFailed([{ field: 'text',
+          message: `不能长期保存疑似凭证（${outcome.kinds.join(', ')}），请先脱敏。` }]);
+      }
+      if (outcome.kind === 'DUPLICATE') {
+        throw validationFailed([{ field: 'title',
+          message: `已存在相同或高度相似的记忆（${outcome.existingId}），请直接编辑该条目。` }]);
+      }
+      if (outcome.kind === 'CONFLICT') {
+        throw validationFailed([{ field: 'memory_key',
+          message: `同一主题已有更高可信度/已固定的记忆（${outcome.existingId}），请先查看再决定是否替代。` }]);
+      }
+      const id = outcome.memoryId;
       return { memory_id: id, revision: '0', version: '1', status: 'ACTIVE' };
     } });
 }
@@ -302,6 +338,8 @@ export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput 
   sessionId: string; messageId: string; expectedSessionRevision: string;
   expectedContentSha256: string; projectId: string | null; title: string;
   text: string; confirmed: boolean; expiresAt?: string | null;
+  memoryType?: string; memoryKey?: string | null; importance?: number;
+  verification?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
 }, storage: ManagedContentStore) {
   const title = textValue(input.title, 'title');
   const body = contentValue(input.text, 'text');
@@ -315,7 +353,9 @@ export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput 
     target: { session_id: input.sessionId, message_id: input.messageId },
     body: { project_id: input.projectId, title, text: body, confirmed: true,
       expected_session_revision: expected.toString(), content_sha256: input.expectedContentSha256,
-      expires_at: expiresAt?.toISOString() ?? null }, execute: async (r) => {
+      expires_at: expiresAt?.toISOString() ?? null, memory_type: input.memoryType ?? 'UNKNOWN',
+      memory_key: input.memoryKey ?? null, importance: input.importance ?? 3,
+      verification: input.verification ?? null }, execute: async (r) => {
       await ruleAuthority(r, input.workspaceId);
       const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId), commandId: input.commandId });
       if (prior !== undefined) return prior.result_ref as Result;
@@ -338,13 +378,34 @@ export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput 
           !await historicalReplyAvailable(r, storage, session, source.id))) {
         throw invalidTransition('来源已失效，不能沿旧答复建立长期记忆。');
       }
-      const id = randomUUID();
-      await r.information.insertMemoryRoot(id, input.workspaceId, input.projectId, title);
-      await r.information.insertMemoryVersion({ id: randomUUID(), memoryId: id, version: 1n,
-        title, text: body, confirmedBy: LOCAL_ACTOR_REF, expiresAt });
-      await r.information.insertMemoryMessageSource({ memoryId: id, sessionId: session.id,
-        messageId: source.id, contentSha256: input.expectedContentSha256 });
-      await r.workspaces.bumpContextRevision(input.workspaceId);
+      const memoryType = parseMemoryType(input.memoryType);
+      if (input.memoryKey !== undefined && input.memoryKey !== null
+          && input.memoryKey.trim() !== '' && normalizeMemoryKey(input.memoryKey) === null) {
+        throw validationFailed([{ field: 'memory_key', message: '只能使用小写 slug（字母/数字/._:-）' }]);
+      }
+      const outcome = await createMemoryRecord(db, r, {
+        workspaceId: input.workspaceId, projectId: input.projectId, taskId: null,
+        memoryType, memoryKey: input.memoryKey ?? null, title, text: body,
+        origin: 'HUMAN_CONFIRMED', sourceKind: 'MANUAL', importance: input.importance ?? 3,
+        verification: input.verification ?? (memoryType === 'USER_PREFERENCE' ? 'VERIFIED' : 'UNVERIFIED'),
+        expiresAt, pinned: false, commandId: input.commandId, actorRef: LOCAL_ACTOR_REF,
+        force: true,
+        source: { sessionId: session.id, messageId: source.id,
+          contentSha256: input.expectedContentSha256 },
+      });
+      if (outcome.kind === 'REJECTED_SENSITIVE') {
+        throw validationFailed([{ field: 'text',
+          message: `不能长期保存疑似凭证（${outcome.kinds.join(', ')}），请先脱敏。` }]);
+      }
+      if (outcome.kind === 'DUPLICATE') {
+        throw validationFailed([{ field: 'title',
+          message: `已存在相同或高度相似的记忆（${outcome.existingId}），请直接编辑该条目。` }]);
+      }
+      if (outcome.kind === 'CONFLICT') {
+        throw validationFailed([{ field: 'memory_key',
+          message: `同一主题已有更高可信度/已固定的记忆（${outcome.existingId}），请先查看再决定是否替代。` }]);
+      }
+      const id = outcome.memoryId;
       await r.activities.insertActivityRecord({ id: randomUUID(), workspaceId: input.workspaceId,
         actorKind: 'HUMAN', actorRef: LOCAL_ACTOR_REF, commandId: input.commandId,
         projectId: input.projectId, taskId: null, eventType: 'MEMORY_SAVED_FROM_MESSAGE',
@@ -355,7 +416,9 @@ export async function createMemoryFromMessage(db: DbExecutor, input: ScopeInput 
 
 export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
   memoryId: string; expectedRevision: string; title: string; text: string;
-  confirmed: boolean; expiresAt?: string | null;
+  confirmed: boolean; expiresAt?: string | null; memoryType?: string;
+  memoryKey?: string | null; importance?: number;
+  verification?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
 }) {
   const expected = requireRevision(input.expectedRevision, 'expected_revision');
   const title = textValue(input.title, 'title');
@@ -365,7 +428,9 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
   return runIdempotentCommand<Result>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
     commandId: input.commandId, commandType: 'AddMemoryRevision', target: { memory_id: input.memoryId },
     body: { expected_revision: input.expectedRevision, title, text: body, confirmed: true,
-      expires_at: expiresAt?.toISOString() ?? null }, execute: async (r) => {
+      expires_at: expiresAt?.toISOString() ?? null, memory_type: input.memoryType ?? null,
+      memory_key: input.memoryKey ?? null, importance: input.importance ?? null,
+      verification: input.verification ?? null }, execute: async (r) => {
       await ruleAuthority(r, input.workspaceId);
       // A concurrent first request can commit while authority is locked; returning its
       // result keeps replay ahead of the time-dependent admission check below.
@@ -376,12 +441,48 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
       const item = await root<InformationRootRow>(r, 'memory', input.workspaceId, input.memoryId);
       sameRevision('memory', item.revision, expected);
       if (item.status !== 'ACTIVE') throw invalidTransition('Memory 已退役。');
+      const currentState = (await r.information.listMemoryStates(input.workspaceId, { id: item.id }))[0];
+      const contentChanged = currentState === undefined
+        || normalizeMemoryText(currentState.title) !== normalizeMemoryText(title)
+        || normalizeMemoryText(currentState.body_text) !== normalizeMemoryText(body);
+      // 正文被改写后，旧的「已人工验证」不再自动成立；只有调用方显式再次确认才保持 VERIFIED。
+      const nextVerification = input.verification
+        ?? (contentChanged ? 'UNVERIFIED' : currentState?.verification ?? 'UNVERIFIED');
       const version = item.current_version + 1n;
       await r.information.insertMemoryVersion({ id: randomUUID(), memoryId: item.id, version,
         title, text: body, confirmedBy: LOCAL_ACTOR_REF, expiresAt });
       await r.information.setRootVersion('memory', item.id, version, title);
+      // 0164：正文变化后索引必须同步；分类/键/重要性的编辑在同一事务里落根。
+      const prepared = prepareMemoryCandidate({
+        workspaceId: input.workspaceId, projectId: item.project_id, title, text: body,
+        origin: 'HUMAN_CONFIRMED', sourceKind: 'MANUAL',
+        memoryType: input.memoryType ?? 'UNKNOWN', memoryKey: input.memoryKey ?? null,
+        ...(input.importance === undefined ? {} : { importance: input.importance }),
+        verification: nextVerification,
+      });
+      if (prepared.keyInvalid) {
+        throw validationFailed([{ field: 'memory_key', message: '只能使用小写 slug（字母/数字/._:-）' }]);
+      }
+      if (prepared.sensitiveKinds.length > 0) {
+        throw validationFailed([{ field: 'text',
+          message: `不能长期保存疑似凭证（${prepared.sensitiveKinds.join(', ')}），请先脱敏。` }]);
+      }
+      await r.information.updateMemoryMetadata({ memoryId: item.id,
+        memoryType: parseMemoryType(input.memoryType ?? currentState?.memory_type ?? 'UNKNOWN'),
+        confidence: computeMemoryConfidence({ origin: 'HUMAN_CONFIRMED', sourceKind: 'MANUAL',
+          verification: nextVerification }),
+        verification: nextVerification,
+        verifiedAt: nextVerification === 'VERIFIED' ? new Date() : null,
+        ...(input.memoryKey === undefined ? {} : { memoryKey: prepared.memoryKey }),
+        ...(input.importance === undefined ? {} : { importance: input.importance }),
+        contentHash: prepared.contentHash,
+        searchTitleTokens: prepared.titleTokens, searchBodyTokens: prepared.bodyTokens,
+        // 用户显式改写正文后，旧的「可能过时」不再成立；不清理会让新修订继续被默认召回过滤。
+        staleAt: null,
+      });
       await r.workspaces.bumpContextRevision(input.workspaceId);
-      return { memory_id: item.id, revision: toDecimalString(item.revision + 1n),
+      const refreshed = await root<InformationRootRow>(r, 'memory', input.workspaceId, item.id);
+      return { memory_id: item.id, revision: toDecimalString(refreshed.revision),
         version: toDecimalString(version), status: 'ACTIVE' };
     } });
 }

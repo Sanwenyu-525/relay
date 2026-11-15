@@ -2,9 +2,9 @@ import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string, stringArray } from "../core/primitives";
-import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryRevisionFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
+import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryMaintenanceRunFrom, memoryRevisionFrom, memoryStatsFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryRevision, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayVerifyTargetState, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayVerifyTargetState, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getKnowledge(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayKnowledge[]> {
@@ -87,11 +87,25 @@ export async function unarchiveKnowledge(http: RelayHttp, id: string, commandId:
  *
  * 有效状态由服务端按数据库时间裁决；前端不按浏览器时钟或 `status === ACTIVE` 过滤已加载列表。
  */
+export interface MemoryListFilters {
+  readonly memoryType?: RelayMemoryType | "ALL";
+  readonly origin?: RelayMemoryOrigin | "ALL";
+  readonly query?: string;
+  readonly limit?: number;
+}
+
 export async function getMemories(http: RelayHttp, projectId: string | null = null,
-  effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL"): Promise<readonly RelayMemory[]> {
+  effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL",
+  filters: MemoryListFilters = {}): Promise<readonly RelayMemory[]> {
   const query = new URLSearchParams();
   if (projectId !== null) query.set("project_id", projectId);
   if (effectiveStatus !== "ALL") query.set("effective_status", effectiveStatus);
+  if (filters.memoryType !== undefined && filters.memoryType !== "ALL") {
+    query.set("memory_type", filters.memoryType);
+  }
+  if (filters.origin !== undefined && filters.origin !== "ALL") query.set("origin", filters.origin);
+  if (filters.query !== undefined && filters.query.trim() !== "") query.set("q", filters.query.trim());
+  if (filters.limit !== undefined) query.set("limit", String(filters.limit));
   const suffix = query.toString();
   const path = http.workspacePath("/memories");
   return directList(await http.request(suffix === "" ? path : `${path}?${suffix}`), "memory list", memoryFrom);
@@ -106,20 +120,42 @@ export async function getMemoryRevisions(http: RelayHttp, id: string): Promise<r
     "memory revisions", memoryRevisionFrom);
 }
 
-export async function createMemory(http: RelayHttp, input: { commandId: string; projectId: string | null; title: string; text: string; confirmed: true; expiresAt?: string | null }): Promise<RelayCommandEnvelope> {
+export interface MemoryMetadataInput {
+  readonly memoryType?: RelayMemoryType;
+  readonly memoryKey?: string | null;
+  readonly importance?: number;
+  readonly pinned?: boolean;
+  readonly taskId?: string | null;
+  readonly verification?: RelayMemoryVerification;
+}
+
+export async function createMemory(http: RelayHttp, input: { commandId: string; projectId: string | null; title: string; text: string; confirmed: true; expiresAt?: string | null } & MemoryMetadataInput): Promise<RelayCommandEnvelope> {
   return informationCommand(http, "/memories", {
     command_id: input.commandId, project_id: input.projectId, title: input.title,
     text: input.text, confirmed: input.confirmed,
+    ...memoryMetadataPayload(input),
     ...(input.expiresAt === undefined ? {} : { expires_at: input.expiresAt })
   }, 201);
 }
 
-export async function addMemoryRevision(http: RelayHttp, input: { id: string; commandId: string; expectedRevision: DecimalRevision; title: string; text: string; confirmed: true; expiresAt?: string | null }): Promise<RelayCommandEnvelope> {
+export async function addMemoryRevision(http: RelayHttp, input: { id: string; commandId: string; expectedRevision: DecimalRevision; title: string; text: string; confirmed: true; expiresAt?: string | null } & Omit<MemoryMetadataInput, "pinned" | "taskId">): Promise<RelayCommandEnvelope> {
   return informationCommand(http, `/memories/${encodeURIComponent(input.id)}/revisions`, {
     command_id: input.commandId, expected_revision: input.expectedRevision, title: input.title,
     text: input.text, confirmed: input.confirmed,
+    ...memoryMetadataPayload(input),
     ...(input.expiresAt === undefined ? {} : { expires_at: input.expiresAt })
   }, 200);
+}
+
+function memoryMetadataPayload(input: MemoryMetadataInput): Record<string, unknown> {
+  return {
+    ...(input.memoryType === undefined ? {} : { memory_type: input.memoryType }),
+    ...(input.memoryKey === undefined ? {} : { memory_key: input.memoryKey }),
+    ...(input.importance === undefined ? {} : { importance: input.importance }),
+    ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
+    ...(input.taskId === undefined ? {} : { task_id: input.taskId }),
+    ...(input.verification === undefined ? {} : { verification: input.verification }),
+  };
 }
 
 export async function retireMemory(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
@@ -131,6 +167,61 @@ export async function retireMemory(http: RelayHttp, id: string, commandId: strin
 export async function reactivateMemory(http: RelayHttp, id: string, commandId: string, expectedRevision: DecimalRevision): Promise<RelayCommandEnvelope> {
   return restoreCommand(http, `/memories/${encodeURIComponent(id)}/reactivate`,
     { commandId, id, expectedRevision }, "memory_id");
+}
+
+export async function pinMemory(http: RelayHttp, id: string, commandId: string,
+  expectedRevision: DecimalRevision, pinned: boolean): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, `/memories/${encodeURIComponent(id)}/pin`,
+    { command_id: commandId, expected_revision: expectedRevision, pinned }, 200);
+}
+
+export async function verifyMemory(http: RelayHttp, id: string, input: {
+  commandId: string; expectedRevision: DecimalRevision; verification: RelayMemoryVerification;
+  clearStale?: boolean }): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, `/memories/${encodeURIComponent(id)}/verification`, {
+    command_id: input.commandId, expected_revision: input.expectedRevision,
+    verification: input.verification,
+    ...(input.clearStale === undefined ? {} : { clear_stale: input.clearStale }),
+  }, 200);
+}
+
+export async function getMemoryStats(http: RelayHttp, projectId: string | null = null): Promise<RelayMemoryStats> {
+  const suffix = projectId === null ? "" : `?project_id=${encodeURIComponent(projectId)}`;
+  return memoryStatsFrom(await http.request(`${http.workspacePath("/memory/stats")}${suffix}`));
+}
+
+export async function getMemoryMaintenanceRuns(http: RelayHttp): Promise<readonly RelayMemoryMaintenanceRun[]> {
+  return directList(await http.request(http.workspacePath("/memory/maintenance/runs")),
+    "memory maintenance runs", memoryMaintenanceRunFrom);
+}
+
+export async function runMemoryConsolidation(http: RelayHttp, commandId: string): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, "/memory/maintenance/consolidate", { command_id: commandId }, 200);
+}
+
+export async function exportMemories(http: RelayHttp, projectId: string | null = null): Promise<Record<string, unknown>> {
+  const suffix = projectId === null ? "" : `?project_id=${encodeURIComponent(projectId)}`;
+  const body = await http.request(`${http.workspacePath("/memory/export")}${suffix}`);
+  return object(body, "memory export");
+}
+
+export async function importMemories(http: RelayHttp, input: { commandId: string;
+  projectId: string | null; payload: Record<string, unknown> }): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, "/memory/import", { command_id: input.commandId,
+    project_id: input.projectId, payload: input.payload }, 200);
+}
+
+export async function purgeMemories(http: RelayHttp, input: { commandId: string;
+  projectId: string | null; memoryType?: RelayMemoryType | "ALL";
+  origin?: RelayMemoryOrigin | "ALL"; memoryIds?: readonly string[];
+  includeActive: boolean }): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, "/memory/purge", { command_id: input.commandId,
+    ...(input.projectId === null ? {} : { project_id: input.projectId }),
+    ...(input.memoryType === undefined || input.memoryType === "ALL" ? {}
+      : { memory_type: input.memoryType }),
+    ...(input.origin === undefined || input.origin === "ALL" ? {} : { origin: input.origin }),
+    ...(input.memoryIds === undefined ? {} : { memory_ids: input.memoryIds }),
+    include_active: input.includeActive, confirmation: "DELETE_MEMORIES" }, 200);
 }
 
 export async function getDecisions(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayDecision[]> {

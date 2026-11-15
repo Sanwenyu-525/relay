@@ -31,3 +31,11 @@
   gap: var(--relay-space-2);
   margin-top: var(--relay-space-2);
 }
+
+/* 0164：预算/间隔等数值字段两列排；窄窗口自动落成一列。 */
+.memory-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--relay-space-3);
+  margin: var(--relay-space-3) 0;
+}

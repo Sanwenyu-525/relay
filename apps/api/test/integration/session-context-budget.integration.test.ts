@@ -51,9 +51,11 @@ const env: NodeJS.ProcessEnv = {
   RELAY_MODEL_BASE_URL: 'https://models.vendor.com/v1',
   RELAY_MODEL_TIMEOUT_MS: '5000',
   RELAY_MODEL_MAX_OUTPUT_TOKENS: '256',
-  RELAY_MODEL_MAX_CALL_TOKENS: '4096',
+  RELAY_MODEL_MAX_CALL_TOKENS: '1000000',
   RELAY_MODEL_MAX_SCOPE_CALLS: '32',
-  RELAY_MODEL_MAX_SCOPE_TOKENS: '16384',
+  RELAY_MODEL_MAX_SCOPE_TOKENS: '2000000',
+  // 0165：部署侧声明这台端点真实支持 1M。会话档位不再参与预算，模型容量才是分母。
+  RELAY_MODEL_CONTEXT_WINDOW: '1000000',
 };
 
 /** 真实端口的假传输：Provider 只回总量，分项只能来自服务端自己装配请求时的统计。 */
@@ -231,15 +233,20 @@ test('SB-04: 用量投影给当前档位与最近一次调用的真实构成；�
     modelEnv: env, modelFetchDependencies: transport, leaseMs: 60_000 });
   assert.equal(ticked?.status, 'COMPLETED', JSON.stringify(ticked));
 
-  const usage = await readSessionContextUsage(app.db, workspaceId, sessionId);
-  assert.equal(usage.budget.tokens, 524_288);
-  assert.equal(usage.budget.revision, '1');
+  const usage = await readSessionContextUsage(app.db, workspaceId, sessionId, env);
+  // 0165：旧档位仍可保存（兼容），但用量投影按模型真实窗口报数——不是按 512K 档位。
+  assert.equal(usage.compaction.model_window_tokens, 1_000_000);
+  assert.equal(usage.compaction.effective_window_tokens, 1_000_000);
+  assert.equal(usage.compaction.window_source, 'MODEL_CONFIG');
+  assert.equal(usage.compaction.effective_threshold_tokens, 350_000,
+    '默认 350K 在 1M 窗口内完整生效，不因旧档位改变');
   assert.equal(usage.last_call?.source, 'MODEL_CALL');
   assert.equal(usage.last_call?.input_tokens, 1_200);
   assert.equal(usage.last_call?.output_tokens, 40);
   // 缓存读数由 Provider 决定；假传输没有上报，面板就不显示这一格（不是 0）。
   assert.equal(usage.last_call?.cache_read_tokens, null);
-  assert.equal(usage.last_call?.reserved_tokens, 524_288);
+  assert.equal(usage.last_call?.reserved_tokens, 1_000_000,
+    '单次调用按模型容量申请，不再按旧档位');
   const breakdown = usage.last_call?.breakdown;
   assert.ok(breakdown, '本次调用带有分项构成');
   assert.equal(breakdown.precision, 'ESTIMATED');
@@ -269,8 +276,8 @@ test('SB-04: 用量投影给当前档位与最近一次调用的真实构成；�
 
   // 会话属于自己的事实：另一条会话读到的档位与调用互不影响。
   const idle = await session(workspaceId);
-  const idleUsage = await readSessionContextUsage(app.db, workspaceId, idle);
-  assert.equal(idleUsage.budget.tokens, 262_144);
+  const idleUsage = await readSessionContextUsage(app.db, workspaceId, idle, env);
+  assert.equal(idleUsage.compaction.effective_window_tokens, 1_000_000);
   assert.equal(idleUsage.last_call, null);
 });
 
@@ -284,7 +291,9 @@ test('SB-05: HTTP 面——档位保存回执逐字核对；用量投影与命�
 
     const before = await api.get(usagePath);
     assert.equal(before.status, 200, before.text);
-    assert.equal((before.body as { budget: { tokens: number } }).budget.tokens, 262_144);
+    // 测试 API 进程没有配置模型：投影必须如实回退 256K，不拿旧档位或 1M 冒充。
+    assert.equal((before.body as { compaction: { effective_window_tokens: number } })
+      .compaction.effective_window_tokens, 262_144);
 
     const commandId = randomUUID();
     const body = { command_id: commandId, expected_revision: '0', context_budget_tokens: 1_048_576 };
@@ -297,28 +306,30 @@ test('SB-05: HTTP 面——档位保存回执逐字核对；用量投影与命�
     assert.equal((await api.post(path, { command_id: randomUUID(), expected_revision: '0',
       context_budget_tokens: 524_288 })).status, 409, '陈旧修订是冲突');
     assert.equal((await api.post(path, { command_id: randomUUID(), expected_revision: '1',
-      context_budget_tokens: 300_000 })).status, 422, '词表只有 256K／512K／1024K');
+      context_budget_tokens: 300_000 })).status, 422, '旧端点仍只接受既有词表，兼容旧客户端');
     assert.equal((await api.post(path, { command_id: randomUUID(), expected_revision: '1',
       context_budget_tokens: 524_288, extra: true })).status, 422, '严格请求体');
 
     const after = await api.get(usagePath);
-    assert.deepEqual((after.body as { budget: unknown }).budget, { tokens: 1_048_576,
-      revision: '1' });
+    assert.equal((after.body as { compaction: { effective_window_tokens: number } })
+      .compaction.effective_window_tokens, 262_144,
+      '旧端点写入档位不再改变上下文预算与压缩分母');
 
-    // 同一 workspace 里另一条会话读不到这条会话的档位。
+    // 同一 workspace 里另一条会话读到同一份模型容量，不读这条会话的旧档位。
     const other = await session(workspaceId);
     const otherUsage = await api.get(
       workspacePath(workspaceId, `/assist-sessions/${other}/context-usage`));
-    assert.equal((otherUsage.body as { budget: { tokens: number } }).budget.tokens, 262_144);
+    assert.equal((otherUsage.body as { compaction: { effective_window_tokens: number } })
+      .compaction.effective_window_tokens, 262_144);
   } finally { await api.stop(); }
 });
 
-test('SB-06: 首条消息之前选的档位写进创建事务，第一个模型调用就按它冻结预算', async () => {
+test('SB-06: 首条消息之前选的旧档位只作为历史记录，模型调用按真实容量冻结', async () => {
   const workspaceId = await workspace();
   const created = await createAssistSession(app.db, { workspaceId, title: 'explicit',
-    commandId: randomUUID(), contextBudgetTokens: 1_048_576 });
+    commandId: randomUUID(), contextBudgetTokens: 262_144 });
   const sessionId = created.result.session_id;
-  assert.equal(await tier(sessionId), 1_048_576, '显式档位在创建事务里落库');
+  assert.equal(await tier(sessionId), 262_144, '旧字段仍按旧接口写入，供兼容读取');
 
   const sent = await requestAssistMessage(app.db, { workspaceId, sessionId,
     commandId: randomUUID(), content: '按这一档跑' }, env);
@@ -332,8 +343,8 @@ test('SB-06: 首条消息之前选的档位写进创建事务，第一个模型�
   const calls = (await sql<{ budget_reserved_tokens: number | null }>`
     select budget_reserved_tokens from model_calls
     where assist_message_id = ${sent.result.assistant_message_id}`.execute(app.db)).rows;
-  assert.equal(calls[0]?.budget_reserved_tokens, 1_048_576,
-    '第一个模型调用按用户选的那一档冻结预算，不是 256K 也不是事后再补写');
+  assert.equal(calls[0]?.budget_reserved_tokens, 1_000_000,
+    '预算来自模型真实窗口（1M），不是旧档位 256K，也不是事后再补写');
 });
 
 test('SB-07: /new 建出的会话继承来源会话的档位', async () => {
@@ -459,17 +470,20 @@ test('SB-11: 辅助外呼（记忆提取/压缩）进账本，但不抢「最近
   assert.ok(after.last_call?.breakdown, '面向用户的那次调用仍然带着分项');
 });
 
-test('SB-12: 投影给出「下次调用会申请的预算」；窗口未知时不冒充可用容量', async () => {
+test('SB-12: 投影给出「下次调用会申请的预算」；按模型容量而不是旧档位', async () => {
   const workspaceId = await workspace();
   const sessionId = await session(workspaceId);
   await setSessionContextBudget(app.db, { workspaceId, sessionId, commandId: randomUUID(),
-    expectedRevision: '0', budgetTokens: 1_048_576 });
+    expectedRevision: '0', budgetTokens: 262_144 });
 
   const usage = await readSessionContextUsage(app.db, workspaceId, sessionId, env);
-  assert.equal(usage.next_call?.reservation_tokens, 1_048_576, '按当前档位申请');
-  assert.equal(usage.next_call?.context_budget_tokens, 1_048_576);
-  assert.equal(usage.next_call?.provider_window_tokens, null, '默认连接没有模型窗口事实');
-  assert.equal(usage.next_call?.window_source, 'UNKNOWN', '窗口未知就如实说未知');
+  assert.equal(usage.next_call?.reservation_tokens, 1_000_000, '按模型真实窗口申请');
+  assert.equal(usage.next_call?.effective_window_tokens, 1_000_000);
+  assert.equal(usage.next_call?.model_window_tokens, 1_000_000);
+  assert.equal(usage.next_call?.provider_call_cap_tokens, 1_000_000);
+  assert.equal(usage.next_call?.window_source, 'MODEL_CONFIG');
+  assert.equal(usage.next_call?.fallback_applied, false);
+  assert.equal(usage.compaction.effective_threshold_tokens, 350_000);
 
   // HTTP 面也带同一份事实（响应 schema 是 strict：未声明的字段会被丢掉）。
   const api = await startTestApi({ env });
@@ -479,7 +493,7 @@ test('SB-12: 投影给出「下次调用会申请的预算」；窗口未知时�
     assert.equal(body.status, 200, body.text);
     const next = (body.body as { next_call: { reservation_tokens: number;
       window_source: string } }).next_call;
-    assert.equal(next.reservation_tokens, 1_048_576);
-    assert.equal(next.window_source, 'UNKNOWN');
+    assert.equal(next.reservation_tokens, 1_000_000);
+    assert.equal(next.window_source, 'MODEL_CONFIG');
   } finally { await api.stop(); }
 });

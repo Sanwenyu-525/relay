@@ -37,12 +37,34 @@ export async function saveMemorySettings(http: RelayHttp, input: {
   recallEnabled: boolean; automaticCompaction: boolean; autoCapture: boolean;
   /** 0162：`null` = 恢复产品默认 350K；数字 = 保存该阈值。 */
   compactionThresholdTokens: number | null;
+  /** 0164：缺省 = 保持服务端当前值，便于旧调用方继续工作。 */
+  coreTokenBudget?: number; retrievalTokenBudget?: number; retrievalTopK?: number;
+  retrievalMode?: "LITERAL" | "HYBRID"; autoConsolidate?: boolean;
+  consolidationIntervalHours?: number; memoryStaleAfterDays?: number;
+  embeddingProvider?: "disabled" | "openai-compatible"; remoteEmbeddingAllowed?: boolean;
+  includeStaleInRecall?: boolean;
 }): Promise<RelayMemorySettings> {
   const body = await http.request(http.workspacePath("/memory-settings"), { method: "POST",
     body: JSON.stringify({ command_id: input.commandId, expected_revision: input.expectedRevision,
       recall_enabled: input.recallEnabled, automatic_compaction: input.automaticCompaction,
       auto_capture: input.autoCapture,
-      compaction_threshold_tokens: input.compactionThresholdTokens }) }, 200);
+      compaction_threshold_tokens: input.compactionThresholdTokens,
+      ...(input.coreTokenBudget === undefined ? {} : { core_token_budget: input.coreTokenBudget }),
+      ...(input.retrievalTokenBudget === undefined ? {}
+        : { retrieval_token_budget: input.retrievalTokenBudget }),
+      ...(input.retrievalTopK === undefined ? {} : { retrieval_top_k: input.retrievalTopK }),
+      ...(input.retrievalMode === undefined ? {} : { retrieval_mode: input.retrievalMode }),
+      ...(input.autoConsolidate === undefined ? {} : { auto_consolidate: input.autoConsolidate }),
+      ...(input.consolidationIntervalHours === undefined ? {}
+        : { consolidation_interval_hours: input.consolidationIntervalHours }),
+      ...(input.memoryStaleAfterDays === undefined ? {}
+        : { memory_stale_after_days: input.memoryStaleAfterDays }),
+      ...(input.embeddingProvider === undefined ? {}
+        : { embedding_provider: input.embeddingProvider }),
+      ...(input.remoteEmbeddingAllowed === undefined ? {}
+        : { remote_embedding_allowed: input.remoteEmbeddingAllowed }),
+      ...(input.includeStaleInRecall === undefined ? {}
+        : { include_stale_in_recall: input.includeStaleInRecall }) }) }, 200);
   try {
     const envelope = commandEnvelopeFrom(body);
     if (envelope.commandId !== input.commandId) throw new Error("command mismatch");

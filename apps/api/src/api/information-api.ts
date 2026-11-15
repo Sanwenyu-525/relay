@@ -8,6 +8,10 @@ import { listInformation, listInformationVersions, readInformation, readKnowledg
   from '../application/information-queries.js';
 import { validationFailed } from '../application/domain-error.js';
 import { readMemorySettings, setMemorySettings } from '../application/memory-settings.js';
+import { consolidateMemoriesCommand, setMemoryPinnedCommand,
+  setMemoryVerificationCommand } from '../application/memory-commands.js';
+import { readMemoryObservability } from '../application/memory-observability.js';
+import { exportMemories, importMemories, purgeMemories } from '../application/memory-transfer.js';
 import { createRepositories } from '../application/unit-of-work.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
@@ -19,9 +23,19 @@ const text = Type.String({ minLength: 1, maxLength: 262144 });
 const base = Type.Object({ workspace_id: uuid }, strict);
 const item = Type.Object({ workspace_id: uuid, id: uuid }, strict);
 const listQuery = Type.Object({ project_id: Type.Optional(uuid) }, strict);
+const memoryType = Type.Union([Type.Literal('USER_PREFERENCE'), Type.Literal('PROJECT_FACT'),
+  Type.Literal('EXPERIENCE'), Type.Literal('EPISODIC'), Type.Literal('UNKNOWN')]);
+const memoryVerification = Type.Union([Type.Literal('VERIFIED'), Type.Literal('UNVERIFIED'),
+  Type.Literal('FAILED')]);
 const memoryListQuery = Type.Object({ project_id: Type.Optional(uuid),
   effective_status: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('ACTIVE'),
-    Type.Literal('EXPIRED'), Type.Literal('RETIRED')])) }, strict);
+    Type.Literal('EXPIRED'), Type.Literal('RETIRED'), Type.Literal('SUPERSEDED'),
+    Type.Literal('STALE')])),
+  memory_type: Type.Optional(Type.Union([memoryType, Type.Literal('ALL')])),
+  origin: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('HUMAN_CONFIRMED'),
+    Type.Literal('AUTO_CAPTURE')])),
+  q: Type.Optional(Type.String({ maxLength: 200 })),
+  limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|[1-4][0-9][0-9]|500)$' })) }, strict);
 const knowledgeContentParams = Type.Object({ workspace_id: uuid, id: uuid,
   version: Type.String({ pattern: '^[1-9][0-9]{0,18}$' }) }, strict);
 const knowledgeContent = Type.Object({ knowledge_id: uuid, title: Type.String(),
@@ -47,9 +61,24 @@ const createKnowledgeBody = Type.Object({ command_id: uuid, project_id: Type.Uni
 const versionKnowledgeBody = Type.Object({ command_id: uuid, expected_revision: rev, ...source }, strict);
 const memoryFields = { title: text, text, confirmed: Type.Literal(true),
   expires_at: Type.Optional(Type.Union([Type.String({ format: 'date-time' }), Type.Null()])) };
+const memoryMetaFields = {
+  memory_type: Type.Optional(memoryType),
+  memory_key: Type.Optional(Type.Union([Type.String({ maxLength: 80 }), Type.Null()])),
+  importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+  pinned: Type.Optional(Type.Boolean()),
+  task_id: Type.Optional(Type.Union([uuid, Type.Null()])),
+  verification: Type.Optional(memoryVerification),
+};
 const createMemoryBody = Type.Object({ command_id: uuid,
-  project_id: Type.Union([uuid, Type.Null()]), ...memoryFields }, strict);
-const versionMemoryBody = Type.Object({ command_id: uuid, expected_revision: rev, ...memoryFields }, strict);
+  project_id: Type.Union([uuid, Type.Null()]), ...memoryFields, ...memoryMetaFields }, strict);
+const versionMemoryBody = Type.Object({ command_id: uuid, expected_revision: rev,
+  ...memoryFields, ...memoryMetaFields }, strict);
+const saveMemoryBody = Type.Object({ command_id: uuid, expected_session_revision: rev,
+  content_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+  project_id: Type.Union([uuid, Type.Null()]), ...memoryFields,
+  memory_type: Type.Optional(memoryType), memory_key: Type.Optional(Type.Union([Type.String({ maxLength: 80 }), Type.Null()])),
+  importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+  verification: Type.Optional(memoryVerification) }, strict);
 const createDecisionBody = Type.Object({ command_id: uuid,
   project_id: Type.Union([uuid, Type.Null()]), title: text, choice: text, rationale: text,
   alternatives: Type.Array(text), costs: Type.Array(text) }, strict);
@@ -99,7 +128,30 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
     auto_capture: Type.Optional(Type.Boolean()),
     // 0162：缺省 = 保持已保存的阈值（旧客户端不会把它清空）；null = 恢复默认 350K。
     // 具体区间由应用层校验并给出可执行说明，schema 只保证它是整数或 null。
-    compaction_threshold_tokens: Type.Optional(Type.Union([Type.Integer(), Type.Null()])) }, strict);
+    compaction_threshold_tokens: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
+    // 0164：预算/模式/整理开关。缺省保持当前值，旧客户端不会重置。
+    core_token_budget: Type.Optional(Type.Integer({ minimum: 0, maximum: 20000 })),
+    retrieval_token_budget: Type.Optional(Type.Integer({ minimum: 0, maximum: 50000 })),
+    retrieval_top_k: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+    retrieval_mode: Type.Optional(Type.Union([Type.Literal('LITERAL'), Type.Literal('HYBRID')])),
+    auto_consolidate: Type.Optional(Type.Boolean()),
+    consolidation_interval_hours: Type.Optional(Type.Integer({ minimum: 1, maximum: 720 })),
+    memory_stale_after_days: Type.Optional(Type.Integer({ minimum: 7, maximum: 3650 })),
+    embedding_provider: Type.Optional(Type.Union([Type.Literal('disabled'),
+      Type.Literal('openai-compatible')])),
+    remote_embedding_allowed: Type.Optional(Type.Boolean()),
+    include_stale_in_recall: Type.Optional(Type.Boolean()) }, strict);
+  const settingsResponse = Type.Object({ workspace_id: uuid, revision: rev,
+    recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
+    auto_capture: Type.Boolean(),
+    compaction_threshold_tokens: Type.Union([Type.Integer(), Type.Null()]),
+    core_token_budget: Type.Integer(), retrieval_token_budget: Type.Integer(),
+    retrieval_top_k: Type.Integer(),
+    retrieval_mode: Type.Union([Type.Literal('LITERAL'), Type.Literal('HYBRID')]),
+    auto_consolidate: Type.Boolean(), consolidation_interval_hours: Type.Integer(),
+    memory_stale_after_days: Type.Integer(),
+    embedding_provider: Type.Union([Type.Literal('disabled'), Type.Literal('openai-compatible')]),
+    remote_embedding_allowed: Type.Boolean(), include_stale_in_recall: Type.Boolean() }, strict);
   app.get('/memories/:id/provenance', { schema: { params: item } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
@@ -115,11 +167,7 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
     catch (error) { return sendReadError(reply, error, request.id); }
   });
   app.post('/memory-settings', { schema: { params: base, body: settingsBody,
-    response: { 200: commandEnvelopeSchema(Type.Object({ workspace_id: uuid, revision: rev,
-      recall_enabled: Type.Boolean(), automatic_compaction: Type.Boolean(),
-      auto_capture: Type.Boolean(),
-      // 0162：响应必须声明，否则 TypeBox 会把它从回执里静默删掉。
-      compaction_threshold_tokens: Type.Union([Type.Integer(), Type.Null()]) }, strict)) } } },
+    response: { 200: commandEnvelopeSchema(settingsResponse) } } },
   createCommandHandler(dependencies, {
     commandType: 'SetMemorySettings', bodySchema: settingsBody, execute: async ({ executor, params, body }) => {
       const outcome = await setMemorySettings(executor, { workspaceId: params.workspace_id ?? '',
@@ -127,12 +175,31 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
         recallEnabled: body.recall_enabled, automaticCompaction: body.automatic_compaction,
         autoCapture: body.auto_capture ?? true,
         ...(body.compaction_threshold_tokens === undefined ? {}
-          : { compactionThresholdTokens: body.compaction_threshold_tokens }) });
+          : { compactionThresholdTokens: body.compaction_threshold_tokens }),
+        ...(body.core_token_budget === undefined ? {} : { coreTokenBudget: body.core_token_budget }),
+        ...(body.retrieval_token_budget === undefined ? {}
+          : { retrievalTokenBudget: body.retrieval_token_budget }),
+        ...(body.retrieval_top_k === undefined ? {} : { retrievalTopK: body.retrieval_top_k }),
+        ...(body.retrieval_mode === undefined ? {} : { retrievalMode: body.retrieval_mode }),
+        ...(body.auto_consolidate === undefined ? {} : { autoConsolidate: body.auto_consolidate }),
+        ...(body.consolidation_interval_hours === undefined ? {}
+          : { consolidationIntervalHours: body.consolidation_interval_hours }),
+        ...(body.memory_stale_after_days === undefined ? {}
+          : { memoryStaleAfterDays: body.memory_stale_after_days }),
+        ...(body.embedding_provider === undefined ? {} : { embeddingProvider: body.embedding_provider }),
+        ...(body.remote_embedding_allowed === undefined ? {}
+          : { remoteEmbeddingAllowed: body.remote_embedding_allowed }),
+        ...(body.include_stale_in_recall === undefined ? {}
+          : { includeStaleInRecall: body.include_stale_in_recall }) });
       return { outcome, result: outcome.result };
     } }));
   const saveMemoryBody = Type.Object({ command_id: uuid, expected_session_revision: rev,
     content_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
-    project_id: Type.Union([uuid, Type.Null()]), ...memoryFields }, strict);
+    project_id: Type.Union([uuid, Type.Null()]), ...memoryFields,
+    memory_type: Type.Optional(memoryType),
+    memory_key: Type.Optional(Type.Union([Type.String({ maxLength: 80 }), Type.Null()])),
+    importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+    verification: Type.Optional(memoryVerification) }, strict);
   app.post('/assist-sessions/:session_id/messages/:message_id/memories', {
     schema: { params: Type.Object({ workspace_id: uuid, session_id: uuid, message_id: uuid }, strict),
       body: saveMemoryBody, response: { 201: commandEnvelopeSchema(commandResult) } },
@@ -142,6 +209,10 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
         sessionId: params.session_id ?? '', messageId: params.message_id ?? '', commandId: body.command_id,
         expectedSessionRevision: body.expected_session_revision, expectedContentSha256: body.content_sha256,
         projectId: body.project_id, title: body.title, text: body.text, confirmed: body.confirmed,
+        ...(body.memory_type === undefined ? {} : { memoryType: body.memory_type }),
+        ...(body.memory_key === undefined ? {} : { memoryKey: body.memory_key }),
+        ...(body.importance === undefined ? {} : { importance: body.importance }),
+        ...(body.verification === undefined ? {} : { verification: body.verification }),
         ...(body.expires_at === undefined ? {} : { expiresAt: body.expires_at }) }, dependencies.storage);
       return { outcome, result: outcome.result };
     } }));
@@ -161,9 +232,16 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
       querystring: kind === 'memory' ? memoryListQuery : listQuery } }, async (request, reply) => {
       try {
         const p = request.params as { workspace_id: string };
-        const q = request.query as { project_id?: string; effective_status?: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'RETIRED' };
+        const q = request.query as { project_id?: string;
+          effective_status?: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'RETIRED' | 'SUPERSEDED' | 'STALE';
+          memory_type?: string; origin?: string; q?: string; limit?: string };
         return await listInformation(dependencies.database.executor, kind, p.workspace_id, q.project_id,
-          q.effective_status ?? 'ALL');
+          q.effective_status ?? 'ALL', kind === 'memory' ? {
+            ...(q.memory_type === undefined ? {} : { memoryType: q.memory_type }),
+            ...(q.origin === undefined ? {} : { origin: q.origin }),
+            ...(q.q === undefined ? {} : { query: q.q }),
+            ...(q.limit === undefined ? {} : { limit: Number(q.limit) }),
+          } : {});
       } catch (error) { return sendReadError(reply, error, request.id); }
     });
     app.get(`/${path}/:id`, { schema: { params: item } }, async (request, reply) => {
@@ -216,6 +294,12 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
       const outcome = await createMemory(executor, { workspaceId: params.workspace_id ?? '',
         commandId: body.command_id, projectId: body.project_id, title: body.title,
         text: body.text, confirmed: body.confirmed,
+        ...(body.memory_type === undefined ? {} : { memoryType: body.memory_type }),
+        ...(body.memory_key === undefined ? {} : { memoryKey: body.memory_key }),
+        ...(body.importance === undefined ? {} : { importance: body.importance }),
+        ...(body.pinned === undefined ? {} : { pinned: body.pinned }),
+        ...(body.task_id === undefined ? {} : { taskId: body.task_id }),
+        ...(body.verification === undefined ? {} : { verification: body.verification }),
         ...(body.expires_at === undefined ? {} : { expiresAt: body.expires_at }) });
       return { outcome, result: outcome.result };
     } }));
@@ -227,6 +311,10 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
         memoryId: params.id ?? '', commandId: body.command_id,
         expectedRevision: body.expected_revision, title: body.title,
         text: body.text, confirmed: body.confirmed,
+        ...(body.memory_type === undefined ? {} : { memoryType: body.memory_type }),
+        ...(body.memory_key === undefined ? {} : { memoryKey: body.memory_key }),
+        ...(body.importance === undefined ? {} : { importance: body.importance }),
+        ...(body.verification === undefined ? {} : { verification: body.verification }),
         ...(body.expires_at === undefined ? {} : { expiresAt: body.expires_at }) });
       return { outcome, result: outcome.result };
     } }));
@@ -237,6 +325,109 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
       const outcome = await retireInformation(executor, { kind: 'memory', id: params.id ?? '',
         workspaceId: params.workspace_id ?? '', commandId: body.command_id,
         expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  // 0164：固定/验证/统计/整理/导入导出/清理。读路由只返回真实聚合，不返回演示数据。
+  const pinBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    pinned: Type.Boolean() }, strict);
+  app.post('/memories/:id/pin', { schema: { params: item, body: pinBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'SetMemoryPinned', bodySchema: pinBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setMemoryPinnedCommand(executor, {
+        workspaceId: params.workspace_id ?? '', memoryId: params.id ?? '',
+        pinned: body.pinned, commandId: body.command_id,
+        expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  const verifyBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    verification: memoryVerification, clear_stale: Type.Optional(Type.Boolean()) }, strict);
+  app.post('/memories/:id/verification', { schema: { params: item, body: verifyBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'SetMemoryVerification', bodySchema: verifyBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setMemoryVerificationCommand(executor, {
+        workspaceId: params.workspace_id ?? '', memoryId: params.id ?? '',
+        verification: body.verification, clearStale: body.clear_stale ?? false,
+        commandId: body.command_id, expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.get('/memory/stats', { schema: { params: base, querystring: listQuery } },
+  async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string };
+      const q = request.query as { project_id?: string };
+      return await readMemoryObservability(dependencies.database.executor, p.workspace_id,
+        q.project_id ?? null);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  app.get('/memory/maintenance/runs', { schema: { params: base } }, async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string };
+      const rows = await createRepositories(dependencies.database.executor).information
+        .listMemoryMaintenanceRuns(p.workspace_id, 20);
+      return rows.map((row) => ({ id: row.id, trigger: row.trigger, status: row.status,
+        stats: row.stats, error: row.error,
+        started_at: row.started_at.toISOString(),
+        finished_at: row.finished_at?.toISOString() ?? null }));
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  const consolidateBody = Type.Object({ command_id: uuid }, strict);
+  app.post('/memory/maintenance/consolidate', { schema: { params: base, body: consolidateBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'ConsolidateMemories',
+    bodySchema: consolidateBody, execute: async ({ executor, params, body }) => {
+      const outcome = await consolidateMemoriesCommand(executor, {
+        workspaceId: params.workspace_id ?? '', commandId: body.command_id });
+      return { outcome, result: outcome.result };
+    } }));
+
+  app.get('/memory/export', { schema: { params: base, querystring: listQuery } },
+  async (request, reply) => {
+    try {
+      const p = request.params as { workspace_id: string };
+      const q = request.query as { project_id?: string };
+      reply.header('Content-Disposition', 'attachment; filename="relay-memories.json"');
+      return await exportMemories(dependencies.database.executor, p.workspace_id,
+        q.project_id ?? null);
+    } catch (error) { return sendReadError(reply, error, request.id); }
+  });
+
+  const importBody = Type.Object({ command_id: uuid,
+    project_id: Type.Union([uuid, Type.Null()]),
+    payload: Type.Object({}, { additionalProperties: true }) }, strict);
+  app.post('/memory/import', { schema: { params: base, body: importBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'ImportMemories', bodySchema: importBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await importMemories(executor, { workspaceId: params.workspace_id ?? '',
+        commandId: body.command_id, expectedPayload: body.payload,
+        projectId: body.project_id });
+      return { outcome, result: outcome.result };
+    } }));
+
+  const purgeBody = Type.Object({ command_id: uuid,
+    project_id: Type.Optional(Type.Union([uuid, Type.Null()])),
+    memory_type: Type.Optional(Type.Union([memoryType, Type.Literal('ALL')])),
+    origin: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('HUMAN_CONFIRMED'),
+      Type.Literal('AUTO_CAPTURE')])),
+    memory_ids: Type.Optional(Type.Array(uuid, { maxItems: 200 })),
+    include_active: Type.Boolean(), confirmation: Type.Literal('DELETE_MEMORIES') }, strict);
+  app.post('/memory/purge', { schema: { params: base, body: purgeBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'PurgeMemories', bodySchema: purgeBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await purgeMemories(executor, { workspaceId: params.workspace_id ?? '',
+        commandId: body.command_id, projectId: body.project_id ?? null,
+        ...(body.memory_type === undefined ? {} : { memoryType: body.memory_type }),
+        ...(body.origin === undefined ? {} : { origin: body.origin }),
+        ...(body.memory_ids === undefined ? {} : { memoryIds: body.memory_ids }),
+        includeActive: body.include_active, confirmation: body.confirmation });
       return { outcome, result: outcome.result };
     } }));
 

@@ -297,11 +297,15 @@ end as run_state
 
 ### 10.119 项目必读文件体积审计（2026-10-30 源码实现，只读投影）
 
+> **0165 替换说明（2026-11-15）**：本节「会话档位 → 工作区默认档位 → 应用配置」的预算
+> 口径已被 §10.137 取代；`session_id` 与 `budget_tokens` 仅为旧客户端兼容保留，不再决定
+> 预算。下面保留为 0145/0162 的历史记录。
+
 输入器「必读文件预警」的后端读数（交互归[工作台 §54](../../frontend/workbench-design/part-15.md#54-必读文件体积预警发送前的上下文风险2026-10-30已实施实机未验)）。**Breaking Change: No**：只新增一个 GET，不改任何既有端点、表结构或命令回执。
 
 | 方法 | 路径（前缀 `/api/v1/workspaces/{workspace_id}`） | 查询 | 成功 |
 |---|---|---|---|
-| `GET` | `/working-directories/{resource_id}/required-context-audit` | `agent?`（`relay`\|`codex`\|`claude`\|`codebuddy`\|`gemini`\|`cursor`\|`copilot`\|`windsurf`，缺省 `relay`）、`model?`（目录模型 id）、`session_id?`（会话档位来源）、`refresh?`（`1` = 跳过目录遍历缓存） | 200 审计投影 |
+| `GET` | `/working-directories/{resource_id}/required-context-audit` | `agent?`（`relay`\|`codex`\|`claude`\|`codebuddy`\|`gemini`\|`cursor`\|`copilot`\|`windsurf`，缺省 `relay`）、`model?`（目录模型 id）、`session_id?`（兼容保留，不再决定预算；见 §10.137）、`refresh?`（`1` = 跳过目录遍历缓存） | 200 审计投影 |
 
 - **只读、无回执**：不写业务事实、不产生 `command_id`、重放无副作用（与 §10.96 工作区默认目录、`/runs/{id}/context-manifests` 同一类读路径）。
 - **必读范围靠枚举，不靠猜测**：只认各 Agent 的官方规则入口（`AGENTS.md`／`CLAUDE.md`／`CODEBUDDY.md`／`GEMINI.md`／`.cursorrules` + `.cursor/rules/*.mdc`／`.github/copilot-instructions.md`／`.windsurfrules`，同名文件在子目录继续生效）与项目显式声明 `.relay/context-required.json`（`required_documents[{path, category: AUTO_INJECTED|TASK_REQUIRED, reason?}]`，≤64 KiB）。项目里其余 Markdown **一律不**计入，也不报成「自动加载」。
@@ -721,3 +725,62 @@ Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调�
 **桌面宿主。** 「打开日志目录」与「导出诊断」由 Tauri 命令承担：只打开 `<data_root>/logs`（不存在时创建），导出文件名清洗后写入用户选择位置，单文件上限 4 MiB；浏览器模式没有宿主能力，只展示路径或走浏览器下载。
 
 **证据。** 功能验收表 DEVELOPER-DIAGNOSTICS-20261112 行：API 诊断相关 **30 项 29 通过 / 1 跳过**（`diagnostics-api` 11、`runtime-log` 15、`model-call-correlation` 4；跳过为 Windows 符号链接用例）、前端 **26/26**、Playwright **1/1**、A–E 受控脚本 **4/4**、宿主命令 Rust 单测 **2/2**（测试 exe 需嵌入 manifest，见该行限制）；真实桌面窗口内打开目录/另存对话框未验。
+
+### 10.137 模型上下文窗口能力与压缩阈值解耦（2026-11-15 源码实现，迁移 0165）
+
+**Breaking Change: Yes（语义与响应字段），兼容策略见下。** 本次不再把会话档位当作模型
+窗口或压缩输入容量；旧端点保留，但不再影响执行/压缩。
+
+**模型窗口解析（服务端内部，无新端点）。** 有效窗口按
+`min(1,000,000, 模型窗口/262,144 安全回退, 服务商单次上限)` 收敛；窗口来源只有：
+
+| 值 | 含义 |
+|---|---|
+| `MODEL_CATALOG` | 模型目录 `context_window`，已公开可核对 |
+| `CAPABILITY_DECLARATION` | `model_capability_declarations.context_window_tokens`，人已核对 |
+| `MODEL_CONFIG` | 部署配置 `RELAY_MODEL_CONTEXT_WINDOW` |
+| `UNKNOWN_FALLBACK` | 都读不到，按 262,144 安全回退；**不冒充 1M** |
+
+`PUT /model-capabilities/{provider}/{source_model_id}`（provider 为
+`openai-compatible` / `anthropic-messages` / `openrouter`）的 body 新增可选
+`context_window_tokens: integer | null`，合法区间 `16384–4000000`，`null` 撤销声明；
+省略该字段保持原值。响应行同时返回 `context_window_tokens`。该字段是高级模型能力元数据，
+不是普通用户的压缩阈值。模型目录、部署配置读取失败只记 `warn`，不升级为业务失败。
+
+**预算与压缩投影。** `GET /assist-sessions/{id}/context-usage` 的 `next_call` 现在返回
+`reservation_tokens`、`effective_window_tokens`、`model_window_tokens`、
+`provider_call_cap_tokens`、`window_source`、`fallback_applied`；旧 `context_budget_tokens`
+预算键只在旧快照兼容读取中出现，语义已变为「本次实际申请容量」。`compaction` 返回
+`threshold_tokens`（保存值，null=默认）、`requested_threshold_tokens`、
+`effective_threshold_tokens`、`threshold_clamped`、`target_window_tokens`、
+`model_window_tokens`、`window_source`、`provider_call_cap_tokens`、`fallback_applied`、
+`effective_window_tokens`、`output_reserve_tokens`、`protocol_overhead_tokens`、
+`safety_reserve_tokens`、`safe_input_tokens`、`post_compaction_target_tokens`、
+`context_tokens/context_source/distance_tokens`、`active` 与 `last_result`。
+`window_source` 四值同上；`effective_window_tokens` 是圆环和浮层唯一分母。
+
+**必读文件审计。** `GET /working-directories/{resource_id}/required-context-audit` 的
+`budget.call_budget_source` 从 `SESSION|WORKSPACE_TIER|APPLICATION_DEFAULT` 改为
+`MODEL_CONTEXT_WINDOW|UNKNOWN_FALLBACK`；`budget_tokens` 查询参数为旧客户端兼容保留，
+但服务端不再用它计算预算。响应的 `provider_window_tokens` 未知时仍为 `null`，
+`effective_input_tokens` 可能为 `null`（`UNAVAILABLE`），不拿旧档位冒充。
+
+**旧配置兼容。** `POST /assist-sessions/{id}/context-budget`、`POST /assist-sessions` 的
+`context_budget_tokens`、工作区默认档位端点仍可读写并继续做旧客户端回执；写入不会改变
+当前模型窗口、冻结预算或压缩判定。迁移 0165 只有能力声明新增列、旧默认连接预算提升与
+LEGACY 注释，不删除 `assist_sessions.context_budget_tokens` 等数据。压缩阈值仍走
+`POST /memory-settings` 的 `compaction_threshold_tokens`（`null` = 默认 350K），保存范围
+`16384–1000000`；实际生效值可低于保存值，但保存值不被改写。
+
+**日志。** 统一 `context-compaction` 通道新增/保留
+`model_context_window_resolved`（scope/model/窗口/来源/有效窗口/服务商上限/回退标记）与
+`context_window_catalog_lookup_failed`、`context_window_declaration_lookup_failed`、
+`context_window_config_invalid`；压缩事件记录 requested/effective 阈值、tokensBefore/After、
+成功/失败/`budget_unmet`，不写摘要正文、对话正文或凭据。
+
+**证据。** 真实 PG18.6：`migration` **15/15**（含 0165 专项：只回填旧双默认、混合值保持、
+能力声明 CHECK 与三列 LEGACY COMMENT）、`context-compaction-threshold` **9/9**、
+`context-budget-runtime` **5/5**、`required-context-audit` **9/9**、
+`session-context-budget` **12/12**；API 上下文单元 **49/49**；Workbench 上下文 Vitest
+**50/50**、真实 Chromium **10/10**、typecheck/build exit 0。真实 Provider 窗口声明与真实
+分词器、Windows/WebView2/安装态未验；详见验收表「上下文窗口与压缩阈值解耦」行。

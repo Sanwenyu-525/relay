@@ -512,6 +512,25 @@
 .pv-page .subnav-item:hover { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
 .pv-page .subnav-item--active { color: var(--relay-color-action-text); background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
 .pv-page .subnav-count { color: inherit; opacity: .75; }
+
+/* UI-UNIFY-03：Tabs variant="page" 的项是 .ui-tabs__item。下面这组用更高优先级
+   （.pv-page .subnav .ui-tabs__item）接住原有药丸皮肤，保证迁移前后像素不变；
+   没有页面皮肤的 page 变体仍走 ui.css 的基线几何。 */
+.pv-page .subnav.ui-tabs--page { gap: 7px; }
+.pv-page .subnav .ui-tabs__item {
+  font-size: var(--relay-font-size-caption);
+  padding: 7px 10px;
+  border: 1px solid var(--relay-color-border-subtle);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-surface);
+  color: var(--relay-color-text-secondary);
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+}
+.pv-page .subnav .ui-tabs__item:hover { background: var(--pv-btn-hover-bg); border-color: var(--pv-btn-hover-border); }
+.pv-page .subnav .ui-tabs__item.is-active { color: var(--relay-color-action-text); background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); }
+.pv-page .subnav .ui-tabs__badge { color: inherit; font-size: inherit; opacity: .75; }
 .pv-page .page-explanation > summary { color: var(--pv-muted); font-size: var(--relay-font-size-micro); cursor: pointer; }
 .pv-page .page-explanation > summary::marker { color: var(--relay-color-action-primary); }
 
