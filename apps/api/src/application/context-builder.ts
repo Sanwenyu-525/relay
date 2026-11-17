@@ -70,6 +70,11 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
     return { kind: 'FAILED', reason: 'CONTEXT_REQUIRED_SOURCE_UNAVAILABLE',
       evidence: { reason: 'CONTEXT_REQUIRED_SOURCE_UNAVAILABLE' } };
   }
+  const acceptance = await r.tasks.readAcceptanceVersion(input.task.id,
+    input.task.acceptance_revision);
+  const acceptanceCriteria = acceptance === undefined ? [] :
+    (await r.tasks.listCriteria(input.task.id, input.task.acceptance_revision))
+      .filter((criterion) => criterion.required);
   const limit = input.budgetTokens ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) {
     throw new Error('context budget must be an integer in 1..100000');
@@ -138,7 +143,10 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
   // Memory 与 Decision 仍用既有检索（它们没有标签与集合维度）。
   const knowledgeMatches = await retrieveKnowledge(db, {
     workspaceId: input.run.workspace_id, projectId: project.id,
-    taskTitle: input.task.title, projectTitle: project.title, limit: MAX_RELEVANT,
+    taskTitle: input.task.title, projectTitle: project.title,
+    taskObjective: acceptance?.objective,
+    acceptanceCriteria: acceptanceCriteria.map((criterion) => criterion.statement),
+    limit: MAX_RELEVANT,
   });
   const otherMatches = query ? await searchInformation(db, {
       workspaceId: input.run.workspace_id, projectId: project.id, query,

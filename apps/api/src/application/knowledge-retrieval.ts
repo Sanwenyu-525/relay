@@ -32,10 +32,32 @@ export interface KnowledgeRetrievalInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly taskTitle: string;
+  /** 当前验收目标；来自 task_acceptances，而不是从标题猜测。 */
+  readonly taskObjective?: string | undefined;
+  /** 验收条目；只取有界条数与长度，避免把整份契约展开成海量查询词。 */
+  readonly acceptanceCriteria?: readonly string[] | undefined;
   /** 项目标题参与查询（项目名通常就是任务主题的一部分），不参与项目归属加权。 */
-  readonly projectTitle?: string;
+  readonly projectTitle?: string | undefined;
   readonly limit: number;
-  readonly explicitIds?: readonly string[];
+}
+
+/**
+ * 显式引用不在这里处理：`readContextSources` 在 context-builder 中先按冻结版本
+ * 加载显式来源，再进入检索候选。保留两条写入同一份 Context 的路径会制造
+ * 优先级与权限校验的分叉，因此本模块不接收 explicitIds。
+ */
+function bounded(value: string | undefined, maxChars: number): string {
+  if (value === undefined) return '';
+  return value.replace(/\s+/gu, ' ').trim().slice(0, maxChars);
+}
+
+function retrievalQueryText(input: KnowledgeRetrievalInput): string {
+  // 标题、验收目标、最多 6 条验收条目依次进入；项目标题最后且单独限长。
+  // knowledgeQueryTokens 仍会截断到 500 字符、24 个词元，保证请求规模有界。
+  const criteria = (input.acceptanceCriteria ?? []).slice(0, 6)
+    .map((statement) => bounded(statement, 120)).filter((statement) => statement !== '');
+  return [bounded(input.taskTitle, 240), bounded(input.taskObjective, 300), ...criteria,
+    bounded(input.projectTitle, 120)].join(' ').trim();
 }
 
 interface ScoredRow {
@@ -55,7 +77,7 @@ interface ScoredRow {
 
 export async function retrieveKnowledge(db: DbExecutor,
   input: KnowledgeRetrievalInput): Promise<readonly KnowledgeCandidate[]> {
-  const queryText = [input.taskTitle, input.projectTitle ?? ''].join(' ').trim();
+  const queryText = retrievalQueryText(input);
   const tokens = knowledgeQueryTokens(queryText);
   if (tokens.length === 0) return [];
   const limit = Math.min(Math.max(input.limit, 1), 20);
@@ -63,6 +85,11 @@ export async function retrieveKnowledge(db: DbExecutor,
   // 直接把词元数组作为参数传给 unnest；避免 CTE 别名在相关子查询里被 PostgreSQL
   // 解析成缺失 FROM 的表引用（真实集成测试曾复现 42P01）。
   const tokenArray = sql`${tokens}::text[]`;
+  // 来源命中也必须进入候选资格；只把 source_hit 算进 select/score，会在 WHERE
+  // 阶段把“仅来源 URI/文件名命中”的合法候选排除，形成无法解释的漏检。
+  const sourceHit = sql`exists (select 1 from unnest(${tokenArray}) tok
+    where position(tok in lower(coalesce(v.source_uri, '') || ' '
+      || coalesce(v.source_refs ->> 'file_name', ''))) > 0)`;
   const rows = (await sql<ScoredRow>`
     with matched as (
       select k.id, k.title, k.project_id, k.status, v.version,
@@ -81,9 +108,7 @@ export async function retrieveKnowledge(db: DbExecutor,
           where ci.knowledge_id = k.id
             and exists (select 1 from unnest(${tokenArray}) tok
               where position(tok in lower(c.name)) > 0))::int as collection_hits,
-        exists (select 1 from unnest(${tokenArray}) tok
-          where position(tok in lower(coalesce(v.source_uri, '') || ' '
-            || coalesce(v.source_refs ->> 'file_name', ''))) > 0) as source_hit,
+        ${sourceHit} as source_hit,
         (k.project_id = ${input.projectId}) as project_match
       from knowledge_items k
       join knowledge_versions v on v.knowledge_id = k.id and v.version = k.current_version
@@ -100,6 +125,7 @@ export async function retrieveKnowledge(db: DbExecutor,
                join knowledge_collections c on c.id = ci.collection_id
                where ci.knowledge_id = k.id
                  and exists (select 1 from unnest(${tokenArray}) tok where position(tok in lower(c.name)) > 0))
+          or ${sourceHit}
         )
     )
     select * from matched

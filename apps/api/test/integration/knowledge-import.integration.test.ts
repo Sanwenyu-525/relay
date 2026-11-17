@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { crc32 } from 'node:zlib';
 import test, { after, before } from 'node:test';
 
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
@@ -75,16 +76,16 @@ function docx(text: string): Buffer {
     const local = Buffer.alloc(30);
     Buffer.from([0x50, 0x4b, 0x03, 0x04]).copy(local, 0);
     local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8);
-    local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12); local.writeUInt16LE(0, 14);
-    local.writeUInt32LE(0, 16); local.writeUInt32LE(data.length, 20);
-    local.writeUInt32LE(data.length, 24); local.writeUInt16LE(nameBytes.length, 26);
+    local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc32(data), 14); local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBytes.length, 26);
     local.writeUInt16LE(0, 28);
     localParts.push(local, nameBytes, data);
     const central = Buffer.alloc(46);
     Buffer.from([0x50, 0x4b, 0x01, 0x02]).copy(central, 0);
     central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8);
     central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14);
-    central.writeUInt32LE(0, 16); central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(crc32(data), 16); central.writeUInt32LE(data.length, 20);
     central.writeUInt32LE(data.length, 24); central.writeUInt16LE(nameBytes.length, 28);
     central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32); central.writeUInt16LE(0, 34);
     central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38); central.writeUInt32LE(offset, 42);
@@ -99,6 +100,46 @@ function docx(text: string): Buffer {
   end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20);
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
+
+test('导入路由放宽到文件上限：超过 Fastify 默认 1MB 的预览和提交都能到达处理器', async () => {
+  // 1.2MB 文本超过单条正文上限，但请求本身必须先能通过 1MB 默认 body limit；
+  // 预览返回 READY/REJECTED 业务结果即可证明路由没有被框架层提前 413。
+  const oversizedText = '导入正文'.repeat(210_000);
+  const previewResponse = await preview([file('大文本.txt', 'text/plain',
+    Buffer.from(oversizedText, 'utf8'))]);
+  assert.equal(previewResponse.status, 200, previewResponse.text);
+  const previewFile = (previewResponse.body as { files: { status: string; failure?: string }[] })
+    .files[0];
+  assert.equal(previewFile?.status, 'REJECTED');
+  assert.equal(previewFile?.failure, 'TEXT_TOO_LARGE');
+
+  // 1.2MB PDF 的正文很小，但 base64 请求超过 1MB；提交必须成功，不能 413。
+  const largePdf = pdf(`BT /F1 12 Tf (Large Transport OK) Tj ET\n${'A'.repeat(1_200_000)}`);
+  const created = await commit({ project_id: null, title: '大文件传输验证',
+    file: file('大文件.pdf', 'application/pdf', largePdf), duplicate_strategy: 'NEW' });
+  assert.equal(created.created, 'true');
+  const id = created.knowledge_id as string;
+  const page = (await api.get(path('/knowledge/page?q=' + encodeURIComponent('Large Transport'))))
+    .body as { items: { id: string }[] };
+  assert.equal(page.items.some((item) => item.id === id), true);
+});
+
+test('批量预览拒绝超过 20 个文件，单个坏文件不影响同批其他文件', async () => {
+  const valid = file('批量有效.md', 'text/markdown', Buffer.from('# 批量有效\n\n正文'));
+  const invalid = { name: '批量坏.md', media_type: 'text/markdown', content_base64: '!!!' };
+  const partial = await preview([valid, invalid]);
+  assert.equal(partial.status, 200, partial.text);
+  const files = (partial.body as { files: { status: string; failure?: string }[] }).files;
+  assert.equal(files[0]?.status, 'READY');
+  assert.equal(files[1]?.status, 'REJECTED');
+  assert.equal(files[1]?.failure, 'MALFORMED');
+
+  const tooMany = Array.from({ length: 21 }, (_, index) => file(`批量-${index}.md`,
+    'text/markdown', Buffer.from(`# 批量 ${index}\n\n正文`)));
+  const response = await api.post(path('/knowledge-import/preview'),
+    { project_id: null, files: tooMany });
+  assert.equal(response.status, 422, response.text);
+});
 
 test('预览只提取正文并提示重复，不写知识行；提交 Markdown 后详情与索引可用', async () => {
   const markdown = '# 知识导入规范\n\n导入正文必须可检索，且保留文件来源。';
@@ -179,9 +220,10 @@ test('扫描 PDF 明确 NO_TEXT 不伪装成功；HTML 去脚本与 DOCX 段落�
   const html = '<html><head><title>网页资料</title><script>window.x=1</script></head>' +
     '<body><style>.x{}</style><h1>网页标题</h1><p>这是网页正文 &amp; 实体。</p></body></html>';
   const htmlPreview = await preview([file('资料.html', 'text/html', Buffer.from(html))]);
-  const htmlFile = (htmlPreview.body as { files: { status: string; text: string; format: string }[] })
-    .files[0];
-  assert.equal(htmlFile?.status, 'READY');
+  assert.equal(htmlPreview.status, 200, htmlPreview.text);
+  const htmlFile = (htmlPreview.body as { files: { status: string; text: string; format: string;
+    failure?: string; message?: string }[] }).files[0];
+  assert.equal(htmlFile?.status, 'READY', htmlPreview.text);
   assert.equal(htmlFile?.format, 'HTML');
   assert.equal(htmlFile?.text.includes('window.x'), false);
   assert.equal(htmlFile?.text.includes('网页正文 & 实体'), true);
@@ -189,9 +231,9 @@ test('扫描 PDF 明确 NO_TEXT 不伪装成功；HTML 去脚本与 DOCX 段落�
   const docxPreview = await preview([file('报告.docx',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', docx('季度报告正文'))]);
   assert.equal(docxPreview.status, 200, docxPreview.text);
-  const docxFile = (docxPreview.body as { files: { status: string; text: string; format: string }[] })
-    .files[0];
-  assert.equal(docxFile?.status, 'READY');
+  const docxFile = (docxPreview.body as { files: { status: string; text: string; format: string;
+    failure?: string; message?: string }[] }).files[0];
+  assert.equal(docxFile?.status, 'READY', docxPreview.text);
   assert.equal(docxFile?.format, 'DOCX');
   assert.equal(docxFile?.text, '季度报告正文');
 

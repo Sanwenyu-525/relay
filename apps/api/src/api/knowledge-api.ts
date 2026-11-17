@@ -10,6 +10,15 @@ import { backfillKnowledgeIndex, listKnowledgeCollections, listKnowledgePage,
   from '../application/knowledge-queries.js';
 import { createCommandHandler, sendReadError, type RouteDependencies } from './envelope.js';
 import { commandEnvelopeSchema } from './domain-schemas.js';
+import { IMPORT_LIMITS } from '../application/knowledge-import.js';
+
+/**
+ * Fastify 默认 1MB body limit 会在文件上限 10MB 之前先拒绝请求，导致 UI 声称支持
+ * 10MB、服务端却永远收不到。这里给导入路由显式放宽，并按 base64/JSON 开销留余量；
+ * 实际文件大小仍由 `IMPORT_LIMITS` 在解码后逐项校验。
+ */
+const IMPORT_PREVIEW_BODY_LIMIT = IMPORT_LIMITS.maxBatchBytes * 2;
+const IMPORT_COMMIT_BODY_LIMIT = IMPORT_LIMITS.maxFileBytes * 2;
 
 /**
  * 知识库组织与检索 API（0167）。
@@ -344,7 +353,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance,
     } }));
 
   app.post('/knowledge-import/preview', { schema: { params: base, body: previewBody,
-    response: { 200: previewResponse } } }, async (request, reply) => {
+    response: { 200: previewResponse } }, bodyLimit: IMPORT_PREVIEW_BODY_LIMIT },
+  async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string };
       const body = request.body as { project_id?: string | null;
@@ -357,7 +367,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance,
   });
 
   app.post('/knowledge-import', { schema: { params: base, body: commitBody,
-    response: { 201: commandEnvelopeSchema(importResult) } } },
+    response: { 201: commandEnvelopeSchema(importResult) } },
+  bodyLimit: IMPORT_COMMIT_BODY_LIMIT },
   createCommandHandler(dependencies, { commandType: 'ImportKnowledge', bodySchema: commitBody,
     execute: async ({ executor, params, body }) => {
       const outcome = await commitKnowledgeImport(executor, {

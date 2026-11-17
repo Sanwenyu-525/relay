@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { inflateRawSync } from 'node:zlib';
+import { crc32, inflateRawSync } from 'node:zlib';
 
 /**
  * 知识导入的格式判定与正文提取（0167）。
@@ -15,6 +15,10 @@ import { inflateRawSync } from 'node:zlib';
  *   * PDF 仅支持 `/FlateDecode` 或未压缩的内容流，且字体编码可映射到 Unicode；
  *     CID/ToUnicode 缺失的扫描件或特殊编码会返回 `NO_TEXT`（本系统没有 OCR）。
  *   * DOCX 读取 `word/document.xml` 的段落文本，不保留样式、表格结构或图片。
+ *
+ * 自研解析器的生产边界：不追求完整 PDF 排版还原，也不承诺 DOCX 表格/页眉页脚；
+ * 资源上限按文件、ZIP 成员、PDF 流、累计解压输出分别设置固定硬上限。声明的大小
+ * 只用于一致性校验，绝不被当作可信预算。
  */
 
 export const IMPORT_LIMITS = Object.freeze({
@@ -23,13 +27,23 @@ export const IMPORT_LIMITS = Object.freeze({
   maxBatchBytes: 40 * 1024 * 1024,
   maxTextBytes: 262_144,
   maxHtmlBytes: 8 * 1024 * 1024,
+  /** ZIP 条目数与单条/全部解压输出上限；即使声明值很小，也按实际输出硬截断。 */
+  maxZipEntries: 2000,
+  maxZipEntryUncompressedBytes: 8 * 1024 * 1024,
+  maxZipTotalUncompressedBytes: 16 * 1024 * 1024,
+  /** PDF 流数量、单流与累计输出上限；每个流不能独立消耗内存。 */
+  maxPdfStreams: 1000,
+  maxPdfStreamOutputBytes: 8 * 1024 * 1024,
+  maxPdfTotalOutputBytes: 16 * 1024 * 1024,
+  maxPdfTextChars: 4 * 1024 * 1024,
+  maxParseMilliseconds: 3000,
 });
 
 export type ImportFormat = 'MARKDOWN' | 'TEXT' | 'PDF' | 'DOCX' | 'HTML';
 
 export type ImportFailure =
   | 'EMPTY_FILE' | 'TOO_LARGE' | 'FORMAT_MISMATCH' | 'UNSUPPORTED_FORMAT'
-  | 'INVALID_ENCODING' | 'NO_TEXT' | 'TEXT_TOO_LARGE' | 'MALFORMED';
+  | 'INVALID_ENCODING' | 'NO_TEXT' | 'TEXT_TOO_LARGE' | 'MALFORMED' | 'RESOURCE_LIMIT';
 
 export interface ExtractedDocument {
   readonly format: ImportFormat;
@@ -145,6 +159,11 @@ export function extractDocument(input: { readonly name: string; readonly mediaTy
   }
   const format = detectFormat(input.buffer, input.name, input.mediaType);
   if (format === null) {
+    const zipMagic = input.buffer[0] === 0x50 && input.buffer[1] === 0x4b;
+    if (zipMagic) {
+      return fail('MALFORMED',
+        'ZIP/DOCX 结构无效或条目/解压声明超过安全上限；为避免资源耗尽，已拒绝导入。');
+    }
     return fail('UNSUPPORTED_FORMAT',
       '无法识别为 Markdown / 纯文本 / PDF / DOCX / HTML。压缩包、二进制文件不导入。');
   }
@@ -230,14 +249,9 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&quot;/giu, '"')
     .replace(/&#39;|&apos;/giu, "'")
     .replace(/&amp;/giu, '&')
-    .replace(/&#(\d{1,7});/gu, (_, code: string) => {
-      const value = Number(code);
-      return value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '';
-    })
-    .replace(/&#x([0-9a-f]{1,6});/giu, (_, code: string) => {
-      const value = Number.parseInt(code, 16);
-      return value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '';
-    });
+    .replace(/&#(\d+);/gu, (_, code: string) => safeCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/giu, (_, code: string) =>
+      safeCodePoint(Number.parseInt(code, 16)));
 }
 
 // ---------------------------------------------------------------------------
@@ -245,28 +259,50 @@ function decodeHtmlEntities(value: string): string {
 // ---------------------------------------------------------------------------
 
 interface ZipEntry { readonly name: string; readonly offset: number; readonly compressed: number;
-  readonly uncompressed: number; readonly method: number; }
+  readonly uncompressed: number; readonly method: number; readonly crc: number;
+  readonly flags: number; }
 
 function readZipEntries(buffer: Buffer): ZipEntry[] | null {
   const eocd = findEndOfCentralDirectory(buffer);
   if (eocd < 0) return null;
+  const diskNumber = buffer.readUInt16LE(eocd + 4);
+  const centralDisk = buffer.readUInt16LE(eocd + 6);
+  const entriesOnDisk = buffer.readUInt16LE(eocd + 8);
   const total = buffer.readUInt16LE(eocd + 10);
+  const directorySize = buffer.readUInt32LE(eocd + 12);
   const offset = buffer.readUInt32LE(eocd + 16);
-  if (total === 0xffff || offset === 0xffffffff) return null; // zip64 不在支持范围
+  // 分卷 ZIP 不在支持范围；条目数必须在固定上限内。
+  if (diskNumber !== 0 || centralDisk !== 0 || entriesOnDisk !== total ||
+      total === 0xffff || offset === 0xffffffff || directorySize === 0xffffffff ||
+      total > IMPORT_LIMITS.maxZipEntries) return null;
+  // 中央目录必须完整落在文件内，且不能与 EOCD 重叠。
+  if (offset > buffer.length || directorySize > buffer.length - offset ||
+      offset + directorySize > eocd) return null;
   const entries: ZipEntry[] = [];
   let cursor = offset;
+  let declaredTotal = 0;
   for (let i = 0; i < total; i++) {
     if (cursor + 46 > buffer.length) return null;
     if (buffer.readUInt32LE(cursor) !== 0x02014b50) return null;
+    const flags = buffer.readUInt16LE(cursor + 8);
     const method = buffer.readUInt16LE(cursor + 10);
+    const crc = buffer.readUInt32LE(cursor + 16);
     const compressed = buffer.readUInt32LE(cursor + 20);
     const uncompressed = buffer.readUInt32LE(cursor + 24);
     const nameLength = buffer.readUInt16LE(cursor + 28);
     const extraLength = buffer.readUInt16LE(cursor + 30);
     const commentLength = buffer.readUInt16LE(cursor + 32);
     const localOffset = buffer.readUInt32LE(cursor + 42);
+    if (nameLength === 0 || nameLength > 512 ||
+        cursor + 46 + nameLength + extraLength + commentLength > buffer.length ||
+        localOffset >= offset) return null;
+    if (uncompressed > IMPORT_LIMITS.maxZipEntryUncompressedBytes) return null;
+    declaredTotal += uncompressed;
+    if (declaredTotal > IMPORT_LIMITS.maxZipTotalUncompressedBytes) return null;
+    if (flags & 0x0001) return null; // 加密条目直接拒绝，不能把密文当 XML。
     const name = buffer.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
-    entries.push({ name, offset: localOffset, compressed, uncompressed, method });
+    if (name.includes('\u0000') || name.includes('\\')) return null;
+    entries.push({ name, offset: localOffset, compressed, uncompressed, method, crc, flags });
     cursor += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
@@ -275,7 +311,10 @@ function readZipEntries(buffer: Buffer): ZipEntry[] | null {
 function findEndOfCentralDirectory(buffer: Buffer): number {
   const start = Math.max(0, buffer.length - 65_557);
   for (let i = buffer.length - 22; i >= start; i--) {
-    if (buffer.readUInt32LE(i) === 0x06054b50) return i;
+    if (i + 22 > buffer.length || buffer.readUInt32LE(i) !== 0x06054b50) continue;
+    const commentLength = buffer.readUInt16LE(i + 20);
+    // 避免把注释里的伪 EOCD 当成中央目录起点；允许少量尾部数据，但不能越过文件。
+    if (i + 22 + commentLength <= buffer.length) return i;
   }
   return -1;
 }
@@ -283,16 +322,40 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
 function readZipEntry(buffer: Buffer, entry: ZipEntry): Buffer | null {
   const at = entry.offset;
   if (at + 30 > buffer.length || buffer.readUInt32LE(at) !== 0x04034b50) return null;
+  const flags = buffer.readUInt16LE(at + 6);
+  const method = buffer.readUInt16LE(at + 8);
+  const crc = buffer.readUInt32LE(at + 14);
+  const compressed = buffer.readUInt32LE(at + 18);
+  const uncompressed = buffer.readUInt32LE(at + 22);
   const nameLength = buffer.readUInt16LE(at + 26);
   const extraLength = buffer.readUInt16LE(at + 28);
   const dataStart = at + 30 + nameLength + extraLength;
-  const raw = buffer.subarray(dataStart, dataStart + entry.compressed);
-  if (entry.method === 0) return raw;
-  if (entry.method === 8) {
-    try { return inflateRawSync(raw, { maxOutputLength: entry.uncompressed + 1024 }); }
-    catch { return null; }
+  // 本地文件头必须与中央目录一致；否则用伪造的“小尺寸”头部绕过中央目录预算。
+  if (method !== entry.method || compressed !== entry.compressed ||
+      uncompressed !== entry.uncompressed || crc !== entry.crc || (flags & 0x0001) !== 0 ||
+      dataStart > buffer.length || compressed > buffer.length - dataStart) return null;
+  const localName = buffer.subarray(at + 30, at + 30 + nameLength).toString('utf8');
+  if (localName !== entry.name) return null;
+  const raw = buffer.subarray(dataStart, dataStart + compressed);
+  let output: Buffer;
+  if (entry.method === 0) {
+    if (compressed !== uncompressed) return null;
+    output = raw;
+  } else if (entry.method === 8) {
+    try {
+      // 关键：maxOutputLength 用固定上限，不采用攻击者声明的 uncompressed。
+      output = inflateRawSync(raw, {
+        maxOutputLength: IMPORT_LIMITS.maxZipEntryUncompressedBytes,
+      });
+    } catch { return null; }
+  } else {
+    return null;
   }
-  return null;
+  // 声明值只做一致性校验；实际输出不能超过声明，也不能超过固定上限。
+  if (output.length !== entry.uncompressed ||
+      output.length > IMPORT_LIMITS.maxZipEntryUncompressedBytes) return null;
+  if (crc32(output) !== entry.crc) return null;
+  return output;
 }
 
 function isDocxZip(buffer: Buffer): boolean {
@@ -332,8 +395,14 @@ function extractDocxText(buffer: Buffer):
 function decodeXmlEntities(value: string): string {
   return value.replace(/&lt;/gu, '<').replace(/&gt;/gu, '>')
     .replace(/&quot;/gu, '"').replace(/&apos;/gu, "'").replace(/&amp;/gu, '&')
-    .replace(/&#(\d+);/gu, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/giu, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/gu, (_, code: string) => safeCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/giu, (_, code: string) => safeCodePoint(Number.parseInt(code, 16)));
+}
+
+/** XML 实体可能指向 surrogate/超范围码点；非法值返回空串，不让解析器崩溃。 */
+function safeCodePoint(value: number): string {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff &&
+    !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -344,41 +413,86 @@ type PdfTextResult = { readonly ok: true; readonly text: string;
   readonly detail: Record<string, string> } |
   { readonly ok: false; readonly failure: ImportFailure; readonly message: string };
 
+/**
+ * `indexOf('stream')` 会命中 `endstream` 里的子串，导致把结束标记当成新流起点，
+ * 进而漏计流数量并错误拼接正文。只接受前面不是 `end` 的 stream 关键字。
+ */
+function findPdfStreamKeyword(buffer: Buffer, from: number): number {
+  let at = buffer.indexOf('stream', from, 'latin1');
+  while (at >= 0) {
+    if (buffer.subarray(Math.max(0, at - 3), at).toString('latin1') !== 'end') return at;
+    at = buffer.indexOf('stream', at + 6, 'latin1');
+  }
+  return -1;
+}
+
 function extractPdfText(buffer: Buffer): PdfTextResult {
-  const streams: string[] = [];
+  const startedAt = Date.now();
+  const pages: string[] = [];
   let head = 0;
+  let streamCount = 0;
+  let totalOutputBytes = 0;
+  let totalTextChars = 0;
   while (true) {
-    const streamAt = buffer.indexOf('stream', head, 'latin1');
+    if (Date.now() - startedAt > IMPORT_LIMITS.maxParseMilliseconds) {
+      return { ok: false, failure: 'RESOURCE_LIMIT',
+        message: 'PDF 解析超过时间上限，已停止；请拆分或转换为文本后导入。' };
+    }
+    const streamAt = findPdfStreamKeyword(buffer, head);
     if (streamAt < 0) break;
+    streamCount += 1;
+    if (streamCount > IMPORT_LIMITS.maxPdfStreams) {
+      return { ok: false, failure: 'RESOURCE_LIMIT',
+        message: 'PDF 内容流数量超过安全上限，已拒绝导入。' };
+    }
     const dictionary = buffer.subarray(Math.max(0, streamAt - 600), streamAt).toString('latin1');
     let start = streamAt + 6;
     if (buffer[start] === 0x0d) start += 1;
     if (buffer[start] === 0x0a) start += 1;
     const endAt = buffer.indexOf('endstream', start, 'latin1');
-    if (endAt < 0) break;
+    if (endAt < 0) {
+      return { ok: false, failure: 'MALFORMED',
+        message: 'PDF 内容流缺少 endstream，文件可能被截断；未保存部分正文。' };
+    }
     const raw = buffer.subarray(start, endAt);
     head = endAt + 9;
-    if (!dictionary.includes('/FlateDecode')) {
-      // 未压缩内容流直接按文本读；其他过滤器（DCT/JBIG2/ASCII85）不尝试。
-      if (!/(\/Filter|\/F)\s*[\[/]/u.test(dictionary)) {
-        streams.push(raw.toString('latin1'));
+    // 未压缩内容流也可能很大；同样进入累计输出预算。
+    let output: Buffer;
+    if (dictionary.includes('/FlateDecode')) {
+      const inflated = inflatePdfStream(raw);
+      if (inflated.tooLarge) {
+        return { ok: false, failure: 'RESOURCE_LIMIT',
+          message: 'PDF 单个内容流解压超过安全上限，已拒绝导入。' };
       }
-      continue;
+      if (inflated.buffer === null) continue; // 异常/不支持 Filter：跳过这个流，不静默补正文。
+      output = inflated.buffer;
+    } else if (/(\/Filter|\/F)\s*[\[/]/u.test(dictionary)) {
+      continue; // DCT/JBIG2/ASCII85 等 Filter 不在支持范围。
+    } else {
+      output = raw;
     }
-    try {
-      streams.push(inflateRawSync(raw, { maxOutputLength: 64 * 1024 * 1024 }).toString('latin1'));
-    } catch {
-      try { streams.push(inflateSyncSafe(raw).toString('latin1')); } catch { /* skip stream */ }
+    if (output.length > IMPORT_LIMITS.maxPdfStreamOutputBytes) {
+      return { ok: false, failure: 'RESOURCE_LIMIT',
+        message: 'PDF 单个内容流解压超过安全上限，已拒绝导入。' };
     }
-  }
-  if (streams.length === 0) {
-    return { ok: false, failure: 'MALFORMED', message: 'PDF 内容流无法解析。' };
-  }
-  const pages: string[] = [];
-  for (const stream of streams) {
+    totalOutputBytes += output.length;
+    if (totalOutputBytes > IMPORT_LIMITS.maxPdfTotalOutputBytes) {
+      return { ok: false, failure: 'RESOURCE_LIMIT',
+        message: 'PDF 内容流累计解压超过安全上限，已拒绝导入。' };
+    }
+    const stream = output.toString('latin1');
     if (!/\bBT\b/u.test(stream) || !/(\bTj\b|\bTJ\b)/u.test(stream)) continue;
     const text = readPdfOperators(stream);
-    if (text !== '') pages.push(text);
+    if (text === '') continue;
+    if (totalTextChars + text.length > IMPORT_LIMITS.maxPdfTextChars) {
+      return { ok: false, failure: 'RESOURCE_LIMIT',
+        message: 'PDF 可提取文本超过安全上限；为避免静默截断，未保存部分正文。' };
+    }
+    totalTextChars += text.length;
+    pages.push(text);
+  }
+  if (streamCount === 0) {
+    return { ok: false, failure: 'MALFORMED', message: 'PDF 内容流无法解析。' };
   }
   const joined = pages.join('\n\n').replace(/[ \t]+/gu, ' ').replace(/\n{3,}/gu, '\n\n').trim();
   if (joined === '') {
@@ -393,15 +507,26 @@ function extractPdfText(buffer: Buffer): PdfTextResult {
       message: 'PDF 文本使用了不支持的字体编码（缺少 Unicode 映射），无法可靠提取；本系统没有 OCR。' };
   }
   return { ok: true, text: joined,
-    detail: { streams: String(pages.length),
-      chars: String(joined.length) } };
+    detail: { streams: String(pages.length), chars: String(joined.length) } };
 }
 
-/** 部分 PDF 用 zlib 头但 deflate 数据被截断；这里用宽松 inflate 兜底。 */
-function inflateSyncSafe(raw: Buffer): Buffer {
+/** 带固定输出上限的宽松 inflate；区分「数据损坏」与「输出超限」。 */
+function inflatePdfStream(raw: Buffer): { buffer: Buffer | null; tooLarge: boolean } {
+  const limit = IMPORT_LIMITS.maxPdfStreamOutputBytes;
+  const attempt = (candidate: Buffer): { buffer: Buffer | null; tooLarge: boolean } => {
+    if (candidate.length < 2) return { buffer: null, tooLarge: false };
+    try {
+      return { buffer: inflateRawSync(candidate, { maxOutputLength: limit }), tooLarge: false };
+    } catch (error: unknown) {
+      const code = (error as { code?: string }).code;
+      return { buffer: null, tooLarge: code === 'ERR_BUFFER_TOO_LARGE' };
+    }
+  };
   // Node 的 inflateRaw 对「带 zlib 头」的数据会失败；先去掉 2 字节头再试。
-  try { return inflateRawSync(raw.subarray(2), { maxOutputLength: 64 * 1024 * 1024 }); }
-  catch { return inflateRawSync(raw, { maxOutputLength: 64 * 1024 * 1024 }); }
+  const first = attempt(raw);
+  if (first.buffer !== null || first.tooLarge) return first;
+  if (raw.length < 2) return { buffer: null, tooLarge: false };
+  return attempt(raw.subarray(2));
 }
 
 /**
@@ -459,7 +584,7 @@ function decodePdfHex(value: string): string {
   const chars: string[] = [];
   for (let i = 0; i < padded.length; i += 4) {
     const code = Number.parseInt(padded.slice(i, i + 4), 16);
-    if (!Number.isFinite(code) || code > 0x10ffff) continue;
+    if (!Number.isFinite(code) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) continue;
     chars.push(String.fromCodePoint(code));
   }
   return chars.join('');

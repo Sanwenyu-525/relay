@@ -66,8 +66,13 @@
 .knowledge-list { container-type: inline-size; }
 @container (min-width: 34rem) {
   .knowledge-row { align-items: center; padding: 9px 16px; }
-  .knowledge-row-main { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
-  .knowledge-row small { text-align: right; white-space: nowrap; }
+  .knowledge-row-main { display: flex; align-items: baseline; gap: 12px; }
+  /* 标题先占可用宽度，摘要只做可截断的补充；元信息与徽标保持自然宽度。
+     否则摘要的 nowrap 会把标题压成逐字换行。 */
+  .knowledge-row strong { flex: 0 1 auto; min-width: 10rem; max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .knowledge-row-snippet { flex: 1 1 auto; min-width: 0; overflow: hidden; text-align: left !important; text-overflow: ellipsis; white-space: nowrap; }
+  .knowledge-row-meta { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+  .knowledge-row-badges { flex: 0 0 auto; margin-top: 0; }
 }
 .knowledge-result { display: flex; flex-direction: column; width: 100%; gap: var(--relay-space-2); padding: var(--relay-space-4) 0; border: 0; border-bottom: 1px solid var(--relay-color-border-separator); background: transparent; color: var(--relay-color-text-primary); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .knowledge-result:hover { background: var(--relay-color-bg-subtle); }

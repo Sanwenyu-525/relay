@@ -327,6 +327,7 @@ export default function KnowledgeView() {
   const pendingRef = useRef<PendingCommand | null>(null);
   const readVersion = useRef(0);
   const contextVersion = useRef(0);
+  const detailRef = useRef<HTMLDivElement | null>(null);
   const previewReadVersion = useRef(0);
   const [writeGate, setWriteGate] = useState<{ key: string; reason: string | null } | null>(null);
   const [gateReload, setGateReload] = useState(0);
@@ -865,6 +866,11 @@ export default function KnowledgeView() {
       setSelectedId(idToSelect); setFormOpen(false); setActionError(null);
       clearDraft();
       void load(kind, idToSelect);
+      // 窄窗口下列表会占满首屏；选中后若详情完全在视口外，至少把阅读区带入视野。
+      const detail = detailRef.current;
+      if (detail !== null && detail.getBoundingClientRect().top > window.innerHeight - 180) {
+        detail.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      }
     });
   }
 
@@ -1686,7 +1692,7 @@ export default function KnowledgeView() {
           </>}
         </section>
 
-        <div className="knowledge-detail">
+        <div className="knowledge-detail" ref={detailRef}>
           {detailItem !== null && selected !== null ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`} hidden={capturing}>
             {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
               client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}

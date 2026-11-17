@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { after, before } from 'node:test';
+import { sql } from 'kysely';
 
 import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { retrieveKnowledge } from '../../src/application/knowledge-retrieval.js';
@@ -14,6 +15,8 @@ import { createWorkspace, expectCommandAccepted, startTestApi, workspacePath, ty
  */
 
 const database = openDatabase(APP_DATABASE_URL, 'relay-knowledge-agent-retrieval');
+// 测试准备用迁移角色写入来源元数据；应用角色没有直接 UPDATE 权限，避免测试绕过生产权限边界。
+const fixtureDatabase = openDatabase(MIGRATION_DATABASE_URL, 'relay-knowledge-agent-retrieval-fixture');
 let api: TestApi;
 let workspaceId: string;
 let projectA: string;
@@ -24,12 +27,15 @@ before(async () => {
   workspaceId = await createWorkspace(database.db);
   projectA = await createProject('Agent 检索项目');
 });
-after(async () => { await api?.stop(); await database.close(); });
+after(async () => { await api?.stop(); await database.close(); await fixtureDatabase.close(); });
 
 const path = (suffix: string) => workspacePath(workspaceId, suffix);
-async function command(suffix: string, body: Record<string, unknown>, status: 200 | 201 = 201) {
+async function command(suffix: string, body: Record<string, unknown>, status: 200 | 201 = 201,
+  method: 'POST' | 'PUT' = 'POST') {
   const commandId = String(body.command_id ?? randomUUID());
-  const response = await api.post(path(suffix), { ...body, command_id: commandId });
+  const response = method === 'POST'
+    ? await api.post(path(suffix), { ...body, command_id: commandId })
+    : await api.put(path(suffix), { ...body, command_id: commandId });
   return expectCommandAccepted(response, status, commandId);
 }
 async function createProject(title: string): Promise<string> {
@@ -94,4 +100,87 @@ test('同名知识产生新版本后，检索只返回当前版本而不是旧�
   const hit = candidates.find((candidate) => candidate.id === id);
   assert.equal(hit?.version, 2n);
   assert.equal(candidates.filter((candidate) => candidate.id === id).length, 1);
+});
+
+async function markSource(id: string, sourceUri: string | null, fileName: string | null) {
+  await sql`update knowledge_versions
+    set source_uri = ${sourceUri},
+      source_refs = ${JSON.stringify(fileName === null ? {} : { file_name: fileName })}::jsonb
+    where knowledge_id = ${id} and version = 1`.execute(fixtureDatabase.db);
+}
+
+test('仅来源 URI 命中也能进入候选集，不再被 WHERE 排除', async () => {
+  const suffix = randomUUID().slice(0, 8);
+  const created = await seed('普通资料', '无关正文。', projectA);
+  const id = created.knowledge_id as string;
+  await markSource(id, `https://docs.example/${suffix}/runbook`, null);
+  const candidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA, taskTitle: suffix, limit: 5
+  });
+  const hit = candidates.find((candidate) => candidate.id === id);
+  assert.equal(hit !== undefined, true);
+  assert.equal(hit?.reasons.includes('SOURCE_MATCH'), true);
+});
+
+test('仅来源文件名命中也能进入候选集', async () => {
+  const suffix = randomUUID().slice(0, 8);
+  const created = await seed('普通资料', '无关正文。', projectA);
+  const id = created.knowledge_id as string;
+  await markSource(id, null, `runbook-${suffix}.docx`);
+  const candidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA, taskTitle: suffix, limit: 5
+  });
+  assert.equal(candidates.some((candidate) => candidate.id === id &&
+    candidate.reasons.includes('SOURCE_MATCH')), true);
+});
+
+test('仅标签命中与仅集合命中都进入候选，且不依赖标题/正文', async () => {
+  const tagSuffix = randomUUID().slice(0, 8);
+  const tagItem = await seed('普通资料甲', '无关正文甲。', projectA);
+  const tagId = tagItem.knowledge_id as string;
+  await command(`/knowledge/${tagId}/tags`, { tags: [`zzTag${tagSuffix}`] }, 200, 'PUT');
+  const tagCandidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA, taskTitle: `zzTag${tagSuffix}`, limit: 5
+  });
+  const tagHit = tagCandidates.find((candidate) => candidate.id === tagId);
+  assert.equal(tagHit?.reasons.includes('TAG_MATCH'), true);
+  assert.equal(tagHit?.reasons.includes('TITLE_MATCH'), false);
+  assert.equal(tagHit?.reasons.includes('TEXT_MATCH'), false);
+
+  const collectionSuffix = randomUUID().slice(0, 8);
+  const collectionItem = await seed('普通资料乙', '无关正文乙。', projectA);
+  const collectionId = collectionItem.knowledge_id as string;
+  const collection = await command('/knowledge-collections',
+    { project_id: projectA, name: `zzColl${collectionSuffix}` });
+  await command(`/knowledge/${collectionId}/collections`,
+    { collection_ids: [collection.collection_id] }, 200, 'PUT');
+  const collectionCandidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA, taskTitle: `zzColl${collectionSuffix}`, limit: 5
+  });
+  const collectionHit = collectionCandidates.find((candidate) => candidate.id === collectionId);
+  assert.equal(collectionHit?.reasons.includes('COLLECTION_MATCH'), true);
+  assert.equal(collectionHit?.reasons.includes('TITLE_MATCH'), false);
+  assert.equal(collectionHit?.reasons.includes('TEXT_MATCH'), false);
+});
+
+test('标题与正文同时命中，验收目标也能成为有界检索信号', async () => {
+  const suffix = randomUUID().slice(0, 8);
+  const created = await seed(`Title${suffix}`, `Body${suffix}。`, projectA);
+  const id = created.knowledge_id as string;
+  const candidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA,
+    taskTitle: `Title${suffix} Body${suffix}`, limit: 5
+  });
+  const hit = candidates.find((candidate) => candidate.id === id);
+  assert.equal(hit?.reasons.includes('TITLE_MATCH'), true);
+  assert.equal(hit?.reasons.includes('TEXT_MATCH'), true);
+
+  const objective = `Objective${suffix}`;
+  const objectiveItem = await seed('目标资料', `验收目标专用 ${objective}。`, projectA);
+  const objectiveId = objectiveItem.knowledge_id as string;
+  const objectiveCandidates = await retrieveKnowledge(database.db, {
+    workspaceId, projectId: projectA, taskTitle: '与主题无关的任务',
+    taskObjective: objective, limit: 5
+  });
+  assert.equal(objectiveCandidates.some((candidate) => candidate.id === objectiveId), true);
 });
