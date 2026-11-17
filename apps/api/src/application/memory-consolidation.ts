@@ -34,10 +34,8 @@ export async function runMemoryConsolidation(db: DbExecutor, r: Repositories, in
 }): Promise<{ readonly status: 'COMPLETED' | 'SKIPPED'; readonly stats: MemoryConsolidationStats }> {
   let locked = false;
   try {
-    const lock = await sql<{ locked: boolean }>`select pg_try_advisory_xact_lock(
-      hashtextextended(${`memory-consolidation:${input.workspaceId}`}, 0)) as locked`
-      .execute(db);
-    locked = lock.rows[0]?.locked === true;
+    // 锁必须由 r 绑定的事务连接执行；在池上执行会在语句结束后立刻释放。
+    locked = await r.information.tryLockMemoryConsolidation(input.workspaceId);
   } catch {
     locked = false;
   }
@@ -49,7 +47,9 @@ export async function runMemoryConsolidation(db: DbExecutor, r: Repositories, in
   const runId = randomUUID();
   await r.information.insertMemoryMaintenanceRun({ id: runId, workspaceId: input.workspaceId,
     trigger: input.trigger });
-
+  const stats: MemoryConsolidationStats = { duplicate_groups: 0, superseded_duplicates: 0,
+    key_groups: 0, superseded_key: 0, stale_marked: 0, index_backfilled: 0 };
+  try {
   const chooseKeeper = (rows: readonly MemoryStateRow[]): MemoryStateRow => rows.slice().sort((left, right) => {
     if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
     const leftVerified = left.verification === 'VERIFIED' ? 1 : 0;
@@ -62,9 +62,6 @@ export async function runMemoryConsolidation(db: DbExecutor, r: Repositories, in
     if (left.confidence !== right.confidence) return right.confidence - left.confidence;
     return right.updated_at.getTime() - left.updated_at.getTime();
   })[0]!;
-
-  const stats: MemoryConsolidationStats = { duplicate_groups: 0, superseded_duplicates: 0,
-    key_groups: 0, superseded_key: 0, stale_marked: 0, index_backfilled: 0 };
 
   const duplicateGroups = await r.information.listDuplicateMemoryGroups(input.workspaceId, batch);
   stats.duplicate_groups = duplicateGroups.length;
@@ -94,10 +91,24 @@ export async function runMemoryConsolidation(db: DbExecutor, r: Repositories, in
     }
   }
 
+  /*
+   * 0167：生命周期按类型分开。用户偏好不自动陈旧（它描述稳定偏好，不是会过期的事实）；
+   * 事件/经验衰减更快；项目事实用工作区配置的窗口；未分类条目取中间值。
+   * 陈旧只影响自动召回排序/是否进入召回，不删除、不改正文，也不改验证状态。
+   */
   const staleDays = Math.min(Math.max(input.staleAfterDays ?? MEMORY_DEFAULTS.memoryStaleAfterDays,
     7), 3650);
-  const olderThan = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
-  stats.stale_marked = await r.information.markMemoriesStale(input.workspaceId, olderThan, batch);
+  const windows: readonly { type: string; days: number }[] = [
+    { type: 'EPISODIC', days: Math.min(staleDays, 30) },
+    { type: 'EXPERIENCE', days: Math.min(staleDays, 90) },
+    { type: 'PROJECT_FACT', days: staleDays },
+    { type: 'UNKNOWN', days: Math.min(staleDays, 120) },
+  ];
+  for (const window of windows) {
+    const olderThan = new Date(Date.now() - window.days * 24 * 60 * 60 * 1000);
+    stats.stale_marked += await r.information.markMemoriesStale(
+      input.workspaceId, window.type, olderThan, batch);
+  }
 
   const unindexed = await r.information.listUnindexedMemories(input.workspaceId, batch);
   for (const row of unindexed) {
@@ -112,6 +123,13 @@ export async function runMemoryConsolidation(db: DbExecutor, r: Repositories, in
   await r.information.finishMemoryMaintenanceRun({ id: runId, status: 'COMPLETED',
     stats, error: null });
   return { status: 'COMPLETED', stats };
+  } catch (error) {
+    // 失败必须收口，不能把 RUNNING 行留给下一次统计/租约去猜。
+    await r.information.finishMemoryMaintenanceRun({ id: runId, status: 'FAILED',
+      stats, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) })
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 /**

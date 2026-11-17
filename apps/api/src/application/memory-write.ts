@@ -4,7 +4,8 @@ import { sql } from 'kysely';
 import type { DbExecutor } from '../infrastructure/database.js';
 import type { Repositories } from './unit-of-work.js';
 import {
-  computeMemoryConfidence, detectSensitiveContent, memoryBodyTokens, memoryContentHash,
+  computeMemoryConfidence, containsInstructionOverride, detectSensitiveContent, memoryBodyTokens,
+  memoryContentHash,
   memoryOverlap, memoryTitleTokens, MEMORY_NEAR_DUPLICATE_THRESHOLD, memoryTrustRank,
   normalizeMemoryKey, normalizeMemoryText, parseMemoryType, type MemoryOrigin,
   type MemoryScope, type MemorySourceKind, type MemoryType, type MemoryVerification,
@@ -37,6 +38,15 @@ export interface PreparedMemoryCandidate {
   readonly instructionOverride: boolean;
 }
 
+export interface MemoryVersionInput {
+  readonly version: number;
+  readonly title: string;
+  readonly text: string;
+  readonly confirmedBy: string;
+  readonly confirmedAt?: Date | null;
+  readonly expiresAt?: Date | null;
+}
+
 export interface MemoryWriteInput {
   readonly workspaceId: string;
   readonly projectId: string | null;
@@ -53,13 +63,20 @@ export interface MemoryWriteInput {
   readonly verification?: MemoryVerification;
   readonly expiresAt?: Date | null;
   readonly pinned?: boolean;
+  /** 导入：已有版本的完整回放；缺省时只写当前版本 v1。 */
+  readonly versions?: readonly MemoryVersionInput[];
+  /** 导入：保留导出时的可信度（只在 0–100 内取值，不改变验证状态）。 */
+  readonly confidenceOverride?: number;
+  /** 导入：保留原验证时间；缺省按验证状态生成。 */
+  readonly verifiedAt?: Date | null;
 }
 
 export type MemoryWriteOutcome =
   | { readonly kind: 'CREATED'; readonly memoryId: string }
   | { readonly kind: 'SUPERSEDED'; readonly memoryId: string; readonly replacedId: string }
   | { readonly kind: 'DUPLICATE'; readonly existingId: string; readonly similarity: number }
-  | { readonly kind: 'CONFLICT'; readonly existingId: string; readonly reason: 'KEY_TRUST' | 'KEY_VERIFIED' }
+  | { readonly kind: 'CONFLICT'; readonly existingId: string;
+    readonly reason: 'KEY_TRUST' | 'KEY_VERIFIED' | 'KEY_PINNED' }
   | { readonly kind: 'REJECTED_SENSITIVE'; readonly kinds: readonly string[] };
 
 export function resolveMemoryScope(input: {
@@ -94,7 +111,9 @@ export function prepareMemoryCandidate(input: MemoryWriteInput): PreparedMemoryC
   const sourceKind = input.sourceKind;
   const verification: MemoryVerification = input.verification
     ?? (origin === 'HUMAN_CONFIRMED' ? 'VERIFIED' : 'UNVERIFIED');
-  const confidence = computeMemoryConfidence({ origin, sourceKind, verification });
+  const confidence = input.confidenceOverride === undefined
+    ? computeMemoryConfidence({ origin, sourceKind, verification })
+    : Math.min(Math.max(Math.round(input.confidenceOverride), 0), 100);
   const importance = Math.min(Math.max(Math.round(input.importance ?? 3), 1), 5);
   const contentHash = memoryContentHash(title, text);
   const titleTokens = memoryTitleTokens(title).join(' ');
@@ -107,7 +126,7 @@ export function prepareMemoryCandidate(input: MemoryWriteInput): PreparedMemoryC
     importance, verification, confidence, expiresAt: input.expiresAt ?? null,
     pinned: input.pinned ?? false, contentHash, titleTokens, bodyTokens,
     sensitiveKinds: sensitive.map((item) => item.kind),
-    instructionOverride: /忽略|无视|绕过|override|ignore|system prompt|系统提示词/iu.test(`${title}\n${text}`),
+    instructionOverride: containsInstructionOverride(`${title}\n${text}`),
   };
 }
 
@@ -127,7 +146,8 @@ export type MemoryWriteDecision =
   | { readonly kind: 'CREATE' }
   | { readonly kind: 'SUPERSEDE'; readonly existingId: string }
   | { readonly kind: 'DUPLICATE'; readonly existingId: string; readonly similarity: number }
-  | { readonly kind: 'CONFLICT'; readonly existingId: string; readonly reason: 'KEY_TRUST' | 'KEY_VERIFIED' };
+  | { readonly kind: 'CONFLICT'; readonly existingId: string;
+    readonly reason: 'KEY_TRUST' | 'KEY_VERIFIED' | 'KEY_PINNED' };
 
 /**
  * 写前裁决（纯函数）：
@@ -149,6 +169,11 @@ export function decideMemoryWrite(candidates: readonly MemoryStateRow[],
       .sort((left, right) => right.updated_at.getTime() - left.updated_at.getTime())[0];
   if (byKey !== undefined) {
     if (force) return { kind: 'SUPERSEDE', existingId: byKey.id };
+    // 固定记忆是用户明确要求每轮常驻的约束；自动观察不能顶掉它，哪怕置信度更高。
+    // 用户显式保存/导入（force）仍然可以替代，权限来自用户而不是模型。
+    if (byKey.pinned) {
+      return { kind: 'CONFLICT', existingId: byKey.id, reason: 'KEY_PINNED' };
+    }
     if (byKey.verification === 'VERIFIED' && candidate.verification !== 'VERIFIED') {
       return { kind: 'CONFLICT', existingId: byKey.id, reason: 'KEY_VERIFIED' };
     }
@@ -191,8 +216,8 @@ export async function createMemoryRecord(db: DbExecutor, r: Repositories, input:
   }
   // 同一作用域+键的并发写入串行化：先拿事务级 advisory lock，再读候选并裁决。
   const lockKey = `${input.workspaceId}:${candidate.scope}:${candidate.projectId ?? ''}:${candidate.taskId ?? ''}:${candidate.memoryKey ?? candidate.contentHash}`;
-  await sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
-    .execute(db);
+  // 锁必须走 r 绑定的事务连接；在池上另开一条连接会在语句结束后立刻释放，挡不住并发。
+  await r.information.lockMemoryWrite(lockKey);
   const candidates = await r.information.listMemoryWriteCandidates(input.workspaceId, {
     projectId: candidate.projectId, taskId: candidate.taskId,
     memoryType: candidate.memoryType, memoryKey: candidate.memoryKey,
@@ -213,15 +238,27 @@ export async function createMemoryRecord(db: DbExecutor, r: Repositories, input:
     taskId: candidate.taskId, agentId: candidate.agentId,
     memoryKey: candidate.memoryKey, importance: candidate.importance,
     confidence: candidate.confidence, verification: candidate.verification,
-    verifiedAt: candidate.verification === 'VERIFIED' ? new Date() : null,
+    verifiedAt: input.verifiedAt ?? (candidate.verification === 'VERIFIED' ? new Date() : null),
     pinned: candidate.pinned,
     supersedesId: decision.kind === 'SUPERSEDE' ? decision.existingId : null,
     contentHash: candidate.contentHash,
     searchTitleTokens: candidate.titleTokens, searchBodyTokens: candidate.bodyTokens,
+    instructionRisk: candidate.instructionOverride,
   });
-  await r.information.insertMemoryVersion({ id: randomUUID(), memoryId, version: 1n,
-    title: candidate.title, text: candidate.text, confirmedBy: input.actorRef,
-    expiresAt: candidate.expiresAt });
+  const versions = input.versions !== undefined && input.versions.length > 0
+    ? input.versions
+    : [{ version: 1, title: candidate.title, text: candidate.text,
+      confirmedBy: input.actorRef, expiresAt: candidate.expiresAt }];
+  let current = 1n;
+  for (const version of versions) {
+    current = BigInt(version.version);
+    await r.information.insertMemoryVersion({ id: randomUUID(), memoryId, version: current,
+      title: version.title.trim(), text: version.text.trim(), confirmedBy: version.confirmedBy,
+      expiresAt: version.expiresAt ?? null,
+      ...(version.confirmedAt === undefined ? {} : { confirmedAt: version.confirmedAt }) });
+  }
+  // 根表的 title/current_version 对齐到最后一条版本；历史版本仍保留在 memory_versions。
+  if (current !== 1n) await r.information.setMemoryCurrentVersion(memoryId, current, candidate.title);
   if (input.source !== undefined) {
     await r.information.insertMemoryMessageSource({ memoryId,
       sessionId: input.source.sessionId, messageId: input.source.messageId,

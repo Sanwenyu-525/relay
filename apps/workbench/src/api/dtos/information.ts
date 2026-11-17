@@ -293,6 +293,8 @@ export interface RelayMemory {
   readonly lastAccessedAt: string | null;
   readonly staleAt: string | null;
   readonly pinned: boolean;
+  /** 0167：正文含指令覆盖意图；只用于提示，不授予任何指令权限。 */
+  readonly instructionRisk: boolean;
   readonly supersedesId: string | null;
   readonly supersededById: string | null;
   readonly retiredReason: string | null;
@@ -308,6 +310,35 @@ export interface RelayMemoryMaintenanceRun {
   readonly finishedAt: string | null;
 }
 
+/** 0167：服务端真实游标分页；不把单页 200 条当成完整记忆库。 */
+export interface RelayMemoryPage {
+  readonly items: readonly RelayMemory[];
+  readonly nextCursor: string | null;
+  readonly pageSize: number;
+  readonly sort: "updated" | "created" | "importance";
+}
+
+export type RelayMemoryCaptureStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "EMPTY"
+  | "FAILED" | "CANCELLED";
+
+/** 0167：自动/显式捕获任务的真实状态，区分「已捕获 / 待捕获 / 失败 / 无可提取内容 / 已取消」。 */
+export interface RelayMemoryCaptureTask {
+  readonly id: string;
+  readonly kind: "AUTO" | "EXPLICIT";
+  readonly status: RelayMemoryCaptureStatus;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly sessionId: string;
+  readonly triggerMessageId: string;
+  readonly userMessageId: string | null;
+  readonly errorKind: string | null;
+  readonly lastError: string | null;
+  readonly result: Readonly<Record<string, unknown>>;
+  readonly nextAttemptAt: string;
+  readonly completedAt: string | null;
+  readonly createdAt: string;
+}
+
 /** 0164：管理页统计；全部来自服务端聚合与运行记录，不生成演示数字。 */
 export interface RelayMemoryStats {
   readonly total: number;
@@ -316,13 +347,28 @@ export interface RelayMemoryStats {
   readonly retired: number;
   readonly expired: number;
   readonly stale: number;
+  readonly unverified: number;
+  readonly failed: number;
+  readonly instructionRisk: number;
   readonly pinned: number;
   readonly storageBytes: number;
   readonly indexHealth: { readonly ftsIndexPresent: boolean; readonly unindexed: number };
-  readonly recall: { readonly last24h: number; readonly avgLatencyMs: number; readonly lastAt: string | null };
+  readonly recall: { readonly last24h: number; readonly avgLatencyMs: number | null;
+    readonly lastAt: string | null };
+  readonly capture: { readonly pending: number; readonly failed: number; readonly last24h: number };
   readonly maintenance: { readonly lastAt: string | null;
     readonly runs: readonly RelayMemoryMaintenanceRun[] };
   readonly types: readonly { readonly memoryType: RelayMemoryType; readonly count: number }[];
+}
+
+/** 0167：设置页只展示服务端声明的真实能力；HYBRID/Embedding 未实现。 */
+export interface RelayMemoryCapabilities {
+  readonly retrieval: { readonly literal: { readonly implemented: boolean;
+    readonly note: string }; readonly hybrid: { readonly implemented: boolean;
+      readonly note: string } };
+  readonly embedding: { readonly implemented: boolean; readonly note: string };
+  readonly capture: { readonly persistentTasks: boolean; readonly retryWithBackoff: boolean;
+    readonly preCompactionBarrier: boolean; readonly explicitRemember: boolean };
 }
 
 /** 历史修订保留当时的内容与有效期，不附加动态有效状态，也不随当前时间重新判定。 */

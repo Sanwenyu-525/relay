@@ -80,7 +80,7 @@ function fakeServer() {
       if (target === undefined) return response({ code: "RESOURCE_NOT_FOUND" }, 404);
       return response({ session_id: target.id,
         next_call: { reservation_tokens: 1_000_000, effective_window_tokens: 1_000_000,
-          model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_000_000,
+          model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_048_576,
           window_source: "MODEL_CATALOG", fallback_applied: false },
         last_call: null, compaction: contextCompactionWireFixture() });
     }
@@ -125,7 +125,7 @@ function fakeServer() {
 afterEach(() => { resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
 
 describe("会话导航链路的来源身份", () => {
-  it("A → 新建 → 首条建出 B；B 的浮层按 1M 模型窗口报数，没有档位单选；/new 建出 C", async () => {
+  it("A → 新建 → 首条建出 B；B 的浮层按实际生效阈值报数，没有档位单选；/new 建出 C", async () => {
     activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
     const server = fakeServer();
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => server.route(input, init)));
@@ -150,10 +150,10 @@ describe("会话导航链路的来源身份", () => {
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");
     await flush();
     expect(view.layer.findAll('[data-testid^="context-budget-option-"]')).toHaveLength(0);
-    expect(view.layer.get('[data-testid="context-compaction-window-row"]').text())
-      .toContain("1,000,000");
-    expect(view.layer.get('[data-testid="context-compaction-window-source"]').text())
-      .toContain("自动识别 · 模型目录");
+    // CONTEXT-USAGE-MINIMAL：窗口/来源行不再占默认面板；核心读数仍按实际生效阈值报数。
+    expect(view.layer.get('[data-testid="context-usage-current-threshold"]').text())
+      .toContain("350,000");
+    expect(view.layer.findAll('[data-testid="context-compaction-window-row"]')).toHaveLength(0);
 
     // 收起浮层，再从 B 发 `/new`：C 仍以 B 为来源。
     await view.wrapper.get('[data-testid="assist-context-meter"]').trigger("click");

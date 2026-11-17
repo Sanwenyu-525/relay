@@ -18,13 +18,12 @@ import '../../src/infrastructure/pg-types.js';
  * 这里只负责连接、随机库名与断言辅助。三种连接使用真实角色，不用超级用户冒充应用角色。
  */
 
-export const MIGRATIONS_DIRECTORY = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  '..',
-  'migrations',
-);
+/**
+ * 055：默认读取仓库迁移目录；`RELAY_TEST_MIGRATIONS_DIRECTORY` 只用于隔离验收，
+ * 让被并行未完成迁移阻塞的子系统仍能在临时库验证自己的迁移链。
+ */
+export const MIGRATIONS_DIRECTORY = process.env.RELAY_TEST_MIGRATIONS_DIRECTORY?.trim() ||
+  resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
 
 function requireEnvironment(name: string): string {
   const value = process.env[name]?.trim();

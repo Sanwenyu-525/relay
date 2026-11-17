@@ -10,18 +10,32 @@ import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, nullableString, object } from "../core/primitives";
 import { activityPageFrom, commandEnvelopeFrom, continuationComparisonFrom, continuationPointSummaryFrom, directoryWorkContextFrom, goalPageFrom, goalProjectListFrom, goalRecordFrom, goalWorkContextFrom, projectCreationFrom, projectFrom, projectGoalLinkDetailListFrom, projectListItemFrom, projectStateFrom, viewConfigurationFrom } from "../parse/projects";
-import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayViewConfiguration, RelayViewKind } from "../dtos/projects";
+import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectListItem, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayViewConfiguration, RelayViewKind } from "../dtos/projects";
 
 export async function getProject(http: RelayHttp, projectId: string): Promise<RelayProject> {
   return projectFrom(await http.request(http.workspacePath(`/projects/${encodeURIComponent(projectId)}`)));
 }
 
-export async function getProjectsPage(http: RelayHttp, status: "active" | "archived" | "all", cursor: string | null = null): Promise<RelayProjectPage> {
+export async function getProjectsPage(http: RelayHttp, status: "active" | "archived" | "all", cursor: string | null = null, limit?: number): Promise<RelayProjectPage> {
   const query = new URLSearchParams({ status });
   if (cursor !== null) query.set("cursor", cursor);
+  // limit 仅在调用方确有一次取回更多行的需要时传入（服务端上限 100）；不传沿用服务端默认。
+  if (limit !== undefined) query.set("limit", String(limit));
   const record = object(await http.request(`${http.workspacePath("/projects")}?${query.toString()}`), "project list");
   return { items: array(record, "items", "project list").map(projectListItemFrom),
     nextCursor: nullableString(record, "next_cursor", "project list") };
+}
+
+/**
+ * 按 Project ID 集合批量读摘要（任务页解析名称）：只返回给定 ID、当前 Workspace 内的事实。
+ * 与分页列表分开，避免「第一页 100 项目」漏掉早期项目；空集合不发请求。
+ */
+export async function getProjectSummariesByIds(http: RelayHttp,
+  ids: readonly string[]): Promise<readonly RelayProjectListItem[]> {
+  if (ids.length === 0) return [];
+  const query = new URLSearchParams({ ids: ids.join(",") });
+  const record = object(await http.request(`${http.workspacePath("/projects")}?${query.toString()}`), "project summaries");
+  return array(record, "items", "project summaries").map(projectListItemFrom);
 }
 
 export async function archiveProject(http: RelayHttp, input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {

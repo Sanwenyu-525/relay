@@ -135,7 +135,7 @@ test("supplement live agent + project tabs", async ({ page }) => {
     [`/projects/${LIVE_PROJECT}`, "projects-live-overview"],
     [`/projects/${LIVE_PROJECT}/tasks`, "projects-live-tasks"],
     [`/projects/${LIVE_PROJECT}/knowledge`, "projects-live-knowledge"],
-    [`/projects/${LIVE_PROJECT}/knowledge?kind=MEMORY`, "projects-live-knowledge-memory"],
+    [`/memory`, "memory-page-live"],
     [`/projects/${LIVE_PROJECT}/connections`, "projects-live-connections"],
     [`/projects/${LIVE_PROJECT}/workbench/general`, "projects-live-workbench-general"],
     [`/projects/${LIVE_PROJECT}/workbench/thesis`, "projects-live-workbench-thesis"],

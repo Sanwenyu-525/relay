@@ -1,4 +1,5 @@
 import type { DbExecutor } from '../infrastructure/database.js';
+import type { ProjectListRow } from '../project/project-repository.js';
 import type { ProjectType } from '../infrastructure/database-schema.js';
 import { toDecimalString } from '../shared/decimal.js';
 import { resourceNotFound } from './domain-error.js';
@@ -24,6 +25,19 @@ export interface ProjectSummaryDto extends ProjectDto {
   readonly next_action_task_id: string | null;
 }
 
+function toProjectSummaryDto(row: ProjectListRow): ProjectSummaryDto {
+  return {
+    id: row.id, title: row.title, project_type: row.project_type,
+    archived_at: row.archived_at?.toISOString() ?? null,
+    archive_status: row.archived_at === null ? 'ACTIVE' : 'ARCHIVED',
+    revision: toDecimalString(row.revision),
+    state_revision: toDecimalString(row.state_revision),
+    phase_key: row.phase_key,
+    next_action_task_id: row.next_action_task_id,
+    created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
+  };
+}
+
 export async function listProjects(
   db: DbExecutor,
   input: { readonly workspaceId: string; readonly status: 'active' | 'archived' | 'all';
@@ -35,19 +49,22 @@ export async function listProjects(
   const page = hasMore ? rows.slice(0, input.limit) : rows;
   const last = page.at(-1);
   return {
-    items: page.map((row) => ({
-      id: row.id, title: row.title, project_type: row.project_type,
-      archived_at: row.archived_at?.toISOString() ?? null,
-      archive_status: row.archived_at === null ? 'ACTIVE' : 'ARCHIVED',
-      revision: toDecimalString(row.revision),
-      state_revision: toDecimalString(row.state_revision),
-      phase_key: row.phase_key,
-      next_action_task_id: row.next_action_task_id,
-      created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
-    })),
+    items: page.map(toProjectSummaryDto),
     next_cursor: hasMore && last !== undefined
       ? { createdAt: last.cursor_created_at, id: last.id } : null,
   };
+}
+
+/**
+ * 任务页按 Project ID 集合取名称：只读给定 ID、Workspace 内、不造名称。
+ * 不存在的 ID 直接缺席，由调用方按「不可读」展示，而不是用一页分页去反推。
+ */
+export async function listProjectsByIds(
+  db: DbExecutor,
+  input: { readonly workspaceId: string; readonly ids: readonly string[] },
+): Promise<readonly ProjectSummaryDto[]> {
+  const rows = await createRepositories(db).projects.listProjectSummariesByIds(input);
+  return rows.map(toProjectSummaryDto);
 }
 
 export interface GoalDto {

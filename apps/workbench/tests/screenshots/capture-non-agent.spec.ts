@@ -45,7 +45,7 @@ test.describe("ui screenshots excluding agent and projects", () => {
     await page.goto("/knowledge");
     await page.waitForLoadState("networkidle").catch(() => {});
     await shot(page, "knowledge-base");
-    await safeClick(page, page.getByTestId("knowledge-tab-MEMORY").or(page.getByRole("tab", { name: "记忆" })));
+    await safeClick(page, page.getByTestId("knowledge-tab-DECISION").or(page.getByRole("tab", { name: "决定" })));
     await shot(page, "knowledge-tab");
     await safeClick(page, page.getByRole("button", { name: /添加|新建|上传|导入/ }));
     await shot(page, "knowledge-add-dialog-or-panel");

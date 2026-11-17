@@ -997,9 +997,37 @@ export interface MemoryRootRow extends InformationRootRow {
   readonly search_title_tokens: string;
   readonly search_body_tokens: string;
   readonly retired_reason: string | null;
+  /** 0167：正文含指令覆盖意图；只阻止自动召回，不授予任何指令权限。 */
+  readonly instruction_risk: boolean;
+  /** 0167：手动延长/缩短的有效期，优先于当前版本 expires_at。 */
+  readonly expires_at_override: Date | null;
 }
 
 export type MemoryItemRow = MemoryRootRow;
+
+/** 0167：一条持久捕获任务；状态与重试落库，区分失败与“无可提取内容”。 */
+export type MemoryCaptureTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'EMPTY' | 'FAILED' | 'CANCELLED';
+export interface MemoryCaptureTaskRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly project_id: string | null;
+  readonly session_id: string;
+  readonly trigger_message_id: string;
+  readonly user_message_id: string | null;
+  readonly kind: 'AUTO' | 'EXPLICIT';
+  readonly status: MemoryCaptureTaskStatus;
+  readonly attempts: number;
+  readonly max_attempts: number;
+  readonly next_attempt_at: Date;
+  readonly lease_until: Date | null;
+  readonly claimed_by: string | null;
+  readonly error_kind: string | null;
+  readonly last_error: string | null;
+  readonly result: JsonObject;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+  readonly completed_at: Date | null;
+}
 export interface MemorySettingsRow {
   readonly workspace_id: string;
   readonly recall_enabled: boolean;
@@ -1753,7 +1781,36 @@ export interface AssistMessageRow {
   readonly updated_at: Date;
 }
 
-/** 0132：一次写入落盘前按消息记录的路径前像。首写优先，不可改写。 */
+/**
+ * 0169：一次真实的第一方 Skill 执行事件。
+ *
+ * 它不是“用户选了哪个 Skill”的副本：`assist_messages.skill_snapshot` 记录选择与冻结定义，
+ * 这里记录执行生命周期（等待、运行、成功、失败、取消）以及脱敏后的输入/输出摘要。
+ * 普通 MCP/工具调用只进 `assist_session_tool_calls`，不得写这张表。
+ */
+export type AssistSkillInvocationStatus =
+  'REQUESTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export interface AssistSkillInvocationRow {
+  readonly id: string;
+  readonly workspace_id: string;
+  readonly session_id: string;
+  readonly message_id: string;
+  readonly invocation_key: string;
+  readonly ordinal: number;
+  readonly skill_id: string;
+  readonly skill_version: string;
+  readonly skill_sha256: string;
+  readonly status: AssistSkillInvocationStatus;
+  readonly input_summary: string | null;
+  readonly output_summary: string | null;
+  readonly error_kind: string | null;
+  readonly error_detail: string | null;
+  readonly requested_at: Date;
+  readonly started_at: Date | null;
+  readonly settled_at: Date | null;
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}
 /** 0132：一条用户消息「发送前」的受管根字节基线（迁移 0132，2026-10-24 按用户拍板口径）。 */
 export interface AssistMessageBaselineRow {
   readonly id: string;
@@ -2165,6 +2222,7 @@ export interface RelayDatabaseSchema {
   session_model_selection: SessionModelSelectionRow;
   assist_sessions: AssistSessionRow;
   assist_messages: AssistMessageRow;
+  assist_skill_invocations: AssistSkillInvocationRow;
   assist_plans: AssistPlanRow;
   assist_goals: AssistGoalRow;
   assist_goal_rounds: AssistGoalRoundRow;
@@ -2194,6 +2252,7 @@ export interface RelayDatabaseSchema {
   memory_versions: MemoryVersionRow;
   memory_recall_events: MemoryRecallEventRow;
   memory_maintenance_runs: MemoryMaintenanceRunRow;
+  memory_capture_tasks: MemoryCaptureTaskRow;
   decisions: DecisionRow;
   decision_versions: DecisionVersionRow;
   rules: RuleRow;

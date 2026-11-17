@@ -154,7 +154,7 @@ export default function KnowledgeReader({ client, knowledge, versions, initialVe
     <aside className="knowledge-reader__source" aria-label="来源与版本">
       <h2>来源与版本</h2>
       {content ? <><dl><dt>来源类型</dt><dd>{sourceLabels[content.sourceKind] ?? content.sourceKind}</dd>
-        <dt>范围</dt><dd>{content.projectId ? `项目 ${content.projectId}` : "工作空间"}</dd>
+        <dt>范围</dt><dd>{content.projectId ? "当前项目" : "工作空间共享"}</dd>
         <dt>保存时间</dt><dd><time dateTime={content.createdAt} title={timeZone}>{formatReadableDateTime(content.createdAt, timeZone)}</time></dd>
         <dt>所选版本</dt><dd>v{content.version}{content.version === content.currentVersion ? " · 当前" : " · 历史"}</dd></dl>
       {typeof artifactVersionId === "string" && <p><Link to={`/artifact-versions/${encodeURIComponent(artifactVersionId)}/lineage`}>查看确切产物版本来源</Link></p>}

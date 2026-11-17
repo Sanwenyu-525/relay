@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateRelayConnection, resetRelayConnectionForTest } from "../src/lib/relayConnection";
-import { flush, mountWorkbench } from "./mountApp";
+import { DomWrapper, flush, mountWorkbench } from "./mountApp";
 
 const baseUrl = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -26,6 +26,16 @@ function content(number: string, body: string) {
   return { ...version(number), title: "长篇资料", project_id: null, current_version: "2", source_uri: null,
     content_status: "FULL", content: body };
 }
+function pageOf(rows: readonly ReturnType<typeof knowledge>[]) {
+  return { items: rows.map((row) => ({ id: row.id, title: row.title, project_id: row.project_id,
+    status: row.status, revision: row.revision, current_version: row.current_version, summary: null,
+    source_kind: "NOTE", media_type: "text/plain", availability: "AVAILABLE", source_uri: null,
+    tags: [], collections: [], matched_fields: [], snippet: null,
+    created_at: row.created_at, updated_at: row.updated_at })), next_cursor: null };
+}
+function isPage(url: string): boolean {
+  return url.startsWith(`${base}/knowledge/page`);
+}
 function activate() {
   activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" });
 }
@@ -39,7 +49,7 @@ describe("知识版本阅读", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) return response(200, pageOf([knowledge()]));
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2"), version("1")]);
       if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`) return response(200,
@@ -54,9 +64,9 @@ describe("知识版本阅读", () => {
     expect(reader.get(".knowledge-reader__main").find('[aria-label="本文目录"]').exists()).toBe(false);
     expect(reader.get(".knowledge-reader__outline").text()).toContain("第一节");
     expect(reader.get('[aria-label="来源与版本"]').text()).toContain("v1 · 历史");
-    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(false);
-    expect((mounted.wrapper.get(".knowledge-search").element as HTMLDetailsElement).open).toBe(false);
-    expect((mounted.wrapper.get(".knowledge-management").element as HTMLDetailsElement).open).toBe(false);
+    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLElement).tagName).toBe("SECTION");
+    expect(mounted.wrapper.get('[data-testid="knowledge-search"]').exists()).toBe(true);
+    expect(mounted.wrapper.findAll(".knowledge-tabs [role=tab]")).toHaveLength(3);
     const directory = reader.get('[aria-label="本文目录"]').findAll("button");
     await directory[1].trigger("click");
     expect(directory[1].attributes("aria-current")).toBe("location");
@@ -65,40 +75,48 @@ describe("知识版本阅读", () => {
     await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click");
     await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("尚未保存的正文草稿");
     const draft = mounted.wrapper.get('[data-testid="knowledge-text"]').element;
-    await mounted.wrapper.get(".knowledge-library > summary").trigger("click");
-    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(true);
-    await mounted.wrapper.get(".knowledge-library > summary").trigger("click");
-    await mounted.wrapper.get(".knowledge-search > summary").trigger("click");
-    await mounted.wrapper.get(".knowledge-management > summary").trigger("click");
+    const manage = mounted.wrapper.findAll("button").find((item) => item.text() === "管理集合与标签");
+    expect(manage).toBeDefined();
+    await manage!.trigger("click");
+    await flush();
+    const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
+    expect(dialog.text()).toContain("知识集合");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     await flush();
     expect(mounted.wrapper.get('[data-testid="knowledge-text"]').element).toBe(draft);
     expect((draft as HTMLTextAreaElement).value).toBe("尚未保存的正文草稿");
     expect(reader.get("h1").text()).toBe("所选历史版本标题");
   });
 
-  it("搜索命中 v1 后仍打开确切 v1，不跟随当前 v2", async () => {
+  it("搜索命中后打开列表当前版本，并显示匹配字段", async () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) {
+        const q = new URL(url).searchParams.get("q");
+        const page = pageOf([knowledge()]);
+        return response(200, q === "旧版"
+          ? { ...page, items: [{ ...page.items[0]!, matched_fields: ["body"], snippet: "旧版正文摘录" }] }
+          : page);
+      }
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2"), version("1")]);
       if (url === `${base}/knowledge/${knowledgeId}/versions/2/content`) return response(200, content("2", "新版正文"));
-      if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`) return response(200, content("1", "搜索命中的旧版正文"));
-      if (url.startsWith(`${base}/search?`)) return response(200, { items: [{ type: "KNOWLEDGE", id: knowledgeId,
-        version: "1", title: "历史命中", snippet: "旧版正文", matched_fields: ["text"],
-        source_ref: `knowledge:${knowledgeId}:v1`, status: "ACTIVE", project_id: null }], next_cursor: null });
+      if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`) return response(200, content("1", "旧版正文"));
       throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="knowledge-search"]').setValue("旧版");
     await flush(300);
-    await mounted.wrapper.get(".knowledge-result").trigger("click");
+    const row = mounted.wrapper.get(".knowledge-row");
+    expect(row.text()).toContain("正文");
+    expect(row.text()).toContain("旧版正文摘录");
+    await row.trigger("click");
     await flush();
     expect(mounted.wrapper.get('[data-testid="knowledge-reader-version"]').element)
-      .toMatchObject({ value: "1" });
-    expect(mounted.wrapper.get('[data-testid="knowledge-reader-body"]').text()).toContain("搜索命中的旧版正文");
-    expect(mounted.wrapper.get('[data-testid="knowledge-reader-body"]').text()).not.toContain("新版正文");
+      .toMatchObject({ value: "2" });
+    expect(mounted.wrapper.get('[data-testid="knowledge-reader-body"]').text()).toContain("新版正文");
+    expect(mounted.wrapper.get('[data-testid="knowledge-reader-body"]').text()).not.toContain("旧版正文");
   });
 
   it("确切 v1 不回退当前 v2，切换时丢弃迟到正文；阅读不调用模型或外网", async () => {
@@ -107,7 +125,7 @@ describe("知识版本阅读", () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input); calls.push(url);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) return response(200, pageOf([knowledge()]));
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2"), version("1")]);
       if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`)
@@ -135,7 +153,7 @@ describe("知识版本阅读", () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input); calls.push(url);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) return response(200, pageOf([knowledge()]));
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2")]);
       if (url === `${base}/knowledge/${knowledgeId}/versions/1/content`) return response(404,
@@ -155,7 +173,7 @@ describe("知识版本阅读", () => {
     const dangerous = "# 安全标题\n<script>window.pwned=1</script>\n[恶意](javascript:alert(1))";
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) return response(200, pageOf([knowledge()]));
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, [version("2")]);
       if (url === `${base}/knowledge/${knowledgeId}/versions/2/content`) return response(200, content("2", dangerous));
@@ -174,7 +192,7 @@ describe("知识版本阅读", () => {
     const plain = "第一行中文\n" + "持续阅读的正文。".repeat(100);
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (isPage(url)) return response(200, pageOf([knowledge()]));
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200,
         [{ ...version("2"), media_type: "text/plain" }]);
@@ -195,9 +213,9 @@ describe("知识版本阅读", () => {
     let submitted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/knowledge` && init?.method !== "POST") {
+      if (isPage(url) && init?.method !== "POST") {
         listCount++;
-        return response(200, [knowledge(listCount === 1 ? "0" : "1", listCount === 1 ? "1" : "2")]);
+        return response(200, pageOf([knowledge(listCount === 1 ? "0" : "1", listCount === 1 ? "1" : "2")]));
       }
       if (url === `${base}/knowledge/${knowledgeId}`) {
         if (listCount === 1) return response(200, knowledge("0", "1"));
@@ -235,7 +253,7 @@ it("项目导读只读服务端编排，未保存时显示空态且不自行推�
       const url = String(input);
       if (url === `${base}/projects/${projectId}`) return response(200,
         { id: projectId, title: "项目甲", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
-      if (url === `${base}/knowledge?project_id=${projectId}` ||
+      if (isPage(url) || url === `${base}/knowledge?project_id=${projectId}` ||
           url === `${base}/decisions?project_id=${projectId}` ||
           url === `${base}/rules?project_id=${projectId}`) return response(200, []);
       if (url === `${base}/projects/${projectId}/goals`) return response(200, { items: [] });
@@ -268,7 +286,7 @@ it("项目导读只读服务端编排，未保存时显示空态且不自行推�
       const url = String(input);
       if (url === `${base}/projects/${projectId}`) return response(200,
         { id: projectId, title: "项目甲", project_type: "GENERAL", revision: "1", state_revision: "1", archived_at: null });
-      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (isPage(url) || url === `${base}/knowledge?project_id=${projectId}`) return response(200, isPage(url) ? pageOf([]) : []);
       if (url === `${base}/artifact-versions/${oldId}/content`)
         return new Promise<Response>((resolve) => { resolveOld = resolve; });
       if (url === `${base}/artifact-versions/${newId}/content`)

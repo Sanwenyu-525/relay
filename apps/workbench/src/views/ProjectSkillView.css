@@ -4,7 +4,8 @@
  * 背景：项目内页签与「打开项目工作台 / 下一段工作 / 有限任务链」三个跨页入口原本竖排两段，
  * 页签之前先出现一整行右对齐按钮，页头之上多出约 54px 空行，而且入口按钮与页签各自对齐
  * 到一条边。这里把它们收进同一条 scope 行：页签占左、入口贴右，共用一条底部分隔线；
- * 左右内缩沿用 .pv-page 的 32px，与页内标题形成同一条左右对齐边。不改路由与文案。
+ * UI-LAYOUT-AUDIT-20261115 起页内水平对齐基准是 .pv-page gutter（30px），
+ * scope 行不再自带 32px 水平内缩（那曾是 .page-primary 时代的双重内边距）。不改路由与文案。
  */
 
 .pv-page .project-scope-bar {
@@ -19,12 +20,12 @@
 .pv-page .project-scope-bar .skill-tabs {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0 var(--relay-layout-main-padding);
+  padding: 0;
   border-bottom: 0;
   flex-wrap: wrap;
 }
 
-/* 页签文字与页内标题同一条左缘（.page-primary 的 32px 内缩），点区靠行高维持。 */
+/* 页签文字与页内正文同一条左缘（.pv-page gutter），点区靠行高维持。 */
 .pv-page .project-scope-bar .skill-tab,
 .pv-page .project-scope-bar .skill-tabs .ui-tabs__item {
   min-height: 38px;
@@ -40,7 +41,7 @@
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  padding: 0 var(--relay-layout-main-padding) 9px;
+  padding: 0 0 9px;
 }
 
 /* 右栏动作下方的限制说明：原样贴着按钮（11px 注记像按钮副标题），补一行距。 */
@@ -61,16 +62,16 @@
 
   .pv-page .project-scope-bar .project-workbench-entry {
     justify-content: flex-start;
-    padding: 0 var(--relay-layout-main-compactPadding);
+    padding: 0;
   }
 }
 
 @media (width < 48rem) {
   .pv-page .project-scope-bar .skill-tabs {
-    padding: 0 var(--relay-layout-main-smallPadding);
+    padding: 0;
   }
 
   .pv-page .project-scope-bar .project-workbench-entry {
-    padding-inline: var(--relay-layout-main-smallPadding);
+    padding-inline: 0;
   }
 }

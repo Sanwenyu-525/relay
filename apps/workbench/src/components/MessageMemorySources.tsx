@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { RelayApiClient, RelayMessageMemoryUse } from "../api/relayClient";
+import type { RelayApiClient, RelayMemoryProvenance, RelayMessageMemoryUse } from "../api/relayClient";
 import { describeLiveError } from "../lib/liveErrors";
 import "./MemorySources.css";
 import { Button } from "../ui";
@@ -24,6 +24,15 @@ const selectionLabels: Record<string, string> = {
   LITERAL_MATCH: "按字面匹配自动召回",
   RECENT_CONFIRMED: "近期已确认回退"
 };
+
+/** 消息 role 后端为大写（USER/ASSISTANT/SYSTEM），展示层按语义归一，不能把用户原话标成助手。 */
+function roleLabel(role: string): string {
+  switch (role.toLowerCase()) {
+    case "user": return "用户";
+    case "system": return "系统";
+    default: return "助手";
+  }
+}
 
 export default function MessageMemorySources({ client, sessionId, messageId }: {
   readonly client: RelayApiClient;
@@ -107,11 +116,18 @@ export default function MessageMemorySources({ client, sessionId, messageId }: {
  *
  * 手工创建的记忆来源为空——这是合法事实，不是读取失败；历史版本也不会冒充当前版本。
  */
+const availabilityLabels: Record<string, string> = {
+  AVAILABLE: "原文可核对",
+  WITHDRAWN: "消息已撤回",
+  MISSING: "消息已不存在",
+  UNAVAILABLE: "来源不可读",
+  CONTENT_CHANGED: "正文与保存时不一致",
+};
+
 export function MemoryProvenancePanel({ client, memoryId }: {
   readonly client: RelayApiClient; readonly memoryId: string;
 }) {
-  const [sources, setSources] = useState<readonly { memoryVersion: string; sessionId: string;
-    messageId: string; contentSha256: string }[] | null>(null);
+  const [provenance, setProvenance] = useState<RelayMemoryProvenance | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestVersion = useRef(0);
@@ -120,9 +136,9 @@ export function MemoryProvenancePanel({ client, memoryId }: {
     const request = ++requestVersion.current;
     setLoading(true); setError(null);
     try {
-      const provenance = await client.getMemoryProvenance(memoryId);
+      const next = await client.getMemoryProvenance(memoryId);
       if (request !== requestVersion.current) return;
-      setSources(provenance.sources);
+      setProvenance(next);
     } catch (caught) {
       if (request !== requestVersion.current) return;
       setError(describeLiveError(caught).message);
@@ -132,8 +148,10 @@ export function MemoryProvenancePanel({ client, memoryId }: {
   }, [client, memoryId]);
 
   return <details className="memory-provenance" data-testid="memory-provenance"
-    onToggle={(event) => { if (event.currentTarget.open && sources === null && !loading && error === null) void read(); }}>
-    <summary>保存来源</summary>
+    onToggle={(event) => {
+      if (event.currentTarget.open && provenance === null && !loading && error === null) void read();
+    }}>
+    <summary>保存来源与证据</summary>
     <div className="message-memory-body">
       {loading && <p className="helper-text" role="status">正在读取保存来源…</p>}
       {error !== null && <div className="action-error" role="alert" data-testid="memory-provenance-error">
@@ -141,18 +159,44 @@ export function MemoryProvenancePanel({ client, memoryId }: {
         <Button variant="secondary" disabled={loading}
           onClick={() => void read()}>重新读取</Button>
       </div>}
-      {sources !== null && (sources.length === 0
-        ? <p className="helper-text" data-testid="memory-provenance-empty">
-          这条记忆没有消息来源：它是在资料页手工创建的。来源为空是事实，不会补造一条。</p>
-        : <ul className="message-memory-list" data-testid="memory-provenance-list">
-          {sources.map((source) => <li key={`${source.sessionId}:${source.messageId}:${source.memoryVersion}`}>
-            <span className="message-memory-ref">版本 v{source.memoryVersion}</span>
-            <span className="helper-text">会话 <code className="hash-code">{source.sessionId}</code> ·
-              消息 <code className="hash-code">{source.messageId}</code></span>
-            <span className="helper-text">原文摘要 <code className="hash-code">{source.contentSha256}</code></span>
-          </li>)}
-        </ul>)}
-      <p className="helper-text">来源记录的是保存那一刻的原消息与确切版本；之后的修订不会改写它。</p>
+      {provenance !== null && <>
+        <p className="helper-text">
+          来源：{provenance.origin === "AUTO_CAPTURE" ? "自动记住" : "人工确认"} ·
+          {" "}{provenance.sourceKind === "USER_STATEMENT" ? "用户原话"
+            : provenance.sourceKind === "MODEL_OBSERVATION" ? "模型观察"
+              : provenance.sourceKind === "MANUAL" ? "人工保存" : "来源未标注"} ·
+          {" "}验证：{provenance.verification === "VERIFIED" ? "已验证"
+            : provenance.verification === "FAILED" ? "明确失败" : "未验证"}
+        </p>
+        {provenance.sources.length === 0
+          ? <p className="helper-text" data-testid="memory-provenance-empty">
+            {provenance.origin === "AUTO_CAPTURE"
+              ? "这条自动记住的条目没有可核对的来源记录；来源缺失是事实，不会补造一条。"
+              : "这条记忆没有消息来源：它是在资料页手工创建的。来源为空是事实，不会补造一条。"}</p>
+          : <ul className="message-memory-list" data-testid="memory-provenance-list">
+            {provenance.sources.map((source) => <li key={`${source.sessionId}:${source.messageId}:${source.memoryVersion}`}>
+              <span className="message-memory-ref">版本 v{source.memoryVersion}</span>
+              <span className="helper-text">
+                {source.sessionTitle ?? "会话标题不可用"} · 会话 <code className="hash-code">{source.sessionId}</code>
+                {" "}· 消息 <code className="hash-code">{source.messageId}</code>
+                {source.role !== null && <> · {roleLabel(source.role)}</>}
+              </span>
+              <span className="message-memory-tag" data-availability={source.availability}>
+                {availabilityLabels[source.availability] ?? source.availability}
+              </span>
+              {source.sha256Matches === false &&
+                <span className="helper-text">原文哈希与保存时不一致，不能把当前正文当作当时的原话。</span>}
+              {source.excerpt !== null && source.excerpt !== "" &&
+                <span className="memory-source-excerpt">消息摘要：{source.excerpt}</span>}
+              {source.sourceQuote !== null && source.sourceQuote !== "" &&
+                <span className="memory-source-quote">保存时引用：“{source.sourceQuote}”</span>}
+              {(source.availability === "WITHDRAWN" || source.availability === "MISSING" ||
+                source.availability === "UNAVAILABLE" || source.availability === "CONTENT_CHANGED") &&
+                <span className="helper-text">这段原文不能作为当前证据使用，请按上方状态如实核对。</span>}
+            </li>)}
+          </ul>}
+        <p className="helper-text">来源记录的是保存那一刻的原消息与确切版本；之后的修订不会改写它。</p>
+      </>}
     </div>
   </details>;
 }

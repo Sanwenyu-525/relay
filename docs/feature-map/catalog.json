@@ -64,29 +64,29 @@
           "name": "阶段与显式项目状态",
           "description": "通过带修订的状态命令修改阶段和状态，保留业务依据。",
           "code": [
-        "apps/api/src/application/state-commands.ts",
-        "apps/api/src/application/state-queries.ts",
-        "apps/api/src/project/project-phase.ts",
-        "apps/workbench/src/components/ProjectStatePanel.tsx",
-        "apps/workbench/src/api/resources/projects.ts"
-      ],
-      "docs": [
-        "docs/architecture/domain-model.md",
-        "contracts/01-facts-and-ownership.md",
-        "docs/api/http-command-contract.md",
-        "docs/frontend/workbench-design.md"
-      ],
-      "prompts": [
-        "prompts/A-human-core.md"
-      ],
-      "tests": [
-        "apps/api/test/integration/api-state.integration.test.ts",
-        "apps/workbench/tests/projectManagementPanels.spec.tsx"
-      ],
-      "acceptance": [
-        "人工项目/任务/产物/完成与重开",
-        "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
-      ],
+            "apps/api/src/application/state-commands.ts",
+            "apps/api/src/application/state-queries.ts",
+            "apps/api/src/project/project-phase.ts",
+            "apps/workbench/src/components/ProjectStatePanel.tsx",
+            "apps/workbench/src/api/resources/projects.ts"
+          ],
+          "docs": [
+            "docs/architecture/domain-model.md",
+            "contracts/01-facts-and-ownership.md",
+            "docs/api/http-command-contract.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-state.integration.test.ts",
+            "apps/workbench/tests/projectManagementPanels.spec.tsx"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开",
+            "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
+          ],
           "intent": "current"
         },
         {
@@ -94,34 +94,34 @@
           "name": "工作空间目标列表",
           "description": "建立目标并提供跨项目的工作空间级目标查询。",
           "code": [
-        "apps/api/src/application/create-goal.ts",
-        "apps/api/src/application/goal-commands.ts",
-        "apps/api/src/api/project-api.ts",
-        "apps/api/src/api/project-maintenance-api.ts",
-        "apps/api/src/project/project-repository.ts",
-        "apps/workbench/src/views/GoalListView.tsx",
-        "apps/workbench/src/views/GoalDetailView.tsx",
-        "apps/workbench/src/api/resources/projects.ts"
-      ],
-      "docs": [
-        "docs/architecture/information-planning.md",
-        "docs/api/http-command-contract.md",
-        "docs/api/project-goal-maintenance.md",
-        "docs/frontend/workbench-design.md"
-      ],
-      "prompts": [
-        "prompts/A-human-core.md"
-      ],
-      "tests": [
-        "apps/api/test/integration/api-lists.integration.test.ts",
-        "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
-        "apps/workbench/tests/createGoalEntry.spec.ts",
-        "apps/workbench/tests/goalManagementLive.spec.tsx"
-      ],
-      "acceptance": [
-        "Goal 工作空间级列表与跨项目反向读（2026-10-01）",
-        "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
-      ],
+            "apps/api/src/application/create-goal.ts",
+            "apps/api/src/application/goal-commands.ts",
+            "apps/api/src/api/project-api.ts",
+            "apps/api/src/api/project-maintenance-api.ts",
+            "apps/api/src/project/project-repository.ts",
+            "apps/workbench/src/views/GoalListView.tsx",
+            "apps/workbench/src/views/GoalDetailView.tsx",
+            "apps/workbench/src/api/resources/projects.ts"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md",
+            "docs/api/project-goal-maintenance.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api-lists.integration.test.ts",
+            "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
+            "apps/workbench/tests/createGoalEntry.spec.ts",
+            "apps/workbench/tests/goalManagementLive.spec.tsx"
+          ],
+          "acceptance": [
+            "Goal 工作空间级列表与跨项目反向读（2026-10-01）",
+            "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
+          ],
           "intent": "current"
         },
         {
@@ -129,63 +129,63 @@
           "name": "项目与目标关联",
           "description": "关联或解除项目目标，保留目标作用域和在用约束。",
           "code": [
-        "apps/api/src/application/project-goal-links.ts",
-        "apps/api/src/api/project-api.ts",
-        "apps/workbench/src/views/GoalProjectLinkPanel.tsx",
-        "apps/workbench/src/views/GoalDetailView.tsx"
-      ],
-      "docs": [
-        "contracts/01-facts-and-ownership.md",
-        "docs/architecture/information-planning.md",
-        "docs/api/http-command-contract.md",
-        "docs/api/project-goal-maintenance.md"
-      ],
-      "prompts": [
-        "prompts/A-human-core.md"
-      ],
-      "tests": [
-        "apps/api/test/integration/api.integration.test.ts",
-        "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
-        "apps/workbench/tests/goalProjectLink.spec.ts",
-        "apps/workbench/tests/goalProjectLinkPagination.spec.tsx",
-        "apps/workbench/tests/goalManagementLive.spec.tsx"
-      ],
-      "acceptance": [
-        "人工项目/任务/产物/完成与重开",
-        "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
-      ],
+            "apps/api/src/application/project-goal-links.ts",
+            "apps/api/src/api/project-api.ts",
+            "apps/workbench/src/views/GoalProjectLinkPanel.tsx",
+            "apps/workbench/src/views/GoalDetailView.tsx"
+          ],
+          "docs": [
+            "contracts/01-facts-and-ownership.md",
+            "docs/architecture/information-planning.md",
+            "docs/api/http-command-contract.md",
+            "docs/api/project-goal-maintenance.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/api.integration.test.ts",
+            "apps/api/test/integration/project-goal-maintenance.integration.test.ts",
+            "apps/workbench/tests/goalProjectLink.spec.ts",
+            "apps/workbench/tests/goalProjectLinkPagination.spec.tsx",
+            "apps/workbench/tests/goalManagementLive.spec.tsx"
+          ],
+          "acceptance": [
+            "人工项目/任务/产物/完成与重开",
+            "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
+          ],
           "intent": "current"
         },
         {
-      "id": "goal-project-work-context",
-      "name": "目标与目录工作上下文",
-      "description": "只读汇集 Goal 关联项目、受管目录与普通会话，保留原 Session ID，不创建或重绑会话。",
-      "code": [
-        "apps/api/src/api/work-context-api.ts",
-        "apps/api/src/application/work-context-queries.ts",
-        "apps/api/src/project/work-context-repository.ts",
-        "apps/workbench/src/views/GoalDetailView.tsx",
-        "apps/workbench/src/views/DirectoryWorkContextView.tsx",
-        "apps/workbench/src/api/resources/projects.ts"
-      ],
-      "docs": [
-        "docs/api/goal-directory-work-context.md",
-        "docs/frontend/workbench-design.md"
-      ],
-      "prompts": [
-        "prompts/A-human-core.md"
-      ],
-      "tests": [
-        "apps/api/test/integration/work-contexts.integration.test.ts",
-        "apps/workbench/tests/goalManagementLive.spec.tsx"
-      ],
-      "acceptance": [
-        "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
-      ],
-      "intent": "current"
-    },
-    {
-      "id": "project-archive-fence",
+          "id": "goal-project-work-context",
+          "name": "目标与目录工作上下文",
+          "description": "只读汇集 Goal 关联项目、受管目录与普通会话，保留原 Session ID，不创建或重绑会话。",
+          "code": [
+            "apps/api/src/api/work-context-api.ts",
+            "apps/api/src/application/work-context-queries.ts",
+            "apps/api/src/project/work-context-repository.ts",
+            "apps/workbench/src/views/GoalDetailView.tsx",
+            "apps/workbench/src/views/DirectoryWorkContextView.tsx",
+            "apps/workbench/src/api/resources/projects.ts"
+          ],
+          "docs": [
+            "docs/api/goal-directory-work-context.md",
+            "docs/frontend/workbench-design.md"
+          ],
+          "prompts": [
+            "prompts/A-human-core.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/work-contexts.integration.test.ts",
+            "apps/workbench/tests/goalManagementLive.spec.tsx"
+          ],
+          "acceptance": [
+            "正式目标管理与项目状态写入（2026-10-24，任务书 P0–P2，当前 Agent 直接执行）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "project-archive-fence",
           "name": "归档与关联写入栅栏",
           "description": "归档项目时核对活动执行并阻止后续关联写入。",
           "code": [
@@ -736,10 +736,22 @@
             "apps/workbench/src/api/dtos/taskAcceptanceMaterials.ts",
             "apps/workbench/src/api/resources/taskAcceptanceMaterials.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/integration/task-acceptance-materials.integration.test.ts", "apps/workbench/tests/taskAcceptanceMaterialsClient.spec.ts"],
-          "acceptance": ["基础验收材料与试用记录（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/task-acceptance-materials.integration.test.ts",
+            "apps/workbench/tests/taskAcceptanceMaterialsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础验收材料与试用记录（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -754,10 +766,22 @@
             "apps/workbench/src/api/dtos/taskAcceptanceTrials.ts",
             "apps/workbench/src/api/resources/taskAcceptanceTrials.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/integration/task-acceptance-materials.integration.test.ts", "apps/workbench/tests/taskAcceptanceTrialsClient.spec.ts"],
-          "acceptance": ["基础验收材料与试用记录（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/task-acceptance-materials.integration.test.ts",
+            "apps/workbench/tests/taskAcceptanceTrialsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础验收材料与试用记录（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -772,10 +796,23 @@
             "apps/workbench/src/api/dtos/taskAcceptanceComparisons.ts",
             "apps/workbench/src/api/resources/taskAcceptanceComparisons.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/unit/task-acceptance-comparison.test.ts", "apps/api/test/integration/acceptance-comparisons.integration.test.ts", "apps/workbench/tests/taskAcceptanceComparisonsClient.spec.ts"],
-          "acceptance": ["基础验收试用比较（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/task-acceptance-comparison.test.ts",
+            "apps/api/test/integration/acceptance-comparisons.integration.test.ts",
+            "apps/workbench/tests/taskAcceptanceComparisonsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础验收试用比较（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -790,10 +827,23 @@
             "apps/api/migrations/0077_conversation_acceptance_time.sql",
             "apps/workbench/src/api/resources/stateMaintenance.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/unit/acceptance-time-statement.test.ts", "apps/api/test/integration/acceptance-time-conversation.integration.test.ts", "apps/workbench/tests/acceptanceTimeConversationClient.spec.ts"],
-          "acceptance": ["基础会话验收耗时补录（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/acceptance-time-statement.test.ts",
+            "apps/api/test/integration/acceptance-time-conversation.integration.test.ts",
+            "apps/workbench/tests/acceptanceTimeConversationClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础会话验收耗时补录（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -808,10 +858,23 @@
             "apps/workbench/src/api/dtos/hypotheses.ts",
             "apps/workbench/src/api/resources/hypotheses.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/unit/hypotheses.test.ts", "apps/api/test/integration/hypotheses.integration.test.ts", "apps/workbench/tests/hypothesesClient.spec.ts"],
-          "acceptance": ["基础假设记录与用户结论（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/hypotheses.test.ts",
+            "apps/api/test/integration/hypotheses.integration.test.ts",
+            "apps/workbench/tests/hypothesesClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础假设记录与用户结论（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -826,10 +889,22 @@
             "apps/workbench/src/api/dtos/decisionReviews.ts",
             "apps/workbench/src/api/resources/decisionReviews.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/integration/decision-reviews.integration.test.ts", "apps/workbench/tests/decisionReviewsClient.spec.ts"],
-          "acceptance": ["基础决定前提与复审（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/decision-reviews.integration.test.ts",
+            "apps/workbench/tests/decisionReviewsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础决定前提与复审（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -844,10 +919,23 @@
             "apps/workbench/src/api/dtos/workSegments.ts",
             "apps/workbench/src/api/resources/workSegments.ts"
           ],
-          "docs": ["docs/api/http-command-contract.md", "docs/database/physical-design-postgresql.md", "docs/architecture/domain-model.md", "docs/requirements/post-v1-roadmap.md"],
-          "prompts": ["prompts/evidence-and-investment.md"],
-          "tests": ["apps/api/test/unit/work-segments.test.ts", "apps/api/test/integration/work-segments.integration.test.ts", "apps/workbench/tests/workSegmentsClient.spec.ts"],
-          "acceptance": ["基础工作段预期与产出复盘（2026-10-14）"],
+          "docs": [
+            "docs/api/http-command-contract.md",
+            "docs/database/physical-design-postgresql.md",
+            "docs/architecture/domain-model.md",
+            "docs/requirements/post-v1-roadmap.md"
+          ],
+          "prompts": [
+            "prompts/evidence-and-investment.md"
+          ],
+          "tests": [
+            "apps/api/test/unit/work-segments.test.ts",
+            "apps/api/test/integration/work-segments.integration.test.ts",
+            "apps/workbench/tests/workSegmentsClient.spec.ts"
+          ],
+          "acceptance": [
+            "基础工作段预期与产出复盘（2026-10-14）"
+          ],
           "intent": "current"
         },
         {
@@ -1937,11 +2025,13 @@
         {
           "id": "context-knowledge-retrieval",
           "name": "资料与知识引用",
-          "description": "把选定知识、记忆、决定及来源版本纳入输入，保留适用范围。",
+          "description": "按任务/项目标题分词，多信号检索知识并在预算内注入；消息来源冻结确切知识 ID、版本与来源引用，权限先在 SQL 层过滤。",
           "code": [
             "apps/api/src/application/context-builder.ts",
             "apps/api/src/application/assist-runner.ts",
-            "apps/workbench/src/components/AssistSourcePicker.tsx"
+            "apps/workbench/src/components/AssistSourcePicker.tsx",
+            "apps/api/src/application/knowledge-retrieval.ts",
+            "apps/api/src/application/knowledge-model.ts"
           ],
           "docs": [
             "docs/architecture/runtime-context.md",
@@ -1953,7 +2043,8 @@
           ],
           "tests": [
             "apps/api/test/integration/context.integration.test.ts",
-            "apps/workbench/tests/assist-source-picker.spec.ts"
+            "apps/workbench/tests/assist-source-picker.spec.ts",
+            "apps/api/test/integration/knowledge-organization.integration.test.ts"
           ],
           "acceptance": [
             "M04 Files/Web→真实模型→人工完成",
@@ -3100,7 +3191,7 @@
     {
       "id": "knowledge-information",
       "name": "共享知识与长期信息",
-      "description": "管理知识、记忆、决定、规则及同源阅读和显式收录。",
+      "description": "管理知识资产、决策、规则及独立长期记忆；知识库与 Memory 分属不同领域，只在 Context 中协同。",
       "stageIds": [
         "M04",
         "M05",
@@ -3113,7 +3204,11 @@
           "description": "建立知识和后续正文版本，保留项目作用域和来源关系。",
           "code": [
             "apps/api/src/application/information-commands.ts",
-            "apps/api/src/information/information-repository.ts"
+            "apps/api/src/information/information-repository.ts",
+            "apps/api/src/application/knowledge-model.ts",
+            "apps/api/src/information/knowledge-repository.ts",
+            "apps/api/src/application/knowledge-commands.ts",
+            "apps/api/src/shared/search-tokens.ts"
           ],
           "docs": [
             "docs/architecture/information-planning.md",
@@ -3125,7 +3220,9 @@
           ],
           "tests": [
             "apps/api/test/integration/information.integration.test.ts",
-            "apps/api/test/integration/knowledge-reading.integration.test.ts"
+            "apps/api/test/integration/knowledge-reading.integration.test.ts",
+            "apps/api/test/unit/knowledge-model.test.ts",
+            "apps/api/test/integration/knowledge-organization.integration.test.ts"
           ],
           "acceptance": [
             "Today/三套工作台/知识/Trace/Lineage"
@@ -3139,7 +3236,10 @@
           "code": [
             "apps/api/src/application/information-queries.ts",
             "apps/workbench/src/components/KnowledgeReader.tsx",
-            "apps/workbench/src/views/KnowledgeView.tsx"
+            "apps/workbench/src/views/KnowledgeView.tsx",
+            "apps/workbench/src/components/KnowledgeOrganizationPanel.tsx",
+            "apps/workbench/src/components/KnowledgeFilters.tsx",
+            "apps/workbench/src/components/KnowledgeKindTabs.tsx"
           ],
           "docs": [
             "docs/architecture/information-planning.md",
@@ -3151,7 +3251,8 @@
           ],
           "tests": [
             "apps/api/test/integration/knowledge-reading.integration.test.ts",
-            "apps/workbench/tests/knowledgeReading.spec.ts"
+            "apps/workbench/tests/knowledgeReading.spec.ts",
+            "apps/workbench/tests/knowledgeViewPaginationRecovery.spec.tsx"
           ],
           "acceptance": [
             "Today/三套工作台/知识/Trace/Lineage"
@@ -3185,10 +3286,12 @@
         {
           "id": "memory-revisions",
           "name": "记忆与修订",
-          "description": "保存长期记忆及修订，保持当前可用事实和历史来源分离。",
+          "description": "保存长期记忆及修订，保持当前可用事实和历史来源分离；管理入口为独立 /memory 页面，不与知识库页签混用。",
           "code": [
             "apps/api/src/application/information-commands.ts",
-            "apps/api/src/information/information-repository.ts"
+            "apps/api/src/information/information-repository.ts",
+            "apps/workbench/src/views/MemoryView.tsx",
+            "apps/workbench/src/router.tsx"
           ],
           "docs": [
             "docs/architecture/information-planning.md",
@@ -3198,7 +3301,9 @@
             "prompts/D-context-product.md"
           ],
           "tests": [
-            "apps/api/test/integration/information.integration.test.ts"
+            "apps/api/test/integration/information.integration.test.ts",
+            "apps/workbench/tests/memoryView.spec.tsx",
+            "apps/workbench/tests/knowledgeTypedErrorPending.spec.tsx"
           ],
           "acceptance": [
             "Today/三套工作台/知识/Trace/Lineage"
@@ -3253,12 +3358,16 @@
         },
         {
           "id": "information-search",
-          "name": "基础资料搜索",
-          "description": "按作用域对知识、记忆、决定及规则提供中文文本搜索。",
+          "name": "知识多信号检索与中文搜索",
+          "description": "按作用域过滤后，用完整标题/正文/标签/集合/来源/项目多信号排序；中文按双字词元检索，候选池有界后再进入 Context 预算。",
           "code": [
             "apps/api/src/application/information-queries.ts",
             "apps/api/src/api/information-api.ts",
-            "apps/workbench/src/views/KnowledgeView.tsx"
+            "apps/workbench/src/views/KnowledgeView.tsx",
+            "apps/api/src/application/knowledge-queries.ts",
+            "apps/api/src/application/knowledge-model.ts",
+            "apps/api/src/information/knowledge-repository.ts",
+            "apps/api/src/shared/search-tokens.ts"
           ],
           "docs": [
             "docs/architecture/information-planning.md",
@@ -3269,7 +3378,9 @@
           ],
           "tests": [
             "apps/api/test/integration/information.integration.test.ts",
-            "apps/workbench/tests/knowledge.spec.ts"
+            "apps/workbench/tests/knowledge.spec.ts",
+            "apps/api/test/integration/knowledge-organization.integration.test.ts",
+            "apps/api/test/integration/context.integration.test.ts"
           ],
           "acceptance": [
             "Today/三套工作台/知识/Trace/Lineage"
@@ -3328,25 +3439,137 @@
           "intent": "current"
         },
         {
-          "id": "pdf-knowledge-import",
-          "name": "PDF 正文导入与定位",
-          "description": "根据真实资料样本核定正文提取、页码和扫描件边界后接入。",
-          "code": [],
+          "id": "knowledge-file-import",
+          "name": "资料文件导入与去重",
+          "description": "在服务端按真实格式提取 Markdown/TXT/PDF/DOCX/HTML 正文，按内容哈希与标题提示重复，由用户选择跳过、新版本或新知识。",
+          "code": [
+            "apps/api/src/application/knowledge-import.ts",
+            "apps/api/src/application/knowledge-commands.ts",
+            "apps/api/src/api/knowledge-api.ts",
+            "apps/workbench/src/components/KnowledgeImportPanel.tsx"
+          ],
           "docs": [
-            "docs/requirements/post-v1-roadmap.md",
-            "docs/frontend/workbench-design.md",
-            "docs/architecture/tool-adapters.md"
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design/part-03.md",
+            "docs/api/http-command-contract.md"
           ],
           "prompts": [
             "prompts/post-v1-collaboration.md",
             "prompts/E-real-adapters.md"
           ],
-          "tests": [],
-          "acceptance": [
-            "交互终端 / PDF 导入"
+          "tests": [
+            "apps/api/test/unit/knowledge-import.test.ts",
+            "apps/api/test/integration/knowledge-import.integration.test.ts"
           ],
-          "intent": "planned",
-          "note": "PDF、OCR、Office 和语义检索的范围须分别确认，当前网页导入不覆盖 PDF。"
+          "acceptance": [
+            "知识库导入与去重（2026-11-15）"
+          ],
+          "intent": "current",
+          "note": "扫描型 PDF 无文本层时返回 NO_TEXT，当前无 OCR；原始文件不持久化，只保存提取正文与来源元数据。"
+        },
+        {
+          "id": "knowledge-library-ia",
+          "name": "知识资产中心页面",
+          "description": "页头、真实概览、常驻搜索、类型导航、范围筛选、服务端游标列表与按需阅读器；Memory 不再出现在知识页。",
+          "code": [
+            "apps/workbench/src/views/KnowledgeView.tsx",
+            "apps/workbench/src/views/KnowledgeView.css",
+            "apps/workbench/src/components/KnowledgeFilters.tsx",
+            "apps/workbench/src/components/KnowledgeKindTabs.tsx",
+            "apps/workbench/src/api/resources/knowledge.ts"
+          ],
+          "docs": [
+            "docs/frontend/workbench-design/part-03.md",
+            "docs/architecture/information-planning.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/knowledge.spec.ts",
+            "apps/workbench/tests/knowledgeReading.spec.ts",
+            "apps/workbench/tests/knowledgeSimplify.spec.ts",
+            "apps/workbench/tests/uiRemediation20260928.spec.ts"
+          ],
+          "acceptance": [
+            "知识资产中心信息架构（2026-11-15）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "knowledge-collections-tags",
+          "name": "知识集合与规范标签",
+          "description": "Workspace/Project 两级集合命名空间与规范化标签；集合收纳不复制正文，标签不绕过知识范围。",
+          "code": [
+            "apps/api/migrations/0167_knowledge_organization.sql",
+            "apps/api/src/information/knowledge-repository.ts",
+            "apps/api/src/application/knowledge-commands.ts",
+            "apps/api/src/api/knowledge-api.ts",
+            "apps/workbench/src/components/KnowledgeOrganizationPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design/part-03.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/knowledge-organization.integration.test.ts",
+            "apps/workbench/tests/knowledge.spec.ts"
+          ],
+          "acceptance": [
+            "知识集合与标签（2026-11-15）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "knowledge-relations",
+          "name": "知识关联与版本引用",
+          "description": "用真实知识 ID 与目标版本建立五类关系，禁止自关联；删除/归档仍保留来源与历史。",
+          "code": [
+            "apps/api/migrations/0167_knowledge_organization.sql",
+            "apps/api/src/information/knowledge-repository.ts",
+            "apps/api/src/application/knowledge-commands.ts",
+            "apps/workbench/src/components/KnowledgeOrganizationPanel.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md"
+          ],
+          "prompts": [
+            "prompts/product-supplement-2026-09-27.md"
+          ],
+          "tests": [
+            "apps/api/test/integration/knowledge-organization.integration.test.ts"
+          ],
+          "acceptance": [
+            "知识关联（2026-11-15）"
+          ],
+          "intent": "current"
+        },
+        {
+          "id": "memory-independent-surface",
+          "name": "独立长期记忆页面",
+          "description": "Memory 使用 /memory 页面与 V2 数据模型；知识库只保留资料/决定/规则，旧 MEMORY 路由回落为资料页。",
+          "code": [
+            "apps/workbench/src/views/MemoryView.tsx",
+            "apps/workbench/src/router.tsx"
+          ],
+          "docs": [
+            "docs/architecture/information-planning.md",
+            "docs/frontend/workbench-design/part-03.md"
+          ],
+          "prompts": [
+            "prompts/D-context-product.md"
+          ],
+          "tests": [
+            "apps/workbench/tests/memoryView.spec.tsx",
+            "apps/workbench/tests/knowledgeTypedErrorPending.spec.tsx"
+          ],
+          "acceptance": [
+            "Knowledge/Memory 边界（2026-11-15）"
+          ],
+          "intent": "current"
         }
       ]
     },

@@ -105,12 +105,11 @@ test("round4c stay-on-page live shots", async ({ page }) => {
   }
   await shot(page, "activity-filter-applied-live", map);
 
-  // Knowledge MEMORY tab after in-place connect
-  await page.goto(`/projects/${IDS.projectId}/knowledge?kind=MEMORY`, { waitUntil: "domcontentloaded" });
+  // Memory is an independent surface after the Knowledge/Memory split.
+  await page.goto(`/memory`, { waitUntil: "domcontentloaded" });
   await connectHere(page);
   await page.waitForTimeout(800);
-  await page.getByTestId("knowledge-tab-MEMORY").click().catch(() => {});
-  await shot(page, "projects-live-knowledge-memory", map);
+  await shot(page, "memory-page-live", map);
 
   expect(true).toBeTruthy();
 });

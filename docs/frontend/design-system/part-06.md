@@ -230,6 +230,25 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 
 **2026-11-01 第五轮（用户指令：删两行＋中线对齐）**：上面两段里的「档位值 20px semibold」与「右缘对齐圆环右缘」**由本轮替代**。①「当前档位 N」标题行（含 20px 档位值与状态 chip）与「下次调用申请 N tokens」行删除，停靠区只留三档横排；当前值由单选态表达，保存中/待核对/失败仍由 `.context-usage-tier-state` 与 `role="alert"` 块说明，不再常驻「已保存」chip。②浮层水平落位由「右缘贴圆环右缘」改为**中线对准圆环中心**（左缘 = 环心 − 浮层宽/2），两侧各留 8px 视口边距；空间不足时夹住，并保证环心仍落在浮层覆盖范围内。垂直落位（贴环 7px / 翻面 / 夹进视口）不变。
 
+**2026-11-15 第二轮精简（CONTEXT-USAGE-COMPACT-2）**：默认首屏由五段收成三块 + 一个折叠入口，视觉规则如下。
+
+- **标题行承担总体状态**：`上下文用量` + 5px 圆点/12px 状态词（只在 warning／danger／running 时出现）+ `最近一次记录 HH:mm` + 24px 信息图标；正常态不显示「正常」徽标，避免每条读数带一枚状态。
+- **几何**：默认宽 360px（340–380 区间，窄视口按 `100vw − space-8` 夹位），`max-height: min(27.5rem, 60vh)`，内距 `space-3`，区块之间 6px（`space-2 − 2px`）；不画区块/行分隔线、不套卡片，数值 `tabular-nums`。默认三块：核心读数 / 自动压缩 / 上下文构成。
+- **压缩操作**：标题行内放 `text-button`「立即压缩」——`min-height: control.target.minimum` 24px、`padding: 0 space-1`、caption 12px、secondary 色、无边框/底色，hover 才上 `selection.hover`；`disabled` / `aria-busy="true"` 仍保持透明底，只降色或 0.7 透明度，busy 文案「正在提交」不改变标题行高度。`focus-visible` 用 `focus.width` 的 `focus.ring` 外描边，24px 命中区不缩小。它是辅助操作，不回到 40px secondary 按钮。
+- **构成行**：14px 图标 + 名称 + 右对齐 tokens + 2.5rem 份额；列头「tokens · 占比」合并单位，不再每行重复 tokens；覆盖、图片、估算/实报差额全部进「估算」Tooltip。六类同屏 + 6 位数值（112,000…11,200）时，图标/名称左对齐、Token/占比右对齐、行高与份额列宽一致，长名称 ellipsis；不缩正文字号/行高，不删名称或隐藏低占比分类。
+- **滚动**：整个面板只有 `.context-usage-scroll` 一个滚动容器。基础 `overflow-y:auto`；是否出现滚动条由真实溢出决定，不用 `:has([open])` 强制 `overflow-y:scroll`。`scrollbar-gutter:stable` 始终预留宽度：默认无溢出时只留空白 gutter、不画轨道，展开并溢出时正文宽度不跳动；滚动条为 6px 拇指/透明轨道（实际浏览器可能用 overlay 自动隐藏）。外层 `overflow:hidden`，禁止双层滚动。
+- **弹层语言**：阴影/圆角沿用 `shadow.floating` / `radius.panel`；高级区的容量公式与「最近一次调用」用 `bg.subtle` + `radius.control`，是面板内唯一的信息块，不新增第二层卡片。
+
+**2026-11-15 未知窗口圆环口径（CONTEXT-USAGE-UNKNOWN-WINDOW-FIX）**：上下文圆环只在模型窗口
+已确认时使用 `effectiveWindowTokens` 作分母；`UNKNOWN_FALLBACK`、`fallbackApplied` 或
+`modelWindowTokens === null` 任一成立时，轨道保持现有虚线，不画占用弧、不显示百分比，
+不让 262,144 回退值看起来像模型真实能力。实际输入 token 仍保留；`aria-label` 与 Tooltip
+使用「上下文 X tokens · 模型窗口未知，按安全回退估算」。已知窗口的百分比、80% 高占用与
+超限后缀不变；不新增常驻说明或第二套容量显示。360px 宽未知面板保持一行收敛说明，
+面板高度 188px。证据与验收归统一表的 `CONTEXT-USAGE-UNKNOWN-WINDOW-FIX` 行。
+
+**2026-11-15 极简化（CONTEXT-USAGE-MINIMAL）**：默认面板从「三块 + 折叠入口」再收成两段，视觉规则随之收敛。①标题行只留 `上下文用量` + 状态点/状态词（接近阈值、已达阈值、最近失败、正在压缩；正常不显示「正常」，已关闭只在正文压缩行出现一次），删除记录时间、来源与 24px 信息图标。②核心读数只留 `当前 / 实际生效阈值 tokens`、右侧占比、4px 进度条、距离行；删除来源标签、窗口轨道与构成。③自动压缩只留 `自动压缩 已开启/已关闭`；阈值被模型容量收敛且用户值不同时只补一行原因，窗口未知时只补一行「模型窗口未知，阈值按安全回退计算。」，失败只补错误码；删除设置/生效/目标三行、成功记录、减少量、手动按钮。④手动作业不进浮层，继续走输入器已有 `/compact` 命令菜单，底层 202/CAS/轮询/终态不变。⑤默认 DOM 无 `.context-usage-scroll`、无内部分段条/容量 details；只有浮层自身 `overflow-y:auto` 作为异常文案与极低窗口兜底，`overscroll-behavior:contain`，不再使用 `scrollbar-gutter:stable` 制造空白轨。⑥几何仍取宽 360px、`max-height:min(27.5rem,60vh)`、popover 圆角/阴影；内距 `space-4` 上下 / `space-3` 左右，根区间距 `space-4`，不新增字号/颜色 token。真实 Chromium 默认 360×162（收敛态 360×188，560×700 / 560×430 均 360×162），默认无滚动，较修改前 360×376 减少约 57%；未缩字号。证据见 `tmp/CONTEXT-USAGE-MINIMAL/`，验收归统一表的 `CONTEXT-USAGE-MINIMAL` 行。
+
 ### 9.24 开发期场景实验室的预览优先工作区（2026-10-31）
 
 场景实验室（`apps/workbench/src/dev/ScenarioLabView.tsx` + `ScenarioLab.css`）是开发构建里的全屏调试工作区，不套 `pv-page` 原型皮肤，也不建立第二套色板：所有颜色、字号、间距、圆角、阴影都取 `--relay-*` 变量。
@@ -472,3 +491,37 @@ CSS 仍保留 `min(30rem, 68vh)` 作为兜底，fixed 定位后它只影响未�
 - 新增规则：本地 `--relay-*` 只能由 token 派生（var/color-mix/calc/min/max/clamp）；新样式文件必须有调用方、不得新增全局选择器与 `!important`；新页面出现原生 button/input/select/textarea 且没有 `../ui` 导入即失败。
 - `EXEMPT_FILES` 登记三个不属工作台设计系统的文件：Tauri 透明 Overlay（自带霓虹色板）与两个 DEV 实验室。豁免必须写理由，并明确不参与计数。
 - 自动执行：`tests/uiConventions.spec.ts` 让默认 Vitest 套件执行守卫；`apps/workbench/package.json` 的 `build` 先跑守卫再 `tsc`/`vite build`。仓库没有 CI 工作流，构建入口就是本机事实上的门。
+
+## §9.37 工作台外壳与列表节奏精修（WORKSPACE-UI-POLISH，2026-11-15）
+
+以 1662×930 实窗 + 真实会话数据审查后，对工作台外壳做的一轮密度与状态层级收敛。未新增 token：所有数值由既有 space / selection / border 档派生。
+
+### 左栏「近期工作」节奏
+
+- 条目行高 `control.target.minimum`(24px) → **28px**（`calc(var(--relay-space-6) + var(--relay-space-1))`）。不下探 `control.height.compact`(32px)：24px 在实窗里把图标、标题、「未开始」与置顶徽标挤成一片，32px 又明显牺牲每屏行数，28px 是中间档且无需开新 token。
+- 竖向节奏一条线：**条目行距 space.1(4px) → 分组块间距 space.1(4px) → 根区（目标／会话／任务／已归档）间距 space.2(8px)**。根区间距此前与条目同档(2px)，四段结构断层读不出来。
+- 悬停/按下/选中的三级层级（此前倒挂）：悬停 = `color-mix(in srgb, var(--relay-color-selection-hover) 40%, var(--relay-color-bg-surface))`（≈#F2F8F4，轻于选中），按下 = `selection.hover` 全档，选中 = `selection.bg` + 激活条 + `selection.text`。条目、分组标题、根区标题三处共用同一悬停配方；图标导航补 `:active` 按下档。悬停只用底色、不做位移，因此悬停时行盒几何逐像素不变（`recentWorkRailDensity.spec.ts` 的 hover 稳定性断言继续守着）。
+- 取值理由：`bg.subtle`(#F8FAF7) 在白纸栏上几乎不可见，旧悬停直接借用 `selection.hover`(#E0EDE4) 又比选中底更深——与图标栏 2026-10-16 的覆写同因。40% 混合档不需要新 token，且守卫允许 `color-mix` 派生。
+
+### 会话切换浮层（顶栏「切换讨论」）
+
+- 固定宽 **22rem**（原 `max-content`：一条超长标题先把浮层顶到上限、再把整行内容一起省略）；`max-width: min(24rem, 100vw − space.8)` 防窄窗越界；`max-height: min(60dvh, 30rem)` + 内部滚动。
+- 条目两行结构：标题最多两行（`-webkit-line-clamp: 2`、`overflow-wrap: anywhere`），「当前／更新 时间／已结束」降到 caption 级次级行。此前整条单行省略，长标题一截断就先把更新时间和结束状态切掉。
+- 当前会话：`aria-current` + `selection.bg` 底色 + `selection.text` 标题，三重信号；完整措辞（含同标题消歧的更新时间与「当前」）保留在 `aria-label` / `title` 上，键盘 Blur/Esc 回焦行为不变。
+
+### 输入器描边三态
+
+- 静止 `border.separator` → 悬停 `border.control` → 聚焦／提交 `action.primary`。原静止态直接用 `border.control`(3:1)：卡片在浅色画布上始终重一圈，且悬停无档可升。提交窗口内 `data-busy` 仍锁定主色，不随焦点闪变（DEV-0110 契约不变）。
+
+### 工具面板
+
+- DevTools 页签条左右内边距 `space.1` → `space.2`，首末页签不贴面板边缘；页签高度、辅助页签图标化与关闭键位置不变。
+- 文件面板条目 `title` 补全「完整路径 · 字节数」，单行省略的路径可悬停读全。
+
+### 验证
+
+- Vitest：`uiConventions` 1/1（px 字号 32/32 基线不变、裸色值 0 新增）、`collaborationWorkspace` 96/96（含切换浮层结构与 aria-current）。
+- Chromium：`recentWorkRailDensity` 17/17（两条间距/悬停断言按新档更新并保留归因注释）、`composerPopupGeometry` + `composerSourcePanel` 9/10（1 红为 HEAD 即有的 client-diagnostics 上报）。
+- 视觉基线 28/29：项目详情红项经 HEAD 工作树二分定位到并行会话在途改动集，非本节引入。
+- 实窗截图：1662×930、1280×800、1024×768，CSS zoom 125%／150% 均无横向溢出与文字重叠；输入器三态边框计算值 #E8EEE8／#849185／#205D47 实测。
+- 未验：Windows/WebView2 实窗与真实 DPI 缩放；真实 AI 回复正文渲染（一次性验证集群无执行 worker）。证据见 `tmp/UI-POLISH-20261115/`。

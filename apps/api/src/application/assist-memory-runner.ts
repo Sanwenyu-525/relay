@@ -210,6 +210,15 @@ Promise<{ requestId: string; status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DIS
     if (await r.assistMemory.hasUnsettledTools(session.id, history.map((m) => m.id))) {
       throw new AssistMemoryUnavailable('MEMORY_UNRESOLVED_TOOL_STATE');
     }
+    /*
+     * 捕获屏障的执行侧复核：请求建立后仍可能有补登记/重试任务关联到即将覆盖的消息。
+     * 这类请求按 MEMORY_CAPTURE_PENDING 失败，原始消息与上一 Checkpoint 都保留；
+     * 捕获任务落定后，prepareMemoryCompaction 允许同一失败边界自动重试。
+     */
+    if (await r.information.countUnsettledCaptureTasks(
+      session.id, history.map((m) => m.id)) > 0) {
+      throw new AssistMemoryUnavailable('MEMORY_CAPTURE_PENDING');
+    }
     const sources = new Map<string, JsonObject>();
     for (const ref of previous?.sources ?? []) {
       if (typeof ref === 'object' && ref !== null && !Array.isArray(ref)) sources.set(JSON.stringify(ref), ref as JsonObject);

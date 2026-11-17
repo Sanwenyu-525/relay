@@ -1,83 +1,128 @@
-# 长期记忆系统 V2：测试报告
+# 长期记忆 V2 测试与验收记录
 
-本文记录 2026-11-15 本轮实际执行的测试与限制。测试通过只证明对应范围，不自动推广到真实 Provider、Windows、桌面安装或全量回归。
+本文件记录 MEMORY-ACCEPTANCE-20261115 第二轮（2026-11-16）的真实运行证据。测试使用真实 PostgreSQL 18.6、真实 HTTP API 与 Workbench；编译通过、fixture、截图存在本身都不单独构成验收。第一轮报告保留在 [B-fix-report](../../tmp/MEMORY-V2-20261115/B-fix-report.md)，本轮结论与剩余项见 [最终报告](../../tmp/MEMORY-V2-20261115/C-final-acceptance-report.md)。
 
-## 1. 运行方法
+## 1. 迁移与隔离
+
+| 数据库 | 用途 | ledger | 说明 |
+|---|---|---|---|
+| `relay_memory_final_20261115` | 全新迁移验证 | 170 行，最新 `0169_assist_skill_invocations` | 完整链一次应用；重复运行 `applied: []` |
+| `relay_memory_ui_final_20261116` | 浏览器/操作验收 | 170 行，最新 0169 | 28 条记忆、5 条捕获任务、4 条 Skill 事件、1 项目/会话/用户消息 |
+| `relay_memory_ui_20261115` | 第一轮旧 UI 库 | 0168 旧 checksum `8d3da836...` | 与当前 `4f918f35...` 不一致；不篡改 ledger、不强行应用 0169，本轮改用全新 UI 库 |
+| `relay_trial` | 真实库（只读） | 167 行，最新 `0166_memory_actor_sources` | 未获授权，本轮没有写入 0167/0168/0169 |
+
+`relay_memory_final_20261115` 中三条迁移 checksum：
+
+- `0167_knowledge_organization`：`95110df548ec183941d7bf9559cdb4cbbff69102b02368c37a90d2d3d9c2d4a6`
+- `0168_memory_capture_tasks`：`4f918f35212aee900f62db3339824cf5e839672c828745e23d7bf1661a5acd9c`
+- `0169_assist_skill_invocations`：`792fe233bdc9ef5074bf2fe14603594f1fef1277c2543f5fd3de1e69fd159f06`
+
+`0169` 已在隔离库核验表结构、`status` 白名单、`settled`/`RUNNING-started_at` 约束、`invocation_key` 唯一键、消息/会话索引和 `GRANT ... TO relay_app`。`migration.integration.test.ts` 的 `ALL_MIGRATIONS` 已补 0167/0168/0169。
+
+## 2. 后端集成测试
+
+命令：
 
 ```powershell
-# API 类型检查
-cd D:\Develop\Relay-Agent\apps\api
-pnpm run typecheck
-
-# V2 单元测试（先构建）
-pnpm exec tsc -p tsconfig.json
-node --test dist/test/unit/memory-system-v2.test.js
-
-# V2 真实 PG 集成测试（脚本会 build + 起临时 PG + 跑迁移 + 停库清理）
-cd D:\Develop\Relay-Agent
-powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 -TestFile memory-system-v2
-
-# 既有长期记忆回归
-powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 -TestFile memory-module
-
-# Workbench 类型检查/定向测试（避免并行 worker 崩溃）
-cd D:\Develop\Relay-Agent\apps\workbench
-pnpm run typecheck
-pnpm exec vitest run --no-file-parallelism tests/memoryStatus.spec.ts tests/memorySettings.spec.tsx tests/memoryStatusClient.spec.ts tests/memoryOrigin.spec.ts tests/memorySourceKind.spec.ts tests/memoryClient.spec.ts tests/memoryView.spec.tsx
+powershell -NoProfile -ExecutionPolicy Bypass -File apps/api/scripts/run-integration.ps1 `
+  -SkipBuild -UseCLocale -TestFile 'memory-system-v2,memory-module,memory-auto-capture,memory-status,assist-memory'
 ```
 
-## 2. 本轮实际结果
-
-| 检查 | 结果 | 说明 |
+| 测试文件 | 最新结果 | 覆盖 |
 |---|---|---|
-| API `typecheck` | **PASS** | `tsc --noEmit` exit 0 |
-| V2 单元 `memory-system-v2.test.ts` | **11/11 PASS** | 分词/tsquery、类型归一、key、hash、敏感、有效状态、置信度、类型提示、Jaccard、写前裁决 |
-| V2 集成 `memory-system-v2.integration.test.ts` | **9/9 PASS** | 真实 PG18.6、临时集群，迁移含 0164/0166；含固定记忆不受 topK 截断、删除后召回为 0 |
-| 既有 `memory-module.integration.test.ts` | **11/11 PASS** | 真实模型输入、关闭、作用域、来源撤销、问候不召回、短期隔离 |
-| `memory-auto-capture.integration.test.ts` | **13/14 PASS** | 唯一失败 `ASSIST_FREE_MODEL_NO_LONGER_ELIGIBLE`：OpenRouter 测试条目被当前并行模型目录资格逻辑拒绝，与本轮记忆写入无关 |
-| `context-compaction-threshold.integration.test.ts` | **7/9 PASS** | 2 条失败为并行 0165 上下文改造中的 `THRESHOLD→OVERFLOW`、`SESSION_TIER→UNKNOWN_FALLBACK` 期望变化，与本轮记忆代码无关 |
-| Workbench `typecheck` | **PASS** | UI 改动后 exit 0 |
-| 记忆相关 Workbench Vitest | **60/60 PASS** | 7 个文件，使用 `--no-file-parallelism` 避开 worker exit 134 |
-| 导航 Vitest | **19/19 PASS** | `navigation.spec.ts` + `navigationPlacement.spec.tsx` |
-| Workbench `build` | **PASS** | UI 一致性检查 + `tsc --noEmit` + Vite build exit 0；首次因 Node 堆不足 OOM，`NODE_OPTIONS=--max-old-space-size=8192` 后通过 |
-| 全量 API 单元 | **不作为干净基线** | 本轮曾运行 1288 项，1264 通过、22 失败；其中 V2 的 3 条已修复，但全量未在最终代码重跑。不能宣称全量通过 |
-| 全量 Workbench `pnpm test` | 未通过干净基线 | 并发 worker `exit 134`，非断言失败；定向 7 文件串行通过 |
-| 浏览器 E2E / 截图 | 未运行 | 无明暗主题、窄窗、长内容视觉证据 |
-| 性能基线 / 大数据检索 | 未运行 | 无延迟分布、Recall@K/Precision@K、GIN EXPLAIN |
-| 文档检查 | 既有失败，无本轮新增 | `check-docs` exit 1：25 条历史证据链接缺失；Memory/ADR-041 新文档无缺失链接 |
+| `memory-system-v2` | 9/9 PASSED | 显式/自动写入、去重与同键替代、敏感凭证、验证/固定、设置、HYBRID 拒绝、预算、整理、导入导出/删除、修订、作用域隔离 |
+| `memory-module` | 11/11 PASSED | 真实模型输入中的记忆、来源身份、设置回放、显式来源、撤回、revision |
+| `memory-status` | 3/3 PASSED | 有效状态、过期/停用过滤、默认 ALL 与项目隔离 |
+| `memory-auto-capture` | 19/19 PASSED（16.4s） | 结算后落库、寒暄不提、关闭捕获、显式记住隔离、敏感/会话关闭回执、真实子进程崩溃、幂等、失败账本、并发去重、冻结模型路由、OpenRouter 资格 |
+| `assist-memory` | 最新全量 0/29；前次 25/29；定向 2/2 PASSED | 压缩、Checkpoint、来源撤回、捕获屏障、自动压缩延迟/恢复、工具上下文、预算、恢复 |
 
-## 3. 已覆盖场景
+`assist-memory` 最新全量 0/29 的根因仍是测试环境：首条 10,000 轮压缩用例在 `startTestApi` 阶段等待 30 秒仍未监听（子进程 alive、217 次探测 `ECONNREFUSED 127.0.0.1:10350`），后续 28 条级联；前一次 25/29 是同一 `manual HTTP compaction ... restart` 重启用例超时 + 3 条 `ECONNREFUSED`。单独运行该重启用例与捕获屏障用例为 **2/2 PASSED**。本轮更早在无并行构建负载时曾全量 **29/29 PASSED（约 186s）**；最新全量失败不能写成“全绿”，最终报告将其列为残余验证风险。
 
-- 写入：显式创建、同内容重复拒绝、同键替代链、低可信冲突、敏感凭证拒绝、固定/取消固定、人工验证、修订不继承旧验证且清除旧陈旧标记；
-- 作用域：项目隔离、工作空间记忆对项目可见、Task 不存在拒绝、Task 存在进入 TASK；
-- 设置：新字段持久化、预算裁剪、topK、HYBRID 降级记录；
-- 整理：确定性去重/同键合并、陈旧标记、索引回填、`memory_maintenance_runs` 真实运行；
-- 数据：导出/导入、真实删除后列表/统计与召回均为 0；
-- UI：列表/统计真实加载、筛选发起真实 GET、新建提交真实 POST、设置卡与导航；
-- 既有：记忆进入真实模型输入、关闭后不召回、来源撤回、问候不误召回。
+`memory-auto-capture` 的真实崩溃测试：
 
-## 4. 未覆盖场景与已知限制
+- 场景 A：子进程领取任务并进入 RUNNING 后 `taskkill /F /T`，3 秒租约过期，新 Worker `recoverExpired` 回收、重新领取并 SUCCEEDED；`attempts=2`，只写 1 条记忆、1 条来源；
+- 场景 C：子进程在“记忆已提交、任务未结算”之间由 `beforeSettle` 注入点挂起，父进程看到 `CHILD_WRITTEN` 后 `taskkill`；重启后重放命中去重，返回 `{ duplicate: true, memoryId }`，任务 SUCCEEDED 且只保留 1 条记忆。这里进程被 OS 强制终止，但暂停窗口由测试注入点固定，不等同于完全无注入的真实崩溃；
+- `forceKill()` 使用 `spawnSync('taskkill','/F','/T','/PID',...)`，不依赖 Node 的 `child.kill`。
 
-- 语义检索：没有 Embedding Provider 适配；`HYBRID` 当前只验证降级，不验证真实语义召回。
-- Agent 作用域：只有数据库列与约束，无多 Agent 身份/共享模型，UI 不创建。
-- 上下文压缩前的真实模型候选提取：未做真实 Provider 质量/成本测试；仅既有压缩链与记忆模块回归。
-- 任务恢复：依赖既有 Checkpoint；未新增“记忆摘要替代工具状态”的反例测试。
-- 并发压力：写入 advisory lock、多进程整理、索引重建中的并发未压测；`array_agg`/复合外键/`numAffectedRows` 未做专项数据库契约测试。
-- 性能：无 10k/100k 记忆量下的检索延迟、索引计划与 Token 成本基线；不声称性能数字。
-- 全量 UI：未验证暗色主题（产品当前无）、125%/150%/200% DPI、窄窗、长内容、浏览器 E2E 删除/导入/导出回执。
-- 导入：本轮新增 task_id 保留与 UUID/作用域校验，但未补 Task 往返集成用例；项目/工作空间既有导入用例通过。
-- 跨进程崩溃：未注入“根写入成功、索引失败”“进程退出 midway”“导入中断”等故障；依赖事务回滚，无专门恢复测试。
-- 真实 Provider：无有效外部凭据，自动提取与压缩质量 BLOCKED；不把受控 Fake 当 Provider 验收。
+`assist` 相关：Skill 事件持久化用例 1/1 PASSED；扩展后的 `assist HTTP surface` 2/2 PASSED（USER 消息无任务时 `memory_capture=null`；助手消息 AUTO 从 EMPTY → PENDING → SUCCEEDED，`saved_count=1`；Skill 摘要字段可见）。
 
-## 5. 已知失败与归因
+## 3. 压缩前捕获屏障
 
-1. `memory-auto-capture` 的 OpenRouter 用例：当前模型目录资格逻辑在测试条目上返回 `ASSIST_FREE_MODEL_NO_LONGER_ELIGIBLE`。该用例是既有冻结路由回归，非 V2 记忆写入；本轮未改模型目录代码。
-2. `context-compaction-threshold` 两条：期望 `THRESHOLD`/`SESSION_TIER`，实际 `OVERFLOW`/`UNKNOWN_FALLBACK`，与并行 0165 上下文改造同时间窗；本轮未改压缩代码。
-3. 全量 Workbench 测试 worker `exit 134` 是运行环境/并发问题，定向串行 60/60 通过；不能据此说全量通过。
-4. 全量 API 单元曾 22 失败；V2 相关 3 条已修，但其余未逐项复核，不能把 1264/1288 当作最终干净基线。
+真实集成覆盖：
 
-## 6. 证据边界
+1. 会话产生正常对话轮，捕获任务在即将被覆盖的旧轮（`fixture(17)`、`seq 26`）保持 PENDING；
+2. 手动压缩返回 409 `MEMORY_CAPTURE_PENDING`；
+3. 自动压缩遇到范围内 PENDING/RUNNING：当前消息照常 COMPLETED，原始 36 条消息不删，Checkpoint 保持 `null`，自动请求持久化为 deferred；
+4. 捕获任务 SUCCEEDED 后，捕获 tick 恢复压缩请求，Checkpoint 提交到 `through_seq=26`，当前轮 35/36 保持原文，消息总数仍 36；
+5. 任务置终态后不创建重复压缩请求；压缩模型失败保留原始消息与上一个有效 Checkpoint；
+6. 手动屏障用例结束时取消自己建立的压缩请求，避免污染后续全局 tick。
 
-- “PASS”只对应表中命令与文件，不替代独立验收、桌面安装、真实 Provider 或全量回归。
-- 真实 PG 集成测试的临时集群跑完即停并删除；迁移 `0164/0166` 已在该集群应用。
-- 真实 UI 未启动浏览器；`MemoryView` 的两条 Vitest 使用真实客户端解析与 DOM，但 API 由请求桩提供，不替代真实 HTTP/浏览器。
+## 4. Workbench 单元测试与静态检查
+
+| 文件 | 结果 | 覆盖 |
+|---|---|---|
+| `tests/messageExecutionTraces.spec.tsx` | 3/3 PASSED | 无任务不渲染、AUTO+EXPLICIT 聚合、Skill 多事件 |
+| `tests/memoryView.spec.tsx` | 2/2 PASSED | 真实列表/统计、筛选与新建命令 |
+| `tests/assistMemoryView.spec.ts` | 4/4 PASSED | 聊天页不恢复旧记忆控制带、斜杠命令路由 |
+| `tests/memoryStatusClient.spec.ts` | 4/4 PASSED | 有效状态查询参数 |
+| API `tsc --noEmit` | EXIT=0 | 本轮代码 |
+| Workbench `tsc --noEmit` | EXIT=0 | 本轮代码 |
+
+`tests/memoryStatus.spec.ts` 是 2026-10 的旧 `/knowledge?kind=MEMORY` 页面测试，仍引用已删除的 `.knowledge-row`、`knowledge-*` selector；当前产品使用 `/memory`，本轮未改该文件，因此 8/8 失败。它不等于新页面回归失败，但“Workbench 全量测试全绿”尚未成立。相关新页面由 `memoryView.spec.tsx` 和真实浏览器证据覆盖。
+
+## 5. 浏览器 E2E（真实 API + 真实 PostgreSQL）
+
+真实栈：Workbench `http://127.0.0.1:4174`、API `http://127.0.0.1:3099`、PostgreSQL `127.0.0.1:12525/relay_memory_ui_final_20261116`。聊天四档由 `bu` 浏览器驱动；记忆页四档与轮询由项目自带 Playwright（headless Chromium）驱动，最终脚本 `browser-acceptance.mjs` 输出 `errors=[]`。
+
+四档视口结果：
+
+| 视口 | `innerWidth` | `documentElement.scrollWidth` | `body.scrollWidth` | 横向溢出 |
+|---|---|---|---|---|
+| 1660×895 | 1660 | 1660 | 1660 | 无 |
+| 1280×800 | 1280 | 1280 | 1280 | 无 |
+| 1024×768 | 1024 | 1024 | 1024 | 无 |
+| 768×900 | 768 | 768 | 768 | 无 |
+
+捕获面板异步刷新实测：
+
+- 展开后立即读取，捕获请求数 2；
+- PENDING 可见；
+- 在数据库中把任务置为 SUCCEEDED，7.5 秒内列表显示“已捕获”，请求数 3；
+- 同拍刷新统计：顶部“捕获待处理”从 1 变为 0，不再保留列表“已捕获”、头部“待处理 1”的旧状态；
+- 再等 7 秒仍为 3，终态后停止轮询；
+- `document.hidden` 跳过刷新、卸载清 timer 由代码路径与页面状态共同验证。
+
+截图在 `tmp/MEMORY-V2-20261115/screenshots/`：
+
+| 文件 | 内容 |
+|---|---|
+| `chat-trace-expanded-1660x895.png` | 聊天轨迹，1660 |
+| `chat-trace-expanded-1280x800.png` | 聊天轨迹，1280 |
+| `chat-trace-expanded-1024x768.png` | 聊天轨迹，1024 |
+| `chat-trace-expanded-768x900.png` | 聊天轨迹，768；捕获与失败 Skill 已展开 |
+| `memory-final-1660x895.png` | 记忆页，1660 |
+| `memory-final-1280x800.png` | 记忆页，1280 |
+| `memory-final-1024x768.png` | 记忆页，1024 |
+| `memory-final-768x900.png` | 记忆页，768；筛选改 2 列，无文字截断 |
+| `memory-capture-pending-1280x800.png` | 捕获面板 PENDING |
+| `memory-capture-settled-1280x800.png` | 同一面板已捕获，顶部统计同步“捕获待处理 0” |
+
+768 宽度原先筛选下拉被省略号截断；本轮把 54rem 以下改为 2 列后，`全部类型/全部验证状态/全部有效状态/全部来源/全部来源类型/全部工作空间` 完整显示，且仍无横向溢出。
+
+## 6. 性能
+
+本轮没有重跑 10,000 条性能基线；第一轮局部数据仍只代表当时临时库与单机环境，不作为 SLA：列表 p50 36.3ms / p95 126.1ms，统计 p50 38.4ms，选择性 FTS `EXPLAIN` 命中 GIN 4.2ms。第二轮新增的 6 秒轮询只在面板展开且存在 PENDING/RUNNING 时发生，终态即停；未做并发、冷缓存、网络故障压测。
+
+## 7. 未验证与未实现
+
+- **真实库迁移未执行**：`relay_trial` ledger 仍 0166；0167/0168/0169 只在隔离库验证，未经授权不写真实库。
+- **`assist-memory` 最新全量不是全绿**：最新 0/29（首条 10,000 轮压缩的测试 API 30 秒未监听、后续级联）；前次 25/29 为同一 API 重启用例超时；定向 2/2 通过，早前非并发全量 29/29 通过；并行 Tauri 构建会放大该环境敏感性。
+- **`memoryStatus.spec` 8/8 失败**：旧路由/旧 selector 的既有测试，未改动，未用删测试或放宽断言掩盖。
+- **聊天四档由 `bu`、记忆页四档由 Playwright 采集**：两种浏览器路径都连接真实服务，但并非同一次页面会话内完成全部四档；WebView2/Windows 桌面窗口未验。
+- **Skill 轨迹只覆盖第一方 Skill**：普通 MCP/文件工具仍在 `assist_session_tool_calls`，不会显示为 Skill；输入/输出只存脱敏截断摘要，不验证完整敏感参数审计。
+- **崩溃场景 C 有测试注入点**：OS 强制终止真实，但暂停窗口由 `beforeSettle` 固定，不能写成完全无注入的自然崩溃。
+- **未做全量 Workbench Vitest、全量 `assist` 集成、并发/冷缓存/网络故障性能压测**；这些不因定向通过而升级为全量验收。
+
+## 8. 结论边界
+
+本轮功能交付与真实证据覆盖显式/开关隔离、自动压缩屏障、真实子进程崩溃恢复、消息级捕获状态、Skill 事件持久化/展示、记忆页异步刷新和 OpenRouter 资格修复。仍按上述未验证项保留 **PARTIAL / B+** 边界；不把编译、fixture、截图或定向用例替代全量验收。完整证据、文件清单与完成度评级见 [最终报告](../../tmp/MEMORY-V2-20261115/C-final-acceptance-report.md)。

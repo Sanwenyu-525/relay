@@ -1,5 +1,9 @@
 import type { RelayContextCompaction } from "../src/api/dtos/assist";
 
+/** 产品目标窗口是十进制 1M；默认连接单次调用预算是 1,048,576，不是产品目标本身。 */
+const PRODUCT_TARGET_TOKENS = 1_000_000;
+const DEFAULT_PROVIDER_CALL_BUDGET_TOKENS = 1_048_576;
+
 /**
  * 上下文压缩投影的测试夹具（0162 / 0165）。
  *
@@ -13,13 +17,37 @@ export function contextCompactionFixture(
 ): RelayContextCompaction {
   return { enabled: true, thresholdTokens: null, defaultThresholdTokens: 350_000,
     recommended: { min: 256_000, max: 400_000 }, requestedThresholdTokens: 350_000,
-    effectiveThresholdTokens: 350_000, thresholdClamped: false, targetWindowTokens: 1_000_000,
+    effectiveThresholdTokens: 350_000, thresholdClamped: false, targetWindowTokens: PRODUCT_TARGET_TOKENS,
     modelWindowTokens: 1_000_000, windowSource: "MODEL_CATALOG",
-    providerCallCapTokens: 1_000_000, fallbackApplied: false, effectiveWindowTokens: 1_000_000,
+    providerCallCapTokens: DEFAULT_PROVIDER_CALL_BUDGET_TOKENS, fallbackApplied: false,
+    effectiveWindowTokens: 1_000_000,
     outputReserveTokens: 8_192, protocolOverheadTokens: 8_192, safetyReserveTokens: 50_000,
     safeInputTokens: 933_616, postCompactionTargetTokens: 100_000, contextTokens: 280_000,
-    contextSource: "PROVIDER_USAGE", distanceTokens: 70_000, active: null, lastResult: null,
+    contextSource: "PROVIDER_USAGE", measuredAt: "2026-11-15T10:00:00.000Z",
+    distanceTokens: 70_000, active: null, lastResult: null,
     ...overrides };
+}
+
+/**
+ * 真实未知窗口的投影：模型窗口 null → UNKNOWN_FALLBACK 安全回退 262,144；
+ * 默认 350K 被收敛到 209,386（safeInput 232,652 × 90%）。
+ * 这一份特意把目标窗口、回退标记、预留、阈值和距离一起写全，
+ * 防止只改 `modelWindowTokens: null` 却留下 1M 的 safeInput/阈值。
+ */
+export function unknownWindowCompactionFixture(
+  overrides: Partial<RelayContextCompaction> = {},
+): RelayContextCompaction {
+  return contextCompactionFixture({
+    targetWindowTokens: PRODUCT_TARGET_TOKENS,
+    modelWindowTokens: null, windowSource: "UNKNOWN_FALLBACK",
+    providerCallCapTokens: DEFAULT_PROVIDER_CALL_BUDGET_TOKENS,
+    fallbackApplied: true, effectiveWindowTokens: 262_144,
+    outputReserveTokens: 8_192, protocolOverheadTokens: 8_192,
+    safetyReserveTokens: 13_108, safeInputTokens: 232_652,
+    requestedThresholdTokens: 350_000, effectiveThresholdTokens: 209_386,
+    thresholdClamped: true, postCompactionTargetTokens: 100_000,
+    contextTokens: 100_000, distanceTokens: 109_386,
+    ...overrides });
 }
 
 /**
@@ -53,6 +81,7 @@ export function contextCompactionWireFixture(
     post_compaction_target_tokens: value.postCompactionTargetTokens,
     context_tokens: value.contextTokens,
     context_source: value.contextSource,
+    measured_at: value.measuredAt,
     distance_tokens: value.distanceTokens,
     active: value.active === null ? null : {
       request_id: value.active.requestId,
@@ -74,4 +103,29 @@ export function contextCompactionWireFixture(
     },
     ...overrides,
   };
+}
+
+/** 未知窗口的线上形状：字段必须与 `unknownWindowCompactionFixture` 完全同源。 */
+export function unknownWindowCompactionWireFixture(
+  overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return contextCompactionWireFixture({
+    target_window_tokens: PRODUCT_TARGET_TOKENS,
+    model_window_tokens: null,
+    window_source: "UNKNOWN_FALLBACK",
+    provider_call_cap_tokens: DEFAULT_PROVIDER_CALL_BUDGET_TOKENS,
+    fallback_applied: true,
+    effective_window_tokens: 262_144,
+    output_reserve_tokens: 8_192,
+    protocol_overhead_tokens: 8_192,
+    safety_reserve_tokens: 13_108,
+    safe_input_tokens: 232_652,
+    requested_threshold_tokens: 350_000,
+    effective_threshold_tokens: 209_386,
+    threshold_clamped: true,
+    post_compaction_target_tokens: 100_000,
+    context_tokens: 100_000,
+    distance_tokens: 109_386,
+    ...overrides,
+  });
 }

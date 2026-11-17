@@ -798,6 +798,8 @@ export const ProjectsListQuerySchema = Type.Object(
     ])),
     limit: Type.Optional(Type.String({ pattern: '^[0-9]{1,3}$' })),
     cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    // 任务页按 ID 集合批量取名称：逗号分隔 UUID，最多 100 个；与 cursor 分页互斥。
+    ids: Type.Optional(Type.String({ minLength: 36, maxLength: 3800 })),
   },
   strict,
 );

@@ -15,6 +15,15 @@ import type { AssistModelPort } from '../workflow/fake-model-port.js';
 
 const MAX_FREE_MODEL_ATTEMPTS = 3;
 const FREE_MODEL_POLICY_VERSION = 'openrouter-free-fallback-v1';
+/**
+ * 候选模型的进程资格门槛，与“单次调用预算”独立。
+ *
+ * 2026-11-15：`RELAY_MODEL_MAX_CALL_TOKENS` 的默认值提升到 1M 后，若继续直接拿它当
+ * 资格门槛，所有 128K 上下文模型都会被误判为不合格（memory-auto-capture 的 OpenRouter
+ * 用例正是因此由绿转红）。预算可以按模型窗口收敛，资格门槛不能随预算目标漂移；
+ * 这里保持升级前的 64K 下限，低于它的模型仍然拒绝。
+ */
+const MINIMUM_CONTEXT_WINDOW_TOKENS = 65_536;
 
 /**
  * 作用域上限至少盖住一笔单次预留（2026-11-10，0165 修订）。
@@ -172,14 +181,14 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
     throw new Error('ASSIST_FREE_MODEL_NO_LONGER_ELIGIBLE');
   }
   const selectedConfig = readOpenRouterModelPortConfig(env, selection.model);
-  if (!isTextCandidate(selected, requirements, selectedConfig.maxCallTokens)) {
+  if (!isTextCandidate(selected, requirements, MINIMUM_CONTEXT_WINDOW_TOKENS)) {
     throw new Error('ASSIST_FREE_MODEL_NO_LONGER_ELIGIBLE');
   }
   if (computeModelConfigFingerprint(selectedConfig) !== selection.config_fingerprint) {
     throw new Error('ASSIST_MODEL_CONFIG_CHANGED');
   }
   const entries = [selected, ...rows.filter((row) => row.source_model_id !== selection.model)
-    .filter((entry) => isTextCandidate(entry, requirements, selectedConfig.maxCallTokens))
+    .filter((entry) => isTextCandidate(entry, requirements, MINIMUM_CONTEXT_WINDOW_TOKENS))
     .sort(byModelId)].slice(0, MAX_FREE_MODEL_ATTEMPTS);
   const candidates = entries.map((entry, index) => {
     const config = readOpenRouterModelPortConfig(env, entry.source_model_id);
@@ -189,9 +198,8 @@ export async function freezeAssistModelSnapshot(repositories: Repositories,
       source: 'openrouter', snapshotSeq: sync.snapshot_seq.toString(),
       sourceModelId: entry.source_model_id });
   });
-  // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。窗口高于产品
-  // 目标时按 1M 截断，低于它时按窗口截断——不是把模型淘汰掉（资格门槛仍是进程默认），
-  // 而是不申请它装不下的预算。
+  // 免费模型路由额外多一个上限：Provider 目录里声明的 `context_window`。档位高于它时按
+  // 窗口截断——不是把模型淘汰掉（资格门槛是独立的 64K 下限），而是不申请它装不下的预算。
   return withCredential(frozen(candidates, selectedConfig,
     Math.min(MAX_FREE_MODEL_ATTEMPTS, candidates.length), requirements,
     planAssistModelBudget(selectedConfig, { modelWindowTokens: selected.context_window,
@@ -500,7 +508,7 @@ function frozen(candidates: readonly AssistModelCandidateSnapshot[],
     version: 1, policy_version: FREE_MODEL_POLICY_VERSION,
     requirements: { tools: requirements.requiresTools,
       response_format: requirements.requiresJsonOutput,
-      minimum_context_window: config.maxCallTokens },
+      minimum_context_window: MINIMUM_CONTEXT_WINDOW_TOKENS },
     candidates: candidates.map((candidate) => ({
       connection: { provider: candidate.connection.provider, model: candidate.connection.model,
         // 只在非默认协议时写入：既有 openai 快照的键集保持不变，旧冻结不被改写。

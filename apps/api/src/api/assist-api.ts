@@ -35,7 +35,8 @@ import { exportAssistSession } from '../application/session-export.js';
 import { readSessionToolCalls } from '../application/session-tool-call-projection.js';
 import type { JsonObject } from '../infrastructure/json.js';
 import type { AssistSessionStatus, AssistSessionTitleSource, AssistTitleGenerationSummary,
-  ConversationMode } from '../infrastructure/database-schema.js';
+  ConversationMode, MemoryCaptureTaskRow,
+  AssistSkillInvocationRow } from '../infrastructure/database-schema.js';
 import { MODEL_ERROR_CATEGORIES, type ModelErrorCategory }
   from '../workflow/model-error-classification.js';
 import { readDeclaredImageInput } from '../workflow/model-port-config.js';
@@ -254,6 +255,46 @@ const AssistGenerationProgressDto = Type.Object({
     settled_at: Type.Union([Type.String(), Type.Null()]),
   }, strict), Type.Null()]),
 }, strict);
+const AssistMessageMemoryCaptureTaskDto = Type.Object({
+  id: uuid, kind: Type.Union([Type.Literal('AUTO'), Type.Literal('EXPLICIT')]),
+  status: Type.Union([Type.Literal('PENDING'), Type.Literal('RUNNING'),
+    Type.Literal('SUCCEEDED'), Type.Literal('EMPTY'), Type.Literal('FAILED'),
+    Type.Literal('CANCELLED')]),
+  attempts: Type.Integer({ minimum: 0 }), max_attempts: Type.Integer({ minimum: 1 }),
+  error_kind: Type.Union([Type.String(), Type.Null()]),
+  last_error: Type.Union([Type.String(), Type.Null()]),
+  updated_at: Type.String(),
+  completed_at: Type.Union([Type.String(), Type.Null()]),
+}, strict);
+/**
+ * 聊天消息的长期记忆捕获状态（2026-11-15 P1）。
+ *
+ * 同一轮可能同时存在 AUTO 与 EXPLICIT 任务；这里由服务端按真实行统一投影成一个状态：
+ * 运行中 > 待处理 > 失败 > 已保存 > 已取消 > 无需保存。`saved_count` / `failed_count`
+ * 保留聚合前的条数，UI 用“部分失败”而不是把有条成功的情况说成全部成功。
+ */
+const AssistMessageMemoryCaptureDto = Type.Object({
+  status: Type.Union([Type.Literal('PENDING'), Type.Literal('RUNNING'),
+    Type.Literal('SUCCEEDED'), Type.Literal('EMPTY'), Type.Literal('FAILED'),
+    Type.Literal('CANCELLED')]),
+  task_count: Type.Integer({ minimum: 1 }),
+  saved_count: Type.Integer({ minimum: 0 }),
+  failed_count: Type.Integer({ minimum: 0 }),
+  tasks: Type.Array(AssistMessageMemoryCaptureTaskDto),
+}, strict);
+const AssistSkillInvocationDto = Type.Object({
+  id: uuid, skill_id: Type.String(), skill_version: Type.String(),
+  skill_sha256: Type.String(),
+  status: Type.Union([Type.Literal('REQUESTED'), Type.Literal('RUNNING'),
+    Type.Literal('SUCCEEDED'), Type.Literal('FAILED'), Type.Literal('CANCELLED')]),
+  input_summary: Type.Union([Type.String(), Type.Null()]),
+  output_summary: Type.Union([Type.String(), Type.Null()]),
+  error_kind: Type.Union([Type.String(), Type.Null()]),
+  error_detail: Type.Union([Type.String(), Type.Null()]),
+  requested_at: Type.String(),
+  started_at: Type.Union([Type.String(), Type.Null()]),
+  settled_at: Type.Union([Type.String(), Type.Null()]),
+}, strict);
 const AssistMessageDto = Type.Object({
   id: uuid, session_id: uuid, seq: rev, role: Type.String(), status: Type.String(),
   intent: Type.String(), content: Type.Union([Type.String(), Type.Null()]),
@@ -265,6 +306,10 @@ const AssistMessageDto = Type.Object({
   skill: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_input: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   skill_output: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
+  /** 当前消息真实调用 Skill 的执行事件（按 requested_at 顺序）；未调用为空数组。 */
+  skill_invocations: Type.Array(AssistSkillInvocationDto),
+  /** 这一轮长期记忆捕获的真实任务状态；没有任何任务时为 null。 */
+  memory_capture: Type.Union([AssistMessageMemoryCaptureDto, Type.Null()]),
   /** 0071：内置工作方法身份（冻结定义 + 摘要 + 本次行动）；未采用方法时为 null。 */
   method: Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]),
   method_argument: Type.Union([Type.String(), Type.Null()]),
@@ -486,6 +531,7 @@ const SessionContextUsageResult = Type.Object({
     post_compaction_target_tokens: Type.Number(),
     context_tokens: Type.Number(),
     context_source: Type.Union([Type.Literal('PROVIDER_USAGE'), Type.Literal('ESTIMATED')]),
+    measured_at: Type.String(),
     distance_tokens: Type.Number(),
     active: Type.Union([Type.Null(), Type.Object({
       request_id: uuid, status: Type.Union([Type.Literal('PENDING'), Type.Literal('RUNNING')]),
@@ -691,6 +737,33 @@ function sessionDto(row: { id: string; workspace_id: string; project_id: string 
   };
 }
 
+function memoryCaptureStatus(tasks: readonly MemoryCaptureTaskRow[]): {
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'EMPTY' | 'FAILED' | 'CANCELLED';
+  task_count: number; saved_count: number; failed_count: number } | null {
+  if (tasks.length === 0) return null;
+  const counts = {
+    PENDING: 0, RUNNING: 0, SUCCEEDED: 0, EMPTY: 0, FAILED: 0, CANCELLED: 0,
+  };
+  for (const task of tasks) counts[task.status] += 1;
+  const status = counts.RUNNING > 0 ? 'RUNNING' as const
+    : counts.PENDING > 0 ? 'PENDING' as const
+      : counts.FAILED > 0 ? 'FAILED' as const
+        : counts.SUCCEEDED > 0 ? 'SUCCEEDED' as const
+          : counts.CANCELLED > 0 ? 'CANCELLED' as const : 'EMPTY' as const;
+  return { status, task_count: tasks.length, saved_count: counts.SUCCEEDED,
+    failed_count: counts.FAILED };
+}
+
+function skillInvocationDto(row: AssistSkillInvocationRow) {
+  return { id: row.id, skill_id: row.skill_id, skill_version: row.skill_version,
+    skill_sha256: row.skill_sha256, status: row.status,
+    input_summary: row.input_summary, output_summary: row.output_summary,
+    error_kind: row.error_kind, error_detail: row.error_detail,
+    requested_at: row.requested_at.toISOString(),
+    started_at: row.started_at === null ? null : row.started_at.toISOString(),
+    settled_at: row.settled_at === null ? null : row.settled_at.toISOString() };
+}
+
 function messageDto(row: { id: string; session_id: string; seq: bigint; role: string;
   status: string; intent: string; content: string | null; error_code: string | null;
   provider_error_kind: ModelErrorCategory | null;
@@ -706,7 +779,10 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
   attachments: readonly AssistMessageAttachmentMeta[] = [],
   recall: AssistMessageRecallSummary | null = null,
   usageSummary: JsonObject = assistUsageDto(projectAssistUsage([])),
-  generationProgress: JsonObject | null = null) {
+  generationProgress: JsonObject | null = null,
+  skillInvocations: readonly AssistSkillInvocationRow[] = [],
+  memoryCaptureTasks: readonly MemoryCaptureTaskRow[] = []) {
+  const capture = memoryCaptureStatus(memoryCaptureTasks);
   return {
     id: row.id, session_id: row.session_id, seq: toDecimalString(row.seq), role: row.role,
     status: row.status, intent: row.intent, content: projection.content,
@@ -714,6 +790,16 @@ function messageDto(row: { id: string; session_id: string; seq: bigint; role: st
     sources: projection.sources,
     skill: projection.skill, skill_input: projection.skill_input,
     skill_output: projection.skill_output,
+    skill_invocations: skillInvocations.map(skillInvocationDto),
+    memory_capture: capture === null ? null : {
+      ...capture,
+      tasks: memoryCaptureTasks.map((task) => ({
+        id: task.id, kind: task.kind, status: task.status, attempts: task.attempts,
+        max_attempts: task.max_attempts, error_kind: task.error_kind,
+        last_error: task.last_error, updated_at: task.updated_at.toISOString(),
+        completed_at: task.completed_at === null ? null : task.completed_at.toISOString(),
+      })),
+    },
     method: projection.method, method_argument: projection.method_argument,
     provider_request_id: row.provider_request_id,
     usage: { input_tokens: row.usage_input_tokens, output_tokens: row.usage_output_tokens,
@@ -1169,6 +1255,25 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
       // AGENT_LIVE_TOKEN_USAGE：本轮用量汇总一次查齐；完成态读账本，不从界面或估算推断。
       const usageSummaries = await readAssistMessageUsageSummaries(
         dependencies.database.executor, rows.map((row) => row.id));
+      const repos = createRepositories(dependencies.database.executor);
+      // 2026-11-15：聊天里的记忆状态只来自捕获任务表；没有任务的消息不生成状态。
+      const captureTasks = await repos.information
+        .listMemoryCaptureTasksByMessages(rows.map((row) => row.id));
+      const captureByMessage = new Map<string, MemoryCaptureTaskRow[]>();
+      for (const task of captureTasks) {
+        const list = captureByMessage.get(task.trigger_message_id) ?? [];
+        list.push(task);
+        captureByMessage.set(task.trigger_message_id, list);
+      }
+      // 0169：Skill 轨迹只来自真实执行事件，不从助手正文推测，也不含普通工具调用。
+      const skillInvocations = await repos.skillInvocations
+        .listByMessageIds(rows.map((row) => row.id));
+      const skillsByMessage = new Map<string, AssistSkillInvocationRow[]>();
+      for (const invocation of skillInvocations) {
+        const list = skillsByMessage.get(invocation.message_id) ?? [];
+        list.push(invocation);
+        skillsByMessage.set(invocation.message_id, list);
+      }
       // AGENT_STREAM_VISIBILITY：只有还在 RUNNING 的回复需要阶段投影；一次查齐其调用证据。
       const runningMessageIds = rows.filter((row) =>
         row.role === 'ASSISTANT' && row.status === 'RUNNING').map((row) => row.id);
@@ -1182,7 +1287,9 @@ app.post('/assist-sessions/:id/binding', { schema: { params: sessionItem, body: 
               dependencies.storage, session, row),
             attachments.get(row.id) ?? [], recallByMessage.get(row.id) ?? null,
             assistUsageDto(usageSummaries.get(row.id) ?? projectAssistUsage([])),
-            progress === undefined ? null : assistGenerationProgressDto(progress));
+            progress === undefined ? null : assistGenerationProgressDto(progress),
+            skillsByMessage.get(row.id) ?? [],
+            captureByMessage.get(row.id) ?? []);
         })),
         has_more: page.hasMore,
         next_before_seq: page.nextBeforeSeq === null ? null : String(page.nextBeforeSeq),

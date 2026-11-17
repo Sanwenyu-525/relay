@@ -50,7 +50,10 @@
 /* ── V5.28 原型皮肤（scope 在 .pv-page） ─────────────────────────────────── */
 
 .pv-page.scheduled-tasks-page .page-primary { padding: 0; max-width: none; }
-.pv-page.scheduled-tasks-page.page-layout { max-width: none; margin: 0; }
+/* 复合根（pv 根即 page-layout）：宽度交给 pv；margin 保持居中——此前这里的 margin:0
+   会把 pv 自身的 auto 居中一并清零，页面贴左而右侧留白，与其他 pv 页的对齐基准不一致
+   （UI-LAYOUT-AUDIT-20261115）。内层 page-layout 仍 margin:0 铺满 pv 内容盒。 */
+.pv-page.scheduled-tasks-page.page-layout { max-width: none; margin: 0 auto; }
 .pv-page.scheduled-tasks-page .page-layout { max-width: none; margin: 0; }
 
 .pv-page .surface-panel {

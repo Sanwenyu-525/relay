@@ -159,13 +159,26 @@ describe("资料提交的结果未知分类", () => {
     expect(posted[1]!.title).toBe("fixed title");
   });
 
-  it("MEMORY 修订提交遇 typed 503 同样保留 pending 与草稿", async () => {
+  it("MEMORY 修订提交遇 typed 503 保留草稿，刷新后可继续重试", async () => {
     activate();
     const posted: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/memories`) return response(200, [memoryRow()]);
-      if (url === `${base}/memories/${memoryId}`) return response(200, memoryRow());
+      if (url.startsWith(`${base}/memory/items`)) {
+        return response(200, { items: [memoryRow()], next_cursor: null, page_size: 50, sort: "updated" });
+      }
+      if (url.startsWith(`${base}/memory/stats`)) {
+        return response(200, {
+          total: 1, active: 1, superseded: 0, retired: 0, expired: 0, stale: 0,
+          unverified: 1, failed: 0, instruction_risk: 0, pinned: 0, storage_bytes: 100,
+          index_health: { fts_index_present: true, unindexed: 0 },
+          recall: { last_24h: 0, avg_latency_ms: null, last_at: null },
+          capture: { pending: 0, failed: 0, last_24h: 0 },
+          maintenance: { last_at: null, runs: [] },
+          types: [{ memory_type: "PROJECT_FACT", count: 1 }]
+        });
+      }
+      if (url.startsWith(`${base}/memory/capture-tasks`)) return response(200, { items: [], next_cursor: null });
       if (url === `${base}/memories/${memoryId}/revisions` && init?.method === "POST") {
         posted.push(JSON.parse(String(init.body)));
         return response(503, { code: "DATABASE_UNAVAILABLE", detail: "response uncertain",
@@ -174,20 +187,21 @@ describe("资料提交的结果未知分类", () => {
       if (url === `${base}/memories/${memoryId}/revisions`) return response(200, []);
       return common(url);
     }));
-    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
+    const mounted = await mountWorkbench("/memory"); unmount = mounted.unmount;
     await flush(30);
-    await mounted.wrapper.get('[data-testid="knowledge-new-version"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("edited text only");
-    await mounted.wrapper.get('[data-testid="memory-confirmed"]').setValue(true);
-    await mounted.wrapper.get('[data-testid="knowledge-form"]').trigger("submit");
+    await mounted.wrapper.get('[data-testid="memory-edit"]').trigger("click");
+    await flush(30);
+    const dialog = mounted.layer.get('[role="dialog"]');
+    await dialog.get('[data-testid="memory-form-text"]').setValue("edited text only");
+    await dialog.get('[data-testid="memory-form-save"]').trigger("click");
     await flush(30);
 
     expect(posted).toHaveLength(1);
-    expect(mounted.wrapper.get('[data-testid="knowledge-pending-receipt"]').text()).toContain(String(posted[0]!.command_id));
-    expect(mounted.wrapper.get('[data-testid="knowledge-save"]').attributes("disabled")).toBeDefined();
-    expect((mounted.wrapper.get('[data-testid="memory-text"]').element as HTMLTextAreaElement).value).toBe("edited text only");
-    await mounted.wrapper.get('[data-testid="knowledge-form"]').trigger("submit");
+    expect((dialog.get('[data-testid="memory-form-text"]').element as HTMLTextAreaElement).value)
+      .toBe("edited text only");
+    expect(dialog.get('[data-testid="memory-form-save"]').attributes("disabled")).toBeUndefined();
+    await dialog.get('[data-testid="memory-form-save"]').trigger("click");
     await flush(30);
-    expect(posted).toHaveLength(1);
+    expect(posted).toHaveLength(2);
   });
 });

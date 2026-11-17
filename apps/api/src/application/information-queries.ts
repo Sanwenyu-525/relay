@@ -61,6 +61,7 @@ function memoryDto(row: MemoryStateRow): Record<string, unknown> {
     verification: row.verification, verified_at: row.verified_at?.toISOString() ?? null,
     last_accessed_at: row.last_accessed_at?.toISOString() ?? null,
     stale_at: row.stale_at?.toISOString() ?? null, pinned: row.pinned,
+    instruction_risk: row.instruction_risk,
     supersedes_id: row.supersedes_id, superseded_by_id: row.superseded_by_id,
     retired_reason: row.retired_reason };
 }
@@ -92,10 +93,77 @@ async function requireProjectFilter(db: DbExecutor, workspaceId: string,
   }
 }
 
+export type MemoryListSort = 'updated' | 'created' | 'importance';
+
+export interface MemoryPageCursor {
+  readonly at: Date;
+  readonly id: string;
+  readonly importance?: number;
+}
+
+/** 游标是不透明字符串：客户端只能原样回传，不能构造时间/ID 猜测页边界。 */
+export function encodeMemoryPageCursor(row: { updated_at: Date; created_at: Date; id: string;
+  importance: number }, sort: MemoryListSort): string {
+  const at = sort === 'created' ? row.created_at : row.updated_at;
+  return Buffer.from(JSON.stringify({ at: at.toISOString(), id: row.id,
+    ...(sort === 'importance' ? { importance: row.importance } : {}) }), 'utf8').toString('base64url');
+}
+
+export function decodeMemoryPageCursor(value: string): MemoryPageCursor {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  } catch {
+    throw validationFailed([{ field: 'cursor', message: '游标格式无效' }]);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw validationFailed([{ field: 'cursor', message: '游标格式无效' }]);
+  }
+  const cursor = parsed as Record<string, unknown>;
+  if (typeof cursor.at !== 'string' || Number.isNaN(Date.parse(cursor.at)) ||
+      typeof cursor.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(cursor.id)) {
+    throw validationFailed([{ field: 'cursor', message: '游标缺少时间或 id' }]);
+  }
+  return { at: new Date(cursor.at), id: cursor.id,
+    ...(typeof cursor.importance === 'number' && Number.isFinite(cursor.importance)
+      ? { importance: cursor.importance } : {}) };
+}
+
+export async function listMemoryPage(db: DbExecutor, workspaceId: string,
+  projectId: string | undefined, filter: { readonly memoryType?: string; readonly origin?: string;
+    readonly verification?: string; readonly sourceKind?: string; readonly pinned?: boolean;
+    readonly effectiveStatus?: MemoryEffectiveStatus | 'ALL'; readonly query?: string;
+    readonly sort?: MemoryListSort; readonly cursor?: string; readonly pageSize?: number }):
+  Promise<{ readonly items: readonly Record<string, unknown>[]; readonly next_cursor: string | null;
+    readonly page_size: number; readonly sort: MemoryListSort }> {
+  const pageSize = Math.min(Math.max(filter.pageSize ?? 50, 1), 100);
+  const sort = filter.sort ?? 'updated';
+  const rows = await createRepositories(db).information.listMemoryStates(workspaceId, {
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(filter.memoryType === undefined ? {} : { memoryType: filter.memoryType }),
+    ...(filter.origin === undefined ? {} : { origin: filter.origin }),
+    ...(filter.verification === undefined ? {} : { verification: filter.verification }),
+    ...(filter.sourceKind === undefined ? {} : { sourceKind: filter.sourceKind }),
+    ...(filter.pinned === undefined ? {} : { pinned: filter.pinned }),
+    ...(filter.effectiveStatus === undefined ? {} : { effectiveStatus: filter.effectiveStatus }),
+    ...(filter.query === undefined ? {} : { query: filter.query }),
+    sort, limit: pageSize + 1,
+    ...(filter.cursor === undefined ? {} : { cursor: decodeMemoryPageCursor(filter.cursor) }),
+  });
+  const hasMore = rows.length > pageSize;
+  const page = hasMore ? rows.slice(0, pageSize) : rows;
+  const last = page[page.length - 1];
+  return { items: page.map(memoryDto), page_size: pageSize, sort,
+    next_cursor: hasMore && last !== undefined ? encodeMemoryPageCursor(last, sort) : null };
+}
+
 export async function listInformation(db: DbExecutor, kind: Kind, workspaceId: string,
   projectId?: string, effectiveStatus: MemoryEffectiveStatus | 'ALL' = 'ALL',
   filters: { readonly memoryType?: string; readonly origin?: string; readonly query?: string;
-    readonly limit?: number } = {}): Promise<readonly Record<string, unknown>[]> {
+    readonly limit?: number; readonly verification?: string; readonly sourceKind?: string;
+    readonly pinned?: boolean; readonly sort?: MemoryListSort;
+    readonly cursor?: MemoryPageCursor } = {}): Promise<readonly Record<string, unknown>[]> {
   const repo = createRepositories(db).information;
   await requireProjectFilter(db, workspaceId, projectId);
   if (kind === 'memory') {

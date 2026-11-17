@@ -754,6 +754,47 @@ export interface RelayAssistSkillOutput {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
+export type RelayAssistMemoryCaptureStatus =
+  "PENDING" | "RUNNING" | "SUCCEEDED" | "EMPTY" | "FAILED" | "CANCELLED";
+
+export interface RelayAssistMemoryCaptureTask {
+  readonly id: string;
+  readonly kind: "AUTO" | "EXPLICIT";
+  readonly status: RelayAssistMemoryCaptureStatus;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly errorKind: string | null;
+  readonly lastError: string | null;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+}
+
+export interface RelayAssistMemoryCapture {
+  readonly status: RelayAssistMemoryCaptureStatus;
+  readonly taskCount: number;
+  readonly savedCount: number;
+  readonly failedCount: number;
+  readonly tasks: readonly RelayAssistMemoryCaptureTask[];
+}
+
+export type RelayAssistSkillInvocationStatus =
+  "REQUESTED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export interface RelayAssistSkillInvocation {
+  readonly id: string;
+  readonly skillId: string;
+  readonly skillVersion: string;
+  readonly skillSha256: string;
+  readonly status: RelayAssistSkillInvocationStatus;
+  readonly inputSummary: string | null;
+  readonly outputSummary: string | null;
+  readonly errorKind: string | null;
+  readonly errorDetail: string | null;
+  readonly requestedAt: string;
+  readonly startedAt: string | null;
+  readonly settledAt: string | null;
+}
+
 export interface RelayAssistMessage {
   readonly id: string;
   readonly sessionId: string;
@@ -793,6 +834,10 @@ export interface RelayAssistMessage {
     readonly missingCapabilities: readonly string[] }) | null;
   readonly skillInput: Readonly<Record<string, unknown>> | null;
   readonly skillOutput: RelayAssistSkillOutput | null;
+  /** 0169：这条消息真实执行过的第一方 Skill（按执行顺序）；旧服务端缺字段读空。 */
+  readonly skillInvocations?: readonly RelayAssistSkillInvocation[];
+  /** 2026-11-15：这一轮长期记忆捕获的真实聚合状态；没有任务为 null。 */
+  readonly memoryCapture?: RelayAssistMemoryCapture | null;
   /** cache*Tokens 为 null 表示 Provider 未上报，不能读成 0。 */
   readonly usage: { readonly inputTokens: number | null; readonly outputTokens: number | null;
     readonly cacheReadTokens: number | null; readonly cacheCreationTokens: number | null };
@@ -1197,6 +1242,8 @@ export interface RelayContextCompaction {
   readonly postCompactionTargetTokens: number;
   readonly contextTokens: number;
   readonly contextSource: "PROVIDER_USAGE" | "ESTIMATED";
+  /** 这份读数在服务端生成的时间（ISO）；界面显示「最近更新时间」，不用本地时钟冒充。 */
+  readonly measuredAt: string;
   /** 距离生效阈值还有多少 tokens；已超过时为负。 */
   readonly distanceTokens: number;
   readonly active: { readonly requestId: string;

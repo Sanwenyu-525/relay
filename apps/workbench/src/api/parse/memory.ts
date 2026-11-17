@@ -73,7 +73,8 @@ export function memorySettingsFrom(value: unknown): RelayMemorySettings {
     ...(row.remote_embedding_allowed === undefined ? {}
       : { remoteEmbeddingAllowed: boolean(row, "remote_embedding_allowed", "memory settings") }),
     ...(row.include_stale_in_recall === undefined ? {}
-      : { includeStaleInRecall: boolean(row, "include_stale_in_recall", "memory settings") })
+      : { includeStaleInRecall: boolean(row, "include_stale_in_recall", "memory settings") }),
+    ...(row.capabilities === undefined ? {} : { capabilities: memoryCapabilitiesFrom(row.capabilities) })
   };
 }
 
@@ -125,23 +126,62 @@ export function memorySourceRefFrom(value: unknown): RelayMemorySourceRef {
     selection, selectionBasis, origin, sourceKind };
 }
 
+function memoryCapabilitiesFrom(value: unknown): NonNullable<RelayMemorySettings["capabilities"]> {
+  const row = object(value, "memory capabilities");
+  const retrieval = object(row.retrieval, "memory capabilities.retrieval");
+  const literal = object(retrieval.literal, "memory capabilities.retrieval.literal");
+  const hybrid = object(retrieval.hybrid, "memory capabilities.retrieval.hybrid");
+  const embedding = object(row.embedding, "memory capabilities.embedding");
+  const capture = object(row.capture, "memory capabilities.capture");
+  return {
+    retrieval: {
+      literal: { implemented: boolean(literal, "implemented", "memory capabilities.literal"),
+        note: string(literal, "note", "memory capabilities.literal") },
+      hybrid: { implemented: boolean(hybrid, "implemented", "memory capabilities.hybrid"),
+        note: string(hybrid, "note", "memory capabilities.hybrid") },
+    },
+    embedding: { implemented: boolean(embedding, "implemented", "memory capabilities.embedding"),
+      note: string(embedding, "note", "memory capabilities.embedding") },
+    capture: { persistentTasks: boolean(capture, "persistent_tasks", "memory capabilities.capture"),
+      retryWithBackoff: boolean(capture, "retry_with_backoff", "memory capabilities.capture"),
+      preCompactionBarrier: boolean(capture, "pre_compaction_barrier", "memory capabilities.capture"),
+      explicitRemember: boolean(capture, "explicit_remember", "memory capabilities.capture") },
+  };
+}
+
 export function memoryProvenanceFrom(value: unknown, expectedMemoryId: string): RelayMemoryProvenance {
   const row = object(value, "memory provenance");
   const memoryId = uuid(row, "memory_id", "memory provenance");
   if (memoryId !== expectedMemoryId) throw new RelayContractError("记忆来源响应与所选记忆不一致。");
-  return { memoryId, sources: array(row, "sources", "memory provenance").map((item) => {
-    const source = object(item, "memory provenance source");
-    const contentSha256 = string(source, "content_sha256", "memory provenance source");
-    if (!sha256Pattern.test(contentSha256)) {
-      throw new RelayContractError("memory provenance source.content_sha256 不是 64 位十六进制。");
-    }
-    const parsed: RelayMemoryProvenanceSource = {
-      memoryVersion: decimal(source, "memory_version", "memory provenance source"),
-      sessionId: uuid(source, "session_id", "memory provenance source"),
-      messageId: uuid(source, "message_id", "memory provenance source"),
-      contentSha256 };
-    return parsed;
-  }) };
+  return { memoryId,
+    origin: enumeration(row, "origin", "memory provenance",
+      ["HUMAN_CONFIRMED", "AUTO_CAPTURE"] as const),
+    sourceKind: enumeration(row, "source_kind", "memory provenance",
+      ["MANUAL", "USER_STATEMENT", "MODEL_OBSERVATION", "UNKNOWN"] as const),
+    verification: enumeration(row, "verification", "memory provenance",
+      ["VERIFIED", "UNVERIFIED", "FAILED"] as const),
+    verifiedAt: nullableString(row, "verified_at", "memory provenance"),
+    sources: array(row, "sources", "memory provenance").map((item) => {
+      const source = object(item, "memory provenance source");
+      const contentSha256 = string(source, "content_sha256", "memory provenance source");
+      if (!sha256Pattern.test(contentSha256)) {
+        throw new RelayContractError("memory provenance source.content_sha256 不是 64 位十六进制。");
+      }
+      const parsed: RelayMemoryProvenanceSource = {
+        memoryVersion: decimal(source, "memory_version", "memory provenance source"),
+        sessionId: uuid(source, "session_id", "memory provenance source"),
+        messageId: uuid(source, "message_id", "memory provenance source"),
+        sessionTitle: nullableString(source, "session_title", "memory provenance source"),
+        role: nullableString(source, "role", "memory provenance source"),
+        contentSha256,
+        sha256Matches: typeof source.sha256_matches === "boolean" ? source.sha256_matches : null,
+        sourceQuote: nullableString(source, "source_quote", "memory provenance source"),
+        excerpt: nullableString(source, "excerpt", "memory provenance source"),
+        availability: enumeration(source, "availability", "memory provenance source",
+          ["AVAILABLE", "WITHDRAWN", "MISSING", "UNAVAILABLE", "CONTENT_CHANGED"] as const),
+      };
+      return parsed;
+    }) };
 }
 
 function checkpointFrom(value: unknown): RelaySessionMemoryCheckpoint {

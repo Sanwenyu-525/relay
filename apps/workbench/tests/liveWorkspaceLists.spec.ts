@@ -149,8 +149,12 @@ describe("live Workspace 项目与任务列表", () => {
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
       urls.push(url);
       if (url === `${root}/projects?status=active`) return response(200, { items: [], next_cursor: null });
-      if (url === `${root}/projects/${projectA}` || url === `${root}/projects/${projectB}`)
-        return response(403, { code: "FORBIDDEN", detail: "项目标题不可读" });
+      // 2026-11-15 第二轮：按当前页 Project ID 集合批量取名称；只返回请求到的 ID。
+      if (url.startsWith(`${root}/projects?ids=`)) {
+        const ids = new Set(new URL(url).searchParams.get("ids")?.split(",") ?? []);
+        return response(200, { items: [project(projectA, "甲项目"), project(projectB, "乙项目")]
+          .filter((item) => ids.has(item.id)), next_cursor: null });
+      }
       if (url === `${root}/tasks?scope=all`) return response(200, { items: [
         task(taskA, "项目任务", projectA, "READY"), task(taskB, "收件箱任务", null)], next_cursor: "t+2" });
       if (url === `${root}/tasks?scope=all&cursor=t%2B2`) return response(200, {
@@ -162,12 +166,15 @@ describe("live Workspace 项目与任务列表", () => {
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/tasks"); unmount = mounted.unmount;
-    // 全局与主区各读一次全部任务；只有主区按确切 Project 单读标题。
-    expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
-      `${root}/tasks?scope=all`, `${root}/projects/${projectA}`]);
+    // 全局与主区各读一次全部任务；项目名由主区按本页引用的两个 Project ID 批量读一次。
+    expect(urls.slice(0, 4)).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`,
+      `${root}/assist-sessions?include_context=true`, `${root}/tasks?scope=all`]);
+    const batchUrl = urls.find((url) => url.startsWith(`${root}/projects?ids=`))!;
+    expect(new URL(batchUrl).searchParams.get("ids")?.split(",")).toEqual([projectA]);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 2 项 · 当前筛选显示 2 项 · 仍有后续页");
-    expect(mounted.wrapper.get(`[data-testid="task-row-${taskA}"]`).text()).toContain(projectA);
+    expect(mounted.wrapper.get(`[data-testid="task-row-${taskA}"]`).text()).toContain("甲项目");
+    expect(mounted.wrapper.get(`[data-testid="task-row-${taskA}"]`).text()).not.toContain(projectA);
     expect(mounted.wrapper.get(`[data-testid="task-row-${taskB}"]`).text()).toContain("未归属项目");
     await mounted.wrapper.get('select[name="task-filter-project"]').setValue(projectA);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text()).toContain("当前筛选显示 1 项");
@@ -184,13 +191,24 @@ describe("live Workspace 项目与任务列表", () => {
     await mounted.wrapper.get('[data-testid="tasks-live-load-more"]').trigger("click");
     await flush(30);
     expect(urls).toContain(`${root}/tasks?scope=all&cursor=t%2B2`);
+    // 续页引入新的 Project：只为未解析的 ID 再补一次批量读，不重复已读项目。
+    const batchUrls = urls.filter((url) => url.startsWith(`${root}/projects?ids=`));
+    expect(batchUrls).toHaveLength(2);
+    const batchUrlB = batchUrls[1]!;
+    expect(new URL(batchUrlB).searchParams.get("ids")?.split(",")).toEqual([projectB]);
     expect(mounted.wrapper.get('[data-testid="tasks-live-count"]').text())
       .toContain("已加载 3 项 · 当前筛选显示 1 项 · 已到列表末页");
+    // 续页带来新的已加载 Project 后，项目筛选选项必须同步出现，不能停留在首屏两项。
+    const projectOptions = mounted.wrapper.get('select[name="task-filter-project"]')
+      .findAll("option").map((option) => option.attributes("value"));
+    expect(projectOptions).toContain(projectA);
+    expect(projectOptions).toContain(projectB);
+    expect(projectOptions).toContain("inbox");
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
     await flush(30);
     expect(urls).toEqual([`${root}/tasks?scope=all`, `${root}/projects?status=active`, `${root}/assist-sessions?include_context=true`,
-      `${root}/tasks?scope=all`, `${root}/projects/${projectA}`,
-      `${root}/tasks?scope=all&cursor=t%2B2`, `${root}/projects/${projectB}`, `${root}/tasks?inbox=true`]);
+      `${root}/tasks?scope=all`, batchUrl, `${root}/tasks?scope=all&cursor=t%2B2`, batchUrlB,
+      `${root}/tasks?inbox=true`]);
     expect(mounted.wrapper.find(`[data-testid="task-row-${taskA}"]`).exists()).toBe(false);
   });
 
@@ -202,7 +220,10 @@ describe("live Workspace 项目与任务列表", () => {
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
       if ([workspaceId, otherWorkspaceId].some((id) => url === `${baseUrl}/api/v1/workspaces/${id}/projects?status=active`))
         return response(200, { items: [], next_cursor: null });
-      if (url === `${root}/projects/${projectA}`) return response(200, project(projectA, "所属项目"));
+      if (url.startsWith(`${root}/projects?ids=`)) return response(200, {
+        items: [project(projectA, "所属项目")], next_cursor: null });
+      if (url.startsWith(`${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/projects?ids=`))
+        return response(200, { items: [], next_cursor: null });
       if (url === `${baseUrl}/api/v1/workspaces/${otherWorkspaceId}/tasks?scope=all`)
         return response(200, { items: [task(taskC, "新空间任务", null)], next_cursor: null });
       if (url === `${root}/tasks?scope=all`) return authorized
@@ -233,6 +254,8 @@ describe("live Workspace 项目与任务列表", () => {
       const url = String(input);
       if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
       if (url === `${root}/projects?status=active`) return response(200, { items: [], next_cursor: null });
+      // 任务页按本页 Project ID 批量取名称；这一用例首读为空，不会触发该请求。
+      if (url.startsWith(`${root}/projects?ids=`)) return response(200, { items: [], next_cursor: null });
       if (url === `${root}/tasks?scope=all`) return ++allReads === 1
         ? response(200, { items: [], next_cursor: null }) : allPending;
       if (url === `${root}/tasks?inbox=true`) return response(200, {

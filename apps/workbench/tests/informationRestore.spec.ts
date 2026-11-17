@@ -28,6 +28,22 @@ function knowledge(status = "ACTIVE", revision = "2", project: string | null = n
     current_version: "1", created_at: created, updated_at: created };
 }
 
+function pageOf(rows: readonly ReturnType<typeof knowledge>[]) {
+  return { items: rows.map((row) => ({ id: row.id, title: row.title, project_id: row.project_id,
+    status: row.status, revision: row.revision, current_version: row.current_version,
+    summary: null, source_kind: "NOTE", media_type: "text/plain", availability: "AVAILABLE",
+    source_uri: null, tags: [], collections: [], matched_fields: [], snippet: null,
+    created_at: row.created_at, updated_at: row.updated_at })), next_cursor: null };
+}
+
+function isLibraryPath(path: string): boolean {
+  return path === "/knowledge" || path.startsWith("/knowledge/page");
+}
+
+function libraryResponse(path: string, rows: readonly ReturnType<typeof knowledge>[]): Response {
+  return response(200, path === "/knowledge" ? rows : pageOf(rows));
+}
+
 function memory(status = "ACTIVE", revision = "2", expiresAt: string | null = "2026-12-31T00:00:00.000Z") {
   return { id: memoryId, project_id: null, title: "约定", status, revision, current_version: "1",
     text: "需要留存的事实", confirmed_by: "local-user", confirmed_at: created, expires_at: expiresAt,
@@ -61,7 +77,7 @@ describe("资料生命周期恢复", () => {
     const undoBodies: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, [knowledge(status, revision)]);
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge(status, revision)]);
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge(status, revision));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/archive` && init?.method === "POST") {
@@ -94,7 +110,7 @@ describe("资料生命周期恢复", () => {
     expect(undoBodies[0]).toMatchObject({ expected_revision: "3" });
     expect(undoBodies[0]!.command_id).not.toBe(archiveBodies[0]!.command_id);
     expect(portal().find(`[data-testid="information-undo-${knowledgeId}"]`).exists()).toBe(false);
-    expect(mounted.wrapper.get(".knowledge-row").text()).toContain("有效");
+    expect(mounted.wrapper.get(".knowledge-row").text()).toContain("工作空间共享");
   });
 
   it("归档在途时重复点击只发一条命令；结果不明时不给撤销条并保留原命令核对入口", async () => {
@@ -103,7 +119,7 @@ describe("资料生命周期恢复", () => {
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, [knowledge()]);
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge()]);
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/archive` && init?.method === "POST") {
@@ -134,7 +150,7 @@ describe("资料生命周期恢复", () => {
     let status = "ACTIVE"; let revision = "2";
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, [knowledge(status, revision)]);
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge(status, revision)]);
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge(status, revision));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/archive` && init?.method === "POST") {
@@ -168,10 +184,11 @@ describe("资料生命周期恢复", () => {
     const undoBodies: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") { knowledgeReads++; return response(200, [knowledge(status, "2")]); }
+      if (isLibraryPath(path)) { knowledgeReads++; return libraryResponse(path, [knowledge(status, "2")]); }
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge(status, "2"));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === "/memories") return response(200, []);
+      if (path.startsWith("/decisions")) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/archive` && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         status = "ARCHIVED";
@@ -189,15 +206,15 @@ describe("资料生命周期恢复", () => {
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await button(mounted.wrapper, "归档资料").trigger("click"); await flush();
     const readsBeforeSwitch = knowledgeReads;
-    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click"); await flush();
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("aria-selected")).toBe("true");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').trigger("click"); await flush();
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
     await portal().get(`[data-testid="information-undo-${knowledgeId}"]`).get("button").trigger("click");
     await flush();
     expect(undoBodies).toHaveLength(1);
     expect(undoBodies[0]).toMatchObject({ expected_revision: "3" });
     // 迟到的撤销结果只属于原资料：当前记忆范围不被重读成资料。
     expect(knowledgeReads).toBe(readsBeforeSwitch);
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
   });
 
   it("永久恢复用当次读回的修订，成功后定向重读并说明只改状态", async () => {
@@ -206,7 +223,7 @@ describe("资料生命周期恢复", () => {
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, [knowledge(status, "3")]);
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge(status, "3")]);
       // 列表那一行是旧修订，永久恢复必须用详情当次读回的 "5"。
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge(status, "5"));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
@@ -225,7 +242,7 @@ describe("资料生命周期恢复", () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({ expected_revision: "5" });
     expect(mounted.wrapper.get(".receipt-message").text()).toContain("已恢复为有效资料");
-    expect(mounted.wrapper.get(".knowledge-row").text()).toContain("有效");
+    expect(mounted.wrapper.get(".knowledge-row").text()).toContain("工作空间共享");
     expect(mounted.wrapper.find('[data-testid="knowledge-restore-entry"]').exists()).toBe(false);
   });
 
@@ -235,7 +252,7 @@ describe("资料生命周期恢复", () => {
     let posts = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, [knowledge("ARCHIVED", "3")]);
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge("ARCHIVED", "3")]);
       if (path === `/knowledge/${knowledgeId}`) { detailReads++; return response(200, knowledge("ARCHIVED", "5")); }
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/unarchive` && init?.method === "POST") {
@@ -256,101 +273,46 @@ describe("资料生命周期恢复", () => {
     expect(posts).toBe(1);
   });
 
-  it("停用记忆后撤销失败留下 Notice，永久恢复说明不延长有效期", async () => {
+  it("Memory 生命周期已迁出知识页：知识页只保留资料、决定与规则", async () => {
     connect();
-    let status = "ACTIVE"; let revision = "1";
-    const reactivateBodies: Record<string, unknown>[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).slice(root.length);
-      if (path === "/knowledge") return response(200, []);
-      if (path === "/memories") return response(200, [memory(status, revision)]);
-      if (path === `/memories/${memoryId}`) return response(200, memory(status, revision));
-      if (path === `/memories/${memoryId}/revisions`) return response(200, []);
-      if (path === `/memories/${memoryId}/retire` && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        status = "RETIRED"; revision = "2";
-        return response(200, envelope(String(body.command_id),
-          { memory_id: memoryId, revision: "2", status: "RETIRED" }));
-      }
-      if (path === `/memories/${memoryId}/reactivate` && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        reactivateBodies.push(body);
-        if (reactivateBodies.length === 1) throw new TypeError("response lost");
-        status = "ACTIVE"; revision = "3";
-        return response(200, envelope(String(body.command_id),
-          { memory_id: memoryId, revision: "3", status: "ACTIVE" }));
-      }
+      if (isLibraryPath(path)) return libraryResponse(path, []);
       throw new Error(`Unexpected request ${path}`);
     }));
     const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
-    await button(mounted.wrapper, "停用记忆").trigger("click"); await flush();
-    const undo = portal().get(`[data-testid="information-undo-${memoryId}"]`);
-    expect(undo.text()).toContain("已停用记忆「约定」");
-    // 反向命令网络失败：结果未明，不能宣称已恢复。
-    await undo.get("button").trigger("click"); await flush();
-    expect(portal().get(`[data-testid="information-undo-${memoryId}"]`).text()).toContain("撤销没成功");
-    const note = mounted.wrapper.get('[data-testid="knowledge-restore-note"]');
-    expect(note.text()).toContain("不延长有效期");
-    expect(note.text()).toContain("不能当作可供 Agent 使用");
-    expect(mounted.wrapper.get('[data-testid="knowledge-restore"]').attributes("disabled")).toBeUndefined();
-    // 永久恢复不碰旁边那条还没保存的草稿：它只发生命周期命令，不重置输入区。
-    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("尚未保存的新记忆");
-    await mounted.wrapper.get('[data-testid="knowledge-restore"]').trigger("click"); await flush();
-    expect(reactivateBodies).toHaveLength(2);
-    expect(reactivateBodies[1]).toMatchObject({ expected_revision: "2" });
-    expect((mounted.wrapper.get('[data-testid="knowledge-title"]').element as HTMLInputElement).value)
-      .toBe("尚未保存的新记忆");
-    // 回执只说明持久状态已恢复：是否仍到期由重读后的有效状态决定，不能提前宣称「现已有效」。
-    expect(mounted.wrapper.get(".receipt-message").text()).toContain("已恢复记忆的持久状态");
-    expect(mounted.wrapper.get(".receipt-message").text()).not.toContain("已恢复为有效记忆");
-    // 恢复只改状态：有效期照旧显示，不是被重新确认或延长。
-    expect(mounted.wrapper.text()).toContain("到期 2026-12-31");
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="knowledge-tab-MEMORY"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll(".knowledge-tabs [role=tab]")).toHaveLength(3);
+    expect(mounted.wrapper.text()).not.toContain("停用记忆");
+    expect(mounted.wrapper.text()).toContain("Memory 已独立");
   });
 
-  it("恢复命令响应丢失后按原回执补查成功，与直接成功同一套收尾：保留无关新建草稿", async () => {
+  it("Memory 生命周期只在独立记忆页提供，知识页不显示记忆恢复入口", async () => {
     connect();
-    let status = "RETIRED"; let revision = "1";
-    const reactivateBodies: Record<string, unknown>[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).slice(root.length);
-      if (path === "/memories") return response(200, [memory(status, revision)]);
-      if (path === `/memories/${memoryId}`) return response(200, memory(status, revision));
-      if (path === `/memories/${memoryId}/revisions`) return response(200, []);
-      if (path === `/memories/${memoryId}/reactivate` && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-        reactivateBodies.push(body);
-        // 服务端已提交，但回包丢失：页面只能靠原回执核对。
-        status = "ACTIVE"; revision = "2";
-        throw new TypeError("response lost after commit");
-      }
-      if (/^\/commands\//u.test(path)) {
-        return response(200, { command_id: decodeURIComponent(path.slice("/commands/".length)),
-          command_type: "ReactivateMemory", committed_at: created,
-          result: { memory_id: memoryId, revision: "2", status: "ACTIVE" } });
-      }
+      if (isLibraryPath(path)) return libraryResponse(path, [knowledge("ARCHIVED", "3")]);
+      if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge("ARCHIVED", "3"));
+      if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
+      if (path.startsWith("/memory/items?")) return response(200, { items: [memory()], next_cursor: null, page_size: 50, sort: "updated" });
+      if (path.startsWith(`/memory/items/${memoryId}`) && path.endsWith("/revisions")) return response(200, []);
+      if (path === `/memory/items/${memoryId}`) return response(200, memory());
+      if (path.startsWith("/memory/stats")) return response(200, { total: 1, active: 1, superseded: 0, retired: 0, expired: 0, stale: 0, unverified: 0, failed: 0, instruction_risk: 0, pinned: 0, storage_bytes: 0, index_health: { fts_index_present: true, unindexed: 0 }, recall: { last_24h: 0, avg_latency_ms: 0, last_at: null }, capture: { pending: 0, failed: 0, last_24h: 0 }, maintenance: { last_at: null, runs: [] }, types: [] });
+      if (path.startsWith("/memory/capture-tasks")) return response(200, { items: [] });
+      if (path.startsWith("/memory-settings")) return response(200, { workspace_id: workspaceId, recall_enabled: true, automatic_compaction: true, auto_capture: true, revision: "0" });
+      if (path.startsWith("/projects")) return response(200, { items: [], next_cursor: null });
+      if (path.endsWith("/revisions")) return response(200, []);
+      if (path.endsWith("/provenance")) return response(200, { memory_id: memoryId, sources: [] });
       throw new Error(`Unexpected request ${path}`);
     }));
-    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
-    // 草稿未参与本次恢复命令：恢复成功不得清掉它。
-    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("未提交的新记忆标题");
-    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("恢复旧记忆不能删除这份草稿");
-    await mounted.wrapper.get('[data-testid="knowledge-restore"]').trigger("click"); await flush();
-    expect(reactivateBodies).toHaveLength(1);
-    const pending = mounted.wrapper.get('[data-testid="knowledge-pending-receipt"]');
-    expect(pending.text()).toContain(String(reactivateBodies[0]!.command_id));
-    await mounted.wrapper.get('[data-testid="knowledge-check-receipt"]').trigger("click"); await flush();
-    expect(mounted.wrapper.find('[data-testid="knowledge-pending-receipt"]').exists()).toBe(false);
-    // 与直接成功路径一致：恢复命令只收口 pending 与对象状态，草稿完整保留。
-    expect((mounted.wrapper.get('[data-testid="knowledge-title"]').element as HTMLInputElement).value)
-      .toBe("未提交的新记忆标题");
-    expect((mounted.wrapper.get('[data-testid="memory-text"]').element as HTMLTextAreaElement).value)
-      .toBe("恢复旧记忆不能删除这份草稿");
-    expect(mounted.wrapper.get(".receipt-message").text()).toContain("已核对原命令回执");
-    expect(mounted.wrapper.find('[data-testid="knowledge-restore-entry"]').exists()).toBe(false);
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
+    await flush();
+    expect(mounted.wrapper.find('[data-testid="memory-effective-status"]').exists()).toBe(false);
+    await mounted.router.push("/memory"); await flush();
+    expect(mounted.wrapper.text()).toContain("约定");
+    expect(mounted.wrapper.findAll("button").some((item) => item.text() === "停用")).toBe(true);
   });
-
   it("切换 Workspace 后按撤销仍打到原范围，不落到新连接", async () => {
     connect(workspaceId);
     let status = "ACTIVE";
@@ -359,7 +321,7 @@ describe("资料生命周期恢复", () => {
       const url = String(input);
       const fromOriginal = url.startsWith(root);
       const path = url.slice((fromOriginal ? root : otherRoot).length);
-      if (path === "/knowledge") return response(200, fromOriginal ? [knowledge(status, "2")] : []);
+      if (isLibraryPath(path)) return libraryResponse(path, fromOriginal ? [knowledge(status, "2")] : []);
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge(status, "2"));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/knowledge/${knowledgeId}/archive` && init?.method === "POST" && fromOriginal) {
@@ -391,7 +353,7 @@ describe("资料生命周期恢复", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const path = url.slice(root.length);
-      if (path === `/knowledge?project_id=${projectId}`) return response(200, [knowledge("ARCHIVED", "3", projectId)]);
+      if (path === `/knowledge?project_id=${projectId}` || path.startsWith("/knowledge/page")) return libraryResponse(path, [knowledge("ARCHIVED", "3", projectId)]);
       if (path === `/knowledge/${knowledgeId}`) return response(200, knowledge("ARCHIVED", "3", projectId));
       if (path === `/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (path === `/projects/${projectId}`) return response(200, { id: projectId, title: "项目",

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import test, { after, before } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { sql } from 'kysely';
 
@@ -11,7 +14,8 @@ import { archiveAssistSession } from '../../src/application/assist-session-contr
 import { loadAssistSourceContent, recheckAssistSources } from '../../src/application/assist-source-content.js';
 import { selectSessionModel } from '../../src/application/select-session-model.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
-import { captureMemoriesForTurn } from '../../src/application/memory-auto-capture.js';
+import { resetSessionMemory } from '../../src/application/assist-memory.js';
+import { captureMemoriesForTurn, processMemoryCaptureTask, runMemoryCaptureTick } from '../../src/application/memory-auto-capture.js';
 import { readAutoCaptures, recordAutoCapture } from '../../src/application/memory-captures.js';
 import { restoreInformation, retireInformation, createMemory } from '../../src/application/information-commands.js';
 import { listInformation } from '../../src/application/information-queries.js';
@@ -100,6 +104,104 @@ const EXTRACTION = JSON.stringify({ memories: [
   { title: '凭空来的', text: '用户同意改用 MySQL。', source: 'user',
     quote: '用户同意改用 MySQL' },
 ] });
+
+/** 崩溃测试只写一条，便于核对“只产生一条有效记忆”。 */
+const CHILD_EXTRACTION = JSON.stringify({ memories: [
+  { title: '数据库选型', text: '唯一业务数据库用 PostgreSQL。', source: 'user',
+    quote: '我们决定用 PostgreSQL', reason: '崩溃测试' },
+] });
+
+const SRC_BASE = new URL('../../src/', import.meta.url).href;
+const SUPPORT_MODULE = new URL('./integration-support.js', import.meta.url).href;
+
+/**
+ * 真子进程 Worker：领取同一任务，可选择“模型调用永不返回”或“返回前延迟”。
+ * 父进程只观察数据库并 SIGKILL，不在测试进程里用 Promise 假装崩溃。
+ */
+function spawnCaptureWorker(input: {
+  readonly taskId: string; readonly sessionId: string; readonly assistantMessageId: string;
+  readonly hang: boolean; readonly delayMs?: number; readonly beforeSettle?: boolean;
+}) {
+  const script = `
+import { openDatabase } from ${JSON.stringify(SUPPORT_MODULE)};
+import { processMemoryCaptureTask } from ${JSON.stringify(new URL('application/memory-auto-capture.js', SRC_BASE).href)};
+import { FakeModelPort } from ${JSON.stringify(new URL('workflow/fake-model-port.js', SRC_BASE).href)};
+const db = openDatabase(process.env.RELAY_CHILD_DATABASE_URL, 'capture-crash-child').db;
+const port = new FakeModelPort();
+port.assist = async (request) => {
+  if (!String(request.system ?? '').includes('长期记忆提取器')) {
+    return { kind: 'CONTENT', content: 'child-main', providerRequestId: 'child-main',
+      usage: { inputTokens: 1, outputTokens: 1 } };
+  }
+  if (process.env.CHILD_HANG === '1') await new Promise(() => {});
+  if (Number(process.env.CHILD_DELAY_MS ?? '0') > 0) {
+    await new Promise((resolve) => setTimeout(resolve, Number(process.env.CHILD_DELAY_MS)));
+  }
+  return { kind: 'CONTENT', content: process.env.CHILD_EXTRACTION,
+    providerRequestId: 'child-extract', usage: { inputTokens: 7, outputTokens: 3 } };
+};
+try {
+  const result = await processMemoryCaptureTask(db, { sessionId: process.env.CHILD_SESSION_ID,
+    assistantMessageId: process.env.CHILD_MESSAGE_ID, taskId: process.env.CHILD_TASK_ID,
+    workerId: 'child-' + process.pid, leaseMs: 3000, modelPort: port,
+    beforeSettle: process.env.CHILD_BEFORE_SETTLE === '1' ? async () => {
+      process.stderr.write('CHILD_WRITTEN\\n');
+      await new Promise(() => {});
+    } : undefined });
+  process.stderr.write('CHILD_RESULT=' + String(result) + '\\n');
+} finally { await db.destroy(); }
+`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, RELAY_CHILD_DATABASE_URL: APP_DATABASE_URL,
+      CHILD_TASK_ID: input.taskId, CHILD_SESSION_ID: input.sessionId,
+      CHILD_MESSAGE_ID: input.assistantMessageId, CHILD_HANG: input.hang ? '1' : '0',
+      CHILD_DELAY_MS: String(input.delayMs ?? 0), CHILD_EXTRACTION,
+      CHILD_BEFORE_SETTLE: input.beforeSettle ? '1' : '0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  return { child, stderr: () => stderr };
+}
+
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 12_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error('condition not reached before timeout');
+}
+
+/** Windows 上 child.kill 可能停在 libpq 同步调用里；用 OS 级强制终止证明进程真的死了。 */
+function forceKill(child: { pid?: number | undefined; exitCode: number | null }): void {
+  if (child.exitCode !== null || child.pid === undefined) return;
+  spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true });
+}
+
+async function seedCaptureTurn(f: { workspaceId: string; sessionId: string }, text: string,
+  reply: string): Promise<{ userMessageId: string; assistantMessageId: string; taskId: string }> {
+  const userMessageId = randomUUID();
+  const assistantMessageId = randomUUID();
+  await withTransaction(app.db, async (r) => {
+    await r.assist.insertMessage({ id: userMessageId, sessionId: f.sessionId, seq: 1n,
+      role: 'USER', status: 'COMPLETED', intent: 'DISCUSS', content: text, sources: [] });
+    await r.assist.insertMessage({ id: assistantMessageId, sessionId: f.sessionId, seq: 2n,
+      role: 'ASSISTANT', status: 'COMPLETED', intent: 'DISCUSS', content: reply, sources: [] });
+  });
+  const taskId = randomUUID();
+  await sql`insert into memory_capture_tasks
+    (id, workspace_id, session_id, trigger_message_id, user_message_id, kind, status)
+    values (${taskId}, ${f.workspaceId}, ${f.sessionId}, ${assistantMessageId},
+      ${userMessageId}, 'AUTO', 'PENDING')`.execute(app.db);
+  return { userMessageId, assistantMessageId, taskId };
+}
+
+async function memoryCount(workspaceId: string): Promise<number> {
+  return (await sql<{ count: number }>`select count(*)::int as count from memory_items
+    where workspace_id = ${workspaceId}`.execute(app.db)).rows[0]?.count ?? 0;
+}
 
 test('真实聊天入口：结算后自动提取落库，来源与证据身份可核对', async () => {
   const f = await fixture();
@@ -236,6 +338,165 @@ test('关闭自动捕获后不再写入：预检与写入事务两道闸门都�
     sourceKind: 'USER_STATEMENT', sourceQuote: '我们决定用 PostgreSQL' }));
   assert.equal(direct, null, '开关已关闭时写事务必须整条拒绝');
   assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 0);
+});
+
+test('关闭自动捕获后：明确记住仍然保存，普通对话不再自动提取', async () => {
+  const f = await fixture();
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
+    expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: false });
+
+  const explicit = await runChatTurn(f, EXTRACTION, '请记住：这个项目统一使用 pnpm。');
+  const items = await listInformation(app.db, 'memory', f.workspaceId, f.projectId);
+  assert.equal(items.length, 1, `明确记住必须落库：${JSON.stringify(items)}`);
+  assert.equal(items[0]?.origin, 'HUMAN_CONFIRMED');
+  assert.equal(items[0]?.source_kind, 'USER_STATEMENT');
+  assert.equal(items[0]?.verification, 'UNVERIFIED', '明确记住不等于人工已验证');
+  assert.equal(String(items[0]?.text), '这个项目统一使用 pnpm');
+
+  const tasks = await sql<{ kind: string; status: string; user_message_id: string | null;
+    error_kind: string | null }>`select kind, status, user_message_id, error_kind
+      from memory_capture_tasks where session_id = ${f.sessionId}
+      order by created_at, id`.execute(app.db);
+  assert.equal(tasks.rows.length, 1);
+  assert.equal(tasks.rows[0]?.kind, 'EXPLICIT');
+  assert.equal(tasks.rows[0]?.status, 'SUCCEEDED');
+  assert.equal(tasks.rows[0]?.user_message_id, explicit.userMessageId,
+    '显式记忆的来源必须是用户原话消息');
+
+  // 同一轮再执行一次（模拟 Worker 重放）：唯一任务身份命中，不产生第二条记忆。
+  await captureMemoriesForTurn(app.db, { sessionId: f.sessionId,
+    assistantMessageId: explicit.assistantMessageId, modelPort: new FakeModelPort() });
+  assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 1,
+    '任务重放不得产生第二条显式记忆');
+
+  // 普通对话在开关关闭后仍有可观察的 AUTO 取消终态，但不得写入记忆。
+  await runChatTurn(f, EXTRACTION);
+  assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 1,
+    '普通对话不得因显式路径的存在而恢复自动保存');
+  const after = await sql<{ kind: string; status: string; error_kind: string | null }>`
+    select kind, status, error_kind from memory_capture_tasks
+    where session_id = ${f.sessionId} order by created_at, id`.execute(app.db);
+  assert.equal(after.rows.length, 2);
+  assert.ok(after.rows.some((row) => row.kind === 'EXPLICIT' && row.status === 'SUCCEEDED'));
+  assert.ok(after.rows.some((row) => row.kind === 'AUTO' && row.status === 'CANCELLED' &&
+    row.error_kind === 'AUTO_CAPTURE_DISABLED'));
+});
+
+test('明确记住：敏感凭证拒绝写入，但留下真实取消回执', async () => {
+  const f = await fixture();
+  const explicit = await runChatTurn(f, EXTRACTION, '请记住：我的密码：abcdef12345678');
+  assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 0,
+    '疑似凭证不得进入长期记忆');
+  const task = (await sql<{ status: string; error_kind: string | null; last_error: string | null }>`
+    select status, error_kind, last_error from memory_capture_tasks
+    where session_id = ${f.sessionId} and kind = 'EXPLICIT' and trigger_message_id = ${explicit.assistantMessageId}`
+    .execute(app.db)).rows[0];
+  assert.equal(task?.status, 'CANCELLED');
+  assert.equal(task?.error_kind, 'SENSITIVE');
+  assert.match(task?.last_error ?? '', /凭证/iu);
+});
+
+test('会话关闭记忆时：明确记住也拒绝，并持久记录 MEMORY_DISABLED', async () => {
+  const f = await fixture();
+  await resetSessionMemory(app.db, { ...f, commandId: randomUUID(),
+    expectedRevision: '0', expectedSessionRevision: '0', remember: false });
+  const explicit = await runChatTurn(f, EXTRACTION, '请记住：这个项目统一使用 pnpm。');
+  assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 0);
+  const task = (await sql<{ status: string; error_kind: string | null }>`
+    select status, error_kind from memory_capture_tasks
+    where session_id = ${f.sessionId} and kind = 'EXPLICIT'
+      and trigger_message_id = ${explicit.assistantMessageId}`.execute(app.db)).rows[0];
+  assert.equal(task?.status, 'CANCELLED');
+  assert.equal(task?.error_kind, 'MEMORY_DISABLED');
+});
+
+test('真实子进程崩溃：领取后 SIGKILL，新 Worker 租约回收后恢复且只写一条', async () => {
+  const f = await fixture();
+  const seeded = await seedCaptureTurn(f, USER_TEXT, REPLY_TEXT);
+  const worker = spawnCaptureWorker({ taskId: seeded.taskId, sessionId: f.sessionId,
+    assistantMessageId: seeded.assistantMessageId, hang: true });
+  try {
+    await waitFor(async () => {
+      const row = (await sql<{ status: string; claimed_by: string | null }>`
+        select status, claimed_by from memory_capture_tasks where id = ${seeded.taskId}`
+        .execute(app.db)).rows[0];
+      return row?.status === 'RUNNING' && row.claimed_by?.startsWith('child-') === true;
+    }).catch(async (error: unknown) => {
+      const row = (await sql<{ status: string; error_kind: string | null; last_error: string | null;
+        attempts: number; claimed_by: string | null }>`select status, error_kind, last_error,
+        attempts, claimed_by from memory_capture_tasks where id = ${seeded.taskId}`
+        .execute(app.db)).rows[0];
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; `
+        + `child_exit=${String(worker.child.exitCode)}; child_stderr=${worker.stderr()}; `
+        + `task=${JSON.stringify(row)}`);
+    });
+    assert.ok(worker.child.pid, `child stderr: ${worker.stderr()}`);
+    forceKill(worker.child);
+    await once(worker.child, 'exit');
+    // 子进程租约 3s；等它真实过期，再由新 Worker 领取，而不是测试手动改状态。
+    await new Promise((resolve) => setTimeout(resolve, 3600));
+    const port = new FakeModelPort();
+    port.assist = async () => ({ kind: 'CONTENT', content: CHILD_EXTRACTION,
+      providerRequestId: randomUUID(), usage: { inputTokens: 7, outputTokens: 3 } });
+    const tick = await runMemoryCaptureTick(app.db, { workerId: randomUUID(), modelPort: port,
+      leaseMs: 3000, skipRecoverySweep: true });
+    const beforeTick = (await sql<{ status: string; attempts: number; error_kind: string | null;
+      claimed_by: string | null; lease_until: Date | null }>`select status, attempts, error_kind,
+      claimed_by, lease_until from memory_capture_tasks where id = ${seeded.taskId}`
+      .execute(app.db)).rows[0];
+    assert.equal(tick.recovered, 1, `${JSON.stringify(tick)} task=${JSON.stringify(beforeTick)}`);
+    assert.equal(tick.processed, 1, JSON.stringify(tick));
+    const task = (await sql<{ status: string; attempts: number; error_kind: string | null }>`
+      select status, attempts, error_kind from memory_capture_tasks where id = ${seeded.taskId}`
+      .execute(app.db)).rows[0]!;
+    assert.equal(task.status, 'SUCCEEDED');
+    assert.equal(task.attempts, 2, '租约回收后重新领取必须递增尝试次数');
+    assert.equal(await memoryCount(f.workspaceId), 1);
+    assert.equal((await sql<{ count: number }>`select count(*)::int as count
+      from memory_message_sources where session_id = ${f.sessionId}`.execute(app.db)).rows[0]?.count, 1);
+  } finally {
+    if (worker.child.exitCode === null) { forceKill(worker.child); }
+  }
+});
+
+test('写入成功但任务未结算时崩溃：真实进程在记忆落库后 SIGKILL，重启后幂等不重复', async () => {
+  const f = await fixture();
+  const seeded = await seedCaptureTurn(f, USER_TEXT, REPLY_TEXT);
+  // 子进程在 memory_items 已提交、任务终态尚未更新的窗口内暂停并打印标记；
+  // 父进程看到标记后强制终止，模拟真实“写成功但未结算”崩溃。
+  const worker = spawnCaptureWorker({ taskId: seeded.taskId, sessionId: f.sessionId,
+    assistantMessageId: seeded.assistantMessageId, hang: false, delayMs: 0, beforeSettle: true });
+  try {
+    await waitFor(async () => worker.stderr().includes('CHILD_WRITTEN'), 15_000);
+    assert.equal(await memoryCount(f.workspaceId), 1, '崩溃点必须已经写入真实记忆');
+    const beforeCrash = (await sql<{ status: string; attempts: number }>`select status, attempts
+      from memory_capture_tasks where id = ${seeded.taskId}`.execute(app.db)).rows[0];
+    assert.equal(beforeCrash?.status, 'RUNNING', '终态更新必须尚未提交');
+    forceKill(worker.child);
+    await once(worker.child, 'exit');
+  } finally {
+    if (worker.child.exitCode === null) { forceKill(worker.child); }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 3600));
+  const port = new FakeModelPort();
+  port.assist = async () => ({ kind: 'CONTENT', content: CHILD_EXTRACTION,
+    providerRequestId: randomUUID(), usage: { inputTokens: 7, outputTokens: 3 } });
+  const tick = await runMemoryCaptureTick(app.db, { workerId: randomUUID(), modelPort: port,
+    leaseMs: 3000, skipRecoverySweep: true });
+  const beforeTick = (await sql<{ status: string; attempts: number; error_kind: string | null;
+    claimed_by: string | null; lease_until: Date | null; completed_at: Date | null }>`
+    select status, attempts, error_kind, claimed_by, lease_until, completed_at
+    from memory_capture_tasks where id = ${seeded.taskId}`.execute(app.db)).rows[0];
+  assert.equal(tick.recovered, 1, `${JSON.stringify(tick)} task=${JSON.stringify(beforeTick)}`);
+  assert.equal(tick.processed, 1, JSON.stringify(tick));
+  const task = (await sql<{ status: string; attempts: number }>`select status, attempts
+    from memory_capture_tasks where id = ${seeded.taskId}`.execute(app.db)).rows[0]!;
+  assert.equal(task.status, 'SUCCEEDED');
+  assert.equal(task.attempts, 2);
+  assert.equal(await memoryCount(f.workspaceId), 1, '幂等键/去重指纹必须阻止第二条记忆');
+  assert.equal((await sql<{ count: number }>`select count(*)::int as count
+    from memory_message_sources where session_id = ${f.sessionId}`.execute(app.db)).rows[0]?.count, 1,
+    '来源证据也不得因重放重复绑定');
 });
 
 test('重试与重复触发不产生第二条记忆', async () => {
@@ -468,6 +729,15 @@ test('提取期间关闭自动记忆或切换会话作用域：迟到的结果�
 test('并发提取同一轮：advisory 锁与去重指纹只留一份', async () => {
   const f = await fixture();
   const turn = await runChatTurn(f, EMPTY_EXTRACTION);
+  // 结算已经消费了这轮捕获；把同一任务重置为待处理，模拟两个 Worker 同时看到同一行。
+  await sql`update memory_capture_tasks set status = 'PENDING', attempts = 0,
+    next_attempt_at = now(), completed_at = null, error_kind = null, last_error = null
+    where session_id = ${f.sessionId} and trigger_message_id = ${turn.assistantMessageId}
+      and kind = 'AUTO'`.execute(app.db);
+  const taskId = (await sql<{ id: string }>`select id from memory_capture_tasks
+    where session_id = ${f.sessionId} and trigger_message_id = ${turn.assistantMessageId}
+      and kind = 'AUTO'`.execute(app.db)).rows[0]?.id;
+  assert.ok(taskId !== undefined);
   const extractionPort = () => {
     const port = new FakeModelPort();
     port.assist = async () => ({ kind: 'CONTENT', content: EXTRACTION,
@@ -475,10 +745,10 @@ test('并发提取同一轮：advisory 锁与去重指纹只留一份', async ()
     return port;
   };
   const [left, right] = await Promise.all([
-    captureMemoriesForTurn(app.db, { sessionId: f.sessionId,
-      assistantMessageId: turn.assistantMessageId, modelPort: extractionPort() }),
-    captureMemoriesForTurn(app.db, { sessionId: f.sessionId,
-      assistantMessageId: turn.assistantMessageId, modelPort: extractionPort() }),
+    processMemoryCaptureTask(app.db, { sessionId: f.sessionId,
+      assistantMessageId: turn.assistantMessageId, taskId, modelPort: extractionPort() }),
+    processMemoryCaptureTask(app.db, { sessionId: f.sessionId,
+      assistantMessageId: turn.assistantMessageId, taskId, modelPort: extractionPort() }),
   ]);
   assert.equal(left + right, 2, `两条候选各写一次：${left} + ${right}`);
   assert.equal((await listInformation(app.db, 'memory', f.workspaceId, f.projectId)).length, 2);

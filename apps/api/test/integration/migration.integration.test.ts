@@ -251,6 +251,12 @@ const ALL_MIGRATIONS = [
   '0164_memory_system_v2',
   '0165_model_context_window_capacity',
   '0166_memory_actor_sources',
+  // 0167（并行工作）：知识整理；0168（本任务）：持久捕获任务与压缩屏障；
+  // 0169（本任务）：第一方 Skill 执行事件。清单必须与磁盘一致，否则迁移账本断言会把
+  // 合法的追加当成“多了一条”。
+  '0167_knowledge_organization',
+  '0168_memory_capture_tasks',
+  '0169_assist_skill_invocations',
 ] as const;
 
 function delay(milliseconds: number): Promise<void> {

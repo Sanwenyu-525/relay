@@ -138,6 +138,21 @@ export class RunRepository {
     return result.rows[0];
   }
 
+  /**
+   * 列表投影的批量等待原因：一次取回多个 Run 的 `wait_reason`。
+   *
+   * 任务列表原先对每个 WAITING 任务单读当前 Run，50 条等待任务就是 50 次查询；这里只投影
+   * `wait_reason` 一列，状态、步骤等仍由 Run 详情入口读取。
+   */
+  async listRunWaitReasons(runIds: readonly string[]): Promise<ReadonlyMap<string, string | null>> {
+    if (runIds.length === 0) return new Map();
+    const result = await sql<{ id: string; wait_reason: string | null }>`
+      select id, wait_reason from runs
+      where id in (${sql.join(runIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    `.execute(this.db);
+    return new Map(result.rows.map((row) => [row.id, row.wait_reason]));
+  }
+
   /** Run 行锁：状态迁移、步骤位置与终态竞争都在同一行上串行化。 */
   async lockRun(runId: string): Promise<RunRow | undefined> {
     const result = await sql<RunRow>`

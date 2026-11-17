@@ -13,13 +13,44 @@
 .pv-page .page-primary > .subnav .subnav-item,
 .pv-page .subnav-row .subnav-item { font-size: var(--relay-font-size-caption); }
 
-/* 列宽（UI-PAGE-TASKS-01）：data-row--tasks 只有本页使用，列宽在页面内收口——
-   任务列（标题+修订）放宽到 2.2fr，项目 1.1fr，状态 1.6fr，模式 0.9fr、执行者 0.8fr；
-   修订数字用 tabular 对齐，长列表上下扫读时同位数字不错位。 */
-.pv-page .task-table-card .data-row--tasks {
-  grid-template-columns:
-    minmax(0, 2.2fr) minmax(0, 1.1fr) minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 0.8fr);
+/* 列宽（UI-PAGE-TASKS-01 / 2026-11-15 复核）：原生 table 用固定列宽百分比，
+   任务列（标题+修订）承载两行标题，给最大权重；工作状态列要放下 chip + 一两行原因，给到 27%；
+   项目列允许换行，模式与执行者是 3–5 字短标签，只按内容给小权重。 */
+.pv-page .task-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.task-table .task-col-title { width: 33%; }
+.task-table .task-col-project { width: 19%; }
+.task-table .task-col-state { width: 27%; }
+.task-table .task-col-mode { width: 11%; }
+.task-table .task-col-executor { width: 10%; }
+.pv-page .task-table thead th {
+  padding: 9px 8px;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-body);
+  font-weight: var(--relay-font-weight-medium, 500);
+  text-align: left;
 }
+.pv-page .task-table thead th:first-child,
+.pv-page .task-table tbody td:first-child { padding-left: 17px; }
+.pv-page .task-table thead th:last-child,
+.pv-page .task-table tbody td:last-child { padding-right: 17px; }
+.pv-page .task-table tbody td {
+  padding: 12px 8px;
+  border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
+  vertical-align: top;
+}
+.pv-page .task-table tbody tr:last-child td { border-bottom: 0; }
+.pv-page .task-table tbody tr:hover,
+.pv-page .task-table tbody tr:focus-within { background: var(--relay-color-selection-hover); }
+.pv-page .task-table tbody tr:focus-within { box-shadow: inset 3px 0 0 var(--relay-color-focus-ring, var(--pv-focus-ring)); }
+.pv-page .task-table .task-title-link {
+  display: block;
+  border-radius: 4px;
+  color: inherit;
+  text-decoration: none;
+}
+.pv-page .task-table .task-title-link:hover strong { text-decoration: underline; text-underline-offset: 2px; }
+.pv-page .task-table .task-title-link:focus-visible { outline: 3px solid var(--pv-focus-ring); outline-offset: 2px; }
 .pv-page .task-table-card .data-cell small { font-variant-numeric: tabular-nums; }
 
 /* 当前生效筛选摘要：chips 用状态 chip 的既有色板（--pv-chip-*），移除按钮只有图标但有
@@ -82,46 +113,76 @@
 /* 列表改用 pv 卡片承载：与收件箱任务卡同一套 1px 边框、13px 圆角与内边距，
    表头行与最后一行不再额外画边框，避免卡片内出现第二条满宽横线。 */
 .pv-page.task-list-page .task-table-card { margin: 16px 0 0; }
-/* 列表页主区不再有 relay 内边距，范围说明入口随之对齐内容左缘（原 32px 偏移会凸出卡片左边）。 */
-.pv-page.task-list-page .rail-trigger { margin: 16px 0 0; justify-self: start; }
-.pv-page .task-table-card .table-scroll { margin-top: 0; }
-.pv-page .task-table-card .data-table { min-width: 0; border-top: 0; }
-.pv-page .task-table-card .data-row { padding: 12px 17px; }
-.pv-page .task-table-card .data-row--head { min-height: 40px; }
-.pv-page .task-table-card .data-list > li:last-child .data-row { border-bottom: 0; }
+/* 列表页主区不再有 relay 内边距；范围说明入口与范围页签同行（.task-scope-row），
+   宽屏不占整行空白，窄屏也不落在页面底部。 */
+.pv-page.task-list-page .task-scope-row { align-items: center; }
 
-/* 状态格：chip 与等待/阻塞原因同排，原因单行省略并保留完整 title。
-   行高因此由左侧「标题 + 修订」两行决定，各数据行同为 68.1px，不再 68.1/72.1 混排。 */
+/* 状态格：chip 在上、原因在下，原因最多两行再省略（title 与行可访问名称都给完整句子）。
+   不把原因压成「等待人工…」这种读不完整的单行；只有超过两行的长句才视觉截断。 */
 .pv-page .task-table-card .data-row--tasks > .data-cell:nth-child(3) {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
-.pv-page .task-table-card .data-cell-reason { flex: 1 1 6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-page .task-table-card .data-cell-reason {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  font-size: var(--relay-font-size-micro);
+  color: var(--relay-color-text-muted);
+}
+.pv-page .task-table-card .table-scroll { margin-top: 0; }
+.pv-page .task-table-card .data-table { min-width: 0; border-top: 0; }
+.pv-page .task-table-card .task-table { margin: 4px 0 0; }
+.pv-page .task-table-card .data-cell-reason { max-width: 100%; }
 
-/* 窄窗：表格转三行列表（标题+修订 / 状态与执行模式 / 项目与执行者），不再横向裁掉三列，
-   修订随标题保留在第一行（UI-PAGE-TASKS-01：行卡片不丢列信息）。 */
+/* 状态格（旧注释保留结论）：chip 与原因同行时会因原因长度不同产生两种行高，
+   现改为 chip 在上、原因在下，所有带原因的行结构一致；行高由内容决定。 */
+
+/* 窄窗：原生 table 保留 table/row/cell/columnheader 角色，只把视觉改成三行卡片
+   （标题+修订 / 状态与执行模式 / 项目与执行者）；表头用 clip 隐藏而不是 display:none，
+   辅助技术仍拿得到五个列标题。 */
 @media (width < 64rem) {
-  /* 表头与数据行同用 .data-row--tasks，需以双类提特异性，否则被下面的 display:grid 覆盖。 */
-  .pv-page .task-table-card .data-row--head.data-row--tasks { display: none; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) {
+  /* 范围页签 + 范围说明入口：窄窗换行时入口靠右，不再拉成整行宽按钮。 */
+  .pv-page.task-list-page .task-scope-row { align-items: flex-start; }
+  .pv-page.task-list-page .task-scope-row .rail-trigger--inline { margin-left: auto; }
+  .pv-page .task-table-card .task-table { display: block; border-top: 0; }
+  .pv-page .task-table-card .task-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .pv-page .task-table-card .task-table tbody { display: block; }
+  .pv-page .task-table-card .task-table tr {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
     gap: 6px 12px;
     padding: 14px 17px;
+    border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
   }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(1) { grid-area: 1 / 1 / 2 / -1; }
+  .pv-page .task-table-card .task-table tr:last-child { border-bottom: 0; }
+  .pv-page .task-table-card .task-table td { display: block; padding: 0; border: 0; }
+  .pv-page .task-table-card .task-table td:nth-child(1) { grid-area: 1 / 1 / 2 / -1; }
+  .pv-page .task-table-card .task-table td:nth-child(3) { grid-area: 2 / 1 / 3 / 2; }
+  .pv-page .task-table-card .task-table td:nth-child(4) { grid-area: 2 / 2 / 3 / 3; justify-self: end; }
+  .pv-page .task-table-card .task-table td:nth-child(2) { grid-area: 3 / 1 / 4 / 2; }
+  .pv-page .task-table-card .task-table td:nth-child(5) { grid-area: 3 / 2 / 4 / 3; justify-self: end; }
   /* 修订换到标题下方单独一行，不与标题抢宽度。 */
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(1) strong { display: block; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(3) { grid-area: 2 / 1 / 3 / 2; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(4) { grid-area: 2 / 2 / 3 / 3; justify-self: end; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(2) { grid-area: 3 / 1 / 4 / 2; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(5) { grid-area: 3 / 2 / 4 / 3; justify-self: end; }
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(2)::before,
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(4)::before,
-  .pv-page .task-table-card .data-row--tasks:not(.data-row--head) > .data-cell:nth-child(5)::before {
+  .pv-page .task-table-card .task-table td:nth-child(1) .task-title-link strong { display: block; }
+  .pv-page .task-table-card .task-table td:nth-child(2)::before,
+  .pv-page .task-table-card .task-table td:nth-child(4)::before,
+  .pv-page .task-table-card .task-table td:nth-child(5)::before {
     content: attr(data-label) "：";
     color: var(--pv-muted);
     font-size: var(--relay-font-size-micro);

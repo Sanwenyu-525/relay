@@ -375,7 +375,7 @@ export default function FileBrowsePanel({ client, projectId, resources, resource
                 style={{ paddingLeft: depth * 14 + 18 }}
                 data-testid={`file-browse-file-${childPath}`}
                 disabled={busy || Boolean(currentPending)}
-                title={entry.size === null ? undefined : `${entry.size} 字节`}
+                title={entry.size === null ? entry.path : `${entry.path} · ${entry.size} 字节`}
                 onClick={() => { setPreview({ path: childPath, status: "loading", content: null, size: entry.size,
                   sha256: null, truncated: false, error: null });
                   void runCommand("READ_FILE", { kind: "PREVIEW", filePath: childPath }); }}>

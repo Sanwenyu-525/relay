@@ -46,12 +46,13 @@ function draftFrom(settings: RelayMemorySettings): Draft {
     coreTokenBudget: String(settings.coreTokenBudget ?? DEFAULTS.coreTokenBudget),
     retrievalTokenBudget: String(settings.retrievalTokenBudget ?? DEFAULTS.retrievalTokenBudget),
     retrievalTopK: String(settings.retrievalTopK ?? DEFAULTS.retrievalTopK),
-    retrievalMode: settings.retrievalMode ?? DEFAULTS.retrievalMode,
+    retrievalMode: settings.retrievalMode === "HYBRID" ? "HYBRID" : DEFAULTS.retrievalMode,
     autoConsolidate: settings.autoConsolidate ?? DEFAULTS.autoConsolidate,
     consolidationIntervalHours: String(settings.consolidationIntervalHours ?? DEFAULTS.consolidationIntervalHours),
     memoryStaleAfterDays: String(settings.memoryStaleAfterDays ?? DEFAULTS.memoryStaleAfterDays),
-    embeddingProvider: settings.embeddingProvider ?? DEFAULTS.embeddingProvider,
-    remoteEmbeddingAllowed: settings.remoteEmbeddingAllowed ?? DEFAULTS.remoteEmbeddingAllowed,
+    // 未实现的能力不把历史配置带进可提交草稿：保存一次就收敛到真实可用状态。
+    embeddingProvider: "disabled",
+    remoteEmbeddingAllowed: false,
     includeStaleInRecall: settings.includeStaleInRecall ?? DEFAULTS.includeStaleInRecall,
   };
 }
@@ -70,13 +71,9 @@ export default function MemoryAdvancedSettingsCard({ client }: {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
-  const [confirmPurge, setConfirmPurge] = useState(false);
-  const [purgeText, setPurgeText] = useState("");
-  const importRef = useRef<HTMLInputElement>(null);
   const disposed = useRef(false);
   const requestVersion = useRef(0);
 
@@ -139,6 +136,12 @@ export default function MemoryAdvancedSettingsCard({ client }: {
     if (draft === null || settings === null || numbers === null || numericError !== null) {
       setError(numericError ?? "设置尚未读取完成。"); return;
     }
+    if (draft.retrievalMode === "HYBRID") {
+      setError("HYBRID 混合检索尚未实现，不能保存为当前检索模式；请先选择「字面/全文」。"); return;
+    }
+    if (draft.embeddingProvider !== "disabled" || draft.remoteEmbeddingAllowed) {
+      setError("Embedding 与远程正文发送尚未实现；请保持禁用，避免把未实现能力当成可用。"); return;
+    }
     if (numbers.core === null || numbers.retrieval === null || numbers.topK === null ||
         numbers.interval === null || numbers.stale === null) return;
     setSaving(true); setError(null); setNotice(null); setConflict(null);
@@ -175,59 +178,24 @@ export default function MemoryAdvancedSettingsCard({ client }: {
     } finally { if (!disposed.current) setSaving(false); }
   }
 
-  async function run(label: string, action: () => Promise<void>): Promise<void> {
-    setBusy(label); setError(null); setNotice(null);
-    try { await action(); }
-    catch (caught) { if (!disposed.current) setError(describeLiveError(caught).message); }
-    finally { if (!disposed.current) setBusy(null); }
-  }
-
-  async function consolidate(): Promise<void> {
-    await run("consolidate", async () => {
-      const result = await client!.runMemoryConsolidation(createCommandId());
-      setNotice(`整理完成：${String(result.result.status ?? "")}，去重 ${String(result.result.deduped ?? 0)} 条，`
-        + `替代 ${String(result.result.superseded ?? 0)} 条，标记陈旧 ${String(result.result.stale ?? 0)} 条。`);
-      await read();
-    });
-  }
-
-  async function exportAll(): Promise<void> {
-    await run("export", async () => {
-      const payload = await client!.exportMemories();
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = "relay-memories.json"; anchor.click();
-      URL.revokeObjectURL(url);
-      setNotice("已导出工作空间可导出记忆。");
-    });
-  }
-
-  async function importFile(file: File): Promise<void> {
-    await run("import", async () => {
-      let payload: Record<string, unknown>;
-      try { payload = JSON.parse(await file.text()) as Record<string, unknown>; }
-      catch { throw new Error("导入文件不是合法 JSON。"); }
-      const result = await client!.importMemories({ commandId: createCommandId(), projectId: null, payload });
-      setNotice(`导入完成：新增 ${String(result.result.imported ?? 0)} 条，跳过 ${String(result.result.skipped ?? 0)} 条。`);
-      await read();
-    });
-  }
-
-  async function purge(): Promise<void> {
-    if (purgeText !== "DELETE_MEMORIES") return;
-    await run("purge", async () => {
-      const result = await client!.purgeMemories({ commandId: createCommandId(), projectId: null,
-        includeActive: false });
-      setConfirmPurge(false); setPurgeText("");
-      setNotice(`已真实删除 ${String(result.result.deleted ?? "0")} 条已停用/已过期记忆。`);
-      await read();
-    });
-  }
-
   return <section className="surface-panel settings-card" data-testid="memory-advanced-settings">
     <h2>召回、整理与隐私</h2>
     <p className="helper-text">按工作空间生效；所有数值都会真实保存并在下一次召回/整理时生效。</p>
+    {settings?.capabilities !== undefined && <div className="memory-capabilities" data-testid="memory-capabilities">
+      <p><strong>能力状态（来自服务端）</strong></p>
+      <ul>
+        <li>字面/全文检索：{settings.capabilities.retrieval.literal.implemented ? "已实现" : "未实现"} · {settings.capabilities.retrieval.literal.note}</li>
+        <li>混合检索 HYBRID：{settings.capabilities.retrieval.hybrid.implemented ? "已实现" : "未实现"} · {settings.capabilities.retrieval.hybrid.note}</li>
+        <li>Embedding：{settings.capabilities.embedding.implemented ? "已实现" : "未实现"} · {settings.capabilities.embedding.note}</li>
+        <li>捕获任务：{settings.capabilities.capture.persistentTasks ? "持久化" : "未持久化"} ·
+          重试退避 {settings.capabilities.capture.retryWithBackoff ? "有" : "无"} ·
+          压缩前屏障 {settings.capabilities.capture.preCompactionBarrier ? "有" : "无"} ·
+          明确记住 {settings.capabilities.capture.explicitRemember ? "有" : "无"}</li>
+      </ul>
+    </div>}
+    {settings?.retrievalMode === "HYBRID" && <Alert tone="warning" title="旧 HYBRID 配置未实现">
+      <p>服务端仍能读出历史 HYBRID 标记，但当前没有向量检索实现；保存时请选择「字面/全文」，否则保存会被拒绝。</p>
+    </Alert>}
     {loading && settings === null && <p role="status">正在读取召回设置…</p>}
     {error !== null && <Alert tone="danger" title="操作未完成"><p>{error}</p>
       <Button variant="secondary" onClick={() => void read()}>重新读取</Button></Alert>}
@@ -247,11 +215,11 @@ export default function MemoryAdvancedSettingsCard({ client }: {
           <Input inputMode="numeric" value={draft.retrievalTopK}
             onChange={(event) => setDraft({ ...draft, retrievalTopK: event.target.value })} />
         </FormField>
-        <FormField label="检索模式" hint="HYBRID 在没有真实 Embedding Provider 时会记录降级并退回字面检索。">
+        <FormField label="检索模式" hint="HYBRID 尚未实现；当前只提供真实可用的字面/全文检索。">
           <Select value={draft.retrievalMode} onChange={(event) =>
             setDraft({ ...draft, retrievalMode: event.target.value as Draft["retrievalMode"] })}>
             <option value="LITERAL">字面/全文</option>
-            <option value="HYBRID">混合（可降级）</option>
+            <option value="HYBRID" disabled>混合（未实现，不可选）</option>
           </Select>
         </FormField>
         <FormField label="自动整理间隔（小时）" hint="Worker 每拍最多处理一个到期工作区。">
@@ -262,11 +230,11 @@ export default function MemoryAdvancedSettingsCard({ client }: {
           <Input inputMode="numeric" value={draft.memoryStaleAfterDays}
             onChange={(event) => setDraft({ ...draft, memoryStaleAfterDays: event.target.value })} />
         </FormField>
-        <FormField label="Embedding Provider" hint="当前只有真实适配器可用时才选择；否则保持 disabled。">
+        <FormField label="Embedding Provider" hint="尚未实现；保持禁用，不会展示成可用能力。">
           <Select value={draft.embeddingProvider} onChange={(event) =>
             setDraft({ ...draft, embeddingProvider: event.target.value as Draft["embeddingProvider"] })}>
             <option value="disabled">禁用（仅字面检索）</option>
-            <option value="openai-compatible">OpenAI 兼容</option>
+            <option value="openai-compatible" disabled>OpenAI 兼容（未实现，不可选）</option>
           </Select>
         </FormField>
       </div>
@@ -282,11 +250,10 @@ export default function MemoryAdvancedSettingsCard({ client }: {
           <span><strong>召回时包含「可能过时」</strong><span className="helper-text">默认关闭；开启后仍会标注状态，不当作当前事实。</span></span>
         </label>
         <label className="memory-settings-switch">
-          <input type="checkbox" checked={draft.remoteEmbeddingAllowed}
-            disabled={draft.embeddingProvider === "disabled"}
+          <input type="checkbox" checked={draft.remoteEmbeddingAllowed} disabled
             onChange={(event) => setDraft({ ...draft, remoteEmbeddingAllowed: event.target.checked })} />
           <span><strong>允许把记忆正文发送到远程 Embedding</strong>
-            <span className="helper-text">隐私开关；关闭时即使选择 Provider 也不会外发正文。</span></span>
+            <span className="helper-text">未实现：没有真实远程 Provider，也不会把正文发出去；本项保持关闭。</span></span>
         </label>
       </div>
       {numericError !== null && <p className="field-error" role="alert">{numericError}</p>}
@@ -294,22 +261,7 @@ export default function MemoryAdvancedSettingsCard({ client }: {
         <Button variant="primary" disabled={saving || !dirty || numericError !== null}
           onClick={() => void save()}>{saving ? "正在保存" : "保存召回设置"}</Button>
         <Button variant="secondary" disabled={saving} onClick={() => void read()}>重新读取</Button>
-        <Button variant="secondary" disabled={busy !== null} onClick={() => void consolidate()}>立即整理</Button>
-        <Button variant="secondary" disabled={busy !== null} onClick={() => void exportAll()}>导出</Button>
-        <Button variant="secondary" disabled={busy !== null} onClick={() => importRef.current?.click()}>导入</Button>
-        <Button variant="danger" disabled={busy !== null} onClick={() => setConfirmPurge(!confirmPurge)}>清理失效项</Button>
       </div>
-      <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => {
-        const file = event.target.files?.[0]; event.target.value = "";
-        if (file !== undefined) void importFile(file);
-      }} />
-      {confirmPurge && <div className="memory-settings-actions">
-        <FormField label="输入 DELETE_MEMORIES 确认真实删除已停用/已过期记忆">
-          <Input value={purgeText} autoComplete="off" onChange={(event) => setPurgeText(event.target.value)} />
-        </FormField>
-        <Button variant="danger" disabled={purgeText !== "DELETE_MEMORIES" || busy !== null}
-          onClick={() => void purge()}>{busy === "purge" ? "正在删除" : "确认删除"}</Button>
-      </div>}
       {conflict !== null && <Alert tone="warning" title="设置已在别处修改">
         <p>{conflict}</p><p className="helper-text">已重读最新设置，未保存的改动仍在表单上；核对后重存。</p>
       </Alert>}

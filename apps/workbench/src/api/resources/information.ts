@@ -2,9 +2,9 @@ import type { DecimalRevision } from "../../types";
 import { RelayTransportError } from "../core/errors";
 import { RelayHttp } from "../core/http";
 import { array, decimal, directList, integer, nullableOptionalInteger, nullableString, object, string, stringArray } from "../core/primitives";
-import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryFrom, memoryMaintenanceRunFrom, memoryRevisionFrom, memoryStatsFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
+import { decisionFrom, interventionFrom, knowledgeCurationCandidateFrom, knowledgeFrom, knowledgeGuideFrom, knowledgeVersionContentFrom, knowledgeVersionFrom, memoryCaptureTaskFrom, memoryFrom, memoryMaintenanceRunFrom, memoryPageFrom, memoryRevisionFrom, memoryStatsFrom, modelVerifyResultFrom, ruleFrom, ruleVersionFrom, searchItemFrom } from "../parse/information";
 import { commandEnvelopeFrom } from "../parse/projects";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayVerifyTargetState, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayChatImageInput, RelayChatImageInputSource, RelayMemory, RelayMemoryCaptureTask, RelayMemoryPage, RelayMemorySourceKind, RelayModelCapabilityDeclaration, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayVerifyTargetState, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "../dtos/information";
 import type { RelayCommandEnvelope } from "../dtos/projects";
 
 export async function getKnowledge(http: RelayHttp, projectId: string | null = null): Promise<readonly RelayKnowledge[]> {
@@ -92,6 +92,42 @@ export interface MemoryListFilters {
   readonly origin?: RelayMemoryOrigin | "ALL";
   readonly query?: string;
   readonly limit?: number;
+}
+
+export interface MemoryPageFilters extends MemoryListFilters {
+  readonly verification?: RelayMemoryVerification | "ALL";
+  readonly sourceKind?: RelayMemorySourceKind | "ALL";
+  readonly pinned?: boolean;
+  readonly sort?: "updated" | "created" | "importance";
+  readonly cursor?: string;
+  readonly pageSize?: number;
+}
+
+/** 0167：服务端游标分页；UI 不把单页结果当完整记忆库。 */
+export async function getMemoryPage(http: RelayHttp, projectId: string | null = null,
+  effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL",
+  filters: MemoryPageFilters = {}): Promise<RelayMemoryPage> {
+  const query = new URLSearchParams();
+  if (projectId !== null) query.set("project_id", projectId);
+  if (effectiveStatus !== "ALL") query.set("effective_status", effectiveStatus);
+  if (filters.memoryType !== undefined && filters.memoryType !== "ALL") {
+    query.set("memory_type", filters.memoryType);
+  }
+  if (filters.origin !== undefined && filters.origin !== "ALL") query.set("origin", filters.origin);
+  if (filters.verification !== undefined && filters.verification !== "ALL") {
+    query.set("verification", filters.verification);
+  }
+  if (filters.sourceKind !== undefined && filters.sourceKind !== "ALL") {
+    query.set("source_kind", filters.sourceKind);
+  }
+  if (filters.pinned !== undefined) query.set("pinned", String(filters.pinned));
+  if (filters.sort !== undefined) query.set("sort", filters.sort);
+  if (filters.cursor !== undefined) query.set("cursor", filters.cursor);
+  if (filters.query !== undefined && filters.query.trim() !== "") query.set("q", filters.query.trim());
+  if (filters.pageSize !== undefined) query.set("limit", String(filters.pageSize));
+  const suffix = query.toString();
+  const path = http.workspacePath("/memory/items");
+  return memoryPageFrom(await http.request(suffix === "" ? path : `${path}?${suffix}`));
 }
 
 export async function getMemories(http: RelayHttp, projectId: string | null = null,
@@ -188,6 +224,41 @@ export async function verifyMemory(http: RelayHttp, id: string, input: {
 export async function getMemoryStats(http: RelayHttp, projectId: string | null = null): Promise<RelayMemoryStats> {
   const suffix = projectId === null ? "" : `?project_id=${encodeURIComponent(projectId)}`;
   return memoryStatsFrom(await http.request(`${http.workspacePath("/memory/stats")}${suffix}`));
+}
+
+/** 0167：手动延长/取消自动过期；只改根覆盖值，不改写历史版本正文。 */
+export async function extendMemoryExpiry(http: RelayHttp, id: string, input: {
+  commandId: string; expectedRevision: DecimalRevision; expiresAt: string | null;
+}): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, `/memories/${encodeURIComponent(id)}/expiry`, {
+    command_id: input.commandId, expected_revision: input.expectedRevision,
+    expires_at: input.expiresAt }, 200);
+}
+
+/** 0167：最近捕获任务；状态区分已捕获/待捕获/失败/无可提取内容/已取消。 */
+export async function getMemoryCaptureTasks(http: RelayHttp, filter: {
+  sessionId?: string; status?: string; limit?: number } = {}): Promise<readonly RelayMemoryCaptureTask[]> {
+  const query = new URLSearchParams();
+  if (filter.sessionId !== undefined) query.set("session_id", filter.sessionId);
+  if (filter.status !== undefined) query.set("status", filter.status);
+  if (filter.limit !== undefined) query.set("limit", String(filter.limit));
+  const suffix = query.toString();
+  const body = await http.request(suffix === "" ? http.workspacePath("/memory/capture-tasks")
+    : `${http.workspacePath("/memory/capture-tasks")}?${suffix}`);
+  const row = object(body, "memory capture tasks");
+  return array(row, "items", "memory capture tasks").map(memoryCaptureTaskFrom);
+}
+
+export async function retryMemoryCaptureTask(http: RelayHttp, id: string,
+  commandId: string): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, `/memory/capture-tasks/${encodeURIComponent(id)}/retry`,
+    { command_id: commandId }, 200);
+}
+
+export async function cancelMemoryCaptureTask(http: RelayHttp, id: string,
+  commandId: string): Promise<RelayCommandEnvelope> {
+  return informationCommand(http, `/memory/capture-tasks/${encodeURIComponent(id)}/cancel`,
+    { command_id: commandId }, 200);
 }
 
 export async function getMemoryMaintenanceRuns(http: RelayHttp): Promise<readonly RelayMemoryMaintenanceRun[]> {

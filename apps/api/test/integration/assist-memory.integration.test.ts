@@ -10,6 +10,7 @@ import { openWorkingDirectory } from '../../src/application/open-working-directo
 import { archiveAssistSession, deleteAssistSession, forkAssistSession } from '../../src/application/assist-session-controls.js';
 import { runAssistGenerationTick } from '../../src/application/assist-runner.js';
 import { runAssistMemoryTick } from '../../src/application/assist-memory-runner.js';
+import { runMemoryCaptureTick } from '../../src/application/memory-auto-capture.js';
 import { requestMemoryCompaction, readSessionMemory, resetSessionMemory,
   cancelMemoryCompaction } from '../../src/application/assist-memory.js';
 import { createMemory, createMemoryFromMessage, retireInformation } from '../../src/application/information-commands.js';
@@ -18,7 +19,7 @@ import { runMigrations } from '../../src/infrastructure/migration-runner.js';
 import { ManagedContentStore } from '../../src/storage/managed-content-store.js';
 import { FakeModelPort, type AssistRequest } from '../../src/workflow/fake-model-port.js';
 import { setMemorySettings } from '../../src/application/memory-settings.js';
-import { createDataRoot, startTestApi, workspacePath, type TestApi } from './api-harness.js';
+import { createDataRoot, expectProblem, startTestApi, workspacePath, type TestApi } from './api-harness.js';
 import { APP_DATABASE_URL, MIGRATION_DATABASE_URL, MIGRATIONS_DIRECTORY, openDatabase } from './integration-support.js';
 
 const app = openDatabase(APP_DATABASE_URL, 'relay-short-memory');
@@ -241,6 +242,35 @@ test('manual HTTP compaction is replayable; restart uses persisted summary plus 
   } finally { await restarted.close(); }
 });
 
+test('memory capture barrier rejects manual compaction until the capture task is settled', async () => {
+  const f = await fixture(17);
+  // 屏障只看“即将被 Checkpoint 覆盖”的消息；手工压缩的候选边界是倒数第 8 条之前，
+  // 因此任务必须放在会被覆盖的旧轮次（seq 26），而不是最新的两条消息上。
+  const held = (await sql<{ assistant_id: string; user_id: string }>`
+    select a.id as assistant_id, u.id as user_id from assist_messages a
+    join assist_messages u on u.session_id = a.session_id and u.seq = a.seq - 1
+    where a.session_id = ${f.sessionId} and a.seq = 26`.execute(app.db)).rows[0]!;
+  await sql`insert into memory_capture_tasks
+    (id, workspace_id, session_id, trigger_message_id, user_message_id, kind)
+    values (${randomUUID()}, ${f.workspaceId}, ${f.sessionId}, ${held.assistant_id}, ${held.user_id}, 'AUTO')`
+    .execute(app.db);
+  const blocked = await api.post(f.path('/compact'),
+    { command_id: randomUUID(), expected_revision: '0' });
+  expectProblem(blocked, 409, 'MEMORY_CAPTURE_PENDING');
+  // 终态任务不再阻塞；手动压缩随后可以正常建立请求。
+  await sql`update memory_capture_tasks set status = 'SUCCEEDED', completed_at = now(),
+    result = '{"written":0}'::jsonb where session_id = ${f.sessionId}`.execute(app.db);
+  const accepted = await api.post(f.path('/compact'),
+    { command_id: randomUUID(), expected_revision: '0' });
+  assert.equal(accepted.status, 202, accepted.text);
+  // 清理本用例建立的压缩请求，避免它污染同一测试库中后续的全局 tick 队列。
+  const active = await createRepositories(app.db).assistMemory.activeRequest(f.sessionId);
+  if (active !== undefined) {
+    await cancelMemoryCompaction(app.db, { workspaceId: f.workspaceId, sessionId: f.sessionId,
+      requestId: active.id, commandId: randomUUID() });
+  }
+});
+
 test('compaction refuses tool results and records their request and usage as a failed call', async () => {
   const f = await fixture();
   await requestMemoryCompaction(app.db, { ...f, commandId: randomUUID() }, storage);
@@ -277,6 +307,51 @@ test('automatic compaction requeues original message, commits checkpoint, then c
   assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'COMPLETED');
   assert.equal((await createRepositories(app.db).assist.readMessage(sent.result.assistant_message_id))?.status, 'COMPLETED');
   assert.ok(p.inputs[1]?.turns.some((turn) => turn.content.includes(f.marker)));
+});
+
+test('automatic compaction defers for capture and resumes after the task settles without a new user turn', async () => {
+  const f = await fixture(17); const p = port(f.marker);
+  await sql`update assist_messages set content = repeat('h', 14500)
+    where session_id = ${f.sessionId} and seq > 1`.execute(app.db);
+  await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(), expectedRevision: '0',
+    recallEnabled: true, automaticCompaction: true, autoCapture: false, compactionThresholdTokens: 50_000 });
+  // 覆盖范围内的一个真实助手轮次被长时间捕获任务占用：压缩必须延迟，而不是丢原始消息。
+  const covered = (await sql<{ id: string; user_id: string }>`
+    select a.id, u.id as user_id from assist_messages a
+    join assist_messages u on u.session_id = a.session_id and u.seq = a.seq - 1
+    where a.session_id = ${f.sessionId} and a.seq = 26`.execute(app.db)).rows[0]!;
+  await sql`insert into memory_capture_tasks
+    (id, workspace_id, session_id, trigger_message_id, user_message_id, kind)
+    values (${randomUUID()}, ${f.workspaceId}, ${f.sessionId}, ${covered.id}, ${covered.user_id}, 'AUTO')`
+    .execute(app.db);
+
+  const sent = await requestAssistMessage(app.db, { ...f, commandId: randomUUID(), content: 'continue-under-deferred-compaction' });
+  // 延迟压缩不阻塞当前回复：消息照常完成，原始历史一条不动。
+  assert.equal((await runAssistGenerationTick(app.db, p.options))?.status, 'COMPLETED');
+  const deferred = (await createRepositories(app.db).assistMemory.requests(f.sessionId))[0]!;
+  assert.equal(deferred.reason, 'AUTO');
+  assert.equal(deferred.status, 'FAILED');
+  assert.equal(deferred.error_code, 'MEMORY_CAPTURE_PENDING');
+  assert.equal((await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId)).checkpoint?.id ?? null, null);
+  assert.equal((await createRepositories(app.db).assist.listMessages(f.sessionId)).length, 36);
+
+  // 捕获终态：捕获 tick 把延迟请求放回队列，压缩随后自动完成，不需要用户再发提示词。
+  await sql`update memory_capture_tasks set status = 'SUCCEEDED', completed_at = now(),
+    result = '{"written":0}'::jsonb where session_id = ${f.sessionId}`.execute(app.db);
+  const resumed = await runMemoryCaptureTick(app.db, { workerId: randomUUID(), modelPort: p.model,
+    leaseMs: 60_000, recoverMissing: false });
+  assert.equal(resumed.recovered, 0);
+  const queued = (await createRepositories(app.db).assistMemory.request(deferred.id))!;
+  assert.equal(queued.status, 'PENDING', '捕获终态后自动压缩必须重新入队');
+  const compacted = await runAssistMemoryTick(app.db, p.options);
+  assert.equal(compacted?.status, 'COMPLETED', JSON.stringify(compacted));
+  const memory = await readSessionMemory(app.db, storage, f.workspaceId, f.sessionId);
+  assert.ok(memory.checkpoint?.id !== null);
+  // 压缩边界在“当前回复生成前”冻结：只能覆盖已完成的更早轮次，当前用户消息与回复保持原文。
+  assert.equal(memory.checkpoint?.through_seq, '26');
+  assert.equal((await createRepositories(app.db).assist.listMessages(f.sessionId)).length, 36,
+    '压缩不删除原始消息，只提交 Checkpoint 并替换后续输入');
+  assert.equal((await createRepositories(app.db).assist.readMessage(sent.result.assistant_message_id))?.status, 'COMPLETED');
 });
 
 test('bad summary preserves checkpoint and originals; no automatic retry loop', async () => {

@@ -15,6 +15,7 @@ import {
   listGoalProjects,
   listProjectGoals,
   listProjects,
+  listProjectsByIds,
   readGoalById,
   readProjectById,
 } from '../application/project-queries.js';
@@ -73,9 +74,23 @@ export function registerProjectRoutes(
     try {
       const params = request.params as { workspace_id: string };
       const query = request.query as Static<typeof ProjectsListQuerySchema>;
+      await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
+      if (query.ids !== undefined) {
+        if (query.cursor !== undefined) {
+          throw validationFailed([{ field: 'cursor', message: '按 ID 批量读取 Project 时不能再传分页游标。' }]);
+        }
+        const ids = [...new Set(query.ids.split(',').map((id) => id.trim()).filter((id) => id.length > 0))];
+        if (ids.length === 0 || ids.length > 100
+          || ids.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+          throw validationFailed([{ field: 'ids', message: 'ids 须为逗号分隔的 UUID，最多 100 个。' }]);
+        }
+        const items = await listProjectsByIds(dependencies.database.executor, {
+          workspaceId: params.workspace_id, ids,
+        });
+        return { items, next_cursor: null };
+      }
       const status = query.status ?? 'active';
       const limit = resolveListLimit(query.limit);
-      await requireWorkspaceVisible(dependencies.database.executor, params.workspace_id);
       const result = await listProjects(dependencies.database.executor, {
         workspaceId: params.workspace_id, status, limit,
         before: query.cursor === undefined ? null

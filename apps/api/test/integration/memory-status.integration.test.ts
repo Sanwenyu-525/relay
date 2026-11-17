@@ -72,8 +72,8 @@ test('expiry and retirement filters are disjoint; reactivation does not extend e
   const search = await api.get(f.path('/search?q=short%20lived&types=MEMORY'));
   assert.equal(search.status, 200, search.text);
   assert.equal((search.body as { items: unknown[] }).items.length, 0);
-  assert.equal((await r.information.listContextCandidates(f.workspaceId, f.projectId, 10))
-    .some((candidate) => candidate.id === id), false);
+  assert.equal((await r.information.listContextCandidates(f.workspaceId, f.projectId,
+    randomUUID(), 10)).some((candidate) => candidate.id === id), false);
   assert.deepEqual(await r.information.readRoot('memory', id), before, 'expiry is a read projection, no clock-driven write');
   assert.deepEqual(await r.workspaces.readAuthority(f.workspaceId), authority);
   assert.deepEqual(await r.information.listVersions('memory', id), versions);

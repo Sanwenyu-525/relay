@@ -17,6 +17,8 @@ import { compareCredentialIdentity } from '../workflow/credential-identity.js';
 import { resolveFrozenChatConnectionPort } from './model-connection-runtime.js';
 import type { CredentialStore } from '../credentials/credential-store.js';
 import { assistPayloadHash } from './assist-commands.js';
+import { skillInvocationKey, skillInputSummary, skillOutputSummary }
+  from '../assist/assist-skill-invocation-repository.js';
 import { observeModelFirstStream, recordModelInvocation } from './model-call-recorder.js';
 import { contextUsageToJson, describeAssistRequestContext, type ContextUsageCategory }
   from './assist-context-usage.js';
@@ -309,6 +311,24 @@ export async function runAssistGenerationTick(db: DbExecutor,
         providerRequestId: null, usage: { inputTokens: null, outputTokens: null } });
       return { messageId: message.id, sessionId: session.id, status: 'FAILED',
         errorCode: 'METHOD_DEFINITION_UNAVAILABLE', proposalIds: [] };
+    }
+    /*
+     * 0169：真正进入执行前把 Skill 事件迁到 RUNNING。
+     *
+     * 受理事务已经写入 REQUESTED；如果事件缺失（旧消息或并行写入未覆盖），这里按同一
+     * 冻结身份补写，再迁移，避免 UI 永远停在“等待执行”。普通工具轮次不经这里。
+     */
+    if (skill !== null) {
+      const key = skillInvocationKey({ messageId: message.id, skillId: skill.id,
+        skillVersion: skill.version, skillSha256: skill.sha256 });
+      const existing = await r.skillInvocations.readByMessage(message.id);
+      if (existing === undefined || existing.invocation_key !== key) {
+        await r.skillInvocations.request({ id: randomUUID(), workspaceId: session.workspace_id,
+          sessionId: session.id, messageId: message.id, skillId: skill.id,
+          skillVersion: skill.version, skillSha256: skill.sha256,
+          inputSummary: skillInputSummary(message.skill_input) });
+      }
+      await r.skillInvocations.markRunning(message.id, key);
     }
 
     // 0087 / ADR-022：普通 AGENT 会话的连续主流程。
@@ -1816,7 +1836,7 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
   if (session?.project_id !== null && session?.project_id !== undefined) {
     await lockWritableProjectInWorkspace(r, session.workspace_id, session.project_id);
   }
-  return r.assist.settleGeneration({
+  const settled = await r.assist.settleGeneration({
     messageId: message.id, workerId, status: input.status, content: input.content,
     errorCode: input.errorCode, providerRequestId: input.providerRequestId,
     providerErrorKind: input.providerErrorKind ?? null,
@@ -1826,6 +1846,27 @@ async function settle(r: Repositories, message: AssistMessageRow, workerId: stri
     ...(input.finalSources === undefined ? {} : { finalSources: input.finalSources }),
     ...(input.skillOutput === undefined ? {} : { skillOutput: input.skillOutput }),
   });
+  if (settled && message.skill_snapshot !== null) {
+    const snapshot = message.skill_snapshot;
+    const skillId = snapshot['id'];
+    const skillVersion = snapshot['version'];
+    const skillSha256 = snapshot['sha256'];
+    if (typeof skillId === 'string' && typeof skillVersion === 'string' &&
+        typeof skillSha256 === 'string') {
+      await r.skillInvocations.finish({
+        messageId: message.id,
+        invocationKey: skillInvocationKey({ messageId: message.id, skillId,
+          skillVersion, skillSha256 }),
+        status: input.status === 'COMPLETED' ? 'SUCCEEDED'
+          : input.status === 'FAILED' ? 'FAILED' : 'CANCELLED',
+        outputSummary: input.skillOutput === undefined ? null
+          : skillOutputSummary(input.skillOutput),
+        errorKind: input.errorCode,
+        errorDetail: input.errorCode,
+      });
+    }
+  }
+  return settled;
 }
 
 async function settleInTransaction(db: DbExecutor, message: AssistMessageRow,

@@ -1,60 +1,122 @@
-/* 上下文用量浮层的**新增**部分（0145 / 0162 / 0165）。
-   摘要段沿用 `.agent-chat-context-meter-*`（定义在 AssistView.css，已是确认过的排版），
-   这里只补构成列表、压缩读数、动作行与说明文字。不重复定义容器几何。
+/* 上下文用量浮层（0145 / 0162 / 0165；2026-11-15 CONTEXT-USAGE-MINIMAL）。
+ *
+ * 只保留一个核心读数区与一行自动压缩状态；没有构成、容量、最近调用、
+ * 成功记录或手动操作。因此这里没有滚动容器、没有固定高度、没有卡片与
+ * 分区边框：内容自然决定高度，靠行距与一处轻量标题区分层级。
+ *
+ * 几何（宽度 / 最大高度 / 圆角 / 阴影 / 定位）仍由 AssistView.css 的
+ * `.agent-chat-context-meter-menu` 统一管理，颜色与字号全部走既有 token。
+ */
 
-   数值一律 tabular-nums：余量从 5 位变 4 位时不能把「tokens」带着左右跳。 */
-
-/* —— 容器（0165）——
-   会话档位入口已取消，浮层不再需要「读数区 + 档位停靠区」两段结构；
-   整块就是一个滚动区，模型窗口只读展示，用户阈值在设置页配置。 */
 .context-usage {
   display: grid;
-  min-height: 0;
+  gap: var(--relay-space-4);
+  min-width: 0;
 }
 .context-usage > * { min-width: 0; }
-.context-usage-scroll {
-  display: grid;
-  align-content: start;
-  gap: var(--relay-space-3);
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding-bottom: var(--relay-space-3);
-}
 
-/* —— 分区 —— */
-.context-usage-section {
+/* —— 核心读数 —— */
+.context-usage-current {
+  display: grid;
+  gap: calc(var(--relay-space-2) + 2px);
+  min-width: 0;
+}
+.context-usage-figure-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--relay-space-2);
+  min-width: 0;
+}
+.context-usage-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0;
+  min-width: 0;
+  color: var(--relay-color-text-primary);
+  font-size: var(--relay-font-size-reading);
+  font-weight: var(--relay-font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+}
+.context-usage-figure-sep {
+  padding: 0 2px;
+  color: var(--relay-color-text-muted);
+}
+.context-usage-figure-unit {
+  margin-inline-start: 2px;
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-meta);
+  font-weight: var(--relay-font-weight-regular);
+}
+.context-usage-percent {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.context-usage-percent[data-over="true"] { color: var(--relay-color-status-warning-text); }
+.context-usage-bar {
+  display: block;
+  height: 4px;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-meter-track);
+  overflow: hidden;
+}
+.context-usage-bar > span {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-meter-fill);
+}
+.context-usage-bar[data-over="true"] > span {
+  background: var(--relay-color-status-warning-text);
+}
+.context-usage-distance {
+  margin: 0;
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-meta);
+  line-height: var(--relay-font-lineHeight-body);
+  font-variant-numeric: tabular-nums;
+  text-wrap: pretty;
+}
+.context-usage-distance[data-over="true"] { color: var(--relay-color-status-warning-text); }
+
+/* —— 自动压缩：一行状态，必要时一行原因 —— */
+.context-usage-compaction {
   display: grid;
   gap: var(--relay-space-2);
-  padding-top: var(--relay-space-3);
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
+  min-width: 0;
 }
-/* 第一段是身份（上下文 / 当前档位），它不需要一条把自己和标题分开的线。 */
-.context-usage-section:first-of-type {
-  padding-top: 0;
-  border-top: 0;
-}
-.context-usage-section-title {
+.context-usage-heading-row {
   display: flex;
   align-items: center;
   gap: var(--relay-space-1);
+  min-width: 0;
+}
+.context-usage-section-title {
   margin: 0;
   color: var(--relay-color-text-primary);
   font-size: var(--relay-font-size-meta);
   font-weight: var(--relay-font-weight-semibold);
   line-height: var(--relay-font-lineHeight-heading);
 }
-/* 「估算」是属性标签，不是标题的一部分：小、灰、不抢读。 */
-.context-usage-estimate {
-  padding: 0 var(--relay-space-1);
-  border-radius: var(--relay-radius-round);
-  background: var(--relay-color-selection-bg);
+.context-usage-tag {
+  flex: none;
   color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
-  font-weight: var(--relay-font-weight-regular);
   line-height: var(--relay-font-lineHeight-heading);
+  white-space: nowrap;
+  cursor: default;
 }
+.context-usage-tag[data-state="on"] { color: var(--relay-color-text-secondary); }
+.context-usage-tag[data-state="off"] { color: var(--relay-color-status-warning-text); }
+
+/* —— 状态与错误：只占一行，不铺解释 —— */
 .context-usage-note {
   margin: 0;
   color: var(--relay-color-text-muted);
@@ -62,151 +124,32 @@
   line-height: var(--relay-font-lineHeight-body);
   text-wrap: pretty;
 }
-
-/* —— 构成列表 ——
-   一行一项：图标 + 名字 + 右对齐数值。行间分隔线只画在相邻行之间，
-   第一行与最后一行不画，列表上下不留「半截线」。 */
-.context-usage-list {
+.context-usage-note--danger { color: var(--relay-color-status-danger-text); }
+.context-usage-error {
   display: grid;
-  gap: 0;
-  margin: var(--relay-space-0-5) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.context-usage-row {
-  display: flex;
-  align-items: center;
   gap: var(--relay-space-1);
-  padding: var(--relay-space-1) 0;
-  min-width: 0;
+  justify-items: start;
+}
+.context-usage-error > p {
+  margin: 0;
+  color: var(--relay-color-status-danger-text);
   font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-heading);
+  line-height: var(--relay-font-lineHeight-snug);
 }
-.context-usage-row + .context-usage-row {
-  border-top: var(--relay-border-width) solid var(--relay-color-border-separator);
-}
-/* 图标是这一行的**类别记号**，色彩只上图标：名称与数值一律保持中性文本色，
-   读数额时不受色相牵引，色盲或暗底下也不会把「工具调用」读成别的类别
-   （类别另有文字标签，颜色从不是唯一载体）。六色取自同一亮度带，
-   在浅色面与深色面（开发态 ScenarioLab）上都是 ≥3:1（见 design-tokens.json 的 contrastChecks）。
-   没配到色的类别（新增枚举值）自动落回中性色，不会画成不可辨认的黑。 */
-.context-usage-row-icon { flex: none; color: var(--relay-color-text-muted); }
-.context-usage-row[data-category="HISTORY"] .context-usage-row-icon { color: var(--relay-color-category-history); }
-.context-usage-row[data-category="SYSTEM"] .context-usage-row-icon { color: var(--relay-color-category-system); }
-.context-usage-row[data-category="TOOLS"] .context-usage-row-icon { color: var(--relay-color-category-tools); }
-.context-usage-row[data-category="FILE_READS"] .context-usage-row-icon { color: var(--relay-color-category-fileReads); }
-.context-usage-row[data-category="MEMORY"] .context-usage-row-icon { color: var(--relay-color-category-memory); }
-.context-usage-row[data-category="OTHER"] .context-usage-row-icon { color: var(--relay-color-category-other); }
-.context-usage-row-label {
-  min-width: 0;
+.context-usage-reload.text-button {
+  min-height: var(--relay-control-target-minimum);
+  padding: 0 var(--relay-space-1);
+  border-radius: var(--relay-radius-control);
   color: var(--relay-color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.context-usage-row-value {
-  margin-inline-start: auto;
-  flex: none;
-  color: var(--relay-color-text-primary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.context-usage-row-unit {
-  margin-inline-start: 2px;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
-}
-/* 窗口来源 / 「不可在此修改」是同一行的属性说明：换行排在数值下面，
-   不挤占行宽，也不伪装成可点击的控件。 */
-.context-usage-row-aside {
-  display: block;
-  margin-top: 2px;
-  color: var(--relay-color-text-muted);
   font-size: var(--relay-font-size-caption);
   font-weight: var(--relay-font-weight-regular);
-  line-height: var(--relay-font-lineHeight-body);
-  white-space: normal;
-}
-
-/* 分区标题行（「最近一次模型调用」+ 右侧「历史记录」标签）：标题与短标签同一行。 */
-.context-usage-heading-row {
-  display: flex;
-  align-items: center;
-  gap: var(--relay-space-2);
-}
-.context-usage-tag {
-  flex: none;
-  margin-inline-start: auto;
-  color: var(--relay-color-text-muted);
-  font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-heading);
-  white-space: nowrap;
-  cursor: help;
 }
-
-/* 浮层里的摘要比圆环旁的同一套排版放大一档：16px 的「已用 / 预算」在这三层结构里
-   只是正文，分不出主次。只作用于浮层，不动圆环自己的样式。 */
-.context-usage .agent-chat-context-meter-amount { font-size: var(--relay-font-size-reading); }
-.context-usage .agent-chat-context-meter-percent { font-size: var(--relay-font-size-reading); }
-
-/* —— 自动压缩（0162 / 0165）——
-   这一段要回答「现在多大、模型装得下多大、什么时候先整理、离它还有多远」。
-   轨道按**实际可用窗口**画，阈值单独一枚刻度：两条线不是同一个数，
-   把阈值画成轨道末端就是「达到阈值 = 达到窗口上限」的错误读法。 */
-.context-usage-tag[data-state] { cursor: default; }
-.context-usage-tag[data-state="on"] { color: var(--relay-color-status-success-text); }
-.context-usage-tag[data-state="off"] { color: var(--relay-color-status-warning-text); }
-
-.context-compaction-headline {
-  display: flex;
-  align-items: baseline;
-  gap: var(--relay-space-2);
-}
-.context-compaction-figure {
-  display: flex;
-  align-items: baseline;
-  gap: 0;
-  margin: 0;
+.context-usage-reload.text-button:hover:not(:disabled) {
+  background: var(--relay-color-selection-hover);
   color: var(--relay-color-text-primary);
-  font-size: var(--relay-font-size-reading);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--relay-font-lineHeight-heading);
 }
-.context-compaction-sep { color: var(--relay-color-text-muted); }
-.context-compaction-track {
-  position: relative;
-  display: block;
-  height: 4px;
-  border-radius: var(--relay-radius-round);
-  background: var(--relay-color-meter-track);
-  overflow: visible;
-}
-.context-compaction-fill {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
-  border-radius: var(--relay-radius-round);
-  background: var(--relay-color-meter-fill);
-}
-.context-compaction-fill[data-over="true"] { background: var(--relay-color-status-warning-text); }
-/* 阈值刻度：2px 竖线，超出轨道上下各 2px，读数在轨道右侧也不与填充端混淆。 */
-.context-compaction-marker {
-  position: absolute;
-  inset-block: -2px;
-  width: 2px;
-  margin-inline-start: -1px;
-  border-radius: var(--relay-radius-round);
-  background: var(--relay-color-status-warning-text);
-}
-.context-compaction-active {
-  margin: 0;
-  color: var(--relay-color-status-running-text);
-  font-size: var(--relay-font-size-meta);
-  line-height: var(--relay-font-lineHeight-body);
-}
-.context-usage-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--relay-space-2);
+.context-usage-reload.text-button:focus-visible {
+  outline: var(--relay-focus-width) solid var(--relay-color-focus-ring);
+  outline-offset: 1px;
 }

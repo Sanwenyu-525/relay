@@ -142,7 +142,10 @@ export const taskStatusLabels: Record<TaskStatus, string> = {
   INBOX: "待整理",
   READY: "可开始",
   IN_PROGRESS: "进行中",
-  WAITING: "待人工验收",
+  // 2026-11-15：WAITING 是「执行停下、等人工处理」，不是「只等验收」。旧文案「待人工验收」
+  // 把审批、工具适配、暂停、等待补充证据都读成验收；状态词只描述「等待中」，
+  // 究竟在等什么由 waiting_reason 的具体原因说明（见 lib/waitingReasons.ts）。
+  WAITING: "等待中",
   BLOCKED: "阻塞",
   DONE: "已完成",
   CANCELLED: "已取消"

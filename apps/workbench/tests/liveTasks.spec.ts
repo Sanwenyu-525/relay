@@ -33,6 +33,9 @@ describe("live 任务入口", () => {
         json: async () => ({ items: [] }) } as Response;
       if (String(input) === projectsUrl) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
+      // 任务页一次批量读项目名（2026-11-15）：空列表也没有项目名要补。
+      if (String(input) === `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=all&limit=100`)
+        return { ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === `${tasksUrl}?inbox=true` || String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       throw new TypeError("offline");
@@ -48,7 +51,8 @@ describe("live 任务入口", () => {
     expect(fixtureAdapter.getCallCount("loadTaskOptions")).toBe(0);
     const requestedUrls = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input))
       .filter((url) => !url.endsWith("/attention/interventions"));
-    // 一次来自全局近期工作（任务 + 会话），一次来自当前全部任务页。
+    // 一次来自全局近期工作（任务 + 会话），一次来自当前全部任务页；空列表没有 Project ID，
+    // 不再需要「项目列表首页」或按 ID 批量读。
     expect(requestedUrls()).toEqual([`${tasksUrl}?scope=all`, projectsUrl, sessionsUrl, `${tasksUrl}?scope=all`]);
 
     await mounted.wrapper.get('[data-testid="tasks-tab-inbox"]').trigger("click");
@@ -85,6 +89,9 @@ describe("live 任务入口", () => {
         json: async () => ({ items: [] }) } as Response;
       if (String(input) === projectsUrl) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
+      // 任务页一次批量读项目名（2026-11-15）：空列表也没有项目名要补。
+      if (String(input) === `${baseUrl}/api/v1/workspaces/${workspaceId}/projects?status=all&limit=100`)
+        return { ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === `${tasksUrl}?scope=all`) return { ok: true, status: 200,
         json: async () => ({ items: [], next_cursor: null }) } as Response;
       if (String(input) === sessionsUrl) return { ok: true, status: 200,

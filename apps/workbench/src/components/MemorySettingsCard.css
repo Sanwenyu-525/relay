@@ -39,3 +39,16 @@
   gap: var(--relay-space-3);
   margin: var(--relay-space-3) 0;
 }
+
+.memory-capabilities {
+  margin: var(--relay-space-2) 0;
+  padding: var(--relay-space-2) var(--relay-space-3);
+  border: 1px solid var(--relay-color-border-separator);
+  border-radius: var(--relay-radius-control);
+  background: var(--relay-color-bg-subtle);
+  color: var(--relay-color-text-secondary);
+  font-size: var(--relay-font-size-caption);
+}
+.memory-capabilities p { margin: 0 0 var(--relay-space-1); }
+.memory-capabilities ul { margin: 0; padding-left: var(--relay-space-4); }
+.memory-capabilities li { line-height: 1.55; }

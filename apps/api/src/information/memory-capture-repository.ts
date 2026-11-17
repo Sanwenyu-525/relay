@@ -122,6 +122,20 @@ export class MemoryCaptureRepository {
     return row !== undefined;
   }
 
+  /**
+   * 读取同一轮、同一内容的既有捕获。
+   *
+   * 崩溃恢复会重放“记忆已写、任务未结算”的轮次；此时不是“无可提取内容”（EMPTY），
+   * 而是该内容已经落库。返回既有 memory_id，供任务以 SUCCEEDED + duplicate 收口。
+   */
+  async capturedMemory(sessionId: string, messageId: string,
+    normalizedSha256: string): Promise<string | undefined> {
+    const row = (await sql<{ memory_id: string }>`select memory_id from memory_auto_captures
+      where session_id = ${sessionId} and message_id = ${messageId}
+        and normalized_sha256 = ${normalizedSha256} limit 1`.execute(this.db)).rows[0];
+    return row?.memory_id;
+  }
+
   /** 同范围内是否已有完全相同标题与正文的 ACTIVE 记忆（人工或自动）。 */
   async hasMemoryWithText(workspaceId: string, projectId: string | null,
     title: string, text: string): Promise<boolean> {

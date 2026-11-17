@@ -3,6 +3,7 @@ import { ActivityRecordRepository } from '../audit/activity-record-repository.js
 import { AssistRepository } from '../assist/assist-repository.js';
 import { AssistTitleGenerationRepository } from '../assist/session-title-repository.js';
 import { AssistMemoryRepository } from '../assist/assist-memory-repository.js';
+import { AssistSkillInvocationRepository } from '../assist/assist-skill-invocation-repository.js';
 import { AssistantProfileRepository } from '../assist/assistant-profile-repository.js';
 import { ConversationExecutionRepository } from '../assist/conversation-execution-repository.js';
 import { ConversationStateRepository } from '../assist/conversation-state-repository.js';
@@ -43,6 +44,7 @@ import { VerificationRepository } from '../verification/verification-repository.
 import { WorkspaceRepository } from '../workspace/workspace-repository.js';
 import { GatewayRepository } from '../gateway/gateway-repository.js';
 import { InformationRepository } from '../information/information-repository.js';
+import { KnowledgeRepository } from '../information/knowledge-repository.js';
 import { MemoryCaptureRepository } from '../information/memory-capture-repository.js';
 import { ChangeSetRepository } from '../files/change-set-repository.js';
 import { FileWriteStopProofRepository } from '../files/file-write-stop-proof-repository.js';
@@ -71,6 +73,8 @@ export interface Repositories {
   readonly admission: RuntimeAdmissionRepository;
   readonly activities: ActivityRecordRepository;
   readonly assist: AssistRepository;
+  /** 0169：第一方 Skill 的真实执行事件；普通工具调用不写这里。 */
+  readonly skillInvocations: AssistSkillInvocationRepository;
   /**
    * 0157：会话标题生成请求的独占写入口。
    *
@@ -149,6 +153,8 @@ export interface Repositories {
   readonly fileWriteDiffs: FileWriteDiffRepository;
   readonly fileWritePaths: FileWritePathRepository;
   readonly information: InformationRepository;
+  /** 0167：知识库组织层（集合/标签/关联）与分页/检索读取；不写知识根与版本。 */
+  readonly knowledge: KnowledgeRepository;
   /** 自动捕获的记账（ADR-030）：只管提取批次与撤销，Memory 正文仍归 information。 */
   readonly memoryCaptures: MemoryCaptureRepository;
   readonly today: TodayRepository;
@@ -179,6 +185,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     admission: new RuntimeAdmissionRepository(db),
     activities: new ActivityRecordRepository(db),
     assist: new AssistRepository(db),
+    skillInvocations: new AssistSkillInvocationRepository(db),
     titleGenerations: new AssistTitleGenerationRepository(db),
     modelCalls: new ModelCallRepository(db),
     assistMemory: new AssistMemoryRepository(db),
@@ -227,6 +234,7 @@ export function createRepositories(db: DbExecutor): Repositories {
     fileWriteDiffs: new FileWriteDiffRepository(db),
     fileWritePaths: new FileWritePathRepository(db),
     information: new InformationRepository(db),
+    knowledge: new KnowledgeRepository(db),
     memoryCaptures: new MemoryCaptureRepository(db),
     today: new TodayRepository(db),
     views: new ViewRepository(db),

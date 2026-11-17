@@ -132,6 +132,22 @@ export class ProjectRepository {
     return result.rows[0];
   }
 
+  /**
+   * 列表投影的批量归档事实：一次取回多个 Project 是否已归档。
+   *
+   * 任务列表原先按每个 Project 单独 `readProject` 只为取 `archived_at`，50 条任务跨多个
+   * Project 时读请求随 Project 数线性增长。这里只读 `archived_at`，不扩大读面（标题、阶段、
+   * 下一步等仍由各自 Owner 的入口读取）。
+   */
+  async readProjectArchiveStates(projectIds: readonly string[]): Promise<ReadonlyMap<string, boolean>> {
+    if (projectIds.length === 0) return new Map();
+    const result = await sql<{ id: string; archived_at: Date | null }>`
+      select id, archived_at from projects
+      where id in (${sql.join(projectIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    `.execute(this.db);
+    return new Map(result.rows.map((row) => [row.id, row.archived_at !== null]));
+  }
+
   /** 归档写入栅栏：KEY SHARE 与 ArchiveProject 的 FOR UPDATE 冲突，不阻塞普通非键更新。 */
   async lockProjectArchiveGate(projectId: string): Promise<ProjectRow | undefined> {
     const result = await sql<ProjectRow>`
@@ -166,6 +182,31 @@ export class ProjectRepository {
         ${cursor}
       order by p.created_at desc, p.id desc
       limit ${input.limit + 1}
+    `.execute(this.db);
+    return result.rows;
+  }
+
+  /**
+   * 按 ID 集合读当前 Workspace 的 Project 摘要（任务列表解析名称用）。
+   * 只返回调用方给出的 ID，不做分页：任务页一页最多 50 个引用，天然覆盖 >100 项目工作空间里
+   * 的早期项目；workspace_id 与 ids 同时约束，不返回其他 Workspace 的事实。
+   */
+  async listProjectSummariesByIds(input: {
+    readonly workspaceId: string;
+    readonly ids: readonly string[];
+  }): Promise<readonly ProjectListRow[]> {
+    if (input.ids.length === 0) return [];
+    const result = await sql<ProjectListRow>`
+      select p.id, p.workspace_id, p.title, p.project_type, p.archived_at,
+             p.revision, p.created_at, p.updated_at,
+             s.phase_key, s.next_action_task_id, s.revision as state_revision,
+             to_char(p.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+               as cursor_created_at
+      from projects p
+      join project_states s on s.project_id = p.id
+      where p.workspace_id = ${input.workspaceId}
+        and p.id in (${sql.join(input.ids.map((id) => sql`${id}::uuid`), sql`, `)})
+      order by p.created_at desc, p.id desc
     `.execute(this.db);
     return result.rows;
   }

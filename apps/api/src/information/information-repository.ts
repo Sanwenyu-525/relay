@@ -1,9 +1,9 @@
 import { sql } from 'kysely';
 
 import type { DbExecutor } from '../infrastructure/database.js';
-import type { InformationRootRow, KnowledgeVersionRow, MemoryMaintenanceRunRow, MemoryRootRow,
-  MemorySettingsRow, MemorySourceKind, MemoryVersionRow, RuleRow, RuleVersionRow }
-  from '../infrastructure/database-schema.js';
+import type { InformationRootRow, KnowledgeVersionRow, MemoryCaptureTaskRow,
+  MemoryMaintenanceRunRow, MemoryRootRow, MemorySettingsRow, MemorySourceKind, MemoryVersionRow,
+  RuleRow, RuleVersionRow } from '../infrastructure/database-schema.js';
 import type { JsonObject } from '../infrastructure/json.js';
 
 type Kind = 'knowledge' | 'memory' | 'decision' | 'rule';
@@ -94,12 +94,40 @@ export class InformationRepository {
       returning *`.execute(this.db)).rows[0]!;
   }
 
+  /** 写入裁决的事务级串行锁；必须由持有同一事务连接的 Repository 执行。 */
+  async lockMemoryWrite(key: string): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(this.db);
+  }
+
   async insertMemoryMessageSource(input: { memoryId: string; sessionId: string;
     messageId: string; contentSha256: string }): Promise<void> {
     await sql`insert into memory_message_sources
       (memory_id, memory_version, session_id, message_id, content_sha256)
       values (${input.memoryId}, 1, ${input.sessionId}, ${input.messageId},
         ${input.contentSha256})`.execute(this.db);
+  }
+
+  /**
+   * 0167：来源证据按真实消息读取；消息被撤回/删除/正文变化时如实返回状态，不补造内容。
+   */
+  async readMemorySourceEvidence(memoryId: string): Promise<readonly {
+    memory_version: bigint; session_id: string; message_id: string; content_sha256: string;
+    role: string | null; content: string | null; status: string | null;
+    withdrawn_at: Date | null; session_title: string | null; source_quote: string | null;
+  }[]> {
+    return (await sql<{
+      memory_version: bigint; session_id: string; message_id: string; content_sha256: string;
+      role: string | null; content: string | null; status: string | null;
+      withdrawn_at: Date | null; session_title: string | null; source_quote: string | null;
+    }>`select s.memory_version, s.session_id, s.message_id, s.content_sha256,
+      am.role, am.content, am.status, am.withdrawn_at, sess.title as session_title,
+      (select c.source_quote from memory_auto_captures c where c.memory_id = s.memory_id limit 1)
+        as source_quote
+      from memory_message_sources s
+      left join assist_messages am on am.id = s.message_id
+      left join assist_sessions sess on sess.id = s.session_id
+      where s.memory_id = ${memoryId} order by s.memory_version`
+      .execute(this.db)).rows;
   }
 
   async readMemoryMessageSources(memoryId: string): Promise<readonly {
@@ -136,7 +164,8 @@ export class InformationRepository {
         and m.superseded_by_id is null
         and not (m.id = any(${[...excludedIds]}::uuid[]))
         and (m.project_id is null or m.project_id = ${projectId})
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
         -- 来源失效（0132 撤回）：自动记忆绑定的那条原消息已撤回时，这条记忆不再有可核对的
         -- 依据，不能继续进入模型上下文。人工记忆没有消息绑定，不受影响。
         and not exists (
@@ -196,10 +225,10 @@ export class InformationRepository {
       : sql`m.memory_type = any(${[...input.typeHints]}::text[])`;
     return (await sql<MemoryStateRow & { literal_match: boolean; fts_rank: number;
       key_match: boolean; type_match: boolean }>`select m.*, v.body_text,
-      v.confirmed_by, v.confirmed_at, v.expires_at,
+      v.confirmed_by, v.confirmed_at, coalesce(m.expires_at_override, v.expires_at) as expires_at,
       case when m.status <> 'ACTIVE' then 'RETIRED'
         when m.superseded_by_id is not null then 'SUPERSEDED'
-        when v.expires_at <= now() then 'EXPIRED'
+        when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
         when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status,
       (${keyMatch} or ${legacyLiteral}) as literal_match,
       ${input.tsQuery === null ? sql`0::float4` : sql`ts_rank(${fts}, to_tsquery('simple', ${input.tsQuery}))`} as fts_rank,
@@ -209,7 +238,10 @@ export class InformationRepository {
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
         and m.superseded_by_id is null
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
+        -- 0167：含指令覆盖意图的记忆只作为管理页面数据，不自动进入提示词。
+        and not m.instruction_risk
         ${scope} ${stale} ${pinned}
         and not (m.id = any(${[...input.excludedIds]}::uuid[]))
         and ${candidate}
@@ -237,16 +269,19 @@ export class InformationRepository {
           or (m.scope = 'TASK' and m.project_id = ${input.projectId}
             and m.task_id = ${input.taskId}))`;
     const stale = input.includeStale ? sql`` : sql`and m.stale_at is null`;
-    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at, v.expires_at,
+    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at,
+      coalesce(m.expires_at_override, v.expires_at) as expires_at,
       case when m.status <> 'ACTIVE' then 'RETIRED'
         when m.superseded_by_id is not null then 'SUPERSEDED'
-        when v.expires_at <= now() then 'EXPIRED'
+        when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
         when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE' and m.pinned
         and m.superseded_by_id is null
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
+        and not m.instruction_risk
         ${scope} ${stale}
         and not (m.id = any(${[...input.excludedIds]}::uuid[]))
         and not exists (
@@ -281,8 +316,12 @@ export class InformationRepository {
   /** One snapshot for lifecycle, current revision and expiry; reading never retires a memory. */
   async listMemoryStates(workspaceId: string, input: { projectId?: string | undefined;
     id?: string; effectiveStatus?: MemoryEffectiveStatus | 'ALL';
-    memoryType?: string; origin?: string; query?: string; limit?: number }):
-    Promise<readonly MemoryStateRow[]> {
+    memoryType?: string; origin?: string; query?: string; limit?: number;
+    verification?: string; sourceKind?: string; pinned?: boolean;
+    sort?: 'updated' | 'created' | 'importance';
+    /** 排序键 + id 的游标；由上一页最后一行的真实字段生成，不接受客户端猜测。 */
+    cursor?: { readonly at: Date; readonly id: string; readonly importance?: number };
+  }): Promise<readonly MemoryStateRow[]> {
     const project = input.projectId === undefined ? sql``
       : sql`and (m.project_id is null or m.project_id = ${input.projectId})`;
     const identity = input.id === undefined ? sql`` : sql`and m.id = ${input.id}`;
@@ -290,21 +329,43 @@ export class InformationRepository {
       : sql`and m.memory_type = ${input.memoryType}`;
     const origin = input.origin === undefined || input.origin === 'ALL' ? sql``
       : sql`and m.origin = ${input.origin}`;
+    const verification = input.verification === undefined || input.verification === 'ALL' ? sql``
+      : sql`and m.verification = ${input.verification}`;
+    const sourceKind = input.sourceKind === undefined || input.sourceKind === 'ALL' ? sql``
+      : sql`and m.source_kind = ${input.sourceKind}`;
+    const pinned = input.pinned === undefined ? sql``
+      : input.pinned ? sql`and m.pinned` : sql`and not m.pinned`;
+    // 结构化键也参与搜索；此前占位文案承诺了“键”，SQL 只查标题/正文。
     const query = input.query === undefined || input.query.trim() === '' ? sql``
-      : sql`and position(lower(${input.query.trim().slice(0, 200)}) in lower(m.title || ' ' || v.body_text)) > 0`;
+      : sql`and (position(lower(${input.query.trim().slice(0, 200)}) in lower(m.title || ' ' || v.body_text)) > 0
+          or position(lower(${input.query.trim().slice(0, 200)}) in lower(coalesce(m.memory_key, ''))) > 0)`;
     const status = input.effectiveStatus === undefined || input.effectiveStatus === 'ALL' ? sql``
-      : sql`where effective_status = ${input.effectiveStatus}`;
-    const limit = input.id === undefined ? Math.min(Math.max(input.limit ?? 200, 1), 500) : 1;
+      : sql`and effective_status = ${input.effectiveStatus}`;
+    const sort = input.sort ?? 'updated';
+    const cursor = input.cursor === undefined ? sql``
+      : sort === 'importance'
+        ? sql`and (importance, updated_at, id) < (${input.cursor.importance ?? 0}::smallint,
+            ${input.cursor.at}::timestamptz, ${input.cursor.id}::uuid)`
+        : sort === 'created'
+          ? sql`and (created_at, id) < (${input.cursor.at}::timestamptz, ${input.cursor.id}::uuid)`
+          : sql`and (updated_at, id) < (${input.cursor.at}::timestamptz, ${input.cursor.id}::uuid)`;
+    const order = sort === 'importance'
+      ? sql`order by importance desc, updated_at desc, id desc`
+      : sort === 'created' ? sql`order by created_at desc, id desc`
+        : sql`order by updated_at desc, id desc`;
+    const limit = input.id === undefined ? Math.min(Math.max(input.limit ?? 50, 1), 101) : 1;
     return (await sql<MemoryStateRow>`with memories as (
-      select m.*, v.body_text, v.confirmed_by, v.confirmed_at, v.expires_at,
+      select m.*, v.body_text, v.confirmed_by, v.confirmed_at,
+        coalesce(m.expires_at_override, v.expires_at) as expires_at,
         case when m.status = 'RETIRED' then 'RETIRED'
           when m.superseded_by_id is not null then 'SUPERSEDED'
-          when v.expires_at <= now() then 'EXPIRED'
+          when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
           when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
-      where m.workspace_id = ${workspaceId} ${project} ${identity} ${type} ${origin} ${query}
-    ) select * from memories ${status} order by created_at desc, id desc limit ${limit}`
+      where m.workspace_id = ${workspaceId} ${project} ${identity} ${type} ${origin}
+        ${verification} ${sourceKind} ${pinned} ${query}
+    ) select * from memories where true ${status} ${cursor} ${order} limit ${limit}`
       .execute(this.db)).rows;
   }
 
@@ -330,6 +391,20 @@ export class InformationRepository {
     title: string): Promise<void> {
     await sql`insert into knowledge_items (id, workspace_id, project_id, title)
       values (${id}, ${workspaceId}, ${projectId}, ${title})`.execute(this.db);
+  }
+
+  /**
+   * 知识检索索引（0167）：摘要与分词随当前版本写入根行。
+   *
+   * 摘要存在根上，是为了让列表不为「显示两行摘要」去读整段正文；
+   * 分词存在根上，是为了让倒排索引与版本正文解耦——旧版本正文留在版本表，
+   * 索引永远描述**当前**版本，不会把旧版本词元错误地算进新版本。
+   */
+  async setKnowledgeIndex(knowledgeId: string, input: { summary: string | null;
+    titleTokens: string; bodyTokens: string }): Promise<void> {
+    await sql`update knowledge_items set summary = ${input.summary},
+      search_title_tokens = ${input.titleTokens}, search_body_tokens = ${input.bodyTokens}
+      where id = ${knowledgeId}`.execute(this.db);
   }
 
   async insertKnowledgeVersion(input: { id: string; workspaceId: string; knowledgeId: string;
@@ -389,13 +464,13 @@ export class InformationRepository {
     verification?: string; verifiedAt?: Date | null; lastAccessedAt?: Date | null;
     staleAt?: Date | null; pinned?: boolean; supersedesId?: string | null;
     contentHash?: string | null; searchTitleTokens?: string; searchBodyTokens?: string;
-    retiredReason?: string | null;
+    retiredReason?: string | null; instructionRisk?: boolean; expiresAtOverride?: Date | null;
   }): Promise<void> {
     const scope = input.scope ?? (input.projectId === null ? 'WORKSPACE' : 'PROJECT');
     await sql`insert into memory_items (id, workspace_id, project_id, title, source_kind, origin,
       memory_type, scope, task_id, agent_id, memory_key, importance, confidence, verification,
       verified_at, last_accessed_at, stale_at, pinned, supersedes_id, content_hash,
-      search_title_tokens, search_body_tokens, retired_reason)
+      search_title_tokens, search_body_tokens, retired_reason, instruction_risk, expires_at_override)
       values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.title},
         ${input.sourceKind ?? 'MANUAL'}, ${input.origin ?? 'HUMAN_CONFIRMED'},
         ${input.memoryType ?? 'UNKNOWN'}, ${scope}, ${input.taskId ?? null}, ${input.agentId ?? null},
@@ -404,14 +479,23 @@ export class InformationRepository {
         ${input.lastAccessedAt ?? null}, ${input.staleAt ?? null}, ${input.pinned ?? false},
         ${input.supersedesId ?? null}, ${input.contentHash ?? null},
         ${input.searchTitleTokens ?? ''}, ${input.searchBodyTokens ?? ''},
-        ${input.retiredReason ?? null})`.execute(this.db);
+        ${input.retiredReason ?? null}, ${input.instructionRisk ?? false},
+        ${input.expiresAtOverride ?? null})`.execute(this.db);
   }
 
   async insertMemoryVersion(input: { id: string; memoryId: string; version: bigint;
-    title: string; text: string; confirmedBy: string; expiresAt: Date | null }): Promise<void> {
+    title: string; text: string; confirmedBy: string; expiresAt: Date | null;
+    confirmedAt?: Date | null }): Promise<void> {
     await sql`insert into memory_versions (id, memory_id, version, title, body_text, confirmed_by,
       confirmed_at, expires_at) values (${input.id}, ${input.memoryId}, ${input.version},
-      ${input.title}, ${input.text}, ${input.confirmedBy}, now(), ${input.expiresAt})`.execute(this.db);
+      ${input.title}, ${input.text}, ${input.confirmedBy}, ${input.confirmedAt ?? new Date()},
+      ${input.expiresAt})`.execute(this.db);
+  }
+
+  /** 0167：导入保留版本号后把根的 current_version/title 对齐到最新版本。 */
+  async setMemoryCurrentVersion(memoryId: string, version: bigint, title: string): Promise<void> {
+    await sql`update memory_items set current_version = ${version}, title = ${title},
+      revision = revision + 1, updated_at = now() where id = ${memoryId}`.execute(this.db);
   }
 
   /** 0164：编辑/验证/固定后的当前分类元数据；版本正文仍由 AddMemoryRevision 负责。 */
@@ -421,6 +505,7 @@ export class InformationRepository {
     verifiedAt?: Date | null; pinned?: boolean; staleAt?: Date | null;
     contentHash?: string | null; searchTitleTokens?: string; searchBodyTokens?: string;
     supersedesId?: string | null; retiredReason?: string | null;
+    instructionRisk?: boolean; expiresAtOverride?: Date | null;
   }): Promise<void> {
     await sql`update memory_items set
       memory_type = ${input.memoryType === undefined ? sql`memory_type` : input.memoryType},
@@ -436,6 +521,9 @@ export class InformationRepository {
       search_body_tokens = ${input.searchBodyTokens === undefined ? sql`search_body_tokens` : input.searchBodyTokens},
       supersedes_id = ${input.supersedesId === undefined ? sql`supersedes_id` : input.supersedesId},
       retired_reason = ${input.retiredReason === undefined ? sql`retired_reason` : input.retiredReason},
+      instruction_risk = ${input.instructionRisk === undefined ? sql`instruction_risk` : input.instructionRisk},
+      expires_at_override = ${input.expiresAtOverride === undefined
+        ? sql`expires_at_override` : input.expiresAtOverride},
       revision = revision + 1, updated_at = now()
       where id = ${input.memoryId}`.execute(this.db);
   }
@@ -496,16 +584,18 @@ export class InformationRepository {
     const keyOrder = input.memoryKey === null ? sql``
       : sql`(case when m.memory_key = ${input.memoryKey} then 1 else 0 end) desc,`;
     const limit = Math.min(Math.max(input.recentLimit ?? 30, 1), 60);
-    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at, v.expires_at,
+    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at,
+      coalesce(m.expires_at_override, v.expires_at) as expires_at,
       case when m.status <> 'ACTIVE' then 'RETIRED'
         when m.superseded_by_id is not null then 'SUPERSEDED'
-        when v.expires_at <= now() then 'EXPIRED'
+        when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
         when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
         and m.superseded_by_id is null
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
         ${scope}
         and (${key} or m.content_hash = ${input.contentHash}
           or m.memory_type = ${input.memoryType})
@@ -523,22 +613,34 @@ export class InformationRepository {
   async memoryStats(workspaceId: string, projectId: string | null): Promise<{
     readonly total: number; readonly active: number; readonly superseded: number;
     readonly retired: number; readonly expired: number; readonly stale: number;
+    readonly unverified: number; readonly failed: number; readonly instruction_risk: number;
     readonly pinned: number; readonly storage_bytes: number; readonly unindexed: number;
     readonly last_recall_at: Date | null; readonly last_maintenance_at: Date | null;
     readonly recall_24h: number; readonly avg_latency_ms: number | null;
+    readonly capture_pending: number; readonly capture_failed: number;
+    readonly capture_last_24h: number;
   }> {
     const project = projectId === null ? sql`` : sql`and (m.project_id is null or m.project_id = ${projectId})`;
     const row = (await sql<{ total: number; active: number; superseded: number; retired: number;
-      expired: number; stale: number; pinned: number; storage_bytes: number; unindexed: number;
+      expired: number; stale: number; unverified: number; failed: number; instruction_risk: number;
+      pinned: number; storage_bytes: number; unindexed: number;
       last_recall_at: Date | null; last_maintenance_at: Date | null; recall_24h: number;
-      avg_latency_ms: number | null }>`select
+      avg_latency_ms: number | null; capture_pending: number; capture_failed: number;
+      capture_last_24h: number }>`select
         count(*)::int as total,
         count(*) filter (where m.status = 'ACTIVE' and m.superseded_by_id is null
-          and (v.expires_at is null or v.expires_at > now()) and m.stale_at is null)::int as active,
+          and (coalesce(m.expires_at_override, v.expires_at) is null
+            or coalesce(m.expires_at_override, v.expires_at) > now())
+          and m.stale_at is null and m.verification <> 'FAILED')::int as active,
         count(*) filter (where m.superseded_by_id is not null)::int as superseded,
         count(*) filter (where m.status = 'RETIRED')::int as retired,
-        count(*) filter (where m.status = 'ACTIVE' and v.expires_at <= now())::int as expired,
-        count(*) filter (where m.status = 'ACTIVE' and m.stale_at is not null)::int as stale,
+        count(*) filter (where m.status = 'ACTIVE' and m.superseded_by_id is null
+          and coalesce(m.expires_at_override, v.expires_at) <= now())::int as expired,
+        count(*) filter (where m.status = 'ACTIVE' and m.superseded_by_id is null
+          and m.stale_at is not null)::int as stale,
+        count(*) filter (where m.verification = 'UNVERIFIED')::int as unverified,
+        count(*) filter (where m.verification = 'FAILED')::int as failed,
+        count(*) filter (where m.instruction_risk)::int as instruction_risk,
         count(*) filter (where m.status = 'ACTIVE' and m.pinned)::int as pinned,
         coalesce(sum(octet_length(m.title) + octet_length(v.body_text)), 0)::bigint as storage_bytes,
         count(*) filter (where m.search_title_tokens = '' and m.search_body_tokens = '')::int as unindexed,
@@ -549,7 +651,15 @@ export class InformationRepository {
         (select count(*)::int from memory_recall_events e
           where e.workspace_id = ${workspaceId} and e.created_at > now() - interval '24 hours') as recall_24h,
         (select round(avg(e.latency_ms))::int from memory_recall_events e
-          where e.workspace_id = ${workspaceId} and e.created_at > now() - interval '24 hours') as avg_latency_ms
+          where e.workspace_id = ${workspaceId} and e.created_at > now() - interval '24 hours') as avg_latency_ms,
+        (select count(*)::int from memory_capture_tasks t
+          where t.workspace_id = ${workspaceId}
+            and t.status in ('PENDING', 'RUNNING')) as capture_pending,
+        (select count(*)::int from memory_capture_tasks t
+          where t.workspace_id = ${workspaceId} and t.status = 'FAILED') as capture_failed,
+        (select count(*)::int from memory_capture_tasks t
+          where t.workspace_id = ${workspaceId}
+            and t.created_at > now() - interval '24 hours') as capture_last_24h
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} ${project}`.execute(this.db)).rows[0]!;
@@ -563,6 +673,14 @@ export class InformationRepository {
     return (await sql<{ memory_type: string; count: number }>`select memory_type, count(*)::int as count
       from memory_items where workspace_id = ${workspaceId} ${project}
       group by memory_type order by count desc, memory_type`.execute(this.db)).rows;
+  }
+
+  /** 0164/0167 整理互斥：事务级锁；必须由持有同一事务连接的 Repository 执行。 */
+  async tryLockMemoryConsolidation(workspaceId: string): Promise<boolean> {
+    const row = (await sql<{ locked: boolean }>`select pg_try_advisory_xact_lock(
+      hashtextextended(${`memory-consolidation:${workspaceId}`}, 0)) as locked`
+      .execute(this.db)).rows[0];
+    return row?.locked === true;
   }
 
   async insertMemoryRecallEvent(input: {
@@ -599,14 +717,242 @@ export class InformationRepository {
       .execute(this.db)).rows;
   }
 
+  /** 0167：到期可领取任务（Worker tick 用）；只取 PENDING 且已过退避时间。 */
+  async listDueMemoryCaptureTasks(limit = 5): Promise<readonly MemoryCaptureTaskRow[]> {
+    return (await sql<MemoryCaptureTaskRow>`select * from memory_capture_tasks
+      where status = 'PENDING' and next_attempt_at <= now()
+      order by next_attempt_at asc, created_at asc
+      limit ${Math.min(Math.max(limit, 1), 20)}`.execute(this.db)).rows;
+  }
+
+  /** 0167：人工延长/取消有效期；只改根行覆盖值，不动历史版本。 */
+  async setMemoryExpiryOverride(memoryId: string, expiresAt: Date | null): Promise<void> {
+    await sql`update memory_items set expires_at_override = ${expiresAt},
+      revision = revision + 1, updated_at = now() where id = ${memoryId}`.execute(this.db);
+  }
+
+  async retryMemoryCaptureTask(id: string, workspaceId: string): Promise<boolean> {
+    const result = await sql`update memory_capture_tasks set status = 'PENDING',
+      attempts = 0, next_attempt_at = now(), lease_until = null, claimed_by = null,
+      error_kind = null, last_error = null, completed_at = null, updated_at = now()
+      where id = ${id} and workspace_id = ${workspaceId}
+        and status in ('FAILED', 'CANCELLED')
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  async cancelMemoryCaptureTask(id: string, workspaceId: string): Promise<boolean> {
+    const result = await sql`update memory_capture_tasks set status = 'CANCELLED',
+      error_kind = 'USER_CANCELLED', last_error = '用户取消了这条捕获任务',
+      completed_at = now(), updated_at = now()
+      where id = ${id} and workspace_id = ${workspaceId}
+        and status in ('PENDING', 'RUNNING')
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  /** 0167：幂等登记一条捕获任务；同一轮同一类型只允许一条。 */
+  async insertMemoryCaptureTask(input: {
+    readonly id: string; readonly workspaceId: string; readonly projectId: string | null;
+    readonly sessionId: string; readonly triggerMessageId: string;
+    readonly userMessageId: string | null; readonly kind: 'AUTO' | 'EXPLICIT';
+    readonly maxAttempts?: number;
+  }): Promise<boolean> {
+    const result = await sql`insert into memory_capture_tasks
+      (id, workspace_id, project_id, session_id, trigger_message_id, user_message_id, kind,
+        max_attempts)
+      values (${input.id}, ${input.workspaceId}, ${input.projectId}, ${input.sessionId},
+        ${input.triggerMessageId}, ${input.userMessageId}, ${input.kind},
+        ${input.maxAttempts ?? 3})
+      on conflict (session_id, trigger_message_id, kind) do nothing
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  async readMemoryCaptureTask(id: string): Promise<MemoryCaptureTaskRow | undefined> {
+    return (await sql<MemoryCaptureTaskRow>`
+      select * from memory_capture_tasks where id = ${id}`.execute(this.db)).rows[0];
+  }
+
+  async readMemoryCaptureTaskForMessage(sessionId: string, messageId: string,
+    kind: 'AUTO' | 'EXPLICIT'): Promise<MemoryCaptureTaskRow | undefined> {
+    return (await sql<MemoryCaptureTaskRow>`
+      select * from memory_capture_tasks
+      where session_id = ${sessionId} and trigger_message_id = ${messageId} and kind = ${kind}`
+      .execute(this.db)).rows[0];
+  }
+
+  async listMemoryCaptureTasks(workspaceId: string, filter: {
+    readonly sessionId?: string | undefined;
+    readonly status?: string | undefined;
+    readonly limit?: number;
+  }): Promise<readonly MemoryCaptureTaskRow[]> {
+    const session = filter.sessionId === undefined ? sql`` : sql`and session_id = ${filter.sessionId}`;
+    const status = filter.status === undefined || filter.status === 'ALL' ? sql``
+      : sql`and status = ${filter.status}`;
+    return (await sql<MemoryCaptureTaskRow>`
+      select * from memory_capture_tasks where workspace_id = ${workspaceId} ${session} ${status}
+      order by created_at desc, id desc limit ${Math.min(Math.max(filter.limit ?? 20, 1), 100)}`
+      .execute(this.db)).rows;
+  }
+
+  /** 消息页专用：一次取回这些助手消息的全部捕获任务（AUTO/EXPLICIT 各一条）。 */
+  async listMemoryCaptureTasksByMessages(messageIds: readonly string[]):
+    Promise<readonly MemoryCaptureTaskRow[]> {
+    if (messageIds.length === 0) return [];
+    return (await sql<MemoryCaptureTaskRow>`select * from memory_capture_tasks
+      where trigger_message_id = any(${[...messageIds]}::uuid[])
+      order by created_at asc, id asc`.execute(this.db)).rows;
+  }
+
+  /**
+   * 0167：领取一条到期任务。条件更新保证同一任务只有一个 Worker 进入 RUNNING；
+   * 前一次 RUNNING 租约过期后由 `recoverExpiredMemoryCaptureTasks` 放回 PENDING。
+   */
+  async claimMemoryCaptureTask(input: {
+    readonly id: string; readonly workerId: string; readonly leaseMs: number;
+  }): Promise<boolean> {
+    const result = await sql`update memory_capture_tasks set status = 'RUNNING',
+      claimed_by = ${input.workerId},
+      lease_until = now() + (${Math.max(input.leaseMs, 1000)}::int * interval '1 millisecond'),
+      attempts = attempts + 1, error_kind = null, last_error = null, updated_at = now()
+      where id = ${input.id} and status = 'PENDING' and next_attempt_at <= now()
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  /** 0167：成功/空结果/取消/失败收口；终态必须写 completed_at。 */
+  async finishMemoryCaptureTask(input: {
+    readonly id: string; readonly status: 'SUCCEEDED' | 'EMPTY' | 'FAILED' | 'CANCELLED';
+    readonly result: JsonObject; readonly errorKind: string | null; readonly lastError: string | null;
+  }): Promise<void> {
+    await sql`update memory_capture_tasks set status = ${input.status},
+      result = ${JSON.stringify(input.result)}::jsonb, error_kind = ${input.errorKind},
+      last_error = ${input.lastError}, lease_until = null, updated_at = now(),
+      completed_at = now() where id = ${input.id}
+        and status in ('PENDING', 'RUNNING')`.execute(this.db);
+  }
+
+  /** 0167：可重试失败放回 PENDING，并写下一次尝试时间与错误类别。 */
+  async rescheduleMemoryCaptureTask(input: {
+    readonly id: string; readonly errorKind: string; readonly lastError: string;
+    readonly nextAttemptAt: Date; readonly maxAttempts: number;
+  }): Promise<boolean> {
+    const result = await sql`update memory_capture_tasks set status = case
+        when attempts >= ${input.maxAttempts} then 'FAILED' else 'PENDING' end,
+      error_kind = ${input.errorKind}, last_error = ${input.lastError},
+      next_attempt_at = ${input.nextAttemptAt}, lease_until = null, updated_at = now(),
+      completed_at = case when attempts >= ${input.maxAttempts} then now() else null end
+      where id = ${input.id} and status = 'RUNNING'
+      returning status`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  /** 0167：Worker 崩溃/进程退出留下的 RUNNING 租约回收。 */
+  async recoverExpiredMemoryCaptureTasks(limit = 20): Promise<number> {
+    const result = await sql`update memory_capture_tasks set
+      status = case when attempts >= max_attempts then 'FAILED' else 'PENDING' end,
+      lease_until = null, claimed_by = null, error_kind = 'LEASE_EXPIRED',
+      last_error = 'worker lease expired before task completion',
+      next_attempt_at = now(), updated_at = now(),
+      completed_at = case when attempts >= max_attempts then now() else null end
+      where id in (
+        select id from memory_capture_tasks
+        where status = 'RUNNING' and lease_until < now()
+        order by lease_until asc limit ${Math.min(Math.max(limit, 1), 100)})
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n);
+  }
+
+  /** 0167：压缩前屏障；只统计即将被 Checkpoint 覆盖的消息，较新的未落定任务不阻塞旧段。 */
+  async countUnsettledCaptureTasks(sessionId: string,
+    messageIds?: readonly string[]): Promise<number> {
+    const scope = messageIds === undefined ? sql``
+      : sql`and (trigger_message_id = any(${[...messageIds]}::uuid[])
+          or user_message_id = any(${[...messageIds]}::uuid[]))`;
+    const row = (await sql<{ count: number }>`select count(*)::int as count
+      from memory_capture_tasks where session_id = ${sessionId}
+        and status in ('PENDING', 'RUNNING') ${scope}`.execute(this.db)).rows[0];
+    return row?.count ?? 0;
+  }
+
+  /**
+   * 恢复扫描的候选轮次（只读事实，不写任务）。
+   *
+   * `kind` 必须由应用层按用户原话再次识别：这里只把“完全没有任务”或
+   * “旧版关闭自动捕获时被 CANCELLED 的明确记住轮次”找出来，不把普通寒暄当成显式。
+   */
+  async listMissingCaptureTurns(limit = 20): Promise<readonly {
+    readonly workspace_id: string; readonly project_id: string | null;
+    readonly session_id: string; readonly trigger_message_id: string;
+    readonly user_message_id: string;
+  }[]> {
+    return (await sql<{
+      workspace_id: string; project_id: string | null; session_id: string;
+      trigger_message_id: string; user_message_id: string;
+    }>`select s.workspace_id, s.project_id, s.id as session_id,
+        am.id as trigger_message_id, prev.id as user_message_id
+      from assist_messages am
+      join assist_sessions s on s.id = am.session_id
+      join assist_messages prev on prev.session_id = am.session_id and prev.seq = am.seq - 1
+      where am.role = 'ASSISTANT' and am.status = 'COMPLETED' and am.withdrawn_at is null
+        and am.created_at > now() - interval '7 days'
+        and am.content is not null and am.content <> ''
+        and prev.role = 'USER' and prev.status = 'COMPLETED' and prev.withdrawn_at is null
+        and prev.content is not null and prev.content <> ''
+        and s.status = 'ACTIVE' and s.remember and s.conversation_mode = 'AGENT'
+        and (
+          not exists (select 1 from memory_capture_tasks t
+            where t.session_id = am.session_id and t.trigger_message_id = am.id)
+          or (
+            not exists (select 1 from memory_capture_tasks t
+              where t.session_id = am.session_id and t.trigger_message_id = am.id
+                and t.kind = 'EXPLICIT')
+            and exists (select 1 from memory_capture_tasks t
+              where t.session_id = am.session_id and t.trigger_message_id = am.id
+                and t.kind = 'AUTO' and t.status = 'CANCELLED'
+                and t.error_kind = 'AUTO_CAPTURE_DISABLED')
+            and prev.content ~* '记住|记一下|记下|牢记|别忘了|别忘记|不要忘记|remember'
+          )
+        )
+      order by am.created_at asc limit ${Math.min(Math.max(limit, 1), 100)}`
+      .execute(this.db)).rows;
+  }
+
+  /** 兼容入口：只补 AUTO 的旧扫描；新 Worker 使用 `listMissingCaptureTurns`。 */
+  async enqueueMissingCaptureTasks(limit = 20): Promise<number> {
+    const result = await sql`insert into memory_capture_tasks
+      (id, workspace_id, project_id, session_id, trigger_message_id, user_message_id, kind)
+      select gen_random_uuid(), s.workspace_id, s.project_id, s.id, am.id, prev.id, 'AUTO'
+      from assist_messages am
+      join assist_sessions s on s.id = am.session_id
+      join assist_messages prev on prev.session_id = am.session_id and prev.seq = am.seq - 1
+      left join memory_capture_tasks t on t.session_id = am.session_id
+        and t.trigger_message_id = am.id and t.kind = 'AUTO'
+      left join workspace_memory_settings ws on ws.workspace_id = s.workspace_id
+      where am.role = 'ASSISTANT' and am.status = 'COMPLETED' and am.withdrawn_at is null
+        and am.created_at > now() - interval '7 days'
+        and am.content is not null and am.content <> ''
+        and prev.role = 'USER' and prev.status = 'COMPLETED' and prev.withdrawn_at is null
+        and prev.content is not null and prev.content <> ''
+        and s.status = 'ACTIVE' and s.remember and s.conversation_mode = 'AGENT'
+        and coalesce(ws.auto_capture, true)
+        and t.id is null
+      order by am.created_at asc limit ${Math.min(Math.max(limit, 1), 100)}
+      on conflict (session_id, trigger_message_id, kind) do nothing
+      returning id`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n);
+  }
+
   /** 0164 整理：按 id 读当前有效行，供确定性选择保留者。 */
   async listMemoryStatesByIds(workspaceId: string, ids: readonly string[]):
     Promise<readonly MemoryStateRow[]> {
     if (ids.length === 0) return [];
-    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at, v.expires_at,
+    return (await sql<MemoryStateRow>`select m.*, v.body_text, v.confirmed_by, v.confirmed_at,
+      coalesce(m.expires_at_override, v.expires_at) as expires_at,
       case when m.status <> 'ACTIVE' then 'RETIRED'
         when m.superseded_by_id is not null then 'SUPERSEDED'
-        when v.expires_at <= now() then 'EXPIRED'
+        when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
         when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status
       from memory_items m join memory_versions v
         on v.memory_id = m.id and v.version = m.current_version
@@ -624,7 +970,8 @@ export class InformationRepository {
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
         and m.superseded_by_id is null and m.content_hash is not null
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
       group by m.content_hash, m.scope, m.project_id, m.task_id, m.memory_type
       having count(*) > 1
       order by count(*) desc, m.content_hash limit ${Math.min(limit, 200)}`.execute(this.db)).rows;
@@ -641,15 +988,17 @@ export class InformationRepository {
         on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
         and m.superseded_by_id is null and m.memory_key is not null
-        and (v.expires_at is null or v.expires_at > now())
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
       group by m.memory_key, m.scope, m.project_id, m.task_id, m.memory_type
       having count(*) > 1
       order by count(*) desc, m.memory_key limit ${Math.min(limit, 200)}`.execute(this.db)).rows;
     return rows.map((row) => ({ memory_key: row.memory_key, ids: row.ids }));
   }
 
-  /** 0164 整理：把长期未验证的项目事实/经验标记为陈旧，不删除、不改正文。 */
-  async markMemoriesStale(workspaceId: string, olderThan: Date, limit: number): Promise<number> {
+  /** 0164/0167 整理：按类型与各自陈旧窗口标记，不删除、不改正文。 */
+  async markMemoriesStale(workspaceId: string, memoryType: string, olderThan: Date,
+    limit: number): Promise<number> {
     const result = await sql`update memory_items set stale_at = now(), revision = revision + 1,
       updated_at = now()
       where id in (
@@ -657,9 +1006,10 @@ export class InformationRepository {
           on v.memory_id = m.id and v.version = m.current_version
         where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
           and m.superseded_by_id is null and m.pinned = false and m.stale_at is null
-          and m.memory_type in ('PROJECT_FACT', 'EXPERIENCE')
+          and m.memory_type = ${memoryType}
           and coalesce(m.verified_at, m.updated_at) < ${olderThan}
-          and (v.expires_at is null or v.expires_at > now())
+          and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
         order by coalesce(m.verified_at, m.updated_at) asc, m.id
         limit ${Math.min(limit, 500)}
       )`.execute(this.db);
@@ -691,12 +1041,13 @@ export class InformationRepository {
     const origin = filter.origin === undefined || filter.origin === 'ALL' ? sql``
       : sql`and m.origin = ${filter.origin}`;
     const ids = filter.memoryIds === undefined || filter.memoryIds.length === 0 ? sql``
-      : sql`and m.id = any(${filter.memoryIds})`;
+      : sql`and m.id = any(${[...filter.memoryIds]}::uuid[])`;
     // 「清理失效项」不能只看 status：过期、被替代、可能过时都是 ACTIVE 根 + 派生状态。
     // 只有真正当前有效（且未固定）的行才受保护；显式 includeActive 才允许删有效行。
     const active = filter.includeActive === true ? sql`` : sql`and m.pinned = false
       and not (m.status = 'ACTIVE' and m.superseded_by_id is null
-        and (v.expires_at is null or v.expires_at > now()) and m.stale_at is null)`;
+        and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now()) and m.stale_at is null)`;
     return (await sql<{ id: string }>`select m.id from memory_items m
       join memory_versions v on v.memory_id = m.id and v.version = m.current_version
       where m.workspace_id = ${workspaceId} ${project} ${type} ${origin} ${ids} ${active}
@@ -714,10 +1065,10 @@ export class InformationRepository {
     Promise<readonly (MemoryStateRow & { source_count: number })[]> {
     const project = projectId === null ? sql`` : sql`and (m.project_id is null or m.project_id = ${projectId})`;
     return (await sql<MemoryStateRow & { source_count: number }>`select m.*, v.body_text,
-      v.confirmed_by, v.confirmed_at, v.expires_at,
+      v.confirmed_by, v.confirmed_at, coalesce(m.expires_at_override, v.expires_at) as expires_at,
       case when m.status <> 'ACTIVE' then 'RETIRED'
         when m.superseded_by_id is not null then 'SUPERSEDED'
-        when v.expires_at <= now() then 'EXPIRED'
+        when coalesce(m.expires_at_override, v.expires_at) <= now() then 'EXPIRED'
         when m.stale_at is not null then 'STALE' else 'ACTIVE' end as effective_status,
       (select count(*)::int from memory_message_sources s where s.memory_id = m.id) as source_count
       from memory_items m join memory_versions v
@@ -736,7 +1087,11 @@ export class InformationRepository {
     if (ids.length === 0) return 0;
     await sql`update memory_items set supersedes_id = null
       where workspace_id = ${workspaceId} and supersedes_id = any(${[...ids]}::uuid[])`.execute(this.db);
-    await sql`update memory_items set superseded_by_id = null
+    // 删除“新事实”不能复活被它替代的“旧事实”：旧行收口为 RETIRED 并留下原因，
+    // 而不是把 superseded_by_id 置空后让它重新变成 ACTIVE。
+    await sql`update memory_items set status = 'RETIRED',
+      retired_reason = coalesce(retired_reason, 'SUPERSEDED_BY_PURGED'),
+      superseded_by_id = null, revision = revision + 1, updated_at = now()
       where workspace_id = ${workspaceId} and superseded_by_id = any(${[...ids]}::uuid[])`.execute(this.db);
     await sql`delete from memory_auto_captures
       where workspace_id = ${workspaceId} and memory_id = any(${[...ids]}::uuid[])`.execute(this.db);
@@ -809,7 +1164,8 @@ export class InformationRepository {
   }
 
   /** P11 bounded fallback when no explicit source selection exists for Delegate. */
-  async listContextCandidates(workspaceId: string, projectId: string, limit: number): Promise<readonly {
+  async listContextCandidates(workspaceId: string, projectId: string, taskId: string,
+    limit: number): Promise<readonly {
     kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION'; id: string;
   }[]> {
     return (await sql<{ kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION'; id: string }>`
@@ -821,8 +1177,14 @@ export class InformationRepository {
         select 'MEMORY', m.id, m.updated_at from memory_items m
           join memory_versions v on v.memory_id = m.id and v.version = m.current_version
           where m.workspace_id = ${workspaceId} and m.status = 'ACTIVE'
-            and (m.project_id is null or m.project_id = ${projectId})
-            and (v.expires_at is null or v.expires_at > now())
+            -- 作用域必须与本次 Run 一致：工作区级永远可见，项目/任务级只在本项目/本任务可见，
+            -- AGENT 级记忆需要显式 Agent 身份，Delegate 上下文无从匹配，因此排除。
+            and (m.scope = 'WORKSPACE'
+              or (m.scope = 'PROJECT' and m.project_id = ${projectId})
+              or (m.scope = 'TASK' and m.task_id = ${taskId}))
+            and m.instruction_risk = false
+            and (coalesce(m.expires_at_override, v.expires_at) is null
+          or coalesce(m.expires_at_override, v.expires_at) > now())
             and not exists (
               select 1 from memory_message_sources s
               join assist_messages am on am.id = s.message_id

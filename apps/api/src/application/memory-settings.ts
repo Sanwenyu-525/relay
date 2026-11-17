@@ -25,6 +25,27 @@ import { MEMORY_DEFAULTS, validateMemoryBudgetSettings,
  * 响应里附带默认值与推荐区间：界面不该把 350000 / 256000–400000 再抄一份常量，
  * 否则产品口径一改就出现「设置页和实际判定不一样」。
  */
+/**
+ * 能力矩阵：设置页只展示真实已实现的能力。
+ *
+ * HYBRID / Embedding 尚未落地（没有向量生成、存储、检索与降级链路），因此这里如实
+ * 标未实现；读取旧值只用于解释历史配置，不允许再选。自动捕获的持久任务、重试和
+ * 压缩前屏障已实现。
+ */
+function memoryCapabilities(): JsonObject {
+  return {
+    retrieval: {
+      literal: { implemented: true, note: 'PostgreSQL 全文检索 + 结构化键检索' },
+      hybrid: { implemented: false,
+        note: '语义向量链路未实现；选择 HYBRID 时按全文检索执行并标注降级' },
+    },
+    embedding: { implemented: false,
+      note: '未接入真实 Embedding Provider；远程正文发送未获授权，概不启用' },
+    capture: { persistent_tasks: true, retry_with_backoff: true,
+      pre_compaction_barrier: true, explicit_remember: true },
+  };
+}
+
 export async function readMemorySettings(db: DbExecutor, workspaceId: string): Promise<JsonObject> {
   const r = createRepositories(db);
   await requireWorkspace(r, workspaceId);
@@ -50,6 +71,7 @@ export async function readMemorySettings(db: DbExecutor, workspaceId: string): P
       ?? MEMORY_DEFAULTS.remoteEmbeddingAllowed,
     include_stale_in_recall: settings?.include_stale_in_recall
       ?? MEMORY_DEFAULTS.includeStaleInRecall,
+    capabilities: memoryCapabilities(),
     revision: (settings?.revision ?? 0n).toString() };
 }
 
@@ -68,6 +90,19 @@ export async function setMemorySettings(db: DbExecutor, input: { workspaceId: st
   embeddingProvider?: 'disabled' | 'openai-compatible'; remoteEmbeddingAllowed?: boolean;
   includeStaleInRecall?: boolean }) {
   const expected = requireRevision(input.expectedRevision, 'expected_revision');
+  // 未实现的检索/Embedding 能力不再接受“新选择”；旧行仍可读，并在 UI 标注未实现。
+  if (input.retrievalMode === 'HYBRID') {
+    throw validationFailed([{ field: 'retrieval_mode',
+      message: 'HYBRID 语义检索尚未实现，当前只支持 LITERAL；拒绝把全文降级冒充混合检索。' }]);
+  }
+  if (input.embeddingProvider === 'openai-compatible') {
+    throw validationFailed([{ field: 'embedding_provider',
+      message: 'Embedding Provider 尚未实现（无向量生成/存储/检索链路）。' }]);
+  }
+  if (input.remoteEmbeddingAllowed === true) {
+    throw validationFailed([{ field: 'remote_embedding_allowed',
+      message: '远程 Embedding 会把记忆正文发往第三方；链路与授权未落地前不可开启。' }]);
+  }
   if (input.compactionThresholdTokens !== undefined) {
     const checked = validateThreshold(input.compactionThresholdTokens);
     if (!checked.ok) throw validationFailed([{ field: 'compaction_threshold_tokens',
@@ -148,6 +183,7 @@ export async function setMemorySettings(db: DbExecutor, input: { workspaceId: st
         embedding_provider: saved.embedding_provider,
         remote_embedding_allowed: saved.remote_embedding_allowed,
         include_stale_in_recall: saved.include_stale_in_recall,
+        capabilities: memoryCapabilities(),
         revision: saved.revision.toString() };
     } });
 }

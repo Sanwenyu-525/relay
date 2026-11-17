@@ -14,6 +14,7 @@ import { fixtureAdapter } from "../fixtures/fixtureAdapter";
 import { fixtureModeFromQuery } from "../lib/fixtureMode";
 import { acceptanceSourceLabels, criterionMethodLabel, executorLabels, interactionModeLabels, taskStatusLabels } from "../lib/labels";
 import { describeLiveError } from "../lib/liveErrors";
+import { sampleReason, taskRowReason } from "../lib/waitingReasons";
 import { useRelayConnection } from "../lib/relayConnection";
 
 import type { DecimalRevision, ExecutorKind, FixtureError, InteractionMode, TaskStatus } from "../types";
@@ -25,7 +26,7 @@ interface TaskDetailResult {
   readonly projectArchivedAt: string | null | undefined;
   readonly projectReadError: string | null;
   readonly projectTitle: string | null;
-  readonly task: { readonly id: string; readonly title: string; readonly status: TaskStatus; readonly mode: InteractionMode; readonly executor: ExecutorKind; readonly revision: DecimalRevision; readonly acceptanceRevision: DecimalRevision; readonly currentCompletionId: string | null; readonly projectId: string | null; readonly runId: string | null; readonly allowedActions: readonly string[] | null };
+  readonly task: { readonly id: string; readonly title: string; readonly status: TaskStatus; readonly mode: InteractionMode; readonly executor: ExecutorKind; readonly revision: DecimalRevision; readonly acceptanceRevision: DecimalRevision; readonly currentCompletionId: string | null; readonly projectId: string | null; readonly runId: string | null; readonly waitingReason: string | null; readonly blockingTaskIds: readonly string[]; readonly unresolvedBlockerIds: readonly string[]; readonly allowedActions: readonly string[] | null };
   readonly objective: string | null;
   readonly acceptance: RelayTaskAcceptance | null;
   readonly criteria: readonly RelayAcceptanceCriterion[];
@@ -139,7 +140,7 @@ export default function TaskDetailView() {
     const snapshot = await fixtureAdapter.loadTask(id, mode);
     if (!snapshot) return null;
     const record = snapshot.task;
-    return { source: "fixture", projectArchivedAt: null, projectReadError: null, projectTitle: null, task: { id: record.id, title: record.title, status: record.status, mode: record.mode, executor: record.executor, revision: record.revision, acceptanceRevision: snapshot.verification.acceptanceRevision, currentCompletionId: null, projectId: snapshot.id, runId: null, allowedActions: null }, objective: record.definition.objective, acceptance: null, criteria: snapshot.verification.checks.map((check) => ({ criterionId: check.id, statement: check.title, required: check.required, method: check.method, targetSpec: null })), criteriaNote: "示例验收方案，不代表服务端当前验收版本。", dependencies: [] };
+    return { source: "fixture", projectArchivedAt: null, projectReadError: null, projectTitle: null, task: { id: record.id, title: record.title, status: record.status, mode: record.mode, executor: record.executor, revision: record.revision, acceptanceRevision: snapshot.verification.acceptanceRevision, currentCompletionId: null, projectId: snapshot.id, runId: null, waitingReason: null, blockingTaskIds: [], unresolvedBlockerIds: [], allowedActions: null }, objective: record.definition.objective, acceptance: null, criteria: snapshot.verification.checks.map((check) => ({ criterionId: check.id, statement: check.title, required: check.required, method: check.method, targetSpec: null })), criteriaNote: "示例验收方案，不代表服务端当前验收版本。", dependencies: [] };
   }
   async function loadLive(client: RelayApiClient): Promise<TaskDetailResult> {
     const task = await client.getTask(id);
@@ -156,7 +157,7 @@ export default function TaskDetailView() {
         projectTitle = project.title;
       } catch (caught) { projectReadError = describeLiveError(caught).message; }
     }
-    return { source: "live", projectArchivedAt, projectReadError, projectTitle, task: { id: task.id, title: task.title, status: task.status, mode: task.mode, executor: task.executor, revision: task.revision, acceptanceRevision: task.acceptance.acceptanceRevision, currentCompletionId: task.currentCompletionId, projectId: task.projectId, runId: task.executorRunId, allowedActions: task.allowedActions }, objective: task.acceptance.objective || null, acceptance: task.acceptance, criteria: task.acceptance.criteria, criteriaNote: criteriaNoteFrom(task.acceptance.source), dependencies: task.dependencies.map((dependency) => ({ id: dependency.taskId, title: dependency.title, status: dependency.status })) };
+    return { source: "live", projectArchivedAt, projectReadError, projectTitle, task: { id: task.id, title: task.title, status: task.status, mode: task.mode, executor: task.executor, revision: task.revision, acceptanceRevision: task.acceptance.acceptanceRevision, currentCompletionId: task.currentCompletionId, projectId: task.projectId, runId: task.executorRunId, waitingReason: task.waitingReason, blockingTaskIds: task.blockingTaskIds, unresolvedBlockerIds: task.unresolvedBlockerIds, allowedActions: task.allowedActions }, objective: task.acceptance.objective || null, acceptance: task.acceptance, criteria: task.acceptance.criteria, criteriaNote: criteriaNoteFrom(task.acceptance.source), dependencies: task.dependencies.map((dependency) => ({ id: dependency.taskId, title: dependency.title, status: dependency.status })) };
   }
   async function load() {
     const request = ++requestVersion.current;
@@ -189,15 +190,21 @@ export default function TaskDetailView() {
   if (!result) return <section className="page-state pv-page"><p className="eyebrow">任务详情</p><h1>{live ? "服务端没有返回这个任务" : "示例数据没有这个任务"}</h1><p>{live ? "跨作用域或已删除的任务按不可见处理；页面不会据此创建任务。" : "示例数据里只有“确定实验评价指标”这一个任务，其他任务不显示示例内容。"}</p><Link className="text-link" to="/tasks">返回任务列表</Link></section>;
   const taskAlerts = taskUnavailable ? <p className="disabled-reason">任务来源暂不可读；本页不显示缓存或推断的任务事实。</p>
     : <>{refreshing && <p className="helper-text" role="status">正在更新任务事实，已显示的内容保持可见。</p>}{projectWriteBlockedReason && <p className="disabled-reason" data-testid="task-project-archive-reason">{projectWriteBlockedReason}</p>}</>;
+  // 等待/阻塞原因与列表同一份映射：列表显示短读法，详情给出完整句子；其它状态不占这一行。
+  const taskReason = result.source === "live"
+    ? taskRowReason({ status: result.task.status, waitingReason: result.task.waitingReason,
+      blockingTaskIds: result.task.blockingTaskIds, unresolvedBlockerIds: result.task.unresolvedBlockerIds })
+    : sampleReason(result.task.status, result.task.waitingReason, null);
+  const reasonLabel = result.task.status === "BLOCKED" ? "阻塞原因" : "等待原因";
   // 右栏事实列：状态语义分开呈现，可开始≠执行中、人工判断≠交接完成、方案可用≠检查已运行。
-  const statusFacts = <section className="task-detail-status" aria-labelledby="task-detail-status-heading"><h3 id="task-detail-status-heading" className="visually-hidden">当前状态</h3><dl className="rail-definition-list task-detail-facts"><div><dt>工作状态</dt><dd><StatusChip status={result.task.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[result.task.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[result.task.executor]}</dd></div><div><dt>当前 Run</dt><dd>{result.task.runId ? <Link className="inline-link" to={`/runs/${result.task.runId}`}>查看 Run</Link> : "无活动 Run"}</dd></div></dl>{result.source === "live" && result.task.currentCompletionId && <Link className="inline-link" to={`/completion-records/${result.task.currentCompletionId}`}>查看当前完成凭据</Link>}</section>;
+  const statusFacts = <section className="task-detail-status" aria-labelledby="task-detail-status-heading"><h3 id="task-detail-status-heading" className="visually-hidden">当前状态</h3><dl className="rail-definition-list task-detail-facts"><div><dt>工作状态</dt><dd><StatusChip status={result.task.status} /></dd></div><div><dt>执行模式</dt><dd>{interactionModeLabels[result.task.mode]}</dd></div><div><dt>当前执行者</dt><dd>{executorLabels[result.task.executor]}</dd></div>{taskReason !== null && <div><dt>{reasonLabel}</dt><dd data-testid="task-detail-reason">{taskReason.short}</dd></div>}<div><dt>当前 Run</dt><dd>{result.task.runId ? <Link className="inline-link" to={`/runs/${result.task.runId}`}>查看 Run</Link> : "无活动 Run"}</dd></div></dl>{result.source === "live" && result.task.currentCompletionId && <Link className="inline-link" to={`/completion-records/${result.task.currentCompletionId}`}>查看当前完成凭据</Link>}</section>;
   const statusNote = aiHolds ? "当前由 AI 持有执行权：不能在这里直接编辑产物或修改验收；请先请求人工接手，接手在运行页生效后再编辑，在此之前只能只读查看任务定义与验收方案。"
     : result.task.status === "DONE" ? "该任务本轮已完成：编辑前需要先重开，界面不会悄悄改旧版本。"
     : result.task.status === "INBOX" ? "任务尚未整理：先完善定义与验收方案，整理后才可开始执行。"
     : result.task.status === "READY" ? "任务可以开始：可进入协作工作区人工执行，或委托给 AI；可开始不等于已在执行。"
     : result.task.status === "IN_PROGRESS" ? "任务进行中：产物在「产物」页签编辑；完成后提交人工验收，人工验收通过才算完成。"
-    : result.task.status === "WAITING" ? "等待人工验收：需要人工核对验收条件与证据后接受；人工判断完成前不算交接完成。"
-    : result.task.status === "BLOCKED" ? "任务被阻塞：先处理前置依赖或阻塞原因。"
+    : result.task.status === "WAITING" ? `等待中：${taskReason?.detail ?? "服务端没有记录等待原因，需按 Run 核对。"}`
+    : result.task.status === "BLOCKED" ? `任务被阻塞：${taskReason?.detail ?? "服务端没有登记阻塞依据。"}`
     : "任务已取消。";
   // 标题行：主标题+状态 chip 同行，meta 只放既有事实（所属项目/任务编号/修订），目标说明下沉到主区“任务目标”。
   // 元信息分组而不是一整句「·」串：换行只发生在组之间，「修订 v2」这类标签+数字不会被拆到两行。

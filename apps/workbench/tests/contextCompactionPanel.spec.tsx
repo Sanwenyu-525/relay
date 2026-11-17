@@ -1,40 +1,33 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { RelayApiClient } from "../src/api/relayClient";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RelayContextCompaction, RelaySessionContextUsage } from "../src/api/dtos/assist";
 import { contextCompactionFixture } from "./contextUsageFixture";
 import ContextUsagePanel from "../src/components/ContextUsagePanel";
 import { flush, mountReact } from "./mountApp";
 
 /**
- * 自动压缩区（0162 / 0165）的界面口径。
+ * 自动压缩区（0162 / 0165；2026-11-15 CONTEXT-USAGE-MINIMAL）的界面口径。
  *
- * 这一区只回答三件不同的事，不能混成一句：
- *   · 模型真实上下文窗口有多大（读不到就写未知，不按 1M 冒充）；
- *   · 用户设置的压缩阈值与实际生效阈值分别是多少（保存值高于安全上限时收敛并明说）；
- *   · 距离下次压缩还有多少（达到阈值不是达到窗口上限）。
- * 手动压缩的 202 也只是受理，完成状态必须从服务端读回。
+ * 压缩区现在只留三件事：开关状态、阈值被模型容量收敛时的一行原因、
+ * 失败时的错误码。成功记录、减少量、预算未达、手动按钮都不再渲染；
+ * 数据本身与 `/compact` 入口仍由服务端/浮层外部承担。
  */
 
-const baseUrl = "http://127.0.0.1:8787";
-const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
-const client = new RelayApiClient({ baseUrl, workspaceId, bearerToken: "test-bearer-token-0123456789abcdef" });
 let unmount: (() => void) | null = null;
 
-afterEach(() => { unmount?.(); unmount = null; vi.unstubAllGlobals(); });
+afterEach(() => { unmount?.(); unmount = null; });
 
 function usage(compaction: Partial<RelayContextCompaction> = {}): RelaySessionContextUsage {
   return { sessionId,
     nextCall: { reservationTokens: 1_000_000, effectiveWindowTokens: 1_000_000,
-      modelWindowTokens: 1_000_000, providerCallCapTokens: 1_000_000,
+      modelWindowTokens: 1_000_000, providerCallCapTokens: 1_048_576,
       windowSource: "MODEL_CATALOG", fallbackApplied: false },
     lastCall: null, compaction: contextCompactionFixture(compaction) };
 }
 
 async function mount(data: RelaySessionContextUsage) {
-  const mounted = await mountReact(<ContextUsagePanel client={client} sessionId={sessionId}
-    sessionRevision="7" usage={data} loading={false} error={null}
-    onReload={() => {}} />);
+  const mounted = await mountReact(<ContextUsagePanel usage={data} loading={false}
+    error={null} onReload={() => {}} />);
   unmount = mounted.unmount;
   await flush();
   return mounted.wrapper;
@@ -44,103 +37,55 @@ function text(wrapper: Awaited<ReturnType<typeof mount>>, testId: string): strin
   return wrapper.get(`[data-testid="${testId}"]`).text();
 }
 
-function optional(wrapper: Awaited<ReturnType<typeof mount>>, testId: string): boolean {
-  return wrapper.findAll(`[data-testid="${testId}"]`).length > 0;
-}
-
 describe("自动压缩区", () => {
-  it("模型窗口、用户阈值与生效阈值分开；距离按生效阈值算", async () => {
+  it("只显示开启状态；阈值相同时不重复用户设置", async () => {
     const wrapper = await mount(usage());
-    expect(text(wrapper, "context-compaction-current")).toBe("280,000");
-    expect(text(wrapper, "context-compaction-threshold")).toBe("350,000");
-    // 模型窗口与用户设置是两个数字，不能被读成同一个上限。
-    expect(text(wrapper, "context-compaction-window-row")).toContain("1,000,000");
-    expect(text(wrapper, "context-compaction-window-source")).toContain("自动识别 · 模型目录");
-    expect(text(wrapper, "context-compaction-configured-row")).toContain("350,000");
-    expect(text(wrapper, "context-compaction-threshold-row")).toContain("350,000");
-    expect(text(wrapper, "context-compaction-distance")).toContain("70,000");
-    expect(wrapper.get('[data-testid="context-compaction-state"]').text()).toBe("已开启");
+    expect(text(wrapper, "context-compaction-state")).toBe("已开启");
+    expect(text(wrapper, "context-usage-current-threshold")).toBe("350,000");
+    expect(wrapper.find('[data-testid="context-compaction-clamped"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="context-compaction-configured-row"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="context-compaction-now"]').exists()).toBe(false);
   });
 
-  it("模型窗口来源与未知回退分开标注，不把安全回退写成自动识别", async () => {
-    const known = await mount(usage({ windowSource: "CAPABILITY_DECLARATION",
-      providerCallCapTokens: null }));
-    expect(text(known, "context-compaction-window-source")).toContain("高级能力声明");
-    unmount?.(); unmount = null;
-    const unknown = await mount(usage({ modelWindowTokens: null, windowSource: "UNKNOWN_FALLBACK",
-      fallbackApplied: true, effectiveWindowTokens: 262_144, safeInputTokens: 232_652,
-      providerCallCapTokens: null }));
-    expect(text(unknown, "context-compaction-window-row"))
-      .toContain("未知（按安全回退 262,144 tokens）");
-    expect(text(unknown, "context-compaction-window-source")).toContain("未知 · 安全回退");
-  });
-
-  it("读数来源分开标注：真实基线 + 估算增量与整份估算不是同一个口径", async () => {
-    const real = await mount(usage({ contextSource: "PROVIDER_USAGE" }));
-    expect(text(real, "context-compaction-source")).toBe("真实基线 + 估算增量");
-    unmount?.(); unmount = null;
-    const estimated = await mount(usage({ contextSource: "ESTIMATED" }));
-    expect(text(estimated, "context-compaction-source")).toBe("估算");
-  });
-
-  it("保存值高于模型安全上限时写明按哪个数生效，不把用户设置当成生效值", async () => {
+  it("保存值高于模型安全上限时只留一行原因，不展开公式", async () => {
     const wrapper = await mount(usage({ thresholdClamped: true, thresholdTokens: 500_000,
       requestedThresholdTokens: 500_000, effectiveThresholdTokens: 209_386,
-      modelWindowTokens: 262_144, effectiveWindowTokens: 262_144, safeInputTokens: 232_652,
+      modelWindowTokens: 262_144, effectiveWindowTokens: 262_144,
+      safetyReserveTokens: 13_108, safeInputTokens: 232_652,
       distanceTokens: -70_614 }));
-    const clamped = text(wrapper, "context-compaction-clamped");
-    expect(clamped).toContain("500,000");
-    expect(clamped).toContain("209,386");
-    expect(text(wrapper, "context-compaction-threshold")).toBe("209,386");
-    expect(text(wrapper, "context-compaction-distance")).toContain("已超过自动压缩阈值");
+    const clamp = text(wrapper, "context-compaction-clamped");
+    expect(clamp).toContain("用户设置 500,000");
+    expect(clamp).toContain("容量受限，按 209,386 生效");
+    expect(text(wrapper, "context-usage-current-threshold")).toBe("209,386");
+    expect(wrapper.find('[data-testid="context-usage-capacity-formula"]').exists()).toBe(false);
   });
 
-  it("关闭普通自动压缩后说明溢出保护仍在，不暗示「不会再压缩」", async () => {
-    const wrapper = await mount(usage({ enabled: false }));
-    expect(wrapper.get('[data-testid="context-compaction-state"]').text()).toBe("已关闭");
-    expect(text(wrapper, "context-compaction-disabled-note")).toContain("溢出保护");
+  it("关闭普通自动压缩后只显示一次已关闭，超过阈值不说会先整理", async () => {
+    const wrapper = await mount(usage({ enabled: false, distanceTokens: -70_614 }));
+    expect(text(wrapper, "context-compaction-state")).toBe("已关闭");
+    expect(text(wrapper, "context-usage-current-remaining"))
+      .toBe("已超过压缩阈值 70,614 tokens。");
+    expect(wrapper.text()).not.toContain("下一次请求前会先整理");
+    expect(wrapper.text()).not.toContain("溢出保护");
   });
 
-  it("压缩中只说明正在压缩并把按钮禁用，不宣称已完成", async () => {
-    const wrapper = await mount(usage({ active: { requestId: "44444444-4444-4444-8444-444444444444",
-      status: "RUNNING", trigger: "THRESHOLD" } }));
-    expect(text(wrapper, "context-compaction-active")).toContain("正在压缩上下文");
-    expect(wrapper.get('[data-testid="context-compaction-now"]').attributes("disabled")).toBeDefined();
-  });
-
-  it("最近一次结果显示压缩前后对照与减少量", async () => {
-    const wrapper = await mount(usage({ lastResult: { requestId: "55555555-5555-4555-8555-555555555555",
-      reason: "AUTO", trigger: "THRESHOLD", status: "COMPLETED", errorCode: null,
-      throughSeq: "10", tokensBefore: 350_000, tokensAfter: 42_000, budgetUnmet: false,
-      safeInputTokens: 481_689, at: "2026-11-12T08:00:00.000Z" } }));
-    const last = text(wrapper, "context-compaction-last-result");
-    expect(last).toContain("压缩前 350,000 tokens");
-    expect(last).toContain("压缩后 42,000 tokens");
-    expect(last).toContain("减少 308,000");
-    // 预算够用时不给 unmet 提示。
-    expect(optional(wrapper, "context-compaction-budget-unmet")).toBe(false);
-  });
-
-  it("压后仍超预算时明确说明下一步，不把「压缩成功」说成问题已解决", async () => {
-    const wrapper = await mount(usage({ safeInputTokens: 232_652,
-      lastResult: { requestId: "55555555-5555-4555-8555-555555555555", reason: "AUTO",
-        trigger: "OVERFLOW", status: "COMPLETED", errorCode: null, throughSeq: "10",
-        tokensBefore: 300_000, tokensAfter: 256_000, budgetUnmet: true,
-        safeInputTokens: 232_652, at: "2026-11-12T08:00:00.000Z" } }));
-    const unmet = text(wrapper, "context-compaction-budget-unmet");
-    expect(unmet).toContain("256,000");
-    expect(unmet).toContain("232,652");
-    expect(unmet).toContain("明确中止");
-  });
-
-  it("没有压后读数时不编造减少量", async () => {
-    const wrapper = await mount(usage({ lastResult: { requestId: "55555555-5555-4555-8555-555555555555",
-      reason: "MANUAL", trigger: "MANUAL", status: "COMPLETED", errorCode: null,
-      throughSeq: "10", tokensBefore: 300_000, tokensAfter: null, budgetUnmet: null,
+  it("压缩失败保留错误码；成功记录与预算未达提示不再渲染", async () => {
+    const failed = await mount(usage({ lastResult: {
+      requestId: "55555555-5555-4555-8555-555555555555", reason: "AUTO",
+      trigger: "THRESHOLD", status: "FAILED", errorCode: "MODEL_TIMEOUT", throughSeq: "10",
+      tokensBefore: 350_000, tokensAfter: null, budgetUnmet: null,
       safeInputTokens: null, at: "2026-11-12T08:00:00.000Z" } }));
-    const last = text(wrapper, "context-compaction-last-result");
-    expect(last).toContain("压缩前 300,000 tokens");
-    expect(last).not.toContain("压缩后");
-    expect(optional(wrapper, "context-compaction-budget-unmet")).toBe(false);
+    expect(text(failed, "context-compaction-failed")).toContain("MODEL_TIMEOUT");
+
+    unmount?.(); unmount = null;
+    const completed = await mount(usage({ lastResult: {
+      requestId: "55555555-5555-4555-8555-555555555555", reason: "AUTO",
+      trigger: "THRESHOLD", status: "COMPLETED", errorCode: null, throughSeq: "10",
+      tokensBefore: 350_000, tokensAfter: 42_000, budgetUnmet: true,
+      safeInputTokens: 232_652, at: "2026-11-12T08:00:00.000Z" } }));
+    expect(completed.find('[data-testid="context-compaction-last-result"]').exists()).toBe(false);
+    expect(completed.find('[data-testid="context-compaction-budget-unmet"]').exists()).toBe(false);
+    expect(completed.text()).not.toContain("减少");
+    expect(completed.text()).not.toContain("安全输入上限");
   });
 });

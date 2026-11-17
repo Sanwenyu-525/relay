@@ -340,7 +340,168 @@
 **验证。** 本行证据归统一验收表「上下文窗口与压缩阈值解耦」行；真实 Provider 的窗口/
 分词器、真实 Windows/WebView2 与安装态仍未验。
 
+### 40.4 上下文用量浮层信息架构重排与第二轮精简（2026-11-15 CONTEXT-USAGE-RELAYOUT / CONTEXT-USAGE-COMPACT-2 / CONTEXT-USAGE-FINAL-POLISH，实施者自检）
+
+在 40.3 的口径之上，浮层先按「可核对」重排，再按「减少默认展示量」精简：统计逻辑、
+手动压缩与高级容量信息没有删减，只改变默认可见层级。终轮精修只处理滚动轨道触发、
+手动压缩按钮状态细节与六类长数值对齐，未改信息架构、Token 口径、阈值公式、压缩状态机、
+DTO/DB 或刷新机制。
+
+**标题行。** 左「上下文用量」，后接总体状态——只在 warning / danger / running 时出现
+（接近阈值、已达阈值、最近失败、正在压缩；正常态不出现「正常」徽标）；右侧
+「最近一次记录 HH:mm」与服务端 `measured_at` 同源，信息图标保留。状态机仍在
+`lib/contextUsageModel.ts`：压缩中 > 最近失败 > 已关闭 > 已达阈值 > 接近阈值 > 正常；
+「已关闭」不进入标题状态，因为「自动压缩 已关闭」标签已经说明。
+
+**默认三块。**
+
+1. **核心读数**：当前 / 实际生效阈值（reading 18px）+ 来源（真实 + 估算 / 估算）+
+   占比；4px 主进度条；距离行。分母是生效阈值；关闭自动压缩时的超过文案如实说明
+   只有触及安全上限才有溢出保护。
+2. **自动压缩**：标题 + 已开启/已关闭标签 + 右侧轻量文字按钮「立即压缩」
+   （`text-button`，24px 命中区、12px、secondary，无边框/底色，保留 busy/disabled/
+   受理/轮询/终态逻辑）。三行：用户设置阈值（默认值旁注 + Tooltip 推荐区间）/
+   实际生效阈值（`thresholdClamped` 时只留一行「已受模型容量限制自动调整」）/
+   压缩后目标（约 X）。完整公式不在默认正文。按钮在 busy 时写 `aria-busy`、文案变
+   「正在提交」，disabled/busy 不铺常驻底色，`focus-visible` 用 1px 外描边；文案切换
+   不撑高标题行、不推挤状态标签。
+3. **上下文构成**：标题 + 「估算」标签 + 右侧列头「tokens · 占比」；6px 分段条；
+   一行一类（14px 图标 + 名称 + 右对齐 tokens + 次级占比）。覆盖说明、图片未计入、
+   估算与实报差额（含两边数字）全部收进「估算」Tooltip，不在默认正文占行。六类
+   同屏并用 6 位数值压力测试（112,000 / 70,000 / 42,000 / 28,000 / 16,800 / 11,200）：
+   图标与名称左对齐、Token 与占比右对齐、行高/列宽一致、长名称走 ellipsis；本轮
+   没有缩字号或行高，也没有删除分类名或隐藏低占比分类。
+
+**高级区。** 底部唯一入口「容量限制与安全预留」`details` 默认折叠。展开后：
+真实数字公式（安全输入上限、生效阈值）、模型窗口及来源/未知回退、服务商单次上限、
+输出预留、协议与工具开销、安全余量，以及「最近一次调用」的窗口占用/输出/缓存与
+冻结预算说明。窗口占用从默认首屏移到这里，避免与输入区圆环同口径重复画一条轨道。
+
+**几何与滚动。** 浮层默认宽 360px（340–380 范围，窄视口按 `100vw − space-8` 夹位），
+`max-height: min(27.5rem, 60vh)`，内距 `space-3`，区块之间只留 6px
+（`space-2 − 2px`），无区块/行分隔线、不套卡片。整个面板只有 `.context-usage-scroll`
+一个滚动容器；滚动轨道由真实溢出决定：基础 `overflow-y:auto`，不再用
+`:has(.capacity[open])` 或 `overflow-y:scroll` 强制轨道；`scrollbar-gutter:stable`
+始终预留宽度，默认没有溢出时只有空白 gutter、不画拇指/轨道，高级区展开且溢出时
+正文宽度不因滚动条出现/消失而跳动。默认 4 类实测 360×376、6 类 560×700 下
+≤420.5 高且无滚动条；1162×782 展开高级区为 360×469、正文内部可滚，外层
+`overflow:hidden` 不参与滚动；560×430 展开后仍只有一个正文滚动容器、可滚到底。
+滚动条为 6px 低存在感拇指/透明轨道（Playwright 截图可能不显示 overlay 拇指，
+滚动能力由 `scrollTop` 与最后一块可见性实测）。阴影/圆角沿用 popover 的
+`shadow.floating` / `radius.panel`，不新造弹层语言。
+
+**组件与数据。** 派生计算集中在 `lib/contextUsageModel.ts` 的
+`buildContextUsageViewModel`；`ContextUsagePanel` 只渲染快照。刷新时机、手动压缩、
+在途轮询与投影字段未改；宽度/高度只改 CSS 与 `AssistView` 的视口量测比例，未改后端。
+
+**验证。** 上下文 3 个 Vitest 文件 **34/34**（`contextUsageModel` 12、`contextUsagePanel` 12、
+`contextCompactionPanel` 10），同批加 `collaborationWorkspace` 96/96 共 **130/130**；真实
+Chromium `contextUsagePanel` **11/11**（默认/展开几何、展开未溢出无强制轨道、展开溢出单
+一滚动容器且宽度稳定、滚到底、560×700 六类、560×430 低高度、按钮 24px 命中/对齐/
+focus-visible/busy、未知窗口回退、互斥/Esc）；截图在 `tmp/CONTEXT-USAGE-FINAL-POLISH/`。
+Workbench `vite build` exit 0；上下文文件 targeted `tsc --noEmit` exit 0；正式全仓 `tsc`
+仅被并行未跟踪测试的未使用变量挡住，UI 一致性检查全仓仅报并行 `KnowledgeView` 新增违规，
+`ContextUsagePanel` 零新增。真实 Provider 与 Windows/WebView2 未验。
+
+### 40.5 上下文用量浮层极简化（2026-11-15 CONTEXT-USAGE-MINIMAL，实施者自检）
+
+40.4 的 FINAL-POLISH 默认仍带来源、构成、容量、最近调用、成功压缩记录与手动按钮；
+本轮只删默认展示，不改 Token 口径、模型窗口识别、阈值公式、压缩目标、状态机、DTO/DB、
+投影或刷新机制。`lib/contextUsageModel.ts` 本轮未改，派生读数继续复用既有 selector。
+
+**默认两段。**
+
+1. **核心读数**：`当前 Token / 实际生效阈值 tokens`、右侧占比、4px 进度条、距离行。
+   分母仍是实际生效压缩阈值，不是模型窗口；自动压缩关闭时用「距压缩阈值还剩……」或
+   「已超过压缩阈值……」，不再宣称「下一次请求前会先整理」。来源标签、记录时间、
+   构成与窗口占用均不占正文。
+2. **自动压缩**：`自动压缩` + `已开启/已关闭`；仅 `thresholdClamped` 且用户设置值与
+   生效值不同时补一行「用户设置 X，因模型容量限制，实际按 Y 生效。」；仅最近一次
+   压缩失败时补一行错误码，成功记录、减少量、`budgetUnmet` 与压缩后目标不渲染。
+   `COMPACTING`、`NEAR_THRESHOLD`、`AT_THRESHOLD`、`LAST_FAILED` 由标题行状态词承担；
+   `DISABLED` 只在自动压缩行出现一次，避免标题与正文各说一遍。模型窗口未知时只补
+   一行「模型窗口未知，阈值按安全回退计算。」，不展开回退数值或公式。
+
+**移除与保留。** 默认浮层不再渲染上下文构成（分段条/六分类/占比）、高级容量
+（模型窗口/服务商上限/输出与协议预留/安全余量/公式）、最近一次调用（输出/缓存/
+命中率/冻结预算）、成功压缩记录、时间戳/来源标签与「立即压缩」按钮；
+`context-usage-scroll`、`context-usage-capacity`、`context-compaction-now` 等节点
+从 DOM 消失，但底层统计 API、压缩 API、Command ID、CAS Revision、202 受理、
+防重复、在途轮询、成功/失败终态与错误码全部保留。手动压缩只保留现有 `/compact`
+命令入口；`AssistView` 受理后额外触发一次上下文投影重读，不发模型请求。
+
+**几何。** 宽仍 360px（340–380 区间，窄视口按 `100vw − space-8` 夹位），
+`max-height: min(27.5rem, 60vh)`，圆角/阴影/定位/颜色 Token 不变；内距改为
+`space-4`（上下）/`space-3`（左右），根区与自动压缩区间距 `space-4`。内容自然决定
+高度，无固定高度、无内部滚动容器；只有浮层自身 `overflow-y:auto` 在异常长文案或
+极低窗口下兜底，`overscroll-behavior:contain`。真实 Chromium：默认 360×162，
+容量收敛态 360×188，560×700 与 560×430 均为 360×162，默认无滚动条，浮层不盖
+圆环/发送键/模型选择器；修改前默认 360×376，高度减少 214px（约 57%），未缩字号。
+
+**验证。** 修改前基线：上下文 + 协作 4 个 Vitest 文件 **130/130**（84.1s），
+旧 Chromium `contextUsagePanel` **11/11**（24.4s，截图 `tmp/CONTEXT-USAGE-MINIMAL/baseline/`）。
+修改后：`contextUsageModel` + `contextUsagePanel` + `contextCompactionPanel`
+**24/24**；追加 `collaborationWorkspace` 与 `contextBudgetInheritance` 后
+**122/122**（5 文件）；真实 Chromium 最小面板 **8/8**（默认/收敛/窗口未知/关闭四态、
+560×700 与 560×430 几何、互斥/Esc、`/compact` 菜单可见与 202 受理）。
+截图在 `tmp/CONTEXT-USAGE-MINIMAL/`（`panel-default-element-1162x782.png`
+360×162、`panel-clamped-element-1162x782.png` 360×188、
+`panel-window-unknown-element-1162x782.png`、`panel-disabled-element-1162x782.png` 360×162、
+`panel-narrow-560x700.png`、`panel-low-560x430-page.png`、
+`panel-low-560x430-element.png`、`command-compact-menu.png`）；
+修改前副本 `before-default-360x376.png`。
+Workbench `tsc --noEmit` 只剩 `tests/knowledge.spec.ts` 的并行未使用变量，
+本轮文件无类型错误；
+`vite build` exit 0（首次在低内存+并行工作区下 Rolldown native OOM，重试 exit 0，
+非本轮代码错误）；UI 一致性检查被并行 `KnowledgeView.css/tsx` 新增项挡住；
+`node scripts/check-docs.mjs` 结果见统一验收表。真实 Provider、Windows/WebView2、
+多 DPI、安装态与独立验收未完成。
+
+### 40.6 未知模型窗口的圆环诚实化（2026-11-15 CONTEXT-USAGE-UNKNOWN-WINDOW-FIX，实施者自检）
+
+**问题与根因。** `AssistView` 的 `ContextMeter` 直接取 `compaction.effectiveWindowTokens`
+当分母，没有区分「模型目录/能力声明/部署配置确认的真实窗口」与「模型窗口未知时的
+262,144 安全回退」。于是 200,000 tokens 会显示成 `200,000 / 262,144（76%）`，
+看起来像已经确认模型支持 262,144；实际这只是回退估算。
+
+**修法。** 只在 `windowSource === "UNKNOWN_FALLBACK"`、`fallbackApplied === true` 或
+`modelWindowTokens === null` 任一成立时进入未知态：不计算占用比例、不画填充弧、
+圆环沿用现有 `.agent-chat-context-meter[data-state="unknown"]` 虚线轨道；实际
+`input_tokens` 保留，`aria-label` 与悬停 Tooltip 统一为
+`上下文 {inputTokens} tokens · 模型窗口未知，按安全回退估算`。已确认窗口仍按
+`effectiveWindowTokens` 计算百分比、80% 高占用与超限判定；没有调用记录时仍是
+「尚无模型调用」。没有新增常驻文字、没有改浮层结构或统计口径。
+
+**真实计算与夹具。** 产品目标仍是十进制 1,000,000；默认连接调用预算
+1,048,576；模型真实窗口未知时回退 262,144。该窗口下：
+`安全预留 = ceil(262,144 × 5%) = 13,108`，
+`安全输入 = 262,144 − 8,192 输出 − 8,192 协议 − 13,108 = 232,652`，
+`生效阈值 = floor(232,652 × 0.9) = 209,386`，`threshold_clamped = true`。
+共享夹具新增 `unknownWindowCompactionFixture` 与对应的 snake_case 版本，明确把
+`model_window_tokens:null`、`window_source:UNKNOWN_FALLBACK`、
+`fallback_applied:true`、`effective_window_tokens:262,144`、
+`safe_input_tokens:232,652`、`effective_threshold_tokens:209,386` 与
+`post_compaction_target_tokens:100,000` 写在一起；默认 1M 夹具的调用预算改为
+1,048,576，避免目标容量和调用上限混写。`contextUsageModel.ts`、DTO、DB、阈值公式、
+压缩状态机与刷新机制均未改。
+
+**验证。** `contextUsageModel` + `contextUsagePanel` + `contextCompactionPanel`
+**26/26**；`collaborationWorkspace` 全文件 **101/101**（新增已知 1M、已知 128K、
+未知回退、未知仍保留实际 input、未知 Tooltip/aria、未知恢复 1M、已知超限）；
+真实 Chromium `contextUsagePanel` **8/8**，明确断言未知态圆环 `data-state="unknown"`、
+aria 为「上下文 200,000 tokens · 模型窗口未知，按安全回退估算」、面板无
+`262,144`、未知默认阈值收敛为 `209,386`；API `model-context-window` /
+`context-compaction-policy` / `assist-model-budget` **27/27**。未知态面板为 360×188，
+「当前阈值 350,000；模型窗口未知，按 209,386 生效。」保持一行。Workbench
+`tsc --noEmit` / `npm run build` 曾在并行错误清空的窗口 exit 0；最终复跑
+`npm run build` 的 UI 一致性检查通过（裸色值 0/0、px 字号 22/32），但被并行
+`tests/tasksViewRefresh.spec.tsx(225,13)` 的 TS2554 阻断；单独 `npx vite build`
+exit 0（3.69s）。截图见 `tmp/CONTEXT-UNKNOWN-WINDOW-FIX/`（未知圆环、已知 1M 圆环、
+未知面板及各档几何）。真实 Provider、Windows/WebView2、多 DPI、安装态与独立验收
+仍未完成。
+
 ## 41. 日常操作减负：工具状态与高级配置分层（2026-10-20 已实施，实机未验）
+
 
 用户诉求是「普通 Agent 操作不该要求我理解并逐项配置底层能力、连接、受管资源和策略」。本轮只做「把日常层与高级层分开、把缺口说清楚」，不新增第二套授权机制，也不删任何已确认能力。
 

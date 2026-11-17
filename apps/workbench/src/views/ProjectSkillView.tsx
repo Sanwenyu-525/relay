@@ -172,9 +172,9 @@ function LiveProjectOverview({ id, client }: { id: string; client: RelayApiClien
     {blockerNotes.length > 0 && <div className="warning-callout" role="status" data-testid="project-overview-blockers"><TriangleAlert aria-hidden="true" /><p><strong>阻塞</strong>：{blockerNotes.join("；")}</p></div>}
     {goals === null && <p className="warning-callout" role="alert">Goal 关系本次读取失败，目标范围待核对。</p>}
     <section className="resume-section" data-testid="project-overview-facts"><h2>已确认事实</h2>
+      {/* UI-LAYOUT-AUDIT-20261115：当前阶段已由页头 meta 与状态 chip 表达，不在事实行重复。 */}
       <dl className="rail-definition-list">
         <div><dt>状态版本</dt><dd>State v{state.revision} · Project v{project.revision}</dd></div>
-        <div><dt>当前阶段</dt><dd>{phaseLabel(state.phaseKey)}</dd></div>
         <div><dt>当前目标</dt><dd>{goals === null ? <span className="warning-callout">Goal 关系本次读取失败，目标范围待核对。</span>
           : activeGoals && activeGoals.length ? activeGoals.map((goal, index) => <span key={goal.goalId}>
             {index > 0 ? "；" : null}<Link className="inline-link" to={`/goals/${goal.goalId}`}>{goal.title}</Link>
@@ -312,10 +312,9 @@ function FixtureProjectOverview() {
       </>}
     </div>
     <section className="resume-section"><h2>项目当前状态</h2>
+      {/* UI-LAYOUT-AUDIT-20261115：阶段/类型在 metadata-row、目标在页头 lede 已表达，不再重复事实行。 */}
       <p className="metadata-row">状态 v{summary.stateRevision}<span aria-hidden="true"> · </span>{typeLabel}<span aria-hidden="true"> · </span>阶段：{phaseText}</p>
       <p className="disabled-reason" aria-label="开发注记"><CircleDashed aria-hidden="true" />开发注记：确认人、确认时间与「已确认 / 仍需明确」清单为设计概念，服务端接口待接入。</p>
-      <dl className="rail-definition-list"><div><dt>当前阶段</dt><dd>{phaseText}</dd></div>
-        <div><dt>项目目标</dt><dd>{summary.goal}</dd></div></dl>
     </section>
     <section className="resume-section"><h2>关键产物与摘要</h2>
       <p className="helper-text">来源可追溯；来源不可用时不以摘要当真相。</p>

@@ -6,6 +6,16 @@ export type { RelayTaskRunPage, RelayTaskRunSummary } from "./resources/taskRuns
 import * as artifactsApi from "./resources/artifacts";
 import * as impactGroupSelectionsApi from "./resources/impactGroupSelections";
 import * as informationApi from "./resources/information";
+import * as knowledgeApi from "./resources/knowledge";
+export type { RelayKnowledgeCollection, RelayKnowledgeCollectionRef, RelayKnowledgeHealth,
+  RelayKnowledgeImportDuplicate, RelayKnowledgeImportFailure, RelayKnowledgeImportPreview,
+  RelayKnowledgeImportPreviewFile, RelayKnowledgeListItem, RelayKnowledgeOrganization,
+  RelayKnowledgeOverview, RelayKnowledgePage, RelayKnowledgePageQuery, RelayKnowledgeRelation,
+  RelayKnowledgeScopeFilter, RelayKnowledgeSort, RelayKnowledgeStatusFilter, RelayKnowledgeTag,
+  RelayKnowledgeUsageRecord } from "./dtos/knowledge";
+import type { RelayKnowledgeCollection, RelayKnowledgeHealth, RelayKnowledgeImportPreview,
+  RelayKnowledgeOrganization, RelayKnowledgeOverview, RelayKnowledgePage,
+  RelayKnowledgePageQuery, RelayKnowledgeTag } from "./dtos/knowledge";
 import * as modelConnectionsApi from "./resources/modelConnections";
 import * as memoryApi from "./resources/memory";
 export type { RelayCompactAccepted, RelayMemoryCompactionRequest, RelayMemoryCompactionStatus,
@@ -105,7 +115,7 @@ import type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceRequest,
   RelayUndoPlan } from "./dtos/stateMaintenance";
 import type { RelayDailyContinuation, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 import type { RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayManagedFileReadInput, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayProjectToolAvailability, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-import type { RelayDecision, RelayDefaultModelConnection, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelCapabilityDeclaration, RelayModelConnection, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
+import type { RelayDecision, RelayDefaultModelConnection, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryCaptureTask, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryPage, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelCapabilityDeclaration, RelayModelConnection, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyResult, RelayVerifyTarget, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchPage } from "./dtos/information";
 import type { CreateModelConnectionInput, ProbeModelConnectionInput, ProbeModelConnectionResult, UpdateModelConnectionInput } from "./resources/modelConnections";
 import type { RelayActivityFilter, RelayActivityPage, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayDirectoryWorkContext, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectCreation, RelayProjectGoalLinkDetail, RelayProjectPage, RelayProjectState, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind } from "./dtos/projects";
 import type { RelayReadiness } from "./dtos/readiness";
@@ -124,7 +134,7 @@ export type { RelayAssistLivePreview, RelayAssistMessage, RelayAssistMessageAtta
 export type { RelayStateMaintenanceApplyResult, RelayStateMaintenanceChange, RelayStateMaintenanceDecisionRequired, RelayStateMaintenanceRequest, RelayUndoPlan, RelayUndoPlanItem } from "./dtos/stateMaintenance";
 export type { RelayDailyContinuation, RelayDailyContinuationBaseline, RelayDailyContinuationCurrent, RelayDailyContinuationDelta, RelayDailyViewConfirmationInput, RelayReturnReview } from "./dtos/projectDailyContinuation";
 export type { RelayDirectoryEntry, RelayDirectoryListingResult, RelayFileBrowseAction, RelayFileContentResult, RelayFileReadAction, RelayGatewayCapability, RelayGatewayConnection, RelayGatewayConnectionSettings, RelayGatewayDecision, RelayGatewayPolicy, RelayGatewayPolicyVersion, RelayGitDiffResult, RelayGitReadAction, RelayGitStatusResult, RelayManagedFileReadInput, RelayManagedFileReadOutcome, RelayManagedFileReadResponse, RelayManagedGitReadInput, RelayManagedGitReadOutcome, RelayManagedGitReadResponse, RelayManagedResource, RelayMockGatewayAction, RelayMockGatewayConnection, RelayMockManagedResource, RelayProjectToolAvailability, RelayProjectToolState, RelayProjectToolCounts, RelayWebFetchAction, RelayWebImportJob, RelayWebImportOperation, RelayWebImportSubmission } from "./dtos/gateway";
-export type { RelayVerifyTarget, RelayVerifyTargetState, RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryRevision, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
+export type { RelayVerifyTarget, RelayVerifyTargetState, RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeGuideEntryInput, RelayKnowledgeSource, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryCaptureTask, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryOrigin, RelayMemoryPage, RelayMemoryRevision, RelayMemorySourceKind, RelayMemoryStats, RelayMemoryType, RelayMemoryVerification, RelayModelCapabilityDeclaration, RelayModelPortStatus, RelayModelVerificationState, RelayModelVerifyErrorCategory, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem, RelaySearchPage } from "./dtos/information";
 export type { RelayActivityFilter, RelayActivityItem, RelayActivityPage, RelayActivityRefKind, RelayCommandEnvelope, RelayCommandReceipt, RelayContinuationComparison, RelayContinuationPointSummary, RelayContinuationRef, RelayContinuationRefChange, RelayContinuationRefKind, RelayDirectoryWorkContext, RelayGoalArchiveResult, RelayGoalCreation, RelayGoalEditResult, RelayGoalPage, RelayGoalProject, RelayGoalRecord, RelayGoalWorkContext, RelayProject, RelayProjectArchiveResult, RelayProjectCreation, RelayProjectGoalLink, RelayProjectGoalLinkDetail, RelayProjectGoalUnlinkResult, RelayProjectListItem, RelayProjectPage, RelayProjectRenameResult, RelayProjectState, RelayStateArtifactRef, RelayStateCommandInput, RelayStateMutation, RelayViewConfiguration, RelayViewKind, RelayWorkContextDirectory, RelayWorkContextProject, RelayWorkContextSession } from "./dtos/projects";
 export type { RelayReadiness } from "./dtos/readiness";
 export type { RelayCommandOutput, RelayContextBuild, RelayContextManifestDetail, RelayContextManifestList, RelayContextManifestSummary, RelayControlRequest, RelayControlSubmission, RelayControlType, RelayDelegateSubmission, RelayGatewayInvocationResult, RelayResumeSubmission, RelayReview, RelayReviewDecision, RelayReviewKind, RelayRun, RelayRunDraftPreview, RelayRunGatewayOperation, RelayRunTrace } from "./dtos/run";
@@ -315,8 +325,13 @@ export class RelayApiClient {
     return projectsApi.getProject(this.#http, projectId);
   }
 
-  async getProjectsPage(status: "active" | "archived" | "all", cursor: string | null = null): Promise<RelayProjectPage> {
-    return projectsApi.getProjectsPage(this.#http, status, cursor);
+  async getProjectsPage(status: "active" | "archived" | "all", cursor: string | null = null, limit?: number): Promise<RelayProjectPage> {
+    return projectsApi.getProjectsPage(this.#http, status, cursor, limit);
+  }
+
+  /** 任务页按 Project ID 集合取名称；只返回给定 ID、当前 Workspace 内的事实。 */
+  async getProjectSummariesByIds(ids: readonly string[]) {
+    return projectsApi.getProjectSummariesByIds(this.#http, ids);
   }
 
   async archiveProject(input: { readonly projectId: string; readonly commandId: string; readonly expectedRevision: DecimalRevision }): Promise<RelayCommandEnvelope> {
@@ -537,6 +552,89 @@ export class RelayApiClient {
     return informationApi.getKnowledgeVersionContent(this.#http, id, version);
   }
 
+  // ---- 0167 知识库：分页检索、概览、组织层与导入 --------------------------
+  async getKnowledgePage(query: RelayKnowledgePageQuery): Promise<RelayKnowledgePage> {
+    return knowledgeApi.getKnowledgePage(this.#http, query);
+  }
+
+  async getKnowledgeOverview(projectId: string | null): Promise<RelayKnowledgeOverview> {
+    return knowledgeApi.getKnowledgeOverview(this.#http, projectId);
+  }
+
+  async getKnowledgeHealth(projectId: string | null): Promise<RelayKnowledgeHealth> {
+    return knowledgeApi.getKnowledgeHealth(this.#http, projectId);
+  }
+
+  async getKnowledgeOrganization(knowledgeId: string): Promise<RelayKnowledgeOrganization> {
+    return knowledgeApi.getKnowledgeOrganization(this.#http, knowledgeId);
+  }
+
+  async listKnowledgeCollections(projectId: string | null): Promise<readonly RelayKnowledgeCollection[]> {
+    return knowledgeApi.listKnowledgeCollections(this.#http, projectId);
+  }
+
+  async createKnowledgeCollection(input: { commandId: string; projectId: string | null;
+    name: string; description?: string | null }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.createKnowledgeCollection(this.#http, input);
+  }
+
+  async updateKnowledgeCollection(input: { id: string; commandId: string;
+    expectedRevision: DecimalRevision; name: string; description?: string | null }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.updateKnowledgeCollection(this.#http, input);
+  }
+
+  async deleteKnowledgeCollection(input: { id: string; commandId: string }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.deleteKnowledgeCollection(this.#http, input);
+  }
+
+  async setKnowledgeCollections(input: { knowledgeId: string; commandId: string;
+    collectionIds: readonly string[] }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.setKnowledgeCollections(this.#http, input);
+  }
+
+  async listKnowledgeTags(projectId: string | null): Promise<readonly RelayKnowledgeTag[]> {
+    return knowledgeApi.listKnowledgeTags(this.#http, projectId);
+  }
+
+  async createKnowledgeTag(input: { commandId: string; name: string }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.createKnowledgeTag(this.#http, input);
+  }
+
+  async renameKnowledgeTag(input: { id: string; commandId: string; name: string }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.renameKnowledgeTag(this.#http, input);
+  }
+
+  async deleteKnowledgeTag(input: { id: string; commandId: string }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.deleteKnowledgeTag(this.#http, input);
+  }
+
+  async setKnowledgeTags(input: { knowledgeId: string; commandId: string;
+    tags: readonly string[] }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.setKnowledgeTags(this.#http, input);
+  }
+
+  async createKnowledgeRelation(input: { fromKnowledgeId: string; commandId: string;
+    toKnowledgeId: string; relationKind: string; targetVersion?: DecimalRevision | null;
+    note?: string | null }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.createKnowledgeRelation(this.#http, input);
+  }
+
+  async deleteKnowledgeRelation(input: { id: string; commandId: string }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.deleteKnowledgeRelation(this.#http, input);
+  }
+
+  async previewKnowledgeImport(input: { projectId: string | null;
+    files: readonly knowledgeApi.KnowledgeImportUpload[] }): Promise<RelayKnowledgeImportPreview> {
+    return knowledgeApi.previewKnowledgeImport(this.#http, input);
+  }
+
+  async importKnowledge(input: { commandId: string; projectId: string | null;
+    file: knowledgeApi.KnowledgeImportUpload; title?: string | null; tags?: readonly string[];
+    collectionIds?: readonly string[]; duplicateStrategy?: "SKIP" | "NEW_VERSION" | "NEW";
+    targetKnowledgeId?: string; expectedRevision?: DecimalRevision }): Promise<RelayCommandEnvelope> {
+    return knowledgeApi.importKnowledge(this.#http, input);
+  }
+
   async createKnowledge(input: { commandId: string; projectId: string | null; title: string; sourceKind: Exclude<RelayKnowledgeSource, "WEB_PAGE">; text?: string; mediaType?: string; artifactVersionId?: string }): Promise<RelayCommandEnvelope> {
     return informationApi.createKnowledge(this.#http, input);
   }
@@ -557,6 +655,30 @@ export class RelayApiClient {
     effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL",
     filters: informationApi.MemoryListFilters = {}): Promise<readonly RelayMemory[]> {
     return informationApi.getMemories(this.#http, projectId, effectiveStatus, filters);
+  }
+
+  async getMemoryPage(projectId: string | null = null,
+    effectiveStatus: RelayMemoryEffectiveStatus | "ALL" = "ALL",
+    filters: informationApi.MemoryPageFilters = {}): Promise<RelayMemoryPage> {
+    return informationApi.getMemoryPage(this.#http, projectId, effectiveStatus, filters);
+  }
+
+  async extendMemoryExpiry(id: string, input: { commandId: string;
+    expectedRevision: DecimalRevision; expiresAt: string | null }): Promise<RelayCommandEnvelope> {
+    return informationApi.extendMemoryExpiry(this.#http, id, input);
+  }
+
+  async getMemoryCaptureTasks(filter: { sessionId?: string; status?: string;
+    limit?: number } = {}): Promise<readonly RelayMemoryCaptureTask[]> {
+    return informationApi.getMemoryCaptureTasks(this.#http, filter);
+  }
+
+  async retryMemoryCaptureTask(id: string, commandId: string): Promise<RelayCommandEnvelope> {
+    return informationApi.retryMemoryCaptureTask(this.#http, id, commandId);
+  }
+
+  async cancelMemoryCaptureTask(id: string, commandId: string): Promise<RelayCommandEnvelope> {
+    return informationApi.cancelMemoryCaptureTask(this.#http, id, commandId);
   }
 
   async getMemory(id: string): Promise<RelayMemory> {

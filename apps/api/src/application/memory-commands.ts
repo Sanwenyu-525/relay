@@ -96,6 +96,47 @@ export async function setMemoryVerificationCommand(db: DbExecutor, input: { work
     } });
 }
 
+/**
+ * 人工延长/取消有效期（0167）：只改根的 `expires_at_override`，历史版本保留原到期时间。
+ * 不允许把有效期设到过去——真过期就是过期，不能靠改日期伪造“当前有效”。
+ */
+export async function setMemoryExpiryCommand(db: DbExecutor, input: { workspaceId: string;
+  memoryId: string; expiresAt: string | null; commandId: string; expectedRevision: string }) {
+  const expected = requireRevision(input.expectedRevision, 'expected_revision');
+  const expiresAt = input.expiresAt === null ? null : new Date(input.expiresAt);
+  if (expiresAt !== null && Number.isNaN(expiresAt.getTime())) {
+    throw validationFailed([{ field: 'expires_at', message: '必须是 ISO 时间或 null' }]);
+  }
+  if (expiresAt !== null && expiresAt.getTime() <= Date.now()) {
+    throw validationFailed([{ field: 'expires_at', message: '新的有效期必须晚于当前时间' }]);
+  }
+  return runIdempotentCommand<JsonObject>(db, { scopeKey: httpCommandScopeKey(input.workspaceId),
+    commandId: input.commandId, commandType: 'SetMemoryExpiry',
+    target: { memory_id: input.memoryId },
+    body: { expected_revision: expected.toString(), expires_at: expiresAt?.toISOString() ?? null },
+    execute: async (r) => {
+      if (await r.workspaces.lockAuthority(input.workspaceId, 'update') === undefined) {
+        throw resourceNotFound('Workspace');
+      }
+      const prior = await r.receipts.findReceipt({ scopeKey: httpCommandScopeKey(input.workspaceId),
+        commandId: input.commandId });
+      if (prior !== undefined) return prior.result_ref;
+      const row = await requireMemory(r, input.workspaceId, input.memoryId);
+      if (row.revision !== expected) throw invalidTransition('Memory 修订已变化，请刷新后重试。');
+      if (row.status !== 'ACTIVE' || row.superseded_by_id !== null) {
+        throw invalidTransition('只能调整当前有效 Memory 的有效期。');
+      }
+      await r.information.setMemoryExpiryOverride(row.id, expiresAt);
+      await r.activities.insertActivityRecord({ id: randomUUID(), workspaceId: input.workspaceId,
+        actorKind: 'HUMAN', actorRef: 'memory-expiry', commandId: input.commandId,
+        projectId: row.project_id, taskId: row.task_id, eventType: 'MEMORY_EXPIRY_CHANGED',
+        factRefs: { memory_id: row.id, expires_at: expiresAt?.toISOString() ?? '' } });
+      await r.workspaces.bumpContextRevision(input.workspaceId);
+      return { memory_id: row.id, revision: (row.revision + 1n).toString(),
+        expires_at: expiresAt?.toISOString() ?? null };
+    } });
+}
+
 /** 手动整理：与 Worker 使用同一个确定性整理器；没有到期工作区不在这里判断。 */
 export async function consolidateMemoriesCommand(db: DbExecutor, input: { workspaceId: string;
   commandId: string }) {

@@ -29,6 +29,28 @@ function version(number: string) {
     content_sha256: "a".repeat(64), availability: "AVAILABLE", excerpt: "保存的原文",
     source_refs: {}, created_at: "2026-09-27T00:00:00Z" };
 }
+/**
+ * 0167 知识库读取面：列表、概览、集合、标签在本用例中不是断言对象，
+ * 统一返回空数据，夹具只声明本用例真正关心的请求（不降低任何断言）。
+ */
+function knowledgeLibraryStub(url: string): Response | null {
+  if (url.includes("/knowledge/page?")) return json({ items: [], next_cursor: null });
+  if (url.includes("/knowledge/overview?")) return json({ knowledge_total: 0, decision_total: 0,
+    rule_total: 0, recent_new: 0, recent_updated: 0, unavailable: 0, stale: 0,
+    curation_pending: 0, collection_total: 0, tag_total: 0, unorganized: 0,
+    latest_created_at: null, latest_updated_at: null });
+  if (url.includes("/knowledge-collections?")) return json({ items: [] });
+  if (url.includes("/knowledge-tags?")) return json({ items: [] });
+  return null;
+}
+/** 0167 列表行：测试只关心阅读与版本切换，其余字段按服务端真实形状给最小值。 */
+function knowledgeListItem() {
+  return { id: knowledgeId, title: "原资料", project_id: projectId, status: "ACTIVE", revision: "4",
+    current_version: "2", summary: "保存的原文", source_kind: "NOTE", media_type: "text/plain",
+    availability: "AVAILABLE", source_uri: null, tags: [], collections: [], matched_fields: [],
+    snippet: null, created_at: "2026-09-27T00:00:00Z", updated_at: "2026-09-27T00:00:00Z" };
+}
+
 function activate() { activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" }); }
 
 afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
@@ -38,6 +60,7 @@ describe("知识收录纸面与确认区", () => {
     activate(); const posts: Record<string, unknown>[] = []; const receipts: string[] = []; let committed = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/projects/${projectId}`) return json(project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return json(committed ? [knowledge()] : []);
       if (url === `${base}/artifact-versions/${artifactVersionId}/content`) return artifactBody("确切版本的完整正文");
@@ -95,8 +118,10 @@ describe("知识收录纸面与确认区", () => {
     activate(); let readable = true; let posts = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/projects/${projectId}`) return json(project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return json([]);
+      if (url.startsWith(`${base}/tasks?project_id=${projectId}`)) return json({ items: [], next_cursor: null });
       if (url === `${base}/artifact-versions/${artifactVersionId}/content`) return readable
         ? artifactBody("仅授权时可见的来源正文") : json({ code: "FORBIDDEN", detail: "source permission revoked" }, 403);
       if (init?.method === "POST") { posts++; throw new Error("must not write"); }
@@ -125,6 +150,8 @@ describe("知识收录纸面与确认区", () => {
     activate(); let posts = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes("/knowledge/page?")) return json({ items: [knowledgeListItem()], next_cursor: null });
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (init?.method === "POST") { posts++; throw new Error("must not write"); }
       if (url === `${base}/projects/${projectId}`) return json(project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return json([knowledge()]);

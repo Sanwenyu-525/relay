@@ -861,7 +861,10 @@ html[data-motion="off"] .chat-disclosure-chevron { transition: none; }
    对齐 Codex 的单卡结构：一张圆角卡同时承载正文与底栏，中间一条细线分隔，卡内不再套第二个输入框。
    data-inflight 只在存在在途回复时为 true，驱动上边那条局部光点（见本文件下方）。
    光点只在独立对话卡与嵌入式子页两种形态下绘制，不推广到普通输入框。 */
-/* 2026-10-11 密度精修：卡内边距与底栏对齐到 space-2，与左栏/消息区同档，不改几何契约。 */
+/* 2026-10-11 密度精修：卡内边距与底栏对齐到 space-2，与左栏/消息区同档，不改几何契约。
+   2026-11-15 工作区精修：描边改成三态阶梯——静止用 separator 低对比描边（任务书「精致白表面、
+   低对比描边」），悬停升到 control，聚焦仍是 action.primary。原静止态直接用 control(3:1)
+   让整张卡在浅色画布上始终重一圈，且悬停无反馈可给；阶梯化后三态各有位置。 */
 .agent-chat-composer {
   position: relative;
   flex: none;
@@ -870,11 +873,14 @@ html[data-motion="off"] .chat-disclosure-chevron { transition: none; }
   gap: var(--relay-space-1);
   padding: var(--relay-space-3);
   background: var(--relay-color-bg-surface);
-  border: var(--relay-border-width) solid var(--relay-color-border-control);
+  border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-composer);
   box-shadow: var(--relay-shadow-card);
   transition: border-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
     box-shadow var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+}
+.agent-chat-composer:hover:not(:focus-within):not([data-busy="true"]) {
+  border-color: var(--relay-color-border-control);
 }
 
 /* 在途反馈：上边一条 18% 宽、2px 高的光点沿上边单向移动（原候选 B）。
@@ -1209,33 +1215,44 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   top: 0;
   left: 0;
   z-index: var(--relay-zIndex-popover);
-  /* 两段式：标题行固定，正文（读数滚动区 + 档位停靠区）吃满剩下的高度。
-     容器自身不再 overflow-y:auto——整块滚会把「档位」滚出视野，正是本轮要修的问题。 */
+  /* 两段式：标题行 + 内容。内容高度由自身决定，浮层不设固定高度；
+     默认没有滚动条，只有异常文案在极低窗口下超过 max-height 时才由浮层自身兜底滚动。 */
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--relay-space-2);
   box-sizing: border-box;
-  width: max-content;
-  min-width: min(21.5rem, calc(100vw - var(--relay-space-8)));
-  max-width: min(24rem, calc(100vw - var(--relay-space-8)));
-  max-height: min(30rem, 68vh);
-  overflow: hidden;
+  width: 22.5rem;
+  /* 2026-11-15 第二轮精简：默认 360px（340–380 区间中位），不再按内容宽度漂移；
+     窄视口仍按 100vw−space-8 夹位。 */
+  min-width: min(21.25rem, calc(100vw - var(--relay-space-8)));
+  max-width: min(23.75rem, calc(100vw - var(--relay-space-8)));
+  max-height: min(27.5rem, 60vh);
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--relay-space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--relay-color-text-muted) transparent;
+  padding: var(--relay-space-4) var(--relay-space-3);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
   box-shadow: var(--relay-shadow-floating);
 }
+/* 低存在感滚动条：默认内容不足时不出现；极低窗口才使用，不常驻占位。 */
+.agent-chat-context-meter-menu::-webkit-scrollbar { width: 6px; }
+.agent-chat-context-meter-menu::-webkit-scrollbar-track { background: transparent; }
+.agent-chat-context-meter-menu::-webkit-scrollbar-thumb {
+  border-radius: var(--relay-radius-round);
+  background: var(--relay-color-text-muted);
+}
 /* 打开即把焦点移进浮层（dialog 语义），容器本身不再画一圈焦点环：
-   可见的焦点反馈由内部可交互项（信息图标）自己给。 */
+   可见的焦点反馈由内部可交互项（如错误态的「重新读取」）自己给。 */
 .agent-chat-context-meter-menu:focus { outline: none; }
 .agent-chat-context-meter-menu > * { margin: 0; min-width: 0; }
-/* 标题行：左身份、右来源与一个信息图标。来源只是短标签，不重复解释。 */
+/* 标题行：只保留身份与必要异常状态，不再有来源标签、记录时间或信息图标。 */
 .agent-chat-context-meter-header {
   display: flex;
   align-items: center;
-  gap: var(--relay-space-1);
+  gap: var(--relay-space-2);
 }
 .agent-chat-context-meter-heading {
   margin: 0;
@@ -1244,47 +1261,28 @@ html[data-motion="on"] .create-form[data-inflight="true"] .agent-chat-composer-s
   font-weight: var(--relay-font-weight-semibold);
   line-height: var(--relay-font-lineHeight-heading);
 }
-.agent-chat-context-meter-source {
-  margin-inline-start: auto;
-  color: var(--relay-color-text-muted);
+/* 总体状态只在非正常态出现：一个 5px 圆点 + 状态词，不再单独占一行。
+   正常、已关闭（已由「自动压缩」区标签承担）都不显示，避免每条读数都带一个徽标。 */
+.agent-chat-context-meter-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--relay-space-1);
+  flex: none;
+  color: var(--relay-color-status-warning-text);
   font-size: var(--relay-font-size-caption);
   line-height: var(--relay-font-lineHeight-heading);
   white-space: nowrap;
 }
-/* 信息图标是标题行里的最后一枚小按钮，不是一排操作项：24px 命中区、20px 视觉盒，
-   悬停与键盘聚焦都浮出同一句口径说明。 */
-.agent-chat-context-meter-info {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--relay-control-target-minimum);
-  height: var(--relay-control-target-minimum);
-  margin-inline-end: calc(-1 * var(--relay-space-1));
-  padding: 0;
-  background: transparent;
-  border: 0;
+.agent-chat-context-meter-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
   border-radius: var(--relay-radius-round);
-  color: var(--relay-color-text-muted);
-  cursor: help;
-  transition: background var(--relay-motion-duration-fast) var(--relay-motion-easing-standard),
-    color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
+  background: currentColor;
+  opacity: 0.85;
 }
-@media (hover: hover) and (pointer: fine) {
-  .agent-chat-context-meter-info:hover { background: var(--relay-color-selection-hover); }
-}
-.agent-chat-context-meter-info svg {
-  width: var(--relay-font-size-meta);
-  height: var(--relay-font-size-meta);
-  flex: none;
-}
-.agent-chat-context-meter-info-ring,
-.agent-chat-context-meter-info-mark {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.25;
-  stroke-linecap: round;
-}
-.agent-chat-context-meter-info-dot { fill: currentColor; }
+.agent-chat-context-meter-state[data-tone="danger"] { color: var(--relay-color-status-danger-text); }
+.agent-chat-context-meter-state[data-tone="running"] { color: var(--relay-color-status-running-text); }
 /* 主读数与进度线是一组：数字到线的距离比浮层各节之间更近。 */
 .agent-chat-context-meter-main { display: grid; gap: var(--relay-space-1); }
 /* 关键数字：左边是「已用 / 预算 tokens」，右边是真实占比。基线对齐，一行读完。
@@ -2769,3 +2767,90 @@ button.agent-chat-latest svg { width: var(--relay-control-icon-size); height: va
 
 .conversation-diff-row--add { background: var(--relay-color-diff-add-bg); }
 .conversation-diff-row--remove { background: var(--relay-color-diff-remove-bg); }
+
+/* 2026-11-15：消息下的执行轨迹（长期记忆捕获 + 第一方 Skill 事件）。
+   只用一行状态与可展开的详情，不引入卡片，也不与正文抢视觉层级。 */
+.assist-execution-traces {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin-top: var(--relay-space-2);
+  color: var(--relay-color-text-muted);
+  font-size: var(--relay-font-size-caption);
+}
+
+.assist-execution-traces .chat-disclosure > summary {
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: var(--relay-space-1);
+  font-size: var(--relay-font-size-caption);
+}
+
+.assist-execution-traces .chat-disclosure > summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.assist-trace-status {
+  flex: none;
+  font-size: var(--relay-font-size-caption);
+  line-height: var(--relay-font-lineHeight-heading);
+}
+
+.assist-trace-status[data-status="SUCCEEDED"] { color: var(--relay-color-status-success-text); }
+.assist-trace-status[data-status="FAILED"] { color: var(--relay-color-status-danger-text); }
+.assist-trace-status[data-status="PENDING"],
+.assist-trace-status[data-status="RUNNING"],
+.assist-trace-status[data-status="REQUESTED"] { color: var(--relay-color-status-warning-text); }
+.assist-trace-status[data-status="EMPTY"],
+.assist-trace-status[data-status="CANCELLED"] { color: var(--relay-color-text-muted); }
+
+.assist-trace-hint { color: var(--relay-color-status-danger-text); }
+
+.assist-trace-body {
+  display: grid;
+  gap: var(--relay-space-1);
+  padding-left: var(--chat-disclosure-indent);
+  max-width: 100%;
+}
+
+.assist-trace-list {
+  display: grid;
+  gap: var(--relay-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assist-trace-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--relay-space-1);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.assist-trace-kind { color: var(--relay-color-text-secondary); }
+.assist-trace-meta { color: var(--relay-color-text-muted); white-space: nowrap; }
+
+.assist-trace-error {
+  color: var(--relay-color-status-danger-text);
+  overflow-wrap: anywhere;
+  max-height: 7.5em;
+  overflow: auto;
+}
+
+.assist-skill-traces { display: grid; gap: var(--relay-space-1); }
+
+.assist-execution-traces .helper-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  max-height: 7.5em;
+  overflow: auto;
+}
+
+/* 窄窗口：状态另起一行，不挤压 Skill 名称或记忆说明。 */
+@media (max-width: 640px) {
+  .assist-execution-traces .chat-disclosure > summary { align-items: flex-start; }
+  .assist-trace-list > li { display: grid; grid-template-columns: auto 1fr; }
+  .assist-trace-meta, .assist-trace-error { grid-column: 1 / -1; }
+}

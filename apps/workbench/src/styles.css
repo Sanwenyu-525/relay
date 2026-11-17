@@ -987,10 +987,13 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
    「新对话」同一写法「图标跟随字号」：16px 图形配 14px 文字更合比例，也在 160px
    拖拽下限下给 placeholder 多让出 4px（取 20px 时余量只剩 8px，压住密度用例的 −8px 断言）。 */
 .recent-work-search > svg { width: var(--relay-font-size-body); height: var(--relay-font-size-body); flex: none; }
-/* 行距只有一档：分组内列表与已归档区列表共用 space.0.5（行距 34px = 32px 行高 + 2px）。
+/* 行距只有一档：分组内列表与已归档区列表共用同一档。
    2026-10-16 第七轮按用户「item 的间距再减小，而且要统一」撤掉分组覆盖里的 space.1——
-   此前分组内 4px、已归档区 2px，同一列出现两档行距。 */
-.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-0-5); position: relative; }
+   此前分组内 4px、已归档区 2px，同一列出现两档行距。
+   2026-11-15 工作区精修：行高从 target.minimum(24px) 提到 28px 档后，2px 行距会让 28px
+   的行重新贴成一片，行距同步回到 space.1(4px)——行距仍与分组上外边距同档，竖向节奏
+   4px(条目)→4px(分组)→8px(根区) 一条线。 */
+.recent-work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--relay-space-1); position: relative; }
 /* 分组相对段标题的上下留白：段标题→分组与分组↔分组同档，下边距同时是「末组→下一根区」的塌穿源。
    2026-10-16 第八轮按用户「间距还是太大」由 space.3(12) 收到 space.2(8)——
    分组下外边距原为 12px，会塌穿包装层把根区间距顶回 12px，必须与根区 margin 同步收。
@@ -1000,8 +1003,10 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
    2026-10-24 第十一轮（用户截图圈出「任务入口」下两条分组行，指「上下间距有点大，缩小一点」）：
    上外边距由 space.1(4) 收到 space.0.5(2)——段标题→分组与分组↔分组随同降到 2px。第十轮
    有意留在 4px 的两档自此与条目行距、根区↔根区同档，整列竖向节奏统一为 2px；下外边距本就是
-   space.0.5，无需再动，塌穿机制不变（末组下外边距仍穿 <details> 与相邻根区 margin 合并取大）。 */
-.recent-work-group { position: relative; margin-block: var(--relay-space-0-5); margin-inline-start: var(--relay-space-2); }
+   space.0.5，无需再动，塌穿机制不变（末组下外边距仍穿 <details> 与相邻根区 margin 合并取大）。
+   2026-11-15 工作区精修：随行距 2px→4px 一起回到 space.1，分组标题在 4px 的行距里重新
+   读得出「一段的开始」；塌穿机制不变。 */
+.recent-work-group { position: relative; margin-block: var(--relay-space-1); margin-inline-start: var(--relay-space-2); }
 /* 2026-10-16 第三轮截图反馈：根区之间不再画分隔线。目标／工作区（目录）／任务入口连排时，
    这三条横线把一列切成几段，层级改由字号档、字重、缩进与留白表达（见设计系统 §9.11）。
    同日第五轮按用户截图再收：margin 与 padding 原本各留一档（12 + 8 = 20px），分隔线撤掉后
@@ -1017,20 +1022,25 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
    4px（根区↔根区、分组↔分组、段标题→分组）→ 2px（条目），仍不新增数值。
    第十轮（同日）：用户「减小到2px」——按指定值收到 space.0.5（2px，与条目行距同档），
    分组下外边距同步收到 space.0.5；分组↔分组与段标题→分组仍是 4px（分组上外边距主导塌穿），
-   根区↔根区与条目行距同为 2px。 */
-.recent-work-section + .recent-work-section { margin-top: var(--relay-space-0-5); }
+   根区↔根区与条目行距同为 2px。
+   2026-11-15 工作区精修：根区（目标／工作区／任务／已归档）之间是这一列最大的结构断层，
+   提到 space.2(8px)——比条目行距(4px)与分组间距(4px)大一档，四段不靠分隔线也读得出边界。 */
+.recent-work-section + .recent-work-section { margin-top: var(--relay-space-2); }
 /* 空态也属于辅助信息；双类限定避免靠后的全局 helper-text 把它放回正文档。
    水平居中：这一段没有可点对象，左对齐会读成「还有一列没显示出来的内容」。 */
 .recent-work .helper-text.recent-work-scope-note { margin: var(--relay-space-2); font-size: var(--relay-font-size-caption); line-height: var(--relay-font-lineHeight-ui); color: var(--relay-color-text-muted); text-align: center; }
 /* 根区标题静止时不铺底：淡底在这一列里读成一块抬起的卡片，三个根区连排会把左栏切成灰白条纹。
    底色只在悬停/按下时出现，与内层组标题同一套交互，层级靠字号档、字重、缩进与留白表达。
    2026-10-24 第十二轮（用户「减小行内留白」）：行高由 control.height.compact(32px) 收到
-   control.target.minimum(24px)——本列三类行（根区标题／组标题／条目）与仓内先例同档
-   （Today 视图的 today-rail__link、today-task 折叠摘要、设置导航按钮都是 target.minimum），
-   此前 32px 是全栏异类。命中区仍是整行宽，24px 即交互目标下限，指针与键盘目标不缩水；
-   搜索框与「新对话」键不动（前者行高绑光标高度，后者是栏头主按钮，各有自己的用例钉着）。 */
-.recent-work-section > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: var(--relay-control-target-minimum); cursor: pointer; list-style: none; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-badge); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); padding: 0 var(--relay-space-2); transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
-.recent-work-section > summary:hover { background: var(--relay-color-bg-subtle); }
+   control.target.minimum(24px)——本列三类行与仓内先例同档（Today 视图的 today-rail__link、
+   today-task 折叠摘要、设置导航按钮都是 target.minimum），此前 32px 是全栏异类。命中区仍是
+   整行宽，指针与键盘目标不缩水；搜索框与「新对话」键不动（各有自己的用例钉着）。
+   2026-11-15 工作区精修：根区标题与条目行一起提到 28px 档（space.6+space.1 派生，不开新档）——
+   24px 的标题行在 28px 条目行旁边读成了「第二等行」，同级元素同高；悬停底与条目悬停同用
+   selection.hover 的 40% 淡档（bg.subtle 在白纸上与纸面几乎同色，悬停反馈名存实亡），
+   按下用 selection.hover 全档，压下反馈比悬停重一档。 */
+.recent-work-section > summary { display: flex; align-items: center; gap: var(--relay-space-1); min-height: calc(var(--relay-space-6) + var(--relay-space-1)); cursor: pointer; list-style: none; color: var(--relay-color-text-primary); border-radius: var(--relay-radius-badge); font-size: var(--relay-font-size-meta); font-weight: var(--relay-font-weight-semibold); padding: 0 var(--relay-space-2); transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard); }
+.recent-work-section > summary:hover { background: color-mix(in srgb, var(--relay-color-selection-hover) 40%, var(--relay-color-bg-surface)); }
 .recent-work-section > summary:active { background: var(--relay-color-selection-hover); }
 .recent-work-section > summary > svg { order: 1; width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); flex: none; color: var(--relay-color-text-muted); }
 .recent-work-section > summary::-webkit-details-marker { display: none; }
@@ -1048,7 +1058,9 @@ html[data-motion="off"] .titlebar-navigation__list { animation: none; }
   line-height: var(--relay-font-lineHeight-heading);
   transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.recent-work-group > summary:hover { background: var(--relay-color-selection-hover); }
+/* 2026-11-15 工作区精修：组标题悬停与条目、根区标题同用 40% 淡档；按下保持 selection.bg，
+   与根区标题的「按下更深一档」方向一致（selection.bg 比 40% 淡档略深、比 selection.hover 浅）。 */
+.recent-work-group > summary:hover { background: color-mix(in srgb, var(--relay-color-selection-hover) 40%, var(--relay-color-bg-surface)); }
 .recent-work-group > summary:active { background: var(--relay-color-selection-bg); }
 .recent-work-group > summary::-webkit-details-marker { display: none; }
 .recent-work-group > summary > svg { width: var(--relay-font-size-caption); height: var(--relay-font-size-caption); flex: none; }
@@ -1163,11 +1175,16 @@ html[data-motion="off"] .recent-work-running { animation: none !important; }
    2026-10-24 第十二轮按用户「减小行内留白」：行高由 compact(32px) 收到 control.target.minimum
    (24px)——文字上下各行内留白约 9px → 5px，两行文字之间的白约 20px → 12px；24px 即交互目标
    下限，命中区仍整行宽。竖直内边距保持 space.0-5 不动（已是令牌最小档）。
-   定位基准只为行内激活标记，标记本身不占 border。 */
+   定位基准只为行内激活标记，标记本身不占 border。
+   2026-11-15 工作区精修：24px 的行在 1662×930 实窗里贴成一片、行内图标/标题/徽标互相挤压
+   （任务书截图同款反馈），行高提到 28px 档（space.6+space.1 派生，不下探 compact 32px 保住
+   信息密度）：文字上下各多 2px，同屏行数约少一行。悬停底从 selection.hover 全档收成 40% 淡档
+   ——此前悬停(#E0EDE4)比选中(#EDF5EF)还深一档，层级倒挂（图标导航栏 2026-10-16 已按同一
+   理由覆写过）；现在悬停轻于选中，按下用 selection.hover 全档补足「按下更深」的反馈。 */
 .recent-work-item {
   position: relative;
   width: 100%;
-  min-height: var(--relay-control-target-minimum);
+  min-height: calc(var(--relay-space-6) + var(--relay-space-1));
   display: flex;
   align-items: center;
   gap: var(--relay-space-2);
@@ -1180,7 +1197,8 @@ html[data-motion="off"] .recent-work-running { animation: none !important; }
   cursor: pointer;
   transition: background-color var(--relay-motion-duration-fast) var(--relay-motion-easing-standard);
 }
-.recent-work-item:hover { background: var(--relay-color-selection-hover); }
+.recent-work-item:hover { background: color-mix(in srgb, var(--relay-color-selection-hover) 40%, var(--relay-color-bg-surface)); }
+.recent-work-item:active { background: var(--relay-color-selection-hover); }
 /* 激活行＝底色 + 行内激活标记 + 标题字重，三者共同表达同一状态，不靠颜色单独区分（设计系统 §6.1）。
    标记画成行内伪元素而不是 border：未选中行不必空出 focus.width，选中切换时文字不横向跳动；
    上下各内缩 space.1 并收圆角，既不顶满行高读成整条边框，也不与分组竖线连成一条。 */
@@ -1869,9 +1887,14 @@ html[data-motion="off"] .recent-work-row[data-recent-dropped="true"] > .recent-w
 /* 图标栏的悬停与选中同层淡底（V4.3 原型 `button:hover, button.active` 本就共用一个色）。
    全局 selection.hover（#E0EDE4）比 selection.bg（#EDF5EF）更深，在任务行那种密集列表里是对的——
    悬停要比静止显眼；但图标栏只有十格、且每格都带淡底圆角块，扫过未选项时会比当前选中项还重一档，
-   层级读起来是倒的。只在这一栏覆写，不动两个全局 token。 */
+   层级读起来是倒的。只在这一栏覆写，不动两个全局 token。
+   2026-11-15 工作区精修：补上按下档——selection.hover 比悬停/选中深一档，压下时给明确的
+   一步反馈；选中态自身的三重信号（底色、激活条、字重）不变。 */
 .app-navrail .navigation-item:hover {
   background: var(--relay-color-selection-bg);
+}
+.app-navrail .navigation-item:active {
+  background: var(--relay-color-selection-hover);
 }
 
 /* 激活条压在色块左缘上，与 V4.3 原型 `.marker` 同一读法：它标记的是「这一块」，
@@ -3700,6 +3723,16 @@ html[data-motion="off"] .feedback-card {
   font-size: var(--relay-font-size-meta);
 }
 
+/* inline 触发按钮：留在调用方放置的位置（如范围页签右侧），不再作为 page-layout 末尾的
+   独立网格项；宽屏不先占一整行空白，窄屏也不用滚到列表末才看到入口。 */
+.rail-trigger--inline {
+  position: static;
+  order: 0;
+  justify-self: auto;
+  align-self: center;
+  margin: 0;
+}
+
 .rail-content {
   display: flex;
   flex-direction: column;
@@ -4126,6 +4159,14 @@ html[data-motion="off"] .feedback-card {
   margin: 0 var(--relay-layout-main-padding) var(--relay-space-6);
 }
 
+/* 任务页的触发按钮 2026-11-15 起与范围页签同行（.task-scope-row）：不再作为页尾网格项，
+   也不保留页面底部的外边距。双类提特异性以压过上面那条共享规则。 */
+.task-list-page .rail-trigger--inline {
+  margin: 0;
+  justify-self: auto;
+  align-self: center;
+}
+
 /* 窄窗：范围说明入口不占首屏整行，改为右上轻量按钮。 */
 @media (width < 80rem) {
   .page-layout {
@@ -4139,6 +4180,15 @@ html[data-motion="off"] .feedback-card {
     margin: var(--relay-space-2) 0 0;
     min-height: var(--relay-control-target-minimum);
     padding: 0 var(--relay-space-2);
+  }
+
+  /* 任务页的范围说明按钮与页签同行，不参与右上角绝对定位（否则会压住页头动作）。 */
+  .task-list-page .rail-trigger--inline {
+    position: static;
+    top: auto;
+    right: auto;
+    margin: 0 0 0 auto;
+    padding: 0 var(--relay-space-4);
   }
 
   .list-header--compact {

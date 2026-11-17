@@ -44,6 +44,8 @@ function stubTasks(handle: (cursor: string | null) => Response | Promise<Respons
     const url = String(input);
     if (url.endsWith("/attention/interventions")) return response(200, { items: [] });
     if (url === `${root}/projects?status=active`) return response(200, { items: [], next_cursor: null });
+    // 任务页另有一次批量项目名读取（2026-11-15 起替代逐项目单读），与本用例的分页无关。
+    if (url.startsWith(`${root}/projects?ids=`)) return response(200, { items: [], next_cursor: null });
     if (url === `${root}/assist-sessions?include_context=true`) return response(200, { items: [] });
     if (url.startsWith(`${root}/tasks?scope=all`)) {
       const cursor = new URL(url).searchParams.get("cursor");

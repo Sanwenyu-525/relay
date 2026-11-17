@@ -8,7 +8,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const apiBase = "http://127.0.0.1:8787";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const prefix = `/api/v1/workspaces/${workspaceId}`;
-const origin = "http://127.0.0.1:4173";
+// CORS origin 跟随实际测试端口推导（与 playwright.config.ts 同一读取）：
+// 4173 被其他项目占用时用 RELAY_E2E_PORT 换端口，stub 的 allow-origin 若仍写死 4173，
+// 浏览器会拦掉全部响应，连接停在「请求响应丢失」。断言零改动。
+const origin = `http://127.0.0.1:${process.env.RELAY_E2E_PORT ?? "4173"}`;
 const taskId = "33333333-3333-4333-8333-333333333333";
 const projectId = "22222222-2222-4222-8222-222222222222";
 // 足够长的中文标题：验证自然换行而不是截断或溢出。

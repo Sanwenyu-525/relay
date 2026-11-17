@@ -57,3 +57,24 @@
   background: var(--relay-color-bg-subtle);
   color: var(--relay-color-text-secondary);
 }
+
+.message-memory-list > li[data-available="false"] .message-memory-tag[data-availability="CONTENT_CHANGED"],
+.message-memory-list > li[data-available="false"] .message-memory-tag[data-availability="WITHDRAWN"],
+.message-memory-list > li[data-available="false"] .message-memory-tag[data-availability="MISSING"],
+.message-memory-list > li[data-available="false"] .message-memory-tag[data-availability="UNAVAILABLE"] {
+  color: var(--relay-color-status-warning-text);
+}
+
+.memory-source-excerpt,
+.memory-source-quote {
+  flex-basis: 100%;
+  color: var(--relay-color-text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.memory-source-quote {
+  padding-left: var(--relay-space-2);
+  border-left: 2px solid var(--relay-color-border-separator);
+  color: var(--relay-color-text-primary);
+}

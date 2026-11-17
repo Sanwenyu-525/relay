@@ -20,6 +20,7 @@ import { historicalReplyAvailable } from './assist-memory.js';
 import { createMemoryRecord, prepareMemoryCandidate } from './memory-write.js';
 import { computeMemoryConfidence, normalizeMemoryKey, normalizeMemoryText, parseMemoryType }
   from './memory-model.js';
+import { knowledgeBodyTokens, knowledgeSummary, knowledgeTitleTokens } from './knowledge-model.js';
 
 type ScopeInput = { workspaceId: string; commandId: string };
 type Result = { readonly knowledge_id?: string; readonly memory_id?: string;
@@ -87,8 +88,26 @@ function sha256(text: string): Buffer {
   return createHash('sha256').update(text, 'utf8').digest();
 }
 
+/**
+ * 知识检索索引（0167）：摘要与词元随写入版本生成。
+ * 只描述当前版本；追加版本时整体替换，不让旧版正文的词元留在索引里。
+ */
+function knowledgeIndex(title: string, text: string | null) {
+  return {
+    summary: knowledgeSummary(text),
+    titleTokens: knowledgeTitleTokens(title).join(' '),
+    bodyTokens: text === null ? '' : knowledgeBodyTokens(text).join(' '),
+  };
+}
+
 export type KnowledgeSource = { sourceKind: 'NOTE' | 'MANAGED_TEXT'; text: string;
-  mediaType?: string } | { sourceKind: 'ARTIFACT_VERSION'; artifactVersionId: string };
+  mediaType?: string;
+  /**
+   * 0167：导入来源的可核对元数据（文件名、大小、格式、提取器说明）。
+   * 只允许扁平标量，避免把原始文件内容塞进 source_refs。
+   */
+  sourceRefs?: JsonObject; sourceUri?: string | null } |
+  { sourceKind: 'ARTIFACT_VERSION'; artifactVersionId: string };
 
 async function knowledgeSource(r: Repositories, workspaceId: string,
   projectId: string | null, source: KnowledgeSource) {
@@ -102,7 +121,7 @@ async function knowledgeSource(r: Repositories, workspaceId: string,
     }
     return { kind: source.sourceKind, mediaType: 'text/markdown', text: null,
       hash: artifact.content_hash, artifactId: artifact.artifact_id,
-      artifactVersionId: source.artifactVersionId,
+      artifactVersionId: source.artifactVersionId, sourceUri: null,
       refs: { artifact_version_id: source.artifactVersionId } as JsonObject };
   }
   const body = contentValue(source.text, 'text');
@@ -112,7 +131,8 @@ async function knowledgeSource(r: Repositories, workspaceId: string,
     throw validationFailed([{ field: 'media_type', message: 'expected text/plain or text/markdown' }]);
   }
   return { kind: source.sourceKind, mediaType, text: body, hash: sha256(body),
-    artifactId: null, artifactVersionId: null, refs: {} as JsonObject };
+    artifactId: null, artifactVersionId: null, sourceUri: source.sourceUri ?? null,
+    refs: (source.sourceRefs ?? {}) as JsonObject };
 }
 
 export async function createKnowledge(db: DbExecutor, input: ScopeInput & {
@@ -140,7 +160,9 @@ export async function createKnowledge(db: DbExecutor, input: ScopeInput & {
         knowledgeId: id, projectId: input.projectId, version: 1n,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: source.sourceUri,
+        sourceRefs: source.refs });
+      await r.information.setKnowledgeIndex(id, knowledgeIndex(title, source.text));
       await r.workspaces.bumpContextRevision(input.workspaceId);
       return { knowledge_id: id, revision: '0', version: '1', status: 'ACTIVE' };
     } });
@@ -168,8 +190,10 @@ export async function addKnowledgeVersion(db: DbExecutor, input: ScopeInput & {
         knowledgeId: item.id, projectId: item.project_id, version,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: source.sourceUri,
+        sourceRefs: source.refs });
       await r.information.setRootVersion('knowledge', item.id, version);
+      await r.information.setKnowledgeIndex(item.id, knowledgeIndex(item.title, source.text));
       await r.workspaces.bumpContextRevision(input.workspaceId);
       const reviewCount = await prepareDecisionReviews(r, { workspaceId: input.workspaceId,
         commandId: input.commandId, knowledgeId: item.id });
@@ -229,7 +253,9 @@ export async function createKnowledgeInTransaction(repositories: Repositories,
         knowledgeId: id, projectId: input.projectId, version: 1n,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: source.sourceUri,
+        sourceRefs: source.refs });
+      await r.information.setKnowledgeIndex(id, knowledgeIndex(title, source.text));
       await r.workspaces.bumpContextRevision(input.workspaceId);
       return { knowledge_id: id, revision: '0', version: '1', status: 'ACTIVE' };
     } });
@@ -260,8 +286,10 @@ export async function addKnowledgeVersionInTransaction(repositories: Repositorie
         workspaceId: input.workspaceId, knowledgeId: item.id, projectId: item.project_id, version,
         sourceKind: source.kind, mediaType: source.mediaType,
         text: source.text, hash: source.hash, artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId, sourceUri: null, sourceRefs: source.refs });
+        artifactVersionId: source.artifactVersionId, sourceUri: source.sourceUri,
+        sourceRefs: source.refs });
       await r.information.setRootVersion('knowledge', item.id, version);
+      await r.information.setKnowledgeIndex(item.id, knowledgeIndex(item.title, source.text));
       await r.workspaces.bumpContextRevision(input.workspaceId);
       const reviewCount = await prepareDecisionReviews(r, { workspaceId: input.workspaceId,
         commandId: input.commandId, knowledgeId: item.id });
@@ -442,6 +470,9 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
       sameRevision('memory', item.revision, expected);
       if (item.status !== 'ACTIVE') throw invalidTransition('Memory 已退役。');
       const currentState = (await r.information.listMemoryStates(input.workspaceId, { id: item.id }))[0];
+      if (currentState?.superseded_by_id != null) {
+        throw invalidTransition('这条记忆已被新事实替代，不能再修订；请编辑替代它的那条。');
+      }
       const contentChanged = currentState === undefined
         || normalizeMemoryText(currentState.title) !== normalizeMemoryText(title)
         || normalizeMemoryText(currentState.body_text) !== normalizeMemoryText(body);
@@ -477,6 +508,8 @@ export async function addMemoryRevision(db: DbExecutor, input: ScopeInput & {
         ...(input.importance === undefined ? {} : { importance: input.importance }),
         contentHash: prepared.contentHash,
         searchTitleTokens: prepared.titleTokens, searchBodyTokens: prepared.bodyTokens,
+        // 当前正文若出现指令覆盖句式，立即同步风险标记；历史版本不在召回范围。
+        instructionRisk: prepared.instructionOverride,
         // 用户显式改写正文后，旧的「可能过时」不再成立；不清理会让新修订继续被默认召回过滤。
         staleAt: null,
       });

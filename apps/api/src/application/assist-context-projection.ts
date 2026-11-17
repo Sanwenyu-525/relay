@@ -101,6 +101,8 @@ export interface SessionContextUsageProjection {
     /** 当前上下文规模；`PROVIDER_USAGE` 表示基线来自真实上报，`ESTIMATED` 表示整份估算。 */
     readonly context_tokens: number;
     readonly context_source: 'PROVIDER_USAGE' | 'ESTIMATED';
+    /** 这份读数在服务端生成的时间（ISO）；界面据此显示「最近更新时间」，不用本地时钟冒充。 */
+    readonly measured_at: string;
     /** 距离生效阈值还有多少 tokens；已超过时为负。 */
     readonly distance_tokens: number;
     readonly active: { readonly request_id: string; readonly status: 'PENDING' | 'RUNNING';
@@ -174,6 +176,7 @@ export async function readSessionContextUsage(db: DbExecutor, workspaceId: strin
       post_compaction_target_tokens: policy.postCompactionTargetTokens,
       context_tokens: measured.tokens,
       context_source: measured.source,
+      measured_at: new Date().toISOString(),
       distance_tokens: policy.effectiveThresholdTokens - measured.tokens,
       active: active === undefined ? null : { request_id: active.id,
         status: active.status === 'RUNNING' ? 'RUNNING' : 'PENDING',

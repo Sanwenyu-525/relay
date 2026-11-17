@@ -1061,10 +1061,51 @@ test('assist HTTP surface: session, 202 message, status polling and proposal acc
 
     const doneList = await api.get(`${base}/assist-sessions/${sessionId}/messages`);
     const doneItems = (doneList.body as { items: { id: string; status: string;
-      role: string }[] }).items;
+      role: string; memory_capture: unknown; skill_invocations: unknown[] }[] }).items;
     const assistant = doneItems.find((item) => item.id === assistantMessageId)!;
     assert.equal(assistant.status, 'COMPLETED');
     assert.equal(assistant.role, 'ASSISTANT');
+    // 没有捕获任务的 USER 消息 DTO 不生成占位状态；助手消息会由真实捕获流程产生任务。
+    const user = doneItems.find((item) => item.role === 'USER')!;
+    assert.equal(user.memory_capture, null);
+    assert.deepEqual(assistant.skill_invocations, []);
+    // 生成结算后已经有真实 AUTO 捕获行（正常聊天无长期事实时是 EMPTY）。
+    const autoTask = (await sql<{ id: string; status: string }>`
+      select id, status from memory_capture_tasks where trigger_message_id = ${assistantMessageId}`
+      .execute(app.db)).rows[0]!;
+    assert.equal(autoTask.status, 'EMPTY');
+    await sql`update memory_capture_tasks set status = 'PENDING', completed_at = null,
+      error_kind = null where id = ${autoTask.id}`.execute(app.db);
+    const pendingMessages = (await api.get(`${base}/assist-sessions/${sessionId}/messages`)).body as {
+      items: { id: string; memory_capture: { status: string; task_count: number } | null }[] };
+    const pendingCapture = pendingMessages.items.find((item) => item.id === assistantMessageId)!;
+    assert.equal(pendingCapture.memory_capture?.status, 'PENDING');
+    assert.equal(pendingCapture.memory_capture?.task_count, 1);
+    await sql`update memory_capture_tasks set status = 'SUCCEEDED', completed_at = now(),
+      error_kind = null, result = '{"written":1}'::jsonb where id = ${autoTask.id}`
+      .execute(app.db);
+    const settledMessages = (await api.get(`${base}/assist-sessions/${sessionId}/messages`)).body as {
+      items: { id: string; memory_capture: { status: string; saved_count: number } | null }[] };
+    const settledCapture = settledMessages.items.find((item) => item.id === assistantMessageId)!;
+    assert.equal(settledCapture.memory_capture?.status, 'SUCCEEDED');
+    assert.equal(settledCapture.memory_capture?.saved_count, 1);
+    // Skill 事件只在真实执行账本有行时出现；输入输出走摘要。
+    await sql`insert into assist_skill_invocations
+      (id, workspace_id, session_id, message_id, invocation_key, ordinal, skill_id, skill_version,
+       skill_sha256, status, input_summary, output_summary, requested_at, started_at, settled_at)
+      values (${randomUUID()}, ${workspaceId}, ${sessionId}, ${assistantMessageId},
+       ${'a'.repeat(64)}, 1, 'task-to-execution-contract', '1.0.0', ${'b'.repeat(64)},
+       'SUCCEEDED', '输入摘要', '输出摘要', now() - interval '2 seconds', now() - interval '1 second', now())`
+      .execute(app.db);
+    const tracedMessages = (await api.get(`${base}/assist-sessions/${sessionId}/messages`)).body as {
+      items: { id: string; skill_invocations: { skill_id: string; status: string;
+        input_summary: string | null; output_summary: string | null }[] }[] };
+    const traced = tracedMessages.items.find((item) => item.id === assistantMessageId)!;
+    assert.equal(traced.skill_invocations.length, 1);
+    assert.equal(traced.skill_invocations[0]!.skill_id, 'task-to-execution-contract');
+    assert.equal(traced.skill_invocations[0]!.status, 'SUCCEEDED');
+    assert.equal(traced.skill_invocations[0]!.input_summary, '输入摘要');
+    assert.equal(traced.skill_invocations[0]!.output_summary, '输出摘要');
 
     const propose = await api.post(`${base}/assist-sessions/${sessionId}/messages`,
       { command_id: randomUUID(), content: 'HTTP 起草候选', intent: 'PROPOSE_CANDIDATE' });
@@ -1222,6 +1263,19 @@ test('Skill Assist freezes version, replays once and settles typed suggestion wi
     /^[0-9a-f]{64}$/u.test(dependency.sha256) && dependency.definition !== null));
   assert.equal(before.rows[0]!.skill_input.desired_result, '可复核的 Markdown');
   assert.equal(before.rows[0]!.skill_output, null);
+  // 0169：受理事务已经写入 REQUESTED，而不是等执行结束后才补记；刷新页面也能看到“等待执行”。
+  const pendingInvocation = (await sql<{ status: string; skill_id: string; skill_version: string;
+    input_summary: string | null; started_at: Date | null; settled_at: Date | null }>`
+    select status, skill_id, skill_version, input_summary, started_at, settled_at
+    from assist_skill_invocations where message_id = ${first.result.assistant_message_id}`
+    .execute(app.db)).rows;
+  assert.equal(pendingInvocation.length, 1);
+  assert.equal(pendingInvocation[0]!.status, 'REQUESTED');
+  assert.equal(pendingInvocation[0]!.skill_id, 'task-to-execution-contract');
+  assert.equal(pendingInvocation[0]!.skill_version, '1.0.0');
+  assert.match(pendingInvocation[0]!.input_summary ?? '', /可复核的 Markdown/u);
+  assert.equal(pendingInvocation[0]!.started_at, null);
+  assert.equal(pendingInvocation[0]!.settled_at, null);
   const taskRevision = await readTaskRevision(f.taskId);
   const generatedRequests: AssistRequest[] = [];
   const capturingPort: AssistModelPort = { identity: modelPort.identity,
@@ -1250,6 +1304,23 @@ test('Skill Assist freezes version, replays once and settles typed suggestion wi
   assert.equal(output.rows[0]!.skill_output.baseline.task_revision, taskRevision);
   assert.match(output.rows[0]!.skill_output.basis_sha256, /^[0-9a-f]{64}$/u);
   assert.match(output.rows[0]!.skill_output.payload_sha256, /^[0-9a-f]{64}$/u);
+  // 0169：结算必须同时收口执行事件，并保留真实开始/结束时间与脱敏输出摘要。
+  const settledInvocation = (await sql<{ status: string; started_at: Date | null;
+    settled_at: Date | null; output_summary: string | null; invocation_key: string }>`
+    select status, started_at, settled_at, output_summary, invocation_key
+    from assist_skill_invocations where message_id = ${first.result.assistant_message_id}`
+    .execute(app.db)).rows;
+  assert.equal(settledInvocation.length, 1, '同一消息一次 Skill 执行只能有一行');
+  assert.equal(settledInvocation[0]!.status, 'SUCCEEDED');
+  assert.ok(settledInvocation[0]!.started_at !== null);
+  assert.ok(settledInvocation[0]!.settled_at !== null);
+  assert.ok(settledInvocation[0]!.output_summary !== null);
+  assert.match(settledInvocation[0]!.invocation_key, /^[0-9a-f]{64}$/u);
+  // 普通工具轮次没有 Skill 事件：这张表只由第一方 Skill 入口写入。
+  const noSkillInvocations = await sql<{ count: string }>`
+    select count(*)::text as count from assist_skill_invocations
+    where session_id = ${session.result.session_id}`.execute(app.db);
+  assert.equal(noSkillInvocations.rows[0]!.count, '1');
   assert.equal(await readTaskRevision(f.taskId), taskRevision);
   const proposalCount = await sql<{ count: string }>`select count(*)::text as count
     from assist_proposals where message_id = ${first.result.assistant_message_id}`.execute(app.db);

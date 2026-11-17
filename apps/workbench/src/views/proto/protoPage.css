@@ -615,9 +615,44 @@
 .pv-page .resume-section p { font-size: var(--relay-font-size-caption); }
 .pv-page .resume-section .helper-text { font-size: var(--relay-font-size-micro); }
 
+/* 接续摘要是分区卡「接续摘要」内的内容组（UI-LAYOUT-AUDIT-20261115）：
+   DailyContinuationCard 自带的完整卡片框在此嵌套位置退场，卡片套卡片由分组间距表达层级；
+   阻塞/失败强调改画左缘细线，不再套第二层框。组件在分区卡外单独使用时不受影响。 */
+.pv-page .resume-section .daily-continuation {
+  margin: 0 0 var(--relay-space-3);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.pv-page .resume-section .daily-continuation--attention {
+  border-left: 2px solid var(--relay-color-palette-amber);
+  padding-left: var(--relay-space-3);
+}
+.pv-page .resume-section .daily-continuation--failed {
+  border-left: 2px solid var(--relay-color-palette-red);
+  padding-left: var(--relay-space-3);
+}
+
 /* Goal 详情页：把「编辑目标」等分区间的空隙与页宽交给 pv 容器 */
 .pv-page .page-layout { max-width: none; padding: 0; margin: 0; }
 .pv-page .page-layout > .page-primary { max-width: none; }
+
+/* ── 页壳唯一 Owner（UI-LAYOUT-AUDIT-20261115）──
+   skill-shell 壳内的 live 视图根（项目总览/蓝图/任务详情）此前重复携带 .pv-page，
+   页壳几何（宽度/居中/内边距/最小高）随之叠加：live 模式水平内缩 30+30+32=92px、
+   底部留白 64+64+32=160px，与 fixture 模式（单层）对齐基准不一致。
+   这里把嵌套层降级为纯皮肤容器：变量、字号与作用域规则照常继承，页壳几何由最外层承担。
+   特异度 0,2,0：TaskDetailView.css 等页面专属覆写（.pv-page.task-detail-page…，0,3,0）
+   不受影响；外层壳不存在、pv 根即页面本身（page-state / page-layout 复合根）不匹配本条。 */
+.pv-page .pv-page { width: auto; margin: 0; padding: 0; min-height: 0; }
+
+/* pv 上下文里 .page-primary 不再叠加水平内边距：pv gutter（30px）是唯一水平 Owner，
+   顶部保留主区节奏，底部交给 pv 壳的 space.16。页签行、页头与正文从此共用同一条左右对齐边。 */
+.pv-page .page-primary { padding: var(--relay-layout-main-padding) 0 0; }
+
+/* 页签行同理对齐 pv gutter（全局 .skill-tabs 的 32px 水平内缩是 page-primary 时代的基准）。 */
+.pv-page .skill-tabs { padding-left: 0; padding-right: 0; }
 
 /* 只有主栏的 pv 页面不保留空右栏：全局 .page-layout 在 ≥80rem 仍按「主栏 + 320px」分列，
    没有 rail 的页面（定时任务列表/新建）会在右侧留下一条 320px 空白。 */

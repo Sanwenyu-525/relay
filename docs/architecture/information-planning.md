@@ -51,6 +51,18 @@ InformationRepository 用一次根/当前版本联查完成投影与筛选，避
 
 召回以同 Workspace 全局与当前 Project 为边界，有界字面匹配/近期回退，不声称语义检索或自动偏好学习。消息记录确切版本与自动选取依据；短期摘要和后续答复继承实际使用足迹，关闭召回、到期/停用或作用域变化后重检，不从旧匿名答复重新引入。工作窗口与检查点仍归 Assist，不能替代 Information 正文、权限或 Task 状态。协议/限额归 [HTTP §10.99](../api/http-command-contract.md#1099-长短期记忆接口2026-10-19)，分层取舍归 [ADR-028](../decisions/ADR-028-memory-layers.md)。
 
+### 1.5 知识资产中心与记忆边界（2026-11-15，0167）
+
+Knowledge 与 Memory 是两个领域，不合并表也不共用写入口：Knowledge 管理可引用、可版本化、可归档的资料/决定/规则；Memory 继续使用独立页面与 V2 模型（确认、置信度、来源、有效期、固定/停用、修订与自动提取标记）。知识库页面只保留 `KNOWLEDGE`、`DECISION`、`RULE` 三类，`MEMORY` 不再出现在知识库分类导航；旧 `?kind=MEMORY` 路由回落为知识资料页，Memory 入口由 `/memory` 提供。两者只在 Context Builder 中协同，不互相冒充事实源。
+
+知识库信息架构改为：页头核心操作、真实概览、常驻搜索、类型导航、范围/状态/集合/标签/排序筛选、服务端游标列表和按需详情阅读器。列表读取 `GET /knowledge/page`，默认按当前有效版本投影；`GET /knowledge` 保留旧语义以兼容既有调用方，新页面不依赖它。概览与健康检查只读聚合，不扫描正文。
+
+组织体系采用“类型 + 作用域 + 集合 + 标签 + 关系”，不引入文件夹层级。集合分为 Workspace 级与 Project 级两套命名空间；项目集合不能收纳其他项目知识。标签按 NFKC + 小写规范化去重，权限仍由知识根所在 Workspace/Project 决定。关系只接受真实知识 ID 与目标版本，支持 `RELATES_TO`、`SUPERSEDES`、`DERIVED_FROM`、`CONSTRAINS`、`REFERENCES`，禁止自关联。
+
+导入先提取正文再建知识版本：Markdown/TXT 按 UTF-8→GB18030→UTF-16 解码，PDF/DOCX/HTML 由服务端真实提取；格式按魔数判断，不信任扩展名。扫描型 PDF 无文本层时返回 `NO_TEXT` 并明确提示无 OCR，不把空正文写成成功。重复按内容哈希与标题相似提示，由用户选择 SKIP、NEW_VERSION 或 NEW，不自动覆盖或按标题自动合并。原始文件不持久化，正文与来源元数据写入不可变版本，来源追溯仍指向导入批次与文件哈希。
+
+Agent 检索使用完整任务/项目标题分词后的多信号排序（标题、正文、标签、集合、来源、项目归属），候选池有界后再进入既有 Context 预算；不把整个知识库塞入 Context。来源权限、作用域、归档/失效状态在 SQL 层先过滤；检索命中记录 `selection_reason`，消息 sources 冻结确切知识 ID、版本与来源引用。候选整理仍由人工确认后才成为正式知识，AI 不自动覆盖或提升为全局规则。
+
 ## 2. 规则解析
 
 Rule scope 为 Workspace、Project 或 Task；Project Type 和工作配置的默认规则在创建配置时形成显式引用，不因切换 Workbench 更改。HARD 适用集合求交；无法兼容时返回冲突及源规则，不选择“更具体的覆盖”。PREFERENCE 按 Task > Project > Workspace，同层冲突需显式选择或保留冲突提示。

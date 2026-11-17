@@ -43,7 +43,9 @@ const CREATED_COMMAND_TYPES: readonly string[] = ['SubmitHumanArtifactVersion',
   // 复制连接/资源/策略到目标项目（2026-10-19）：一次命令新建多行业务事实，与新建同类。
   'CopyGatewaySettings',
   // 一键启用插件（2026-10-25）：一次命令补齐连接与逐动作策略，同为新建多行业务事实。
-  'EnableProjectPlugin'];
+  'EnableProjectPlugin',
+  // 0167：导入提交会新建知识根或追加版本，契约与前端客户端都按 201 处理。
+  'ImportKnowledge'];
 
 export function successStatusOf(commandType: string): 200 | 201 | 202 {
   // Delegate 已原子获得执行权，但工作尚未完成：按契约第 4 节返回 202（已接受）。

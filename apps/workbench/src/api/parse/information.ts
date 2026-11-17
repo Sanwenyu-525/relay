@@ -1,6 +1,6 @@
 import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, nullableInteger, nullableString, object, string, stringArray } from "../core/primitives";
-import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryRevision, RelayMemoryStats, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
+import type { RelayDecision, RelayInformationKind, RelayInterventionItem, RelayKnowledge, RelayKnowledgeCurationCandidate, RelayKnowledgeGuideEntry, RelayKnowledgeVersion, RelayKnowledgeVersionContent, RelayMemory, RelayMemoryCaptureTask, RelayMemoryEffectiveStatus, RelayMemoryMaintenanceRun, RelayMemoryPage, RelayMemoryRevision, RelayMemoryStats, RelayModelVerifyResult, RelayProjectKnowledgeGuide, RelayRule, RelayRuleEnforcement, RelayRuleStrength, RelayRuleVersion, RelaySearchItem } from "../dtos/information";
 
 export function interventionFrom(value: unknown): RelayInterventionItem {
   const row = object(value, "intervention");
@@ -227,10 +227,50 @@ export function memoryFrom(value: unknown): RelayMemory {
     lastAccessedAt: optionalNullableString(row, "last_accessed_at", "memory"),
     staleAt: optionalNullableString(row, "stale_at", "memory"),
     pinned: optionalBoolean(row, "pinned", false),
+    instructionRisk: optionalBoolean(row, "instruction_risk", false),
     supersedesId: optionalNullableString(row, "supersedes_id", "memory"),
     supersededById: optionalNullableString(row, "superseded_by_id", "memory"),
     retiredReason: optionalNullableString(row, "retired_reason", "memory")
   };
+}
+
+/** 0167：真实游标分页；游标原样回传，不在前端拼接。 */
+export function memoryPageFrom(value: unknown): RelayMemoryPage {
+  const row = object(value, "memory page");
+  const sort = string(row, "sort", "memory page");
+  if (sort !== "updated" && sort !== "created" && sort !== "importance") {
+    throw new RelayContractError("memory page.sort 包含未知取值。");
+  }
+  return { items: array(row, "items", "memory page").map(memoryFrom),
+    nextCursor: nullableString(row, "next_cursor", "memory page"),
+    pageSize: integer(row, "page_size", "memory page"), sort };
+}
+
+const captureStatuses = ["PENDING", "RUNNING", "SUCCEEDED", "EMPTY", "FAILED", "CANCELLED"] as const;
+
+export function memoryCaptureTaskFrom(value: unknown): RelayMemoryCaptureTask {
+  const row = object(value, "memory capture task");
+  const kind = string(row, "kind", "memory capture task");
+  if (kind !== "AUTO" && kind !== "EXPLICIT") {
+    throw new RelayContractError("memory capture task.kind 包含未知取值。");
+  }
+  const status = string(row, "status", "memory capture task");
+  if (!captureStatuses.includes(status as (typeof captureStatuses)[number])) {
+    throw new RelayContractError("memory capture task.status 包含未知取值。");
+  }
+  const result = object(row.result ?? {}, "memory capture task.result");
+  return { id: string(row, "id", "memory capture task"), kind,
+    status: status as RelayMemoryCaptureTask["status"],
+    attempts: integer(row, "attempts", "memory capture task"),
+    maxAttempts: integer(row, "max_attempts", "memory capture task"),
+    sessionId: string(row, "session_id", "memory capture task"),
+    triggerMessageId: string(row, "trigger_message_id", "memory capture task"),
+    userMessageId: nullableString(row, "user_message_id", "memory capture task"),
+    errorKind: nullableString(row, "error_kind", "memory capture task"),
+    lastError: nullableString(row, "last_error", "memory capture task"),
+    result, nextAttemptAt: string(row, "next_attempt_at", "memory capture task"),
+    completedAt: nullableString(row, "completed_at", "memory capture task"),
+    createdAt: string(row, "created_at", "memory capture task") };
 }
 
 export function memoryMaintenanceRunFrom(value: unknown): RelayMemoryMaintenanceRun {
@@ -252,6 +292,8 @@ export function memoryStatsFrom(value: unknown): RelayMemoryStats {
   const row = object(value, "memory stats");
   const index = object(row.index_health, "memory stats.index_health");
   const recall = object(row.recall, "memory stats.recall");
+  const captureRow = typeof row.capture === "object" && row.capture !== null && !Array.isArray(row.capture)
+    ? row.capture as Record<string, unknown> : {};
   const maintenance = object(row.maintenance, "memory stats.maintenance");
   const types = array(row, "types", "memory stats").map((entry) => {
     const item = object(entry, "memory type count");
@@ -260,13 +302,21 @@ export function memoryStatsFrom(value: unknown): RelayMemoryStats {
   return { total: integer(row, "total", "memory stats"),
     active: integer(row, "active", "memory stats"), superseded: integer(row, "superseded", "memory stats"),
     retired: integer(row, "retired", "memory stats"), expired: integer(row, "expired", "memory stats"),
-    stale: integer(row, "stale", "memory stats"), pinned: integer(row, "pinned", "memory stats"),
+    stale: integer(row, "stale", "memory stats"),
+    unverified: integer(row, "unverified", "memory stats"),
+    failed: integer(row, "failed", "memory stats"),
+    instructionRisk: integer(row, "instruction_risk", "memory stats"),
+    pinned: integer(row, "pinned", "memory stats"),
     storageBytes: integer(row, "storage_bytes", "memory stats"),
     indexHealth: { ftsIndexPresent: boolean(index, "fts_index_present", "memory stats.index_health"),
       unindexed: integer(index, "unindexed", "memory stats.index_health") },
     recall: { last24h: integer(recall, "last_24h", "memory stats.recall"),
-      avgLatencyMs: integer(recall, "avg_latency_ms", "memory stats.recall"),
+      // 没有召回过时服务端返回 null；不能用 0 伪装成“0 ms”。
+      avgLatencyMs: nullableInteger(recall, "avg_latency_ms", "memory stats.recall"),
       lastAt: nullableString(recall, "last_at", "memory stats.recall") },
+    capture: { pending: integer(captureRow, "pending", "memory stats.capture"),
+      failed: integer(captureRow, "failed", "memory stats.capture"),
+      last24h: integer(captureRow, "last_24h", "memory stats.capture") },
     maintenance: { lastAt: nullableString(maintenance, "last_at", "memory stats.maintenance"),
       runs: array(maintenance, "runs", "memory stats.maintenance").map(memoryMaintenanceRunFrom) },
     types };

@@ -37,6 +37,7 @@ import type { ManagedContentStore } from '../storage/managed-content-store.js';
 import { createRepositories, type Repositories } from './unit-of-work.js';
 import { applyTaskSkillContractChange } from './task-contract-commands.js';
 import { skillOutputHash } from '../skills/skill-proposal.js';
+import { skillInputSummary } from '../assist/assist-skill-invocation-repository.js';
 import { requireRevision } from './revisions.js';
 import { readAdmission, requireNormalAdmission } from './maintenance-admission.js';
 import { parseAssistModelSnapshot } from './assist-model-snapshot.js';
@@ -900,6 +901,19 @@ export async function requestAssistMessage(
           modelConnectionId: modelSnapshot.connectionId,
         }),
       });
+      /*
+       * 0169：受理时先写 Skill 执行事件 REQUESTED。
+       *
+       * 它与消息行同事务：排队但尚未执行的 Skill 在重启后仍可读回“等待执行”，
+       * 不会因为进程退出就只剩一个无法解释的 skill_snapshot。
+       */
+      if (skill !== null && skill !== undefined) {
+        await repositories.skillInvocations.request({
+          id: randomUUID(), workspaceId: session.workspace_id, sessionId: session.id,
+          messageId: assistantMessageId, skillId: skill.id, skillVersion: skill.version,
+          skillSha256: skill.sha256, inputSummary: skillInputSummary(skillInput),
+        });
+      }
       return { session_id: session.id, user_message_id: userMessageId,
         assistant_message_id: assistantMessageId,
         chat_mode: requestedMode, goal_id: goalBinding ?? goalCreated };

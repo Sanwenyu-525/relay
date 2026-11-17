@@ -17,8 +17,6 @@ import { createCommandId, RelayApiError, type RelayApiClient, type RelayArtifact
   type RelaySessionContextUsage, type RelayTokenUsage,
   type RelayWorkspaceDefaultDirectory, type RequiredContextAudit } from "../api/relayClient";
 import type { RelayModelConnection } from "../api/dtos/information";
-// CONTEXT-COMPACTION-0162：手动压缩的 CAS 基线类型（会话整行修订）。
-import type { DecimalRevision } from "../types";
 import { formatTokenUsageDetail, formatTokenUsageLine, legacyTokenUsage,
   tokenUsageTotal } from "../lib/tokenCount";
 import { generationStageView } from "../lib/generationStage";
@@ -29,6 +27,7 @@ import AssistSkillOutput from "../components/AssistSkillOutput";
 import AssistRecallUndo from "../components/AssistRecallUndo";
 import ModelSelector from "../components/ModelSelector";
 import ContextUsagePanel from "../components/ContextUsagePanel";
+import { contextUsageStatus, formatRatioPercent } from "../lib/contextUsageModel";
 import ContextRiskNotice from "../components/ContextRiskNotice";
 import { sessionModelSelectionFrom } from "../api/resources/modelSelection";
 import { revisionAtLeast } from "../api/parse/memory";
@@ -60,6 +59,7 @@ import { RecentActivitySummary } from "../components/RecentActivitySummary";
 import { PendingWorkStrip } from "../components/PendingWorkStrip";
 import { SessionRoundTrace } from "../components/SessionRoundTrace";
 import { MessageExecutionStatus } from "../components/MessageExecutionStatus";
+import { MessageExecutionTraces } from "../components/MessageExecutionTraces";
 import { useSessionActivity } from "../lib/useSessionActivity";
 import type { RelayExecutionActivityMessage } from "../api/dtos/assist";
 import SessionTodoList from "../components/SessionTodoList";
@@ -2435,8 +2435,18 @@ async function sendFirstMessage(pending: PendingFirstMessage, retry = false) {
           {sessions.map((item) => <button key={item.id} type="button" role="menuitem"
             className="collab-session-switcher-option" data-testid={`collab-session-option-${item.id}`}
             title={item.title} aria-current={item.id === sessionId ? "true" : undefined}
+            aria-label={sessionOptionLabel(item)}
             disabled={item.id === sessionId || sessionChangeBlocked}
-            onClick={() => { setSessionSwitcherOpen(false); selectSession(item.id); }}>{sessionOptionLabel(item)}</button>)}
+            onClick={() => { setSessionSwitcherOpen(false); selectSession(item.id); }}>
+            {/* 两行结构（2026-11-15 工作区精修）：标题最多两行省略；「更新时间 / 当前 / 已结束」
+                是辅助事实，降到 caption 次级行，不再与标题同档挤一行被省略号先切掉。
+                完整措辞（含同标题消歧的更新时间与「当前」）保留在 aria-label / title 上，可读不变。 */}
+            <span className="collab-session-switcher-title">{item.title}</span>
+            <span className="collab-session-switcher-meta">
+              {item.id === sessionId ? "当前" : `更新 ${formatReadableDateTime(item.updatedAt, timeZone)}`}
+              {item.status !== "ACTIVE" ? " · 已结束" : ""}
+            </span>
+          </button>)}
         </div>}
       </div>
     : null;
@@ -3837,23 +3847,9 @@ function formatUsagePercent(value: number, limit: number): string {
 }
 
 /**
- * 上下文占用比例的读数：不把超额压成 100%。
- * 未满但四舍五入会进位到 100 时保留一位小数（99.6% 不能读成刚好打满）；
- * 恰好 100% 就是真的 100%；超过 100% 时给出真实比例，四舍五入后恰好 100.0
- * 的也保留 ".0"，免得把刚超出的读数又说回 100%。
+ * 比例读数不再本地实现：与浮层、构成份额共用 `lib/contextUsageModel` 的同一套读法
+ * （未满但会进位 100% 时保留小数、超额给真实比例）。
  */
-function formatRatioPercent(ratio: number): string {
-  const rounded = Math.round(ratio * 100);
-  if (ratio < 1) {
-    if (rounded < 100) return String(rounded);
-    const tenths = Math.floor(ratio * 1000) / 10;
-    return tenths >= 100 ? "99.9" : tenths.toFixed(1);
-  }
-  if (ratio === 1) return "100";
-  const tenths = Math.round(ratio * 1000) / 10;
-  if (tenths === 100) return "100.0";
-  return Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
-}
 
 /** 浮层与圆环之间的安全间距：用户要的 6–8px 取中位，实测右缘另与圆环右缘对齐。 */
 const RING_GAP_PX = 7;
@@ -3878,21 +3874,22 @@ const MIN_PANEL_HEIGHT_PX = 168;
  * 分母取当前模型的可用窗口（2026-11-15，0165），圆环与浮层共用同一份投影（`usage`）。
  * 会话档位入口已取消；读数未知时轨道虚线、不画弧，与「真的 0%」分开。
  */
-function ContextMeter({ usage, loading, error, sessionId, sessionRevision, client, onReload }: {
+function ContextMeter({ usage, loading, error, onReload }: {
   readonly usage: RelaySessionContextUsage | null;
   readonly loading: boolean;
   readonly error: string | null;
-  readonly sessionId: string;
-  /** CONTEXT-COMPACTION-0162：手动压缩的 CAS 基线（会话整行修订）。 */
-  readonly sessionRevision: DecimalRevision;
-  readonly client: RelayApiClient | null;
   readonly onReload: () => void;
 }) {
   const lastCall = usage?.lastCall ?? null;
   const inputTokens = lastCall?.inputTokens ?? null;
-  // 0165：占比直接按**当前模型可用窗口**解释，与浮层共用一个分母。
-  // 那次调用冻结的预算不再参与圆环计算，只在浮层里作为差异说明保留。
-  const limit = usage?.compaction.effectiveWindowTokens ?? null;
+  // 2026-11-15 第二轮：总体状态收进标题行，只在非正常态出现，正常时不再占一行。
+  const status = usage === null ? null : contextUsageStatus(usage.compaction);
+  // 2026-11-15：窗口来源未确认时，不能用安全回退窗口当真实分母。
+  // 任意一项表明「模型真实窗口未知」，圆环都进入 unknown：
+  // 不计算百分比、不展示容易被误读为真实窗口的分母，只保留实际 inputTokens。
+  const windowUnknown = usage !== null && (usage.compaction.windowSource === "UNKNOWN_FALLBACK"
+    || usage.compaction.fallbackApplied || usage.compaction.modelWindowTokens === null);
+  const limit = windowUnknown ? null : usage?.compaction.effectiveWindowTokens ?? null;
   const ratio = inputTokens !== null && limit !== null && limit > 0 ? inputTokens / limit : null;
   const percent = ratio === null ? null : formatRatioPercent(ratio);
   const high = ratio !== null && ratio >= 0.8;
@@ -3901,9 +3898,11 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
   const inputText = inputTokens === null ? null : inputTokens.toLocaleString();
   const meterText = lastCall === null ? "尚无模型调用"
     : inputTokens === null ? "上下文用量未上报"
-      : ratio === null ? `上下文 ${inputText} tokens · 窗口未知`
-        : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
-          + (over ? " · 已超出当前模型可用窗口" : "");
+      : windowUnknown
+        ? `上下文 ${inputText} tokens · 模型窗口未知，按安全回退估算`
+        : ratio === null ? `上下文 ${inputText} tokens · 窗口未知`
+          : `上下文 ${inputText} / ${limit?.toLocaleString()} tokens（${percent}%）`
+            + (over ? " · 已超出当前模型可用窗口" : "");
   const cacheRead = lastCall?.cacheReadTokens ?? null;
   const hitRate = inputTokens !== null && cacheRead !== null && inputTokens > 0 &&
     cacheRead <= inputTokens ? cacheRead / inputTokens : null;
@@ -3941,6 +3940,19 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
+  }, [open]);
+  /*
+   * 浮层打开期间的轻量对账（2026-11-15 浮层重排）：发送、回复、工具与压缩已由消息 key
+   * 与压缩轮询覆盖，但记忆注入、系统指令变化这类「装配侧」变化没有可订阅的事件。
+   * 打开时每 15 秒重读一次投影——读投影是本地数据库读，不发模型请求；关掉即停。
+   * onReload 在父组件里是内联箭头、身份每次渲染都变，这里走 ref 保持间隔稳定。
+   */
+  const reloadRef = useRef(onReload);
+  useEffect(() => { reloadRef.current = onReload; });
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setInterval(() => reloadRef.current(), 15000);
+    return () => window.clearInterval(timer);
   }, [open]);
   // 浮层是 dialog：打开就把焦点移进去，键盘用户可以立刻读到读数或用 Tab 走到信息图标。
   // preventScroll 保证移焦不会把输入卡顶出视野。
@@ -3982,8 +3994,10 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
       const aboveRoom = Math.round(box.top - RING_GAP_PX - EDGE_MARGIN_PX);
       const belowRoom = Math.round(window.innerHeight - box.bottom - RING_GAP_PX - EDGE_MARGIN_PX);
       const flip = aboveRoom < MIN_PANEL_HEIGHT_PX && belowRoom > aboveRoom;
+      // 2026-11-15 第二轮：默认内容按 360–440px 排，面板上限不超过 60vh；
+      // 空间不够时由正文的单一滚动容器承担，不再让外层与内层同时滚。
       menu.style.maxHeight = `${Math.max(MIN_PANEL_HEIGHT_PX,
-        Math.min(Math.round(window.innerHeight * 0.68), flip ? belowRoom : aboveRoom))}px`;
+        Math.min(Math.round(window.innerHeight * 0.6), flip ? belowRoom : aboveRoom))}px`;
       const height = menu.offsetHeight;
       const left = Math.max(EDGE_MARGIN_PX,
         Math.min(box.left + box.width / 2 - width / 2,
@@ -4042,15 +4056,6 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
   // 缓存命中率与圆环用同一套悬停提示：读数只有这一份，提示里补上真实 token 分子分母。
   const { tooltipHandlers: cacheHandlers, tooltipNode: cacheTooltipNode } = usePathTooltip(
     () => cacheTip, "assist-cache-hit-tooltip");
-  // 标题旁的小信息图标：口径说明只留这一句，悬停/聚焦即浮出，不占浮层正文。
-  const { tooltipHandlers: infoHandlers, tooltipNode: infoTooltipNode,
-    dismissTooltip: dismissInfoTooltip } = usePathTooltip(
-    () => (open ? "总用量取最近一次模型调用的真实读数，占比相对当前模型可用窗口；分项按请求文本估算，不是 Provider 的分词结果。" : null),
-    "context-meter-info-tooltip");
-  // 浮层关掉后信息图标的锚点已经不在文档里，已浮出的提示要一并收掉。
-  useEffect(() => {
-    if (!open) dismissInfoTooltip();
-  }, [open, dismissInfoTooltip]);
   return <div className="agent-chat-usage">
     {/* 缓存命中率（2026-11-01 UI-COMPOSER）：从「缓存命中 57%」收成「小图标 + 57%」。
         不用第二枚圆环：同一行已有一枚表示上下文占用的环，再来一枚小环容易被读成同一
@@ -4070,7 +4075,7 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
         onClick={() => {
           // Reopening also reconciles a save that completed after the popover was closed.
           if (!open) onReload();
-          setOpen((wasOpen) => !wasOpen); dismissTooltip(); dismissInfoTooltip();
+          setOpen((wasOpen) => !wasOpen); dismissTooltip();
         }}
         {...tooltipHandlers}>
         <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
@@ -4087,26 +4092,16 @@ function ContextMeter({ usage, loading, error, sessionId, sessionRevision, clien
       {open && createPortal(<div className="agent-chat-context-meter-menu" id={panelId} ref={panelRef}
         tabIndex={-1} data-testid="assist-context-meter-panel" role="dialog" aria-label="上下文用量详情"
         data-state={meterState} data-over={over ? "true" : undefined}>
-        {/* 标题行：左边是浮层身份，右边只有「这份读数属于哪一次」与一个信息图标。
-            口径说明不摊在正文里，悬停/聚焦图标才浮出。 */}
+        {/* 标题行只做身份与必要异常状态；时间戳、来源与信息图标不再占默认正文。 */}
         <div className="agent-chat-context-meter-header">
           <p className="agent-chat-context-meter-heading">上下文用量</p>
-          {lastCall !== null && <>
-            <span className="agent-chat-context-meter-source">最近一次记录</span>
-            <button type="button" className="agent-chat-context-meter-info"
-              data-testid="assist-context-meter-info" aria-label="上下文用量统计说明"
-              {...infoHandlers}>
-              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <circle className="agent-chat-context-meter-info-ring" cx="8" cy="8" r="6.25" />
-                <path className="agent-chat-context-meter-info-mark" d="M8 7.1v3.4" />
-                <circle className="agent-chat-context-meter-info-dot" cx="8" cy="4.9" r="0.85" />
-              </svg>
-            </button>
-            {infoTooltipNode}
-          </>}
+          {status !== null && status.key !== "NORMAL" && status.key !== "DISABLED" &&
+            <span className="agent-chat-context-meter-state" data-tone={status.tone}
+              data-state={status.key} data-testid="context-usage-status">
+              <span data-testid="context-usage-status-label">{status.label}</span>
+            </span>}
         </div>
-        <ContextUsagePanel client={client} sessionId={sessionId}
-          sessionRevision={sessionRevision} usage={usage} loading={loading}
+        <ContextUsagePanel usage={usage} loading={loading}
           error={error} onReload={onReload} />
       </div>, document.body)}
       {tooltipNode}
@@ -4573,6 +4568,9 @@ export function AssistMessageRow({ client, target, message, activity, activityRe
     {/* 2026-11-01 AGENT_STREAM_VISIBILITY：原先这里独占一块的三点等待已收进 meta 行
         之后的阶段行（AssistStageLine）：同一组动效 + 一句服务端事实驱动的阶段文案。
         草稿出现后，唯一保留的是草稿末尾的 inline 三点。 */}
+    {/* 2026-11-15：记忆捕获状态与 Skill 执行轨迹只读服务端账本；没有事实时整块不渲染。
+        它与「Skill 来源与定义」不同：后者说明选择了什么，这里说明真的执行到了哪一步。 */}
+    {!withdrawn && <MessageExecutionTraces message={message} />}
     {/* 2026-10-20 用户指认：消息级的记忆 UI（「保存为长期记忆」「记忆来源」）与
         输入卡上方的「会话记忆」条都是聊天里的噪音，已全部移除（工作台 §40）。
         记忆本身仍由服务端自动捕获与召回；查看与撤销在资料页与设置页。 */}
@@ -5702,6 +5700,31 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
     const timer = window.setInterval(() => { void refresh(); }, 1500);
     return () => window.clearInterval(timer);
   }, [messages, client, session.id]);
+  /*
+   * 2026-11-15：消息自己的生成已经结束，但长期记忆捕获任务仍可能在后台跑。
+   * 只有真实存在 PENDING/RUNNING 捕获时才开启 6 秒轮询；全部终态立即停止，页面隐藏不请求，
+   * 卸载清计时器。状态永远读服务端，不在前端按时间猜“应该保存好了”。
+   */
+  const capturePending = messages?.some((item) => item.role === "ASSISTANT" &&
+    item.memoryCapture != null &&
+    (item.memoryCapture.status === "PENDING" || item.memoryCapture.status === "RUNNING")) ?? false;
+  useEffect(() => {
+    if (!capturePending) return;
+    let timer: number | null = null;
+    let disposed = false;
+    const tick = (): void => {
+      if (disposed) return;
+      if (!document.hidden) void refresh();
+      timer = window.setTimeout(tick, 6000);
+    };
+    const onVisibility = (): void => {
+      if (!document.hidden) void refresh();
+    };
+    timer = window.setTimeout(tick, 6000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { disposed = true; if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility); };
+  }, [capturePending, client, session.id]);
 
   const previewIds = messages?.filter(canPreview).map((item) => item.id).join("|") ?? "";
   useEffect(() => {
@@ -5929,6 +5952,8 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
         if (disposed.current) return;
         setDraft("");
         // 202 只表示受理：完成与否以服务端读回的整理记录为准，不在文案里宣称已整理。
+        // 浮层若开着，用这次重读把「正在压缩」的状态尽快对上（仍是本地投影读，不发模型请求）。
+        setContextUsageRevision((revision) => revision + 1);
         setNotice(`已受理整理请求（${accepted.status}）。完成状态以服务端整理记录为准。`);
       } else if (action.kind === "send") {
         followLatest.current = true; setAtLatest(true);
@@ -6983,12 +7008,14 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
 
   /* 0145：上下文读数不再从消息行推导。消息行上的用量是**整轮聚合**（多轮工具调用相加），
      拿它当「这次调用的上下文」会把三轮输入加在一起；真正的口径是一次调用的记录，
-     由 `getSessionContextUsage` 给出。这里只在「这一轮已经结算」时重新读一次，
-     让刚结束的调用立刻反映到圆环上。 */
+     由 `getSessionContextUsage` 给出。这里只在「最后一条消息变化或其状态流转」时重新读
+     一次，让刚发出的消息与刚结束的调用立刻反映到圆环与浮层上。
+     2026-11-15 浮层重排：key 从「最后一条 ASSISTANT」放宽到「最后一条消息（任意角色）」
+     ——用户消息落库就会改变会话级读数（基线 + 增量），不能等到助手消息出现才刷新。 */
   const usageRefreshKey = (() => {
-    const lastAssistant = [...(messages ?? [])].reverse().find((message) =>
-      message.role === "ASSISTANT") ?? null;
-    return lastAssistant === null ? "" : `${lastAssistant.id}:${lastAssistant.status}`;
+    const lastMessage = messages !== null && messages.length > 0
+      ? messages[messages.length - 1] : null;
+    return lastMessage === null ? "" : `${lastMessage.id}:${lastMessage.status ?? ""}`;
   })();
   useEffect(() => {
     if (usageRefreshKey === "") return;
@@ -7661,7 +7688,6 @@ function AssistSessionPanel({ client, session, target, sources, writeBlockedReas
               2026-11-01 用户指令「会话欢迎页就不需要上下文圆圈」只针对**首条输入器**
               （还没有会话、没有真实用量可读的欢迎页）；已建会话的空态仍保留圆环与档位入口。 */}
           <ContextMeter usage={contextUsage} loading={contextUsageLoading} error={contextUsageError}
-            sessionId={session.id} sessionRevision={session.revision} client={client}
             onReload={() => setContextUsageRevision((revision) => revision + 1)} />
           <ModelSelector client={client} open={modelPickerOpen} onOpenChange={setModelPickerOpen}
             sessionId={session.id}

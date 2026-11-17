@@ -27,6 +27,7 @@ import { planExecutionAdmission, executionConcurrencyGateEnabled }
   from '../application/execution-concurrency.js';
 import { runWebImportTick } from '../application/web-import-runner.js';
 import { runMemoryConsolidationTick } from '../application/memory-consolidation.js';
+import { runMemoryCaptureTick } from '../application/memory-auto-capture.js';
 import { runOneCommand } from './run-command.js';
 import { startBackgroundModelCatalogSync } from '../application/model-catalog-background-sync.js';
 
@@ -302,7 +303,17 @@ async function main(): Promise<void> {
             if (memoryMaintenance !== null) {
               process.stdout.write(`${JSON.stringify({ type: 'worker_memory_consolidation',
                 workspace_id: memoryMaintenance.workspaceId,
-                ...memoryMaintenance.stats })}\n`);
+                ...memoryMaintenance.stats }) }\n`);
+            }
+          }
+          // 0167：捕获任务恢复。结算后的 immediate 提取失败、超时或进程退出时，任务行仍在；
+          // 这里回收过期租约、补登记漏掉的轮次，并有界执行一条到期任务。
+          if (process.env.RELAY_MEMORY_CAPTURE_RETRY !== 'false') {
+            const captureTick = await runMemoryCaptureTick(database.executor, {
+              workerId, modelPort: assistModelPort, signal: controller.signal });
+            if (captureTick.recovered > 0 || captureTick.enqueued > 0 ||
+                captureTick.processed > 0 || captureTick.failed > 0) {
+              process.stdout.write(`${JSON.stringify({ type: 'worker_memory_capture', ...captureTick })}\n`);
             }
           }
           // 2026-10-20：已就绪的会话执行候选由服务端推进，不再等前端页面来喊这一声。

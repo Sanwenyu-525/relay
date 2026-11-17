@@ -8,7 +8,6 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const projectId = "77777777-7777-4777-8777-777777777777";
 const base = `${baseUrl}/api/v1/workspaces/${workspaceId}`;
 const knowledgeId = "22222222-2222-4222-8222-222222222222";
-const memoryId = "33333333-3333-4333-8333-333333333333";
 const decisionId = "44444444-4444-4444-8444-444444444444";
 const replacementId = "55555555-5555-4555-8555-555555555555";
 let unmount: (() => void) | null = null;
@@ -27,11 +26,17 @@ function knowledge() {
     current_version: "1", created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z" };
 }
 
-function memory() {
-  return { id: memoryId, project_id: null, title: "约定", status: "ACTIVE", revision: "0",
-    current_version: "1", text: "需要留存的事实", confirmed_by: "local-user",
-    confirmed_at: "2026-09-23T00:00:00.000Z", expires_at: null,
-    created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z" };
+function pageOf(rows: readonly Record<string, unknown>[]) {
+  return { items: rows.map((row) => ({ id: row.id, title: row.title,
+    project_id: row.project_id ?? null, status: row.status, revision: row.revision,
+    current_version: row.current_version, summary: null, source_kind: "NOTE",
+    media_type: "text/plain", availability: "AVAILABLE", source_uri: null, tags: [],
+    collections: [], matched_fields: [], snippet: null,
+    created_at: row.created_at, updated_at: row.updated_at })), next_cursor: null };
+}
+
+function libraryPage(url: string): string | null {
+  return url.startsWith(`${base}/knowledge/page`) ? url : null;
 }
 
 function project(archivedAt: string | null = null) {
@@ -44,11 +49,6 @@ function decision(id: string, superseded = false) {
     choice: "采用方案", rationale: "已核对", alternatives: ["另一方案"], costs: ["维护成本"],
     superseded_by_id: superseded ? replacementId : null,
     created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z" };
-}
-
-function searchItem(title: string) {
-  return { type: "KNOWLEDGE", id: knowledgeId, version: "1", title, snippet: title,
-    matched_fields: ["title"], source_ref: `knowledge:${knowledgeId}:v1`, status: "ACTIVE", project_id: null };
 }
 
 function rule(id: string, overrides: Record<string, unknown> = {}) {
@@ -72,32 +72,32 @@ afterEach(() => {
 describe("P10 information workbench", () => {
   it("右栏对空范围按资料类型说明没有对象，且读取失败不会成为成功空态", async () => {
     activate();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === `${base}/knowledge` || url === `${base}/memories`) return response(200, []);
+      if (libraryPage(url) !== null) return response(200, pageOf([]));
+      if (url === `${base}/knowledge` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([]) : []);
       throw new Error(`unexpected ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    }));
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount; await flush();
     const emptyKnowledge = mounted.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
     expect(emptyKnowledge.text()).toContain("当前范围没有资料");
     expect(emptyKnowledge.text()).not.toContain("选择一项资料");
-    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click"); await flush();
-    const emptyMemory = mounted.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
-    expect(emptyMemory.text()).toContain("当前范围没有记忆");
-    expect(emptyMemory.text()).not.toContain("选择一项记忆");
+    // Memory 已独立：知识页的分类导航不再提供 MEMORY 入口，也没有伪装成资料类型的记忆列表。
+    expect(mounted.wrapper.find('[data-testid="knowledge-tab-MEMORY"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll(".knowledge-tabs [role=tab]")).toHaveLength(3);
 
     mounted.unmount(); unmount = null;
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === `${base}/knowledge`) return response(403, { code: "FORBIDDEN", detail: "资料不可读取" });
-      throw new Error(`unexpected ${String(input)}`);
+      const url = String(input);
+      if (libraryPage(url) !== null) return response(403, { code: "FORBIDDEN", detail: "资料不可读取" });
+      throw new Error(`unexpected ${url}`);
     }));
     const failed = await mountWorkbench("/knowledge"); unmount = failed.unmount; await flush();
-    expect(failed.wrapper.get('[data-testid="knowledge-read-error"]').text()).toContain("资料不可读取");
+    expect(failed.wrapper.get('[data-testid="knowledge-page-error"]').text()).toContain("已无权读取");
     const failedDetail = failed.wrapper.get('[data-testid="knowledge-detail-empty-state"]');
     expect(failedDetail.text()).toContain("读取失败");
-    expect(failedDetail.text()).not.toContain("当前范围没有资料");
+    expect(failedDetail.text()).not.toContain("当前范围还没有知识");
   });
 
   it("资料右栏在读取中显示进度，非空列表选择后仍显示真实详情", async () => {
@@ -105,21 +105,24 @@ describe("P10 information workbench", () => {
     let release: ((value: Response) => void) | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return new Promise<Response>((resolve) => { release = resolve; });
+      if (libraryPage(url) !== null) return new Promise<Response>((resolve) => { release = resolve; });
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
       throw new Error(`unexpected ${url}`);
     }));
     const loading = await mountWorkbench("/knowledge"); unmount = loading.unmount;
     expect(loading.wrapper.get('[data-testid="knowledge-detail-empty-state"]').text()).toContain("正在读取");
-    release!(response(200, [knowledge()])); await flush();
+    release!(response(200, pageOf([knowledge()]))); await flush();
     expect(loading.wrapper.get(".knowledge-detail").text()).toContain("设计资料");
     expect(loading.wrapper.find('[data-testid="knowledge-detail-empty-state"]').exists()).toBe(false);
   });
 
   it("资料类型页签关联同页正文，方向键首尾循环且忽略输入法合成", async () => {
     activate();
-    const fetchMock = vi.fn(async (_input: string, _init?: RequestInit) => response(200, [])); vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.fn(async (input: string, _init?: RequestInit) => {
+      const url = String(input);
+      return libraryPage(url) !== null ? response(200, pageOf([])) : response(200, []);
+    }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     const tabs = mounted.wrapper.get(".knowledge-tabs");
     expect(tabs.attributes("role")).toBe("tablist");
@@ -133,7 +136,7 @@ describe("P10 information workbench", () => {
       await press("ArrowRight", properties);
       expect(current().attributes("data-testid")).toBe("knowledge-tab-KNOWLEDGE");
     }
-    for (const [key, expected] of [["ArrowLeft", "RULE"], ["ArrowRight", "KNOWLEDGE"], ["End", "RULE"], ["Home", "KNOWLEDGE"], ["ArrowRight", "MEMORY"]]) {
+    for (const [key, expected] of [["ArrowLeft", "RULE"], ["ArrowRight", "KNOWLEDGE"], ["End", "RULE"], ["Home", "KNOWLEDGE"], ["ArrowRight", "DECISION"]]) {
       await press(key!);
       const selected = current();
       expect(selected.attributes("data-testid")).toBe(`knowledge-tab-${expected}`);
@@ -150,56 +153,58 @@ describe("P10 information workbench", () => {
 
   it("从资料阅读切换类型后保留选中页签焦点，迟到列表不覆盖新类型", async () => {
     activate();
-    let releaseMemory: ((value: Response) => void) | null = null;
+    let releaseDecision: ((value: Response) => void) | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
-      if (input === `${base}/knowledge`) return response(200, [knowledge()]);
-      if (input === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
-      if (input === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
-      if (input === `${base}/memories`) return new Promise<Response>((resolve) => { releaseMemory = resolve; });
-      if (input === `${base}/decisions`) return response(200, []);
-      throw new Error(`unexpected request ${input}`);
+      const url = String(input);
+      if (libraryPage(url) !== null) return response(200, pageOf([knowledge()]));
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
+      if (url === `${base}/decisions`) return new Promise<Response>((resolve) => { releaseDecision = resolve; });
+      if (url === `${base}/rules`) return response(200, []);
+      if (libraryPage(url) !== null) return response(200, pageOf([]));
+      throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await act(async () => {
-      (mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open = true;
       const first = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]').element as HTMLButtonElement;
       first.focus(); first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
     });
     await flush();
-    const memoryTab = mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]');
-    expect(memoryTab.attributes("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(memoryTab.element);
-    await act(async () => memoryTab.element?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
+    const decisionTab = mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]');
+    expect(decisionTab.attributes("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(decisionTab.element);
+    await act(async () => decisionTab.element?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
     await flush();
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
-    expect(releaseMemory).not.toBeNull();
-    releaseMemory!(response(200, [memory()])); await flush();
-    expect(mounted.wrapper.text()).not.toContain("需要留存的事实");
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-RULE"]').attributes("aria-selected")).toBe("true");
+    expect(releaseDecision).not.toBeNull();
+    releaseDecision!(response(200, [decision(decisionId)])); await flush();
+    expect(mounted.wrapper.text()).not.toContain("旧决定");
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-RULE"]').attributes("aria-selected")).toBe("true");
     await act(async () => (document.activeElement as HTMLButtonElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true })));
     await flush();
     const knowledgeTab = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]');
     expect(knowledgeTab.attributes("aria-selected")).toBe("true"); expect(document.activeElement).toBe(knowledgeTab.element);
-    expect((mounted.wrapper.get('[data-testid="knowledge-library"]').element as HTMLDetailsElement).open).toBe(true);
+    expect(mounted.wrapper.find('[data-testid="knowledge-library"]').exists()).toBe(true);
   });
 
   it("键盘切换资料类型仍先保护草稿，保留草稿后焦点回到原页签", async () => {
     activate();
-    const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (init?.method === "POST") throw new Error("切换类型不应提交资料");
-      return response(200, []);
+      const url = String(input);
+      return libraryPage(url) !== null ? response(200, pageOf([])) : response(200, []);
     }); vi.stubGlobal("fetch", fetchMock);
-    const mounted = await mountWorkbench("/knowledge?kind=MEMORY"); unmount = mounted.unmount;
+    const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("未保存的事实");
-    const current = mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').element as HTMLButtonElement;
+    await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("未保存的事实");
+    const current = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]').element as HTMLButtonElement;
     await act(async () => { current.focus(); current.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); });
     const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
     expect(dialog.text()).toContain("保留未保存的资料");
     expect(current.getAttribute("aria-selected")).toBe("true");
     await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
     expect(document.activeElement).toBe(current);
-    expect((mounted.wrapper.get('[data-testid="memory-text"]').element as HTMLTextAreaElement).value).toBe("未保存的事实");
+    expect((mounted.wrapper.get('[data-testid="knowledge-text"]').element as HTMLTextAreaElement).value).toBe("未保存的事实");
     await act(async () => current.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
     await new DomWrapper(document.querySelector('[data-testid="knowledge-discard-and-switch"]')).trigger("click"); await flush();
     const next = mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]');
@@ -210,16 +215,17 @@ describe("P10 information workbench", () => {
 
   it("切换资料类型和路由前保护未保存正文，明确丢弃后才能切换", async () => {
     activate();
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") throw new Error("切换类型不应提交资料");
-      return response(200, []);
+      const url = String(input);
+      return libraryPage(url) !== null ? response(200, pageOf([])) : response(200, []);
     }); vi.stubGlobal("fetch", fetchMock);
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
     await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("尚未保存的资料");
     await mounted.wrapper.get('[data-testid="knowledge-text"]').setValue("需要保留的正文");
     const draft = mounted.wrapper.get('[data-testid="knowledge-text"]').element;
-    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').trigger("click");
     const dialog = new DomWrapper(document.querySelector('[role="dialog"]'));
     expect(dialog.text()).toContain("保留未保存的资料");
     await dialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
@@ -229,9 +235,9 @@ describe("P10 information workbench", () => {
     expect(mounted.router.currentRoute.value.path).toBe("/knowledge");
     const routeDialog = new DomWrapper(document.querySelector('[role="dialog"]'));
     await routeDialog.findAll("button").find((button) => button.text() === "保留并继续编辑")!.trigger("click");
-    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click");
+    await mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').trigger("click");
     await new DomWrapper(document.querySelector('[data-testid="knowledge-discard-and-switch"]')).trigger("click"); await flush();
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("aria-selected")).toBe("true");
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("aria-selected")).toBe("true");
     expect(mounted.wrapper.find('[data-testid="knowledge-form"]').exists()).toBe(false);
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });
@@ -247,12 +253,14 @@ describe("P10 information workbench", () => {
     let resolveFirst: ((value: Response) => void) | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, []);
-      if (url.includes("/search?")) {
+      if (libraryPage(url) !== null) {
         const q = new URL(url).searchParams.get("q");
         if (q === "知") return new Promise<Response>((resolve) => { resolveFirst = resolve; });
-        if (q === "知识") return response(200, { items: [searchItem("知识新结果")], next_cursor: null });
+        if (q === "知识") return response(200, pageOf([{ ...knowledge(), title: "知识新结果" }]));
+        return response(200, pageOf([]));
       }
+      if (url === `${base}/knowledge/${knowledgeId}`) return response(200, { ...knowledge(), title: "知识新结果" });
+      if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
       throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench("/knowledge");
@@ -264,42 +272,30 @@ describe("P10 information workbench", () => {
     await flush(300);
     expect(mounted.wrapper.text()).toContain("知识新结果");
     expect(resolveFirst).not.toBeNull();
-    resolveFirst!(response(200, { items: [searchItem("过期结果")], next_cursor: null }));
+    resolveFirst!(response(200, pageOf([{ ...knowledge(), title: "过期结果" }])));
     await flush(30);
     expect(mounted.wrapper.text()).not.toContain("过期结果");
   });
 
-  it("Memory 必须明确确认才能提交，提交体绑定 confirmed:true", async () => {
+  it("Memory 已独立：知识页不再提供记忆入口，Memory 页面独立承载", async () => {
     activate();
-    let saved = false;
-    let posted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      if (libraryPage(url) !== null) return response(200, pageOf([]));
       if (url === `${base}/projects/${projectId}`) return response(200, project());
-      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
-      if (url === `${base}/memories?project_id=${projectId}` && init?.method !== "POST") return response(200, saved ? [{ ...memory(), project_id: projectId }] : []);
-      if (url === `${base}/memories` && init?.method === "POST") {
-        posted = JSON.parse(String(init.body)) as Record<string, unknown>;
-        saved = true;
-        return response(201, envelope(String(posted.command_id), { memory_id: memoryId, revision: "0", version: "1", status: "ACTIVE" }));
-      }
-      if (url === `${base}/memories/${memoryId}`) return response(200, { ...memory(), project_id: projectId });
-      if (url === `${base}/memories/${memoryId}/revisions`) return response(200, []);
+      if (url === `${base}/memories` && init?.method !== "POST") return response(200, []);
+      if (url === `${base}/memories/stats`) return response(200, { total: 0, active: 0, needsReview: 0,
+        stale: 0, pinned: 0 });
       throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench(`/projects/${projectId}/knowledge`);
     unmount = mounted.unmount;
-    await mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').trigger("click");
     await flush();
-    await mounted.wrapper.get('[data-testid="knowledge-create"]').trigger("click");
-    await mounted.wrapper.get('[data-testid="knowledge-title"]').setValue("约定");
-    await mounted.wrapper.get('[data-testid="memory-text"]').setValue("需要留存的事实");
-    expect(mounted.wrapper.get('[data-testid="knowledge-save"]').attributes("disabled")).toBeDefined();
-    await mounted.wrapper.get('[data-testid="memory-confirmed"]').setValue(true);
-    await mounted.wrapper.get('[data-testid="knowledge-save"]').trigger("submit");
-    await flush(60);
-    expect(posted).toMatchObject({ project_id: projectId, title: "约定", text: "需要留存的事实", confirmed: true });
-    expect(mounted.wrapper.text()).toContain("明确确认：local-user");
+    expect(mounted.wrapper.find('[data-testid="knowledge-tab-MEMORY"]').exists()).toBe(false);
+    expect(mounted.wrapper.findAll(".knowledge-tabs [role=tab]")).toHaveLength(3);
+    await mounted.router.push("/memory"); await flush();
+    expect(mounted.wrapper.text()).toContain("用户偏好、项目事实、已验证经验与历史事件");
+    expect(mounted.wrapper.findAll("button").some((item) => item.text().includes("新建记忆"))).toBe(true);
   });
 
   it("归档项目资料可读但新建、追加和归档命令不可发；Workspace 规则仍独立可写", async () => {
@@ -309,7 +305,7 @@ describe("P10 information workbench", () => {
       const url = String(input);
       if (init?.method === "POST") { posts++; throw new Error("archived project write sent"); }
       if (url === `${base}/projects/${projectId}`) return response(200, project("2026-09-26T00:00:00.000Z"));
-      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, [{ ...knowledge(), project_id: projectId }]);
+      if (url === `${base}/knowledge?project_id=${projectId}` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([{ ...knowledge(), project_id: projectId }]) : [{ ...knowledge(), project_id: projectId }]);
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, { ...knowledge(), project_id: projectId });
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
       if (url === `${base}/rules?project_id=${projectId}`) return response(200, []);
@@ -337,7 +333,7 @@ describe("P10 information workbench", () => {
     let committed = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/knowledge` && init?.method !== "POST") return response(200, committed ? [knowledge()] : []);
+      if ((url === `${base}/knowledge` || libraryPage(url) !== null) && init?.method !== "POST") return response(200, libraryPage(url) !== null ? pageOf(committed ? [knowledge()] : []) : (committed ? [knowledge()] : []));
       if (url === `${base}/knowledge` && init?.method === "POST") {
         postCount += 1;
         commandId = String((JSON.parse(String(init.body)) as Record<string, unknown>).command_id);
@@ -362,12 +358,12 @@ describe("P10 information workbench", () => {
     await flush();
     expect(mounted.wrapper.get('[data-testid="knowledge-pending-receipt"]').text()).toContain(commandId);
     const originalTab = mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]');
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').attributes("disabled")).toBeDefined();
+    expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').attributes("disabled")).toBeDefined();
     await act(async () => originalTab.element?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })));
     expect(originalTab.attributes("aria-selected")).toBe("true");
     expect(postCount).toBe(1);
     await mounted.wrapper.get('[data-testid="knowledge-check-receipt"]').trigger("click");
-    await flush(60);
+    await flush(300);
     expect(postCount).toBe(1);
     expect(receiptCount).toBe(1);
     expect(mounted.wrapper.text()).toContain("设计资料");
@@ -379,7 +375,7 @@ describe("P10 information workbench", () => {
     let revision = "0";
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [{ ...knowledge(), revision }]);
+      if (url === `${base}/knowledge` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([{ ...knowledge(), revision }]) : [{ ...knowledge(), revision }]);
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, { ...knowledge(), revision });
       if (url === `${base}/knowledge/${knowledgeId}/versions` && init?.method === "POST") {
         posted = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -413,7 +409,7 @@ describe("P10 information workbench", () => {
     let posted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, []);
+      if (url === `${base}/knowledge` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([]) : []);
       if (url === `${base}/decisions`) return response(200, [decision(decisionId, superseded), decision(replacementId)]);
       if (url === `${base}/decisions/${decisionId}`) return response(200, decision(decisionId, superseded));
       if (url === `${base}/decisions/${decisionId}/supersessions` && init?.method === "POST") {
@@ -441,7 +437,8 @@ describe("P10 information workbench", () => {
     let posted: Record<string, unknown> | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${base}/knowledge` || url === `${base}/rules` && init?.method !== "POST") return response(200, []);
+      if (libraryPage(url) !== null) return response(200, pageOf([]));
+      if (url === `${base}/knowledge` || (url === `${base}/rules` && init?.method !== "POST")) return response(200, []);
       if (url === `${base}/rules` && init?.method === "POST") {
         posted = JSON.parse(String(init.body)) as Record<string, unknown>;
         return response(409, { code: "RULE_ENFORCEMENT_UNAVAILABLE", detail: "checker unavailable" });
@@ -471,6 +468,10 @@ describe("P10 information workbench", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
       if (url === `${base}/projects/${projectId}`) return response(200, project());
+      if (libraryPage(url) !== null) return response(200, pageOf([
+        { ...knowledge(), revision: "0", current_version: "5", project_id: projectId },
+        { ...knowledge(), id: spaceId, title: "空间资料", revision: "0", current_version: "2", project_id: null },
+      ]));
       if (url === `${base}/knowledge`) return response(200, [
         { ...knowledge(), revision: "0", current_version: "5", project_id: projectId },
         { ...knowledge(), id: spaceId, title: "空间资料", revision: "0", current_version: "2", project_id: null }
@@ -483,12 +484,12 @@ describe("P10 information workbench", () => {
     unmount = mounted.unmount;
     await flush();
     const rows = mounted.wrapper.findAll(".knowledge-row");
-    expect(rows[0]!.text()).toContain("当前 v5");
+    expect(rows[0]!.text()).toContain("v5");
     expect(rows[0]!.text()).not.toContain("v0");
-    expect(rows[0]!.text()).toContain("项目");
-    expect(rows[1]!.text()).toContain("当前 v2");
-    expect(rows[1]!.text()).toContain("工作空间");
-    expect(mounted.wrapper.get('[data-testid="knowledge-detail-scope"]').text()).toContain(`项目 ${projectId}`);
+    expect(rows[0]!.text()).toContain("当前项目");
+    expect(rows[1]!.text()).toContain("v2");
+    expect(rows[1]!.text()).toContain("工作空间共享");
+    expect(mounted.wrapper.get('[data-testid="knowledge-detail-scope"]').text()).toContain("当前项目");
   });
 
   it("规则与搜索结果用中文呈现枚举，原枚举降级保留，目标约束不直出 JSON", async () => {
@@ -540,47 +541,47 @@ describe("P10 information workbench", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, []);
+      if (url === `${base}/knowledge` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([]) : []);
       throw new Error(`unexpected request ${url}`);
     }));
     const workspace = await mountWorkbench("/knowledge"); unmount = workspace.unmount; await flush();
     // 首装语义：工作空间还没有任何资料，引导新建。
     const wsEmpty = workspace.wrapper.get('[data-testid="knowledge-list-empty"]');
-    expect(wsEmpty.text()).toContain("还没有资料");
-    expect(wsEmpty.text()).toContain("新建");
+    expect(wsEmpty.text()).toContain("当前工作空间还没有知识");
+    expect(wsEmpty.text()).toContain("新建笔记");
     workspace.unmount(); unmount = null;
 
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
       if (url === `${base}/projects/${projectId}`) return response(200, project());
-      if (url === `${base}/knowledge?project_id=${projectId}`) return response(200, []);
+      if (url === `${base}/knowledge?project_id=${projectId}` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([]) : []);
       throw new Error(`unexpected request ${url}`);
     }));
     const projectView = await mountWorkbench(`/projects/${projectId}/knowledge`); unmount = projectView.unmount; await flush();
     // 范围为空语义：说清项目范围只显示项目内容，不与首装混同。
     const projEmpty = projectView.wrapper.get('[data-testid="knowledge-list-empty"]');
-    expect(projEmpty.text()).toContain("当前项目还没有资料");
-    expect(projEmpty.text()).toContain("工作空间范围");
+    expect(projEmpty.text()).toContain("项目知识库包含");
+    expect(projEmpty.text()).toContain("工作空间共享知识");
     projectView.unmount(); unmount = null;
 
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, [knowledge()]);
+      if (libraryPage(url) !== null && new URL(url).searchParams.get("q") === "不存在的词") return response(200, pageOf([]));
+      if (url === `${base}/knowledge` || libraryPage(url) !== null) return response(200, libraryPage(url) !== null ? pageOf([knowledge()]) : [knowledge()]);
       if (url === `${base}/knowledge/${knowledgeId}`) return response(200, knowledge());
       if (url === `${base}/knowledge/${knowledgeId}/versions`) return response(200, []);
-      if (url.includes("/search?")) return response(200, { items: [], next_cursor: null });
       throw new Error(`unexpected request ${url}`);
     }));
     const searchView = await mountWorkbench("/knowledge"); unmount = searchView.unmount; await flush();
     await searchView.wrapper.get('[data-testid="knowledge-search"]').setValue("不存在的词");
     await flush(300);
     // 搜索无匹配语义：提示换关键词，不暗示全空。
-    const searchEmpty = searchView.wrapper.get('[data-testid="knowledge-search-empty"]');
+    const searchEmpty = searchView.wrapper.get('[data-testid="knowledge-list-empty"]');
     expect(searchEmpty.text()).toContain("不存在的词");
     expect(searchEmpty.text()).toContain("关键词");
-    expect(searchEmpty.text()).not.toContain("还没有资料");
+    expect(searchEmpty.text()).not.toContain("当前工作空间还没有知识");
   });
 
   it("规则表单选项统一为「中文 · 原枚举」风格", async () => {
@@ -588,6 +589,7 @@ describe("P10 information workbench", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
       if (url === `${base}/rules`) return response(200, []);
+      if (libraryPage(url) !== null) return response(200, pageOf([]));
       throw new Error(`unexpected request ${url}`);
     }));
     const mounted = await mountWorkbench("/knowledge?kind=RULE"); unmount = mounted.unmount;

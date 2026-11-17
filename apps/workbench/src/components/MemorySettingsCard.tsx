@@ -181,6 +181,14 @@ export default function MemorySettingsCard({ client }: { readonly client: RelayA
   return <section className="surface-panel settings-card" data-testid="memory-settings">
     <h2>上下文压缩与记忆</h2>
     <p className="helper-text">按工作空间生效，只影响后续对话。模型上下文窗口由系统自动识别，不在这里配置。</p>
+    {settings?.capabilities !== undefined && <p className="helper-text" data-testid="memory-settings-capabilities">
+      检索：字面/全文{settings.capabilities.retrieval.literal.implemented ? "已实现" : "未实现"}；
+      混合检索{settings.capabilities.retrieval.hybrid.implemented ? "已实现" : "未实现（不展示为可用）"}；
+      Embedding {settings.capabilities.embedding.implemented ? "已实现" : "未实现"}。
+      自动捕获：持久任务{settings.capabilities.capture.persistentTasks ? "已启用" : "未启用"}，
+      重试退避{settings.capabilities.capture.retryWithBackoff ? "已启用" : "未启用"}，
+      压缩前屏障{settings.capabilities.capture.preCompactionBarrier ? "已启用" : "未启用"}。
+    </p>}
 
     {loading && settings === null && <p role="status" data-testid="memory-settings-loading">正在读取记忆设置…</p>}
     {error !== null && <div className="action-error" role="alert" data-testid="memory-settings-error">

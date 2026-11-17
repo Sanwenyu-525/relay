@@ -28,7 +28,9 @@
   display: flex;
   align-items: stretch;
   gap: var(--relay-space-1);
-  padding-inline: var(--relay-space-1);
+  /* 2026-11-15 工作区精修：页签条左右各留 space.2，首枚页签与面板左缘不贴边，与
+     下方内容区 space.3 的内边距形成同向对齐起点；末枚关闭键与右缘同理。 */
+  padding-inline: var(--relay-space-2);
   border-bottom: var(--relay-border-width) solid var(--relay-color-border-separator);
 }
 /* 页签条不参与收缩竞争：每一项 flex: 0 0 auto，末位才允许横向滚动。

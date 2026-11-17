@@ -146,6 +146,11 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
   reason: 'MANUAL' | 'AUTO', env: NodeJS.ProcessEnv, forceRebuild = false,
   modelSnapshot?: JsonObject | null, projectedInputBytes = 0,
   modelConnectionId: string | null = null, modelHint: string | null = null): Promise<string | null> {
+  /*
+   * 0167：压缩前同步屏障——即将被 Checkpoint 覆盖的消息还有未落定的长期记忆捕获任务时，
+   * 不建立压缩请求。精确到覆盖范围而不是整个会话：较新消息的 PENDING 任务不应阻塞旧段。
+   * 手动压缩给出明确原因；自动压缩静默跳过，下一轮再判定。
+   */
   const existing = await r.assistMemory.activeRequest(session.id);
   if (existing !== undefined) return existing.id;
   const settings = await r.information.readMemorySettings(session.workspace_id);
@@ -215,11 +220,66 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
     }
     return null;
   }
-  // A failed automatic request is retried only after history advances or explicit manual action.
+  // A failed automatic request is retried only after history advances or explicit manual action,
+  // except a request deliberately deferred by the capture barrier: once the covered tasks settle,
+  // the same boundary may be retried without requiring a new user message.
   const latest = (await r.assistMemory.requests(session.id))[0];
   if (reason === 'AUTO' && latest?.reason === 'AUTO' && latest.through_seq >= anchor.seq &&
-      latest.status !== 'COMPLETED') return null;
+      latest.status !== 'COMPLETED' &&
+      latest.error_code !== 'MEMORY_CAPTURE_PENDING') return null;
   const covered = history.filter((m) => m.seq <= anchor.seq);
+  const authority = await r.workspaces.readAuthority(session.workspace_id);
+  if (authority === undefined) throw resourceNotFound('Workspace authority');
+  const id = randomUUID();
+  const requestSnapshot: JsonObject = { ...snapshot,
+    // 0158：压缩请求记住它冻结在哪条连接上；执行端据此解析，不重新读「当前默认」。
+    ...(connectionId === null ? {} : { model_connection_id: connectionId }),
+    memory_compaction: { after_seq: after.toString(),
+      base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null,
+      // 0162 / 0165：这次请求为什么发生，以及判定当时的读数。`reason` 只区分 MANUAL/AUTO
+      // （0119 的 CHECK），溢出保护也走 AUTO，所以触发方式单独记一份；它是派生元数据，
+      // 不是新的事实源，旧行没有这些键时由 `readCompactionAudit` 按 reason 推回。
+      trigger, tokens_before: contextTokens,
+      threshold_tokens: policy.effectiveThresholdTokens,
+      configured_threshold_tokens: policy.requestedThresholdTokens,
+      effective_threshold_tokens: policy.effectiveThresholdTokens,
+      window_tokens: policy.modelWindowTokens,
+      model_context_window_tokens: policy.modelWindowTokens,
+      provider_call_cap_tokens: policy.providerCallCapTokens,
+      window_source: policy.windowSource,
+      fallback_applied: policy.fallbackApplied,
+      // 执行端在压缩完成后要复核「压完到底够不够」，因此把判定当时的两个边界一起冻结：
+      // 安全输入上限（硬上限）与压缩后目标。它们只是这次请求的判定依据，不是新的事实源。
+      safe_input_tokens: policy.safeInputTokens,
+      post_compaction_target_tokens: policy.postCompactionTargetTokens,
+      // 模型名只作可读元数据：执行端日志要说明「哪次压缩、用哪个模型」，避免只能记 null。
+      model } };
+  const pendingCaptures = await r.information.countUnsettledCaptureTasks(
+    session.id, covered.map((message) => message.id));
+  if (pendingCaptures > 0) {
+    if (reason === 'MANUAL') throw new AssistMemoryUnavailable('MEMORY_CAPTURE_PENDING');
+    /*
+     * 自动压缩的延迟必须是持久事实，不能只 return null：否则 Worker 不会再回来，
+     * 当前轮会直接按未压缩上下文回答，用户只能等下一次发言才重新触发。
+     *
+     * 这里落一条同身份的 AUTO 请求并收口为 FAILED + MEMORY_CAPTURE_PENDING；它不会被
+     * Worker 领取，也不改 Checkpoint。捕获任务全部终态后，捕获 tick 把它重新置为
+     * PENDING，压缩随后自动执行——不需要用户重发提示词，也不会重复建请求。
+     */
+    if (await r.assistMemory.deferredAutomaticRequest(session.id) !== undefined) return null;
+    await r.assistMemory.insertRequest({ id, workspaceId: session.workspace_id, sessionId: session.id,
+      sessionRevision: session.revision, memoryRevision: state?.revision ?? 0n,
+      authorityRevision: authority.revision, contextRevision: authority.context_revision,
+      settingsRevision: settings?.revision ?? 0n, throughSeq: anchor.seq, anchorMessageId: anchor.id,
+      sourceMessageIds: covered.map((m) => m.id), sourceSha256: memoryHistoryFingerprint(covered),
+      modelSnapshot: requestSnapshot, reason });
+    await r.assistMemory.deferAutomaticRequest(id);
+    getRuntimeLogger('context-compaction').info('context_compaction_deferred_memory_capture', {
+      session_id: session.id, pending_captures: pendingCaptures,
+      through_seq: anchor.seq.toString(), covered_messages: covered.length,
+      deferred_request_id: id });
+    return null;
+  }
   /*
    * 只有真的要建请求时才记「已发起」：判定命中但无候选轮次（或同一失败边界）会
    * 在上面返回 null，那两次都不该在日志里留下一次并不存在的压缩。
@@ -245,37 +305,12 @@ export async function prepareMemoryCompaction(r: Repositories, session: AssistSe
       effective_threshold_tokens: policy.effectiveThresholdTokens,
       window_tokens: policy.modelWindowTokens, target_window_tokens: policy.targetWindowTokens });
   }
-  const authority = await r.workspaces.readAuthority(session.workspace_id);
-  if (authority === undefined) throw resourceNotFound('Workspace authority');
-  const id = randomUUID();
   await r.assistMemory.insertRequest({ id, workspaceId: session.workspace_id, sessionId: session.id,
     sessionRevision: session.revision, memoryRevision: state?.revision ?? 0n,
     authorityRevision: authority.revision, contextRevision: authority.context_revision,
     settingsRevision: settings?.revision ?? 0n, throughSeq: anchor.seq, anchorMessageId: anchor.id,
     sourceMessageIds: covered.map((m) => m.id), sourceSha256: memoryHistoryFingerprint(covered),
-    modelSnapshot: { ...snapshot,
-      // 0158：压缩请求记住它冻结在哪条连接上；执行端据此解析，不重新读「当前默认」。
-      ...(connectionId === null ? {} : { model_connection_id: connectionId }),
-      memory_compaction: { after_seq: after.toString(),
-        base_checkpoint_id: forceRebuild ? null : checkpoint?.id ?? null,
-        // 0162 / 0165：这次请求为什么发生，以及判定当时的读数。`reason` 只区分 MANUAL/AUTO
-        // （0119 的 CHECK），溢出保护也走 AUTO，所以触发方式单独记一份；它是派生元数据，
-        // 不是新的事实源，旧行没有这些键时由 `readCompactionAudit` 按 reason 推回。
-        trigger, tokens_before: contextTokens,
-        threshold_tokens: policy.effectiveThresholdTokens,
-        configured_threshold_tokens: policy.requestedThresholdTokens,
-        effective_threshold_tokens: policy.effectiveThresholdTokens,
-        window_tokens: policy.modelWindowTokens,
-        model_context_window_tokens: policy.modelWindowTokens,
-        provider_call_cap_tokens: policy.providerCallCapTokens,
-        window_source: policy.windowSource,
-        fallback_applied: policy.fallbackApplied,
-        // 执行端在压缩完成后要复核「压完到底够不够」，因此把判定当时的两个边界一起冻结：
-        // 安全输入上限（硬上限）与压缩后目标。它们只是这次请求的判定依据，不是新的事实源。
-        safe_input_tokens: policy.safeInputTokens,
-        post_compaction_target_tokens: policy.postCompactionTargetTokens,
-        // 模型名只作可读元数据：执行端日志要说明「哪次压缩、用哪个模型」，避免只能记 null。
-        model } }, reason });
+    modelSnapshot: requestSnapshot, reason });
   return id;
 }
 

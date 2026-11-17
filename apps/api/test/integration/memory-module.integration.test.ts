@@ -124,7 +124,7 @@ test('message save requires confirmation, exact source hash and scope; provenanc
   assert.equal((await api.post(path, { ...body, confirmed: false })).status, 422);
   assert.equal((await api.post(path, { ...body, content_sha256: '0'.repeat(64) })).status, 409);
   const saved = await api.post(path, body);
-  assert.equal(saved.status, 201, saved.text);
+  assert.equal(saved.status, 201, `${saved.text}\n--- api output ---\n${api.running.readOutput()}`);
   assert.deepEqual((await api.post(path, body)).body, saved.body);
   const id = (saved.body as { result: { memory_id: string } }).result.memory_id;
   const provenance = await api.get(f.path(`/memories/${id}/provenance`));

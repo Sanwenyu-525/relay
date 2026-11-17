@@ -26,9 +26,11 @@ function memory(overrides: Record<string, unknown> = {}) {
 }
 
 function stats() {
-  return { total: 3, active: 2, superseded: 0, retired: 1, expired: 0, stale: 0, pinned: 1,
+  return { total: 3, active: 2, superseded: 0, retired: 1, expired: 0, stale: 0,
+    unverified: 1, failed: 0, instruction_risk: 0, pinned: 1,
     storage_bytes: 2048, index_health: { fts_index_present: true, unindexed: 0 },
     recall: { last_24h: 7, avg_latency_ms: 4, last_at: created },
+    capture: { pending: 1, failed: 0, last_24h: 2 },
     maintenance: { last_at: created, runs: [] },
     types: [{ memory_type: "PROJECT_FACT", count: 1 }] };
 }
@@ -47,8 +49,10 @@ describe("记忆管理页", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).slice(root.length);
-      if (path === "/memories" || path.startsWith("/memories?")) return response(200, [memory()]);
+      if (path.startsWith("/memory/items")) return response(200,
+        { items: [memory()], next_cursor: null, page_size: 50, sort: "updated" });
       if (path.startsWith("/memory/stats")) return response(200, stats());
+      if (path.startsWith("/memory/capture-tasks")) return response(200, { items: [] });
       if (path.startsWith("/memory-settings")) return response(200, { workspace_id: workspaceId,
         recall_enabled: true, automatic_compaction: true, auto_capture: true, revision: "0" });
       if (path.startsWith("/projects")) return response(200, { items: [], next_cursor: null });
@@ -77,9 +81,11 @@ describe("记忆管理页", () => {
         return response(201, { command_id: body.command_id, committed_at: created,
           result: { memory_id: memoryId, revision: "0", version: "1", status: "ACTIVE" } });
       }
-      if (path.startsWith("/memories?") && (init?.method ?? "GET") === "GET") return response(200, [memory()]);
+      if (path.startsWith("/memory/items")) return response(200,
+        { items: [memory()], next_cursor: null, page_size: 50, sort: "updated" });
       if (path === "/memories") return response(200, [memory()]);
       if (path.startsWith("/memory/stats")) return response(200, stats());
+      if (path.startsWith("/memory/capture-tasks")) return response(200, { items: [] });
       if (path.startsWith("/projects")) return response(200, { items: [], next_cursor: null });
       if (path.endsWith("/revisions")) return response(200, []);
       if (path.endsWith("/provenance")) return response(200, { memory_id: memoryId, sources: [] });

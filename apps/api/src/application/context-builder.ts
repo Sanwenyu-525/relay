@@ -10,6 +10,7 @@ import { toDecimalString } from '../shared/decimal.js';
 import type { ContextCorrectionInput, FakeScenario } from '../workflow/context-fixture.js';
 import { DEFAULT_FAKE_SCENARIO } from '../workflow/context-fixture.js';
 import { searchInformation } from './information-queries.js';
+import { retrieveKnowledge } from './knowledge-retrieval.js';
 import { createRepositories } from './unit-of-work.js';
 import { readContextSources } from '../workflow/execution-contract.js';
 import type { FakeToolScript } from '../workflow/fake-model-port.js';
@@ -42,7 +43,8 @@ export interface ContextSource extends JsonObject {
   content: string;
   role: 'MANDATORY' | 'RELEVANT' | 'STEP_SPECIFIC';
   trust: 'CANONICAL' | 'UNTRUSTED_DATA';
-  selection_reason?: 'EXPLICIT_SELECTION' | 'TITLE_MATCH' | 'RECENT_SCOPE_FALLBACK';
+  selection_reason?: 'EXPLICIT_SELECTION' | 'TITLE_MATCH' | 'TEXT_MATCH' | 'TAG_MATCH' |
+    'COLLECTION_MATCH' | 'SOURCE_MATCH' | 'RECENT_SCOPE_FALLBACK';
 }
 
 export type BuiltContext = { readonly kind: 'READY'; readonly builderVersion: string;
@@ -129,23 +131,45 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
 
   const selected = [...required];
   const exclusions: JsonObject[] = [];
-  const query = input.task.title.trim().slice(0, 12);
+  const query = input.task.title.trim();
   const explicitRefs = readContextSources(contract.frozen_snapshot);
   const explicitSelections = explicitRefs.length > 0;
-  const matches = query ? await searchInformation(db, { workspaceId: input.run.workspace_id,
-      projectId: project.id, query, types: 'KNOWLEDGE,MEMORY,DECISION', limit: MAX_RELEVANT })
-    : { items: [] };
-  const ranked = matches.items.filter((match) => match.type !== 'RULE').map((match) => ({
-    type: match.type as 'KNOWLEDGE' | 'MEMORY' | 'DECISION', id: match.id,
-    source_ref: match.source_ref, selection_reason: 'TITLE_MATCH' as const }));
+  // 知识使用多信号检索（标题/正文/标签/集合/来源/项目归属），
+  // Memory 与 Decision 仍用既有检索（它们没有标签与集合维度）。
+  const knowledgeMatches = await retrieveKnowledge(db, {
+    workspaceId: input.run.workspace_id, projectId: project.id,
+    taskTitle: input.task.title, projectTitle: project.title, limit: MAX_RELEVANT,
+  });
+  const otherMatches = query ? await searchInformation(db, {
+      workspaceId: input.run.workspace_id, projectId: project.id, query,
+      types: 'MEMORY,DECISION', limit: MAX_RELEVANT }) : { items: [] };
+  const reasonOf = (reasons: readonly string[]): ContextSource['selection_reason'] => {
+    if (reasons.includes('TITLE_MATCH')) return 'TITLE_MATCH';
+    if (reasons.includes('TEXT_MATCH')) return 'TEXT_MATCH';
+    if (reasons.includes('TAG_MATCH')) return 'TAG_MATCH';
+    if (reasons.includes('COLLECTION_MATCH')) return 'COLLECTION_MATCH';
+    if (reasons.includes('SOURCE_MATCH')) return 'SOURCE_MATCH';
+    return 'TITLE_MATCH';
+  };
+  const ranked = [
+    ...knowledgeMatches.map((match) => ({ type: 'KNOWLEDGE' as const, id: match.id,
+      source_ref: `knowledge:${match.id}`, selection_reason: reasonOf(match.reasons),
+      version: match.version })),
+    ...otherMatches.items.filter((match) => match.type !== 'RULE').map((match) => ({
+      type: match.type as 'MEMORY' | 'DECISION', id: match.id, source_ref: match.source_ref,
+      selection_reason: 'TITLE_MATCH' as const, version: undefined }))];
   // 显式选中资料优先，且引用随 Run 冻结的不可变版本；存在显式选择时按最小必要
   // 输入不再做最近同范围资料补位，同作用域检索仍按设计保留。
   const recent = explicitSelections || input.externalModel === true ? [] :
-    await r.information.listContextCandidates(input.run.workspace_id, project.id, MAX_FALLBACK);
+    await r.information.listContextCandidates(input.run.workspace_id, project.id, input.task.id,
+      MAX_FALLBACK);
   const candidates = [...ranked, ...recent.map((entry) => ({ type: entry.kind, id: entry.id,
     source_ref: `${entry.kind.toLowerCase()}:${entry.id}`,
-    selection_reason: 'RECENT_SCOPE_FALLBACK' as const }))];
+    selection_reason: 'RECENT_SCOPE_FALLBACK' as const, version: undefined as bigint | undefined }))];
   const seen = new Set<string>();
+  // 同一段内容（同一份 immutable 全文 hash）只注入一次：
+  // 两个知识条目指向同一来源时，重复片段会白白吃掉预算。
+  const injectedHashes = new Set<string>();
   for (const ref of explicitRefs) {
     if (seen.has(`${ref.kind}:${ref.root_id}`)) continue;
     seen.add(`${ref.kind}:${ref.root_id}`);
@@ -156,25 +180,36 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
       exclusions.push({ source_ref: reference, reason: 'SOURCE_UNAVAILABLE' });
       continue;
     }
+    if (injectedHashes.has(optional.source_sha256)) {
+      exclusions.push({ source_ref: optional.source_ref, reason: 'DUPLICATE_CONTENT' });
+      continue;
+    }
     if (projected([...selected, optional], exclusions) + RESERVED_TOKENS > limit) {
       exclusions.push({ source_ref: optional.source_ref, reason: 'BUDGET_TRIMMED' });
       continue;
     }
+    injectedHashes.add(optional.source_sha256);
     selected.push(optional);
   }
   for (const match of candidates) {
     if (seen.has(`${match.type}:${match.id}`) || seen.size >= MAX_RELEVANT) continue;
     seen.add(`${match.type}:${match.id}`);
+    // 检索命中的版本随上下文冻结：加载时按同一版本号读取，避免「匹配旧版、注入新版」。
     const optional = await loadRelevant(db, input.storage, input.run.workspace_id,
-      project.id, match.type, match.id, query, match.selection_reason);
+      project.id, match.type, match.id, query, match.selection_reason, match.version);
     if (optional === null) {
       exclusions.push({ source_ref: match.source_ref, reason: 'SOURCE_UNAVAILABLE' });
+      continue;
+    }
+    if (injectedHashes.has(optional.source_sha256)) {
+      exclusions.push({ source_ref: optional.source_ref, reason: 'DUPLICATE_CONTENT' });
       continue;
     }
     if (projected([...selected, optional], exclusions) + RESERVED_TOKENS > limit) {
       exclusions.push({ source_ref: optional.source_ref, reason: 'BUDGET_TRIMMED' });
       continue;
     }
+    injectedHashes.add(optional.source_sha256);
     selected.push(optional);
   }
   // Exclusion evidence also consumes budget. Keep the mandatory set intact.
@@ -196,8 +231,8 @@ export async function buildRunContext(db: DbExecutor, input: { readonly run: Run
 
 async function loadRelevant(db: DbExecutor, storage: ManagedContentStore,
   workspaceId: string, projectId: string, kind: 'KNOWLEDGE' | 'MEMORY' | 'DECISION',
-  id: string, query: string, selectionReason: 'EXPLICIT_SELECTION' | 'TITLE_MATCH' |
-    'RECENT_SCOPE_FALLBACK', pinnedVersion?: bigint): Promise<ContextSource | null> {
+  id: string, query: string, selectionReason: ContextSource['selection_reason'],
+  pinnedVersion?: bigint): Promise<ContextSource | null> {
   const r = createRepositories(db);
   const key = kind.toLowerCase() as 'knowledge' | 'memory' | 'decision';
   const root = await r.information.readRoot<InformationRootRow | DecisionRow>(key, id);
@@ -251,7 +286,7 @@ async function loadRelevant(db: DbExecutor, storage: ManagedContentStore,
     range: { start: startByte, end: startByte + Buffer.byteLength(queryContent, 'utf8'),
       unit: 'UTF8_BYTE' },
     content: queryContent, role: 'RELEVANT', trust: 'UNTRUSTED_DATA',
-    selection_reason: selectionReason };
+    ...(selectionReason === undefined ? {} : { selection_reason: selectionReason }) };
 }
 
 function source(kind: string, ref: string, version: string, content: string,

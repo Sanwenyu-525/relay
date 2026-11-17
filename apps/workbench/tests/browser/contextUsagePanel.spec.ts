@@ -1,12 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { contextCompactionWireFixture } from "../contextUsageFixture";
+import { contextCompactionWireFixture, unknownWindowCompactionWireFixture } from "../contextUsageFixture";
 
 /**
- * 0165：上下文用量浮层只读展示「模型真实窗口 / 用户阈值 / 生效阈值 / 距离」，
- * 不再有三档窗口选择；手动压缩仍可用。
+ * CONTEXT-USAGE-MINIMAL（2026-11-15）的真实 Chromium 验收。
  *
- * 这里用真实 Chromium 核对界面事实：模型窗口只读、未知窗口不伪造 1M、用户设置与
- * 生效值分开说、分项读序稳定、浮层不压住发送键；API 全部由 page.route 伪造。
+ * 默认浮层只保留：标题/异常状态、当前 Token / 生效阈值、占比、进度条、
+ * 余量、自动压缩开关、阈值被模型容量收敛时的一行原因。
+ * 构成、容量、最近调用、成功记录、时间戳、来源与手动压缩按钮都不再渲染；
+ * 手动压缩仍可从 `/compact` 命令入口执行。
  */
 
 const apiBase = "http://127.0.0.1:8787";
@@ -52,48 +53,32 @@ const completedAssistant = { ...completedUser, id: "bbbb2222-2222-4222-8222-2222
   usage: { input_tokens: 10_607, output_tokens: 646, cache_read_tokens: null,
     cache_creation_tokens: null } };
 
-function breakdown() {
-  return { version: 1, method: "UTF8_BYTES_DIV_3", precision: "ESTIMATED",
-    categories: [
-      { key: "HISTORY", bytes: 12_000, tokens: 4_000 },
-      { key: "SYSTEM", bytes: 9_000, tokens: 3_000 },
-      { key: "TOOLS", bytes: 6_000, tokens: 2_000 },
-      { key: "FILE_READS", bytes: 4_821, tokens: 1_607 }],
-    estimated_total_tokens: 10_607, covered_bytes: 31_821, image_parts: 0 };
-}
+const compactCommand = { kind: "SYSTEM", name: "compact", aliases: ["压缩"],
+  title: "压缩上下文", summary: "在安全边界手动整理当前会话上下文。",
+  usage: "/compact", system_id: "compact" };
 
-function breakdownSix() {
-  return { ...breakdown(), categories: [
-    { key: "HISTORY", bytes: 12_000, tokens: 4_000 },
-    { key: "SYSTEM", bytes: 9_000, tokens: 3_000 },
-    { key: "TOOLS", bytes: 6_000, tokens: 2_000 },
-    { key: "FILE_READS", bytes: 4_821, tokens: 1_607 },
-    { key: "MEMORY", bytes: 3_000, tokens: 1_000 },
-    { key: "OTHER", bytes: 1_800, tokens: 600 }],
-    estimated_total_tokens: 12_207, covered_bytes: 36_621, image_parts: 2 };
-}
-
-function contextUsage(options: {
-  readonly withBreakdown?: boolean;
-  readonly input?: number;
-  readonly reserved?: number | null;
-  readonly compaction?: Record<string, unknown>;
-} = {}): unknown {
+function contextUsage(options: { readonly compaction?: Record<string, unknown>;
+  readonly input?: number } = {}): unknown {
+  const compaction = contextCompactionWireFixture(options.compaction ?? {});
   return { session_id: sessionId,
-    next_call: { reservation_tokens: 1_000_000, effective_window_tokens: 1_000_000,
-      model_window_tokens: 1_000_000, provider_call_cap_tokens: 1_000_000,
-      window_source: "MODEL_CATALOG", fallback_applied: false },
+    next_call: { reservation_tokens: compaction.effective_window_tokens,
+      effective_window_tokens: compaction.effective_window_tokens,
+      model_window_tokens: compaction.model_window_tokens,
+      provider_call_cap_tokens: compaction.provider_call_cap_tokens,
+      window_source: compaction.window_source,
+      fallback_applied: compaction.fallback_applied },
     last_call: { source: "MODEL_CALL", call_id: "cccc3333-3333-4333-8333-333333333333",
       message_id: completedAssistant.id, provider: "openai-compatible", model: "gpt-4.1-mini",
       status: "COMPLETED", input_tokens: options.input ?? 10_607,
       output_tokens: 646, cache_read_tokens: null, cache_creation_tokens: null,
-      reserved_tokens: options.reserved === undefined ? 1_000_000 : options.reserved,
-      settled_at: "2026-10-30T00:00:00Z",
-      breakdown: options.withBreakdown === false ? null : breakdown() },
-    compaction: contextCompactionWireFixture(options.compaction ?? {}) };
+      reserved_tokens: compaction.effective_window_tokens,
+      settled_at: "2026-10-30T00:00:00Z", breakdown: null },
+    compaction };
 }
 
-async function installRoutes(page: Page, options: Parameters<typeof contextUsage>[0] = {}): Promise<void> {
+async function installRoutes(page: Page, options: Parameters<typeof contextUsage>[0] = {}): Promise<{
+  readonly compactBodies: readonly Record<string, unknown>[] }> {
+  const compactBodies: Record<string, unknown>[] = [];
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -117,6 +102,16 @@ async function installRoutes(page: Page, options: Parameters<typeof contextUsage
         revision: "0" });
     if (path === `${prefix}/model-port`) return fulfillJson(route, { provider: "openai-compatible",
       configured: true, model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000_000 });
+    if (path === `${prefix}/chat-commands`) return fulfillJson(route, { items: [compactCommand] });
+    if (path === `${prefix}/assist-sessions/${sessionId}/chat-commands` &&
+      request.method() === "POST") {
+      const body = JSON.parse(String(request.postData())) as Record<string, unknown>;
+      compactBodies.push(body);
+      return fulfillJson(route, { command_id: body.command_id,
+        committed_at: "2026-11-15T00:00:00Z", result: { kind: "MEMORY_COMPACTION",
+          system: "compact", session_id: sessionId, status: "PENDING",
+          request_id: "dddd4444-4444-4444-8444-444444444444" } }, 202);
+    }
     if (path === `${prefix}/assist-sessions`) return fulfillJson(route, { items: [session] });
     if (path === `${prefix}/assist-sessions/${sessionId}`) return fulfillJson(route, session);
     if (path === `${prefix}/assist-sessions/${sessionId}/messages`) return fulfillJson(route,
@@ -127,6 +122,7 @@ async function installRoutes(page: Page, options: Parameters<typeof contextUsage
     if (path === `${prefix}/skill-definitions`) return fulfillJson(route, { items: [] });
     return fulfillJson(route, { items: [], next_cursor: null });
   });
+  return { compactBodies };
 }
 
 async function connect(page: Page): Promise<void> {
@@ -139,10 +135,14 @@ async function connect(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-async function openPanel(page: Page): Promise<void> {
+async function openChat(page: Page): Promise<void> {
   await page.goto(`/agent?work=${taskId}&session=${sessionId}`);
   await connect(page);
   await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
+}
+
+async function openPanel(page: Page): Promise<void> {
+  await openChat(page);
   await page.getByTestId("assist-composer").getByTestId("assist-context-meter").click();
   await expect(page.getByTestId("assist-context-meter-panel")).toBeVisible();
 }
@@ -151,7 +151,7 @@ type Rect = { left: number; right: number; top: number; bottom: number;
   width: number; height: number };
 
 async function measure(page: Page): Promise<{ panel: Rect | null; ring: Rect | null;
-  send: Rect | null; model: Rect | null; position: string | null;
+  send: Rect | null; model: Rect | null; position: string | null; side: string | null;
   viewport: { width: number; height: number } }> {
   return page.evaluate(() => {
     const rect = (selector: string) => {
@@ -166,7 +166,26 @@ async function measure(page: Page): Promise<{ panel: Rect | null; ring: Rect | n
       ring: rect('[data-testid="assist-composer"] [data-testid="assist-context-meter"]'),
       send: rect('[data-testid="assist-send"]'), model: rect('[data-testid="model-selector-open"]'),
       position: menu === null ? null : getComputedStyle(menu).position,
+      side: menu?.dataset.side ?? null,
       viewport: { width: window.innerWidth, height: window.innerHeight } };
+  });
+}
+
+async function facts(page: Page): Promise<{ width: number; height: number;
+  overflow: number; overflowY: string; scrollers: number; text: string }> {
+  return page.evaluate(() => {
+    const menu = document.querySelector<HTMLElement>('[data-testid="assist-context-meter-panel"]');
+    if (menu === null) throw new Error("缺少浮层");
+    const scrollers = Array.from(menu.querySelectorAll<HTMLElement>("*")).filter((el) => {
+      const style = getComputedStyle(el);
+      return (style.overflowY === "auto" || style.overflowY === "scroll")
+        && el.scrollHeight > el.clientHeight + 1;
+    }).length;
+    const box = menu.getBoundingClientRect();
+    return { width: box.width, height: box.height,
+      overflow: menu.scrollHeight - menu.clientHeight,
+      overflowY: getComputedStyle(menu).overflowY, scrollers,
+      text: menu.textContent?.replace(/\s+/g, " ").trim() ?? "" };
   });
 }
 
@@ -175,95 +194,188 @@ function overlapArea(a: Rect, b: Rect): number {
     * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 }
 
-test("用量浮层：展示模型窗口、用户阈值、实际生效阈值与距离；没有三档入口", async ({ page }) => {
+const removedTestIds = ["context-usage-breakdown-section", "context-usage-breakdown",
+  "context-usage-composition-bar", "context-usage-capacity", "context-usage-capacity-formula",
+  "context-usage-window", "context-usage-window-used", "context-usage-window-value",
+  "context-usage-window-percent", "context-usage-window-meta", "context-usage-frozen-note",
+  "context-usage-estimate", "context-compaction-now", "context-compaction-last-result",
+  "context-compaction-window-row", "context-compaction-window-source",
+  "context-compaction-configured-row", "context-compaction-threshold-row",
+  "context-compaction-post-target-row", "context-usage-status-time",
+  "assist-context-meter-info"];
+
+test("1162×782：默认只保留核心读数与自动压缩，无滚动且不盖控件", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page);
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  await expect(panel.getByTestId("context-budget-option-262144")).toHaveCount(0);
-  await expect(panel.getByTestId("context-budget-option-524288")).toHaveCount(0);
-  await expect(panel.getByTestId("context-budget-option-1048576")).toHaveCount(0);
-  await expect(panel.locator("input[type=radio]")).toHaveCount(0);
-  await expect(panel.getByTestId("context-compaction-window-row")).toContainText("1,000,000");
-  await expect(panel.getByTestId("context-compaction-window-source"))
-    .toContainText("自动识别 · 模型目录 · 不可在此修改");
-  await expect(panel.getByTestId("context-compaction-configured-row")).toContainText("350,000");
-  await expect(panel.getByTestId("context-compaction-threshold-row")).toContainText("350,000");
-  await expect(panel.getByTestId("context-compaction-distance"))
-    .toHaveText("距离自动压缩还有 70,000 tokens。");
-  await expect(panel.getByTestId("context-compaction-now")).toBeEnabled();
-
+  await expect(panel.locator(".agent-chat-context-meter-heading")).toHaveText("上下文用量");
+  await expect(panel.getByTestId("context-usage-status-label")).toHaveText("接近压缩阈值");
+  await expect(panel.getByTestId("context-usage-current-tokens")).toHaveText("280,000");
+  await expect(panel.getByTestId("context-usage-current-threshold")).toHaveText("350,000");
+  await expect(panel.getByTestId("context-usage-current-percent")).toHaveText("80%");
+  await expect(panel.getByTestId("context-usage-current-remaining"))
+    .toHaveText("距离自动压缩还剩 70,000 tokens。");
+  await expect(panel.getByTestId("context-compaction-state")).toHaveText("已开启");
+  await expect(panel.getByTestId("context-compaction-clamped")).toHaveCount(0);
   const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 1,000,000 tokens（1%）");
-  await expect(panel.getByTestId("context-compaction-current")).toHaveText("280,000");
-  await expect(panel.getByTestId("context-compaction-threshold")).toHaveText("350,000");
-  await page.screenshot({ path: shot("panel-default-1m.png"), fullPage: true });
+  await expect(meter).toHaveAttribute("data-state", "normal");
+  await expect(meter).toHaveAttribute("aria-label",
+    "上下文 10,607 / 1,000,000 tokens（1%）");
+  await meter.screenshot({ path: shot("ring-known-1m-1162x782.png") });
+
+  for (const testId of removedTestIds) {
+    await expect(panel.getByTestId(testId), testId).toHaveCount(0);
+  }
+  const panelFacts = await facts(page);
+  expect(panelFacts.text).not.toContain("上下文构成");
+  expect(panelFacts.text).not.toContain("容量限制");
+  expect(panelFacts.text).not.toContain("最近一次调用");
+  expect(panelFacts.text).not.toContain("最近压缩");
+  expect(panelFacts.text).not.toContain("真实 + 估算");
+  expect(panelFacts.text).not.toContain("立即压缩");
+  expect(panelFacts.text).not.toContain("最近一次记录");
+  expect(panelFacts.scrollers, "默认不应有内部滚动容器").toBe(0);
+  expect(panelFacts.overflow, "默认不应出现滚动条").toBeLessThanOrEqual(1);
+  expect(panelFacts.width).toBeGreaterThanOrEqual(339);
+  expect(panelFacts.width).toBeLessThanOrEqual(380.5);
+  expect(panelFacts.height).toBeGreaterThanOrEqual(150);
+  expect(panelFacts.height).toBeLessThanOrEqual(230);
+
+  const layout = await measure(page);
+  if (layout.panel === null || layout.ring === null || layout.send === null
+    || layout.model === null) throw new Error("缺少常规窗口几何采样");
+  expect(layout.position).toBe("fixed");
+  expect(overlapArea(layout.panel, layout.ring), "浮层不得盖住上下文圆环").toBe(0);
+  expect(overlapArea(layout.panel, layout.send), "浮层不得盖住发送键").toBe(0);
+  expect(overlapArea(layout.panel, layout.model), "浮层不得盖住模型选择器").toBe(0);
+
+  await page.screenshot({ path: shot("panel-default-1162x782.png"), fullPage: false });
+  await panel.screenshot({ path: shot("panel-default-element-1162x782.png") });
 });
 
-test("用量浮层：分项按固定顺序、标「估算」，与圆环读同一份记录", async ({ page }) => {
+test("1162×782：阈值被模型容量限制时只留一行原因", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
+  await installRoutes(page, { compaction: {
+    threshold_tokens: 500_000, requested_threshold_tokens: 500_000,
+    threshold_clamped: true, effective_threshold_tokens: 209_386,
+    model_window_tokens: 262_144, effective_window_tokens: 262_144,
+    safety_reserve_tokens: 13_108, safe_input_tokens: 232_652,
+    context_tokens: 100_000, distance_tokens: 109_386 } });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  await expect(panel.getByTestId("assist-context-meter-percent")).toHaveText("1%");
-  await expect(panel.getByTestId("assist-context-meter-remaining")).toHaveText("989,393 tokens");
-  await expect(panel.getByTestId("context-usage-estimate")).toHaveText("估算");
-  const rows = panel.locator('[data-testid^="context-usage-row-"]');
-  await expect(rows).toHaveCount(4);
-  await expect(rows.nth(0)).toContainText("历史消息");
-  await expect(rows.nth(1)).toContainText("系统 / 指令");
-  await expect(rows.nth(2)).toContainText("工具调用");
-  await expect(rows.nth(3)).toContainText("文件读取");
+  await expect(panel.getByTestId("context-usage-current-threshold")).toHaveText("209,386");
+  const clamp = panel.getByTestId("context-compaction-clamped");
+  await expect(clamp).toHaveCount(1);
+  await expect(clamp).toContainText("用户设置 500,000");
+  await expect(clamp).toContainText("容量受限，按 209,386 生效");
+  await expect(panel.getByTestId("context-compaction-threshold-row")).toHaveCount(0);
+  await expect(panel.getByTestId("context-usage-capacity")).toHaveCount(0);
+  const panelFacts = await facts(page);
+  expect(panelFacts.overflow, "收敛说明也不应引入滚动").toBeLessThanOrEqual(1);
+  expect(panelFacts.scrollers).toBe(0);
+  await panel.screenshot({ path: shot("panel-clamped-element-1162x782.png") });
 });
 
-test("用量浮层：模型窗口未知时按安全回退显示，不伪造 1M", async ({ page }) => {
+test("1162×782：模型窗口未知时圆环诚实显示估算，不泄露回退分母", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { compaction: { model_window_tokens: null,
-    window_source: "UNKNOWN_FALLBACK", provider_call_cap_tokens: null,
-    effective_window_tokens: 262_144, safe_input_tokens: 240_000,
-    requested_threshold_tokens: 350_000, effective_threshold_tokens: 216_000,
-    threshold_clamped: true, context_tokens: 100_000, distance_tokens: 116_000 } });
+  await installRoutes(page, { input: 200_000, compaction: unknownWindowCompactionWireFixture() });
+  await openPanel(page);
+  const panel = page.getByTestId("assist-context-meter-panel");
+  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
+
+  await expect(panel.getByTestId("context-usage-current-threshold")).toHaveText("209,386");
+  await expect(panel.getByTestId("context-usage-current-percent")).toHaveText("48%");
+  const clamp = panel.getByTestId("context-compaction-clamped");
+  await expect(clamp).toHaveCount(1);
+  await expect(clamp).toContainText("当前阈值 350,000");
+  await expect(clamp).toContainText("模型窗口未知，按 209,386 生效");
+  await expect(panel.getByTestId("context-compaction-window-unknown")).toHaveCount(0);
+  await expect(panel.getByTestId("context-usage-capacity")).toHaveCount(0);
+  const panelFacts = await facts(page);
+  expect(panelFacts.overflow).toBeLessThanOrEqual(1);
+  expect(panelFacts.text).not.toContain("262,144");
+
+  await expect(meter).toHaveAttribute("data-state", "unknown");
+  await expect(meter).toHaveAttribute("aria-label",
+    "上下文 200,000 tokens · 模型窗口未知，按安全回退估算");
+  await expect(meter).not.toHaveAttribute("data-over", "true");
+  await meter.screenshot({ path: shot("ring-window-unknown-1162x782.png") });
+  await panel.screenshot({ path: shot("panel-window-unknown-element-1162x782.png") });
+});
+
+test("1162×782：自动压缩关闭时只剩一次状态，不宣称会先整理", async ({ page }) => {
+  await page.setViewportSize({ width: 1162, height: 782 });
+  await installRoutes(page, { compaction: { enabled: false, context_tokens: 420_000,
+    distance_tokens: -70_000 } });
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
 
-  await expect(panel.getByTestId("context-compaction-window-row"))
-    .toContainText("未知（按安全回退 262,144 tokens）");
-  await expect(panel.getByTestId("context-compaction-window-source"))
-    .toContainText("未知 · 安全回退 · 不可在此修改");
-  await expect(panel.getByTestId("context-compaction-clamped"))
-    .toContainText("用户设置 350,000 tokens / 实际生效 216,000 tokens");
-  await expect(panel.getByTestId("context-compaction-clamped")).toContainText("当前模型上下文容量不足");
-  const meter = page.getByTestId("assist-composer").getByTestId("assist-context-meter");
-  await expect(meter).toHaveAttribute("aria-label", "上下文 10,607 / 262,144 tokens（4%）");
+  await expect(panel.getByTestId("context-compaction-state")).toHaveText("已关闭");
+  await expect(panel.getByTestId("context-usage-current-percent")).toHaveText("120%");
+  await expect(panel.getByTestId("context-usage-current-remaining"))
+    .toHaveText("已超过压缩阈值 70,000 tokens。");
+  await expect(panel.getByTestId("context-usage-status")).toHaveCount(0);
+  const panelFacts = await facts(page);
+  expect(panelFacts.text.split("自动压缩已关闭").length - 1, "状态只出现一次").toBe(1);
+  expect(panelFacts.text).not.toContain("下一次请求前会先整理");
+  await panel.screenshot({ path: shot("panel-disabled-element-1162x782.png") });
 });
 
-test("用量浮层：560px 窄窗仍贴环、不横向溢出、不盖住发送键与模型下拉", async ({ page }) => {
+test("560×700：窄窗不横向溢出、不盖发送键与模型下拉", async ({ page }) => {
   await page.setViewportSize({ width: 560, height: 700 });
   await installRoutes(page);
   await openPanel(page);
   const panel = page.getByTestId("assist-context-meter-panel");
-  const geometry = await measure(page);
-  if (geometry.panel === null || geometry.ring === null || geometry.send === null
-    || geometry.model === null) throw new Error("缺少浮层几何采样");
+  const layout = await measure(page);
+  if (layout.panel === null || layout.ring === null || layout.send === null
+    || layout.model === null) throw new Error("缺少浮层几何采样");
 
-  expect(geometry.position).toBe("fixed");
-  expect(geometry.panel.width).toBeLessThanOrEqual(384.5);
-  expect(geometry.panel.left).toBeGreaterThanOrEqual(7.5);
-  expect(geometry.panel.right).toBeLessThanOrEqual(geometry.viewport.width - 7.5);
-  expect(geometry.panel.top).toBeGreaterThanOrEqual(7.5);
-  expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.viewport.height + 0.5);
-  const ringCenter = (geometry.ring.left + geometry.ring.right) / 2;
-  expect(ringCenter).toBeGreaterThanOrEqual(geometry.panel.left - 0.5);
-  expect(ringCenter).toBeLessThanOrEqual(geometry.panel.right + 0.5);
-  expect(overlapArea(geometry.panel, geometry.send), "浮层不得盖住发送键").toBe(0);
-  expect(overlapArea(geometry.panel, geometry.model), "浮层不得盖住模型下拉").toBe(0);
+  expect(layout.position).toBe("fixed");
+  expect(layout.panel.width).toBeLessThanOrEqual(380.5);
+  expect(layout.panel.left).toBeGreaterThanOrEqual(7.5);
+  expect(layout.panel.right).toBeLessThanOrEqual(layout.viewport.width - 7.5);
+  expect(layout.panel.top).toBeGreaterThanOrEqual(7.5);
+  expect(layout.panel.bottom).toBeLessThanOrEqual(layout.viewport.height + 0.5);
+  const ringCenter = (layout.ring.left + layout.ring.right) / 2;
+  expect(ringCenter).toBeGreaterThanOrEqual(layout.panel.left - 0.5);
+  expect(ringCenter).toBeLessThanOrEqual(layout.panel.right + 0.5);
+  expect(overlapArea(layout.panel, layout.send)).toBe(0);
+  expect(overlapArea(layout.panel, layout.model)).toBe(0);
+  const panelFacts = await facts(page);
+  expect(panelFacts.scrollers, "窄窗默认也不应有内部滚动").toBe(0);
+  expect(panelFacts.overflow, "窄窗默认不滚动").toBeLessThanOrEqual(1);
   expect(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-  await page.screenshot({ path: shot("panel-narrow-560.png"), fullPage: true });
+  await page.screenshot({ path: shot("panel-narrow-560x700.png"), fullPage: true });
 });
 
-test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收", async ({ page }) => {
+test("560×430：低高度自然缩短、不双重滚动、不盖控件", async ({ page }) => {
+  await page.setViewportSize({ width: 560, height: 430 });
+  await installRoutes(page);
+  await openPanel(page);
+  const panel = page.getByTestId("assist-context-meter-panel");
+  const layout = await measure(page);
+  if (layout.panel === null || layout.ring === null || layout.send === null
+    || layout.model === null) throw new Error("缺少低高度几何采样");
+
+  expect(layout.position).toBe("fixed");
+  expect(layout.side).toMatch(/above|below/);
+  expect(layout.panel.top).toBeGreaterThanOrEqual(7.5);
+  expect(layout.panel.bottom).toBeLessThanOrEqual(layout.viewport.height + 0.5);
+  expect(overlapArea(layout.panel, layout.ring)).toBe(0);
+  expect(overlapArea(layout.panel, layout.send)).toBe(0);
+  expect(overlapArea(layout.panel, layout.model)).toBe(0);
+  const panelFacts = await facts(page);
+  expect(panelFacts.scrollers, "低高度也不叠加内层滚动").toBe(0);
+  expect(panelFacts.overflow, "紧凑内容在低高度下也应一次展示").toBeLessThanOrEqual(1);
+  expect(panelFacts.overflowY, "浮层自身只在真实溢出时兜底").toBe("auto");
+  await page.screenshot({ path: shot("panel-low-560x430-page.png"), fullPage: false });
+  await panel.screenshot({ path: shot("panel-low-560x430-element.png") });
+});
+
+test("浮层与模型下拉互斥、Esc 收起还焦点、点外即收", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
   await installRoutes(page);
   await openPanel(page);
@@ -288,108 +400,23 @@ test("用量浮层：与模型下拉互斥、Esc 收起还焦点、点外即收"
   await expect(panel).toBeHidden();
 });
 
-test("用量浮层：手动压缩显示受理状态，禁止重复点击", async ({ page }) => {
+test("手动压缩仍可从 /compact 命令入口执行", async ({ page }) => {
   await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page);
-  let release: () => void = () => {};
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  let writes = 0;
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/memory/compact`,
-    async (route) => {
-      writes += 1;
-      const body = JSON.parse(String(route.request().postData())) as Record<string, unknown>;
-      await gate;
-      return fulfillJson(route, { command_id: body.command_id,
-        committed_at: "2026-11-15T00:00:00Z", result: { session_id: sessionId,
-          status: "PENDING", request_id: "dddd4444-4444-4444-8444-444444444444" } }, 202);
-    });
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  const button = panel.getByTestId("context-compaction-now");
-  await button.click();
-  await expect(button).toBeDisabled();
-  await expect(button).toContainText("正在提交");
-  await page.waitForTimeout(150);
-  expect(writes).toBe(1);
-  release();
-  await expect(panel.getByTestId("context-compaction-notice"))
-    .toContainText("已受理压缩请求", { timeout: 20_000 });
-});
-
-test("空白新会话（还没有会话）不显示上下文圆环，也没有窗口入口", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page);
-  await page.goto("/agent?new=1");
-  await connect(page);
-  await page.getByTestId("collab-conversation-toolbar").waitFor({ timeout: 20_000 });
-  await expect(page.getByTestId("assist-first-draft")).toBeVisible();
-  await expect(page.getByTestId("assist-context-meter")).toHaveCount(0);
-  await expect(page.getByTestId("assist-context-meter-panel")).toHaveCount(0);
-});
-
-test("用量浮层：六类分项各上一色，文本与数值保持中性，颜色不是唯一载体", async ({ page }) => {
-  await page.setViewportSize({ width: 1162, height: 782 });
-  await installRoutes(page, { withBreakdown: true });
-  await page.route(`${apiBase}${prefix}/assist-sessions/${sessionId}/context-usage`, async (route) => {
-    const body = contextUsage({ withBreakdown: true }) as {
-      last_call: { breakdown: unknown } | null };
-    if (body.last_call !== null) body.last_call.breakdown = breakdownSix();
-    return fulfillJson(route, body);
-  });
-  await openPanel(page);
-  const panel = page.getByTestId("assist-context-meter-panel");
-  const rows = panel.locator('[data-testid^="context-usage-row-"]');
-  await expect(rows).toHaveCount(6);
-
-  const sampled = await rows.evaluateAll((nodes) => {
-    const menu = document.querySelector<HTMLElement>('[data-testid="assist-context-meter-panel"]');
-    if (menu === null) throw new Error("缺少浮层");
-    const resolve = (expression: string) => {
-      const probe = document.createElement("span");
-      probe.style.color = expression;
-      menu.appendChild(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    };
-    const neutral = { secondary: resolve("var(--relay-color-text-secondary)"),
-      primary: resolve("var(--relay-color-text-primary)") };
-    const tokens = { HISTORY: resolve("var(--relay-color-category-history)"),
-      SYSTEM: resolve("var(--relay-color-category-system)"),
-      TOOLS: resolve("var(--relay-color-category-tools)"),
-      FILE_READS: resolve("var(--relay-color-category-fileReads)"),
-      MEMORY: resolve("var(--relay-color-category-memory)"),
-      OTHER: resolve("var(--relay-color-category-other)") };
-    const surface = getComputedStyle(menu).backgroundColor;
-    const rgb = (value: string) => value.match(/\d+/g)!.slice(0, 3).map(Number);
-    const luminance = (value: string) => rgb(value).map((channel) => channel / 255)
-      .map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
-      .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
-    const contrast = (fg: string, bg: string) => {
-      const [a, b] = [luminance(fg), luminance(bg)].sort((x, y) => x - y);
-      return (b + 0.05) / (a + 0.05);
-    };
-    return nodes.map((node) => {
-      const category = (node as HTMLElement).dataset.category as keyof typeof tokens;
-      const icon = node.querySelector<SVGSVGElement>(".context-usage-row-icon");
-      const label = node.querySelector<HTMLElement>(".context-usage-row-label");
-      const value = node.querySelector<HTMLElement>(".context-usage-row-value");
-      if (icon === null || label === null || value === null) throw new Error("缺少分项行结构");
-      return { category, icon: getComputedStyle(icon).color, token: tokens[category],
-        label: getComputedStyle(label).color, value: getComputedStyle(value).color,
-        neutral, surface, contrast: contrast(getComputedStyle(icon).color, surface),
-        glyph: icon.innerHTML };
-    });
-  });
-
-  expect(sampled.map((row) => row.category))
-    .toEqual(["HISTORY", "SYSTEM", "TOOLS", "FILE_READS", "MEMORY", "OTHER"]);
-  for (const row of sampled) {
-    expect(row.icon, `${row.category} 的图标色必须来自分类 token`).toBe(row.token);
-    expect(row.contrast, `${row.category} 的图标对浮层底面不足 3:1`).toBeGreaterThanOrEqual(3);
-    expect(row.label, `${row.category} 的标签被上了色`).toBe(row.neutral.secondary);
-    expect(row.value, `${row.category} 的数值被上了色`).toBe(row.neutral.primary);
-  }
-  expect(new Set(sampled.map((row) => row.glyph)).size).toBe(6);
-  await page.screenshot({ path: shot("panel-categories.png"), fullPage: true });
+  const server = await installRoutes(page);
+  await openChat(page);
+  const draft = page.getByTestId("assist-draft");
+  await draft.fill("/");
+  await expect(page.getByTestId("chat-command-compact")).toBeVisible();
+  await page.screenshot({ path: shot("command-compact-menu.png"), fullPage: false });
+  await page.keyboard.press("Escape");
+  await draft.fill("/compact");
+  await page.getByTestId("assist-send").click();
+  // 这套夹具没有完整必读文件审计；发送前的风险检查会礼貌地要求确认一次。
+  const confirm = page.getByRole("button", { name: "仍然发送" });
+  if (await confirm.isVisible().catch(() => false)) await confirm.click();
+  await expect.poll(() => server.compactBodies.length, { timeout: 10_000 }).toBe(1);
+  expect(server.compactBodies[0]?.text).toBe("/compact");
+  await expect(page.getByText(/已受理整理请求（PENDING）/)).toBeVisible();
+  // 浮层按钮已删，但底层 chat-commands Owner 与 202 受理仍然真实走通。
+  await expect(page.getByTestId("context-compaction-now")).toHaveCount(0);
 });

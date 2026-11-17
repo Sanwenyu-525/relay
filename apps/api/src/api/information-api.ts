@@ -1,14 +1,16 @@
+import { createHash } from 'node:crypto';
+
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 
 import { addKnowledgeVersion, addMemoryRevision, addRuleVersion, createDecision,
   createKnowledge, createMemory, createMemoryFromMessage, createRule, retireInformation, restoreInformation, supersedeDecision,
   type KnowledgeSource } from '../application/information-commands.js';
-import { listInformation, listInformationVersions, readInformation, readKnowledgeVersionContent, searchInformation }
-  from '../application/information-queries.js';
+import { listInformation, listInformationVersions, listMemoryPage, readInformation,
+  readKnowledgeVersionContent, searchInformation } from '../application/information-queries.js';
 import { validationFailed } from '../application/domain-error.js';
 import { readMemorySettings, setMemorySettings } from '../application/memory-settings.js';
-import { consolidateMemoriesCommand, setMemoryPinnedCommand,
+import { consolidateMemoriesCommand, setMemoryExpiryCommand, setMemoryPinnedCommand,
   setMemoryVerificationCommand } from '../application/memory-commands.js';
 import { readMemoryObservability } from '../application/memory-observability.js';
 import { exportMemories, importMemories, purgeMemories } from '../application/memory-transfer.js';
@@ -34,8 +36,15 @@ const memoryListQuery = Type.Object({ project_id: Type.Optional(uuid),
   memory_type: Type.Optional(Type.Union([memoryType, Type.Literal('ALL')])),
   origin: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('HUMAN_CONFIRMED'),
     Type.Literal('AUTO_CAPTURE')])),
+  verification: Type.Optional(Type.Union([Type.Literal('ALL'), memoryVerification])),
+  source_kind: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('MANUAL'),
+    Type.Literal('USER_STATEMENT'), Type.Literal('MODEL_OBSERVATION'), Type.Literal('UNKNOWN')])),
+  pinned: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])),
+  sort: Type.Optional(Type.Union([Type.Literal('updated'), Type.Literal('created'),
+    Type.Literal('importance')])),
+  cursor: Type.Optional(Type.String({ maxLength: 500 })),
   q: Type.Optional(Type.String({ maxLength: 200 })),
-  limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|[1-4][0-9][0-9]|500)$' })) }, strict);
+  limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })) }, strict);
 const knowledgeContentParams = Type.Object({ workspace_id: uuid, id: uuid,
   version: Type.String({ pattern: '^[1-9][0-9]{0,18}$' }) }, strict);
 const knowledgeContent = Type.Object({ knowledge_id: uuid, title: Type.String(),
@@ -151,14 +160,33 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
     auto_consolidate: Type.Boolean(), consolidation_interval_hours: Type.Integer(),
     memory_stale_after_days: Type.Integer(),
     embedding_provider: Type.Union([Type.Literal('disabled'), Type.Literal('openai-compatible')]),
-    remote_embedding_allowed: Type.Boolean(), include_stale_in_recall: Type.Boolean() }, strict);
+    remote_embedding_allowed: Type.Boolean(), include_stale_in_recall: Type.Boolean(),
+    capabilities: Type.Optional(Type.Record(Type.String(), Type.Unknown())) }, strict);
   app.get('/memories/:id/provenance', { schema: { params: item } }, async (request, reply) => {
     try {
       const p = request.params as { workspace_id: string; id: string };
-      await readInformation(dependencies.database.executor, 'memory', p.workspace_id, p.id);
-      const sources = await createRepositories(dependencies.database.executor).information.readMemoryMessageSources(p.id);
-      return { memory_id: p.id, sources: sources.map((source) => ({ ...source,
-        memory_version: source.memory_version.toString() })) };
+      const memory = await readInformation(dependencies.database.executor, 'memory',
+        p.workspace_id, p.id);
+      const sources = await createRepositories(dependencies.database.executor).information
+        .readMemorySourceEvidence(p.id);
+      return { memory_id: p.id, origin: memory.origin, source_kind: memory.source_kind,
+        verification: memory.verification, verified_at: memory.verified_at,
+        sources: sources.map((source) => {
+          const withdrawn = source.withdrawn_at !== null;
+          const content = source.content;
+          const hashMatches = content === null ? null
+            : createHash('sha256').update(content, 'utf8').digest('hex') === source.content_sha256;
+          const availability = withdrawn ? 'WITHDRAWN' : source.role === null ? 'MISSING'
+            : content === null ? 'UNAVAILABLE'
+              : hashMatches === false ? 'CONTENT_CHANGED' : 'AVAILABLE';
+          return { memory_version: source.memory_version.toString(),
+            session_id: source.session_id, message_id: source.message_id,
+            session_title: source.session_title, role: source.role, status: source.status,
+            content_sha256: source.content_sha256, sha256_matches: hashMatches,
+            source_quote: source.source_quote,
+            excerpt: content === null ? null : content.slice(0, 500),
+            availability };
+        }) };
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
   app.get('/memory-settings', { schema: { params: base } }, async (request, reply) => {
@@ -259,6 +287,34 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
     });
   }
 
+  /*
+   * 0167：管理页列表走真实游标分页。`/memories` 保留旧数组契约给现有调用方，
+   * 新页面用 `/memory/items`，一次只取一页，不再把 200 条当全量。
+   */
+  app.get('/memory/items', { schema: { params: base, querystring: memoryListQuery } },
+    async (request, reply) => {
+      try {
+        const p = request.params as { workspace_id: string };
+        const q = request.query as {
+          project_id?: string; effective_status?: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'RETIRED'
+            | 'SUPERSEDED' | 'STALE'; memory_type?: string; origin?: string;
+          verification?: string; source_kind?: string; pinned?: 'true' | 'false'; sort?: string;
+          cursor?: string; q?: string; limit?: string };
+        return await listMemoryPage(dependencies.database.executor, p.workspace_id, q.project_id, {
+          ...(q.effective_status === undefined ? {} : { effectiveStatus: q.effective_status }),
+          ...(q.memory_type === undefined ? {} : { memoryType: q.memory_type }),
+          ...(q.origin === undefined ? {} : { origin: q.origin }),
+          ...(q.verification === undefined ? {} : { verification: q.verification }),
+          ...(q.source_kind === undefined ? {} : { sourceKind: q.source_kind }),
+          ...(q.pinned === undefined ? {} : { pinned: q.pinned === 'true' }),
+          ...(q.sort === undefined ? {} : { sort: q.sort as 'updated' | 'created' | 'importance' }),
+          ...(q.cursor === undefined ? {} : { cursor: q.cursor }),
+          ...(q.q === undefined ? {} : { query: q.q }),
+          ...(q.limit === undefined ? {} : { pageSize: Number(q.limit) }),
+        });
+      } catch (error) { return sendReadError(reply, error, request.id); }
+    });
+
   app.post('/knowledge', { schema: { params: base, body: createKnowledgeBody,
     response: { 201: commandEnvelopeSchema(commandResult) } } },
   createCommandHandler(dependencies, { commandType: 'CreateKnowledge', bodySchema: createKnowledgeBody,
@@ -355,6 +411,19 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
       return { outcome, result: outcome.result };
     } }));
 
+  const expiryBody = Type.Object({ command_id: uuid, expected_revision: rev,
+    expires_at: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]) }, strict);
+  app.post('/memories/:id/expiry', { schema: { params: item, body: expiryBody,
+    response: { 200: commandEnvelopeSchema(Type.Object({}, { additionalProperties: true })) } } },
+  createCommandHandler(dependencies, { commandType: 'SetMemoryExpiry', bodySchema: expiryBody,
+    execute: async ({ executor, params, body }) => {
+      const outcome = await setMemoryExpiryCommand(executor, {
+        workspaceId: params.workspace_id ?? '', memoryId: params.id ?? '',
+        expiresAt: body.expires_at, commandId: body.command_id,
+        expectedRevision: body.expected_revision });
+      return { outcome, result: outcome.result };
+    } }));
+
   app.get('/memory/stats', { schema: { params: base, querystring: listQuery } },
   async (request, reply) => {
     try {
@@ -376,6 +445,72 @@ export function registerInformationRoutes(app: FastifyInstance, dependencies: Ro
         finished_at: row.finished_at?.toISOString() ?? null }));
     } catch (error) { return sendReadError(reply, error, request.id); }
   });
+
+  /*
+   * 0167：自动捕获任务可观察、可重试、可取消。
+   * 状态语义固定：PENDING/RUNNING 未落定；SUCCEEDED 已写入；EMPTY 无可提取内容；
+   * FAILED 重试耗尽；CANCELLED 关闭/日限/用户取消。它们不再混成同一个 0。
+   */
+  const captureTasksQuery = Type.Object({ session_id: Type.Optional(uuid),
+    status: Type.Optional(Type.Union([Type.Literal('ALL'), Type.Literal('PENDING'),
+      Type.Literal('RUNNING'), Type.Literal('SUCCEEDED'), Type.Literal('EMPTY'),
+      Type.Literal('FAILED'), Type.Literal('CANCELLED')])),
+    limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })) }, strict);
+  const captureTaskDto = (row: {
+    id: string; kind: string; status: string; attempts: number; max_attempts: number;
+    session_id: string; trigger_message_id: string; user_message_id: string | null;
+    project_id: string | null; error_kind: string | null; last_error: string | null;
+    result: Record<string, unknown>; next_attempt_at: Date; lease_until: Date | null;
+    completed_at: Date | null; created_at: Date; updated_at: Date;
+  }) => ({ id: row.id, kind: row.kind, status: row.status, attempts: row.attempts,
+    max_attempts: row.max_attempts, session_id: row.session_id,
+    trigger_message_id: row.trigger_message_id, user_message_id: row.user_message_id,
+    project_id: row.project_id, error_kind: row.error_kind, last_error: row.last_error,
+    result: row.result, next_attempt_at: row.next_attempt_at.toISOString(),
+    lease_until: row.lease_until?.toISOString() ?? null,
+    completed_at: row.completed_at?.toISOString() ?? null,
+    created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString() });
+  app.get('/memory/capture-tasks', { schema: { params: base, querystring: captureTasksQuery } },
+    async (request, reply) => {
+      try {
+        const p = request.params as { workspace_id: string };
+        const q = request.query as { session_id?: string; status?: string; limit?: string };
+        const rows = await createRepositories(dependencies.database.executor).information
+          .listMemoryCaptureTasks(p.workspace_id, {
+            ...(q.session_id === undefined ? {} : { sessionId: q.session_id }),
+            ...(q.status === undefined ? {} : { status: q.status }),
+            ...(q.limit === undefined ? {} : { limit: Number(q.limit) }),
+          });
+        return { items: rows.map(captureTaskDto) };
+      } catch (error) { return sendReadError(reply, error, request.id); }
+    });
+
+  const captureActionBody = Type.Object({ command_id: uuid }, strict);
+  for (const action of ['retry', 'cancel'] as const) {
+    app.post(`/memory/capture-tasks/:id/${action}`, { schema: { params: item,
+      body: captureActionBody, response: { 200: commandEnvelopeSchema(
+        Type.Object({}, { additionalProperties: true })) } } },
+    async (request, reply) => {
+      try {
+        const p = request.params as { workspace_id: string; id: string };
+        const executed = action === 'retry'
+          ? await createRepositories(dependencies.database.executor).information
+            .retryMemoryCaptureTask(p.id, p.workspace_id)
+          : await createRepositories(dependencies.database.executor).information
+            .cancelMemoryCaptureTask(p.id, p.workspace_id);
+        const commandId = (request.body as { command_id: string }).command_id;
+        if (!executed) {
+          // 200 + 明确冲突：调用方按 executed 判断是否生效，不把未执行说成成功。
+          return { command_id: commandId, committed_at: new Date().toISOString(),
+            result: { executed: 'false', status: 'CONFLICT' },
+            links: { resource: `/memory/capture-tasks/${p.id}` } };
+        }
+        return { command_id: commandId, committed_at: new Date().toISOString(),
+          result: { executed: 'true', status: action === 'retry' ? 'PENDING' : 'CANCELLED' },
+          links: { resource: `/memory/capture-tasks/${p.id}` } };
+      } catch (error) { return sendReadError(reply, error, request.id); }
+    });
+  }
 
   const consolidateBody = Type.Object({ command_id: uuid }, strict);
   app.post('/memory/maintenance/consolidate', { schema: { params: base, body: consolidateBody,

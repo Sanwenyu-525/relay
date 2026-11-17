@@ -105,6 +105,42 @@ export class AssistMemoryRepository {
       where session_id = ${sessionId} and status in ('PENDING', 'RUNNING')`.execute(this.db)).rows[0];
   }
 
+  /** 0167：捕获屏障的持久延迟标记；存在时不再为同一边界重复建请求。 */
+  async deferredAutomaticRequest(sessionId: string): Promise<AssistMemoryRequestRow | undefined> {
+    return (await sql<AssistMemoryRequestRow>`select * from assist_memory_requests
+      where session_id = ${sessionId} and reason = 'AUTO' and status = 'FAILED'
+        and error_code = 'MEMORY_CAPTURE_PENDING'
+      order by created_at desc limit 1`.execute(this.db)).rows[0];
+  }
+
+  async deferAutomaticRequest(id: string): Promise<boolean> {
+    const result = await sql`update assist_memory_requests set status = 'FAILED',
+      error_code = 'MEMORY_CAPTURE_PENDING', updated_at = now()
+      where id = ${id} and status = 'PENDING'`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n) > 0;
+  }
+
+  /**
+   * 捕获任务全部终态后，把延迟的自动压缩重新放回队列。
+   *
+   * 只恢复「覆盖消息范围内已无 PENDING/RUNNING 捕获」的请求；仍有未落定任务时保持
+   * FAILED 标记，等下一次捕获 tick 再判定。返回恢复条数。
+   */
+  async resumeDeferredAutomaticRequests(sessionId?: string): Promise<number> {
+    const scope = sessionId === undefined ? sql`` : sql`and j.session_id = ${sessionId}`;
+    const result = await sql`update assist_memory_requests j set status = 'PENDING',
+      error_code = null, updated_at = now()
+      where j.reason = 'AUTO' and j.status = 'FAILED'
+        and j.error_code = 'MEMORY_CAPTURE_PENDING' ${scope}
+        and not exists (
+          select 1 from memory_capture_tasks t
+          where t.session_id = j.session_id and t.status in ('PENDING', 'RUNNING')
+            and (to_jsonb(t.trigger_message_id::text) <@ j.source_message_ids
+              or to_jsonb(t.user_message_id::text) <@ j.source_message_ids)
+        )`.execute(this.db);
+    return Number(result.numAffectedRows ?? 0n);
+  }
+
   async insertRequest(input: { id: string; workspaceId: string; sessionId: string;
     sessionRevision: bigint; memoryRevision: bigint; settingsRevision: bigint;
     authorityRevision: bigint; contextRevision: bigint;

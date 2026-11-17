@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { buildTsQuery, tokenizeSearchText } from '../shared/search-tokens.js';
+
 /**
  * 长期记忆的纯领域模型（0164）。
  *
@@ -99,26 +101,7 @@ export function memoryContentHash(title: string, text: string): string {
  * `limit` 是索引与查询的硬上限，避免把整段正文变成倒排词表。
  */
 export function memoryTokens(value: string, limit: number): readonly string[] {
-  const terms: string[] = [];
-  const seen = new Set<string>();
-  const push = (term: string): boolean => {
-    if (term === '' || seen.has(term)) return false;
-    seen.add(term); terms.push(term);
-    return terms.length >= limit;
-  };
-  const text = value.slice(0, 4000).normalize('NFKC').toLowerCase();
-  for (const token of text.match(/\p{Script=Han}+|(?:(?!\p{Script=Han})[\p{L}\p{N}_./:@-]){2,}/gu) ?? []) {
-    if (/^\p{Script=Han}+$/u.test(token)) {
-      if (token.length === 1) {
-        if (push(token)) break;
-        continue;
-      }
-      for (let i = 0; i < token.length - 1; i++) {
-        if (push(token.slice(i, i + 2))) return terms;
-      }
-    } else if (push(token.slice(0, 60))) return terms;
-  }
-  return terms;
+  return tokenizeSearchText(value, limit);
 }
 
 export const MEMORY_TITLE_TOKEN_LIMIT = 64;
@@ -147,11 +130,7 @@ export function memoryQueryTokens(query: string): readonly string[] {
  * 避免把用户输入拼成 tsquery 操作符。没有任何可用 token 时返回 null。
  */
 export function memoryTsQuery(tokens: readonly string[]): string | null {
-  const safe = [...new Set(tokens.flatMap((token) => token.split(/[^\p{L}\p{N}_]+/gu))
-    .map((token) => token.trim())
-    .filter((token) => /\p{L}|\p{N}/u.test(token)))];
-  if (safe.length === 0) return null;
-  return safe.join(' | ');
+  return buildTsQuery(tokens);
 }
 
 export interface MemoryTypeHint {

@@ -53,19 +53,18 @@ describe("整改 2026-09-28 UI 共享问题", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       const url = String(input);
-      if (url === `${base}/knowledge`) return response(200, []);
+      if (url === `${base}/knowledge` || url.startsWith(`${base}/knowledge/page`)) return response(200, url.includes("/page") ? { items: [], next_cursor: null } : []);
       throw new Error(`unexpected ${url}`);
     }));
     const mounted = await mountWorkbench("/knowledge");
     unmount = mounted.unmount;
     expect(mounted.wrapper.get('[data-testid="knowledge-tab-KNOWLEDGE"]').text()).toBe("资料");
-    expect(mounted.wrapper.get('[data-testid="knowledge-tab-MEMORY"]').text()).toBe("记忆");
     expect(mounted.wrapper.get('[data-testid="knowledge-tab-DECISION"]').text()).toBe("决定");
     expect(mounted.wrapper.get('[data-testid="knowledge-tab-RULE"]').text()).toBe("规则");
     expect(mounted.wrapper.text()).not.toContain("Knowledge 资料");
     const create = mounted.wrapper.get('[data-testid="knowledge-create"]');
-    expect(create.text()).toBe("新建");
-    expect(create.attributes("class")).toContain("secondary-button");
+    expect(create.text()).toBe("新建资料");
+    expect(create.attributes("class")).toContain("primary-button");
     await create.trigger("click");
     await flush();
     expect(mounted.wrapper.get('[data-testid="knowledge-form"] h2').text()).toBe("新建资料");

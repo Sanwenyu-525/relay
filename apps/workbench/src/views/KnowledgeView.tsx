@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { BookOpen, Brain, List, Scale, Search, ShieldCheck } from "lucide-react";
+
 import ProjectNav from "../components/ProjectNav";
 import PageHeader from "../components/PageHeader";
 import AppDialog from "../components/AppDialog";
@@ -10,22 +10,29 @@ import DecisionReviewPanel from "../components/DecisionReviewPanel";
 import SafeMarkdown from "../components/SafeMarkdown";
 import ProjectKnowledgeGuide from "../components/ProjectKnowledgeGuide";
 import WebImportPanel from "../components/WebImportPanel";
+import KnowledgeImportPanel from "../components/KnowledgeImportPanel";
+import KnowledgeOrganizationPanel from "../components/KnowledgeOrganizationPanel";
+import KnowledgeFilters from "../components/KnowledgeFilters";
+import KnowledgeKindTabs from "../components/KnowledgeKindTabs";
 import { MemoryProvenancePanel } from "../components/MessageMemorySources";
 import { escalateFeedback, openUndoFeedback } from "../components/Feedback";
 import {
   createCommandId, RelayApiError, RelayTransportError,
   type RelayApiClient, type RelayCommandEnvelope, type RelayDecision,
-  type RelayInformationKind, type RelayKnowledge, type RelayKnowledgeSource, type RelayKnowledgeVersion,
+  type RelayInformationKind, type RelayKnowledge, type RelayKnowledgeCollection,
+  type RelayKnowledgeHealth, type RelayKnowledgeListItem, type RelayKnowledgeOverview,
+  type RelayKnowledgePageQuery, type RelayKnowledgeSource, type RelayKnowledgeTag,
+  type RelayKnowledgeVersion,
   type RelayMemory, type RelayMemoryEffectiveStatus, type RelayMemoryRevision, type RelayRule, type RelayRuleEnforcement,
   type RelayRuleStrength, type RelayRuleVersion, type RelaySearchItem
 } from "../api/relayClient";
 import { describeLiveError, needsReceiptCheck } from "../lib/liveErrors";
 import { useRelayConnection } from "../lib/relayConnection";
+import { formatReadableDateTime, useDisplayPreferences } from "../lib/displayPreferences";
 import { clearDraftGuard, setDraftGuard, type DraftGuard } from "../lib/draftGuard";
-import { handleTabListKeyDown } from "../lib/tabNavigation";
 import { useProjectTaskPages } from "../lib/useProjectTaskPages";
 import "./KnowledgeView.css";
-import { Button } from "../ui";
+import { Button, Input } from "../ui";
 
 type InformationRow = RelayKnowledge | RelayMemory | RelayDecision | RelayRule;
 type Scope = "WORKSPACE" | "PROJECT" | "TASK";
@@ -54,20 +61,16 @@ type SubmitOutcome =
   | { readonly kind: "REJECTED"; readonly error: unknown }
   | { readonly kind: "UNCERTAIN" };
 
+/**
+ * 知识库只保留三类：资料 / 决定 / 规则（AGENTS.md 与 0167 的边界决定）。
+ * Memory 已迁到独立 `/memory` 页与 V2 数据模型；这里不再提供记忆入口，
+ * 但旧代码路径保留可读（routeKind=MEMORY 会被解析成 KNOWLEDGE，不会读到记忆）。
+ */
 const kinds: readonly { kind: RelayInformationKind; label: string; noun: string }[] = [
   { kind: "KNOWLEDGE", label: "资料", noun: "资料" },
-  { kind: "MEMORY", label: "记忆", noun: "记忆" },
   { kind: "DECISION", label: "决定", noun: "决定" },
   { kind: "RULE", label: "规则", noun: "规则" }
 ];
-
-/** 列表行的类型标记：同一形状在四种类型里各用一次，避免每行都写一遍类型名。 */
-function kindIcon(kind: RelayInformationKind) {
-  if (kind === "MEMORY") return <Brain />;
-  if (kind === "DECISION") return <Scale />;
-  if (kind === "RULE") return <ShieldCheck />;
-  return <BookOpen />;
-}
 
 /**
  * 规则没有标题，但规则键是服务端身份（可能由服务端生成成 `rule-<uuid>`），
@@ -90,21 +93,20 @@ function statusLabel(status: string): string {
   return status === "ACTIVE" ? "有效" : status === "SUPERSEDED" ? "已被替代" : "已停用或归档";
 }
 
+/** 检索命中字段是服务端事实枚举（title/text/tag/collection），界面只做中文标签映射。 */
+const matchedFieldLabels: Record<string, string> = {
+  title: "标题", text: "正文", tag: "标签", collection: "集合"
+};
+function matchedFieldsLabel(fields: readonly string[]): string {
+  return fields.map((field) => matchedFieldLabels[field] ?? field).join("、");
+}
+
 /**
  * 记忆的筛选维度：只描述服务端算出的有效状态，不新增可写状态。
  *
  * 「有效」只表示未停用且未到期，不保证项目/权限可用，也不保证进入模型 Context。
  */
 type MemoryEffectiveFilter = RelayMemoryEffectiveStatus | "ALL";
-
-const memoryFilterOptions: readonly { readonly value: MemoryEffectiveFilter; readonly label: string }[] = [
-  { value: "ALL", label: "全部" },
-  { value: "ACTIVE", label: "有效" },
-  { value: "STALE", label: "可能过时" },
-  { value: "SUPERSEDED", label: "已被替代" },
-  { value: "EXPIRED", label: "已过期" },
-  { value: "RETIRED", label: "已停用" }
-];
 
 const memoryEffectiveLabels: Record<RelayMemoryEffectiveStatus, string> = {
   ACTIVE: "有效", EXPIRED: "已过期", RETIRED: "已停用", SUPERSEDED: "已被替代", STALE: "可能过时"
@@ -118,21 +120,7 @@ function memoryStatusText(memory: RelayMemory): string {
   return memory.effectiveStatus === null ? "状态待核对" : memoryEffectiveLabels[memory.effectiveStatus];
 }
 
-function memoryFilterLabel(filter: MemoryEffectiveFilter): string {
-  return memoryFilterOptions.find((option) => option.value === filter)?.label ?? filter;
-}
-
-/** 记忆行同时给出有效状态与原确认事实（有效期），两者职责分开。 */
-function memoryRowSummary(memory: RelayMemory): string {
-  return `${memoryStatusText(memory)} · ${memory.origin === "AUTO_CAPTURE" ? `自动记住${memorySourceKindLabel(memory.sourceKind)} · ` : ""}当前 v${memory.currentVersion} · ${rowScopeLabel(memory)} · ${
-    memory.expiresAt === null ? "无到期时间" : `到期 ${memory.expiresAt}`}`;
-}
-
-/**
- * DEV-0042：自动记住的条目要看出「这句话是谁说的」——
- * 用户原话可以说成用户的事实，模型观察（可能含工具结果或网页正文的转述）只是观察。
- */
-export function memorySourceKindLabel(kind: RelayMemory["sourceKind"]): string {
+function memorySourceKindLabel(kind: RelayMemory["sourceKind"]): string {
   if (kind === "USER_STATEMENT") return "（用户原话）";
   if (kind === "MODEL_OBSERVATION") return "（模型观察）";
   if (kind === "MANUAL") return "（人工保存）";
@@ -279,14 +267,49 @@ export default function KnowledgeView() {
   const routeSearch = routeQuery.get("q") ?? "";
   const projectId = id ?? null;
   const connection = useRelayConnection();
+  const { timeZone } = useDisplayPreferences();
   const client = connection.client;
   const live = connection.mode === "live";
   const [kind, setKind] = useState<RelayInformationKind>(routeKind);
   const tabId = useId();
   const tabListRef = useRef<HTMLElement>(null);
-  const libraryRef = useRef<HTMLDetailsElement>(null);
+  const libraryRef = useRef<HTMLElement>(null);
   const focusKindAfterRead = useRef<RelayInformationKind | null>(null);
   const [rows, setRows] = useState<readonly InformationRow[]>([]);
+  /**
+   * 0167 知识库读取面：分页列表、概览、集合、标签、健康检查。
+   *
+   * 这些状态只由服务端事实填充；知识列表走 `/knowledge/page`（游标 + 服务端排序/过滤），
+   * 不再一次读取全表。决定与规则仍走既有列表端点。
+   */
+  const [pageItems, setPageItems] = useState<readonly RelayKnowledgeListItem[]>([]);
+  const [pageCursor, setPageCursor] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [pageLoadingMore, setPageLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [pageMoreError, setPageMoreError] = useState<string | null>(null);
+  const [pageNonce, setPageNonce] = useState(0);
+  const pageItemsRef = useRef<readonly RelayKnowledgeListItem[]>([]);
+  pageItemsRef.current = pageItems;
+  const pageRequest = useRef(0);
+  const [overview, setOverview] = useState<RelayKnowledgeOverview | null>(null);
+  const [collections, setCollections] = useState<readonly RelayKnowledgeCollection[]>([]);
+  const [tags, setTags] = useState<readonly RelayKnowledgeTag[]>([]);
+  const [health, setHealth] = useState<RelayKnowledgeHealth | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<"ALL" | "WORKSPACE" | "PROJECT">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "ARCHIVED" | "ALL">("ACTIVE");
+  const [collectionFilter, setCollectionFilter] = useState<string | null>(null);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<"UPDATED_DESC" | "CREATED_DESC" | "TITLE_ASC">("UPDATED_DESC");
+  const [organizeOpen, setOrganizeOpen] = useState(false);
+  const [organizeError, setOrganizeError] = useState<string | null>(null);
+  const [collectionName, setCollectionName] = useState("");
+  const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
+  const [collectionRevision, setCollectionRevision] = useState<string | null>(null);
+  const [tagName, setTagName] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(routeItem);
   const [selected, setSelected] = useState<InformationRow | null>(null);
   /** 记忆页签的有效状态筛选：只影响 Memory 的 GET，不改其他类型请求。 */
@@ -490,11 +513,11 @@ export default function KnowledgeView() {
   }
 
   /**
-   * 统一读取：列表 + 详情 + 版本。
+   * 统一读取：详情 + 版本。
    *
-   * `nextFilter` 只对 MEMORY 生效并原样交给服务端；`dropUnmatchedSelection` 用于命令成功后的
-   * 定向重读——对象可能已不符合当前筛选（例如停用后不再属于「有效」），此时按列表事实把
-   * 选中项落到剩余项，而不是继续展示一条已经不在当前列表里的详情。
+   * 知识库列表已改为服务端游标分页（见 loadKnowledgePage），这里不再为 KNOWLEDGE 读取全表；
+   * 选中项默认落在当前页第一行，但命令成功后的定向重读必须保留原对象，避免把刚保存的版本
+   * 换成同页别的一条。`dropUnmatchedSelection` 用于对象已不符合当前筛选时的落位。
    */
   async function load(nextKind = kind, nextId = selectedId, activeClient = client, activeProject = projectId,
     nextFilter: MemoryEffectiveFilter = memoryFilter, dropUnmatchedSelection = false): Promise<void> {
@@ -508,20 +531,37 @@ export default function KnowledgeView() {
         return;
       }
       if (activeClient === null) throw new Error("本机 API 连接已失效，请重新连接。");
-      const list = nextKind === "KNOWLEDGE" ? await activeClient.getKnowledge(activeProject)
-        : nextKind === "MEMORY" ? await activeClient.getMemories(activeProject, nextFilter)
-          : nextKind === "DECISION" ? await activeClient.getDecisions(activeProject)
-            : await activeClient.getRules(activeProject);
+
+      if (nextKind === "KNOWLEDGE") {
+        const items = pageItemsRef.current;
+        const present = nextId !== null && items.some((row) => row.id === nextId);
+        const detailId = nextId !== null && (!dropUnmatchedSelection || present)
+          ? nextId : items[0]?.id ?? null;
+        if (detailId === null) {
+          if (version === readVersion.current) { setSelectedId(null); setSelected(null); setKnowledgeVersions([]); }
+          return;
+        }
+        const [detail, versions] = await Promise.all([activeClient.getKnowledgeDetail(detailId),
+          activeClient.getKnowledgeVersions(detailId)]);
+        if (version !== readVersion.current) return;
+        setRows([]);
+        setSelectedId(detailId); setSelected(detail); setKnowledgeVersions(versions);
+        // 命令后重读：列表与概览也必须跟上（新版本、归档、标签都可能改变行摘要）。
+        // 回执确认的目标可能还没出现在当前页（例如刚创建的对象），也要触发一次列表重读。
+        if (items.length > 0 || dropUnmatchedSelection) setPageNonce((value) => value + 1);
+        return;
+      }
+
+      const list = nextKind === "MEMORY" ? await activeClient.getMemories(activeProject, nextFilter)
+        : nextKind === "DECISION" ? await activeClient.getDecisions(activeProject)
+          : await activeClient.getRules(activeProject);
       const detailId = nextId !== null && (!dropUnmatchedSelection || list.some((row) => row.id === nextId))
         ? nextId : list[0]?.id ?? null;
       let detail: InformationRow | null = null;
-      let versions: readonly RelayKnowledgeVersion[] = [];
       let revisions: readonly RelayMemoryRevision[] = [];
       let rules: readonly RelayRuleVersion[] = [];
       if (detailId !== null) {
-        if (nextKind === "KNOWLEDGE") {
-          [detail, versions] = await Promise.all([activeClient.getKnowledgeDetail(detailId), activeClient.getKnowledgeVersions(detailId)]);
-        } else if (nextKind === "MEMORY") {
+        if (nextKind === "MEMORY") {
           [detail, revisions] = await Promise.all([activeClient.getMemory(detailId), activeClient.getMemoryRevisions(detailId)]);
         } else if (nextKind === "DECISION") {
           detail = await activeClient.getDecision(detailId);
@@ -531,7 +571,7 @@ export default function KnowledgeView() {
       }
       if (version !== readVersion.current) return;
       setRows(list); setSelectedId(detailId); setSelected(detail);
-      setKnowledgeVersions(versions); setMemoryRevisions(revisions); setRuleVersions(rules);
+      setKnowledgeVersions([]); setMemoryRevisions(revisions); setRuleVersions(rules);
     } catch (caught) {
       if (version === readVersion.current) {
         setRows([]); setSelected(null); setKnowledgeVersions([]); setMemoryRevisions([]); setRuleVersions([]);
@@ -542,6 +582,178 @@ export default function KnowledgeView() {
     }
   }
 
+  function knowledgeQuery(cursor: string | null): RelayKnowledgePageQuery {
+    const trimmed = query.trim();
+    return {
+      projectId, scope: scopeFilter, status: statusFilter,
+      ...(trimmed === "" ? {} : { q: trimmed }),
+      collectionId: collectionFilter, tagId: tagFilter, sort: sortOrder,
+      limit: 25, cursor,
+    };
+  }
+
+  /** 首页（append=false）与续页共用同一份查询条件；旧请求按序号丢弃，不写回新查询。 */
+  async function loadKnowledgePage(cursor: string | null = null, append = false,
+    activeClient = client): Promise<void> {
+    if (activeClient === null || !live) return;
+    const request = ++pageRequest.current;
+    if (append) setPageLoadingMore(true); else setPageLoading(true);
+    setPageError(null); setPageMoreError(null);
+    try {
+      const page = await activeClient.getKnowledgePage(knowledgeQuery(cursor));
+      if (request !== pageRequest.current) return;
+      setPageItems((current) => {
+        if (!append) return page.items;
+        const seen = new Set(current.map((item) => item.id));
+        const merged = [...current];
+        // 同一页内也可能重复（游标重叠）；逐条去重，不能只按已有集合过滤。
+        for (const item of page.items) {
+          if (seen.has(item.id)) continue;
+          seen.add(item.id); merged.push(item);
+        }
+        return merged;
+      });
+      setPageCursor(page.nextCursor);
+    } catch (caught) {
+      if (request !== pageRequest.current) return;
+      if (append) {
+        // 续页失权：不能把已读的第一页当成仍然可见的许可结果留着。
+        if (isAccessRevoked(caught)) {
+          setPageItems([]); setPageCursor(null);
+          setPageError("当前范围的知识已无权读取；已清空列表，请核对权限后重试。");
+        } else setPageMoreError(describeLiveError(caught).message);
+      } else {
+        setPageItems([]); setPageCursor(null);
+        setPageError(isAccessRevoked(caught)
+          ? "当前范围的知识已无权读取；已清空列表，请核对权限后重试。"
+          : describeLiveError(caught).message);
+      }
+    } finally {
+      if (request === pageRequest.current) { setPageLoading(false); setPageLoadingMore(false); }
+    }
+  }
+
+  /**
+   * 概览/集合/标签是三个独立的服务端事实：一个读失败不能抹掉其余已经读到的结果，
+   * 也不能用 0 冒充「没有」。overview 为 null 时界面直接不显示统计。
+   */
+  async function loadLibraryFacts(activeClient = client): Promise<void> {
+    if (activeClient === null || !live) return;
+    const [overviewResult, collectionsResult, tagsResult] = await Promise.allSettled([
+      activeClient.getKnowledgeOverview(projectId),
+      activeClient.listKnowledgeCollections(projectId),
+      activeClient.listKnowledgeTags(projectId),
+    ]);
+    if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
+    else setOverview(null);
+    if (collectionsResult.status === "fulfilled") setCollections(collectionsResult.value);
+    else setCollections([]);
+    if (tagsResult.status === "fulfilled") setTags(tagsResult.value);
+    else setTags([]);
+  }
+
+  // 列表：查询条件（含输入词）变化后重读第一页；输入词加 250ms 防抖。
+  useEffect(() => {
+    if (kind !== "KNOWLEDGE" || !live || client === null) return;
+    const timer = setTimeout(() => { void loadKnowledgePage(null, false); },
+      query.trim() === "" ? 0 : 250);
+    return () => { clearTimeout(timer); };
+  }, [kind, client, connection.mode, projectId, scopeFilter, statusFilter,
+    collectionFilter, tagFilter, sortOrder, query, pageNonce]);
+
+  // 概览与组织事实只在知识库页签读取；命令完成（pageNonce）后一起刷新。
+  useEffect(() => {
+    if (kind !== "KNOWLEDGE" || !live || client === null) return;
+    void loadLibraryFacts();
+  }, [kind, client, connection.mode, projectId, pageNonce]);
+
+  // 集合/标签的写入只走既有命令；成功后重读事实，失败保留原值并说明原因。
+  async function saveCollection(): Promise<void> {
+    if (client === null) return;
+    const name = collectionName.trim();
+    if (name === "") { setOrganizeError("集合名称不能为空。"); return; }
+    setOrganizeError(null);
+    try {
+      if (editingCollectionId === null || collectionRevision === null) {
+        await client.createKnowledgeCollection({ commandId: createCommandId(),
+          projectId, name });
+      } else {
+        await client.updateKnowledgeCollection({ id: editingCollectionId,
+          commandId: createCommandId(), expectedRevision: collectionRevision, name });
+      }
+      setCollectionName(""); setEditingCollectionId(null); setCollectionRevision(null);
+      setPageNonce((value) => value + 1);
+      await loadLibraryFacts();
+      setActionMessage(editingCollectionId === null ? `已创建集合「${name}」。` : `已更新集合「${name}」。`);
+    } catch (caught) { setOrganizeError(describeLiveError(caught).message); }
+  }
+
+  async function removeCollection(collection: RelayKnowledgeCollection): Promise<void> {
+    if (client === null) return;
+    setOrganizeError(null);
+    try {
+      await client.deleteKnowledgeCollection({ id: collection.id, commandId: createCommandId() });
+      if (collectionFilter === collection.id) setCollectionFilter(null);
+      setActionMessage(`已删除集合「${collection.name}」（只解除组织关系，不删除知识正文）。`);
+      setPageNonce((value) => value + 1);
+      await loadLibraryFacts();
+    } catch (caught) { setOrganizeError(describeLiveError(caught).message); }
+  }
+
+  async function saveTag(): Promise<void> {
+    if (client === null) return;
+    const name = tagName.trim();
+    if (name === "") { setOrganizeError("标签不能为空。"); return; }
+    setOrganizeError(null);
+    try {
+      const existing = tags.find((tag) => tag.name.toLowerCase() === name.toLowerCase()) ?? null;
+      if (existing === null) {
+        await client.createKnowledgeTag({ commandId: createCommandId(), name });
+      } else {
+        await client.renameKnowledgeTag({ id: existing.id, commandId: createCommandId(), name });
+      }
+      setTagName("");
+      setActionMessage(tags.some((tag) => tag.name.toLowerCase() === name.toLowerCase())
+        ? `已更新标签「${name}」。` : `已创建标签「${name}」。`);
+      setPageNonce((value) => value + 1);
+      await loadLibraryFacts();
+    } catch (caught) { setOrganizeError(describeLiveError(caught).message); }
+  }
+
+  async function removeTag(tag: RelayKnowledgeTag): Promise<void> {
+    if (client === null) return;
+    setOrganizeError(null);
+    try {
+      await client.deleteKnowledgeTag({ id: tag.id, commandId: createCommandId() });
+      if (tagFilter === tag.id) setTagFilter(null);
+      setActionMessage(`已删除标签「${tag.name}」。`);
+      setPageNonce((value) => value + 1);
+      await loadLibraryFacts();
+    } catch (caught) { setOrganizeError(describeLiveError(caught).message); }
+  }
+
+  // 首页读回后尚未选中任何知识：落到第一行；已有选中项（含路由 item）不覆盖。
+  useEffect(() => {
+    if (kind !== "KNOWLEDGE" || pageLoading || pageItems.length === 0) return;
+    if (selectedId !== null) return;
+    const first = pageItems[0];
+    if (first === undefined) return;
+    void load("KNOWLEDGE", first.id);
+  }, [kind, pageItems, pageLoading]);
+
+  // 健康检查按需读取：不做常驻扫描，用户点开才查。
+  useEffect(() => {
+    if (!healthOpen || client === null || !live || kind !== "KNOWLEDGE") return;
+    let active = true;
+    setHealthError(null);
+    void client.getKnowledgeHealth(projectId).then((result) => {
+      if (active) setHealth(result);
+    }).catch((caught: unknown) => {
+      if (active) { setHealth(null); setHealthError(describeLiveError(caught).message); }
+    });
+    return () => { active = false; };
+  }, [healthOpen, client, connection.mode, projectId, kind, pageNonce]);
+
   useEffect(() => {
     contextVersion.current++;
     readVersion.current++;
@@ -549,6 +761,10 @@ export default function KnowledgeView() {
     pendingRef.current = null;
     setPendingCommand(null); setSubmitting(false); setKind(routeKind); setSelectedId(routeItem); setSelected(null); setRows([]);
     setMemoryFilter("ALL");
+    setPageItems([]); setPageCursor(null); setPageError(null); setPageMoreError(null);
+    setOverview(null); setCollections([]); setTags([]); setHealth(null); setHealthOpen(false);
+    setScopeFilter("ALL"); setStatusFilter("ACTIVE"); setCollectionFilter(null); setTagFilter(null);
+    setSortOrder("UPDATED_DESC"); setImportOpen(false); setOrganizeOpen(false); setOrganizeError(null);
     setActionError(null); setActionMessage(null); setFormOpen(false);
     setGuideOpen(false);
     setQuery(routeSearch);
@@ -568,7 +784,7 @@ export default function KnowledgeView() {
     setSearching(true);
     try {
       const page = await client.searchInformation({
-        q: searchQuery, projectId, types: ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"], limit: 20
+        q: searchQuery, projectId, types: [kind], limit: 20
       });
       if (version !== searchVersion.current) return;
       setSearchItems(appendSearchItems([], page.items));
@@ -596,7 +812,7 @@ export default function KnowledgeView() {
     setLoadingMore(true); setMoreError(null);
     try {
       const page = await client.searchInformation({
-        q: searchTerm.current, projectId, types: ["KNOWLEDGE", "MEMORY", "DECISION", "RULE"], limit: 20, cursor
+        q: searchTerm.current, projectId, types: [kind], limit: 20, cursor
       });
       if (version !== searchVersion.current) return;
       setSearchItems((current) => appendSearchItems(current, page.items));
@@ -620,12 +836,15 @@ export default function KnowledgeView() {
     moreBusy.current = false; setLoadingMore(false);
     const trimmed = query.trim();
     searchTerm.current = trimmed;
+    // 知识的搜索由 `/knowledge/page` 承担（标题/正文/标签/集合/来源 + 相关性排序）；
+    // 这里只服务决定与规则的既有搜索，避免同一输入打两次不同语义的请求。
+    if (kind !== "DECISION" && kind !== "RULE") { setSearching(false); return; }
     if (!live || trimmed === "") { setSearching(false); return; }
     if (trimmed.length > 200) { setSearchError("搜索词不能超过 200 个字符。"); setSearching(false); return; }
     setSearching(true);
     const timer = setTimeout(() => { void runSearch(version, trimmed); }, 250);
     return () => { clearTimeout(timer); searchVersion.current++; };
-  }, [query, client, connection.mode, projectId]);
+  }, [query, client, connection.mode, projectId, kind]);
 
   function switchKind(next: RelayInformationKind) {
     if (pendingRef.current !== null || kind === next) return;
@@ -654,18 +873,6 @@ export default function KnowledgeView() {
    *
    * 旧结果由 `readVersion` 守卫丢弃；筛选不是本地过滤，也不改变任何命令状态。
    */
-  function changeMemoryFilter(next: MemoryEffectiveFilter) {
-    if (pendingRef.current !== null || kind !== "MEMORY" || next === memoryFilter) return;
-    requestDraftTransition(() => {
-      setMemoryFilter(next);
-      setSelectedId(null); setSelected(null); setRows([]); setFormOpen(false);
-      setKnowledgeVersions([]); setMemoryRevisions([]); setRuleVersions([]);
-      setActionError(null); setActionMessage(null);
-      clearDraft();
-      void load(kind, null, client, projectId, next);
-    });
-  }
-
   function openSearchItem(item: RelaySearchItem) {
     if (pendingRef.current !== null) return;
     requestDraftTransition(() => {
@@ -1122,7 +1329,9 @@ export default function KnowledgeView() {
       // 收尾语义与直接成功一致（#109）：生命周期恢复只收口 pending 与对象状态，
       // 不清未参与本次命令的新建草稿；表单类命令的确认成功仍按原语义收起草稿。
       if (pending.resetComposer) { setFormOpen(false); clearDraft(); }
-      await load(kind, confirmed.id, client, projectId, memoryFilter, true);
+      // 回执确认的对象是服务端已提交的确切目标，即使还不在当前页也要直接读取；
+      // 列表刷新由 load 内的 pageNonce 触发，不能先因“不在当前页”丢掉目标。
+      await load(kind, confirmed.id, client, projectId, memoryFilter, false);
     } catch (caught) {
       if (context !== contextVersion.current) return;
       setActionError(caught instanceof RelayApiError && caught.problem.code === "COMMAND_NOT_FOUND"
@@ -1139,7 +1348,6 @@ export default function KnowledgeView() {
     if (document.activeElement !== document.body && !tabListRef.current?.contains(document.activeElement)) {
       focusKindAfterRead.current = null; return;
     }
-    if (reading && libraryRef.current) libraryRef.current.open = true;
     tabListRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
     if (!loading && !refreshing) focusKindAfterRead.current = null;
   }, [kind, reading, loading, refreshing]);
@@ -1243,133 +1451,254 @@ export default function KnowledgeView() {
    * 类型页签在两种形态下都常驻：阅读形态此前把它连同「新建」一起折进「资料列表」，
    * 首屏只剩两枚折叠三角，读起来既不知道现在在哪个类型里，也回不到列表。
    */
-  const kindNav = <nav ref={tabListRef} className="knowledge-tabs" role="tablist" aria-label="资料类型" onKeyDown={handleTabListKeyDown}>{kinds.map((item) =>
-    <button key={item.kind} type="button" className={`subnav-item${kind === item.kind ? " subnav-item--active" : ""}`}
-      role="tab" id={`${tabId}-tab-${item.kind}`} aria-controls={`${tabId}-panel`} aria-selected={kind === item.kind}
-      tabIndex={kind === item.kind ? 0 : -1} disabled={pendingCommand !== null}
-      data-testid={`knowledge-tab-${item.kind}`} onClick={() => switchKind(item.kind)}>{item.label}</button>)}</nav>;
-  const library = <section className="surface-panel knowledge-list">
-    <div role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`} tabIndex={0}>
-    <div className="section-heading-row"><h2>{currentNoun}</h2>
-      <Button variant="secondary" data-testid="knowledge-create" disabled={pendingCommand !== null} onClick={() => openForm(false)}>新建</Button></div>
-    {/* 有效状态筛选只作用于记忆，由服务端按数据库时间裁决；不新增一级导航，也不本地过滤。 */}
-    {kind === "MEMORY" && <div className="knowledge-memory-filter">
-      <div className="segmented" role="group" aria-label="按有效状态筛选记忆">{memoryFilterOptions.map((option) =>
-        <button key={option.value} type="button"
-          className={`segmented-option${memoryFilter === option.value ? " segmented-option--selected" : ""}`}
-          aria-pressed={memoryFilter === option.value} disabled={pendingCommand !== null}
-          data-testid={`knowledge-memory-filter-${option.value}`}
-          onClick={() => changeMemoryFilter(option.value)}>{option.label}</button>)}</div>
-      <p className="helper-text">「有效」只表示未停用且未到期，不保证进入模型 Context。</p>
-    </div>}
-    {/* 读取失败不能呈现为「还没有」：同一文件的详情空态已有正确的 error 分支（见下方
-        data-testid="knowledge-detail-empty-state"），列表这里此前缺失，会把失败说成没有数据。 */}
-    {/* 列表空态按共享规格区分三种事实：首装无资料、项目范围为空、筛选无匹配、读取失败（见下方 error 分支）不互相冒充。 */}
-    {!loading && error === null && rows.length === 0 && (kind === "MEMORY" && memoryFilter !== "ALL"
-      ? <EmptyState size="compact" testId="knowledge-memory-filter-empty"
-        title={`当前筛选没有${memoryFilterLabel(memoryFilter)}的记忆`}
-        description={`筛选由服务端按数据库时间判定，「${memoryFilterLabel(memoryFilter)}」下没有命中不代表工作空间没有记忆。切换「全部」可查看所有记忆。`}
-        actions={<Button variant="secondary" data-testid="knowledge-memory-filter-clear"
-          onClick={() => changeMemoryFilter("ALL")}>查看全部记忆</Button>} />
-      : projectId
-        ? <EmptyState size="compact" testId="knowledge-list-empty" title={`当前项目还没有${currentNoun}`}
-          description={`项目范围只显示归属当前项目的${currentNoun}，工作空间范围的${currentNoun}不会出现在这里。可以点「新建」添加第一条，或到工作空间资料查看已有内容。`} />
-        : <EmptyState size="compact" testId="knowledge-list-empty" title={`还没有${currentNoun}`}
-          description={`当前工作空间还没有收录${currentNoun}。${currentNoun}用来沉淀跨任务长期有效的事实与约定；点击「新建」添加第一条，保存后才会出现在这里。`} />)}
-    {!loading && error !== null && rows.length === 0 && <p className="helper-text" role="status">当前范围的{currentNoun}没有读到，请查看上方错误并重试；这不代表当前范围确实没有{currentNoun}。</p>}
-    {rows.map((row) => <button key={row.id} type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
-      disabled={pendingCommand !== null} onClick={() => selectRow(row.id)}>
-      <span className="knowledge-row-icon" aria-hidden="true">{kindIcon(kind)}</span>
-      <span className="knowledge-row-main"><strong>{rowTitle(row)}</strong><small>{kind === "MEMORY"
-        ? memoryRowSummary(row as RelayMemory)
-        : `${statusLabel(row.status)} · 当前 v${row.currentVersion} · ${rowScopeLabel(row)}`}</small></span></button>)}
-    </div>
+  const kindNav = <KnowledgeKindTabs
+    kinds={kinds}
+    kind={kind}
+    pending={pendingCommand !== null}
+    tabId={tabId}
+    tabListRef={tabListRef}
+    onSwitch={(next) => switchKind(next as RelayInformationKind)}
+  />;
+
+
+  const knowledgeRowCount = pageItems.length;
+  const listTotal = kind === "KNOWLEDGE" ? knowledgeRowCount : rows.length;
+  const detailItem = selected;
+
+  function knowledgeSourceLabel(sourceKind: string): string {
+    return sourceKind === "ARTIFACT_VERSION" ? "产物版本"
+      : sourceKind === "MANAGED_TEXT" ? "受管文本"
+        : sourceKind === "WEB_PAGE" ? "网页快照" : "本地笔记";
+  }
+
+  const knowledgeRows = <ul className="knowledge-rows" role="list">
+    {pageItems.map((item) => <li key={item.id}>
+      <button type="button" className={`knowledge-row${item.id === selectedId ? " knowledge-row--active" : ""}`}
+        disabled={pendingCommand !== null} data-testid="knowledge-row" onClick={() => selectRow(item.id)}>
+        <span className="knowledge-row-main">
+          <strong>{item.title}</strong>
+          {item.snippet !== null && <small className="knowledge-row-snippet">{item.snippet}</small>}
+          {item.snippet === null && item.summary !== null && <small className="knowledge-row-snippet">{item.summary}</small>}
+          <small className="knowledge-row-meta">
+            {item.projectId === null ? "工作空间共享" : "当前项目"} · {knowledgeSourceLabel(item.sourceKind)} · v{item.currentVersion}
+            {item.status !== "ACTIVE" && <> · {statusLabel(item.status)}</>}
+            {item.availability !== "AVAILABLE" && <> · 来源不可读</>}
+            {" · "}{formatReadableDateTime(item.updatedAt, timeZone)}
+          </small>
+          {(item.tags.length > 0 || item.collections.length > 0 || item.matchedFields.length > 0) &&
+            <small className="knowledge-row-badges">
+              {item.matchedFields.length > 0 && <span className="knowledge-badge knowledge-badge--match">匹配：{matchedFieldsLabel(item.matchedFields)}</span>}
+              {item.collections.map((collection) => <span key={collection.id} className="knowledge-badge">{collection.name}</span>)}
+              {item.tags.map((tag) => <span key={tag} className="knowledge-badge knowledge-badge--tag">{tag}</span>)}
+            </small>}
+        </span>
+      </button>
+    </li>)}
+  </ul>;
+
+  const legacyRows = <ul className="knowledge-rows" role="list">
+    {rows.map((row) => <li key={row.id}>
+      <button type="button" className={`knowledge-row${row.id === selectedId ? " knowledge-row--active" : ""}`}
+        disabled={pendingCommand !== null} data-testid="knowledge-row" onClick={() => selectRow(row.id)}>
+        <span className="knowledge-row-main"><strong>{rowTitle(row)}</strong>
+          <small>{statusLabel(row.status)} · 当前 v{row.currentVersion} · {rowScopeLabel(row)}</small></span>
+      </button></li>)}
+  </ul>;
+
+  const searchItemsBlock = kind !== "KNOWLEDGE" && query.trim() !== "" && <>
+    {searching && <p role="status">正在搜索…</p>}
+    {searchError !== null && <p className="action-error" role="alert" data-testid="knowledge-search-error">{searchError}</p>}
+    {moreError !== null && <p className="action-error" role="alert" data-testid="knowledge-search-more-error">续页失败：{moreError}；已保留前面加载的结果，可按同一游标重试。</p>}
+    {searchItems.length > 0 && <ul className="knowledge-search-list">{searchItems.map((item) =>
+      <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
+        <strong>{item.title}</strong><span className="knowledge-result-meta">{kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}</span>
+        <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code className="hash-code">{item.sourceRef}</code></small>
+      </button></li>)}</ul>}
+    {searchItems.length === 0 && !searching && searchError === null &&
+      <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的{currentNoun}。试试更短的关键词或切换类型。</p>}
+    {nextCursor !== null && <Button variant="secondary" data-testid="knowledge-more" disabled={searching || loadingMore}
+      onClick={() => { void loadMore(); }}>{loadingMore ? "正在加载下一页" : moreError !== null ? "重试加载下一页" : "加载下一页"}</Button>}
+  </>;
+
+  const overviewStrip = kind === "KNOWLEDGE" && overview !== null && <section className="knowledge-overview" data-testid="knowledge-overview" aria-label="知识库概览">
+    <dl>
+      <div><dt>知识</dt><dd>{overview.knowledgeTotal}</dd></div>
+      <div><dt>决定</dt><dd>{overview.decisionTotal}</dd></div>
+      <div><dt>规则</dt><dd>{overview.ruleTotal}</dd></div>
+      <div><dt>7 天新增</dt><dd>{overview.recentNew}</dd></div>
+      <div><dt>7 天更新</dt><dd>{overview.recentUpdated}</dd></div>
+      <div><dt>待整理候选</dt><dd>{overview.curationPending}</dd></div>
+      <div className={overview.stale > 0 || overview.unavailable > 0 ? "knowledge-overview--attention" : undefined}>
+        <dt>需关注</dt><dd>{overview.stale + overview.unavailable}</dd></div>
+      <div><dt>集合 / 标签</dt><dd>{overview.collectionTotal} / {overview.tagTotal}</dd></div>
+    </dl>
+  </section>;
+
+  const filterBar = kind === "KNOWLEDGE" && <KnowledgeFilters
+    projectId={projectId}
+    scopeFilter={scopeFilter}
+    statusFilter={statusFilter}
+    collectionFilter={collectionFilter}
+    tagFilter={tagFilter}
+    sortOrder={sortOrder}
+    query={query}
+    pendingCommand={pendingCommand !== null}
+    collections={collections}
+    tags={tags}
+    onScopeChange={setScopeFilter}
+    onStatusChange={setStatusFilter}
+    onCollectionChange={setCollectionFilter}
+    onTagChange={setTagFilter}
+    onSortChange={setSortOrder}
+    onOrganize={() => setOrganizeOpen(true)}
+    onClear={() => {
+      setScopeFilter("ALL"); setStatusFilter("ACTIVE"); setCollectionFilter(null);
+      setTagFilter(null); setQuery("");
+    }}
+  />;
+
+  const listEmptyState = kind === "KNOWLEDGE"
+    ? (pageLoading ? null : pageError === null && knowledgeRowCount === 0
+      ? <EmptyState size="compact" testId="knowledge-list-empty" title="当前范围还没有知识"
+        description={query.trim() !== ""
+          ? `没有匹配「${query.trim()}」的知识。可以清空搜索条件，或换一个更短的关键词。`
+          : projectId !== null
+            ? "项目知识库包含「工作空间共享知识 + 归属当前项目的知识」。可以新建笔记、导入文件，或把范围切到「工作空间共享」。"
+            : "当前工作空间还没有知识。可以新建笔记、导入 Markdown/TXT/PDF/DOCX/网页，或先创建一个知识集合。"}
+        actions={<>
+          <Button variant="secondary" data-testid="knowledge-empty-create" onClick={() => openForm(false)}>新建笔记</Button>
+          <Button variant="text" data-testid="knowledge-empty-import" onClick={() => setImportOpen(true)}>导入文件</Button>
+        </>} />
+      : null)
+    : (loading ? null : error === null && rows.length === 0
+      ? <EmptyState size="compact" testId="knowledge-list-empty" title={`当前范围还没有${currentNoun}`}
+        description={`可以使用「新建」添加第一条${currentNoun}；决定与规则仍保留各自的业务字段与版本。`} />
+      : null);
+
+  const healthBlock = healthOpen && <section className="knowledge-health" data-testid="knowledge-health" aria-label="知识健康检查">
+    <div className="section-heading-row"><h2>知识健康</h2>
+      <Button variant="text" onClick={() => setHealthOpen(false)}>关闭</Button></div>
+    {healthError !== null && <p className="action-error" role="alert">{healthError}</p>}
+    {health !== null && <>
+      <dl className="knowledge-health-facts">
+        <div><dt>重复内容组</dt><dd>{health.duplicates.length}</dd></div>
+        <div><dt>来源不可读</dt><dd>{health.unavailable}</dd></div>
+        <div><dt>{health.staleAfterDays} 天未更新</dt><dd>{health.stale}</dd></div>
+        <div><dt>未组织（无集合无标签）</dt><dd>{health.unorganized}</dd></div>
+        <div><dt>待整理候选</dt><dd>{health.curationPending}</dd></div>
+      </dl>
+      {health.duplicates.length > 0 && <ul className="knowledge-health-duplicates">
+        {health.duplicates.map((group) => <li key={group.contentSha256}>
+          <code className="hash-code">{group.contentSha256.slice(0, 12)}…</code>
+          <span>{group.ids.length} 条知识内容完全相同</span>
+          <ul>{group.ids.map((id) => <li key={id}><button type="button" className="link-button"
+            onClick={() => selectRow(id)}>{pageItems.find((item) => item.id === id)?.title ?? id}</button></li>)}</ul>
+        </li>)}
+      </ul>}
+      <p className="helper-text">健康检查只提示，不自动删除、不自动合并、不自动覆盖；处理方式仍由你决定。</p>
+    </>}
   </section>;
 
   return <section className={`knowledge-page pv-page${reading ? " knowledge-page--reading" : ""}${capturing ? " knowledge-page--capture" : ""}`}>
-    {!reading && !capturing && <PageHeader testId="knowledge-page-head" title="资料" overline="Knowledge"
+    {!capturing && <PageHeader testId="knowledge-page-head" title="知识库" overline="Knowledge"
       lede={projectId
-        ? "只显示归属这个项目的资料、记忆、决定与规则；工作空间范围的内容不在这里。"
-        : "按资料、记忆、决定、规则沉淀长期有效的内容，并保留来源与版本。"} />}
-    {/* 项目段导航在阅读形态也保留：它是「这个项目还有哪些分区」的唯一入口，折进
-        资料列表就等于进了正文就再也切不出去。 */}
+        ? "项目知识库包含工作空间共享知识与归属当前项目的知识；决定与规则保留各自的业务字段与版本。Memory 已独立到「记忆」页面。"
+        : "工作空间共享知识库：资料、决定与规则。Memory 已独立到「记忆」页面，完成确认与来源追溯。"} />}
     {projectId && !capturing && <ProjectNav projectId={projectId} active="knowledge" />}
 
     {!live ? <section className="surface-panel knowledge-fixture-card" data-testid="knowledge-fixture-gap">
-      <h2>示例模式未接入资料</h2>
-      <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取和管理真实内容。</p>
+      <h2>示例模式未接入知识库</h2>
+      <p>此处不生成虚构的资料、记忆、决定或规则。连接本机 API 后可读取、检索和管理真实知识。</p>
     </section> : <>
-      <div className="knowledge-tools" hidden={capturing}>
-      {kindNav}
-      <details className="knowledge-search" open={query.trim() !== ""}>
-        <summary><Search aria-hidden="true" />搜索资料</summary>
-      <section className="surface-panel" aria-label="资料搜索">
-        <label className="field" htmlFor="knowledge-search"><span className="field-label">搜索词</span>
-          <span className="field-hint">按当前范围搜索四类资料，支持中文短词；每页最多 20 条。</span>
-          <input id="knowledge-search" value={query} onChange={(event) => setQuery(event.target.value)} data-testid="knowledge-search" type="search" maxLength={200} autoComplete="off" />
+      <div className="knowledge-toolbar" hidden={capturing}>
+        {kindNav}
+        <label className="field knowledge-search-field" htmlFor="knowledge-search">
+          <span className="field-label">搜索</span>
+          <input id="knowledge-search" type="search" value={query} maxLength={200} autoComplete="off"
+            placeholder={kind === "KNOWLEDGE" ? "搜索标题、正文、标签、集合与来源…" : `搜索${currentNoun}…`}
+            onChange={(event) => setQuery(event.target.value)} data-testid="knowledge-search" />
         </label>
-        {searching && <p role="status">正在搜索…</p>}
-        {searchError && <p className="action-error" role="alert" data-testid="knowledge-search-error">{searchError}</p>}
-        {/* 续页失败与「没有匹配」是两种状态：局部错误贴着已有结果说，不改写已核实的第一页。 */}
-        {moreError && <p className="action-error" role="alert" data-testid="knowledge-search-more-error">续页失败：{moreError}；已保留前面加载的结果，可按同一游标重试。</p>}
-        {searchItems.length > 0 ? <ul className="knowledge-search-list">{searchItems.map((item) =>
-          <li key={`${item.type}-${item.id}-${item.version}`}><button type="button" className="knowledge-result" disabled={pendingCommand !== null} onClick={() => openSearchItem(item)}>
-            <strong>{item.title}</strong> · {kinds.find((k) => k.kind === item.type)?.noun ?? item.type} v{item.version} · {statusLabel(item.status)}
-            <span>{item.snippet}</span><small>匹配：{item.matchedFields.join("、")} · 来源 <code className="hash-code">{item.sourceRef}</code></small>
-          </button></li>)}</ul> : query.trim() && !searching && !searchError && <p className="helper-text" data-testid="knowledge-search-empty">没有匹配「{query.trim()}」的当前有效资料。试试更短的关键词或切换资料类型；这只说明搜索没有结果，不代表当前范围没有{currentNoun}。</p>}
-        {nextCursor && <Button variant="secondary" data-testid="knowledge-more" disabled={searching || loadingMore}
-          onClick={() => { void loadMore(); }}>{loadingMore ? "正在加载下一页" : moreError ? "重试加载下一页" : "加载下一页"}</Button>}
-      </section>
-      </details>
+        <div className="knowledge-toolbar-actions">
+          {kind === "KNOWLEDGE" && <Button variant="secondary" data-testid="knowledge-import-open"
+            disabled={pendingCommand !== null} onClick={() => setImportOpen(true)}>导入</Button>}
+          {kind === "KNOWLEDGE" && <Button variant="text" data-testid="knowledge-health-open"
+            onClick={() => setHealthOpen((value) => !value)}>健康检查</Button>}
+          <Button variant="primary" data-testid="knowledge-create" disabled={pendingCommand !== null}
+            onClick={() => openForm(false)}>新建{currentNoun}</Button>
+        </div>
+      </div>
 
-      {reading && <details ref={libraryRef} className="knowledge-library" data-testid="knowledge-library">
-        <summary><List aria-hidden="true" />资料列表 · {rows.length}</summary>{library}
-      </details>}
+      {overviewStrip}
+      {filterBar}
+      {healthBlock}
 
-      {projectId && client && kind === "KNOWLEDGE" && <details className="knowledge-web-import"><summary>导入网页</summary><WebImportPanel
+      {projectId && client && kind === "KNOWLEDGE" && <details className="knowledge-web-import"><summary>从网页收录</summary><WebImportPanel
         key={`${connection.epoch}:${projectId}`} client={client} projectId={projectId}
         onOpenKnowledge={(knowledgeId) => {
           requestDraftTransition(() => {
-              setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
-              clearDraft();
-              void load("KNOWLEDGE", knowledgeId);
+            setSelectedId(knowledgeId); setFormOpen(false); setActionError(null);
+            clearDraft();
+            void load("KNOWLEDGE", knowledgeId);
           });
         }} /></details>}
 
-      {projectId && client && <Button variant="text" data-testid="knowledge-guide-toggle"
+      {projectId && client && <Button variant="text" hidden={capturing} data-testid="knowledge-guide-toggle"
         onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "关闭项目导读" : "打开项目导读"}</Button>}
-      </div>
-      {guideOpen && projectId && client && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
+      {guideOpen && projectId && client && !capturing && <ProjectKnowledgeGuide key={`${connection.epoch}:${projectId}`}
         client={client} projectId={projectId} onOpen={(nextKind, nextId) => {
           requestDraftTransition(() => {
-              setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
-              setFormOpen(false); clearDraft();
-              void load(nextKind, nextId);
+            setGuideOpen(false); setKind(nextKind); setSelectedId(nextId); setSelected(null);
+            setFormOpen(false); clearDraft();
+            void load(nextKind, nextId);
           });
         }} />}
 
-      {error && <p className="action-error" role="alert" data-testid="knowledge-read-error">{error} <Button variant="text" onClick={() => { void load(); }}>重新读取</Button></p>}
-      {loading && <p role="status">正在读取资料…</p>}
+      {error !== null && <p className="action-error" role="alert" data-testid="knowledge-read-error">{error} <Button variant="text" onClick={() => { void load(); }}>重新读取</Button></p>}
+      {pageError !== null && <p className="action-error" role="alert" data-testid="knowledge-page-error">{pageError}
+        <Button variant="text" onClick={() => { void loadKnowledgePage(null, false); }}>重试读取列表</Button></p>}
+      {loading && <p role="status">正在读取知识…</p>}
+      {pageLoading && <p role="status">正在读取知识列表…</p>}
       {refreshing && <p role="status">正在读取最新版本…</p>}
-      {actionError && !capturing && <p className="action-error" role="alert" data-testid="knowledge-action-error">{actionError}</p>}
-      {actionMessage && <p className="receipt-message" role="status">{actionMessage}</p>}
+      {actionError !== null && !capturing && <p className="action-error" role="alert" data-testid="knowledge-action-error">{actionError}</p>}
+      {actionMessage !== null && <p className="receipt-message" role="status">{actionMessage}</p>}
       {!capturing && writeGateFeedback}
       {!capturing && pendingReceipt}
 
-      <div className={`knowledge-columns${!reading && !loading && error === null && rows.length === 0 ? " knowledge-columns--empty" : ""}`}>
-        {!reading && library}
+      <div className="knowledge-columns">
+        <section className="surface-panel knowledge-list" data-testid="knowledge-library" ref={libraryRef}>
+          <div className="section-heading-row" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-tab-${kind}`}>
+            <h2>{currentNoun}列表{listTotal > 0 && <span className="knowledge-count"> · {listTotal}</span>}</h2>
+            {kind === "KNOWLEDGE" && <span className="helper-text">{pageCursor !== null ? "还有下一页" : "已到最后"}</span>}
+          </div>
+          {kind === "KNOWLEDGE" ? <>
+            {knowledgeRows}
+            {listEmptyState}
+            {kind === "KNOWLEDGE" && pageMoreError !== null && <p className="action-error" role="alert" data-testid="knowledge-search-more-error">
+              续页失败：{pageMoreError}；已保留前面加载的结果，可按同一游标重试。</p>}
+            {pageCursor !== null && <Button variant="secondary" data-testid="knowledge-more"
+              disabled={pageLoading || pageLoadingMore || pendingCommand !== null}
+              onClick={() => { void loadKnowledgePage(pageCursor, true); }}>
+              {pageLoadingMore ? "正在加载下一页" : pageMoreError !== null ? "重试加载下一页" : "加载下一页"}</Button>}
+          </> : <>
+            {legacyRows}
+            {listEmptyState}
+            {searchItemsBlock}
+          </>}
+        </section>
 
         <div className="knowledge-detail">
-          {selected ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`} hidden={capturing}>
+          {detailItem !== null && selected !== null ? <section className={`surface-panel${reading ? " knowledge-reading-detail" : ""}`} hidden={capturing}>
             {selectedKnowledge && client && <KnowledgeReader key={`${selectedKnowledge.id}:${selectedKnowledge.currentVersion}:${routeItem === selectedKnowledge.id ? routeVersion ?? "" : ""}`}
               client={client} knowledge={selectedKnowledge} versions={knowledgeVersions}
               initialVersion={routeItem === selectedKnowledge.id ? routeVersion : null}
               onNewVersion={selected.status === "ACTIVE" && pendingCommand === null ? () => openForm(true) : undefined}
               newVersionDisabled={writeBlockedReason !== null} />}
+            {selectedKnowledge && client && <KnowledgeOrganizationPanel client={client} knowledgeId={selectedKnowledge.id}
+              projectId={selectedKnowledge.projectId} collections={collections}
+              onChanged={() => setPageNonce((value) => value + 1)} />}
             {!reading && <header className="knowledge-item-heading"><div><h2>{rowTitle(selected)}</h2><p className="helper-text">当前版本 v{selected.currentVersion} · {selectedMemory ? memoryStatusText(selectedMemory) : statusLabel(selected.status)}</p></div>
               {selected.status === "ACTIVE" && pendingCommand === null && kind !== "DECISION" && <Button variant="secondary" data-testid="knowledge-new-version" disabled={writeBlockedReason !== null} onClick={() => openForm(true)}>追加新版本</Button>}</header>}
             {selectedMemory && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedMemory.text}</p><p className="helper-text">明确确认：{selectedMemory.confirmedBy} · {selectedMemory.confirmedAt} · {selectedMemory.expiresAt === null ? "无到期时间" : `到期 ${selectedMemory.expiresAt}`}</p></article>}
-            {/* ADR-030：自动记住的记忆不能显示成人工确认。撤销就用既有的「停用记忆」。 */}
             {selectedMemory?.origin === "AUTO_CAPTURE" && <p className="helper-text" data-testid="memory-auto-capture-note">
               这条是对话结算后自动提取的（确认方：auto-capture），不是你手动确认的事实。来源类别：
               {memorySourceKindLabel(selectedMemory.sourceKind)}
@@ -1379,9 +1708,7 @@ export default function KnowledgeView() {
                   ? "——引用的是你自己说过的话。"
                   : ""}它照常参与召回，
               但不代表正确；发现不对就停用，停用后同一内容不会再被自动写入。</p>}
-            {/* 保存来源（HTTP §10.99）：只在展开时读；手工创建的记忆来源为空是事实，不是读取失败。 */}
             {selectedMemory && client && <MemoryProvenancePanel client={client} memoryId={selectedMemory.id} />}
-            {/* 过期是投影不是新状态：续期/取消到期只能走既有修订并明确确认，不静默延长。 */}
             {selectedMemory && selectedMemory.effectiveStatus === "EXPIRED" && <section className="knowledge-expired" data-testid="memory-expired-hint">
               <p className="helper-text">这条记忆已过有效期。恢复状态不会延长有效期；要续期或取消到期，请追加新版本并明确确认，产生新的确认版本。</p>
               {selectedMemory.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
@@ -1389,7 +1716,6 @@ export default function KnowledgeView() {
                   onClick={() => openForm(true)}>去追加新版本</Button></div>}
             </section>}
             {selectedDecision && <article className="knowledge-fact-paper"><h3>做出的选择</h3><p className="knowledge-body">{selectedDecision.choice}</p><h3>依据</h3><p className="knowledge-body">{selectedDecision.rationale}</p><h3>备选与代价</h3><p>备选：{selectedDecision.alternatives.join("、") || "未记录"}</p><p>代价：{selectedDecision.costs.join("、") || "未记录"}</p>{selectedDecision.supersededById && <p data-testid="decision-supersession">已由决定 {selectedDecision.supersededById} 替代；旧决定保留可查。</p>}</article>}
-            {/* 决定依据与复核：登记与判断都在这里，服务端负责变化检测、去重与修订冲突。 */}
             {selectedDecision && client && projectId && <DecisionReviewPanel key={selectedDecision.id}
               client={client} projectId={projectId} decision={selectedDecision} />}
             {selectedRule && <article className="knowledge-fact-paper"><p className="knowledge-body">{selectedRule.statement}</p><p>{selectedRule.strength === "HARD" ? "硬约束" : "偏好"} · 执行检查：{selectedRule.enforcement}{selectedRule.method && <> · {selectedRule.method}</>}</p></article>}
@@ -1400,41 +1726,39 @@ export default function KnowledgeView() {
                 onClick={() => { void restoreRetired(); }}>{restoring ? "正在恢复" : restoreEntry.button}</Button></div>
             </section>}
             <details className="knowledge-management">
-            <summary>资料管理与范围</summary>
-            <div className="section-heading-row"><h2>{rowTitle(selected)}</h2><span>{selectedMemory ? memoryStatusText(selectedMemory) : statusLabel(selected.status)} · 修订 v{selected.revision}</span></div>
-            <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
-            {/* 持久状态与有效状态各用其职责：停用/恢复看 status，展示与筛选看 effective_status。 */}
-            {selectedMemory && <p className="helper-text" data-testid="memory-effective-status">持久状态 {selectedMemory.status} · 有效状态 {memoryStatusText(selectedMemory)} · {selectedMemory.expiresAt === null ? "无到期时间" : `到期 ${selectedMemory.expiresAt}`}</p>}
-            <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scopeId" in selected
-              ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
-              : selected.projectId ? `项目 ${selected.projectId}` : "工作空间"}</p>
-            {selectedRule && selectedRuleSpec && <><p className="knowledge-rule-facts" data-testid="knowledge-rule-facts">{enumText(ruleStrengthLabels, selectedRule.strength)} · {enumText(ruleScopeLabels, selectedRule.scope)} / {selectedRule.scopeId} · {enumText(ruleApplicabilityLabels, selectedRule.applicability)}</p>
-              <p className="helper-text" data-testid="knowledge-rule-target-spec">目标约束：{selectedRuleSpec.text}</p>
-              {selectedRuleSpec.json !== null && <details className="knowledge-tech-details" data-testid="knowledge-rule-target-spec-json"><summary>目标约束 JSON</summary><code>{selectedRuleSpec.json}</code></details>}</>}
+              <summary>资料管理与范围</summary>
+              <div className="section-heading-row"><h2>{rowTitle(selected)}</h2>
+                <span>{selectedMemory ? memoryStatusText(selectedMemory) : statusLabel(selected.status)} · 修订 v{selected.revision}</span></div>
+              <p className="helper-text">ID：{selected.id} · 当前版本 v{selected.currentVersion}</p>
+              {selectedMemory && <p className="helper-text" data-testid="memory-effective-status">持久状态 {selectedMemory.status} · 有效状态 {memoryStatusText(selectedMemory)} · {selectedMemory.expiresAt === null ? "无到期时间" : `到期 ${selectedMemory.expiresAt}`}</p>}
+              <p className="helper-text" data-testid="knowledge-detail-scope">范围：{"scopeId" in selected
+                ? (selected.scope === "WORKSPACE" ? "工作空间" : `${selected.scope === "PROJECT" ? "项目" : "任务"} ${selected.scopeId}`)
+                : selected.projectId ? "当前项目（同时可见工作空间共享知识）" : "工作空间共享"}</p>
+              {selectedRule && selectedRuleSpec && <><p className="knowledge-rule-facts" data-testid="knowledge-rule-facts">{enumText(ruleStrengthLabels, selectedRule.strength)} · {enumText(ruleScopeLabels, selectedRule.scope)} / {selectedRule.scopeId} · {enumText(ruleApplicabilityLabels, selectedRule.applicability)}</p>
+                <p className="helper-text" data-testid="knowledge-rule-target-spec">目标约束：{selectedRuleSpec.text}</p>
+                {selectedRuleSpec.json !== null && <details className="knowledge-tech-details" data-testid="knowledge-rule-target-spec-json"><summary>目标约束 JSON</summary><code>{selectedRuleSpec.json}</code></details>}</>}
 
-            {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
-              {kind === "KNOWLEDGE" && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</Button>}
-              {(kind === "MEMORY" || kind === "RULE") && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</Button>}
-            </div>}
-            {selectedDecision?.status === "ACTIVE" && pendingCommand === null && <>
-              <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的决定 ID</span>
-                <input id="decision-replacement" value={replacementId} onChange={(event) => setReplacementId(event.target.value)} data-testid="decision-replacement" /></label>
-              <Button variant="secondary" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</Button>
-            </>}
+              {selected.status === "ACTIVE" && pendingCommand === null && <div className="knowledge-actions">
+                {kind === "KNOWLEDGE" && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>归档资料</Button>}
+                {(kind === "MEMORY" || kind === "RULE") && <Button variant="danger" disabled={writeBlockedReason !== null} onClick={() => { void retire(); }}>停用{kind === "MEMORY" ? "记忆" : "规则"}</Button>}
+              </div>}
+              {selectedDecision?.status === "ACTIVE" && pendingCommand === null && <>
+                <label className="field" htmlFor="decision-replacement"><span className="field-label">替代它的决定 ID</span>
+                  <input id="decision-replacement" value={replacementId} onChange={(event) => setReplacementId(event.target.value)} data-testid="decision-replacement" /></label>
+                <Button variant="secondary" data-testid="decision-supersede" disabled={writeBlockedReason !== null} onClick={() => { void supersede(); }}>记录替代关系</Button>
+              </>}
 
-            {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
-              <li key={revision.id}>v{revision.version} · {revision.title} · {revision.confirmedBy} 于 {revision.confirmedAt}<p>{revision.text}</p></li>)}</ol></section>}
-            {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
-              <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {enumText(ruleStrengthLabels, version.strength)} · {enumText(ruleEnforcementLabels, version.enforcement)} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
+              {selectedMemory && <section className="knowledge-history"><h3>确认修订历史</h3><ol>{memoryRevisions.map((revision) =>
+                <li key={revision.id}>v{revision.version} · {revision.title} · {revision.confirmedBy} 于 {revision.confirmedAt}<p>{revision.text}</p></li>)}</ol></section>}
+              {selectedRule && <section className="knowledge-history"><h3>规则版本历史</h3><ol>{ruleVersions.map((version) =>
+                <li key={`${version.ruleId}-${version.version}`}>v{version.version} · {enumText(ruleStrengthLabels, version.strength)} · {enumText(ruleEnforcementLabels, version.enforcement)} · {version.ruleKey}<p>{version.statement}</p></li>)}</ol></section>}
             </details>
           </section> : !capturing && <section className="surface-panel" data-testid="knowledge-detail-empty-state">
-            <p className="helper-text" role={loading || refreshing ? "status" : undefined}>
-              {loading || refreshing ? `正在读取当前范围的${currentNoun}…`
-                : error !== null ? `当前范围的${currentNoun}读取失败，请查看上方错误并重试。`
-                  : rows.length === 0 ? (kind === "MEMORY" && memoryFilter !== "ALL"
-                    ? `当前筛选没有匹配的记忆；「${memoryFilterLabel(memoryFilter)}」只代表当前筛选下没有命中，切换「全部」可查看所有记忆。`
-                    : `当前范围没有${currentNoun}。可使用左侧列表中的「新建」入口添加。`)
-                    : `当前列表有 ${rows.length} 项${currentNoun}，请选择一项查看详情与版本。`}
+            <p className="helper-text" role={loading || refreshing || pageLoading ? "status" : undefined}>
+              {loading || refreshing || pageLoading ? `正在读取当前范围的${currentNoun}…`
+                : error !== null || pageError !== null ? `当前范围的${currentNoun}读取失败，请查看上方错误并重试。`
+                  : listTotal === 0 ? `当前范围没有${currentNoun}。可使用「新建」或「导入」添加。`
+                    : `当前列表有 ${listTotal} 项${currentNoun}，请选择一项查看详情与版本。`}
             </p>
           </section>}
 
@@ -1521,6 +1845,60 @@ export default function KnowledgeView() {
         </div>
       </div>
     </>}
+
+    <AppDialog open={importOpen} title="导入知识" onClose={() => setImportOpen(false)}>
+      {client !== null && <KnowledgeImportPanel client={client} projectId={projectId} collections={collections}
+        onImported={(knowledgeId) => {
+          setImportOpen(false);
+          setSelectedId(knowledgeId);
+          void load("KNOWLEDGE", knowledgeId);
+          setPageNonce((value) => value + 1);
+        }} />}
+    </AppDialog>
+
+    <AppDialog open={organizeOpen} title="管理集合与标签" onClose={() => { setOrganizeOpen(false); setEditingCollectionId(null); setCollectionName(""); }}>
+      <div className="knowledge-organize" data-testid="knowledge-organize">
+        {organizeError !== null && <p className="action-error" role="alert" data-testid="knowledge-organize-error">{organizeError}</p>}
+        <section><h3>知识集合</h3>
+          <p className="helper-text">集合只做逻辑组织，不复制正文；项目集合只能收纳工作空间共享或本项目的知识。</p>
+          {collections.length === 0 && <p className="helper-text">还没有集合。</p>}
+          <ul className="knowledge-organize-list">{collections.map((collection) => <li key={collection.id}>
+            <span>{collection.name}<small>{collection.itemCount} 条 · {collection.projectId === null ? "工作空间" : "当前项目"}</small></span>
+            <span className="knowledge-organize-actions">
+              <Button variant="text" data-testid={`knowledge-collection-edit-${collection.id}`}
+                onClick={() => { setEditingCollectionId(collection.id); setCollectionRevision(collection.revision); setCollectionName(collection.name); }}>编辑</Button>
+              <Button variant="text" data-testid={`knowledge-collection-delete-${collection.id}`}
+                onClick={() => { void removeCollection(collection); }}>删除</Button>
+            </span>
+          </li>)}</ul>
+          <div className="knowledge-org-inline">
+            <label className="field"><span className="field-label">{editingCollectionId === null ? "新集合名称" : "集合新名称"}</span>
+              <Input value={collectionName} maxLength={120} data-testid="knowledge-collection-name"
+                onChange={(event) => setCollectionName(event.target.value)} /></label>
+            <Button variant="secondary" data-testid="knowledge-collection-save" onClick={() => { void saveCollection(); }}>
+              {editingCollectionId === null ? "创建集合" : "保存修改"}</Button>
+            {editingCollectionId !== null && <Button variant="text" onClick={() => { setEditingCollectionId(null); setCollectionRevision(null); setCollectionName(""); }}>取消</Button>}
+          </div>
+        </section>
+        <section><h3>标签</h3>
+          <p className="helper-text">同名标签按规范化名称去重；标签不能绕过知识本身的权限范围。</p>
+          {tags.length === 0 && <p className="helper-text">还没有标签。</p>}
+          <ul className="knowledge-organize-list">{tags.map((tag) => <li key={tag.id}>
+            <span>{tag.name}<small>{tag.usageCount} 条知识</small></span>
+            <span className="knowledge-organize-actions">
+              <Button variant="text" data-testid={`knowledge-tag-delete-${tag.id}`} onClick={() => { void removeTag(tag); }}>删除</Button>
+            </span>
+          </li>)}</ul>
+          <div className="knowledge-org-inline">
+            <label className="field"><span className="field-label">标签名称</span>
+              <Input value={tagName} maxLength={48} data-testid="knowledge-tag-name"
+                onChange={(event) => setTagName(event.target.value)} /></label>
+            <Button variant="secondary" data-testid="knowledge-tag-create" onClick={() => { void saveTag(); }}>创建或更新标签</Button>
+          </div>
+        </section>
+      </div>
+    </AppDialog>
+
     <AppDialog open={draftTransition !== null} title="保留未保存的资料" onClose={() => setDraftTransition(null)}>
       <p>当前资料还有未保存的修改。继续编辑会保留正文；丢弃后再切换阅读对象。</p>
       <div className="dialog-actions"><Button variant="secondary" onClick={() => setDraftTransition(null)}>保留并继续编辑</Button>

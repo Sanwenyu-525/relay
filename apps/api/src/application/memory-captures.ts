@@ -70,7 +70,7 @@ export async function recordAutoCapture(db: DbExecutor, r: Repositories, input: 
   /** 0164：模型提取声明的类型/键/重要性；非法值按 UNKNOWN/忽略处理，不猜。 */
   memoryType?: string; memoryKey?: string | null; importance?: number;
   verification?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
-}): Promise<{ memoryId: string; captureId: string } | null> {
+}): Promise<{ memoryId: string; captureId: string; duplicate?: boolean } | null> {
   const title = input.title.trim();
   const text = input.text.trim();
   if (title === '' || text === '') return null;
@@ -96,7 +96,9 @@ export async function recordAutoCapture(db: DbExecutor, r: Repositories, input: 
   const normalizedSha256 = captureFingerprint(title, text);
 
   await r.memoryCaptures.lockSource(`${input.sessionId}:${input.triggerMessageId}:${normalizedSha256}`);
-  if (await r.memoryCaptures.hasCaptured(input.sessionId, input.triggerMessageId, normalizedSha256)) return null;
+  const already = await r.memoryCaptures.capturedMemory(input.sessionId, input.triggerMessageId,
+    normalizedSha256);
+  if (already !== undefined) return { memoryId: already, captureId: '', duplicate: true };
   if (await r.memoryCaptures.countToday(input.sessionId) >= MEMORY_AUTO_CAPTURE_DAILY_LIMIT) return null;
 
   const memoryType = parseMemoryType(input.memoryType);

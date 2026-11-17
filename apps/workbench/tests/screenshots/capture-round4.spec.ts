@@ -113,7 +113,7 @@ test("round4 unblocked gaps", async ({ page }) => {
   await page.goto(`/projects/${LIVE_PROJECT}/knowledge`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
   await record("projects-live-knowledge-base");
-  for (const kind of ["MEMORY", "DECISION", "RULE"] as const) {
+  for (const kind of ["KNOWLEDGE", "DECISION", "RULE"] as const) {
     await page.getByTestId(`knowledge-tab-${kind}`).click().catch(() => {});
     await page.waitForTimeout(400);
     await record(`projects-live-knowledge-${kind.toLowerCase()}`);

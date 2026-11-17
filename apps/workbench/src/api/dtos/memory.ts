@@ -36,6 +36,14 @@ export interface RelayMemorySettings {
   readonly embeddingProvider?: "disabled" | "openai-compatible";
   readonly remoteEmbeddingAllowed?: boolean;
   readonly includeStaleInRecall?: boolean;
+  /** 0167：服务端声明的真实能力；旧服务端不返回时按“未知”，UI 不把未实现能力当可用。 */
+  readonly capabilities?: {
+    readonly retrieval: { readonly literal: { readonly implemented: boolean; readonly note: string };
+      readonly hybrid: { readonly implemented: boolean; readonly note: string } };
+    readonly embedding: { readonly implemented: boolean; readonly note: string };
+    readonly capture: { readonly persistentTasks: boolean; readonly retryWithBackoff: boolean;
+      readonly preCompactionBarrier: boolean; readonly explicitRemember: boolean };
+  };
 }
 
 /** 长期记忆的不可变保存来源；手工创建的记忆没有来源，这里就是空数组。 */
@@ -43,11 +51,22 @@ export interface RelayMemoryProvenanceSource {
   readonly memoryVersion: DecimalRevision;
   readonly sessionId: string;
   readonly messageId: string;
+  readonly sessionTitle: string | null;
+  readonly role: string | null;
   readonly contentSha256: string;
+  /** 原文是否还能读出、是否被撤回、以及正文哈希是否仍与保存时一致。 */
+  readonly sha256Matches: boolean | null;
+  readonly sourceQuote: string | null;
+  readonly excerpt: string | null;
+  readonly availability: "AVAILABLE" | "WITHDRAWN" | "MISSING" | "UNAVAILABLE" | "CONTENT_CHANGED";
 }
 
 export interface RelayMemoryProvenance {
   readonly memoryId: string;
+  readonly origin: "HUMAN_CONFIRMED" | "AUTO_CAPTURE";
+  readonly sourceKind: "MANUAL" | "USER_STATEMENT" | "MODEL_OBSERVATION" | "UNKNOWN";
+  readonly verification: "VERIFIED" | "UNVERIFIED" | "FAILED";
+  readonly verifiedAt: string | null;
   readonly sources: readonly RelayMemoryProvenanceSource[];
 }
 

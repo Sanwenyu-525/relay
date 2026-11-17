@@ -27,7 +27,10 @@ describe("全部任务", () => {
     unmount = mounted.unmount;
 
     expect(mounted.wrapper.text()).toContain("修复任务恢复逻辑");
-    expect(mounted.wrapper.text()).toContain("待人工验收");
+    // WAITING 统一读作「等待中」，不再用一个状态词代替验收结论；等什么由原因列说明。
+    expect(mounted.wrapper.text()).toContain("等待中");
+    expect(mounted.wrapper.text()).toContain("等待人工接受产物 v3");
+    expect(mounted.wrapper.text()).not.toContain("待人工验收");
     expect(mounted.wrapper.text()).toContain("AI 委托");
     expect(mounted.wrapper.text()).toContain("未归属项目");
     expect(mounted.wrapper.text()).toContain("任务修订 v5");

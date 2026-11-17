@@ -116,12 +116,18 @@ export async function listTasksSummary(
   projectId: string | null | undefined,
 ): Promise<readonly TaskSummaryDto[]> {
   const readiness = await loadReadinessForTasks(repositories, tasks, projectId);
-  const archivedByProject = new Map<string, boolean>();
-  for (const id of new Set(tasks.map((task) => task.project_id).filter((id): id is string => id !== null))) {
-    archivedByProject.set(id, (await repositories.projects.readProject(id))?.archived_at !== null);
-  }
+  // 列表投影只做两条批量读，读请求数不随任务数增长（此前按 Project 与 WAITING 任务各单读一次）：
+  // Project 归档事实按去重后的 Project 集合取一次，等待原因按去重后的当前 Run 集合取一次。
+  const projectIds = [...new Set(tasks.map((task) => task.project_id)
+    .filter((id): id is string => id !== null))];
+  const archivedByProject = await repositories.projects.readProjectArchiveStates(projectIds);
+  const waitingRunIds = [...new Set(tasks
+    .filter((task) => task.status === 'WAITING')
+    .map((task) => task.executor_run_id)
+    .filter((id): id is string => id !== null))];
+  const waitReasons = await repositories.runs.listRunWaitReasons(waitingRunIds);
 
-  return Promise.all(tasks.map(async (task) => {
+  return tasks.map((task) => {
     const facts = readiness.get(task.id);
 
     return summarize(
@@ -129,10 +135,12 @@ export async function listTasksSummary(
       facts?.blockingTaskIds ?? [],
       facts?.unresolvedBlockerIds ?? [],
       facts?.requiredCriterionCount ?? 0,
-      await currentRunWaitReason(repositories, task),
+      task.status === 'WAITING' && task.executor_run_id !== null
+        ? waitReasons.get(task.executor_run_id) ?? null
+        : null,
       task.project_id !== null && archivedByProject.get(task.project_id) === true,
     );
-  }));
+  });
 }
 
 export interface ListTasksInput {

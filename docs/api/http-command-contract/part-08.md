@@ -409,8 +409,9 @@ Breaking Change: **Yes（语义）**——上下文档位从「工作区默认�
   不存提示词、文件正文、工具输出、路径或凭据。迁移前的行为 `NULL`。
 - `compaction`（0162）：自动压缩策略与当前读数，字段分三组。
   ①**窗口与阈值**：`target_window_tokens`（会话档位／产品目标 1M）、`model_window_tokens`
-  +`window_source`（`MODEL_CATALOG` 真实目录窗口／`SESSION_TIER` 未知时按档位估算）、
-  `effective_window_tokens`、`output_reserve_tokens`、`protocol_overhead_tokens`、
+  +`window_source`（2026-11-15 起为四值枚举 `MODEL_CATALOG`／`CAPABILITY_DECLARATION`／
+  `MODEL_CONFIG`／`UNKNOWN_FALLBACK`，未知按 262,144 安全回退；旧 0162 的 `SESSION_TIER`
+  已退场，见下方 2026-11-15 节）、`effective_window_tokens`、`output_reserve_tokens`、`protocol_overhead_tokens`、
   `safety_reserve_tokens`、`safe_input_tokens`（硬上限）、`post_compaction_target_tokens`；
   `requested_threshold_tokens`（用户保存值或默认 350K）、`effective_threshold_tokens`
   （= min(请求值, 安全输入 × 0.9)）、`threshold_clamped`（生效值被窗口收敛）。达到阈值
@@ -756,7 +757,9 @@ Breaking Change: **No**（形状为追加；不传 `title_source` 的既有调�
 `model_window_tokens`、`window_source`、`provider_call_cap_tokens`、`fallback_applied`、
 `effective_window_tokens`、`output_reserve_tokens`、`protocol_overhead_tokens`、
 `safety_reserve_tokens`、`safe_input_tokens`、`post_compaction_target_tokens`、
-`context_tokens/context_source/distance_tokens`、`active` 与 `last_result`。
+`context_tokens/context_source/measured_at/distance_tokens`、`active` 与 `last_result`。
+`measured_at` 是这份读数在服务端生成的时间（ISO；2026-11-15 浮层重排新增，界面显示
+「最近更新时间」用，不用本地时钟冒充）；
 `window_source` 四值同上；`effective_window_tokens` 是圆环和浮层唯一分母。
 
 **必读文件审计。** `GET /working-directories/{resource_id}/required-context-audit` 的

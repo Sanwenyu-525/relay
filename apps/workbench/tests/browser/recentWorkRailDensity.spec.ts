@@ -480,10 +480,29 @@ test.describe("近期工作栏窄列几何", () => {
       document.body.append(probe);
       const token = (name: string) => { probe.style.color = `var(--relay-${name})`; return getComputedStyle(probe).color; };
       const subtle = token("color-bg-subtle");
+      // 2026-11-15 工作区精修：悬停底 = selection.hover 40% 混 bg.surface。必须在 probe 摘除前
+      // 读 token（摘除后 getComputedStyle 读不到值）；浏览器对 color-mix 结果输出 color(srgb …)，
+      // 断言时逐通道浮点比对。
+      const parseRgb = (value: string): [number, number, number] => {
+        const match = /rgba?\(([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/.exec(value)
+          ?? /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(value);
+        if (match === null) throw new Error(`unreadable color: ${value}`);
+        const channel = (raw: string) => {
+          const n = Number.parseFloat(raw);
+          return n > 1 ? n / 255 : n;
+        };
+        return [channel(match[1]!), channel(match[2]!), channel(match[3]!)];
+      };
+      const hoverBase = parseRgb(token("color-selection-hover"));
+      const surfaceBase = parseRgb(token("color-bg-surface"));
+      const hoverMix = hoverBase.map((channel, index) => channel * 0.4 + surfaceBase[index]! * 0.6);
       probe.remove();
       const root = getComputedStyle(document.documentElement);
       // 2026-10-20 第十轮：根区间距收到 space.0.5(2px)，断言基准用既有 gap（= space.0.5）。
+      // 2026-11-15 工作区精修：根区间距提到 space.2(8px)、行距提到 space.1(4px)；gap 变量
+      // 仍指 space.0.5，只服务「激活标记与分组竖线留缝」这条断言（列表 padding-left 未变）。
       const gap = Number.parseFloat(root.getPropertyValue("--relay-space-0-5")) * Number.parseFloat(root.fontSize);
+      const sectionGap = Number.parseFloat(root.getPropertyValue("--relay-space-2")) * Number.parseFloat(root.fontSize);
       const section = document.querySelector<HTMLElement>('[data-testid="recent-work-directories"] > summary')!;
       // 第三轮的断言只量根区自身的样式与相邻两段的间距：map 出来的数组对「还没渲染」是安全的，
       // 不再为新增检查引入第二个会抛空引用的取值点。
@@ -498,6 +517,10 @@ test.describe("近期工作栏窄列几何", () => {
         sectionBackground: getComputedStyle(section).backgroundColor,
         subtle,
         gap,
+        sectionGap,
+        // 2026-11-15 工作区精修：悬停底是 selection.hover 的 40% 淡档（color-mix over surface），
+        // 比选中底 selection.bg 浅——浏览器对 color-mix 结果输出 color(srgb …)，逐通道浮点比对。
+        hoverMix,
         // 根区之间不再画分隔线：上边框必须为 0，分隔只能由相邻两段之间的留白承担。
         sectionBorderTops: sections.map((element) => Number.parseFloat(getComputedStyle(element).borderTopWidth)),
         sectionGaps: sectionBoxes.slice(1).map((box, index) => box.top - sectionBoxes[index]!.bottom),
@@ -527,7 +550,21 @@ test.describe("近期工作栏窄列几何", () => {
     const hovered = await read();
     const detail = `${JSON.stringify({ rest, hovered })}`;
     expect(rest.sectionBackground, detail).toBe("rgba(0, 0, 0, 0)");
-    expect(hovered.sectionBackground, detail).toBe(hovered.subtle);
+    // 2026-11-15 工作区精修：悬停底从 bg.subtle 换成 selection.hover 40% 淡档——bg.subtle
+    // 在白纸上与纸面几乎同色，悬停反馈名存实亡；40% 淡档轻于选中底，层级不再倒挂。
+    const hoveredChannels = (() => {
+      const match = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(hovered.sectionBackground)
+        ?? /rgba?\(([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/.exec(hovered.sectionBackground);
+      if (match === null) throw new Error(`unreadable hover color: ${hovered.sectionBackground}`);
+      const channel = (raw: string) => {
+        const n = Number.parseFloat(raw);
+        return n > 1 ? n / 255 : n;
+      };
+      return [channel(match[1]!), channel(match[2]!), channel(match[3]!)];
+    })();
+    hoveredChannels.forEach((channel, index) => {
+      expect(channel, detail).toBeCloseTo(rest.hoverMix[index]!, 2);
+    });
     // 条目整体右移一档 space.0.5（2px），激活标记随条目一起走，不再压在竖线上。
     expect(rest.lineToItem - rest.gap, detail).toBeLessThan(0.5);
     expect(rest.barWidth, detail).toBeGreaterThan(0);
@@ -536,17 +573,20 @@ test.describe("近期工作栏窄列几何", () => {
     // 空态短提示水平居中：这一段没有可点对象，左对齐会读成还有一列没显示出来。
     expect(rest.noteAlign, detail).toBe("center");
     expect(rest.noteOffCenter, detail).toBeLessThan(0.5);
-    // 2026-10-16 第三轮：根区之间撤掉分隔线后，不能既无线也无间距——上边框为 0，相邻段之间至少留一档 space.0.5。
+    // 2026-10-16 第三轮：根区之间撤掉分隔线后，不能既无线也无间距——上边框为 0，相邻段之间至少留一档。
+    // 2026-11-15 工作区精修：根区间距从 space.0.5 提到 space.2(8px)——它是这一列最大的结构断层，
+    // 要比条目行距(4px)与分组间距(4px)明显大一档。
     expect(rest.sectionBorderTops.length, detail).toBeGreaterThanOrEqual(3);
     expect(Math.max(...rest.sectionBorderTops), detail).toBeLessThan(0.5);
-    expect(Math.min(...rest.sectionGaps), detail).toBeGreaterThanOrEqual(rest.gap - 0.5);
+    expect(Math.min(...rest.sectionGaps), detail).toBeGreaterThanOrEqual(rest.sectionGap - 0.5);
     // 2026-10-16 第五轮起四个根区的视觉间距对齐同一档；第七轮修掉任务收起时塌成 0px 的
     // 相邻断裂；第八轮按用户「间距还是太大」由 space.3(12px) 收到 space.2(8px)；2026-10-20
     // 第九轮按「这四个的间距再减小一点」收到 space.1(4px)，同日第十轮按「减小到2px」收到
-    // space.0.5(2px)——分组下外边距随同换档，塌穿才不会把间隙顶回去。四处间隙必须仍是同一档。
+    // space.0.5(2px)——分组下外边距随同换档，塌穿才不会把间隙顶回去。2026-11-15 工作区精修
+    // 随行高 24px→28px 一起回到 space.2(8px)：四处间隙必须仍是同一档。
     expect(rest.sectionContentGaps.length, detail).toBe(3);
     expect(rest.sectionContentGaps.every((gap) => Math.abs(gap - rest.sectionContentGaps[0]!) < 0.5), detail).toBe(true);
-    expect(rest.sectionContentGaps[0], detail).toBeCloseTo(rest.gap, 1);
+    expect(rest.sectionContentGaps[0], detail).toBeCloseTo(rest.sectionGap, 1);
   });
 
   // 2026-10-16 第七轮：用户截图指认「四个根区间距没有统一，统一成任务入口和已归档的间距」。
@@ -581,18 +621,19 @@ test.describe("近期工作栏窄列几何", () => {
         }
         return { inGroup: list.closest(".recent-work-group") !== null, rows: rows.length, rowGaps };
       });
-      return { gaps, space05: rem("--relay-space-0-5"), listGaps };
+      return { gaps, space2: rem("--relay-space-2"), rowPitch: rem("--relay-space-1"), listGaps };
     });
 
     const expanded = await read();
     const detail = JSON.stringify(expanded);
-    // 全部展开：三处根区间距都是 space.0.5（第十轮起，用户指定 2px），且已归档区的行确实在测量范围内。
-    expect(expanded.gaps, detail).toEqual([expanded.space05, expanded.space05, expanded.space05]);
+    // 全部展开：三处根区间距都是 space.2（2026-11-15 工作区精修起，8px 断层），且已归档区的行确实在测量范围内。
+    expect(expanded.gaps, detail).toEqual([expanded.space2, expanded.space2, expanded.space2]);
     expect(expanded.listGaps.some((list) => !list.inGroup && list.rows >= 2), detail).toBe(true);
-    // 行距只有一档：凡是有多行的列表（分组内与已归档区）行距都是 space.0.5。
+    // 行距只有一档：凡是有多行的列表（分组内与已归档区）行距都是 space.1（4px）。
+    // 2026-11-15 工作区精修：行高 24px→28px 后 2px 行距会让行重新贴成一片，随分组间距一起回到 4px。
     for (const list of expanded.listGaps) {
       if (list.rows < 2) continue;
-      expect(list.rowGaps.every((gap) => Math.abs(gap - expanded.space05) < 0.5),
+      expect(list.rowGaps.every((gap) => Math.abs(gap - expanded.rowPitch) < 0.5),
         `${detail} ${JSON.stringify(list)}`).toBe(true);
     }
 
@@ -601,7 +642,7 @@ test.describe("近期工作栏窄列几何", () => {
     await page.waitForTimeout(150);
     const tasksCollapsed = await read();
     expect(tasksCollapsed.gaps, JSON.stringify(tasksCollapsed))
-      .toEqual([tasksCollapsed.space05, tasksCollapsed.space05, tasksCollapsed.space05]);
+      .toEqual([tasksCollapsed.space2, tasksCollapsed.space2, tasksCollapsed.space2]);
 
     // 其余三段也收起：四处间距仍不变（任务保持收起，不再点它）。
     for (const id of ["recent-work-goals", "recent-work-directories", "recent-work-archived"]) {
@@ -610,7 +651,7 @@ test.describe("近期工作栏窄列几何", () => {
     await page.waitForTimeout(150);
     const allCollapsed = await read();
     expect(allCollapsed.gaps, JSON.stringify(allCollapsed))
-      .toEqual([allCollapsed.space05, allCollapsed.space05, allCollapsed.space05]);
+      .toEqual([allCollapsed.space2, allCollapsed.space2, allCollapsed.space2]);
   });
 
   // 栏头「新对话」：2026-10-16 第三轮把悬停淡底收成中部一条，第四轮收到 control.height，第五轮误把「上下间距」

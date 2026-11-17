@@ -25,9 +25,15 @@ function response(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
-function searchItem(id: string, title: string) {
-  return { type: "KNOWLEDGE", id, version: "1", title, snippet: title,
-    matched_fields: ["title"], source_ref: `knowledge:${id}:v1`, status: "ACTIVE", project_id: null };
+function pageItem(id: string, title: string) {
+  return { id, title, project_id: null, status: "ACTIVE", revision: "0", current_version: "1",
+    summary: null, source_kind: "NOTE", media_type: "text/plain", availability: "AVAILABLE",
+    source_uri: null, tags: [], collections: [], matched_fields: [], snippet: null,
+    created_at: "2026-09-23T00:00:00.000Z", updated_at: "2026-09-23T00:00:00.000Z" };
+}
+
+function page(items: readonly ReturnType<typeof pageItem>[], nextCursor: string | null) {
+  return { items, next_cursor: nextCursor };
 }
 
 function activate(): void {
@@ -40,6 +46,7 @@ function common(url: string): Response {
   if (url.endsWith("/tasks?scope=all")) return response(200, { items: [], next_cursor: null });
   if (url.includes("/assist-sessions")) return response(200, { items: [] });
   if (url.includes("/projects?")) return response(200, { items: [], next_cursor: null });
+  if (url.includes("/knowledge/page")) return response(200, page([], null));
   if (url === `${base}/knowledge`) return response(200, []);
   return response(200, []);
 }
@@ -56,9 +63,9 @@ describe("知识库搜索续页失败恢复", () => {
     const cursorRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) {
+      if (url.includes("/knowledge/page")) {
         const cursor = new URL(url).searchParams.get("cursor");
-        if (cursor === null) return response(200, { items: [searchItem(pageOneId, "第一页结果")], next_cursor: "cursor-2" });
+        if (cursor === null) return response(200, page([pageItem(pageOneId, "第一页结果")], "cursor-2"));
         cursorRequests.push(cursor);
         return response(503, { code: "DATABASE_UNAVAILABLE", detail: "next page temporary failure" });
       }
@@ -77,8 +84,8 @@ describe("知识库搜索续页失败恢复", () => {
     expect(cursorRequests).toEqual(["cursor-2"]);
     // 续页失败是局部错误，不是首屏整页错误，也不冒充「没有匹配」。
     expect(mounted.wrapper.get('[data-testid="knowledge-search-more-error"]').text()).toContain("续页失败");
-    expect(mounted.wrapper.find('[data-testid="knowledge-search-error"]').exists()).toBe(false);
-    expect(mounted.wrapper.find('[data-testid="knowledge-search-empty"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="knowledge-page-error"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="knowledge-list-empty"]').exists()).toBe(false);
   });
 
   it("按原游标重试成功后错误消失，且结果只追加一次", async () => {
@@ -87,12 +94,12 @@ describe("知识库搜索续页失败恢复", () => {
     const cursorRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) {
+      if (url.includes("/knowledge/page")) {
         const cursor = new URL(url).searchParams.get("cursor");
-        if (cursor === null) return response(200, { items: [searchItem(pageOneId, "第一页结果")], next_cursor: "cursor-2" });
+        if (cursor === null) return response(200, page([pageItem(pageOneId, "第一页结果")], "cursor-2"));
         cursorRequests.push(cursor);
         if (continuationFails) return response(503, { code: "DATABASE_UNAVAILABLE", detail: "next page temporary failure" });
-        return response(200, { items: [searchItem(pageTwoId, "第二页结果")], next_cursor: null });
+        return response(200, page([pageItem(pageTwoId, "第二页结果")], null));
       }
       return common(url);
     }));
@@ -107,7 +114,7 @@ describe("知识库搜索续页失败恢复", () => {
     // 重试必须按原游标请求：换游标等于换一次查询，之前的读取就接不上了。
     expect(cursorRequests).toEqual(["cursor-2", "cursor-2"]);
     expect(mounted.wrapper.find('[data-testid="knowledge-search-more-error"]').exists()).toBe(false);
-    const results = mounted.wrapper.findAll(".knowledge-result");
+    const results = mounted.wrapper.findAll(".knowledge-row");
     expect(results.map((result) => result.text())).toHaveLength(2);
     expect(results.map((result) => result.text()).join(" ")).toContain("第一页结果");
     expect(results.map((result) => result.text()).join(" ")).toContain("第二页结果");
@@ -121,9 +128,9 @@ describe("知识库搜索续页失败恢复", () => {
     const cursorRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) {
+      if (url.includes("/knowledge/page")) {
         const cursor = new URL(url).searchParams.get("cursor");
-        if (cursor === null) return response(200, { items: [searchItem(pageOneId, "第一页结果")], next_cursor: "cursor-2" });
+        if (cursor === null) return response(200, page([pageItem(pageOneId, "第一页结果")], "cursor-2"));
         cursorRequests.push(cursor);
         return new Promise<Response>((resolve) => { resolveContinuation = resolve; });
       }
@@ -137,9 +144,9 @@ describe("知识库搜索续页失败恢复", () => {
     await mounted.wrapper.get('[data-testid="knowledge-more"]').trigger("click"); await flush(20);
     expect(cursorRequests).toEqual(["cursor-2"]);
 
-    resolveContinuation!(response(200, { items: [searchItem(pageTwoId, "第二页结果"), searchItem(pageTwoId, "第二页结果")], next_cursor: null }));
+    resolveContinuation!(response(200, page([pageItem(pageTwoId, "第二页结果"), pageItem(pageTwoId, "第二页结果")], null)));
     await flush(40);
-    const results = mounted.wrapper.findAll(".knowledge-result");
+    const results = mounted.wrapper.findAll(".knowledge-row");
     expect(results).toHaveLength(2);
     expect(results.filter((result) => result.text().includes("第二页结果"))).toHaveLength(1);
   });
@@ -148,13 +155,13 @@ describe("知识库搜索续页失败恢复", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) return response(503, { code: "DATABASE_UNAVAILABLE", detail: "search temporarily unavailable" });
+      if (url.includes("/knowledge/page")) return response(503, { code: "DATABASE_UNAVAILABLE", detail: "search temporarily unavailable" });
       return common(url);
     }));
     const mounted = await mountWorkbench("/knowledge"); unmount = mounted.unmount;
     await mounted.wrapper.get('[data-testid="knowledge-search"]').setValue("探针"); await flush(320);
-    expect(mounted.wrapper.find('[data-testid="knowledge-search-error"]').exists()).toBe(true);
-    expect(mounted.wrapper.find('[data-testid="knowledge-search-empty"]').exists()).toBe(false);
+    expect(mounted.wrapper.find('[data-testid="knowledge-page-error"]').exists()).toBe(true);
+    expect(mounted.wrapper.find('[data-testid="knowledge-list-empty"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="knowledge-search-more-error"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="knowledge-more"]').exists()).toBe(false);
   });
@@ -163,9 +170,9 @@ describe("知识库搜索续页失败恢复", () => {
     activate();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) {
+      if (url.includes("/knowledge/page")) {
         const cursor = new URL(url).searchParams.get("cursor");
-        if (cursor === null) return response(200, { items: [searchItem(pageOneId, "第一页结果")], next_cursor: "cursor-2" });
+        if (cursor === null) return response(200, page([pageItem(pageOneId, "第一页结果")], "cursor-2"));
         return response(403, { code: "FORBIDDEN", detail: "当前工作空间无权读取这些资料。" });
       }
       return common(url);
@@ -174,7 +181,7 @@ describe("知识库搜索续页失败恢复", () => {
     await mounted.wrapper.get('[data-testid="knowledge-search"]').setValue("探针"); await flush(320);
     await mounted.wrapper.get('[data-testid="knowledge-more"]').trigger("click"); await flush(40);
     expect(mounted.wrapper.text()).not.toContain("第一页结果");
-    expect(mounted.wrapper.find('[data-testid="knowledge-search-error"]').exists()).toBe(true);
+    expect(mounted.wrapper.find('[data-testid="knowledge-page-error"]').exists()).toBe(true);
     expect(mounted.wrapper.find('[data-testid="knowledge-search-more-error"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[data-testid="knowledge-more"]').exists()).toBe(false);
   });
@@ -185,12 +192,13 @@ describe("知识库搜索续页失败恢复", () => {
     const cursorRequests: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?")) {
+      if (url.includes("/knowledge/page")) {
         const params = new URL(url).searchParams;
         const q = params.get("q");
         const cursor = params.get("cursor");
-        if (cursor === null && q === "旧词") return response(200, { items: [searchItem(pageOneId, "旧词结果")], next_cursor: "cursor-2" });
-        if (cursor === null && q === "新词") return response(200, { items: [searchItem(pageThreeId, "新词结果")], next_cursor: null });
+        if (cursor === null && q === null) return response(200, page([], null));
+        if (cursor === null && q === "旧词") return response(200, page([pageItem(pageOneId, "旧词结果")], "cursor-2"));
+        if (cursor === null && q === "新词") return response(200, page([pageItem(pageThreeId, "新词结果")], null));
         cursorRequests.push(String(cursor));
         return new Promise<Response>((resolve) => { resolveOldContinuation = resolve; });
       }
@@ -209,7 +217,7 @@ describe("知识库搜索续页失败恢复", () => {
     expect(mounted.wrapper.find('[data-testid="knowledge-more"]').exists()).toBe(false);
 
     // 迟到的旧续页响应不得写回当前查询。
-    resolveOldContinuation!(response(200, { items: [searchItem(pageTwoId, "旧续页结果")], next_cursor: null }));
+    resolveOldContinuation!(response(200, page([pageItem(pageTwoId, "旧续页结果")], null)));
     await flush(40);
     expect(mounted.wrapper.text()).not.toContain("旧续页结果");
     expect(mounted.wrapper.text()).toContain("新词结果");

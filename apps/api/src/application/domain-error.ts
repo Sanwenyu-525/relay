@@ -94,7 +94,24 @@ export function resourceNotFound(entity: string): DomainError {
   });
 }
 
-/** Project 历史仍可读取，但普通业务写入必须重新选择未归档的工作范围。 */
+/** 知识导入被拒：格式/编码/无文本层/超限都是可核对的事实，不伪造成功。 */
+export function knowledgeImportRejected(input: {
+  readonly failure: string;
+  readonly message: string;
+}): DomainError {
+  return new DomainError({
+    code: 'KNOWLEDGE_IMPORT_REJECTED',
+    status: 422,
+    type: '/problems/knowledge-import-rejected',
+    title: '文件无法作为知识导入',
+    detail: input.message,
+    retryable: false,
+    retryAction: 'NONE',
+    fieldErrors: [{ field: 'file', message: `[${input.failure}] ${input.message}` }],
+  });
+}
+
+/** 项目归档后不能写入业务事实（导入/组织变更同样适用）。 */
 export function projectArchived(): DomainError {
   return new DomainError({
     code: 'PROJECT_ARCHIVED',

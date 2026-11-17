@@ -44,6 +44,20 @@ function artifact() {
       media_type: "text/markdown", sha256: "a".repeat(64), size: "12", source_kind: "HUMAN",
       created_at: "2026-10-20T08:00:00Z" }] };
 }
+/**
+ * 0167 知识库读取面：列表、概览、集合、标签在本用例中不是断言对象，
+ * 统一返回空数据，夹具只声明本用例真正关心的请求（不降低任何断言）。
+ */
+function knowledgeLibraryStub(url: string): Response | null {
+  if (url.includes("/knowledge/page?")) return json({ items: [], next_cursor: null });
+  if (url.includes("/knowledge/overview?")) return json({ knowledge_total: 0, decision_total: 0,
+    rule_total: 0, recent_new: 0, recent_updated: 0, unavailable: 0, stale: 0,
+    curation_pending: 0, collection_total: 0, tag_total: 0, unorganized: 0,
+    latest_created_at: null, latest_updated_at: null });
+  if (url.includes("/knowledge-collections?")) return json({ items: [] });
+  if (url.includes("/knowledge-tags?")) return json({ items: [] });
+  return null;
+}
 function activate() { activateRelayConnection({ baseUrl, workspaceId, bearerToken: "test-token" }); }
 
 afterEach(() => { unmount?.(); unmount = null; resetRelayConnectionForTest(); vi.unstubAllGlobals(); });
@@ -55,6 +69,7 @@ describe("日常减负：资料与规则的操作面", () => {
     let committed = false;
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/projects/${projectId}`) return json(project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return json(committed ? [knowledge()] : []);
       if (url === `${base}/knowledge` && init?.method === "POST") {
@@ -88,9 +103,10 @@ describe("日常减负：资料与规则的操作面", () => {
     const posts: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/projects/${projectId}`) return json(project());
       if (url === `${base}/knowledge?project_id=${projectId}`) return json([]);
-      if (url === `${base}/tasks?project_id=${projectId}`) return json({ items: [task()], next_cursor: null });
+      if (url.startsWith(`${base}/tasks?project_id=${projectId}`)) return json({ items: [task()], next_cursor: null });
       if (url === `${base}/tasks/${taskId}/artifacts`) return json({ items: [artifact()], current_accepted_version_ids: [] });
       if (url === `${base}/artifact-versions/${artifactVersionId}/content`) return text("确切版本正文");
       if (url === `${base}/knowledge` && init?.method === "POST") {
@@ -125,6 +141,7 @@ describe("日常减负：资料与规则的操作面", () => {
     const posts: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/rules` && init?.method !== "POST") return json([]);
       if (url === `${base}/rules` && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -159,6 +176,7 @@ describe("日常减负：资料与规则的操作面", () => {
     const posts: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
+      const libraryStub = knowledgeLibraryStub(url); if (libraryStub !== null) return libraryStub;
       if (url === `${base}/rules` && init?.method !== "POST") return json([]);
       if (url === `${base}/rules` && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;

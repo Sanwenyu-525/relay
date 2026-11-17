@@ -1,6 +1,6 @@
 import { RelayContractError } from "../core/errors";
 import { array, boolean, decimal, integer, isRecord, nullableInteger, nullableOptionalInteger, nullableString, object, optionalString, string, stringArray, stringList } from "../core/primitives";
-import type { RelayAssistMessage, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayCompactionTrigger, RelayContextCompaction, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
+import type { RelayAssistMessage, RelayAssistMemoryCapture, RelayAssistMemoryCaptureStatus, RelayAssistMemoryCaptureTask, RelayAssistMessageRecall, RelayAssistMessageRecallStatus, RelayAssistMessageRecallSummary, RelayAssistProposal, RelayAssistProposalBase, RelayAssistSession, RelayAssistSessionBinding, RelayAssistSessionDelete, RelayAssistSessionDirectoryBinding, RelayAssistSessionFork, RelayAssistSessionListState, RelayAssistSessionPin, RelayAssistSessionState, RelayAssistSessionTitle, RelayAssistSessionUnread, RelayAssistRunState, RelayAssistantProfile, RelayAssistSkillInvocation, RelayAssistSkillInvocationStatus, RelayAssistSkillOutput, RelayAssistSourceRef, RelayChatMode, RelayCompactionTrigger, RelayContextCompaction, RelayConversationCandidateFileChange, RelayConversationCheck, RelayConversationDiff, RelayConversationDiffCoverage, RelayConversationDiffFile, RelayConversationDiffScanSide, RelayConversationDiffScope, RelayConversationDiffUnavailableReason, RelayConversationExecution, RelayConversationFileAction, RelayConversationFileDiff, RelayPackDefinition, RelayRunToolCall, RelayRunToolCallPreviews, RelayRunToolCalls, RelaySessionToolCall, RelaySessionToolCallStatus, RelaySessionToolCalls, RelaySkillDefinition, RelayTokenUsage, RelayToolCallStatus, RelayWorkingDirectory, RelayWorkingDirectoryCandidate, RelayWorkingDirectorySource, RelayWorkspaceDefaultDirectory, RelayContextBudgetTokens, RelayContextUsageBreakdown, RelayContextUsageCall, RelayContextUsageEntry, RelayNextCallBudget, RelaySessionContextUsage } from "../dtos/assist";
 import type { RelayActivityItem, RelayActivityRecovery, RelayActivityRecoveryDisposition,
   RelayExecutionActivityMessage, RelayExecutionActivitySnapshot, RelayExecutionRequestSummary,
   RelayMessagePhase, RelayRunSummary, RelayAssistTitleGeneration,
@@ -471,6 +471,69 @@ RelayAssistGenerationProgress | null {
       settledAt: optionalString(latest, "settled_at") } };
 }
 
+const ASSIST_MEMORY_CAPTURE_STATUSES: readonly RelayAssistMemoryCaptureStatus[] =
+  ["PENDING", "RUNNING", "SUCCEEDED", "EMPTY", "FAILED", "CANCELLED"];
+const ASSIST_SKILL_INVOCATION_STATUSES: readonly RelayAssistSkillInvocationStatus[] =
+  ["REQUESTED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"];
+
+function memoryCaptureStatus(value: unknown, label: string): RelayAssistMemoryCaptureStatus {
+  const status = typeof value === "string" ? value : "";
+  if (!(ASSIST_MEMORY_CAPTURE_STATUSES as readonly string[]).includes(status)) {
+    throw new RelayContractError(`${label} 的捕获状态无效。`);
+  }
+  return status as RelayAssistMemoryCaptureStatus;
+}
+
+function assistMemoryCaptureTaskFrom(value: unknown): RelayAssistMemoryCaptureTask {
+  const row = object(value, "assist memory capture task");
+  const kind = string(row, "kind", "assist memory capture task");
+  if (kind !== "AUTO" && kind !== "EXPLICIT") {
+    throw new RelayContractError("记忆捕获任务类型无效。");
+  }
+  const maxAttempts = integer(row, "max_attempts", "assist memory capture task");
+  if (maxAttempts < 1) throw new RelayContractError("记忆捕获任务最大重试次数无效。");
+  return { id: string(row, "id", "assist memory capture task"), kind,
+    status: memoryCaptureStatus(row.status, "assist memory capture task"),
+    attempts: integer(row, "attempts", "assist memory capture task"),
+    maxAttempts, errorKind: nullableString(row, "error_kind", "assist memory capture task"),
+    lastError: nullableString(row, "last_error", "assist memory capture task"),
+    updatedAt: string(row, "updated_at", "assist memory capture task"),
+    completedAt: nullableString(row, "completed_at", "assist memory capture task") };
+}
+
+function assistMemoryCaptureFrom(value: unknown): RelayAssistMemoryCapture {
+  const row = object(value, "assist memory capture");
+  const tasks = array(row, "tasks", "assist memory capture").map(assistMemoryCaptureTaskFrom);
+  const taskCount = integer(row, "task_count", "assist memory capture");
+  if (taskCount !== tasks.length || taskCount < 1) {
+    throw new RelayContractError("记忆捕获聚合的任务数量与实际任务不一致。");
+  }
+  return { status: memoryCaptureStatus(row.status, "assist memory capture"),
+    taskCount, savedCount: integer(row, "saved_count", "assist memory capture"),
+    failedCount: integer(row, "failed_count", "assist memory capture"), tasks };
+}
+
+function assistSkillInvocationFrom(value: unknown): RelayAssistSkillInvocation {
+  const row = object(value, "assist skill invocation");
+  const status = string(row, "status", "assist skill invocation");
+  if (!(ASSIST_SKILL_INVOCATION_STATUSES as readonly string[]).includes(status)) {
+    throw new RelayContractError("Skill 执行事件状态无效。");
+  }
+  const sha = string(row, "skill_sha256", "assist skill invocation");
+  if (!/^[0-9a-f]{64}$/.test(sha)) throw new RelayContractError("Skill 执行事件摘要无效。");
+  return { id: string(row, "id", "assist skill invocation"),
+    skillId: string(row, "skill_id", "assist skill invocation"),
+    skillVersion: string(row, "skill_version", "assist skill invocation"),
+    skillSha256: sha, status: status as RelayAssistSkillInvocationStatus,
+    inputSummary: nullableString(row, "input_summary", "assist skill invocation"),
+    outputSummary: nullableString(row, "output_summary", "assist skill invocation"),
+    errorKind: nullableString(row, "error_kind", "assist skill invocation"),
+    errorDetail: nullableString(row, "error_detail", "assist skill invocation"),
+    requestedAt: string(row, "requested_at", "assist skill invocation"),
+    startedAt: nullableString(row, "started_at", "assist skill invocation"),
+    settledAt: nullableString(row, "settled_at", "assist skill invocation") };
+}
+
 export function assistMessageFrom(value: unknown): RelayAssistMessage {
   const row = object(value, "assist message");
   const role = string(row, "role", "assist message");
@@ -538,6 +601,12 @@ export function assistMessageFrom(value: unknown): RelayAssistMessage {
       ? null : object(row.skill_input, "assist skill input"),
     skillOutput: row.skill_output === null || row.skill_output === undefined
       ? null : assistSkillOutputFrom(row.skill_output),
+    // 0169：旧服务端没有事件数组；缺失读空，不根据 skill 选择补造一次“已执行”。
+    skillInvocations: row.skill_invocations === undefined || row.skill_invocations === null ? []
+      : array(row, "skill_invocations", "assist message").map(assistSkillInvocationFrom),
+    // 2026-11-15：没有捕获任务时服务端返回 null；缺失字段同样读 null。
+    memoryCapture: row.memory_capture === undefined || row.memory_capture === null ? null
+      : assistMemoryCaptureFrom(row.memory_capture),
     usage: { inputTokens: nullableInteger(usage, "input_tokens", "assist usage"),
       outputTokens: nullableInteger(usage, "output_tokens", "assist usage"),
       // cache_* 是 Provider 可选上报项：旧服务端没有这两个字段时按"未上报"处理，
@@ -1318,6 +1387,7 @@ function contextCompactionFrom(value: unknown): RelayContextCompaction {
     postCompactionTargetTokens: integer(row, "post_compaction_target_tokens", label),
     contextTokens: integer(row, "context_tokens", label),
     contextSource,
+    measuredAt: string(row, "measured_at", label),
     distanceTokens: integer(row, "distance_tokens", label),
     active: activeRaw === null || activeRaw === undefined ? null : (() => {
       const active = object(activeRaw, `${label}.active`);

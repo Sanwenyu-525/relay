@@ -104,21 +104,35 @@ test('敏感凭证拒绝写入；已验证/固定与人工验证命令真实落�
     '验证回执必须返回清除陈旧后的真实 revision');
 });
 
-test('设置扩展字段持久化；召回预算生效；HYBRID 记录降级但仍返回字面命中', async () => {
+test('设置扩展字段持久化；未实现的 HYBRID 被拒绝；召回预算生效', async () => {
   const f = await fixture();
   const marker = `BUDGET-${randomUUID()}`;
   await createMemory(app.db, { workspaceId: f.workspaceId, projectId: f.projectId,
     commandId: randomUUID(), title: '预算测试', text: `${marker} 这是一个预算测试。`,
     confirmed: true, memoryType: 'PROJECT_FACT' });
+  await assert.rejects(() => setMemorySettings(app.db, { workspaceId: f.workspaceId,
+    commandId: randomUUID(), expectedRevision: '0', recallEnabled: true,
+    automaticCompaction: true, autoCapture: true, coreTokenBudget: 100,
+    retrievalTokenBudget: 100, retrievalTopK: 3, retrievalMode: 'HYBRID',
+    autoConsolidate: false, consolidationIntervalHours: 48, memoryStaleAfterDays: 90,
+    embeddingProvider: 'disabled', remoteEmbeddingAllowed: false,
+    includeStaleInRecall: true }), (error: unknown) => {
+    assert.match(String(error), /HYBRID|未实现|请求字段/u);
+    return true;
+  });
   await setMemorySettings(app.db, { workspaceId: f.workspaceId, commandId: randomUUID(),
     expectedRevision: '0', recallEnabled: true, automaticCompaction: true, autoCapture: true,
-    coreTokenBudget: 100, retrievalTokenBudget: 100, retrievalTopK: 3, retrievalMode: 'HYBRID',
+    coreTokenBudget: 100, retrievalTokenBudget: 100, retrievalTopK: 3, retrievalMode: 'LITERAL',
     autoConsolidate: false, consolidationIntervalHours: 48, memoryStaleAfterDays: 90,
     embeddingProvider: 'disabled', remoteEmbeddingAllowed: false, includeStaleInRecall: true });
   const settings = await readMemorySettings(app.db, f.workspaceId);
   assert.equal(settings?.core_token_budget, 100);
-  assert.equal(settings?.retrieval_mode, 'HYBRID');
+  assert.equal(settings?.retrieval_mode, 'LITERAL');
   assert.equal(settings?.include_stale_in_recall, true);
+  const capabilities = settings?.capabilities as { readonly retrieval: {
+    readonly hybrid: { readonly implemented: boolean } } } | undefined;
+  assert.equal(capabilities?.retrieval.hybrid.implemented, false,
+    '未实现的 HYBRID 不能向 UI 报成可用');
 
   const session = (await createRepositories(app.db).assist.readSession(f.sessionId))!;
   const refs = await recallConfirmedMemoryRefs(createRepositories(app.db), session,
@@ -208,7 +222,7 @@ test('导出、导入、真实删除：删除后不再从列表或统计召回',
     commandId: randomUUID(), title: '导出条目', text: `${marker} 可导出正文。`, confirmed: true,
     memoryType: 'USER_PREFERENCE' });
   const exported = await exportMemories(app.db, source.workspaceId, null);
-  assert.equal(exported.schema_version, 1);
+  assert.equal(exported.schema_version, 2, 'v2 导出必须保留版本、来源与作用域，不能退回 v1');
   const memories = exported.memories as readonly Record<string, unknown>[];
   assert.equal(memories.length, 1);
   assert.ok(!JSON.stringify(exported).includes('session'));

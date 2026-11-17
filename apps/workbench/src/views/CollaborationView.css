@@ -731,19 +731,27 @@
 /* 右翼动作区：图标键同高同密度、按 space.2 成组；「工作详情」固定在最后。
    图标键本身的基底与展开色见本文件上方的 `.collab-toolbar-icon-button`，这里只摆位置。 */
 .collab-toolbar-right { display: flex; align-items: center; gap: var(--relay-space-2); }
-/* 「切换讨论」浮层（2026-10-17）：贴在触发键正下方，右缘对齐顶栏右缘，宽度按最长一条讨论走，
-   与左栏行内菜单同一套浮层形（surface + separator + floating 阴影 + panel 圆角）。 */
+/* 「切换讨论」浮层（2026-10-17）：贴在触发键正下方，右缘对齐顶栏右缘，
+   与左栏行内菜单同一套浮层形（surface + separator + floating 阴影 + panel 圆角）。
+   2026-11-15 工作区精修：宽度从「按最长一条讨论走」改为固定 22rem——max-content 会被一条
+   超长标题顶到 20rem 上限再整体省略，条目越宽越挤；固定宽 + 条目内两行省略让长标题可读到
+   两行、短标题不把浮层拉成一条细长条。条目改两行结构（标题 + 次级 meta 行），标题最多两行，
+   「更新时间 / 当前 / 已结束」降到 caption 档——它们是辅助事实，此前与标题同档同色挤在一行，
+   长标题一省略就先把它们切掉。当前会话补 selection.bg 底色：aria-current 是三重信号里的
+   那一道视觉层，只有字重读不出「我在哪儿」。条目超过视口时面板内部滚动。 */
 .collab-session-switcher { position: relative; display: flex; align-items: center; }
 .collab-session-switcher-panel {
   position: absolute;
-  top: calc(100% + var(--relay-space-1));
+  top: calc(100% + var(--relay-space-2));
   right: 0;
   z-index: var(--relay-zIndex-popover);
   display: grid;
   gap: var(--relay-space-1);
-  width: max-content;
-  max-width: min(20rem, calc(100vw - var(--relay-space-4)));
-  padding: var(--relay-space-1);
+  width: 22rem;
+  max-width: min(24rem, calc(100vw - var(--relay-space-8)));
+  max-height: min(60dvh, 30rem);
+  overflow-y: auto;
+  padding: var(--relay-space-2);
   background: var(--relay-color-bg-surface);
   border: var(--relay-border-width) solid var(--relay-color-border-separator);
   border-radius: var(--relay-radius-panel);
@@ -751,22 +759,42 @@
 }
 .collab-session-switcher-option {
   min-width: 0;
-  padding: var(--relay-space-1) var(--relay-space-2);
+  display: grid;
+  gap: var(--relay-space-0-5);
+  padding: var(--relay-space-2);
   font-size: var(--relay-font-size-meta);
   text-align: start;
   color: var(--relay-color-text-secondary);
   background: transparent;
   border: 0;
   border-radius: var(--relay-radius-control);
-  white-space: nowrap;
+}
+.collab-session-switcher-title {
+  min-width: 0;
+  color: var(--relay-color-text-primary);
+  line-height: var(--relay-font-lineHeight-heading);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.collab-session-switcher-meta {
+  font-size: var(--relay-font-size-caption);
+  color: var(--relay-color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.collab-session-switcher-option:hover:not(:disabled) {
-  background: var(--relay-color-selection-hover);
-  color: var(--relay-color-text-primary);
+.collab-session-switcher-option:hover:not(:disabled),
+.collab-session-switcher-option:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--relay-color-selection-hover) 40%, var(--relay-color-bg-surface));
 }
 .collab-session-switcher-option[aria-current="true"] {
+  background: var(--relay-color-selection-bg);
+}
+.collab-session-switcher-option[aria-current="true"] .collab-session-switcher-title {
   color: var(--relay-color-selection-text);
   font-weight: var(--relay-font-weight-medium);
 }

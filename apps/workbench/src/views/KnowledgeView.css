@@ -36,7 +36,7 @@
   border-radius: var(--relay-radius-control);
   background: var(--relay-color-bg-surface);
   color: var(--relay-color-text-secondary);
-  font-size: 11.5px;
+  font-size: var(--relay-font-size-micro);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -59,7 +59,7 @@
 .knowledge-row-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--relay-radius-control); background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); }
 .knowledge-row-icon svg { width: 15px; height: 15px; }
 .knowledge-row-main { display: grid; gap: 4px; min-width: 0; }
-.knowledge-row strong { color: var(--relay-color-text-primary); font-size: 12.5px; font-weight: 650; line-height: 1.55; }
+.knowledge-row strong { color: var(--relay-color-text-primary); font-size: var(--relay-font-size-pageBase); font-weight: 650; line-height: 1.55; }
 .knowledge-row small { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); line-height: 1.5; }
 /* 宽列表（阅读形态展开的那一份）一行放得下「标题 + 元信息」：标题在左、元信息靠右，
    行高收到 46px；窄列（列表形态）仍按上下两行排。按容器宽度切换，不按视口猜。 */
@@ -145,7 +145,7 @@
 .knowledge-reader { display: grid; gap: 14px; }
 .knowledge-reader__head { min-width: 0; }
 .knowledge-reader__head .page-head { margin: 0 0 12px; }
-.knowledge-reader__head .page-head-title > h1 { font-size: 22px; }
+.knowledge-reader__head .page-head-title > h1 { font-size: var(--relay-font-size-rowTitle); }
 .knowledge-reader__head .page-head-meta { font-size: var(--relay-font-size-caption); }
 .knowledge-reader__grid { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) minmax(0, 252px); gap: 20px; align-items: start; }
 .knowledge-reader--no-toc .knowledge-reader__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 252px); }
@@ -164,9 +164,9 @@
 .knowledge-reader__paper .knowledge-reader__body { max-width: none; padding: 20px 22px 26px; }
 .knowledge-reader__body { max-width: var(--relay-layout-reading-maxWidth); font-family: var(--relay-font-family-ui); font-size: var(--relay-font-size-reading); line-height: var(--relay-font-lineHeight-reading); overflow-wrap: anywhere; }
 .knowledge-reader__body .markdown-preview { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; }
-.knowledge-reader__body .markdown-preview__heading { margin: 26px 0 10px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
-.knowledge-reader__body .markdown-preview__heading[data-heading-level="1"] { font-size: 20px; }
-.knowledge-reader__body .markdown-preview__subheading { margin: 22px 0 8px; font-size: 15px; font-weight: 650; }
+.knowledge-reader__body .markdown-preview__heading { margin: 26px 0 10px; font-size: var(--relay-font-size-reading); font-weight: 650; letter-spacing: -.01em; }
+.knowledge-reader__body .markdown-preview__heading[data-heading-level="1"] { font-size: var(--relay-font-size-rowTitle); }
+.knowledge-reader__body .markdown-preview__subheading { margin: 22px 0 8px; font-size: var(--relay-font-size-meta); font-weight: 650; }
 .knowledge-reader__body .markdown-preview__heading:first-child, .knowledge-reader__body .markdown-preview__subheading:first-child { margin-top: 0; }
 .knowledge-reader__body .markdown-preview__paragraph, .knowledge-reader__body .markdown-preview__list { margin-bottom: var(--relay-space-4); }
 /* 正文里的表格是数据，不是正文：压到 13px 并按内容分列，避免 18px 字号把三列表格
@@ -183,7 +183,7 @@
 .knowledge-reader__toc .knowledge-reader__toc-current { border-left-color: var(--relay-color-action-primary); background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); font-weight: 650; }
 .knowledge-reader__source { padding: 14px 16px 18px; border: 1px solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); box-shadow: var(--relay-shadow-surface); }
 .knowledge-reader__source h2 { margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--relay-color-border-separator); color: var(--relay-color-text-primary); font-size: var(--relay-font-size-pageBase); }
-.knowledge-reader__source dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 12px; margin: 0; font-size: 11.5px; overflow-wrap: anywhere; }
+.knowledge-reader__source dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 12px; margin: 0; font-size: var(--relay-font-size-micro); overflow-wrap: anywhere; }
 .knowledge-reader__source dt { color: var(--relay-color-text-muted); }
 .knowledge-reader__source dd { margin: 0; color: var(--relay-color-text-primary); }
 .knowledge-reader__source small { display: block; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
@@ -275,7 +275,7 @@
 
 /* ── 原型皮肤里仍需收口的几处（其余已在上面按 V5.28 取值直接写死） ───────── */
 
-.pv-page .knowledge-item-heading h2 { font-size: 15px; color: var(--relay-color-text-primary); }
+.pv-page .knowledge-item-heading h2 { font-size: var(--relay-font-size-meta); color: var(--relay-color-text-primary); }
 .pv-page .knowledge-fact-paper {
   border: 1px solid var(--relay-color-border-separator);
   background: var(--relay-color-bg-subtle);
@@ -287,3 +287,108 @@
 /* 示例模式空态：1062px 全宽卡片里只有一行约 360px 的说明，右侧 660px 是死区；
    收到与 /goals、/activity、/today 空态卡相同的 780px 阅读宽，保持同一条左对齐边。 */
 .pv-page .knowledge-fixture-card { max-width: 780px; }
+
+/* ---- 0167：知识库信息架构（工具行 / 概览 / 筛选 / 密列表 / 组织 / 导入） ---- */
+/* 工具行：类型页签 + 常驻搜索 + 操作；搜索不再折进 details，首屏就能输入。 */
+.knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; margin: var(--relay-space-3) 0 var(--relay-space-2); }
+.knowledge-toolbar .knowledge-tabs { align-self: center; }
+.knowledge-search-field { flex: 1 1 18rem; min-width: 12rem; margin: 0; }
+.knowledge-search-field input { width: 100%; height: 34px; }
+.knowledge-toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+/* 概览：一行事实，不是统计卡片；没有真实数据时整段不渲染。 */
+.knowledge-overview { margin: 0 0 var(--relay-space-2); padding: 9px 14px; border: 1px solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-subtle); }
+.knowledge-overview dl { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; }
+.knowledge-overview dl div { display: flex; align-items: baseline; gap: 6px; }
+.knowledge-overview dt { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-overview dd { margin: 0; color: var(--relay-color-text-primary); font-size: var(--relay-font-size-pageBase); font-weight: 650; font-variant-numeric: tabular-nums; }
+.knowledge-overview .knowledge-overview--attention dd { color: var(--relay-color-status-warning-text); }
+
+/* 筛选条：范围/状态/集合/标签/排序同一行，窄屏自动换行。 */
+.knowledge-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin: 0 0 var(--relay-space-3); padding: 9px 12px; border: 1px solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
+.knowledge-filter-group { display: flex; align-items: center; gap: 8px; }
+.knowledge-filter-label { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); white-space: nowrap; }
+.knowledge-filter .segmented { display: flex; flex-wrap: wrap; gap: 4px; }
+.knowledge-filter .segmented-option { flex: none; margin-left: 0; height: 30px; padding-inline: 10px; border: 1px solid var(--relay-color-border-subtle); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-micro); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.knowledge-filter .segmented-option:hover:not(:disabled) { background: var(--relay-color-selection-hover); color: var(--relay-color-action-text); }
+.knowledge-filter .segmented-option--selected { background: var(--relay-color-selection-bg); border-color: var(--relay-color-action-primary); color: var(--relay-color-action-text); font-weight: 650; }
+.knowledge-filter-field { display: grid; gap: 3px; min-width: 7.5rem; }
+.knowledge-filter-field span { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-filter-field select { height: 30px; padding: 0 6px; font-size: var(--relay-font-size-micro); }
+
+/* 密列表：每条给出标题、摘要、范围/来源/版本/时间与标签；不用大卡片。 */
+.knowledge-rows { list-style: none; margin: 0; padding: 0; }
+.knowledge-rows .knowledge-row { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 10px 14px; }
+.knowledge-row-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--relay-color-text-secondary) !important; font-size: var(--relay-font-size-micro) !important; }
+.knowledge-row-meta { font-variant-numeric: tabular-nums; }
+.knowledge-row-badges { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 2px; }
+.knowledge-badge { padding: 1px 6px; border: 1px solid var(--relay-color-border-subtle); border-radius: 999px; background: var(--relay-color-bg-subtle); color: var(--relay-color-text-secondary); font-size: var(--relay-font-size-micro); line-height: 1.5; }
+.knowledge-badge--tag { border-color: var(--relay-color-action-primary); color: var(--relay-color-action-text); }
+.knowledge-badge--match { background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); }
+.knowledge-count { color: var(--relay-color-text-muted); font-weight: 500; }
+
+/* 健康检查：一行事实 + 重复组清单；只提示，不自动处理。 */
+.knowledge-health { margin: 0 0 var(--relay-space-3); padding: 12px 14px; border: 1px solid var(--relay-color-border-separator); border-radius: var(--relay-radius-panel); background: var(--relay-color-bg-surface); }
+.knowledge-health-facts { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 0 0 8px; }
+.knowledge-health-facts dt { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-health-facts dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.knowledge-health-duplicates { margin: 0 0 8px; padding-left: 18px; font-size: var(--relay-font-size-micro); color: var(--relay-color-text-secondary); }
+.knowledge-health-duplicates ul { margin: 2px 0 0; padding-left: 16px; }
+
+/* 详情组织区：集合/标签/关联/使用记录；每条事实都来自服务端，不显示推测次数。 */
+.knowledge-organization { margin-top: var(--relay-space-4); padding-top: var(--relay-space-3); border-top: 1px solid var(--relay-color-border-separator); }
+.knowledge-organization .section-heading-row h2 { margin: 0; font-size: var(--relay-font-size-pageBase); }
+.knowledge-org-block { margin-top: var(--relay-space-3); }
+.knowledge-org-block h3 { margin: 0 0 6px; color: var(--relay-color-text-primary); font-size: var(--relay-font-size-pageBase); font-weight: 650; }
+.knowledge-org-choices { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.knowledge-org-inline { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 8px; }
+.knowledge-org-inline .field { min-width: 9rem; flex: 1 1 12rem; margin: 0; }
+.knowledge-org-inline .field input { height: 30px; }
+.knowledge-tag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.knowledge-tag { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; border: 1px solid var(--relay-color-action-primary); border-radius: 999px; background: var(--relay-color-selection-bg); color: var(--relay-color-action-text); font-size: var(--relay-font-size-micro); }
+.knowledge-tag button { border: 0; background: transparent; color: inherit; font-size: var(--relay-font-size-pageBase); line-height: 1; cursor: pointer; padding: 0 3px; }
+.knowledge-relations, .knowledge-usage { list-style: none; margin: 0; padding: 0; }
+.knowledge-relations li, .knowledge-usage li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 0; border-bottom: 1px solid var(--relay-color-border-separator); font-size: var(--relay-font-size-micro); }
+.knowledge-relations li:last-child, .knowledge-usage li:last-child { border-bottom: 0; }
+.knowledge-relation-kind { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-relations small, .knowledge-usage small { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.link-button { padding: 0; border: 0; background: transparent; color: var(--relay-color-action-text); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* 导入：每个文件一张扁平行，拒绝原因与原样预览都在行内。 */
+.knowledge-import { display: grid; gap: 10px; }
+.knowledge-import-head { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 12px; }
+.knowledge-import-head h2 { margin: 0 0 4px; font-size: var(--relay-font-size-pageBase); }
+.knowledge-import-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.knowledge-import-item { padding: 10px 12px; border: 1px solid var(--relay-color-border-separator); border-radius: var(--relay-radius-control); background: var(--relay-color-bg-surface); }
+.knowledge-import-item header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; }
+.knowledge-import-status { color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-import-status--ready { color: var(--relay-color-action-text); }
+.knowledge-import-status--rejected { color: var(--relay-color-status-danger-text); }
+.knowledge-import-duplicate { margin: 6px 0; padding: 6px 8px; border-left: 3px solid var(--relay-color-status-warning-text); background: var(--relay-color-bg-subtle); font-size: var(--relay-font-size-micro); }
+.knowledge-import-fields { display: grid; gap: 8px; margin-top: 6px; }
+.knowledge-import-fields .field { margin: 0; }
+.knowledge-import-fields .field input { height: 30px; }
+.knowledge-import-collections { margin: 0; padding: 4px 8px 6px; border: 1px solid var(--relay-color-border-subtle); border-radius: var(--relay-radius-control); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.knowledge-import-collections legend { padding: 0 4px; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-import-strategy { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.knowledge-import-strategy .field { min-width: 14rem; }
+.knowledge-import-preview { margin-top: 8px; }
+.knowledge-import-preview pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--relay-font-size-micro); }
+
+/* 集合与标签管理：两段式清单，没有卡片嵌套。 */
+.knowledge-organize { display: grid; gap: var(--relay-space-4); max-height: 70vh; overflow: auto; }
+.knowledge-organize section h3 { margin: 0 0 4px; font-size: var(--relay-font-size-pageBase); }
+.knowledge-organize-list { list-style: none; margin: 8px 0; padding: 0; }
+.knowledge-organize-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--relay-color-border-separator); font-size: var(--relay-font-size-pageBase); }
+.knowledge-organize-list li small { display: block; color: var(--relay-color-text-muted); font-size: var(--relay-font-size-micro); }
+.knowledge-organize-actions { display: flex; gap: 4px; }
+
+@media (max-width: 80rem) {
+  .knowledge-columns { grid-template-columns: minmax(15rem, 0.38fr) minmax(0, 1fr); }
+}
+@media (max-width: 64rem) {
+  .knowledge-toolbar { align-items: stretch; }
+  .knowledge-toolbar-actions { margin-left: 0; }
+  .knowledge-columns { grid-template-columns: minmax(0, 1fr); }
+  .knowledge-detail { min-width: 0; }
+}

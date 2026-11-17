@@ -28,6 +28,7 @@ import { registerFileUserActionRoutes } from './file-user-action-api.js';
 import { registerRequiredContextRoutes } from './required-context-api.js';
 import { registerAssistantProfileRoutes } from './assistant-profile-api.js';
 import { registerInformationRoutes } from './information-api.js';
+import { registerKnowledgeRoutes } from './knowledge-api.js';
 import { registerReviewRoutes } from './review-api.js';
 import { registerStateRoutes } from './state-api.js';
 import { registerTaskRoutes } from './task-api.js';
@@ -175,6 +176,8 @@ registerProjectKnowledgeGuideRoutes(scope, apiDependencies);
       // 2026-10-30：项目必读文件体积审计（只读投影，用于发送前的上下文风险预警）。
       registerRequiredContextRoutes(scope, apiDependencies);
       registerInformationRoutes(scope, apiDependencies);
+      // 0167：知识库组织层（集合/标签/关联）、服务端分页检索与导入。
+      registerKnowledgeRoutes(scope, apiDependencies);
       registerReviewRoutes(scope, apiDependencies);
       registerAssistRoutes(scope, apiDependencies);
       // P0-3：前端异常诊断（固定字段、限频、Bearer 作用域内）。

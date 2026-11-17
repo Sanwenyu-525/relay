@@ -131,6 +131,64 @@ test('GET /projects pages exact ProjectState and archive facts without crossing 
     404, 'RESOURCE_NOT_FOUND');
 });
 
+test('GET /projects?ids= reads referenced Projects by ID beyond the first 100 and stays Workspace-scoped', async () => {
+  const workspaceId = await createWorkspace(app.db);
+  const otherWorkspace = await createWorkspace(app.db);
+  const foreign = await createProject(otherWorkspace, 'foreign');
+  // 最早创建的项目在「第一页 100 条」之外：任务页仍要按 ID 取回它的名称。
+  const oldest = await createProject(workspaceId, '最早立项项目');
+  const fillers: string[] = [];
+  for (let index = 0; index < 100; index += 1) {
+    fillers.push(await createProject(workspaceId, `填充项目 ${index + 1}`));
+  }
+  const archived = await createProject(workspaceId, '已归档项目');
+  await sql`update projects set archived_at = now() where id = ${archived}`.execute(app.db);
+  await sql`update projects set created_at = '2025-01-01T00:00:00.000001Z'::timestamptz
+    where id = ${oldest}`.execute(app.db);
+
+  const firstPage = await api.get(workspacePath(workspaceId, '/projects?status=all&limit=100'));
+  assert.equal(firstPage.status, 200, firstPage.text);
+  const firstPageIds = (firstPage.body as { items: { id: string }[] }).items.map((item) => item.id);
+  assert.equal(firstPageIds.length, 100);
+  assert.ok(!firstPageIds.includes(oldest));
+  assert.ok(!firstPageIds.includes(foreign));
+
+  const missing = randomUUID();
+  const wanted = [oldest, fillers.at(-1)!, archived, missing];
+  const batch = await api.get(workspacePath(workspaceId, `/projects?ids=${wanted.join(',')}`));
+  assert.equal(batch.status, 200, batch.text);
+  const items = (batch.body as { items: { id: string; title: string;
+    archive_status: string; archived_at: string | null }[]; next_cursor: string | null }).items;
+  assert.deepEqual(items.map((item) => item.id).sort(), [oldest, fillers.at(-1)!, archived].sort());
+  assert.equal(items.find((item) => item.id === oldest)?.title, '最早立项项目');
+  assert.equal(items.find((item) => item.id === archived)?.archive_status, 'ARCHIVED');
+  assert.notEqual(items.find((item) => item.id === archived)?.archived_at, null);
+  assert.deepEqual((batch.body as { next_cursor: string | null }).next_cursor, null);
+
+  // 单个 Project 也走同一入口；空结果不伪造名称。
+  const single = await api.get(workspacePath(workspaceId, `/projects?ids=${oldest}`));
+  assert.equal(single.status, 200, single.text);
+  assert.deepEqual((single.body as { items: { id: string }[] }).items.map((item) => item.id), [oldest]);
+  const absent = await api.get(workspacePath(workspaceId, `/projects?ids=${missing}`));
+  assert.equal(absent.status, 200, absent.text);
+  assert.deepEqual((absent.body as { items: unknown[] }).items, []);
+
+  // 不跨 Workspace：用本空间的 URL 查外空间项目，也必须为空。
+  const cross = await api.get(workspacePath(workspaceId, `/projects?ids=${foreign}`));
+  assert.equal(cross.status, 200, cross.text);
+  assert.deepEqual((cross.body as { items: unknown[] }).items, []);
+
+  const tooMany = Array.from({ length: 101 }, () => randomUUID()).join(',');
+  expectProblem(await api.get(workspacePath(workspaceId, `/projects?ids=${tooMany}`)),
+    422, 'VALIDATION_FAILED');
+  expectProblem(await api.get(workspacePath(workspaceId, '/projects?ids=not-a-uuid')),
+    422, 'VALIDATION_FAILED');
+  const projectPage = await api.get(workspacePath(workspaceId, '/projects?limit=1'));
+  const cursor = (projectPage.body as { next_cursor: string }).next_cursor;
+  expectProblem(await api.get(workspacePath(workspaceId,
+    `/projects?ids=${oldest}&cursor=${encodeURIComponent(cursor)}`)), 422, 'VALIDATION_FAILED');
+});
+
 test('GET /tasks?scope=all keeps legacy filters and computes blockers by each Project', async () => {
   const workspaceId = await createWorkspace(app.db);
   const otherWorkspace = await createWorkspace(app.db);

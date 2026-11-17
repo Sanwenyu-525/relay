@@ -185,6 +185,18 @@ window.content.initialWidth/initialHeight 与 minWidth/minHeight 为客户区逻
 - **Reviews**：「查看判断条件／前往决定」由行内链接改次要按钮；列表标题在 fixture 下用目标产物版本号，详情事实两列。
 - **第二轮验证**：26 路由 fixture 审计 1440／390 全部对比度 0、小于 11px 0、横向溢出 0、右栏空白 0（`audit-round3-1440.json`／`audit-round3-390.json`）；受影响 `vitest` 12 文件 178 通过；`tests/browser/acceptance-projects-20261028.spec.ts` 22/22（4188 端口被占，改用 `RELAY_E2E_PORT=4190`）、`acceptance-tasks-20261028.spec.ts` 9/9；`tsc --noEmit` 仍只有 `scenarioFixtureContract` 5 处 HEAD 欠账。剩余限制：项目详情「页签行/入口按钮行」顺序与 4+7 两套项目导航未合并（测试同时依赖 `.skill-tab` 与 `.subnav-item--active`）、任务详情 390px 事实栏仍在概览之后、项目工作台 h1 仍是任务名、页面内容列左缘随路由变化、返回动作形状与日期/命名不统一；均为后续范围。
 
+2026-11-15 全局布局与容器层级整改（UI-LAYOUT-AUDIT-20261115，实施者自检、未独立验收）：用户指认项目总览等多页「卡片套卡片、无意义空白、内容区过窄、对齐基准不一」。以 1660×895／1280×800 实测各路由的容器矩形与 computed padding 定位根因后收敛，规则仍 scope 在 `.pv-page` 下，不改业务语义、data-testid 与路由：
+
+- **页壳唯一 Owner**：`.skill-shell.pv-page` 内的 live 视图根（项目总览、蓝图预览、任务详情）此前重复携带 `.pv-page`，页壳几何叠加——live 模式水平内缩 30+30+32=92px、底部 64+64+32=160px，且与 fixture 模式的对齐基准不一致。新增 `.pv-page .pv-page { width:auto; margin:0; padding:0; min-height:0 }`：嵌套层降级为纯皮肤容器（`--pv-*` 变量、字号档与 `.pv-page` 作用域规则照常继承），页壳几何只归最外层。特异度 0,2,0，不压 `.pv-page.task-detail-page` 等页面专属覆写（0,3,0）；pv 根即页面本身的复合根（`page-state pv-page`、`page-layout … pv-page`）不匹配本条。
+- **水平对齐唯一基准**：`.pv-page .page-primary { padding: 32px 0 0 }`——pv gutter（30px）是页内唯一水平 Owner，`.page-primary` 不再叠加 32px；顶部保留主区节奏、底部交给 pv 壳 space.16。页签行同步（`.pv-page .skill-tabs` 水平内缩归零、项目 scope 行 `padding: 0` 与 `project-workbench-entry` 右缘同改），页签、页头与正文从此共用同一条左右对齐边，fixture 与 live 两种数据模式一致。实测 live 总览正文列 716→840px、底部死白 160→64px。
+- **分区卡内不再套完整卡片**：「接续摘要」分区卡（`.resume-section`）内的 `DailyContinuationCard`（`.daily-continuation`）退化为内容组——去边框/底色/圆角/内边距，层级由卡片内留白表达；阻塞/失败态改画 2px 左缘强调线（`palette.amber`/`palette.red`），不再套第二层框。组件在分区卡外单独使用时样式不变。
+- **全站水平基准修复**：定时任务页复合根（`pv-page.scheduled-tasks-page.page-layout`）此前 `margin:0` 把 pv 自身的 `margin:0 auto` 一并清零——页面贴卡左缘、右侧留 98px 死白；改回 `margin:0 auto` 后与其他 pv 页同一居中基准（内层 page-layout 仍 `margin:0` 铺满 pv 内容盒）。
+- **总览信息去重**：live「已确认事实」去掉与页头 meta／状态 chip 重复的「当前阶段」行；fixture「项目当前状态」去掉与 metadata-row／页头 lede 重复的阶段与目标两行。
+- **有意不动**：token 数值（`layout.page.maxWidth` 1220、rail 宽度公式 `clamp(18rem,24%,24rem)`／`clamp(20rem,26%,26rem)`）未改——百分比在 1220 上限的 pv 页里恒触下限（288/320px），属已知 token 设计问题，调公式会改动多张视觉基线，留待独立视觉验收。`/settings`（非 pv，自带壳层）与 `/memory`（新页自带 `memory-page`，max-width 80rem）保持各自壳层。
+
+**验证**：Computed 实测（嵌套壳 padding 0／宽度 auto、page-primary `32/0/0`、接续卡仅剩左缘强调线）；1660／1280 全路由 fixture 探针横向溢出 0；`check-ui-conventions`、`tsc --noEmit`、`vite build` 通过；Vitest 定向 81/81 与全量结果见验收表行；Chromium `uiDensity`＋`uiAccessibility`＋`workbench` 38/39（R02 创建页草稿守卫失败经临时还原本轮全部改动复跑同样失败，确认非本轮引入）、`taskDetailVisual` 8/8（CORS origin 改按 `RELAY_E2E_PORT` 推导，断言零改动）、`acceptance-projects` 22/22；视觉基线 29/29 连续两次通过（`project-detail.png` 因此轮去重与去 padding 有意更新，元素截图内容高度 1408→1294，其余 28 张不变）。证据 `tmp/UI-LAYOUT-AUDIT-20261115/`（before/after 截图、measure JSON、注入式 computed 探针）。
+
+
 
 2026-09-29，用户已选方向 1「对话主轴 · 双页工作桌」；[完整窗口修订图](../mockups/2026-09-29/collaboration-dialogue-window.png)补入用户指出遗漏的 Windows 标题栏，[原选稿](../mockups/2026-09-29/collaboration-dialogue-selected.png)保留选择依据。本轮已授权实施并在 `/agent` 落地（开发自检），**真实 Windows 窗口验收仍未完成**；本文只定义呈现规则，操作与状态以[工作台第 14 节](../workbench-design/part-03.md#14-以目标协作为中心的工作台改造)为准。
 

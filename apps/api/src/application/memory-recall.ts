@@ -69,7 +69,8 @@ function toRef(memory: SelectedMemory, basis: MemoryRecallBasis): RecallMemoryRe
  */
 export async function recallConfirmedMemoryRefs(r: Repositories, session: AssistSessionRow,
   content: string, excludedIds: ReadonlySet<string>, remaining: number): Promise<readonly RecallMemoryRef[]> {
-  if (session.conversation_mode !== 'AGENT' || !session.remember || remaining <= 0) return [];
+  if (session.conversation_mode !== 'AGENT' && session.conversation_mode !== 'ASSISTANT') return [];
+  if (!session.remember || remaining <= 0) return [];
   const settings = await r.information.readMemorySettings(session.workspace_id);
   if (settings?.recall_enabled === false) return [];
   const coreBudget = settings?.core_token_budget ?? DEFAULT_CORE_BUDGET;
@@ -103,7 +104,10 @@ export async function recallConfirmedMemoryRefs(r: Repositories, session: Assist
     let coreTokens = 0;
     let retrievalTokens = 0;
     for (const row of pinned) {
-      if (row.effective_status !== 'ACTIVE' || row.verification === 'FAILED') continue;
+      // 固定记忆在用户显式允许陈旧召回时仍然常驻；否则只取当前有效。
+      if (row.effective_status !== 'ACTIVE' &&
+          !(includeStale && row.effective_status === 'STALE')) continue;
+      if (row.verification === 'FAILED') continue;
       if (seen.has(row.id) || selected.length >= remaining) continue;
       const cost = tokenCost(row.body_text);
       if (coreTokens + cost > coreBudget) continue;
@@ -113,6 +117,8 @@ export async function recallConfirmedMemoryRefs(r: Repositories, session: Assist
     }
     for (const row of literal) {
       if (row.effective_status !== 'ACTIVE' && row.effective_status !== 'STALE') continue;
+      // STALE 只在 include_stale_in_recall 开启时进入召回；这是用户显式选择，不是默认行为。
+      if (row.effective_status === 'STALE' && !includeStale) continue;
       if (row.verification === 'FAILED') continue;
       if (seen.has(row.id) || selected.length >= remaining) continue;
       const cost = tokenCost(row.body_text);

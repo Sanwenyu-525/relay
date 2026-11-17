@@ -110,29 +110,39 @@ interface Routes {
 }
 
 /**
- * 按一份真实用量造投影：冻结预算取 `reserved`，会话档位固定 262,144。
- * 两者不同正是要覆盖的情形——占比必须按 `reserved` 解释。
+ * 按一份真实用量造投影：冻结预算取 `reserved`，当前模型有效窗口固定为已知的 262,144。
+ * 两者不同正是要覆盖的情形——占比必须按当前模型有效窗口解释。
+ *
+ * 这里刻意不写 `model_window_tokens: null + MODEL_CONFIG`：真实链路里模型窗口未知时
+ * `window_source` 必须是 `UNKNOWN_FALLBACK` 且 `fallback_applied:true`，否则就是自相矛盾。
+ * 目标容量仍是产品 1M，服务商默认单次预算 1,048,576；有效窗口取二者的最小值 262,144。
  */
 export function contextUsageProjection(usage: { input_tokens: number | null;
   output_tokens: number | null; cache_read_tokens: number | null;
-  cache_creation_tokens: number | null }, reserved: number | null): unknown {
-  // 0162 起 `compaction` 是必读投影（缺省显式失败，见 sessionContextUsageFrom）；
-  // 旧夹具没有这一段，会让整份上下文用量读成 unknown。这里补一份与 256K 档一致的
-  // 默认压缩策略，仅作为服务端投影的夹具，不改变任何界面断言。
+  cache_creation_tokens: number | null }, reserved: number | null,
+  compactionOverrides: Record<string, unknown> = {}): unknown {
   const contextTokens = usage.input_tokens ?? 0;
+  const compaction = {
+    enabled: true, threshold_tokens: 180_000, default_threshold_tokens: 350_000,
+    recommended: { min: 256_000, max: 400_000 }, requested_threshold_tokens: 180_000,
+    effective_threshold_tokens: 180_000, threshold_clamped: false,
+    target_window_tokens: 1_000_000, model_window_tokens: 262_144,
+    window_source: "MODEL_CONFIG", provider_call_cap_tokens: 1_048_576,
+    fallback_applied: false, effective_window_tokens: 262_144,
+    output_reserve_tokens: 8_192, protocol_overhead_tokens: 8_192,
+    safety_reserve_tokens: 13_108, safe_input_tokens: 232_652,
+    post_compaction_target_tokens: 90_000, context_tokens: contextTokens,
+    context_source: "PROVIDER_USAGE", measured_at: "2026-11-15T10:00:00.000Z",
+    distance_tokens: 180_000 - contextTokens, active: null, last_result: null,
+    ...compactionOverrides,
+  };
   return { session_id: sessionId, budget: { tokens: 262_144, revision: "0" },
-    compaction: {
-      enabled: true, threshold_tokens: 180_000, default_threshold_tokens: 180_000,
-      recommended: { min: 120_000, max: 240_000 }, requested_threshold_tokens: 180_000,
-      effective_threshold_tokens: 180_000, threshold_clamped: false,
-      target_window_tokens: 262_144, model_window_tokens: null, window_source: "MODEL_CONFIG",
-      provider_call_cap_tokens: null, fallback_applied: false,
-      effective_window_tokens: 262_144, output_reserve_tokens: 8_192,
-      protocol_overhead_tokens: 1_024, safety_reserve_tokens: 2_048,
-      safe_input_tokens: 250_880, post_compaction_target_tokens: 131_072,
-      context_tokens: contextTokens, context_source: "PROVIDER_USAGE",
-      distance_tokens: 180_000 - contextTokens, active: null, last_result: null
-    },
+    compaction,
+    next_call: { reservation_tokens: compaction.effective_window_tokens,
+      effective_window_tokens: compaction.effective_window_tokens,
+      model_window_tokens: compaction.model_window_tokens,
+      provider_call_cap_tokens: compaction.provider_call_cap_tokens,
+      window_source: compaction.window_source, fallback_applied: compaction.fallback_applied },
     last_call: usage.input_tokens === null ? null : {
       source: "MODEL_CALL", call_id: "call-usage", message_id: "assistant-usage",
       provider: "openai-compatible", model: "gpt-4.1-mini", status: "COMPLETED",
@@ -973,7 +983,11 @@ describe("协作工作区主路径", () => {
     } finally { view.unmount(); }
   });
 
-  for (const scenario of [
+  const meterScenarios: Array<{ name: string; maxCallTokens: number;
+    usage: { input_tokens: number | null; output_tokens: number | null;
+      cache_read_tokens: number | null; cache_creation_tokens: number | null };
+    hit: string | null; state: string; aria: string; over?: boolean;
+    compaction?: Record<string, unknown>; notContains?: string }> = [
     { name: "有真实读数时给出命中率与占用圆环", maxCallTokens: 1_000,
       usage: { input_tokens: 800, output_tokens: 200, cache_read_tokens: 600, cache_creation_tokens: 100 },
       hit: "75%", state: "normal", aria: "0%" },
@@ -988,11 +1002,54 @@ describe("协作工作区主路径", () => {
     { name: "全部命中时显示 100%", maxCallTokens: 1_000,
       usage: { input_tokens: 500, output_tokens: 20, cache_read_tokens: 500, cache_creation_tokens: null },
       hit: "100%", state: "normal", aria: "0%" },
-    // 2026-11-11：分母是当前会话档位（这里 262,144），不是那次调用冻结的 1,000。
-    { name: "冻结预算与当前档位不同时，占比按当前档位", maxCallTokens: 1_000,
+    // 2026-11-11：分母是当前模型的有效窗口（这里 262,144），不是那次调用冻结的 1,000。
+    { name: "冻结预算与当前有效窗口不同时，占比按有效窗口", maxCallTokens: 1_000,
       usage: { input_tokens: 131_072, output_tokens: 20, cache_read_tokens: 65_536,
         cache_creation_tokens: null },
       hit: "50%", state: "normal", aria: "50%" },
+    { name: "已知 1M 模型窗口正常显示真实百分比", maxCallTokens: 1_000_000,
+      usage: { input_tokens: 200_000, output_tokens: 20, cache_read_tokens: null,
+        cache_creation_tokens: null },
+      hit: null, state: "normal", aria: "上下文 200,000 / 1,000,000 tokens（20%）",
+      compaction: { target_window_tokens: 1_000_000, model_window_tokens: 1_000_000,
+        window_source: "MODEL_CATALOG", provider_call_cap_tokens: 1_048_576,
+        fallback_applied: false, effective_window_tokens: 1_000_000,
+        output_reserve_tokens: 8_192, protocol_overhead_tokens: 8_192,
+        safety_reserve_tokens: 50_000, safe_input_tokens: 933_616,
+        requested_threshold_tokens: 350_000, effective_threshold_tokens: 350_000,
+        threshold_clamped: false, post_compaction_target_tokens: 100_000,
+        distance_tokens: 150_000 } },
+    { name: "已知 128K 模型窗口按真实有效窗口计算", maxCallTokens: 131_072,
+      usage: { input_tokens: 65_536, output_tokens: 20, cache_read_tokens: null,
+        cache_creation_tokens: null },
+      hit: null, state: "normal", aria: "上下文 65,536 / 131,072 tokens（50%）",
+      compaction: { target_window_tokens: 1_000_000, model_window_tokens: 131_072,
+        window_source: "MODEL_CONFIG", provider_call_cap_tokens: 1_048_576,
+        fallback_applied: false, effective_window_tokens: 131_072,
+        output_reserve_tokens: 8_192, protocol_overhead_tokens: 8_192,
+        safety_reserve_tokens: 6_554, safe_input_tokens: 108_134,
+        requested_threshold_tokens: 90_000, effective_threshold_tokens: 90_000,
+        threshold_clamped: false, post_compaction_target_tokens: 45_000,
+        distance_tokens: 24_464 } },
+    { name: "未知模型窗口不显示百分比，保留真实 input tokens", maxCallTokens: 1_000,
+      usage: { input_tokens: 200_000, output_tokens: 20, cache_read_tokens: null,
+        cache_creation_tokens: null },
+      hit: null, state: "unknown",
+      aria: "上下文 200,000 tokens · 模型窗口未知，按安全回退估算",
+      notContains: "262,144",
+      compaction: { target_window_tokens: 1_000_000, model_window_tokens: null,
+        window_source: "UNKNOWN_FALLBACK", provider_call_cap_tokens: 1_048_576,
+        fallback_applied: true, effective_window_tokens: 262_144,
+        output_reserve_tokens: 8_192, protocol_overhead_tokens: 8_192,
+        safety_reserve_tokens: 13_108, safe_input_tokens: 232_652,
+        requested_threshold_tokens: 350_000, effective_threshold_tokens: 209_386,
+        threshold_clamped: true, post_compaction_target_tokens: 100_000,
+        distance_tokens: 9_386 } },
+    { name: "已知有效窗口下超过容量时保留超限警告", maxCallTokens: 262_144,
+      usage: { input_tokens: 300_000, output_tokens: 20, cache_read_tokens: null,
+        cache_creation_tokens: null },
+      hit: null, state: "high", over: true,
+      aria: "上下文 300,000 / 262,144 tokens（114.4%） · 已超出当前模型可用窗口" },
     { name: "还没有模型调用时圆环如实说明", maxCallTokens: 1_000,
       usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_creation_tokens: null },
       hit: null, state: "unknown", aria: "尚无模型调用" },
@@ -1006,14 +1063,16 @@ describe("协作工作区主路径", () => {
       usage: { input_tokens: 262_144, output_tokens: 200, cache_read_tokens: 300_000,
         cache_creation_tokens: null },
       hit: null, state: "high", aria: "100%" },
-  ]) {
+  ];
+  for (const scenario of meterScenarios) {
     it(`输入区底栏：${scenario.name}`, async () => {
       activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
       const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
         model: "gpt-4.1-mini", base_url: null, max_call_tokens: scenario.maxCallTokens }) });
       vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
         if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
-          return response(contextUsageProjection(scenario.usage, scenario.maxCallTokens));
+          return response(contextUsageProjection(scenario.usage, scenario.maxCallTokens,
+            scenario.compaction));
         }
         if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
           return response({ items: [
@@ -1055,6 +1114,12 @@ describe("协作工作区主路径", () => {
         const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
         expect(meter.attributes("data-state")).toBe(scenario.state);
         expect(meter.attributes("aria-label")).toContain(scenario.aria);
+        if (scenario.over !== undefined) {
+          expect(meter.attributes("data-over")).toBe(scenario.over ? "true" : undefined);
+        }
+        if (scenario.notContains !== undefined) {
+          expect(meter.attributes("aria-label")).not.toContain(scenario.notContains);
+        }
         // 2026-11-01 用户指令：删掉圆环右侧的独立百分比文本。数字没有消失——
         // 它就在这条 aria-label 里，也仍在悬停 Tooltip 与详情浮层里（下面各有一条断言），
         // 只是不再常驻工具行。这一枚也顺带保证读数不会以两种排版同时出现。
@@ -1069,6 +1134,10 @@ describe("协作工作区主路径", () => {
         await flush(0);
         expect(document.querySelector('[data-testid="context-meter-tooltip"]')?.textContent)
           .toContain(scenario.aria);
+        if (scenario.notContains !== undefined) {
+          expect(document.querySelector('[data-testid="context-meter-tooltip"]')?.textContent)
+            .not.toContain(scenario.notContains);
+        }
       } finally { view.unmount(); }
     });
   }
@@ -1104,43 +1173,22 @@ describe("协作工作区主路径", () => {
       await meter.trigger("click"); await flush();
       expect(meter.attributes("aria-expanded")).toBe("true");
       const panel = view.layer.get('[data-testid="assist-context-meter-panel"]');
-      // 2026-10-29 第二轮整改：打开先读数据；「属于哪一次」只用一枚短标签。
+      // 2026-11-15 CONTEXT-USAGE-MINIMAL：标题不再带记录时间/来源/信息图标；
+      // 正文只保留核心读数与一行自动压缩状态，诊断内容不占默认面板。
       expect(panel.get(".agent-chat-context-meter-heading").text()).toBe("上下文用量");
-      expect(panel.get(".agent-chat-context-meter-source").text()).toBe("最近一次记录");
-      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("200,000");
-      // 2026-11-11：分母取当前会话档位 262,144（投影 budget），不取那次调用冻结的 1,000。
-      expect(panel.get(".agent-chat-context-meter-amount").text()).toContain("262,144");
-      expect(panel.get(".agent-chat-context-meter-percent").text()).toBe("76%");
-      // 二级信息：预算余量（估算）与本次输出并排，各自一个读数。
-      expect(panel.get('[data-testid="assist-context-meter-remaining"]').text()).toContain("62,144");
-      expect(panel.get('[data-testid="assist-context-meter-output"]').text()).toContain("200");
-      // 缓存读取与写入分列，命中率另起一行；未上报的项不占行。
-      const cacheRows = panel.findAll(".agent-chat-context-meter-cache-row").map((row) => row.text());
-      expect(cacheRows).toHaveLength(3);
-      expect(cacheRows[0]).toContain("缓存读取");
-      expect(cacheRows[0]).toContain("150,000");
-      expect(cacheRows[1]).toContain("缓存写入");
-      expect(cacheRows[1]).toContain("100");
-      expect(cacheRows[2]).toContain("缓存命中率");
-      expect(cacheRows[2]).toContain("75%");
-      // 删掉的冗余：来源行、常驻长句与统计口径清单都不再出现。
-      expect(panel.text()).not.toContain("统计来源");
-      expect(panel.text()).not.toContain("统计口径");
-      expect(panel.text()).not.toContain("物理上下文窗口");
-      expect(panel.text()).not.toContain("占用比例按本次调用");
-      expect(panel.text()).not.toContain("max_call_tokens");
-      // 口径说明收进标题旁的信息图标：可聚焦按钮 + 一句准确说明。
-      const info = panel.get('[data-testid="assist-context-meter-info"]');
-      expect(info.attributes("aria-label")).toBe("上下文用量统计说明");
-      await act(async () => {
-        info.element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
-      }); await flush(0);
-      const infoTip = document.querySelector('[data-testid="context-meter-info-tooltip"]');
-      // 2026-11-11：口径是「最近一次调用的真实读数 + 相对当前会话档位」——
-      // 分母既不是工作区配置，也不是那次调用冻结的预算；分项也不是 Provider 的分词结果。
-      expect(infoTip?.textContent).toContain("总用量取最近一次模型调用的真实读数");
-      expect(infoTip?.textContent).toContain("占比相对当前模型可用窗口");
-      expect(infoTip?.textContent).toContain("不是 Provider 的分词结果");
+      expect(panel.get('[data-testid="context-usage-status-label"]').text()).toBe("已达压缩阈值");
+      expect(panel.get('[data-testid="context-usage-current-tokens"]').text()).toBe("200,000");
+      expect(panel.get('[data-testid="context-usage-current-threshold"]').text()).toBe("180,000");
+      expect(panel.get('[data-testid="context-usage-current-percent"]').text()).toBe("111.1%");
+      expect(panel.get('[data-testid="context-usage-current-remaining"]').text())
+        .toContain("已超过自动压缩阈值 20,000 tokens");
+      expect(panel.text()).not.toContain("最近一次记录");
+      expect(panel.text()).not.toContain("真实 + 估算");
+      expect(panel.findAll('[data-testid^="context-usage-window"]')).toHaveLength(0);
+      expect(panel.find('[data-testid="context-usage-breakdown-section"]').exists()).toBe(false);
+      expect(panel.find('[data-testid="context-usage-capacity"]').exists()).toBe(false);
+      expect(panel.find('[data-testid="context-compaction-now"]').exists()).toBe(false);
+      expect(panel.find('[data-testid="assist-context-meter-info"]').exists()).toBe(false);
       // Esc 收起并把焦点还给圆环（与模型下拉同一套收起语义）。
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -1155,6 +1203,52 @@ describe("协作工作区主路径", () => {
         document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
       }); await flush();
       expect(view.layer.find('[data-testid="assist-context-meter-panel"]').exists()).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it("未知窗口恢复为已知 1M 窗口后，圆环恢复真实百分比", async () => {
+    activateRelayConnection({ baseUrl: "http://127.0.0.1:8787", workspaceId, bearerToken: "test-token" });
+    let known = false;
+    const read = router({ modelPort: () => response({ provider: "openai-compatible", configured: true,
+      model: "gpt-4.1-mini", base_url: null, max_call_tokens: 1_000_000 }) });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/context-usage`) {
+        return response(contextUsageProjection({ input_tokens: 200_000, output_tokens: 20,
+          cache_read_tokens: null, cache_creation_tokens: null }, 1_000_000,
+        known ? { model_window_tokens: 1_000_000, window_source: "MODEL_CATALOG",
+          fallback_applied: false, effective_window_tokens: 1_000_000,
+          target_window_tokens: 1_000_000, provider_call_cap_tokens: 1_048_576,
+          safety_reserve_tokens: 50_000, safe_input_tokens: 933_616,
+          requested_threshold_tokens: 350_000, effective_threshold_tokens: 350_000,
+          threshold_clamped: false, distance_tokens: 150_000 }
+          : { model_window_tokens: null, window_source: "UNKNOWN_FALLBACK",
+            fallback_applied: true, effective_window_tokens: 262_144,
+            target_window_tokens: 1_000_000, provider_call_cap_tokens: 1_048_576,
+            safety_reserve_tokens: 13_108, safe_input_tokens: 232_652,
+            requested_threshold_tokens: 350_000, effective_threshold_tokens: 209_386,
+            threshold_clamped: true, distance_tokens: 9_386 }));
+      }
+      if (new URL(String(input)).pathname === `${prefix}/assist-sessions/${sessionId}/messages`) {
+        return response({ items: [{ id: "assistant-usage", session_id: sessionId, seq: "2",
+          role: "ASSISTANT", status: "COMPLETED", intent: "DISCUSS", content: "好的",
+          error_code: null, sources: [], cancel_requested: false,
+          usage: { input_tokens: 200_000, output_tokens: 20, cache_read_tokens: null,
+            cache_creation_tokens: null } }] });
+      }
+      return read(input, init);
+    }));
+    const view = await mountWorkbench(`/agent?work=${taskId}`);
+    try {
+      const meter = view.wrapper.get('[data-testid="assist-context-meter"]');
+      expect(meter.attributes("data-state")).toBe("unknown");
+      expect(meter.attributes("aria-label"))
+        .toContain("模型窗口未知，按安全回退估算");
+      known = true;
+      await meter.trigger("click");
+      await flush(80);
+      expect(meter.attributes("data-state")).toBe("normal");
+      expect(meter.attributes("aria-label"))
+        .toContain("上下文 200,000 / 1,000,000 tokens（20%）");
     } finally { view.unmount(); }
   });
 
